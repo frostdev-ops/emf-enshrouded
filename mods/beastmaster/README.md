@@ -1,13 +1,13 @@
 # Beastmaster (`beastmaster`, a Lua mod)
 
-A Beastmaster class for Enshrouded. Tame wild wolves, boars, sabretooths, hounds, bears, aurochs and panthers, keep up
-to 8 in your collection, and call up to 2 at a time to fight beside you. They follow you, come back when they stray,
-rest after they fall, and are kept with the world. Their kills are yours: XP and loot.
+A Beastmaster class for Enshrouded. Tame wild wolves, boars, sabretooths, hounds, bears and aurochs, keep up to 8 in
+your collection, and call up to 2 at a time to fight beside you. They follow you, come back when they stray, rest after
+they fall, and are kept with the world. Their kills are yours: XP and loot.
 
 It needs the `lua` mod 1.9 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
-(the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs and the panther come in separate
-downloads, the **bear pack** (`emf_beastmaster_bear`) and the **beasts pack** (`emf_beastmaster_beasts`), below;
-without them everything else works and those beasts are simply not there.
+(the key under Esc) or in EMF.exe, then restart the game. The bear and the aurochs come in separate downloads, the
+**bear pack** (`emf_beastmaster_bear`) and the **beasts pack** (`emf_beastmaster_beasts`), below; without them
+everything else works and those beasts are simply not there.
 
 ## How it goes
 
@@ -18,7 +18,7 @@ without them everything else works and those beasts are simply not there.
      and your beasts leave it alone. Stay within 8 m. If it dies or you walk away, taming stops and it turns wild
      again. A beast someone else is taming or feeding is theirs to finish.
    - **By bait:** choose **Feed** 3 times within 10 s (the beast you look at, else the nearest within 8 m). Each feed
-     takes one bait from your bag: dog bait for wolves and hounds, lean meat for boars, game meat for sabretooths and panthers, red
+     takes one bait from your bag: dog bait for wolves and hounds, lean meat for boars, game meat for sabretooths, red
      berries for bears and aurochs.
 2. A tamed beast becomes your ally, guards you, and joins your collection with a name: "Wolf", "Wolf 2", "Boar"...
 3. **Call a beast** from your collection: **Call <name>** on the wheel, or `/beastmaster call <name or number>`. It costs
@@ -39,14 +39,11 @@ resting; a resting one shows its time left. With **Necromancer** installed too, 
 "Beasts: ..." and "Undead: ..." items; turn **One wheel** (`shared_wheel`) off to keep Beastmaster's own wheel. A line at the bottom left lists your beasts that are out or resting:
 "Beasts: Wolf (out), Bear (rests 1:20)".
 
-**Wild bears, aurochs and panthers (with their packs):** about every 30 minutes of play, when there is no wild one
-yet, one of them (at random, from the packs you have) appears 50-70 m from a player who is out in the open, at that
-player's level; never within 40 m of a flame altar. Beat it down or feed it its bait to tame it.
-- **Bear** (bear pack): 1.4x a wolf's size, 2.5x its health, 1.5x its damage, a little slower.
-- **Aurochs** (beasts pack): a huge horned wild bull on the boar's skeleton, it charges like a boar: 1.3x a boar's
-  size, 3x its health, 1.4x its damage, a little slower.
-- **Panther** (beasts pack): a sleek black big cat on the sabretooth's skeleton: 0.85x a sabretooth's size, quicker
-  (1.15x its speed), 1.2x its damage.
+**Wild bears and aurochs (with their packs):** about every 30 minutes of play, when there is no wild one yet, one of
+them (at random, from the packs you have) appears 50-70 m from a player who is out in the open, at that player's level;
+never within 40 m of a flame altar. Beat it down or feed it its bait to tame it. - **Bear** (bear pack): 1.4x a wolf's
+size, 2.5x its health, 1.5x its damage, a little slower. - **Aurochs** (beasts pack): a huge horned wild bull on the
+boar's skeleton, it charges like a boar: 1.3x a boar's size, 3x its health, 1.4x its damage, a little slower.
 
 ## Commands
 
@@ -61,8 +58,8 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster call <name or number>` | call a beast from your collection |
 | `/beastmaster dismiss <name, number or all>` | send a beast home |
 | `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
-| `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, panther) |
-| `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear is the wolf's graph at 1.4x, the aurochs the boar's at 1.3x, the panther the sabretooth's at 0.85x) |
+| `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs) |
+| `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear is the wolf's graph at 1.4x, the aurochs the boar's at 1.3x) |
 
 ## Settings (Mods tab, EMF.exe, or `set beastmaster <key> <value>`)
 
@@ -79,10 +76,10 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Taming takes (`tame_channel_s`) | 3 s | |
 | Taming range (`tame_range_m`) | 8 m | |
 | Baits to tame by feeding (`feed_count`), Feeding window (`feed_window_s`) | 3, 10 s | |
-| Bait for wolves, hounds, boars, sabretooths, bears, aurochs, panthers (`bait_<kind>`) | see above | an item's debug name (`items meat` in the console) |
+| Bait for wolves, hounds, boars, sabretooths, bears, aurochs (`bait_<kind>`) | see above | an item's debug name (`items meat` in the console) |
 | Beasts come back from (`leash_m`), At once from (`leash_far_m`) | 40 m, 80 m | |
 | You get your beasts' kills (`xp_credit`) | on | XP and loot for the owner |
-| Rare wild bears, aurochs and panthers (`wild_bears`), About every (`wild_bear_minutes`) | on, 30 min | needs their pack |
+| Rare wild bears and aurochs (`wild_bears`), About every (`wild_bear_minutes`) | on, 30 min | needs their pack |
 
 ## The bear pack (`emf_beastmaster_bear`)
 
@@ -99,15 +96,13 @@ instructions that copy and change the game's wolf at load time; no game files ar
 
 ## The beasts pack (`emf_beastmaster_beasts`)
 
-An EML data patch with new beasts, made with Meshy and fitted to game skeletons (their animations and AI):
-- the Aurochs, `Beastmaster_Aurochs` (template `d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02`), on the boar: size
-  (`ScaleComponent`) 1.3, damage x1.4, speeds x0.9; the health (x3) comes from Beastmaster;
-- the Panther, `Beastmaster_Panther` (template `f3c9a1d7-5b2e-4f8a-9c64-2e7b1d9a5f02`), on the sabretooth: size 0.85,
-  damage x1.2, speeds x1.15.
+An EML data patch with a new beast, made with Meshy and fitted to a game skeleton (its animations and AI): the Aurochs,
+`Beastmaster_Aurochs` (template `d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02`), on the boar: size (`ScaleComponent`) 1.3,
+damage x1.4, speeds x0.9; the health (x3) comes from Beastmaster. Its tail follows its hips.
 
 Installed and rebuilt like the bear pack (`tools/models/packs/beastmaster_beasts.json`). Without the pack, an aurochs
-or a panther in your collection stays at home: calling it answers that the pack is not installed, and one that was out
-when you saved goes home with one note when you load.
+in your collection stays at home: calling it answers that the pack is not installed, and one that was out when you
+saved goes home with one note when you load.
 
 ## Good to know
 

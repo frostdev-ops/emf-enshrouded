@@ -39,7 +39,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `mods/handover/` | Hand-over (Lua, off by default): `/handover wood 20` gives items to the nearest other player; nothing is ever lost; `/handover.block` refuses them (see below) |
 | `mods/teleports/` | Waypoint Teleports: `/unstuck` and `/home` for every player, `tp`, `bring`, `tp.pos`, `tp.back` for admins (see below) |
 | `mods/bulk_craft/` | Bulk Craft (off by default): craft one by hand, then U at the station (or `/craft 25`, every player) crafts many through the game's own crafting, at the recipe's pace (see below) |
-| `mods/beastmaster/` | Beastmaster (Lua, off by default): tame wolves, boars, sabretooths and hounds (bears, aurochs and panthers with the content packs), keep 8, call 2 to fight beside you; hold B for the beast wheel, `/beastmaster` for every player; rare wild pack beasts (see below) |
+| `mods/beastmaster/` | Beastmaster (Lua, off by default): tame wolves, boars, sabretooths and hounds (bears and aurochs with the content packs), keep 8, call 2 to fight beside you; hold B for the beast wheel, `/beastmaster` for every player; rare wild pack beasts (see below) |
 | `mods/necromancer/` | Necromancer (Lua, off by default): raise up to 3 skeleton warriors that stay and follow you (a lich and a bone golem with the undead pack), cast raging spirits (flaming skulls, 6 s); hold V for the summoning wheel, shared with Beastmaster; `/necromancer` for every player (see below) |
 | `mods/loot_scale/` | more materials per loot stack (x2 by default, off by default) by hooking the game's loot amount getter by its bytes; switching it off takes effect at the next start, factor 1 at once |
 | `content/emberbrand/` | an example of a new item (an EML data patch; [docs/modding/content.md](docs/modding/content.md)) |
@@ -482,17 +482,16 @@ once), at most 100 per order; it stops if a craft's materials did not leave your
 `mods/bulk_craft/README.md`; how the game's craft request works: `docs/engine_parts/inventory_crafting.md`.
 
 ## The beastmaster mod (Beastmaster)
-Installed switched off: switch it on in the Mods tab or EMF.exe (it needs the `lua` mod 1.9). A Beastmaster class:
-tame a wild wolf, boar, sabretooth, hound or bear by beating it under 25 % health (`/beastmaster tame`, a 3 s channel
-within 8 m) or by feeding it its bait 3 times within 10 s (`/beastmaster feed`). Up to 8 beasts per player are kept with
-the world; call up to 2 (one of each kind) for 15 % mana with a 10 s cooldown (`/beastmaster call <name>`), send them
-at what you look at (`/beastmaster attack`), dismiss them; a beast that falls rests 2 minutes. Your beasts' kills give
-you XP and loot. Hold **B** for the beast wheel (the host); every player has `/beastmaster` in the chat. The bear comes
-in an EML pack (`emf_beastmaster_bear`, a new model on the game wolf's skeleton): 1.4x the size, 2.5x the health, 1.5x
-the damage, a little slower. The beasts pack (`emf_beastmaster_beasts`) adds the aurochs (a huge horned bull on the
-boar's skeleton: 1.3x, 3x health) and the panther (a black big cat on the sabretooth's: 0.85x, quicker, harder hitting). Now and then a
-wild one of the packs' beasts appears 50-70 m from a player. Without a pack its beasts are refused with a note. Details:
-`mods/beastmaster/README.md`; the model tools: `tools/models/`.
+Installed switched off: switch it on in the Mods tab or EMF.exe (it needs the `lua` mod 1.9). A Beastmaster class: tame
+a wild wolf, boar, sabretooth, hound or bear by beating it under 25 % health (`/beastmaster tame`, a 3 s channel within
+8 m) or by feeding it its bait 3 times within 10 s (`/beastmaster feed`). Up to 8 beasts per player are kept with the
+world; call up to 2 (one of each kind) for 15 % mana with a 10 s cooldown (`/beastmaster call <name>`), send them at
+what you look at (`/beastmaster attack`), dismiss them; a beast that falls rests 2 minutes. Your beasts' kills give you
+XP and loot. Hold **B** for the beast wheel (the host); every player has `/beastmaster` in the chat. The bear comes in
+an EML pack (`emf_beastmaster_bear`, a new model on the game wolf's skeleton): 1.4x the size, 2.5x the health, 1.5x the
+damage, a little slower. The beasts pack (`emf_beastmaster_beasts`) adds the aurochs (a huge horned bull on the boar's
+skeleton: 1.3x, 3x health). Now and then a wild one of the packs' beasts appears 50-70 m from a player. Without a pack
+its beasts are refused with a note. Details: `mods/beastmaster/README.md`; the model tools: `tools/models/`.
 
 ## The necromancer mod (Necromancer)
 Installed switched off: switch it on in the Mods tab or EMF.exe (it needs the `lua` mod 1.9). Raise skeleton warriors

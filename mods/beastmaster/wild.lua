@@ -1,4 +1,4 @@
--- Rare wild pack beasts (the bear pack's bear, the beasts pack's aurochs and panther): every wild_bear_minutes of play,
+-- Rare wild pack beasts (the bear pack's bear, the beasts pack's aurochs): every wild_bear_minutes of play,
 -- when no wild beast of ours is about, one of them (at random) comes 50-70 m from a random player who is out in the
 -- open (not within 40 m of a flame altar), on a spot that is not within 40 m of an altar either: at the player's height
 -- + 2 m, then onto the ground there (the game's ground search), hostile, at that player's level. It is tamed like any

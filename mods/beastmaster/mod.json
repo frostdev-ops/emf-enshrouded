@@ -2,7 +2,7 @@
   "id": "beastmaster",
   "name": "Beastmaster",
   "version": "1.1.0",
-  "description": "A Beastmaster class: tame wild wolves, boars, sabretooths, hounds, and with the content packs bears, aurochs and panthers (beat them down or feed them bait), keep up to 8 in your collection, call up to 2 to fight beside you. They follow you, come back when far away, and are kept with the world. Hold B for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
+  "description": "A Beastmaster class: tame wild wolves, boars, sabretooths, hounds, and with the content packs bears and aurochs (beat them down or feed them bait), keep up to 8 in your collection, call up to 2 to fight beside you. They follow you, come back when far away, and are kept with the world. Hold B for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
   "authors": ["EMF contributors"],
   "enabled": false,
   "emf": 14,
@@ -28,11 +28,10 @@
     {"key": "bait_sabretooth", "type": "text", "default": "Food_T2_raw_bad_meat_Game", "label": "Bait for sabretooths", "live": true, "group": "Taming"},
     {"key": "bait_bear", "type": "text", "default": "Food_T1_raw_fruit_Red_Berries", "label": "Bait for bears", "live": true, "group": "Taming"},
     {"key": "bait_aurochs", "type": "text", "default": "Food_T1_raw_fruit_Red_Berries", "label": "Bait for aurochs", "live": true, "group": "Taming"},
-    {"key": "bait_panther", "type": "text", "default": "Food_T2_raw_bad_meat_Game", "label": "Bait for panthers", "live": true, "group": "Taming"},
     {"key": "leash_m", "type": "slider", "min": 15, "max": 100, "step": 5, "default": 40, "label": "Beasts come back from (m)", "live": true, "group": "Behaviour"},
     {"key": "leash_far_m", "type": "slider", "min": 30, "max": 300, "step": 10, "default": 80, "label": "At once from (m)", "live": true, "group": "Behaviour"},
     {"key": "xp_credit", "type": "bool", "default": true, "label": "You get your beasts' kills (XP and loot)", "live": true, "group": "Behaviour"},
-    {"key": "wild_bears", "type": "bool", "default": true, "label": "Rare wild bears, aurochs and panthers (needs their content pack)", "live": true, "group": "World"},
+    {"key": "wild_bears", "type": "bool", "default": true, "label": "Rare wild bears and aurochs (needs their content pack)", "live": true, "group": "World"},
     {"key": "wild_bear_minutes", "type": "slider", "min": 5, "max": 120, "step": 5, "default": 30, "label": "A wild pack beast about every (minutes)", "live": true, "group": "World"}
   ]
 }

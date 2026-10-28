@@ -447,7 +447,6 @@ TEST_CASE("beastmaster: a guest's /beastmaster call acts on the guest's own beas
 namespace {
 constexpr const char* kBearTemplate = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02";
 constexpr const char* kAurochsTemplate = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02";  // the beasts pack's
-constexpr const char* kPantherTemplate = "f3c9a1d7-5b2e-4f8a-9c64-2e7b1d9a5f02";  // the beasts pack's
 size_t logged(const Fake& f, const std::string& needle) {
     size_t n = 0;
     for (const auto& l : f.log) n += l.find(needle) != std::string::npos;
@@ -458,7 +457,6 @@ size_t logged(const Fake& f, const std::string& needle) {
 TEST_CASE("wild bears: one spawns 50-70 m from a player when none exists; none when the pack is missing") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));  // only the bear pack: the bear every time
-    b.r.fake.missing_templates.insert(guid_bytes(kPantherTemplate));
     b.spawnable(3);
     b.seconds(30);
     CHECK(b.r.fake.spawns.empty());  // not before a minute of play
@@ -784,21 +782,17 @@ TEST_CASE("beastmaster: a beast whose pack is missing goes home with one note; i
     CHECK(b.reply("beastmaster.call Aurochs").find("pack") != std::string::npos);
 }
 
-TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs and panthers come (the missing bear is skipped)") {
+TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs come (the missing bear is skipped)") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
     b.spawnable(8);
-    std::set<std::string> seen;
-    for (int round = 0; round < 6; ++round) {
+    for (int round = 0; round < 4; ++round) {
         const size_t before = b.r.fake.spawns.size();
         b.seconds(61);
         REQUIRE(b.r.fake.spawns.size() == before + 1);
-        const std::string t = guid_text(b.r.fake.spawns.back().guid);
-        CHECK((t == kAurochsTemplate || t == kPantherTemplate));
-        seen.insert(t);
+        CHECK(guid_text(b.r.fake.spawns.back().guid) == kAurochsTemplate);
         const uint32_t id = 1234 + static_cast<uint32_t>(before);
-        // the pack's size: the aurochs 1.3x, the panther 0.85x
-        component<ecs::ScaleComponent>(b.r.fake, id).uniformScale = t == kAurochsTemplate ? 1.3f : 0.85f;
+        component<ecs::ScaleComponent>(b.r.fake, id).uniformScale = 1.3f;  // the pack's aurochs
         CHECK(b.faction(id) == kWildBeast);
         b.seconds(60);
         CHECK(b.r.fake.spawns.size() == before + 1);  // one at a time: it is still about
@@ -807,29 +801,15 @@ TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs and pa
     CHECK(logged(b.r.fake, "wild bears") <= 1);
 }
 
-// ---- new beasts (the beasts pack): the Panther ----
+// ---- the sabretooth graph: no pack beast on it in this version ----
 namespace {
 constexpr const char* kSabretoothGraph = "9c1b120e-4901-495c-9cc0-5de134fbe140";
 }
 
-TEST_CASE("beastmaster: a panther is the sabretooth graph at 0.92x or less (WildBeast); a game sabretooth is not") {
+TEST_CASE("beastmaster: there is no panther in this version: a small sabretooth is a sabretooth, give panther is refused") {
     BeastRig b;
-    CHECK(b.reply(std::string("beastmaster.species ") + kSabretoothGraph + " 6 0.85") == "panther");
-    CHECK(b.reply(std::string("beastmaster.species ") + kSabretoothGraph + " 6") == "sabretooth");
-    CHECK(b.reply(std::string("beastmaster.species ") + kSabretoothGraph + " 6 0.95") == "sabretooth");
-    CHECK(b.reply(std::string("beastmaster.species ") + kSabretoothGraph + " 4 0.85") == "sabretooth");  // a tamed one
-    b.beast(50, kSabretoothGraph, 0, 5, kWildBeast, 20, 100);
-    component<ecs::ScaleComponent>(b.r.fake, 50).uniformScale = 0.85f;
-    b.look(1, 0, 10.5, 0, 0);
-    CHECK(b.reply("beastmaster.tame").find("Taming the panther") != std::string::npos);
-    b.seconds(4);
-    CHECK(b.reply("beastmaster.list").find("1. Panther - panther, out") != std::string::npos);
-    b.reply("beastmaster.dismiss all");
-    b.spawnable(1);
-    b.seconds(11);
-    CHECK(b.reply("beastmaster.call Panther").find("comes") != std::string::npos);
-    REQUIRE(b.r.fake.spawns.size() == 1);
-    CHECK(guid_text(b.r.fake.spawns[0].guid) == kPantherTemplate);
+    CHECK(b.reply(std::string("beastmaster.species ") + kSabretoothGraph + " 6 0.85") == "sabretooth");
+    CHECK(b.reply("beastmaster.give panther").find("no species panther") != std::string::npos);
 }
 
 TEST_CASE("beastmaster: an aurochs that was out comes back after its first call-backs fail for a moment (no position yet, one refused spawn)") {
@@ -853,7 +833,7 @@ TEST_CASE("beastmaster: an aurochs that was out comes back after its first call-
     CHECK(notes == 0);
 }
 
-// ---- holding a beast during the taming channel (a beaten panther ran out of range in game) ----
+// ---- holding a beast during the taming channel (a beaten beast that flees runs out of range) ----
 namespace {
 // Movement's attribute storage: [0] movement, [1] the multiplier (1 normally), [2..] speeds
 float move_mul(Fake& f, uint32_t id) {  // read as it is (component<> would reset it)

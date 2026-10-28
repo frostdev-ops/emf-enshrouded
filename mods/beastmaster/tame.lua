@@ -2,7 +2,7 @@
 -- tame_range_m) or by bait (feed_count baits within feed_window_s, one taken from you each time).
 -- M.new(env) where env has: setting(key), now(world), tell(world, player, text), on_tamed(world, player, id, species).
 -- One channel per player: a new tame or feed ends the one before (its calmed beast turns wild again).
--- The beast is held for the channel (seen in game: a beaten panther ran out of range though calmed): its Movement
+-- The beast is held for the channel (a beaten beast that flees can run out of range though calmed): its Movement
 -- multiplier at 0, given back when the channel ends any way, and a teleport back to where it was held when it still
 -- gets more than HOLD_M away from there (a player who walks away does not drag it along: the channel breaks).
 local aim = require("aim")
