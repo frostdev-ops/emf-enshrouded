@@ -86,3 +86,73 @@ def width_scale(c, g, mode="fit"):
         height = (g["top"] - max(g["ground_front"], g["ground_back"])) / ((c["top"] - c["ground"]) or 1e-6)
         return (length + height) / 2
     return float(mode)
+
+
+STEP = 0.05         # slices along the body (y), and cells within a slice (x, z), in metres
+THIN_FILL = 0.3     # a tail slice fills less than this share of the body's typical cross-section ...
+THIN_REACH = 0.35   # ... or reaches less than this share of the body's width to the side
+HEAD_SHARE = 0.05   # a bone under the head is kept when the game animal puts this share of its head's weight on it
+
+
+def tail_slices(points, g):
+    """The slices (round(y / STEP)) behind the hind feet (landmarks `g` of the fitted creature) where the creature is
+    thin: its tail. A slice is thin when its points fill little of the cross-section (a tail curling out to the side
+    reaches far but fills little) or reach little to the side (a tail hanging right behind the rump)."""
+    cells, reach = {}, {}
+    for p in points:
+        k = round(p.y / STEP)
+        cells.setdefault(k, set()).add((round(p.x / STEP), round(p.z / STEP)))
+        reach[k] = max(reach.get(k, 0.0), abs(p.x))
+    fill = {k: len(c) for k, c in cells.items()}
+    body = sorted(fill[k] for k in fill if g["front"] <= k * STEP <= g["back"])
+    ref = body[len(body) // 2] if body else 1
+    xs = sorted(abs(p.x) for p in points if g["front"] <= p.y <= g["back"])
+    width = xs[int(0.9 * len(xs))] if xs else 1.0
+    start = g["back"] - 0.05 * (g["back"] - g["front"])
+    return {k for k in fill if k * STEP > start and (fill[k] < THIN_FILL * ref or reach[k] < THIN_REACH * width)}
+
+
+def kept_head_bones(use, total):
+    """The bones under the head the game animal itself uses on its head (`use`: bone -> weight there; `total`: all
+    weight there): its jaw, not a crest or ear tips that belong to other meshes."""
+    return {b for b, w in use.items() if w >= HEAD_SHARE * total}
+
+
+def clean_detail_weights(weights, in_tail, parents, main, keep, head):
+    """Detail bones keep weight only where the creature has that detail. `weights`: per vertex {bone: weight};
+    `in_tail`: per vertex, whether it is in the creature's tail; `parents`: bone -> parent (None at the root); `main`:
+    the spine and leg bones; `keep`: the kept bones under the head (kept_head_bones); `head`: the head bone.
+    A bone under the head that is not kept gives its weight to its nearest kept ancestor (or the head); any other
+    bone off the main chains (a tail) keeps its weight on the tail and gives it elsewhere to its nearest main ancestor.
+    Returns new per-vertex dicts."""
+    def under_head(b):
+        x = parents.get(b)
+        while x is not None:
+            if x == head:
+                return True
+            x = parents.get(x)
+        return False
+
+    def target(b, tail):
+        if b in main or b in keep or b == head:
+            return b
+        if under_head(b):
+            x = parents.get(b)
+            while x is not None and x not in keep and x != head:
+                x = parents.get(x)
+            return x if x is not None else head
+        if tail:
+            return b
+        x = parents.get(b)
+        while x is not None and x not in main:
+            x = parents.get(x)
+        return x if x is not None else b
+
+    out = []
+    for ws, tail in zip(weights, in_tail):
+        new = {}
+        for b, w in ws.items():
+            t = target(b, tail)
+            new[t] = new.get(t, 0.0) + w
+        out.append(new)
+    return out

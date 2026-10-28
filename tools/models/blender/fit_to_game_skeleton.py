@@ -13,7 +13,10 @@ Steps:
     body's (--width fit, the default); --width keep keeps the creature's own proportions (the mean of its length and
     height scales), for a creature stretched much more in length and height than in width.
  3. Copy bone weights from all game meshes (nearest surface) and UVs from one game mesh (--uv-from), so the creature
-    can use that mesh's material and textures (--material, the game material index).
+    can use that mesh's material and textures (--material, the game material index). Detail bones then keep weight
+    only where the creature has that detail (../quad_landmarks.py clean_detail_weights): a big rump on a small tail's
+    bones would swing with the tail, a head on a crest's bones would bend with the crest. The spine and leg chains
+    keep their weights; bones under the head keep theirs when the game animal itself uses them on its head (the jaw).
  4. --vertex-colors stores the creature's own material colours as vertex colours (COLOR_0).
  5. Export a skinned .glb that tools/models/make_mod.py reads.
 Blender axes after the glTF import: forward is -Y (the head), up is +Z, width is X.
@@ -25,7 +28,7 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from quad_landmarks import fit_z, landmarks, width_scale  # noqa: E402
+from quad_landmarks import clean_detail_weights, fit_z, kept_head_bones, landmarks, tail_slices, width_scale  # noqa: E402
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 game_glb, creature_glb, out_glb = (os.path.abspath(p) for p in argv[:3])
@@ -208,6 +211,69 @@ bpy.context.view_layer.objects.active = body
 for name in ("weights",) if keep_uvs else ("weights", "uvs"):
     bpy.ops.object.modifier_apply(modifier=name)
 bpy.data.objects.remove(weight_src)
+
+# detail bones only where the creature has that detail
+bones = arm.data.bones
+
+
+def slot(suffix):
+    return next((b for b in bones if b.name.endswith(suffix)), None)
+
+
+def subtree(b):
+    out = {b.name}
+    for c_ in b.children:
+        out |= subtree(c_)
+    return out
+
+
+head_b = slot("_Head")
+if head_b is not None:
+    spine = set()
+    b = head_b
+    while b is not None:
+        spine.add(b.name)
+        b = b.parent
+    main = set(spine)
+    for b in bones:
+        if any(b.name.endswith(sfx) for sfx in ("_FootL", "_FootR", "_FootRL", "_FootRR", "_HandL", "_HandR")):
+            x = b
+            while x is not None and x.name not in spine:
+                main.add(x.name)
+                x = x.parent
+            main |= subtree(b)
+    under_head = subtree(head_b) - {head_b.name}
+    use, total = {}, 0.0  # the game animal's own weights on its head
+    for gm in game_meshes:
+        gnames = {g_.index: g_.name for g_ in gm.vertex_groups}
+        for v in gm.data.vertices:
+            ws = [(gnames[g_.group], g_.weight) for g_ in v.groups if g_.weight > 0]
+            if ws and max(ws, key=lambda t: t[1])[0] in under_head | {head_b.name}:
+                for n, w in ws:
+                    total += w
+                    if n in under_head:
+                        use[n] = use.get(n, 0.0) + w
+    keep = kept_head_bones(use, total)
+    names = {g_.index: g_.name for g_ in body.vertex_groups}
+    world = [body.matrix_world @ v.co for v in body.data.vertices]
+    tail = tail_slices(world, g)
+    weights = [{names[g_.group]: g_.weight for g_ in v.groups if g_.weight > 0} for v in body.data.vertices]
+    cleaned = clean_detail_weights(weights, [round(p.y / 0.05) in tail for p in world],
+                                   {b.name: (b.parent.name if b.parent else None) for b in bones}, main, keep,
+                                   head_b.name)
+    changed = 0
+    for v, old, new in zip(body.data.vertices, weights, cleaned):
+        if new == old:
+            continue
+        changed += 1
+        for n in old:
+            body.vertex_groups[n].remove([v.index])
+        for n, w in new.items():
+            if n not in body.vertex_groups:
+                body.vertex_groups.new(name=n)
+            body.vertex_groups[n].add([v.index], w, "REPLACE")
+    print("FIT detail bones: kept under the head %s, tail slices %d, vertices changed %d"
+          % (sorted(keep), len(tail), changed))
 
 # keep at most 4 weights per vertex, normalised
 bpy.ops.object.vertex_group_limit_total(limit=4)
