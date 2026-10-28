@@ -162,5 +162,53 @@ class DetailWeightTests(unittest.TestCase):
         self.assertEqual(ql.kept_head_bones({"jaw": 8.0, "crest": 0.5}, 100.0), {"jaw"})
 
 
+# the game boar's bones (gamegltf.py names: only the spine's are named): parent and rest-pose height in metres
+BOAR = {
+    "j000_Root": ("", 0.00), "j001_Pelvis": ("j000_Root", 0.74), "j002": ("j001_Pelvis", 0.74), "j003": ("j002", 0.77),
+    "j004": ("j003", 0.82), "j005_Chest": ("j004", 0.84), "j006": ("j005_Chest", 0.84), "j007": ("j006", 0.83),
+    "j008": ("j007", 0.82), "j009": ("j008", 0.79), "j010_Head": ("j009", 0.79), "j011": ("j010_Head", 0.62),
+    "j012": ("j011", 0.59), "j013": ("j012", 0.51), "j014": ("j013", 0.46), "j015": ("j010_Head", 0.79),
+    "j016": ("j010_Head", 0.80), "j017": ("j010_Head", 0.80), "j018": ("j010_Head", 0.55), "j019": ("j010_Head", 1.02),
+    "j020": ("j019", 1.12), "j021": ("j020", 1.20), "j022": ("j021", 1.25), "j023": ("j010_Head", 0.80),
+    "j024": ("j010_Head", 0.80), "j025": ("j010_Head", 0.79), "j026": ("j010_Head", 1.02), "j027": ("j026", 1.12),
+    "j028": ("j027", 1.20), "j029": ("j028", 1.25), "j030": ("j010_Head", 0.66), "j031": ("j010_Head", 0.66),
+    "j032": ("j005_Chest", 0.84), "j033": ("j032", 0.68), "j034": ("j033", 0.57), "j035": ("j034", 0.29),
+    "j036": ("j035", 0.12), "j037": ("j005_Chest", 0.84), "j038": ("j037", 0.68), "j039": ("j038", 0.57),
+    "j040": ("j039", 0.29), "j041": ("j040", 0.12), "j042": ("j005_Chest", 0.57), "j043": ("j005_Chest", 0.57),
+    "j044": ("j001_Pelvis", 0.79), "j045": ("j044", 0.71), "j046": ("j045", 0.63), "j047": ("j046", 0.57),
+    "j048": ("j001_Pelvis", 0.76), "j049": ("j048", 0.43), "j050": ("j049", 0.29), "j051": ("j050", 0.11),
+    "j052": ("j001_Pelvis", 0.76), "j053": ("j052", 0.43), "j054": ("j053", 0.29), "j055": ("j054", 0.11),
+    "j056": ("j001_Pelvis", 0.43), "j057": ("j001_Pelvis", 0.43)}
+
+
+class MainBoneTests(unittest.TestCase):
+    """The bones that keep their copied weights: the spine (the head and the bones above it) and the four legs, found
+    by where they reach in the rest pose, not by name."""
+
+    def main(self, table, head):
+        return ql.main_bones({n: p or None for n, (p, _) in table.items()}, {n: z for n, (_, z) in table.items()}, head)
+
+    def test_the_boars_unnamed_legs_are_legs_and_its_tail_and_helpers_are_not(self):
+        spine = {"j000_Root", "j001_Pelvis", "j002", "j003", "j004", "j005_Chest", "j006", "j007", "j008", "j009",
+                 "j010_Head"}
+        legs = {"j%03d" % i for i in list(range(32, 42)) + list(range(48, 56))}
+        self.assertEqual(self.main(BOAR, "j010_Head"), spine | legs)
+
+    def test_front_paws_below_the_hind_feet_and_a_low_tail(self):
+        # like the sabretooth's rest pose: front paws 0.25 m below the hind feet, the tail reaching down to 0.41 m
+        table = {"root": ("", 0.0), "pelvis": ("root", 0.9), "chest": ("pelvis", 1.0), "head": ("chest", 1.2),
+                 "arm_l": ("chest", 0.9), "paw_l": ("arm_l", -0.14), "arm_r": ("chest", 0.9), "paw_r": ("arm_r", -0.14),
+                 "leg_l": ("pelvis", 0.8), "foot_l": ("leg_l", 0.11), "leg_r": ("pelvis", 0.8), "foot_r": ("leg_r", 0.11),
+                 "tail": ("pelvis", 0.9), "tail_tip": ("tail", 0.41), "jaw": ("head", 0.0)}
+        self.assertEqual(self.main(table, "head"), {"root", "pelvis", "chest", "head", "arm_l", "paw_l", "arm_r",
+                                                    "paw_r", "leg_l", "foot_l", "leg_r", "foot_r"})
+
+    def test_fewer_than_four_branches_off_the_spine_is_an_error(self):
+        table = {"root": ("", 1.0), "head": ("root", 1.0), "leg_a": ("root", 0.0), "leg_b": ("root", 0.0),
+                 "leg_c": ("root", 0.0)}
+        with self.assertRaises(ValueError):
+            self.main(table, "head")
+
+
 if __name__ == "__main__":
     unittest.main()

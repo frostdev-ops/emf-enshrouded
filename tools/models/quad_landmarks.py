@@ -112,6 +112,33 @@ def tail_slices(points, g):
     return {k for k in fill if k * STEP > start and (fill[k] < THIN_FILL * ref or reach[k] < THIN_REACH * width)}
 
 
+def main_bones(parents, z, head):
+    """The bones that keep their copied weights: the spine (`head` and every bone above it) and the four legs, the
+    four branches off the spine (outside the head) that reach lowest in the rest pose, with every bone in them. Game
+    skeletons do not name every leg (the boar's leg bones have numbers only), but feet are always far lower than a
+    tail or a helper bone. `parents`: bone -> parent (None at the root); `z`: bone -> its rest-pose height.
+    Raises ValueError when fewer than four branches leave the spine."""
+    children = {}
+    for b, p in parents.items():
+        children.setdefault(p, []).append(b)
+
+    def subtree(b):
+        out = {b}
+        for c in children.get(b, []):
+            out |= subtree(c)
+        return out
+
+    spine, b = set(), head
+    while b is not None:
+        spine.add(b)
+        b = parents.get(b)
+    branches = [subtree(c) for s in spine - {head} for c in children.get(s, []) if c not in spine]
+    if len(branches) < 4:
+        raise ValueError("%d branches leave the spine, a four-legged skeleton has at least 4" % len(branches))
+    legs = sorted(branches, key=lambda br: min(z[x] for x in br))[:4]
+    return spine.union(*legs)
+
+
 def kept_head_bones(use, total):
     """The bones under the head the game animal itself uses on its head (`use`: bone -> weight there; `total`: all
     weight there): its jaw, not a crest or ear tips that belong to other meshes."""

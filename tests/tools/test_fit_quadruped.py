@@ -14,6 +14,7 @@ BLENDER_DIR = os.path.join(ROOT, "tools", "models", "blender")
 BOAR = os.path.join(ROOT, "analysis", "models", "game_enemy_wildboar_01.glb")
 BLENDER = os.environ.get("BLENDER") or shutil.which("blender")
 TAIL_ROOT = "j044"  # the boar's tail: j044 < j045 < j046 < j047 under the pelvis
+LEG_ROOTS = ("j032", "j037", "j048", "j052")  # the boar's legs (no named bones): front under the chest, hind the pelvis
 
 
 def blender(script, *args):
@@ -21,6 +22,17 @@ def blender(script, *args):
     out = subprocess.run([BLENDER, "--background", "--factory-startup", "--python-exit-code", "1",
                           "--python", path, "--", *args], capture_output=True, text=True, timeout=600)
     return out.returncode, out.stdout + out.stderr
+
+
+def weights(fitted):
+    """(rump, tail, legs): the mean weight on the boar's tail bones of the rump and of the animal's own tail, and on
+    its leg bones of the animal's lower legs."""
+    code, log = blender(os.path.join(HERE, "blender_tail_weights.py"), fitted, TAIL_ROOT, *LEG_ROOTS)
+    if code != 0:
+        raise AssertionError(log[-2000:])
+    tail = next(line for line in log.splitlines() if line.startswith("TAILW ")).split()
+    legs = next(line for line in log.splitlines() if line.startswith("LEGW ")).split()
+    return float(tail[1]), float(tail[2]), float(legs[1])
 
 
 @unittest.skipUnless(BLENDER and os.path.exists(BOAR), "needs Blender and analysis/models/game_enemy_wildboar_01.glb")
@@ -34,12 +46,10 @@ class FitQuadrupedTests(unittest.TestCase):
             self.assertEqual(code, 0, log[-2000:])
             code, log = blender("fit_to_game_skeleton.py", BOAR, fig, fitted)
             self.assertEqual(code, 0, log[-2000:])
-            code, log = blender(os.path.join(HERE, "blender_tail_weights.py"), fitted, TAIL_ROOT)
-            self.assertEqual(code, 0, log[-2000:])
-            line = next(l for l in log.splitlines() if l.startswith("TAILW "))
-            _, rump, tail = line.split()
-            self.assertLess(float(rump), 0.02, line)  # the rump: none of the tail's weight
-            self.assertGreater(float(tail), 0.3, line)  # the animal's own tail: on the tail bones
+            rump, tail, legs = weights(fitted)
+            self.assertLess(rump, 0.02)  # the rump: none of the tail's weight
+            self.assertGreater(tail, 0.3)  # the animal's own tail: on the tail bones
+            self.assertGreater(legs, 0.5)  # the legs: on the boar's leg bones (which have no names), so they walk
 
     def test_with_tail_hips_the_tail_follows_the_hips(self):
         """A long tail driven by a short tail's animation moves strangely (the aurochs on the boar): --tail hips gives
@@ -49,12 +59,10 @@ class FitQuadrupedTests(unittest.TestCase):
             self.assertEqual(blender("make_test_quadruped.py", fig)[0], 0)
             code, log = blender("fit_to_game_skeleton.py", BOAR, fig, fitted, "--tail", "hips")
             self.assertEqual(code, 0, log[-2000:])
-            code, log = blender(os.path.join(HERE, "blender_tail_weights.py"), fitted, TAIL_ROOT)
-            self.assertEqual(code, 0, log[-2000:])
-            line = next(l for l in log.splitlines() if l.startswith("TAILW "))
-            _, rump, tail = line.split()
-            self.assertLess(float(rump), 0.02, line)
-            self.assertLess(float(tail), 0.02, line)
+            rump, tail, legs = weights(fitted)
+            self.assertLess(rump, 0.02)
+            self.assertLess(tail, 0.02)
+            self.assertGreater(legs, 0.5)
 
 
 if __name__ == "__main__":

@@ -15,8 +15,9 @@ Steps:
  3. Copy bone weights from all game meshes (nearest surface) and UVs from one game mesh (--uv-from), so the creature
     can use that mesh's material and textures (--material, the game material index). Detail bones then keep weight
     only where the creature has that detail (../quad_landmarks.py clean_detail_weights): a big rump on a small tail's
-    bones would swing with the tail, a head on a crest's bones would bend with the crest. The spine and leg chains
-    keep their weights; bones under the head keep theirs when the game animal itself uses them on its head (the jaw).
+    bones would swing with the tail, a head on a crest's bones would bend with the crest. The spine and the legs keep
+    their weights (the legs: the four branches off the spine that reach lowest, named or not; the fit stops when the
+    skeleton has no four); bones under the head keep theirs when the game animal itself uses them on its head (the jaw).
     --tail hips gives the creature's own tail to the hips too (a long tail driven by a short tail's animation moves
     strangely); the default, own, keeps the game animal's tail bones on the creature's tail.
  4. --vertex-colors stores the creature's own material colours as vertex colours (COLOR_0).
@@ -30,7 +31,8 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from quad_landmarks import clean_detail_weights, fit_z, kept_head_bones, landmarks, tail_slices, width_scale  # noqa: E402
+from quad_landmarks import (clean_detail_weights, fit_z, kept_head_bones, landmarks, main_bones, tail_slices,  # noqa: E402
+                            width_scale)
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 game_glb, creature_glb, out_glb = (os.path.abspath(p) for p in argv[:3])
@@ -234,19 +236,11 @@ def subtree(b):
 
 head_b = slot("_Head")
 if head_b is not None:
-    spine = set()
-    b = head_b
-    while b is not None:
-        spine.add(b.name)
-        b = b.parent
-    main = set(spine)
-    for b in bones:
-        if any(b.name.endswith(sfx) for sfx in ("_FootL", "_FootR", "_FootRL", "_FootRR", "_HandL", "_HandR")):
-            x = b
-            while x is not None and x.name not in spine:
-                main.add(x.name)
-                x = x.parent
-            main |= subtree(b)
+    try:
+        main = main_bones({b.name: (b.parent.name if b.parent else None) for b in bones},
+                          {b.name: (arm.matrix_world @ b.head_local).z for b in bones}, head_b.name)
+    except ValueError as e:
+        raise SystemExit("fit_to_game_skeleton: no four legs on the game skeleton: %s" % e)
     under_head = subtree(head_b) - {head_b.name}
     use, total = {}, 0.0  # the game animal's own weights on its head
     for gm in game_meshes:
