@@ -2,7 +2,7 @@
 
   blender --background --factory-startup --python fit_to_game_skeleton.py -- \
       <game.glb> <creature.glb> <out.glb> [--uv-from 1] [--material 1] [--size 1.0] [--vertex-colors]
-      [--width fit|keep|<scale>]
+      [--width fit|keep|<scale>] [--tail own|hips]
 
 Steps:
  1. Import the game model (armature with jNNN bones + its body meshes) and the creature (any rig; it is dropped).
@@ -17,6 +17,8 @@ Steps:
     only where the creature has that detail (../quad_landmarks.py clean_detail_weights): a big rump on a small tail's
     bones would swing with the tail, a head on a crest's bones would bend with the crest. The spine and leg chains
     keep their weights; bones under the head keep theirs when the game animal itself uses them on its head (the jaw).
+    --tail hips gives the creature's own tail to the hips too (a long tail driven by a short tail's animation moves
+    strangely); the default, own, keeps the game animal's tail bones on the creature's tail.
  4. --vertex-colors stores the creature's own material colours as vertex colours (COLOR_0).
  5. Export a skinned .glb that tools/models/make_mod.py reads.
 Blender axes after the glTF import: forward is -Y (the head), up is +Z, width is X.
@@ -48,6 +50,9 @@ size = opt("--size", 1.0, float)
 vertex_colors = bool(opt("--vertex-colors", False))
 keep_uvs = bool(opt("--keep-uvs", False))  # a textured creature (e.g. from Meshy) keeps its own UVs and material
 keep_head = bool(opt("--keep-head", False))  # don't stretch the head to the game creature's nose
+tail_mode = opt("--tail", "own")
+if tail_mode not in ("own", "hips"):
+    raise SystemExit("fit_to_game_skeleton: --tail needs own or hips")
 width_mode = opt("--width", "fit")  # fit (the game body's width), keep (the creature's proportions) or a scale
 if width_mode is True:
     raise SystemExit("fit_to_game_skeleton: --width needs fit, keep or a number")
@@ -256,7 +261,7 @@ if head_b is not None:
     keep = kept_head_bones(use, total)
     names = {g_.index: g_.name for g_ in body.vertex_groups}
     world = [body.matrix_world @ v.co for v in body.data.vertices]
-    tail = tail_slices(world, g)
+    tail = tail_slices(world, g) if tail_mode == "own" else set()
     weights = [{names[g_.group]: g_.weight for g_ in v.groups if g_.weight > 0} for v in body.data.vertices]
     cleaned = clean_detail_weights(weights, [round(p.y / 0.05) in tail for p in world],
                                    {b.name: (b.parent.name if b.parent else None) for b in bones}, main, keep,

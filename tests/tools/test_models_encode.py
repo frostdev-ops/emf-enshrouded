@@ -89,6 +89,13 @@ class MakeModTests(unittest.TestCase):
         self.assertIn('{component = "keen::ecs::DamageMod", path = {"dataStorage", 3}, value = 1.5}', text)
         self.assertIn('{type = "keen::ecs::ScaleComponent", value = {uniformScale = 1.4}}', text)
 
+    def test_a_rebuild_removes_the_files_of_creatures_the_pack_no_longer_has(self):
+        with tempfile.TemporaryDirectory() as d:
+            for n in ("old_data.lua", "old_blob.lua", "old_albedo.lua", "kept_data.lua", "kept_blob.lua", "notes.txt"):
+                open(os.path.join(d, n), "w").close()
+            make_mod.remove_stale(d, {"kept"})
+            self.assertEqual(sorted(os.listdir(d)), ["kept_blob.lua", "kept_data.lua", "notes.txt"])
+
     def test_a_bad_field_path_is_refused(self):
         for bad in ("data storage", "dataStorage[-1]", "dataStorage[x]", ""):
             with self.assertRaises(SystemExit, msg=bad):

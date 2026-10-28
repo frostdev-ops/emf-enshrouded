@@ -41,6 +41,21 @@ class FitQuadrupedTests(unittest.TestCase):
             self.assertLess(float(rump), 0.02, line)  # the rump: none of the tail's weight
             self.assertGreater(float(tail), 0.3, line)  # the animal's own tail: on the tail bones
 
+    def test_with_tail_hips_the_tail_follows_the_hips(self):
+        """A long tail driven by a short tail's animation moves strangely (the aurochs on the boar): --tail hips gives
+        the creature's whole tail to the hips."""
+        with tempfile.TemporaryDirectory() as d:
+            fig, fitted = os.path.join(d, "animal.glb"), os.path.join(d, "fitted.glb")
+            self.assertEqual(blender("make_test_quadruped.py", fig)[0], 0)
+            code, log = blender("fit_to_game_skeleton.py", BOAR, fig, fitted, "--tail", "hips")
+            self.assertEqual(code, 0, log[-2000:])
+            code, log = blender(os.path.join(HERE, "blender_tail_weights.py"), fitted, TAIL_ROOT)
+            self.assertEqual(code, 0, log[-2000:])
+            line = next(l for l in log.splitlines() if l.startswith("TAILW "))
+            _, rump, tail = line.split()
+            self.assertLess(float(rump), 0.02, line)
+            self.assertLess(float(tail), 0.02, line)
+
 
 if __name__ == "__main__":
     unittest.main()

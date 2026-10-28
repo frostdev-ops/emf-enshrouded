@@ -19,7 +19,7 @@ def frange(a, b, step=0.05):
 def quadruped(front_ground=0.0, back_ground=0.0, tail_to=None):
     """A box body (y -1..1, z 0.8..1.4), a head in front (y -1.4), four legs at y -0.8 and 0.7 (x +-0.3) down to their
     ground, and optionally a long tail drooping behind from z 1.2 to `tail_to` at y 2.4 (the game sabretooth's ends at
-    0.3; Meshy's panther's nearly at its feet). Forward is -y."""
+    0.3; some big cats' nearly at their feet). Forward is -y."""
     pts = []
     for y in frange(-1.0, 1.0):
         for z in frange(0.8, 1.4):

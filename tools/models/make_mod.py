@@ -336,6 +336,18 @@ def write_scripts(src, pack, listing):
         f.write(MOD_LUA % {"title": pack.get("title", pack["id"]), "id": pack["id"]})
 
 
+GENERATED = ("_data.lua", "_blob.lua", "_albedo.lua")
+
+
+def remove_stale(src, names):
+    """Removes the generated files of creatures not in `names` from the mod's src folder (a creature taken out of the
+    pack would otherwise ship its model unused)."""
+    for f in os.listdir(src):
+        for suffix in GENERATED:
+            if f.endswith(suffix) and f[: -len(suffix)] not in names:
+                os.remove(os.path.join(src, f))
+
+
 def main():
     pack_path = os.path.abspath(sys.argv[1])
     base = os.path.dirname(pack_path)
@@ -347,6 +359,7 @@ def main():
 
     out = path(pack["out"])
     os.makedirs(os.path.join(out, "src"), exist_ok=True)
+    remove_stale(os.path.join(out, "src"), {c["name"] for c in pack["creatures"]})
     changed = False
     listing = []
     for c in pack["creatures"]:

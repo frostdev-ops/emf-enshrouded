@@ -17,7 +17,7 @@ def landmarks(points):
     front / back: the y of the front and the hind feet. They are found as clusters of low points along y: the first
     one, and the biggest of the others (two legs are more than a tail's tip), so a rest pose that holds one pair of
     feet lower than the other (the game sabretooth's front paws are 0.35 m below its hind ones) or a tail that droops
-    behind as low as the feet (Meshy's panther's) does not confuse them.
+    behind as low as the feet (some big cats') does not confuse them.
     ground_front / ground_back: each pair's lowest point; ground: the lowest of all. top and width: within the band
     between the feet; belly: the lowest point of the middle half of that band."""
     zmin = min(p.z for p in points)
