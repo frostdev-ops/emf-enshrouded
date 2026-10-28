@@ -1,7 +1,7 @@
 {
   "id": "beastmaster",
   "name": "Beastmaster",
-  "version": "1.1.0",
+  "version": "1.1.1",
   "description": "A Beastmaster class: tame wild wolves, boars, sabretooths, hounds, and with the content packs bears and aurochs (beat them down or feed them bait), keep up to 8 in your collection, call up to 2 to fight beside you. They follow you, come back when far away, and are kept with the world. Hold B for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
   "authors": ["EMF contributors"],
   "enabled": false,
