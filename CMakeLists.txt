@@ -187,11 +187,17 @@ target_compile_definitions(emf_nexus PRIVATE EMF_VERSION="${EMF_VERSION}")
 add_library(emf_loader SHARED
   src/loader/dllmain.cpp
   src/proxy/dinput8_proxy.cpp
-  src/proxy/dinput8.def)
+  src/proxy/dinput8.def
+  src/loader/loader.rc)
+# Version information in the file's properties (the resource compiler gets these definitions too)
+target_compile_definitions(emf_loader PRIVATE EMF_VERSION="${EMF_VERSION}" EMF_VER_MAJOR=${PROJECT_VERSION_MAJOR}
+  EMF_VER_MINOR=${PROJECT_VERSION_MINOR} EMF_VER_PATCH=${PROJECT_VERSION_PATCH})
 set_target_properties(emf_loader PROPERTIES OUTPUT_NAME dinput8 RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/dist
   ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/loader)
-add_library(emf_core SHARED src/core/core.cpp)
+add_library(emf_core SHARED src/core/core.cpp src/core/core.rc)
 target_link_libraries(emf_core PRIVATE emf_core_lib)
+target_compile_definitions(emf_core PRIVATE EMF_VER_MAJOR=${PROJECT_VERSION_MAJOR} EMF_VER_MINOR=${PROJECT_VERSION_MINOR}
+  EMF_VER_PATCH=${PROJECT_VERSION_PATCH})
 set_target_properties(emf_core PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/dist/emf)
 # The Vulkan layer manifest (emf_core.dll is the layer library; the loader enables it for the game process).
 configure_file(src/core/overlay/VkLayer_EMF_console.json ${CMAKE_BINARY_DIR}/dist/emf/vk/VkLayer_EMF_console.json

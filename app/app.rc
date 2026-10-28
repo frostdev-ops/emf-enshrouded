@@ -16,10 +16,11 @@ BEGIN
     BEGIN
         BLOCK "040904b0"
         BEGIN
-            VALUE "CompanyName", "EMF project"
+            VALUE "CompanyName", "EMF contributors"
             VALUE "FileDescription", "EMF - Enshrouded mod manager"
             VALUE "FileVersion", EMF_VERSION
             VALUE "InternalName", "EMF"
+            VALUE "LegalCopyright", "Copyright (c) 2026 EMF contributors. MIT licence."
             VALUE "OriginalFilename", "EMF.exe"
             VALUE "ProductName", "EMF (Enshrouded Modding Framework)"
             VALUE "ProductVersion", EMF_VERSION
