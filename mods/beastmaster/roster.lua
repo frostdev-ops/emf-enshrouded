@@ -76,12 +76,17 @@ function R:serialize()
 	return table.concat(lines, "\n")
 end
 
+-- species saved by an earlier version that this one does not have: the beast loads as the species it was made from
+-- (Beastmaster 1.1's panther was a small sabretooth)
+local RETIRED = { panther = "sabretooth" }
+
 function M.parse(text)
 	local r = M.new()
 	for line in (text or ""):gmatch("[^\r\n]+") do
 		local account, species, rest, out, name = line:match("^b (%S+) (%S+) (%d+) ([01]) (.+)$")
 		if account then
 			local list = r.by[account] or {}
+			species = RETIRED[species] or species
 			list[#list + 1] = { species = species, name = name, rest = tonumber(rest), out = out == "1" }
 			r.by[account] = list
 		end

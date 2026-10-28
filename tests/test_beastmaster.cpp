@@ -801,15 +801,26 @@ TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs come (
     CHECK(logged(b.r.fake, "wild bears") <= 1);
 }
 
-// ---- the sabretooth graph: no pack beast on it in this version ----
+// ---- the sabretooth graph: no pack beast on it ----
 namespace {
 constexpr const char* kSabretoothGraph = "9c1b120e-4901-495c-9cc0-5de134fbe140";
 }
 
-TEST_CASE("beastmaster: there is no panther in this version: a small sabretooth is a sabretooth, give panther is refused") {
+TEST_CASE("beastmaster: no panther: a small sabretooth is a sabretooth, give panther is refused") {
     BeastRig b;
     CHECK(b.reply(std::string("beastmaster.species ") + kSabretoothGraph + " 6 0.85") == "sabretooth");
     CHECK(b.reply("beastmaster.give panther").find("no species panther") != std::string::npos);
+}
+
+TEST_CASE("beastmaster: a panther saved by Beastmaster 1.1 loads as a sabretooth (it keeps its name and slot)") {
+    BeastRig b;
+    write(b.data, "b 0x00000000000000aa panther 0 0 Shadow\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    const std::string list = b.reply("beastmaster.list");
+    CHECK(list.find("Shadow - sabretooth") != std::string::npos);
+    CHECK(list.find("panther") == std::string::npos);
 }
 
 TEST_CASE("beastmaster: an aurochs that was out comes back after its first call-backs fail for a moment (no position yet, one refused spawn)") {

@@ -41,9 +41,10 @@ resting; a resting one shows its time left. With **Necromancer** installed too, 
 
 **Wild bears and aurochs (with their packs):** about every 30 minutes of play, when there is no wild one yet, one of
 them (at random, from the packs you have) appears 50-70 m from a player who is out in the open, at that player's level;
-never within 40 m of a flame altar. Beat it down or feed it its bait to tame it. - **Bear** (bear pack): 1.4x a wolf's
-size, 2.5x its health, 1.5x its damage, a little slower. - **Aurochs** (beasts pack): a huge horned wild bull on the
-boar's skeleton, it charges like a boar: 1.3x a boar's size, 3x its health, 1.4x its damage, a little slower.
+never within 40 m of a flame altar. Beat it down or feed it its bait to tame it.
+- **Bear** (bear pack): 1.4x a wolf's size, 2.5x its health, 1.5x its damage, a little slower.
+- **Aurochs** (beasts pack): a huge horned wild bull on the boar's skeleton, it charges like a boar: 1.3x a boar's
+  size, 3x its health, 1.4x its damage, a little slower.
 
 ## Commands
 
