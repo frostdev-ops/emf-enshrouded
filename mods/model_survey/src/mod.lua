@@ -66,6 +66,13 @@ for _, res in ipairs(game.assets.get_resources_by_type("keen::anim_graph::Retarg
 end
 csv("retarget.csv", "guid,entries,verticalOffset", rows)
 
+-- Every template's name and GUID (for spawning a game creature by its GUID in tests)
+rows = {}
+for _, res in ipairs(game.assets.get_resources_by_type("keen::ecs::TemplateResource")) do
+	rows[#rows + 1] = string.format('"%s",%s', s(res.data.name), s(res.guid))
+end
+csv("template_guids.csv", "name,guid", rows)
+
 -- Template bindings: model + animation graph + retarget per template
 rows = {}
 for _, res in ipairs(game.assets.get_resources_by_type("keen::ecs::TemplateResource")) do
