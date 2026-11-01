@@ -182,10 +182,11 @@ void refresh_sources() {
     g_sources.mod_settings.clear();
     if (g_deps.mods)
         for (const auto& m : g_deps.mods->list()) {
-            std::vector<std::string> keys;
+            ModSource mod;
+            mod.id = m.id;
             if (g_deps.settings)
-                for (const auto& d : g_deps.settings->defs(m.id)) keys.push_back(d.key);
-            g_sources.mod_settings.emplace_back(m.id, std::move(keys));
+                for (const auto& d : g_deps.settings->defs(m.id)) mod.settings.emplace_back(d.key);
+            g_sources.mod_settings.push_back(std::move(mod));
         }
     const uint64_t now = GetTickCount64();
     if (g_deps.item_names && (g_sources.items.empty() || now - g_items_refreshed > 10000)) {

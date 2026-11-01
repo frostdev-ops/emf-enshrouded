@@ -44,9 +44,28 @@ private:
     size_t history_pos_ = 0;  // == history_.size(): not browsing
 };
 
+// A mod's setting as `set` takes it.
+struct SettingSource {
+    std::string key;
+    std::string label;  // what the Mods tab calls it
+    std::vector<std::pair<std::string, std::string>> values;  // the values it takes (on/off, choices, options), each
+                                                              // with what it means ("" = the value says it)
+    SettingSource() = default;
+    SettingSource(const char* k) : key(k) {}  // NOLINT: a list of keys reads as settings
+    SettingSource(std::string k) : key(std::move(k)) {}  // NOLINT
+};
+
+struct ModSource {
+    std::string id;
+    std::vector<SettingSource> settings;
+    std::string name;  // what the Mods tab calls the mod
+};
+
 struct CompletionSources {
     std::vector<std::string> commands, items, components;
-    std::vector<std::pair<std::string, std::vector<std::string>>> mod_settings;  // mod id -> its setting keys
+    std::vector<std::string> command_help;  // commands[i]'s help, "<args>: what it does" (when known)
+    std::vector<ModSource> mod_settings;    // the mods and their settings
+    uint64_t version = 0;                   // changes whenever anything above changed (suggestions recompute then)
 };
 
 // Completed lines for `input` (at most `max`, sorted, unique): the first word from commands (prefix, any case); the
