@@ -84,7 +84,9 @@ local AT_BOARD_M = 8        -- m: "at a Bounty Board" for /bounty.take, /bounty.
 local KEY_COS = 0.87        -- read_key: the board within 30 degrees of where the camera looks
 local WALK_COS = 0.7        -- walking up: within 45 degrees
 local WALK_EVERY = 0.5      -- s between two looks at who walked up to a board
-local REARM_M = 8           -- m: told about a board, a player is told again after going this far from it
+local REARM_M = 8           -- m: told about a board, a player is told again after going this far from it ...
+local NOTICE_GAP = 60       -- s: ... and this long after their last notices (walking past now and then floods no chat)
+local HINT_GAP = 600        -- s: the host's "press E" note at most this often
 local CHAT_LINES = 30       -- chat lines this mod sends at most ...
 local CHAT_WINDOW = 10.5    -- ... in this many seconds of play (the Lua host's limit is 30 in 10 s)
 local PROP_HEIGHT = 1       -- m: the point of a prop the crosshair aims at, above its position
@@ -129,6 +131,7 @@ local tell_later          -- (player, account, text [, kind]): a chat line for a
 local outbox = {}         -- chat lines waiting: {player, account, text, lines, kind}
 local sent_lines = {}     -- chat lines sent in the last CHAT_WINDOW: {at, lines}
 local told = {}           -- account -> the board {x, y, z} they were last told about (cleared REARM_M away)
+local told_at = {}        -- account -> play second they were last told
 local tell_refused = false
 local walk_up_at = 0
 
@@ -557,7 +560,7 @@ local function same_session()
   session = emf.session()
   hits, gifts, moving, filled, dropped = {}, {}, {}, {}, {}
   boards, found, altars, client_models, walk, cwalk = {}, {}, {}, {}, nil, nil
-  told, outbox, sent_lines, walk_up_at = {}, {}, {}, 0
+  told, told_at, outbox, sent_lines, walk_up_at = {}, {}, {}, {}, 0
   loaded = false  -- the old world's data is not this one's: commands wait for on_world_data
   emf.hud("board", "")
   hud_shown = false
@@ -921,7 +924,7 @@ emf.on_world_data(function(world, text)
   loaded, dirty = true, fresh  -- a new seed is kept at once
   loaded_at = play_s
   found, altars, client_models, cwalk, cwalk_after = {}, {}, {}, nil, 0
-  told, outbox, sent_lines, walk_up_at = {}, {}, {}, 0
+  told, told_at, outbox, sent_lines, walk_up_at = {}, {}, {}, {}, 0
   search_soon()
   rebuild_boards()
   session = emf.session()
@@ -1480,8 +1483,9 @@ local function notice_message(account)
   return table.concat(lines, "\n")
 end
 
--- Players who come within read_range of a board, facing it, are told once, again after they went REARM_M away:
--- the host gets a note (the wheel is theirs), everyone else the notices in the chat (with chat_notices).
+-- Players who come within read_range of a board, facing it, are told once, again after they went REARM_M away and
+-- NOTICE_GAP after the last time: the host gets a note (the wheel is theirs; at most every HINT_GAP), everyone else
+-- the notices in the chat (with chat_notices).
 local function walk_up(world)
   if #boards == 0 then return end
   local me = emf.local_player()
@@ -1492,9 +1496,10 @@ local function walk_up(world)
       if t and dist(t, p.x, p.y, p.z) > REARM_M then
         told[account], t = nil, nil
       end
-      local b = not t and board_in_front(world, p.id, read_range(), WALK_COS)
+      local gap = p.id == me and HINT_GAP or NOTICE_GAP
+      local b = not t and play_s - (told_at[account] or -1e9) >= gap and board_in_front(world, p.id, read_range(), WALK_COS)
       if b then
-        told[account] = {x = b.x, y = b.y, z = b.z}
+        told[account], told_at[account] = {x = b.x, y = b.y, z = b.z}, play_s
         if p.id == me then
           local key = emf.setting("read_key") or ""
           emf.notify(key ~= "" and ("Bounty Board: press " .. key .. " to read") or "Bounty Board: /bounty.board to read")

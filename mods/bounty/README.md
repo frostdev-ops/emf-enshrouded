@@ -29,13 +29,13 @@ under Esc) or in EMF.exe, then restart the game (or the server).
 
 ## Reading the board
 
-- **The host:** look at the board within 4 m: a note says "Bounty Board: press E to read". Press **E**: a wheel shows
+- **The host:** look at the board within 4 m: a note says "Bounty Board: press E to read" (at most every 10 minutes). Press **E**: a wheel shows
   the notices (click one to take it), "Drop" for each bounty you hold, and "Claim" when one is done. E is also the
   game's key for using things: a chest standing right next to the board opens too. **Read the board (host)** changes
   the key.
 - **Players who joined, and everyone on a dedicated server:** walking up to the board, facing it, sends you a private
   chat line with the notices ("1. Gather 20 Wood logs (3 runes) ... Type /bounty.take 1-3 here"), and again after you
-  went 8 m away. Take one with `/bounty.take <n>`; claim with `/bounty.claim` at the board. This needs players' chat:
+  went 8 m away (at most once a minute). Take one with `/bounty.take <n>`; claim with `/bounty.claim` at the board. This needs players' chat:
   always on on a dedicated server, `[chat] players=1` in `emf\emf_core.ini` in a game you host (see
   `docs/modding/server.md`).
 - `/bounty.board` lists the notices when you are within 8 m of a Bounty Board, and your bounties anywhere.
