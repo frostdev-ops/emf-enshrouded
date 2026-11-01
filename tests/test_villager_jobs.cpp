@@ -1154,3 +1154,71 @@ TEST_CASE("jobs: a craft whose product is unknown is not confirmed by an item lo
     book.on_output(6830, 0x55, 600, 0);  // the craft's product (the game reports no source)
     CHECK(book.find(1025)->made == 1);
 }
+
+// ---- the settings players see (mod.json) ----
+#include <fstream>
+#include <regex>
+#include <sstream>
+
+#include "core/manifest.h"
+
+namespace {
+std::string source_file(const std::string& rel) {
+    std::ifstream f(std::string(EMF_SOURCE_DIR) + "/" + rel, std::ios::binary);
+    REQUIRE_MESSAGE(f.good(), rel);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+}  // namespace
+
+TEST_CASE("villager_jobs manifest: every setting the mod reads from its ini is in mod.json with the same default and range") {
+    const std::string code = source_file("mods/villager_jobs/villager_jobs.cpp");
+    const std::string readme = source_file("README_EMF.md");
+    const auto r = emf::core::parse_manifest(source_file("mods/villager_jobs/mod.json"));
+    REQUIRE_MESSAGE(r.manifest, r.error);
+    std::map<std::string, emf::core::SettingDef> declared;
+    for (const auto& s : r.manifest->settings) {
+        CAPTURE(s.key);
+        CHECK(s.problem.empty());
+        CHECK(s.warning.empty());
+        CHECK(s.label != s.key);  // a label of its own for the Mods tab and EMF.exe
+        declared[s.key] = s;
+    }
+    // GetPrivateProfileIntW(L"villager_jobs", L"<key>", <default>, ...), read as at least 1 inside (std::max)(1u, ...);
+    // GetPrivateProfileStringW(L"villager_jobs", L"<key>", L"<default>", ...)
+    const std::regex int_read(R"re((\(std::max\)\(1u,\s*)?GetPrivateProfileIntW\(L"villager_jobs",\s*L"(\w+)",\s*(\d+))re");
+    const std::regex text_read(R"re(GetPrivateProfileStringW\(L"villager_jobs",\s*L"(\w+)",\s*L"([^"]*)")re");
+    std::vector<std::string> read;
+    for (std::sregex_iterator it(code.begin(), code.end(), int_read), end; it != end; ++it) {
+        const std::string key = (*it)[2].str(), def = (*it)[3].str();
+        if (key == "enabled") continue;  // EMF's own switch, never a setting
+        read.push_back(key);
+        CAPTURE(key);
+        REQUIRE(declared.count(key));
+        const auto& s = declared[key];
+        CHECK(s.type == emf::core::SettingType::Int);
+        CHECK(s.default_value == def);
+        REQUIRE(s.has_min);
+        REQUIRE(s.has_max);
+        if ((*it)[1].matched) CHECK(s.min == 1.0);  // the mod reads 0 as 1
+        CHECK(std::stod(def) >= s.min);
+        CHECK(std::stod(def) <= s.max);
+        CHECK(readme.find("`" + key + "=" + def + "`") != std::string::npos);  // README_EMF's ini table
+    }
+    for (std::sregex_iterator it(code.begin(), code.end(), text_read), end; it != end; ++it) {
+        const std::string key = (*it)[1].str(), def = (*it)[2].str();
+        read.push_back(key);
+        CAPTURE(key);
+        REQUIRE(declared.count(key));
+        CHECK(declared[key].default_value == def);
+        CHECK(readme.find("`" + key + "=" + def + "`") != std::string::npos);
+    }
+    CHECK(read.size() == 7);  // key, seconds_per_item, farm/tend radius, haul_per_trip, gather radius and seconds
+    CHECK(read.size() == declared.size());  // nothing in mod.json that the mod does not read
+    REQUIRE(declared.count("gather_radius"));
+    CHECK(declared["gather_radius"].max == 100.0);
+    REQUIRE(declared.count("gather_seconds"));
+    CHECK(declared["gather_seconds"].max == 600.0);
+    CHECK(r.manifest->description.find("gather") != std::string::npos);
+}
