@@ -205,16 +205,17 @@ Example reply (from a test run):
   with their AI state and position.
 - Logs `world loaded` / `world saved` from the load and autosave events.
 - Adds the command `sample.villagers`: the villagers of your world with their AI state and position.
-- With `enable_write=1` (host only):
-  - **F8** moves the time of day forward 3 hours (the game's own `setTimeOfDay`).
-  - **F9** spawns the template in `spawn_guid` (default: a barrel prop) 2 m from the player; **F11** spawns
-    `spawn_guid2` (default: a test townsfolk).
-  - **F10** destroys the last spawned entity.
-  - **F12** gives the player `give_item` × `give_count` (an item's debug name, e.g. `Material_T1_Wood_Logs`) as a
+- With `enable_write=1` (host only), on test keys set in the same ini (none by default, so they never take a key a
+  mod uses: Hand-over has F7, Bulk Craft F8; for example `key_spawn=F10`, `key_destroy=F11`):
+  - **`key_time`** moves the time of day forward 3 hours (the game's own `setTimeOfDay`).
+  - **`key_spawn`** spawns the template in `spawn_guid` (default: a barrel prop) 2 m from the player;
+    **`key_spawn2`** spawns `spawn_guid2` (default: a test townsfolk).
+  - **`key_destroy`** destroys the last spawned entity.
+  - **`key_give`** gives the player `give_item` × `give_count` (an item's debug name, e.g. `Material_T1_Wood_Logs`) as a
     pickup dropped 1 m above them; the game's loot code collects it into the backpack (with the default
     auto-collect setting). `dump_items=1` writes every item (name, id, GUID,
     stack size) to `emf\items.csv` when the world loads (build 1269579 has 4207 items).
-  - **F7** makes the villager nearest to the player walk to the player (the engine's own "go to position"
+  - **`key_villager`** makes the villager nearest to the player walk to the player (the engine's own "go to position"
     command). It waits next to you briefly, then wanders back to its home area.
 
 ## The big_stacks mod

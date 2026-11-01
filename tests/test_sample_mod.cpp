@@ -4,10 +4,16 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <fstream>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
+#include "../mods/sample_mod/test_keys.h"
 #include "emf/emf_api.h"
+#include "game_bindings.h"
+#include "test_scratch.h"
 
 namespace {
 std::vector<std::string> g_log;
@@ -159,4 +165,77 @@ TEST_CASE("sample_mod loads, subscribes to ticks and logs the local player's pos
     bool listed = false;
     for (const auto& r : g_sm_replies) listed |= r.find("villager 7") != std::string::npos;
     CHECK(listed);
+}
+
+namespace {
+void* fake_resolve(const char*) { return nullptr; }  // no engine here: the villager command stays unavailable
+}  // namespace
+
+TEST_CASE("sample_mod: its test keys are settings with no key by default (never Hand-over's F7 or Bulk Craft's F8)") {
+    for (const char* k : {"key_villager", "key_time", "key_spawn", "key_destroy", "key_spawn2", "key_give"}) {
+        CAPTURE(k);
+        CHECK(game_bindings::manifest_default("mods/sample_mod/mod.json", k).empty());
+    }
+    std::ifstream f(std::string(EMF_SOURCE_DIR) + "/mods/sample_mod/sample_mod.cpp", std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    REQUIRE_FALSE(ss.str().empty());
+    CHECK(ss.str().find("VK_F") == std::string::npos);  // no key of its own
+}
+
+TEST_CASE("sample_mod: test keys come from the ini; an empty or unknown one is no key") {
+    const std::map<std::wstring, std::wstring> ini = {{L"key_spawn", L"F9"}, {L"key_give", L"f12"}, {L"key_time", L"nonsense"}};
+    const auto t = sample::read_test_keys([&ini](const wchar_t* s) {
+        const auto it = ini.find(s);
+        return it == ini.end() ? std::wstring() : it->second;
+    });
+    CHECK(t[sample::kKeySpawn].vk == VK_F9);
+    CHECK(t[sample::kKeyGive].name == "F12");
+    CHECK(t[sample::kKeyTime].vk == 0);
+    CHECK(t[sample::kKeyTime].name.empty());
+    CHECK(t[sample::kKeyVillager].vk == 0);
+    CHECK(sample::test_keys_text(t) == "F9 spawns spawn_guid, F12 gives give_item");
+    CHECK(sample::test_keys_text(sample::read_test_keys([](const wchar_t*) { return std::wstring(); })).empty());
+}
+
+TEST_CASE("sample_mod: with enable_write=1 only the keys its ini sets do anything, and the log names them") {
+    const test_scratch::BuildFolderLock lock;  // the ini is <exe folder>\emf\config\sample_mod.ini for every run of this build
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);
+    std::wstring dir(exe);
+    dir = dir.substr(0, dir.find_last_of(L"\\/")) + L"\\emf";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    CreateDirectoryW((dir + L"\\config").c_str(), nullptr);
+    const std::wstring ini = dir + L"\\config\\sample_mod.ini";
+    DeleteFileW(ini.c_str());
+    struct Gone {  // the ini goes also when a REQUIRE ends the test (the other sample_mod test needs it absent)
+        const std::wstring& path;
+        ~Gone() { DeleteFileW(path.c_str()); }
+    } gone{ini};
+    WritePrivateProfileStringW(L"sample_mod", L"enable_write", L"1", ini.c_str());
+    static EmfApi api{};
+    api.version = EMF_API_VERSION;
+    api.size = sizeof(EmfApi);
+    api.log = fake_log;
+    api.world_kind = fake_kind;
+    api.local_player = fake_local_player;
+    api.get_component = fake_get_component;
+    api.on_tick = fake_on_tick;
+    api.for_each_entity = fake_for_each;
+    api.resolve = fake_resolve;
+    HMODULE m = LoadLibraryW(sample_mod_path().c_str());
+    REQUIRE(m != nullptr);
+    auto load = reinterpret_cast<EmfModLoadFn>(GetProcAddress(m, "emf_mod_load"));
+    REQUIRE(load != nullptr);
+    g_log.clear();
+    CHECK(load(&api));
+    CHECK(has("write test on, but no test keys"));
+
+    WritePrivateProfileStringW(L"sample_mod", L"key_spawn", L"F9", ini.c_str());
+    WritePrivateProfileStringW(L"sample_mod", L"key_give", L"F12", ini.c_str());
+    g_log.clear();
+    CHECK(load(&api));
+    CHECK(has("write test ON: F9 spawns spawn_guid, F12 gives give_item"));
+    CHECK_FALSE(has("F7"));
+    CHECK_FALSE(has("F8"));
 }

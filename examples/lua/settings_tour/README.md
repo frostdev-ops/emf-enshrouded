@@ -29,7 +29,7 @@ It needs EMF's `lua` mod, which the EMF installer puts in and switches on.
 3. "A whole-number slider" is greyed out until the mood is "wild". Switch "Show the values on screen" off: the corner,
    colour and text settings grey out and the lines go.
 4. Press F4 (outside the console): the mood moves on (calm, busy, wild). Bind another key in the Mods tab and it
-   works at once. (F4 because no EMF mod uses it; the developer `sample_mod` has F7 to F12.)
+   works at once. (F4 because no EMF mod uses it.)
 5. Type `settings_tour.set count 12` in the console: `count is now 12`. `settings_tour.set wildness 99` is refused
    (the slider goes from 1 to 10), and so is a label longer than 12 characters.
 6. Change the greeting: nothing happens until the mod loads again (save `main.lua`, or restart the game).
