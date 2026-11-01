@@ -4,11 +4,29 @@
 
 namespace {
 constexpr uint32_t kLogs = 0x2b0cf1d5, kRunes = 0x41a792dc, kSword = 0x43aa0001, kFlint = 0x5e8e867a;
+// The render model of the game's notice board (villageprops_noticeboard_01): the Notice Board players build, and very
+// likely the villages' boards too.
+constexpr const char* kBoardModel = "0bee6531-ef51-4925-9cd3-a40d11561165";
+
+std::map<uint32_t, bool> g_keys;  // the fake keyboard: vk -> held
+
+// The 1.1 tests take and claim anywhere (need_board off) unless a test says otherwise.
+std::map<std::string, std::string> board_off(std::map<std::string, std::string> s) {
+    s.emplace("need_board", "0");
+    return s;
+}
+
+// The game stores a GUID's first three groups little-endian (see read_field in src/lua_host/fields.cpp).
+std::vector<uint8_t> guid_bytes(const std::string& text) {
+    auto hex = [&](size_t at) { return static_cast<uint8_t>(std::stoul(text.substr(at, 2), nullptr, 16)); };
+    return {hex(6), hex(4), hex(2), hex(0), hex(11), hex(9), hex(16), hex(14),
+            hex(19), hex(21), hex(24), hex(26), hex(28), hex(30), hex(32), hex(34)};
+}
 
 // Players 1 (account 0xAA, the host, level 5) and 2 (0xBB, level 5); creatures to hit and kill.
 struct BountyRig : ModRig {
     explicit BountyRig(const std::map<std::string, std::string>& settings = {})
-        : ModRig("bounty", L"bounty", settings, [](Fake& f) {
+        : ModRig("bounty", L"bounty", board_off(settings), [](Fake& f) {
               add_player(f, 1, 0xAA, 0, 10, 0);
               add_player(f, 2, 0xBB, 20, 10, 0);
               for (uint32_t p : {1u, 2u}) component<ecs::Level>(f, p).dataStorage[0] = 5;
@@ -18,7 +36,31 @@ struct BountyRig : ModRig {
               f.item_names[kSword] = "Weapon_T1_1H_SwordEpic_01";
               f.item_names[0x3aaa39a7] = "Material_T1_Animal_Fur";
               set_daytime(f, 12.0);
-          }) {}
+          }) {
+        g_keys.clear();
+        host->set_key_reader([](uint32_t k) { return g_keys[k]; });
+        host->set_clock([this] { return static_cast<uint64_t>(r.fake.tick) * 1000 / 60; });  // the chat limit's clock
+    }
+    // Player `p`'s camera at (x, y, z) looking along `yaw_deg` (0 = +z, 90 = +x), level.
+    void look(uint32_t p, double x, double y, double z, double yaw_deg) {
+        auto& in = component<ecs::PlayerInput>(r.fake, p);
+        auto& cam = in.fromClient.camera;
+        cam.position.x = static_cast<int64_t>(x * 4294967296.0);
+        cam.position.y = static_cast<int64_t>(y * 4294967296.0);
+        cam.position.z = static_cast<int64_t>(z * 4294967296.0);
+        const double h = yaw_deg * 3.14159265358979 / 360.0;
+        cam.orientation.x = 0;
+        cam.orientation.y = static_cast<float>(std::sin(h));
+        cam.orientation.z = 0;
+        cam.orientation.w = static_cast<float>(std::cos(h));
+    }
+    // Presses `vk` once on the server world (this game hosts) and lets go.
+    void press(uint32_t vk) {
+        g_keys[vk] = true;
+        host->tick(kServer);
+        g_keys[vk] = false;
+        host->tick(kServer);
+    }
     // A creature of `faction` (FactionType) at `level` with `max_health`.
     void creature(uint32_t who, int faction, uint32_t level = 3, uint32_t max_health = 200) {
         place(r.fake, who, 5, 10, 5);
@@ -54,6 +96,49 @@ size_t count_of(const std::string& text, const std::string& part) {
     return n;
 }
 }  // namespace
+
+TEST_CASE("bounty: mod.json 1.2.0 has the board settings with the approved defaults") {
+    const auto m = emf::core::parse_manifest(slurp((std::filesystem::path(EMF_SOURCE_DIR) / "mods/bounty/mod.json").wstring()));
+    REQUIRE_MESSAGE(m.manifest, m.error);
+    CHECK(m.manifest->version_text == "1.2.0");
+    std::map<std::string, emf::core::SettingDef> s;
+    for (const auto& d : m.manifest->settings) {
+        CAPTURE(d.key);
+        CHECK(d.problem.empty());
+        CHECK(d.warning.empty());
+        s[d.key] = d;
+    }
+    struct Want {
+        const char* key;
+        const char* def;
+        double min, max;  // 0, 0: no range to check
+    };
+    for (const Want& w : {Want{"need_board", "1", 0, 0}, Want{"notice_boards", "1", 0, 0}, Want{"base_radius", "40", 10, 100},
+                          Want{"bounties_per_period", "3", 2, 4}, Want{"offers_for", "everyone", 0, 0},
+                          Want{"hold_max", "1", 1, 4}, Want{"reset", "game_days", 0, 0}, Want{"reset_days", "4", 1, 10},
+                          Want{"read_key", "E", 0, 0}, Want{"read_range", "4", 2, 8}, Want{"chat_notices", "1", 0, 0},
+                          Want{"rerolls", "1", 0, 3}}) {
+        const std::string key = w.key;
+        CAPTURE(key);
+        REQUIRE(s.count(key) == 1);
+        CHECK(s[w.key].default_value == w.def);
+        if (w.max > 0) {
+            CHECK(s[w.key].min == w.min);
+            CHECK(s[w.key].max == w.max);
+        }
+    }
+    CHECK(s["read_key"].type == emf::core::SettingType::Key);
+    CHECK(s["reset_days"].when_key == "reset");
+    CHECK(s["reset_days"].when_value == "game_days");
+    CHECK(s["rerolls"].when_key == "offers_for");
+    CHECK(s["rerolls"].when_value == "each_player");
+    bool each_player = false;
+    for (const auto& o : s["offers_for"].options) each_player = each_player || o.value == "each_player";
+    CHECK(each_player);
+    REQUIRE(m.manifest->depends.size() == 1);
+    CHECK(m.manifest->depends[0].id == "lua");
+    CHECK(m.manifest->depends[0].version.describe().find("1.8.0 or newer") == 0);
+}
 
 TEST_CASE("bounty: each player gets 3 bounties from the pool for the period, the same each time they look; others get their own") {
     BountyRig b;
