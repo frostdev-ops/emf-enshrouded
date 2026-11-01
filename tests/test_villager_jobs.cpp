@@ -2,12 +2,16 @@
 #include <doctest.h>
 
 #include <cmath>
+#include <fstream>
 #include <map>
 #include <optional>
+#include <regex>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "../mods/villager_jobs/jobs_logic.h"
+#include "core/manifest.h"
 
 using namespace jobs;
 
@@ -1156,11 +1160,6 @@ TEST_CASE("jobs: a craft whose product is unknown is not confirmed by an item lo
 }
 
 // ---- the settings players see (mod.json) ----
-#include <fstream>
-#include <regex>
-#include <sstream>
-
-#include "core/manifest.h"
 
 namespace {
 std::string source_file(const std::string& rel) {

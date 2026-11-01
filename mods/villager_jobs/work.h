@@ -33,8 +33,9 @@ struct StageParts {
     bool container = false;          // InventorySetup or Inventory: a loot moves its slots instead of rolling a table
 };
 // The farm job harvests with a loot (the chest as the looter), which rolls the loot table of a stage that offers an
-// interaction, has no inventory of its own and is removed on loot (re_villages.md, immediate_loot_action path A): every
-// crop's last stage in the game data (179 templates, mushrooms included). A tree the player planted grows into
+// interaction, has no inventory of its own and is removed on loot (re_villages.md, immediate_loot_action path A): the
+// last stage of the picked crops in the game data (179 templates, mushrooms included). Plants that are cut rather than
+// picked (aloe, cabbage, artichoke) end in a MiningNode scatter prop instead. A tree the player planted grows into
 // something to chop, and planted fruit trees and nut bushes (date palm, coconut, banana, coffee, hazelnut) end in a
 // container whose fruit grows back (`..._PlayerPlanted_Refill`, with a MiningNode). Such a loot brings nothing (a false
 // "chest full" pause of the whole job), or, if it did, re-arming the plant would cut it back to a seedling: not
