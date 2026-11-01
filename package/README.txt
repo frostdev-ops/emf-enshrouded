@@ -29,8 +29,8 @@ Included mods:
   lua            runs the Lua mods (kill_counter, life_skills, beastmaster, ...)
   big_stacks     bigger item stacks (OFF by default: the game saves the bigger stacks; switch it on in the Mods tab
                  and restart the game)
-  loot_scale     more materials per loot stack (OFF by default; switch it on in the Mods tab and restart the game;
-                 its factor, 2 by default, changes at once)
+  loot_scale     more materials per loot stack, also from plants, trees and rocks (OFF by default; switch it on in
+                 the Mods tab and restart the game; its factors, 2 by default, change at once)
   handover       /handover wood 20 gives items to the nearest other player; nothing is lost (a Lua mod; OFF by
                  default; /handover.block refuses them)
   herald         Server Herald, for dedicated servers: message of the day, join lines, announcements, restart

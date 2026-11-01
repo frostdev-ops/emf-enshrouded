@@ -59,4 +59,6 @@ pickups give more (or fewer) materials, and nothing is saved into the world. Its
 server too (not tested on a running server). Switching it off takes effect at the next start; factor 1 is "off"
 at once. Set
 `factor` in the Mods tab or `emf\config\loot_scale.ini`. It is also a short example of hooking a game function by its
-bytes (`hook_pattern`).
+bytes (`hook_pattern`). Plants picked with E, chopped trees and mined rocks never read that setting: for those it
+watches the game's `PickupEvent` and gives the difference (`put_items_ex`) or takes it back (`take_items`), with
+their own factors (`harvest`, `chopping`, `mining`; 0 = the same as `factor`). See `mods/loot_scale/README.md`.
