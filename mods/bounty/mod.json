@@ -2,7 +2,7 @@
   "id": "bounty",
   "name": "Bounty Board",
   "version": "1.2.0",
-  "description": "Bounties for every player: slay creatures of a faction, gather a material, slay a champion. Build the game's Notice Board in your base (or mark any prop with bounty.mark) and it becomes a Bounty Board: take a bounty there (the host presses E; players who joined get the notices in the chat when they walk up and type /bounty.take), claim the reward there. New notices every 4 in-game days; switch off need_board to take and claim anywhere, as in 1.1. Quick starters until your first is done; kills by your companion or summons count for you. Kept per world and per player. Host or dedicated server; players who join need nothing. A Lua mod: the bounties are a table at the top of main.lua, or your own in emf\\config\\bounty\\pool.lua (kept when EMF is installed again). Installed switched off.",
+  "description": "Bounties for every player: slay creatures of a faction, gather a material, slay a champion. Build the game's Notice Board in your base (or mark any prop with bounty.mark) and it becomes a Bounty Board: take a bounty there (the host presses E; players who joined get the notices in the chat when they walk up and type /bounty.take), claim the reward there. Until the world's first board, anywhere. On a dedicated server an admin marks the board with /bounty.mark. New notices every 4 in-game days; switch off need_board to take and claim anywhere. Quick starters until your first is done; kills by your companion or summons count for you. Kept per world and per player. Host or dedicated server; players who join need nothing. A Lua mod: the bounties are a table at the top of main.lua, or your own in emf\\config\\bounty\\pool.lua (kept when EMF is installed again). Installed switched off.",
   "authors": ["EMF"],
   "enabled": false,
   "emf": 14,
@@ -11,7 +11,7 @@
   "depends": {"lua": ">=1.8"},
   "settings": [
     {"key": "need_board", "type": "bool", "default": true, "label": "Take and claim at a Bounty Board", "live": true,
-     "group": "Board", "help": "Off: /bounty.take and /bounty.claim work anywhere, as in 1.1."},
+     "group": "Board", "help": "Off: take and claim anywhere. Until a world's first Bounty Board, that is so anyway."},
     {"key": "notice_boards", "type": "bool", "default": true, "label": "Every Notice Board in a base is a Bounty Board",
      "live": true, "group": "Board", "help": "Off: only props the host marked with bounty.mark."},
     {"key": "base_radius", "type": "slider", "min": 10, "max": 100, "step": 5, "default": 40,

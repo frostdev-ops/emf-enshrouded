@@ -7,6 +7,7 @@
 --   /bounty.claim   the rewards of your finished bounties
 --   /bounty.reroll  <n>: swap notice n for another (notices of your own only)
 --   /bounty.top     who finished the most bounties in this world
+--   bounty.mark, bounty.unmark, bounty.boards (host / admins): make a prop a Bounty Board, take the mark off, list them
 --   bounty.give <id>, bounty.reset (host / admins)
 -- Runs where the world runs (the host or a dedicated server); players who join need nothing.
 

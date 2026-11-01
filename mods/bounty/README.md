@@ -7,7 +7,7 @@ anywhere, and claim its reward at the board. New notices come every 4 in-game da
 tracker (65) are open requests on the official board; no Nexus mod has them.
 
 It runs where the world runs, so on the host or a dedicated server it works for every player, also those who joined
-without EMF. The notices, each player's bounties and progress, and the marked props are kept with the world, by
+without EMF. The notices, each player's bounties and progress, and the boards' places are kept with the world, by
 account (`emf\config\bounty\<world slot>.txt`). Nothing is written into the game's save: without the mod a Bounty
 Board is an ordinary Notice Board again.
 
@@ -19,23 +19,31 @@ under Esc) or in EMF.exe, then restart the game (or the server).
 ## The board
 
 - **A Notice Board in a base:** build a Notice Board (Decoration Workbench) within 40 m of a flame altar (**Board must
-  be within (m) of a flame altar**). It becomes a Bounty Board within a minute. The notice boards in the world's
-  villages are no Bounty Boards (unless a base is that close to them).
+  be within (m) of a flame altar**; an abandoned altar makes no base). In a game you host it becomes a Bounty Board
+  within a minute of the host coming near it, and stays one, also while the host is far away and after a reload. The
+  notice boards in the world's villages are no Bounty Boards (unless a base is that close to them).
+- **A dedicated server** cannot see which prop is a Notice Board (the game shows that only to a game with a screen):
+  there an admin marks the board with `/bounty.mark`, as below.
 - **Any prop:** before you have a Notice Board, the host looks at a prop within 8 m (a sign, a post, a table) and
-  types `bounty.mark`: it is a Bounty Board now. `bounty.unmark` near it takes the mark off. Marks are kept with the
-  world by the prop's place; a marked prop that was taken down loses its mark.
-- `bounty.boards` lists the world's Bounty Boards. If it does not list your Notice Board (on a dedicated server, for
-  example), look at the board and type `bounty.mark`.
+  types `bounty.mark`: it is a Bounty Board now. When the server does not know where the sender looks, `bounty.mark`
+  takes the prop nearest to them within 3 m and says which. `bounty.unmark` near it takes the mark off.
+- Boards are kept with the world by their place. A board that was taken down is forgotten once two searches in a row
+  (one every 30 seconds) missed it while a player was near its place.
+- `bounty.boards` lists the world's Bounty Boards (also from a dedicated server's console).
+- **Until the world's first Bounty Board**, bounties are taken and claimed anywhere, so a new world (or one from 1.1)
+  has bounties before anyone can build a Notice Board. Once a board was found or marked, they are taken and claimed at
+  a board, also after a reload.
 
 ## Reading the board
 
-- **The host:** look at the board within 4 m: a note says "Bounty Board: press E to read" (at most every 10 minutes). Press **E**: a wheel shows
-  the notices (click one to take it), "Drop" for each bounty you hold, and "Claim" when one is done. E is also the
-  game's key for using things: a chest standing right next to the board opens too. **Read the board (host)** changes
-  the key.
+- **The host:** look at the board within 4 m: a note says "Bounty Board: press E to read" (at most every 10 minutes).
+  With the crosshair on the board, press **E**: a wheel shows the notices (click one to take it), "Drop" for each
+  bounty you hold, and "Claim" when one is done. E is also the game's key for using things; with the crosshair on a
+  chest or a station beside the board, E opens only that. **Read the board (host)** changes the key.
 - **Players who joined, and everyone on a dedicated server:** walking up to the board, facing it, sends you a private
-  chat line with the notices ("1. Gather 20 Wood logs (3 runes) ... Type /bounty.take 1-3 here"), and again after you
-  went 8 m away (at most once a minute). Take one with `/bounty.take <n>`; claim with `/bounty.claim` at the board. This needs players' chat:
+  chat line with the notices ("1. Gather 20 Wood logs (3 runes) ... Type /bounty.take 1-3 here"). After you went 8 m
+  away you get it again when there is something new (new notices, a bounty to claim), else after 10 minutes. Take one
+  with `/bounty.take <n>`; claim with `/bounty.claim` at the board. This needs players' chat:
   always on on a dedicated server, `[chat] players=1` in `emf\emf_core.ini` in a game you host (see
   `docs/modding/server.md`).
 - `/bounty.board` lists the notices when you are within 8 m of a Bounty Board, and your bounties anywhere.
@@ -52,11 +60,11 @@ under Esc) or in EMF.exe, then restart the game (or the server).
   6:00, also when the host sets the time from the evening to the morning or the players sleep through the night.
   **New notices** can also be every real day at an hour on the host's clock, every dawn, or every few hours of play.
 
-## Take and claim anywhere, as in 1.1
+## Take and claim anywhere
 
 Switch off **Take and claim at a Bounty Board** (`need_board`): in the Mods tab, in EMF.exe, or with
 `set bounty need_board 0` in the console. Then `/bounty.board` shows the notices anywhere and `/bounty.take` and
-`/bounty.claim` work anywhere. The boards still work as above.
+`/bounty.claim` work anywhere, as `/bounty.board` and `/bounty.claim` did in 1.1. The boards still work as above.
 
 ## Commands
 
@@ -68,7 +76,7 @@ Switch off **Take and claim at a Bounty Board** (`need_board`): in the Mods tab,
 | `/bounty.claim` | every player | the rewards of your finished bounties (at a board) |
 | `/bounty.reroll <n>` | every player | with notices of your own: swap notice n for another one (1 per period by default) |
 | `/bounty.top` | every player | who finished the most bounties in this world |
-| `bounty.mark`, `bounty.unmark` | host, admins | the prop you look at becomes a Bounty Board / the marked prop nearest to you is none again |
+| `bounty.mark`, `bounty.unmark` | host, admins | the prop you look at (or the one beside you) becomes a Bounty Board / the marked prop nearest to you is none again |
 | `bounty.boards` | host, admins | the world's Bounty Boards |
 | `bounty.give <id>` | host, admins | hold a bounty from the pool at once (for tests) |
 | `bounty.reset` | host, admins | new notices for everyone now |
@@ -113,7 +121,8 @@ on screen.
 
 ## Your first bounties
 
-Until you finish your first bounty, the board shows you quick **starter** notices (and your rerolls draw starters):
+Until you finish your first bounty, the board shows you quick **starter** notices, named so (and your rerolls draw
+starters):
 gather 20 wood logs, 20 stone or 15 plant fibre, slay 2 wildlife, 3 shroud creatures or 2 scavengers, for a small
 reward. Once you have finished one, you see the board's other notices.
 
@@ -122,9 +131,14 @@ logs"); the size counts for bounties taken from then on.
 
 ## Updating from 1.1
 
-The bounties you had become bounties you hold, with their progress (also more than the hold limit); finished ones wait
-for `/bounty.claim`, rewards waiting stay, and the count of finished bounties (`/bounty.top`) stays. Nothing earned is
-lost. Bounties already claimed are not kept.
+The bounties you had started or finished become bounties you hold, with their progress (also more than the hold
+limit); finished ones wait for `/bounty.claim` (anywhere, until the world has a Bounty Board), rewards waiting stay,
+and the count of finished bounties (`/bounty.top`) stays. Nothing earned is lost. Bounties not started yet (0 done)
+and bounties already claimed are not kept.
+
+Going back to 1.1 keeps the finished counts and the rewards waiting; it forgets the bounties players hold, the
+notices taken and the boards. A world file written by a newer Bounty Board is read, but never written over, by this
+version.
 
 ## The pool
 
@@ -157,7 +171,7 @@ programs.
 
 | Setting | Default | What it does |
 |---|---|---|
-| Take and claim at a Bounty Board (`need_board`) | on | off: the commands work anywhere, as in 1.1 |
+| Take and claim at a Bounty Board (`need_board`) | on | off: take and claim anywhere |
 | Every Notice Board in a base is a Bounty Board (`notice_boards`) | on | off: only marked props |
 | Board must be within (m) of a flame altar (`base_radius`) | 40 | 10-100 |
 | Read the board (host) (`read_key`) | E | |
