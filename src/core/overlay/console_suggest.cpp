@@ -190,16 +190,23 @@ void drop_exact(Suggestions& s) {
     if (s.rows.size() == 1 && iequal(s.rows[0].insert, trim(s.typed))) s.rows.clear();
 }
 
+// `item_order`: the item names that match what was typed, best first, when already known (else they are searched).
 void value_rows(Suggestions& s, const HintToken& arg, const std::string& cmd, std::string_view mod,
-                std::string_view key, const CompletionSources& src, size_t max_rows) {
+                std::string_view key, const CompletionSources& src, size_t max_rows,
+                const std::vector<size_t>* item_order) {
     const std::string_view typed = trim(s.typed);
     const std::string name = lower(arg.name);
     const auto add = [&](const std::string& label, const std::string& help) {
         if (s.rows.size() < max_rows) s.rows.push_back({label, "", help, label});
     };
     if (item_arg(arg)) {  // thousands of names: only once something is typed, by the item-name rules
-        if (!typed.empty())
-            for (size_t i : search_items(src.items, typed)) add(src.items[i], "");
+        if (!typed.empty()) {
+            const std::vector<size_t> searched = item_order ? std::vector<size_t>() : search_items(src.items, typed);
+            for (size_t i : item_order ? *item_order : searched) {
+                if (s.rows.size() >= max_rows) break;
+                add(src.items[i], "");
+            }
+        }
     } else if (name.find("component") != std::string::npos) {
         if (!typed.empty())
             for (size_t i : rank(src.components.size(), [&](size_t i) { return fit(src.components[i], typed); }))
@@ -319,9 +326,13 @@ Suggestions suggest(std::string_view line, size_t caret, const CompletionSources
         if (tokens[k].kind == HintToken::Kind::Or) forms.emplace_back();
         else if (tokens[k].kind == HintToken::Kind::Arg) forms.back().push_back(k);
     }
+    std::string looked_up;  // the item name resolves() looked up last, and what it found
+    ItemMatch found;
     const auto resolves = [&](size_t first, size_t end) {
         const std::string_view t = line.substr(words[first].start, words[end - 1].end - words[first].start);
-        return match_item(src.items, t).id != 0;
+        looked_up = std::string(t);
+        found = match_item(src.items, t);
+        return found.id != 0;
     };
     std::vector<Located> where;
     for (const auto& f : forms) where.push_back(locate(tokens, f, words, line, resolves));
@@ -350,7 +361,11 @@ Suggestions suggest(std::string_view line, size_t caret, const CompletionSources
     s.typed = std::string(line.substr(s.from, caret - s.from));
     const std::string_view mod = words.size() > 2 ? text_of(1) : std::string_view();
     const std::string_view key = words.size() > 3 ? text_of(2) : std::string_view();
-    value_rows(s, tokens[forms[0][static_cast<size_t>(at.arg)]], cmd, mod, key, src, max_rows);
+    // after a space an item name that means no one item yet was looked up already: its matches are the search's, in
+    // the same order (only a name without words gets none from match_item)
+    const bool known = found.id == 0 && looked_up == trim(s.typed) && !item_words(looked_up).empty();
+    value_rows(s, tokens[forms[0][static_cast<size_t>(at.arg)]], cmd, mod, key, src, max_rows,
+               known ? &found.matches : nullptr);
     drop_exact(s);
     return s;
 }

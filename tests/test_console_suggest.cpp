@@ -261,7 +261,8 @@ TEST_CASE("suggest: item names for give, put and any <item> argument, by the fri
     CHECK(labels(at_end("give simple bait", src)) == std::vector<std::string>{"Material_T0_simple_FishingBait"});
     CHECK(labels(at_end("put to", src)) == std::vector<std::string>{"Tool_Torch01"});  // a part of a word
     CHECK(labels(at_end("handover.to bob torch", src)) == std::vector<std::string>{"Tool_Torch01"});  // <item>
-    CHECK(labels(at_end("give wood ", src)).size() == 3);  // still the name: its matches stay
+    CHECK(labels(at_end("give wood ", src)) == labels(at_end("give wood", src)));  // still the name: its matches stay
+    CHECK(labels(at_end("give wood  ", src)) == labels(at_end("give wood", src)));
     CHECK(at_end("give ", src).rows.empty());               // nothing typed yet: 4000 names are no help
     CHECK(at_end("give wood 5", src).rows.empty());         // the count
     CHECK(at_end("give wood log ", src).rows.empty());      // one item: the count is next
