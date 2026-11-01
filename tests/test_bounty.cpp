@@ -954,3 +954,36 @@ TEST_CASE("bounty: a marked prop that is gone loses its mark when a player was n
     b.seconds(70);
     CHECK(b.reply("bounty.boards").find("1. marked prop at 0, 10, 5") != std::string::npos);
 }
+
+// ---- 1.2: take and claim at a board ----
+TEST_CASE("bounty: with need_board on, take and claim work only near a Bounty Board; off, anywhere") {
+    BountyRig b({{"need_board", "1"}});
+    CHECK(b.reply("bounty.take 1").rfind("This world has no Bounty Board yet", 0) == 0);
+    CHECK(b.board().find("This world has no Bounty Board yet") != std::string::npos);
+    CHECK(notices_of(b.board()).empty());
+    altar(b, 900, 20, 0);
+    prop(b, 950, 20, 10, 5);  // beside player 2 (at 20, 10, 0), 20 m from the host
+    search(b);
+    CHECK(b.reply("bounty.take 1") == "Take and claim bounties at a Bounty Board.");
+    CHECK(b.board().find("Notices: at a Bounty Board.") != std::string::npos);
+    CHECK(notices_of(b.board()).empty());
+    CHECK(count_of(notices_of(b.board(2, 0xBB)), "\n") == 3);
+    CHECK(b.reply("bounty.take 1", 2, 0xBB).rfind("Taken: ", 0) == 0);
+    // a bounty finished away from the board is claimed at it
+    b.reply("bounty.give kill_vukah");
+    for (uint32_t id = 3010; id < 3016; ++id) {
+        b.creature(id, 3);
+        b.kill(id, {1});
+    }
+    CHECK(b.reply("bounty.claim") == "Take and claim bounties at a Bounty Board.");
+    CHECK(b.r.fake.puts.empty());
+    CHECK(yours_of(b.board()).find("Slay 6 Vukah: done") != std::string::npos);  // your bounties show anywhere
+    place(b.r.fake, 1, 18, 10, 2);                                                // the host walks to the board
+    CHECK(b.reply("bounty.claim").rfind("Claimed: ", 0) == 0);
+    place(b.r.fake, 1, 0, 10, 0);
+    b.reply("bounty.give kill_scavenger");
+    CHECK(b.reply("bounty.drop 1").rfind("Dropped: ", 0) == 0);  // giving one up works anywhere
+    b.r.fake.settings["bounty.need_board"] = "0";                // off: anywhere, as in 1.1
+    CHECK(b.reply("bounty.take 2").rfind("Taken: ", 0) == 0);
+    CHECK(count_of(notices_of(b.board()), "\n") == 3);
+}

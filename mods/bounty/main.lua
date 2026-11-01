@@ -80,6 +80,7 @@ local MARK_SAME_M = 1       -- m: a marked prop is found again at its place with
 local MARK_REACH_M = 8      -- m: bounty.mark and bounty.unmark reach this far
 local MARK_GONE_M = 40      -- m: missed by a search with a player this close to its place, a marked prop is gone ...
 local LOAD_GRACE = 30       -- s: ... but never this soon after a load (places may still be streaming in)
+local AT_BOARD_M = 8        -- m: "at a Bounty Board" for /bounty.take, /bounty.claim, /bounty.reroll and the notices
 local PROP_HEIGHT = 1       -- m: the point of a prop the crosshair aims at, above its position
 local FIX = 4294967296.0    -- 1 m in the game's fixed-point positions
 
@@ -821,6 +822,16 @@ local function board_near(world, player, range)
   return best
 end
 
+-- Why `player` cannot take or claim here (nil: they can): with need_board on, only within AT_BOARD_M of a board.
+local function gate(world, player)
+  if not emf.setting("need_board") then return nil end
+  if #boards == 0 then
+    return "This world has no Bounty Board yet: build a Notice Board in a base, or the host marks a prop with bounty.mark."
+  end
+  if not board_near(world, player, AT_BOARD_M) then return "Take and claim bounties at a Bounty Board." end
+  return nil
+end
+
 -- The camera ray of `player` (PlayerInput.fromClient.camera on the server world), or nil when there is none.
 local function camera_ray(world, player)
   local ok, input = pcall(world.get, world, "PlayerInput", player)
@@ -1148,8 +1159,15 @@ emf.command("board", ": the notices, your bounties and how far you are", functio
   local me = ready(world)
   if not me then return end
   local rec = record(me.account)
-  emf.reply("Notices (take one with /bounty.take <n>):")
-  for _, l in ipairs(notice_lines(me.account)) do emf.reply(l) end
+  local why = gate(world, me.id)
+  if why and #boards > 0 then
+    emf.reply("Notices: at a Bounty Board.")
+  elseif why then
+    emf.reply(why)
+  else
+    emf.reply("Notices (take one with /bounty.take <n>):")
+    for _, l in ipairs(notice_lines(me.account)) do emf.reply(l) end
+  end
   if #rec.taken == 0 then emf.reply("You hold no bounty: take one from the notices.") end
   for i, b in ipairs(rec.taken) do
     local e = entry(b.id)
@@ -1174,7 +1192,7 @@ end, {players = true})
 emf.command("take", "<n>: take notice n from the board", function(world, args)
   local me = ready(world)
   if not me then return end
-  emf.reply(take(me.account, args[1]))
+  emf.reply(gate(world, me.id) or take(me.account, args[1]))
 end, {players = true})
 
 emf.command("drop", "<n>: give up bounty n of yours", function(world, args)
@@ -1186,6 +1204,8 @@ end, {players = true})
 emf.command("claim", ": the rewards of your finished bounties", function(world, args)
   local me = ready(world)
   if not me then return end
+  local why = gate(world, me.id)
+  if why then return emf.reply(why) end
   local parts = claim_all(world, me.id, me.account)
   if #parts == 0 then
     emf.reply("No finished bounty to claim.")
@@ -1202,6 +1222,8 @@ emf.command("reroll", "<n>: swap notice n for another (notices of your own)", fu
     emf.reply("The notices are the same for everyone: they cannot be rerolled.")
     return
   end
+  local why = gate(world, me.id)
+  if why then return emf.reply(why) end
   local rec = record(me.account)
   local list = notices_for(me.account)
   local n = tonumber(args[1] or "")
