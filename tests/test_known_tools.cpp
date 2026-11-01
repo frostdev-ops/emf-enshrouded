@@ -220,7 +220,8 @@ TEST_CASE("ModLoader Proxy's DLLs: read from chainloader.ini only when it runs; 
     emf::core::FolderLook look;
     look.read_text = [&](const std::string& p) {
         read.push_back(p);
-        return std::string("[Settings]\nLoadFromFolder = true\n[Load]\nEMF.dll\ngone.dll\nD:\\elsewhere\\x.dll\n..\\up.dll\n");
+        return std::string(
+            "[Settings]\nLoadFromFolder = true\n[Load]\nEMF.dll\ngone.dll\nD:\\elsewhere\\x.dll\n..\\up.dll\n");
     };
     look.exists = [](const std::string& p) { return p != "gone.dll"; };
     look.tool = [](const std::string& p) { return p == "EMF.dll" ? std::string("emf") : std::string("shroudforge"); };
@@ -236,14 +237,92 @@ TEST_CASE("ModLoader Proxy's DLLs: read from chainloader.ini only when it runs; 
     REQUIRE(v.loader_started.size() == 5);
     CHECK((v.loader_started[0].name == "EMF.dll" && v.loader_started[0].word == "emf" && v.loader_started[0].found));
     CHECK((v.loader_started[1].name == "gone.dll" && !v.loader_started[1].found));
-    CHECK((v.loader_started[2].name == "D:\\elsewhere\\x.dll" && v.loader_started[2].word.empty() && v.loader_started[2].found));
-    CHECK((v.loader_started[3].name == "..\\up.dll" && v.loader_started[3].word.empty()));
+    CHECK((v.loader_started[2].name == "D:\\elsewhere\\x.dll" && v.loader_started[2].outside));
+    CHECK((v.loader_started[3].name == "..\\up.dll" && v.loader_started[3].outside));
     CHECK((v.loader_started[4].name == "mods\\sf.dll" && v.loader_started[4].word == "shroudforge"));
+    CHECK_FALSE(v.loader_started[0].outside);
+}
+
+TEST_CASE("ModLoader Proxy's DLLs: a device name (CON, COM1, NUL) is never opened and counts as not found") {
+    std::vector<std::string> looked;
+    emf::core::FolderLook look;
+    look.read_text = [](const std::string&) {
+        return std::string("[Load]\nCON\ncom1.dll\nsub\\NUL.dll\nLPT9.txt.dll\nreal.dll\n");
+    };
+    look.exists = [&](const std::string& p) {
+        looked.push_back(p);
+        return true;
+    };
+    look.tool = [&](const std::string& p) {
+        looked.push_back(p);
+        return std::string("emf");
+    };
+    look.dlls_in = [](const std::string&) { return std::vector<std::string>{}; };
+    emf::core::GameFolderView v;
+    v.proxies = {{"dinput8.dll", "modloader-proxy"}};
+    emf::core::add_loader_started(v, look);
+    CHECK(looked == (std::vector<std::string>{"real.dll", "real.dll"}));
+    REQUIRE(v.loader_started.size() == 5);
+    for (size_t i = 0; i < 4; ++i) CHECK_FALSE(v.loader_started[i].found);
+    CHECK(v.loader_started[4].found);
+}
+
+TEST_CASE("ModLoader Proxy's DLLs: started by EMF from a subfolder, it reads the chainloader.ini next to it") {
+    std::vector<std::string> read;
+    emf::core::FolderLook look;
+    look.read_text = [&](const std::string& p) {
+        read.push_back(p);
+        return std::string("[Load]\nsf.dll\nMODLOADER-PROXY.dll\n");  // itself, by its file name: skipped
+    };
+    look.exists = [](const std::string&) { return true; };
+    look.tool = [](const std::string&) { return std::string("shroudforge"); };
+    look.dlls_in = [](const std::string&) { return std::vector<std::string>{}; };
+    emf::core::GameFolderView v;
+    v.proxies = {{"dinput8.dll", "emf"}};
+    v.chain_status = "mods\\mlp\\modloader-proxy.dll\tstarted\r\n";
+    v.chained_tools = {"modloader-proxy"};
+    emf::core::add_loader_started(v, look);
+    CHECK(read == std::vector<std::string>{"mods\\mlp\\chainloader.ini"});
+    REQUIRE(v.loader_started.size() == 1);
+    CHECK(v.loader_started[0].name == "mods\\mlp\\sf.dll");
+    CHECK(v.loader_started[0].word == "shroudforge");
+}
+
+TEST_CASE("ModLoader Proxy's DLLs: a ModsFolder outside the game is listed, not dropped; a path starting with \\ is inside") {
+    std::vector<std::string> folders;
+    emf::core::FolderLook look;
+    look.read_text = [](const std::string&) {
+        return std::string("[Settings]\nLoadFromFolder = true\nModsFolder = D:\\mods\n[Load]\n\\top.dll\n");
+    };
+    look.exists = [](const std::string&) { return true; };
+    look.tool = [](const std::string& p) { return p == "top.dll" ? std::string("emf") : std::string(); };
+    look.dlls_in = [&](const std::string& f) {
+        folders.push_back(f);
+        return std::vector<std::string>{"x.dll"};
+    };
+    emf::core::GameFolderView v;
+    v.proxies = {{"dinput8.dll", "modloader-proxy"}};
+    emf::core::add_loader_started(v, look);
+    CHECK(folders.empty());  // never looked into
+    REQUIRE(v.loader_started.size() == 2);
+    CHECK((v.loader_started[0].name == "top.dll" && v.loader_started[0].word == "emf" && !v.loader_started[0].outside));
+    CHECK((v.loader_started[1].name == "D:\\mods\\*.dll" && v.loader_started[1].outside));
+    const auto lines = emf::core::installed_report({}, v);
+    CHECK(lines.back() == "started by modloader-proxy (chainloader.ini): top.dll = EMF, D:\\mods\\*.dll (outside the game "
+                          "folder, not read)");
+}
+
+TEST_CASE("ModLoader Proxy runs when EMF's dinput8-chain.ini lists it (EMF.exe, before a game start wrote the status)") {
+    emf::core::GameFolderView v;
+    std::string self;
+    v.proxies = {{"dinput8.dll", "emf"}};
+    v.chain_listed = {{"creative.dll", ""}, {"modloader-proxy.dll", "modloader-proxy"}};
+    CHECK(emf::core::modloader_proxy_runs(v, &self));
+    CHECK(self == "modloader-proxy.dll");
 }
 
 TEST_CASE("installed report: ModLoader Proxy as dinput8.dll starts EMF and ShroudForge, so neither is reported inactive") {
-    // a player's setup (ModLoader Proxy chaining EMF next to ShroudForge on Linux): before, EMF said ShroudForge and
-    // ModLoader Proxy were installed "but none of its DLLs is active"
+    // a player's setup: ModLoader Proxy chains EMF next to ShroudForge (on Linux)
     const auto tools = parse_known_tools(kTableWithProxy);
     emf::core::GameFolderView v;
     v.proxies = {{"dinput8.dll", "modloader-proxy"}, {"dbghelp.dll", ""}, {"winmm.dll", "shroudforge"}, {"dxgi.dll", ""}};

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 
+#include "loader/chain_list.h"
 #include "loader/loader_id.h"
 
 namespace emf::core {
@@ -141,8 +142,13 @@ std::vector<std::string> installed_report(const std::vector<KnownTool>& tools, c
             missing += (missing.empty() ? "" : ", ") + d.name;
             continue;
         }
+        by_proxy += by_proxy.empty() ? "" : ", ";
+        if (d.outside) {
+            by_proxy += d.name + " (outside the game folder, not read)";
+            continue;
+        }
         active.push_back(d.word);
-        by_proxy += (by_proxy.empty() ? "" : ", ") + d.name + " = " + display(tools, d.word);
+        by_proxy += d.name + " = " + display(tools, d.word);
     }
     if (!view.loader_started.empty()) {
         std::string s = "started by " + display(tools, kModLoaderProxy) +
@@ -211,7 +217,8 @@ ChainloaderIni parse_chainloader_ini(const std::string& text) {
 std::vector<std::string> chainloader_dlls(const std::string& ini_text, const std::string& self,
                                           const std::function<std::vector<std::string>(const std::string&)>& dlls_in) {
     const ChainloaderIni ini = parse_chainloader_ini(ini_text);
-    const std::string me = lower(self);
+    const size_t self_slash = self.find_last_of("\\/");
+    const std::string me = lower(self_slash == std::string::npos ? self : self.substr(self_slash + 1));  // its file name
     std::vector<std::string> out;
     const auto add = [&](const std::string& path, bool skip_own_name) {
         const size_t slash = path.find_last_of('\\');
@@ -230,7 +237,8 @@ std::vector<std::string> chainloader_dlls(const std::string& ini_text, const std
         while (!folder.empty() && folder.back() == '\\') folder.pop_back();
         if (!folder.empty() && folder != ".") {  // a subfolder only, as ModLoader Proxy demands
             std::vector<std::string> names = dlls_in(folder);
-            std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) { return lower(a) < lower(b); });
+            std::sort(names.begin(), names.end(),
+                      [](const std::string& a, const std::string& b) { return lower(a) < lower(b); });
             for (const auto& n : names)
                 if (n.size() > 4 && lower(n.substr(n.size() - 4)) == ".dll") add(folder + "\\" + n, true);
         }
@@ -250,35 +258,72 @@ bool modloader_proxy_runs(const GameFolderView& view, std::string* self) {
             if (self) *self = names.size() == view.chained_tools.size() ? names[i] : std::string();
             return true;
         }
+    for (const auto& [name, word] : view.chain_listed)
+        if (word == kModLoaderProxy) {
+            if (self) *self = name;
+            return true;
+        }
     return false;
+}
+
+namespace {
+// A Windows device name (CON, PRN, AUX, NUL, COM1-9, LPT1-9; also NUL.txt) as any part of a path: opening it reaches
+// a device (a console, a serial port), not a file.
+bool device_path(const std::string& path) {
+    size_t from = 0;
+    while (from <= path.size()) {
+        size_t to = path.find_first_of("\\/", from);
+        if (to == std::string::npos) to = path.size();
+        std::string base = lower(path.substr(from, to - from));
+        base = trim(base.substr(0, base.find('.')));
+        if (base == "con" || base == "prn" || base == "aux" || base == "nul") return true;
+        if (base.size() == 4 && (base.compare(0, 3, "com") == 0 || base.compare(0, 3, "lpt") == 0) &&
+            base[3] >= '0' && base[3] <= '9')
+            return true;
+        from = to + 1;
+    }
+    return false;
+}
+}  // namespace
+
+std::vector<StartedDll> chainloader_entries(const std::string& self, const FolderLook& look) {
+    // its folder: ModLoader Proxy reads the chainloader.ini next to its DLL and starts paths relative to it
+    const size_t slash = self.find_last_of("\\/");
+    const std::string base = slash == std::string::npos ? std::string() : self.substr(0, slash + 1);
+    // a listed path as a path in the game folder; false when it leaves the game folder (a drive, "..", \\server). A
+    // path starting with one \ is next to the proxy, as ModLoader Proxy resolves it.
+    const auto in_game = [&](std::string rel, std::string* path) {
+        if (!rel.empty() && rel[0] == '\\' && (rel.size() < 2 || rel[1] != '\\')) rel.erase(0, 1);
+        *path = base + rel;
+        return !rel.empty() && loader::inside_game_folder(loader::widen_chain(*path));
+    };
+    std::string outside_folder;  // a ModsFolder outside the game folder: listed, never looked into
+    const auto names = chainloader_dlls(look.read_text(base + "chainloader.ini"), self, [&](const std::string& folder) {
+        std::string path;
+        if (in_game(folder, &path) && !device_path(path)) return look.dlls_in(path);
+        outside_folder = folder;
+        return std::vector<std::string>{};
+    });
+    std::vector<StartedDll> out;
+    for (const auto& n : names) {
+        StartedDll d{n, {}, true, false};
+        std::string path;
+        if (!in_game(n, &path)) {
+            d.outside = true;
+        } else {
+            d.name = path;
+            d.found = !device_path(path) && look.exists(path);  // never opens CON or COM1
+            if (d.found) d.word = look.tool(path);
+        }
+        out.push_back(std::move(d));
+    }
+    if (!outside_folder.empty()) out.push_back({outside_folder + "\\*.dll", {}, true, true});
+    return out;
 }
 
 void add_loader_started(GameFolderView& view, const FolderLook& look) {
     std::string self;
-    if (!modloader_proxy_runs(view, &self)) return;
-    // inside the game folder: no drive, no leading slash, no ".." part (EMF reads nothing else)
-    const auto inside = [](const std::string& p) {
-        if (p.empty() || p[0] == '\\' || p.find(':') != std::string::npos) return false;
-        size_t from = 0;
-        while (from <= p.size()) {
-            size_t to = p.find('\\', from);
-            if (to == std::string::npos) to = p.size();
-            if (p.compare(from, to - from, "..") == 0) return false;
-            from = to + 1;
-        }
-        return true;
-    };
-    const auto names = chainloader_dlls(look.read_text("chainloader.ini"), self, [&](const std::string& folder) {
-        return inside(folder) ? look.dlls_in(folder) : std::vector<std::string>{};
-    });
-    for (const auto& n : names) {
-        StartedDll d{n, {}, true};
-        if (inside(n)) {
-            d.found = look.exists(n);
-            if (d.found) d.word = look.tool(n);
-        }
-        view.loader_started.push_back(std::move(d));
-    }
+    if (modloader_proxy_runs(view, &self)) view.loader_started = chainloader_entries(self, look);
 }
 
 const std::vector<std::string>& proxy_dll_names() {

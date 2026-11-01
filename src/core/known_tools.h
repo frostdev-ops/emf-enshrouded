@@ -50,9 +50,10 @@ std::vector<std::string> chainloader_dlls(const std::string& ini_text, const std
                                           const std::function<std::vector<std::string>(const std::string&)>& dlls_in);
 
 struct StartedDll {
-    std::string name;    // as listed
-    std::string word;    // its tool ("" unknown)
-    bool found = false;  // the file is there
+    std::string name;      // its path in the game folder (as listed when outside it)
+    std::string word;      // its tool ("" unknown)
+    bool found = false;    // a file is there (not a folder, not a device name such as CON or COM1)
+    bool outside = false;  // outside the game folder (an absolute path, "..", a ModsFolder elsewhere): not read
 };
 
 struct GameFolderView {
@@ -61,10 +62,11 @@ struct GameFolderView {
     std::vector<std::string> beside;                           // tools' own files/folders that exist
     std::string chain_status;                                  // emf\chain_status.txt
     std::vector<StartedDll> loader_started;                    // the DLLs ModLoader Proxy starts, when it runs
+    std::vector<std::pair<std::string, std::string>> chain_listed;  // EMF.exe: dinput8-chain.ini's DLLs, tool word
 };
 
-// Whether ModLoader Proxy runs: one of its DLLs is a proxy next to the game, or EMF chain-loaded it. self: that
-// DLL's file name.
+// Whether ModLoader Proxy runs: one of its DLLs is a proxy next to the game, or EMF chain-loaded it (chain_status), or
+// dinput8-chain.ini lists it (chain_listed). self: that DLL's path in the game folder.
 bool modloader_proxy_runs(const GameFolderView& view, std::string* self = nullptr);
 
 // How the core and EMF.exe look into the game folder (paths relative to it, UTF-8, '\' between folders).
@@ -75,8 +77,12 @@ struct FolderLook {
     std::function<std::vector<std::string>(const std::string&)> dlls_in;  // the *.dll file names in a folder
 };
 
-// When ModLoader Proxy runs (view.proxies, view.chained_tools), the DLLs its chainloader.ini starts go into
-// view.loader_started with their tools. A path that leaves the game folder is listed, not read.
+// The DLLs ModLoader Proxy starts from the chainloader.ini next to its DLL (self: that DLL's path in the game folder; ""
+// for one next to the game), as paths in the game folder, with their tools. A path that leaves the game folder is
+// listed, not read; a device name (CON, COM1) is never opened. look.exists means a file (not a folder) is there.
+std::vector<StartedDll> chainloader_entries(const std::string& self, const FolderLook& look);
+
+// When ModLoader Proxy runs (modloader_proxy_runs), its chainloader_entries go into view.loader_started.
 void add_loader_started(GameFolderView& view, const FolderLook& look);
 
 std::vector<std::string> installed_report(const std::vector<KnownTool>& tools, const GameFolderView& view);

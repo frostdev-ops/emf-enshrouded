@@ -316,6 +316,8 @@ struct Context {
     bool light = false;  // ScanDepth::Profiles: only what the mods' switches and settings need
     bool modloader_proxy = false;    // ModLoader Proxy runs (a proxy DLL next to the game, or started by EMF)
     std::string modloader_proxy_as;  // the proxy name it runs as ("" when EMF starts it)
+    bool chainloader_ini = false;    // its chainloader.ini is there (next to its DLL, else next to the game)
+    std::vector<core::StartedDll> chainloader;  // what ModLoader Proxy starts from it (chainloader_entries)
 };
 
 void warn(FolderState& s, const std::string& level, const std::string& text) { s.warnings.push_back({level, text}); }
@@ -749,8 +751,14 @@ void scan_other(FolderState& s, const Context& c) {
                         }
                     s.mods.push_back(std::move(e));
                 }
+    const auto modloader_proxy_starts = [&](const std::wstring& path) {
+        for (const auto& d : c.chainloader)
+            if (!d.outside && d.found && iequals(c.game + L"\\" + wide(d.name), path)) return true;
+        return false;
+    };
     for (size_t i = 0; i < c.shroudtopia_dlls.size(); ++i) {
-        if (matched[i]) continue;
+        // (one ModLoader Proxy starts is listed under ModLoader Proxy)
+        if (matched[i] || modloader_proxy_starts(c.shroudtopia_dlls[i].second)) continue;
         ModEntry e;
         e.source = "other";
         e.id = "shroudtopia:" + utf8(c.shroudtopia_dlls[i].first);
@@ -764,40 +772,31 @@ void scan_other(FolderState& s, const Context& c) {
         s.mods.push_back(std::move(e));
     }
 
-    // ModLoader Proxy's own list: it reads chainloader.ini itself, with its own settings
-    const std::wstring cl = c.game + L"\\chainloader.ini";
-    if (exists(cl)) {
-        // its list is the [Load] section (github.com/Entrodor/modloader-proxy, src/main.cpp); read it with the chain
-        // file's rules by presenting that section as [Chain]
-        std::string list, line;
-        bool in_load = false;
-        for (const char ch : loader::chain_text_utf8(read_text(cl)) + "\n") {
-            if (ch != '\n') { line += ch; continue; }
-            std::string t = line;
-            while (!t.empty() && (t.back() == '\r' || t.back() == ' ' || t.back() == '\t')) t.pop_back();
-            while (!t.empty() && (t.front() == ' ' || t.front() == '\t')) t.erase(t.begin());
-            if (!t.empty() && t[0] == '[') in_load = _stricmp(t.c_str(), "[Load]") == 0;
-            else if (in_load) list += t + "\n";
-            line.clear();
-        }
-        for (const auto& n : loader::parse_chain_list(list)) {
+    // ModLoader Proxy's list: what it starts from its chainloader.ini (chainloader_entries, as the status reads it); it
+    // reads the file itself, with its own settings
+    if (c.chainloader_ini) {
+        for (const auto& d : c.chainloader) {
             ModEntry e;
             e.source = "other";
-            e.id = "modloader-proxy:" + utf8(n);
-            e.name = utf8(n);
-            e.path = c.game + L"\\" + n;
+            e.id = "modloader-proxy:" + d.name;
+            e.name = d.name;
+            e.path = d.outside ? wide(d.name) : c.game + L"\\" + wide(d.name);
             e.loaded_by = "ModLoader Proxy";
             e.toggle_note = "ModLoader Proxy reads chainloader.ini itself.";
-            e.note = "Listed in chainloader.ini, ModLoader Proxy's own list.";
-            if (!exists(e.path)) e.error = "listed in chainloader.ini, but not in the game folder";
+            e.note = d.outside ? "Started by ModLoader Proxy from outside the game folder: EMF does not look at it."
+                               : "Started by ModLoader Proxy (chainloader.ini, its own list).";
+            if (!d.outside && !d.found)
+                e.error = exists(e.path) ? "listed in chainloader.ini, but it is not a DLL file"
+                                         : "listed in chainloader.ini, but not in the game folder";
             s.mods.push_back(std::move(e));
         }
         if (!c.modloader_proxy_as.empty())
-            warn(s, "info", "ModLoader Proxy (" + c.modloader_proxy_as + ") starts the DLLs listed in chainloader.ini. It "
-                            "reads that file itself, with its own settings.");
+            warn(s, "info", "ModLoader Proxy (" + c.modloader_proxy_as +
+                                ") starts the DLLs listed in chainloader.ini. It reads that file itself, with its own "
+                                "settings.");
         else if (c.modloader_proxy)
-            warn(s, "info", "EMF starts ModLoader Proxy (dinput8-chain.ini), and ModLoader Proxy starts the DLLs listed in "
-                            "chainloader.ini. It reads that file itself, with its own settings.");
+            warn(s, "info", "EMF starts ModLoader Proxy (dinput8-chain.ini), and ModLoader Proxy starts the DLLs "
+                            "listed in chainloader.ini. It reads that file itself, with its own settings.");
         else
             warn(s, "info", "chainloader.ini is ModLoader Proxy's list: ModLoader Proxy reads it itself, with its own "
                             "settings. EMF starts ModLoader Proxy when its DLL is listed in dinput8-chain.ini.");
@@ -903,33 +902,6 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
     for (const auto& t : c.tools)
         for (const auto& b : t.beside)
             if (exists(s.game + L"\\" + wide(b))) view.beside.push_back(b);
-    // ModLoader Proxy (a proxy DLL, or started by EMF at the last game start) starts the DLLs in its chainloader.ini:
-    // EMF's loader itself, ShroudForge, ...
-    if (read_dlls) {
-        core::FolderLook look;
-        look.read_text = [&](const std::string& rel) { return read_text(s.game + L"\\" + wide(rel)); };
-        look.exists = [&](const std::string& rel) { return exists(s.game + L"\\" + wide(rel)); };
-        look.tool = [&](const std::string& rel) { return dll_tool(c, wide(rel)); };
-        look.dlls_in = [&](const std::string& rel) {
-            std::vector<std::string> names;
-            for (const auto& d : list_dir(s.game + L"\\" + wide(rel)))
-                if (!d.dir && ends_with_nocase(d.name, L".dll")) names.push_back(utf8(d.name));
-            return names;
-        };
-        core::add_loader_started(view, look);
-        for (const auto& d : view.loader_started)
-            if (d.found && !d.word.empty()) words.push_back(d.word);
-        std::string self;
-        c.modloader_proxy = core::modloader_proxy_runs(view, &self);
-        for (const auto& p : view.proxies)
-            if (c.modloader_proxy && p.first == self) c.modloader_proxy_as = self;
-    }
-    if (!c.light)
-        for (const auto& line : core::installed_report(c.tools, view)) {
-            s.report.push_back(line);
-            if (line.rfind("next to the game:", 0) != 0 && line.rfind("started by ", 0) != 0) warn(s, "warn", line);
-        }
-
     // dinput8-chain.ini: one that is there but cannot be read is said so (its DLLs are not listed), never taken as empty
     std::string chain_bytes;
     const std::wstring chain_path = s.game + L"\\" + kChainFile;
@@ -942,8 +914,46 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
     c.chain_active = loader::parse_chain_list(c.chain_text);
     for (const auto& n : c.chain_active) {
         const std::string w = read_dlls ? dll_tool(c, n) : std::string();
+        view.chain_listed.emplace_back(utf8(n), w);  // what EMF starts at the next game start
         if (!w.empty()) words.push_back(w);
     }
+
+    // ModLoader Proxy (a proxy DLL, or started by EMF: listed in dinput8-chain.ini or started at the last game start)
+    // starts the DLLs in its chainloader.ini: EMF's loader itself, ShroudForge, ...
+    core::FolderLook look;
+    look.read_text = [&](const std::string& rel) { return read_text(s.game + L"\\" + wide(rel)); };
+    look.exists = [&](const std::string& rel) {  // a file, not a folder
+        const std::wstring path = s.game + L"\\" + wide(rel);
+        return exists(path) && !is_dir(path);
+    };
+    look.tool = [&](const std::string& rel) { return read_dlls ? dll_tool(c, wide(rel)) : std::string(); };
+    look.dlls_in = [&](const std::string& rel) {
+        std::vector<std::string> names;
+        for (const auto& d : list_dir(s.game + L"\\" + wide(rel)))
+            if (!d.dir && ends_with_nocase(d.name, L".dll")) names.push_back(utf8(d.name));
+        return names;
+    };
+    std::string self;
+    c.modloader_proxy = core::modloader_proxy_runs(view, &self);
+    for (const auto& p : view.proxies)
+        if (c.modloader_proxy && p.first == self) c.modloader_proxy_as = self;
+    if (c.modloader_proxy) {
+        core::add_loader_started(view, look);
+        for (const auto& d : view.loader_started)
+            if (d.found && !d.outside && !d.word.empty()) words.push_back(d.word);
+    }
+    const std::string list_of = c.modloader_proxy ? self : std::string();  // the ini next to its DLL, else the game's
+    const size_t slash = list_of.find_last_of("\\/");
+    c.chainloader_ini = exists(s.game + L"\\" + wide(slash == std::string::npos ? "" : list_of.substr(0, slash + 1)) +
+                               L"chainloader.ini");
+    if (c.chainloader_ini)
+        c.chainloader = c.modloader_proxy ? view.loader_started : core::chainloader_entries("", look);
+    if (!c.light)
+        for (const auto& line : core::installed_report(c.tools, view)) {
+            s.report.push_back(line);
+            if (line.rfind("next to the game:", 0) != 0 && line.rfind("started by ", 0) != 0) warn(s, "warn", line);
+        }
+
     const auto runs = [&](const char* w) { return std::find(words.begin(), words.end(), w) != words.end(); };
     s.emf_installed = runs("emf") && exists(s.game + L"\\emf\\emf_core.dll");
     if (!c.light) s.emf_version = exists(s.game + L"\\emf\\emf_core.dll") ? core_version(s.game + L"\\emf\\emf_core.dll") : "";

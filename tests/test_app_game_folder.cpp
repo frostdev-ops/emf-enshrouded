@@ -352,8 +352,45 @@ TEST_CASE("app chain: chainloader.ini is ModLoader Proxy's list, shown read-only
             CHECK_FALSE(m.can_toggle);
         }
     CHECK(listed);
-    for (const auto& m : s.mods) CHECK(m.name.find("fwd") == std::string::npos);  // a setting, not its list
+    // the list is what ModLoader Proxy starts: the ForwardTo DLL first, then [Load] (missing files said so)
+    std::vector<std::string> names;
+    for (const auto& m : s.mods)
+        if (m.source == "other" && m.loaded_by == "ModLoader Proxy") names.push_back(m.name);
+    CHECK(names == (std::vector<std::string>{"fwd.dll", "atlas.dll"}));
     CHECK(has_warning(s, "info", "chainloader.ini"));
+}
+
+TEST_CASE("app chain: the list of what ModLoader Proxy starts has its mods folder; a folder named like a DLL is not one") {
+    TempGame g(L"mlproxylist");
+    install_emf(g);
+    g.write(L"chainloader.ini", "[Settings]\r\nLoadFromFolder = true\r\n[Load]\r\ndir.dll\r\n");
+    g.mkdir(L"dir.dll");
+    g.write(L"mods\\b.dll", "MZ b");
+    g.write(L"mods\\a.dll", "MZ a");
+    const FolderState s = scan_game_folder(g.dir);
+    std::vector<std::string> names;
+    for (const auto& m : s.mods)
+        if (m.source == "other" && m.loaded_by == "ModLoader Proxy") names.push_back(m.name);
+    CHECK(names == (std::vector<std::string>{"dir.dll", "mods\\a.dll", "mods\\b.dll"}));
+    const ModEntry* dir = find(s, "other", "modloader-proxy:dir.dll");
+    REQUIRE(dir);
+    CHECK_FALSE(dir->error.empty());  // a folder, not a DLL
+    CHECK_FALSE(has_warning(s, "warn", "nothing loads it"));  // ModLoader Proxy loads mods\a.dll and b.dll
+}
+
+TEST_CASE("app chain: a ModLoader Proxy that EMF starts counts in the quick scan too (no status read yet)") {
+    // the setup install.cmd makes: EMF's loader, ModLoader Proxy renamed and listed in dinput8-chain.ini, ShroudForge in
+    // chainloader.ini; before any game start there is no emf\chain_status.txt
+    TempGame g(L"mlproxylight");
+    install_emf(g);
+    g.write(L"modloader-proxy.dll", "MZ fake modloader-proxy.dll");
+    g.write(L"dinput8-chain.ini", "[Chain]\r\nmodloader-proxy.dll\r\n");
+    g.write(L"chainloader.ini", "[Load]\r\nshroudforge.dll\r\n");
+    g.write(L"shroudforge.dll", "MZ ShroudForge EML_LOG_FILE_PATH");
+    g.mkdir(L"shroudforge");
+    g.write(L"emf\\known_tools.txt", repo_text("src/core/known_tools.txt"));
+    CHECK(scan_mod_folder(g.dir, ScanDepth::Profiles).shroudforge_active);
+    CHECK(scan_game_folder(g.dir).shroudforge_active);
 }
 
 TEST_CASE("app chain: ModLoader Proxy as dinput8.dll starts EMF and ShroudForge from chainloader.ini") {

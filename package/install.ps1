@@ -125,7 +125,8 @@ function Set-DesktopShortcut([string]$Dir) {
         if (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected) { return $null }
         Read-Host $question
     }
-    $choice = Resolve-DesktopShortcut $record $DesktopShortcut.IsPresent $NoDesktopShortcut.IsPresent $AskDesktopShortcut.IsPresent $prompt
+    $choice = Resolve-DesktopShortcut $record $DesktopShortcut.IsPresent $NoDesktopShortcut.IsPresent `
+        $AskDesktopShortcut.IsPresent $prompt
     if ($choice -eq "decline" -and $record -notlike "made`t*") { Write-Lines $recordPath @("declined") }
     if ($choice -ne "make") { return }
     $desk = Get-DesktopFolder
@@ -136,8 +137,9 @@ function Set-DesktopShortcut([string]$Dir) {
     $name = if (Test-Path -LiteralPath (Join-Path $Dir "enshrouded.exe")) { "EMF" } else { "EMF (server)" }
     $lnk = Join-Path $desk "$name.lnk"
     $recorded = if ($record -like "made`t*") { $record.Substring(5) } else { "" }
-    $ours = $recorded -and (($recorded -ieq $lnk) -or (-not (Test-Path -LiteralPath $recorded) -and
-                                                       (Test-Path -LiteralPath $lnk) -and (Get-ShortcutTarget $lnk) -ieq $exe))
+    $moved = $recorded -and -not (Test-Path -LiteralPath $recorded) -and (Test-Path -LiteralPath $lnk) -and
+        (Get-ShortcutTarget $lnk) -ieq $exe
+    $ours = $recorded -and (($recorded -ieq $lnk) -or $moved)
     if ((Test-Path -LiteralPath $lnk) -and -not $ours) {
         "There is already a shortcut called $name on your desktop, so EMF left it as it is and added none."
         return

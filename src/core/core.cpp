@@ -402,8 +402,8 @@ void start_auto_backup(const std::wstring& dir) {
 }
 
 // Which tool owns each proxy DLL next to the game, what the loader chain-loaded (emf\chain_status.txt), what ModLoader
-// Proxy starts (chainloader.ini), and a loader whose file another tool took (emf\known_tools.txt names them). Reading the DLLs takes a moment: it runs on its own
-// thread, so EMF's start (and a held server) does not wait for it.
+// Proxy starts (chainloader.ini), and a loader whose file another tool took (emf\known_tools.txt names them). Reading
+// the DLLs takes a moment: it runs on its own thread, so EMF's start (and a held server) does not wait for it.
 void log_installed(const std::wstring& dir) {
     constexpr size_t kDllHead = 32u << 20;
     const auto tools = emf::core::parse_known_tools(read_head(dir + L"\\emf\\known_tools.txt", 1u << 20));
@@ -417,11 +417,12 @@ void log_installed(const std::wstring& dir) {
     view.chain_status = read_head(dir + L"\\emf\\chain_status.txt", 1u << 20);
     for (const auto& name : emf::core::started_chain_names(view.chain_status))
         view.chained_tools.push_back(emf::core::tool_for_dll_text(tools, read_head(dir + L"\\" + widen(name), kDllHead)));
-    // ModLoader Proxy (a proxy DLL, or started by EMF) starts the DLLs in its chainloader.ini: EMF itself, ShroudForge...
+    // ModLoader Proxy (a proxy DLL, or started by EMF) starts the DLLs in its chainloader.ini: EMF, ShroudForge...
     emf::core::FolderLook look;
     look.read_text = [&](const std::string& rel) { return read_head(dir + L"\\" + widen(rel), 1u << 20); };
-    look.exists = [&](const std::string& rel) {
-        return GetFileAttributesW((dir + L"\\" + widen(rel)).c_str()) != INVALID_FILE_ATTRIBUTES;
+    look.exists = [&](const std::string& rel) {  // a file: not a folder, not a device
+        const DWORD a = GetFileAttributesW((dir + L"\\" + widen(rel)).c_str());
+        return a != INVALID_FILE_ATTRIBUTES && !(a & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_DEVICE));
     };
     look.tool = [&](const std::string& rel) {
         return emf::core::tool_for_dll_text(tools, read_head(dir + L"\\" + widen(rel), kDllHead));

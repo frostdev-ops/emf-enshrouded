@@ -97,7 +97,7 @@ try {
         }
     }
 } catch {
-    "could not read emf\desktop_shortcut.txt ($($_.Exception.Message)): if EMF made a desktop shortcut, delete it yourself"
+    "could not read emf\desktop_shortcut.txt ($($_.Exception.Message)): delete EMF's desktop shortcut yourself"
 }
 # Other mods' dinput8.dll that the installer renamed: the newest goes back to its name, its chain line goes. Only one
 # file can be dinput8.dll: the others stay renamed (and are named in the output); the record of them is kept.
