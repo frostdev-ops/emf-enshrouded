@@ -598,9 +598,9 @@ function renderDetails(force) {
       m.install_key ? withFocus(el('button', {
         class: 'ghost danger', type: 'button', disabled: state.game_running,
         title: state.game_running ? 'Close the game first' : 'Remove the files EMF installed for it',
-        onclick: () => confirmUninstall(m.install_key),
+        onclick: () => confirmUninstall(m.install_key, keyOf(m)),
       }, 'Uninstall'), 'uninstall') : null),
-    m.install_key ? el('p', { class: 'd-note' }, installedText(m.install_key)) : null,
+    m.install_key ? el('p', { class: 'd-note' }, installedText(m.install_key, keyOf(m))) : null,
     updateSection(m),
     m.depends.length ? el('div', { class: 'd-section' }, el('h3', {}, 'Needs'), el('ul', { class: 'd-list' }, m.depends.map((x) => el('li', {}, x)))) : null,
     m.game_build ? el('p', { class: 'd-note' }, 'Made for game build ' + m.game_build + '.') : null,
@@ -1254,14 +1254,26 @@ function recordOf(key) {
   return state && (state.installed || []).find((i) => i.key === key);
 }
 
-function installedText(key) {
-  const r = recordOf(key);
-  if (!r) return '';
-  return 'Installed by EMF on ' + r.installed_at + ' from ' + r.archive + ' (' + r.files + (r.files === 1 ? ' file' : ' files') + ').';
+// The other rows of one install (an EML folder and its DLL, or mods EMF.exe 0.3.2 recorded together): Uninstall
+// removes them too, so the details and the question name them.
+function sameInstall(key, rowKey) {
+  return state ? state.mods.filter((x) => x.install_key === key && keyOf(x) !== rowKey).map((x) => x.name) : [];
 }
 
-function confirmUninstall(key) {
-  showModal({ mode: 'confirm', key });
+function namesText(names) {
+  return names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
+function installedText(key, rowKey) {
+  const r = recordOf(key);
+  if (!r) return '';
+  const others = sameInstall(key, rowKey);
+  return 'Installed by EMF on ' + r.installed_at + ' from ' + r.archive + ' (' + r.files + (r.files === 1 ? ' file' : ' files') + ').' +
+    (others.length ? ' Together with ' + namesText(others) + ', as one install: Uninstall removes them together.' : '');
+}
+
+function confirmUninstall(key, rowKey) {
+  showModal({ mode: 'confirm', key, rowKey });
 }
 
 const ACTION = { install: 'Install', update: 'Update', skip: 'Not installed', refused: 'Not installed' };
@@ -1353,6 +1365,8 @@ function renderModal() {
         running ? el('div', { class: 'sheet-warn', role: 'status' }, 'Close the game first: mods are uninstalled while the game is closed.') : null,
         el('ul', { class: 'part-lines' },
           el('li', {}, 'Removes the ' + r.files + (r.files === 1 ? ' file' : ' files') + ' EMF installed, where they are unchanged. A file that changed since is left in place and named.'),
+          sameInstall(modal.key, modal.rowKey).length ? el('li', { class: 'also' }, 'Also uninstalls ' + namesText(sameInstall(modal.key, modal.rowKey)) +
+            ': EMF installed them from the same file as one install.') : null,
           r.outside && r.outside.length ? el('li', {}, 'Including files outside the mod’s own folder: ' + r.outside.join(', ') + '.') : null,
           r.chain && r.chain.length ? el('li', {}, 'Takes ' + r.chain.join(', ') + ' out of dinput8-chain.ini.') : null,
           el('li', {}, 'Removes the folders it made once they are empty; a file another mod still uses is kept. Earlier versions in emf\\backup stay.'))),
@@ -1830,7 +1844,8 @@ function updatesOnDone(m) {
   const r = updates.reply;
   if (!r || !m.ok || !m.key) return;
   const nexusId = /^nexus-(\d+)$/.test(m.key) ? Number(m.key.slice(6)) : 0;
-  r.items = r.items.filter((it) => it.install_key !== m.key && it.nexus_id !== nexusId);
+  const keys = m.keys && m.keys.length ? m.keys : [m.key];  // an archive of several mods writes a record for each
+  r.items = r.items.filter((it) => !keys.includes(it.install_key) && it.nexus_id !== nexusId);
   r.summary = { update: 0, maybe: 0, current: 0, unavailable: 0, gone: 0, failed: 0 };
   for (const it of r.items) r.summary[it.state] = (r.summary[it.state] || 0) + 1;
   renderUpdates();

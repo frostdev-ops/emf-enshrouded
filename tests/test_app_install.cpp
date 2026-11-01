@@ -714,3 +714,186 @@ TEST_CASE("app install: the Nexus id comes from the file name's mod id, not the 
     CHECK(filename_nexus_id_of("2-Handed-Mod-1-0.zip") == "");  // no timestamp: no id guessed
     CHECK(filename_nexus_id_of("quick_deposit.zip") == "");
 }
+
+// ---- several separate mods in one archive (the EMF creature packs) ----
+namespace {
+
+// The EMF creature packs download (scripts/package_packs.ps1): mods\<pack>\ folders and a README.txt, in a top folder.
+void add_packs(Archive& a, const char* version = "1.0") {
+    for (const char* pack : {"emf_beastmaster_bear", "emf_beastmaster_beasts", "emf_necromancer_undead"}) {
+        const std::wstring dir = L"EMF-creature-packs-0.3.2\\mods\\" + wide(pack) + L"\\";
+        a.add(dir + L"mod.json", std::string(R"({"id":")") + pack + R"(","name":")" + pack + R"( pack","version":")" + version + "\"}");
+        a.add(dir + L"src\\mod.lua", std::string("-- ") + pack + " " + version);
+        a.add(dir + L"models\\creature.bin", std::string("model ") + version);
+    }
+    a.add(L"EMF-creature-packs-0.3.2\\README.txt", "what is in it");
+}
+
+bool notes_say(const InstallPlan& p, const std::string& text) {
+    return std::any_of(p.notes.begin(), p.notes.end(), [&](const std::string& n) { return n.find(text) != std::string::npos; });
+}
+
+std::string row_key(const FolderState& s, const std::string& id) {
+    for (const auto& m : s.mods)
+        if (m.id == id) return m.install_key;
+    return "(no row)";
+}
+
+}  // namespace
+
+TEST_CASE("app install: several mods in one archive are recorded one by one, and each uninstalls on its own (the creature packs)") {
+    TempGame g(L"inst_packs");
+    Archive a(L"inst_packs_a");
+    add_packs(a);
+    const InstallPlan p = build_plan(a.input(g, "EMF-creature-packs-0.3.2.zip"));
+    REQUIRE_MESSAGE(p.error.empty(), p.error);
+    REQUIRE(p.parts.size() == 3);
+    for (const auto& part : p.parts) {
+        CHECK(part.action == Action::Install);
+        CHECK(part.key == part.id);  // an install of its own, named by its folder
+    }
+    CHECK(notes_say(p, "recorded on its own"));
+    CHECK(notes_say(p, "README.txt"));  // not part of any mod: not copied, and the sheet says so
+
+    const InstallResult r = apply_plan(g.dir, p);
+    REQUIRE_MESSAGE(r.ok, r.error);
+    CHECK(r.keys == std::vector<std::string>{"emf_beastmaster_bear", "emf_beastmaster_beasts", "emf_necromancer_undead"});
+    CHECK_FALSE(g.has(L"README.txt"));
+    CHECK_FALSE(g.has(L"mods\\README.txt"));
+    const auto records = read_install_records(g.dir);
+    REQUIRE(records.size() == 3);
+    for (const auto& rec : records) {
+        CAPTURE(rec.key);
+        CHECK(rec.roots == std::vector<std::string>{"mods\\" + rec.key});
+        CHECK(rec.name == rec.key + " pack");
+        CHECK(rec.archive == "EMF-creature-packs-0.3.2.zip");
+        CHECK(rec.files.size() == 3);
+        for (const auto& [path, hash] : rec.files) CHECK(path.rfind("mods\\" + rec.key + "\\", 0) == 0);
+    }
+    const FolderState s = scan_game_folder(g.dir);
+    CHECK(row_key(s, "emf_beastmaster_bear") == "emf_beastmaster_bear");
+    CHECK(row_key(s, "emf_necromancer_undead") == "emf_necromancer_undead");
+
+    // uninstalling the bear pack leaves the other packs and their records alone
+    const InstallResult u = uninstall_mod(g.dir, "emf_beastmaster_bear");
+    REQUIRE_MESSAGE(u.ok, u.error);
+    CHECK_FALSE(g.has(L"mods\\emf_beastmaster_bear"));
+    CHECK(g.read(L"mods\\emf_necromancer_undead\\src\\mod.lua") == "-- emf_necromancer_undead 1.0");
+    CHECK(g.has(L"mods\\emf_beastmaster_beasts\\models\\creature.bin"));
+    CHECK(read_install_records(g.dir).size() == 2);
+    REQUIRE(uninstall_mod(g.dir, "emf_necromancer_undead").ok);
+    REQUIRE(uninstall_mod(g.dir, "emf_beastmaster_beasts").ok);
+    CHECK_FALSE(g.has(L"mods"));  // the install made it, and it is empty now
+    CHECK(read_install_records(g.dir).empty());
+}
+
+TEST_CASE("app install: installing the packs again updates each pack's own install; one install of them all (EMF.exe 0.3.2) is split") {
+    for (const bool from_nexus : {false, true}) {
+        CAPTURE(from_nexus);
+        TempGame g(from_nexus ? L"inst_packs_up_nexus" : L"inst_packs_up");
+        Archive v1(L"inst_packs_v1");
+        add_packs(v1, "1.0");
+        PlanInput in1 = v1.input(g, "EMF-creature-packs-0.3.2.zip");
+        if (from_nexus) in1.nexus_id = "900";
+        InstallPlan old = build_plan(in1);
+        for (auto& part : old.parts) part.key.clear();  // as EMF.exe 0.3.2 did: one record for every pack
+        REQUIRE(apply_plan(g.dir, old).ok);
+        const std::string old_key = from_nexus ? "nexus-900" : "emf_beastmaster_bear";
+        REQUIRE(read_install_records(g.dir).size() == 1);
+        REQUIRE(read_install_record(g.dir, old_key)->roots.size() == 3);
+        g.write(L"mods\\emf_necromancer_undead\\player.txt", "the player's own file");
+
+        Archive v2(L"inst_packs_v2");
+        add_packs(v2, "2.0");
+        PlanInput in2 = v2.input(g, "EMF-creature-packs-0.3.3.zip");
+        if (from_nexus) in2.nexus_id = "900";
+        const InstallPlan p = build_plan(in2);
+        CHECK(p.update);
+        CHECK(notes_say(p, "This replaces"));
+        for (const auto& part : p.parts) {
+            CHECK(part.action == Action::Update);
+            CHECK(part.key == part.id);
+        }
+        const InstallResult r = apply_plan(g.dir, p);
+        REQUIRE_MESSAGE(r.ok, r.error);
+        const auto records = read_install_records(g.dir);
+        REQUIRE(records.size() == 3);  // the one record of them all is gone
+        for (const auto& rec : records) {
+            CAPTURE(rec.key);
+            CHECK(rec.roots == std::vector<std::string>{"mods\\" + rec.key});
+            CHECK(rec.version == "2.0");
+            CHECK(rec.nexus_id == (from_nexus ? "900" : ""));
+            for (const auto& [path, hash] : rec.files) CHECK(path.rfind("mods\\" + rec.key + "\\", 0) == 0);
+        }
+        CHECK(g.read(L"mods\\emf_beastmaster_bear\\src\\mod.lua") == "-- emf_beastmaster_bear 2.0");
+        CHECK(g.read(L"mods\\emf_necromancer_undead\\player.txt") == "the player's own file");  // kept in place
+        CHECK(g.has(L"emf\\backup"));  // the old files, never deleted
+
+        // and again: each pack's install is updated under its own key
+        const InstallPlan again = build_plan(v2.input(g, "EMF-creature-packs-0.3.3.zip"));
+        REQUIRE(apply_plan(g.dir, again).ok);
+        CHECK(read_install_records(g.dir).size() == 3);
+        REQUIRE(uninstall_mod(g.dir, "emf_beastmaster_beasts").ok);
+        CHECK(g.has(L"mods\\emf_beastmaster_bear\\mod.json"));
+        CHECK_FALSE(g.has(L"mods\\emf_beastmaster_beasts"));
+    }
+}
+
+TEST_CASE("app install: a pack whose folder name another install's key already has gets a key of its own") {
+    TempGame g(L"inst_packs_taken");
+    Archive other(L"inst_packs_taken_other");  // an unrelated Greeneye mod with the same folder name
+    other.add(L"greeneye\\emf_beastmaster_bear\\mod.json", R"({"id":"emf_beastmaster_bear"})");
+    other.add(L"greeneye\\emf_beastmaster_bear\\bear.dll", "MZ unrelated");
+    REQUIRE(apply_plan(g.dir, build_plan(other.input(g, "other.zip"))).ok);
+    REQUIRE(read_install_record(g.dir, "emf_beastmaster_bear"));
+    Archive a(L"inst_packs_taken_a");
+    add_packs(a);
+    const InstallPlan p = build_plan(a.input(g, "EMF-creature-packs-0.3.2.zip"));
+    CHECK_FALSE(p.update);  // the unrelated install is no earlier version of the pack
+    const auto bear = std::find_if(p.parts.begin(), p.parts.end(), [](const PlanPart& x) { return x.id == "emf_beastmaster_bear"; });
+    REQUIRE(bear != p.parts.end());
+    CHECK(bear->key == "emf_beastmaster_bear-2");
+    REQUIRE(apply_plan(g.dir, p).ok);
+    CHECK(g.read(L"greeneye\\emf_beastmaster_bear\\bear.dll") == "MZ unrelated");  // left alone
+    CHECK(read_install_record(g.dir, "emf_beastmaster_bear")->roots == std::vector<std::string>{"greeneye\\emf_beastmaster_bear"});
+    CHECK(read_install_record(g.dir, "emf_beastmaster_bear-2")->roots == std::vector<std::string>{"mods\\emf_beastmaster_bear"});
+}
+
+TEST_CASE("app install: mods that install files outside their folders stay one install, and the plan says they go together") {
+    TempGame g(L"inst_together");
+    emf_game(g);
+    Archive a(L"inst_together_a");  // Auto Loot Plus: a DLL mod next to the game and an EML mod
+    a.add(L"dinput8.dll", "MZ unknown dll");
+    a.add(L"mods\\auto-loot-plus\\mod.json", R"({"id":"auto-loot-plus","name":"Auto Loot Plus","version":"1.1.8"})");
+    a.add(L"mods\\auto-loot-plus\\src\\mod.lua");
+    const InstallPlan p = build_plan(a.input(g, "AutoLootPlus.zip"));
+    for (const auto& part : p.parts) CHECK(part.key.empty());
+    CHECK(notes_say(p, "one install"));
+    REQUIRE(apply_plan(g.dir, p).ok);
+    CHECK(read_install_records(g.dir).size() == 1);
+
+    Archive gr(L"inst_together_gr");  // two Greeneye mods with the Greeneye Loader: they need it
+    gr.add(L"greeneye\\moda\\mod.json", R"({"id":"moda"})");
+    gr.add(L"greeneye\\moda\\a.dll", "MZ a");
+    gr.add(L"greeneye\\modb\\mod.json", R"({"id":"modb"})");
+    gr.add(L"greeneye\\modb\\b.dll", "MZ b");
+    gr.add(L"dbgcore.dll", "MZ greeneye loader");
+    const InstallPlan q = build_plan(gr.input(g, "greeneye-pair.zip"));
+    for (const auto& part : q.parts) CHECK(part.key.empty());
+    CHECK(notes_say(q, "one install"));
+
+    TempGame h(L"inst_split_greeneye");  // the loader already there (a dependency, not a file it installs): one by one
+    h.write(L"dbgcore.dll", "MZ greeneye loader");
+    PlanInput in = gr.input(h, "greeneye-pair.zip");
+    in.state.proxies.push_back({"dbgcore.dll", "greeneye"});
+    const InstallPlan s = build_plan(in);
+    REQUIRE(apply_plan(h.dir, s).ok);
+    const auto ra = read_install_record(h.dir, "moda"), rb = read_install_record(h.dir, "modb");
+    REQUIRE(ra);
+    REQUIRE(rb);
+    CHECK(std::find(ra->deps.begin(), ra->deps.end(), "dbgcore.dll") != ra->deps.end());
+    CHECK(std::find(rb->deps.begin(), rb->deps.end(), "dbgcore.dll") != rb->deps.end());
+    REQUIRE(uninstall_mod(h.dir, "moda").ok);
+    CHECK(h.has(L"greeneye\\modb\\b.dll"));
+    CHECK(h.has(L"dbgcore.dll"));
+}

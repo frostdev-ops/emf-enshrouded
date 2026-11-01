@@ -54,7 +54,7 @@ try {
                 "  through EML (emm.exe) as its page says.",
                 "Every player in a world that uses these creatures needs the same packs, and the host needs Beastmaster or",
                 "Necromancer switched on in EMF.", "",
-                "Uninstall: delete the pack folders from the mods folder (or uninstall them in EMF.exe).")
+                "Uninstall: delete the pack folders from the mods folder (or uninstall each one in EMF.exe).")
     [System.IO.File]::WriteAllText((Join-Path $root "README.txt"), ($lines -join "`r`n") + "`r`n")
     if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 

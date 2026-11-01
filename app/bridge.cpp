@@ -134,7 +134,7 @@ std::string nexus_id_of(const Value& v, const char* key) {
 }
 
 std::string done_json(const char* type, const InstallResult& r, const std::string& key) {
-    return Obj().str("type", type).boolean("ok", r.ok).str("error", r.error).strs("lines", r.done).str("key", key).text();
+    return Obj().str("type", type).boolean("ok", r.ok).str("error", r.error).strs("lines", r.done).str("key", key).strs("keys", r.keys).text();
 }
 
 constexpr int64_t kExpiryGrace = 300;  // seconds a link's expiry may lie behind this PC's clock before EMF refuses it

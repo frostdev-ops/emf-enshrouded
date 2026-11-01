@@ -17,7 +17,9 @@
 // Nothing is ever overwritten: a part that would replace another mod's file is refused with the reason, and the other
 // parts still install. Files of the same install's earlier version move to emf\backup\ (never deleted).
 // emf\installed_mods\<key>.json records every installed file with its SHA-256; the key is nexus-<id> when the Nexus
-// mod is known, else the mod's id. An archive EMF downloaded from Nexus also records its Nexus file id.
+// mod is known, else the mod's id. An archive EMF downloaded from Nexus also records its Nexus file id. An archive of
+// several separate mods (each in its own mod folder, nothing installed outside them: the EMF creature packs) writes one
+// record per mod, keyed by its folder, so each uninstalls by itself.
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -54,6 +56,7 @@ struct PlanPart {
     std::vector<std::string> deps;            // files it needs but did not install (already there shared, a kept loader)
     std::vector<std::string> lines;           // what goes where, in words
     std::string id, version;                  // from mod.json
+    std::string key;  // an install of its own (several separate mods in one archive), else "": the plan's key
     bool installs() const { return (action == Action::Install || action == Action::Update) && (!copies.empty() || !chain_add.empty()); }
 };
 
@@ -100,6 +103,7 @@ struct InstallResult {
     bool ok = false;
     std::string error;
     std::vector<std::string> done;  // what happened, in words
+    std::vector<std::string> keys;  // the install records it wrote (one, or one per mod)
 };
 // Applies a plan (the caller checks that the game is closed). CopyFile never overwrites; on a failure everything this
 // call did is taken back (its own new files removed, backups moved back, dinput8-chain.ini restored).

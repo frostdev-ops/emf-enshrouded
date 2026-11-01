@@ -262,6 +262,12 @@ through the same steps from step 2.)
 - **One archive, several parts**: Auto Loot Plus is a `dinput8.dll` DLL mod and an EML mod; each part installs on its
   own, and a part that cannot install does not stop the others. Files next to an EML or EMF mod folder that belong to
   no part (a README at the top) are not copied; the sheet says so.
+- **One archive, several separate mods**: when every part that installs is a mod folder of its own and nothing is
+  installed outside them (the EMF creature packs: `mods\<pack>\` folders and a `README.txt`, which is not copied),
+  each mod is recorded as an install of its own, so each one uninstalls by itself; the sheet says so. An archive
+  that installs anything outside its mod folders (Auto Loot Plus's DLL, a Greeneye loader, files in `emf\`) stays one
+  install, since its parts may need each other: the sheet says that Uninstall removes all of it together, and the
+  details and the uninstall question of each of its mods name the others that go with it.
 - **Nothing is ever overwritten.** A part that would replace another mod's file is refused and names the file (and,
   for a proxy DLL, its tool). A read-me of the same name is skipped. A file with the same bytes is left as it is. At
   install time `CopyFile` refuses to overwrite as well, so a file that appeared since the plan stops the install.
@@ -287,7 +293,10 @@ anything is never removed.
 ## Uninstall and what is recorded
 
 Each install writes `emf\installed_mods\<key>.json`; the key is `nexus-<id>` when the Nexus mod is known (installed from
-its page, or `nexus_id` in the archive's `mod.json`), else the mod's id, else the archive's name. It holds the name,
+its page, or `nexus_id` in the archive's `mod.json`), else the mod's id, else the archive's name. An archive of several
+separate mods writes one record per mod, keyed by its folder name (`-2`, `-3` when another install has that key for
+another folder), each with the archive's Nexus id. Installing it again updates each mod's own record; one record that
+held several of them (as EMF.exe 0.3.2 made it for the creature packs) is replaced by theirs. It holds the name,
 version, Nexus id, archive name and time, the kinds, the mod folders it installed, every file with its SHA-256, the
 folders it made, the DLLs it listed in `dinput8-chain.ini` and the older copies it switched off, and its backups.
 
@@ -810,7 +819,11 @@ player's, and counts only a stand-in game running from the folder shown.
   saves, tables, unknown, EMF itself, Auto Loot Plus's two layouts), conflicts and read-mes, unsafe paths; applying
   (record, SHA-256s, the scan linking mods to their install), an update with the old folder in `emf\backup\`, a file
   that appears before Install taking everything back (a UTF-16 `dinput8-chain.ini` byte for byte), uninstall (changed
-  files left and named, folders, chain lines, a switched-off copy on again), a forged record, and the chain line rules.
+  files left and named, folders, chain lines, a switched-off copy on again), a forged record, the chain line rules,
+  and several separate mods in one archive (the creature packs: one record each, each uninstalled alone; installed
+  again, each record updated and one record of them all split; a key another install has for another folder; mods
+  with files outside their folders kept as one install, and Greeneye mods with the loader already there split, each
+  depending on it).
 - `test_app_browse.cpp`: the picture hosts, description links, file order, the recorded replies, the page's JSON.
 - `test_app_account.cpp`: the DPAPI round trip and the stored account (the file holds neither key nor name), the
   nxm:// setting against a registry in memory (taking the links from Vortex and giving them back exactly, nothing there
@@ -891,7 +904,9 @@ player's, and counts only a stand-in game running from the folder shown.
   in order, the "doesn't list" note, an older file classified on request, the description in its container without
   scripts, a picture from `example.com` and a fetch blocked while a Nexus picture loads. An archive made in the test is
   installed through the page (`install_path`, the test's stand-in for the file dialog, allowed only with `EMF_TEST=1`)
-  and uninstalled again, checking the files, the `[Chain]` line, the record and the backup. The Nexus account, offline:
+  and uninstalled again, checking the files, the `[Chain]` line, the record, the backup and that the question names the
+  other mod of the same install; an archive of two packs is installed as two installs, and uninstalling one through the
+  page leaves the other. The Nexus account, offline:
   the EMF tab says the key is "not set" and hides Log in with Nexus; the nxm:// setting shows a seeded Vortex, takes the
   links and gives them back (in memory; the real HKCU is read before and after and must not change); a key saved
   through the page shows the account as Premium with its request allowance, is stored encrypted and never stays in the

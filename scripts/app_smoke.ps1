@@ -23,7 +23,9 @@
 #   of the details, Enter saves the link; with the Premium key, "Update with EMF" with the file's changelog opens the plan
 #   of the same install;
 # - "Install a downloaded file" through the page (a zip made here; install_path is the test's stand-in for the file
-#   dialog): the plan, Install, the files and the dinput8-chain.ini line; then Uninstall takes them out again;
+#   dialog): the plan, Install, the files and the dinput8-chain.ini line; then Uninstall takes them out again, its
+#   question naming the other mod of the same install; a zip of two packs installs as two installs, and uninstalling
+#   one leaves the other;
 # - the Nexus account (offline, recorded replies): the EMF tab's account card says the key is "not set"; the nxm://
 #   setting shows the current handler and switches in a registry in memory (the real HKCU is never written); a key
 #   saved through the page is checked, stored encrypted (never in the page) and shows the account as Premium; "Download
@@ -389,16 +391,49 @@ try {
         $backup = @(Get-ChildItem -LiteralPath (Join-Path $game "emf\backup") -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*\mods\auto-loot-plus\mod.json" })
         Check ($backup.Count -ge 1) "the mod's old file that was there moved to emf\backup\ first"
 
-        $uninstallJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; W(function(){return document.querySelector('[data-focus=uninstall]');},function(){ var b=document.querySelector('[data-focus=uninstall]'); window.emfProbe={found:!!b}; b.click(); W(function(){return document.querySelector('.sheet-foot .primary');},function(){ document.querySelector('.sheet-foot .primary').click(); W(function(){var t=document.getElementById('sheet-title'); return t&&(t.textContent==='Uninstalled'||t.textContent==='Not uninstalled');},function(){ window.emfProbe.title=(document.getElementById('sheet-title')||{}).textContent; window.emfDone=true; }); }); });"
+        $uninstallJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; W(function(){return document.querySelector('[data-focus=uninstall]');},function(){ var b=document.querySelector('[data-focus=uninstall]'); window.emfProbe={found:!!b}; b.click(); W(function(){return document.querySelector('.sheet-foot .primary');},function(){ window.emfProbe.lines=[...document.querySelectorAll('#sheet .part-lines li')].map(function(l){return l.textContent;}); document.querySelector('.sheet-foot .primary').click(); W(function(){var t=document.getElementById('sheet-title'); return t&&(t.textContent==='Uninstalled'||t.textContent==='Not uninstalled');},function(){ window.emfProbe.title=(document.getElementById('sheet-title')||{}).textContent; window.emfDone=true; }); }); });"
         $run = Invoke-Smoke -Eval $uninstallJs -SelectMod "eml:auto-loot-plus" -More @("--probe-wait", "9000")
         $p7 = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
         Check ($null -ne $p7 -and $p7.found -and $p7.title -eq "Uninstalled") "the mod's details offer Uninstall, which reports Uninstalled ($(if ($p7) { $p7 | ConvertTo-Json -Compress }))"
+        Check ($null -ne $p7 -and (@($p7.lines) -join " ") -like "*Also uninstalls autolootplus.dll*") "the question names the other mod of the same install that goes with it"
         Check (-not (Test-Path -LiteralPath (Join-Path $game "autolootplus.dll")) -and -not (Test-Path -LiteralPath (Join-Path $game "AutoLootPlus-README.txt")) -and -not (Test-Path -LiteralPath (Join-Path $game "mods\auto-loot-plus"))) "uninstall removed the files it installed"
         $chain = Get-Content -LiteralPath (Join-Path $game "dinput8-chain.ini") -Raw
         Check ($chain -eq "[Chain]`r`n; creative.dll`r`n") "and took its line out of dinput8-chain.ini ($($chain.Trim() -replace "`r`n", ' | '))"
     } finally {
         Remove-Item -LiteralPath $src -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $zipDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # 6b. several separate mods in one file (the EMF creature packs: mods\<pack>\ folders and a README.txt): each is an
+    # install of its own, so uninstalling one through the page leaves the other
+    $src = Join-Path ([System.IO.Path]::GetTempPath()) ("emf smoke packs " + [guid]::NewGuid().ToString("N").Substring(0, 8))
+    foreach ($pack in @("emf_pack_one", "emf_pack_two")) {
+        $dir = Join-Path $src "EMF-creature-packs-9.9.9\mods\$pack"
+        New-Item -ItemType Directory -Force (Join-Path $dir "src") | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $dir "mod.json"), "{""id"": ""$pack"", ""name"": ""$pack"", ""version"": ""1.0""}")
+        [System.IO.File]::WriteAllText((Join-Path $dir "src\mod.lua"), "-- $pack")
+    }
+    [System.IO.File]::WriteAllText((Join-Path $src "EMF-creature-packs-9.9.9\README.txt"), "what is in it")
+    $zipDir = "$src zip"
+    New-Item -ItemType Directory -Force $zipDir | Out-Null
+    $zip = Join-Path $zipDir "EMF-creature-packs-9.9.9.zip"
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($src, $zip)
+    try {
+        $zipJs = $zip.Replace("\", "/")
+        $packsJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; window.emfProbe={}; window.chrome.webview.postMessage({cmd:'install_path',path:'$zipJs',nexus_id:0,nexus_name:''}); W(function(){return document.querySelectorAll('.part').length>0&&document.querySelector('.sheet-foot .primary');},function(){ window.emfProbe.parts=document.querySelectorAll('.part').length; window.emfProbe.notes=[...document.querySelectorAll('#sheet .notes li')].map(function(l){return l.textContent;}); var b=document.querySelector('.sheet-foot .primary'); setTimeout(function(){ if(b)b.click(); W(function(){var t=document.getElementById('sheet-title'); return t&&(t.textContent==='Installed'||t.textContent==='Not installed');},function(){ window.emfProbe.title=(document.getElementById('sheet-title')||{}).textContent; window.emfDone=true; }); }, 1200); });"
+        $run = Invoke-Smoke -Eval $packsJs -More @("--probe-wait", "9000")
+        $p6b = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+        Check ($null -ne $p6b -and $p6b.parts -eq 2 -and (@($p6b.notes) -join " ") -like "*recorded on its own*" -and $p6b.title -eq "Installed") "a file with two packs: the plan says each is recorded on its own, and Install reports Installed ($(if ($p6b) { $p6b | ConvertTo-Json -Compress }))"
+        Check ((Test-Path -LiteralPath (Join-Path $game "emf\installed_mods\emf_pack_one.json")) -and (Test-Path -LiteralPath (Join-Path $game "emf\installed_mods\emf_pack_two.json")) -and -not (Test-Path -LiteralPath (Join-Path $game "mods\README.txt"))) "each pack has its own record, and the README.txt is not copied"
+        $run = Invoke-Smoke -Eval $uninstallJs -SelectMod "eml:emf_pack_one" -More @("--probe-wait", "9000")
+        $p6c = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+        Check ($null -ne $p6c -and $p6c.found -and $p6c.title -eq "Uninstalled" -and -not ((@($p6c.lines) -join " ") -like "*Also uninstalls*")) "Uninstall on one pack names no other mod and reports Uninstalled ($(if ($p6c) { $p6c | ConvertTo-Json -Compress }))"
+        Check (-not (Test-Path -LiteralPath (Join-Path $game "mods\emf_pack_one")) -and (Test-Path -LiteralPath (Join-Path $game "mods\emf_pack_two\src\mod.lua")) -and (Test-Path -LiteralPath (Join-Path $game "emf\installed_mods\emf_pack_two.json"))) "it removed that pack only; the other pack and its record stay"
+    } finally {
+        Remove-Item -LiteralPath $src -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $zipDir -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $game "mods\emf_pack_one"), (Join-Path $game "mods\emf_pack_two") -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath (Join-Path $game "emf\installed_mods\emf_pack_one.json"), (Join-Path $game "emf\installed_mods\emf_pack_two.json") -Force -ErrorAction SilentlyContinue
     }
 
     # 8. the Nexus account, offline. The real nxm:// handler (HKCU) is read before and after: the smoke runs use a
