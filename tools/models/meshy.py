@@ -9,8 +9,10 @@ so a key set with [Environment]::SetEnvironmentVariable works without restarting
   python meshy.py image <picture> [<picture> ...] [--prompt "<texture prompt>"] [--polycount 12000] [--smart]
       a textured model from 1-4 pictures of one object (png, jpg, webp), e.g. renders of a free rig's rest pose:
       30 credits; --smart (one picture): Meshy's game-ready Smart Topology mesh, 20 credits
-  python meshy.py status <task id> [--kind text|image|multi]
-  python meshy.py download <task id> <folder> [--kind text|image|multi]   (model .glb, textures, thumbnail)
+  python meshy.py retexture <task id> "<texture prompt>" [--keep-uv]
+      new textures on a model Meshy made, the same geometry (10 credits); --keep-uv keeps its UV layout
+  python meshy.py status <task id> [--kind text|image|multi|retexture]
+  python meshy.py download <task id> <folder> [--kind text|image|multi|retexture]   (model .glb, textures, thumbnail)
 Every request is appended to meshy_log.txt next to the downloads folder you pass (or the current folder).
 """
 import base64
@@ -45,7 +47,8 @@ def call(method, path, body=None):
         raise SystemExit("Meshy said %d: %s" % (e.code, e.read().decode()[:500]))
 
 
-KINDS = {"text": "/v2/text-to-3d/", "image": "/v1/image-to-3d/", "multi": "/v1/multi-image-to-3d/"}
+KINDS = {"text": "/v2/text-to-3d/", "image": "/v1/image-to-3d/", "multi": "/v1/multi-image-to-3d/",
+         "retexture": "/v1/retexture/"}
 MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
 
 
@@ -62,7 +65,7 @@ def data_uri(path):
 def task_path(args):
     kind = args[args.index("--kind") + 1] if "--kind" in args else "text"
     if kind not in KINDS:
-        raise SystemExit("--kind is text, image or multi")
+        raise SystemExit("--kind is text, image, multi or retexture")
     return KINDS[kind]
 
 
@@ -136,6 +139,14 @@ def main():
             body.get("texture_prompt"), credits))
         print("%s task %s (about %d credits); status/download with --kind %s" % (
             path.rsplit("/", 1)[-1], r.get("result"), credits, "multi" if "image_urls" in body else "image"))
+    elif cmd == "retexture":
+        if len(args) < 2:
+            raise SystemExit(__doc__)
+        body = {"input_task_id": args[0], "text_style_prompt": args[1], "ai_model": "latest", "enable_pbr": True,
+                "enable_original_uv": "--keep-uv" in args}
+        r = call("POST", "/v1/retexture", body)
+        log("retexture %s of %s prompt=%r (about 10 credits)" % (r.get("result"), args[0], args[1]))
+        print("retexture task %s (about 10 credits); status/download with --kind retexture" % r.get("result"))
     elif cmd == "status":
         r = call("GET", task_path(args) + args[0])
         keep = {k: r.get(k) for k in ("id", "mode", "status", "progress", "task_error")}

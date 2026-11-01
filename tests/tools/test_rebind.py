@@ -41,7 +41,7 @@ class RebindTests(unittest.TestCase):
         run = blender(os.path.join(HERE, "blender_unskinned_copy.py"), cls.rig_glb, cls.moved, "90", "1.7", "3", "-2", "1")
         assert run.returncode == 0, run.stdout[-1500:] + run.stderr[-1500:]
         cls.out = os.path.join(cls.tmp.name, "rebound.glb")
-        cls.result = blender(SCRIPT, cls.rig_glb, cls.moved, cls.out)
+        cls.result = blender(SCRIPT, cls.rig_glb, cls.moved, cls.out, "--material", "1")
         line = next((x for x in cls.result.stdout.splitlines() if x.startswith("REBIND ")), None)
         cls.report = json.loads(line[7:]) if line else None
 
@@ -57,6 +57,14 @@ class RebindTests(unittest.TestCase):
         self.assertLess(r["mean_distance"], 0.003)  # metres, in the rig's size
         self.assertLess(r["mean_distance_back"], 0.003)
         self.assertEqual(r["unweighted"], 0)
+
+    def test_the_mesh_takes_the_game_material_slot(self):
+        """--material N names the materials game_material_N: gltf_in puts the mesh in that slot of the source model."""
+        gltf, _ = gltf_in.read_glb(self.out)
+        self.assertTrue(all(gltf_in.re.match(r"^game_material_1(\.\d+)?$", m["name"]) for m in gltf["materials"]),
+                        [m["name"] for m in gltf["materials"]])
+        groups, _ = gltf_in.load_groups(self.out, self.hier, warn=lambda m: None)
+        self.assertEqual([g["material"] for g in groups], [1])
 
     def test_every_vertex_keeps_its_weights(self):
         """The same mesh comes back with the artist's weights: the same joints and weights per vertex."""

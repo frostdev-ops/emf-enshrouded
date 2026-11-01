@@ -2,14 +2,15 @@
 lined up with the rig's own mesh and skinned with its weights.
 
   blender --background --factory-startup --python rebind_to_rig.py -- <rig.glb> <mesh.glb> <out.glb>
-      [--yaw auto|0|90|180|270] [--icp 25]
+      [--yaw auto|0|90|180|270] [--icp 25] [--material N]
 
 rig.glb: the rig with its own skinned mesh (new_skeleton.write_glb's copy: bones named jNNN_<name>). mesh.glb: the new
 mesh, upright, at any size, place and turn about the vertical. The new mesh is turned (each quarter turn, or --yaw),
 scaled to the rig mesh's height and set on it, then fitted closer (iterative closest points with one uniform scale);
 the turn whose fit lies closest wins. Every vertex then takes the weights of the nearest point on the rig's mesh
 (interpolated over that face), at most four joints, normalised. The rig's own mesh is dropped and the new mesh is
-exported on the rig with its materials. Prints REBIND {json}: yaw, scale, the mean and largest distance from the new
+exported on the rig with its materials (--material N names them game_material_N: the mesh then takes slot N of
+the source model, gltf_in.py). Prints REBIND {json}: yaw, scale, the mean and largest distance from the new
 mesh to the rig's mesh, the mean distance back (rig mesh to new mesh: parts the new mesh lacks), vertices, and
 vertices left without weights.
 """
@@ -33,6 +34,7 @@ def opt(name, default=None):
 
 yaw_opt = opt("--yaw", "auto")
 rounds = int(opt("--icp", "25"))
+material_slot = opt("--material")
 yaws = [0, 90, 180, 270] if yaw_opt == "auto" else [int(yaw_opt)]
 
 bpy.ops.wm.read_factory_settings(use_empty=True)
@@ -165,6 +167,10 @@ bpy.data.objects.remove(src)
 for o in shapes:
     bpy.data.objects.remove(o)
 arm.data.pose_position = "POSE"
+if material_slot is not None:
+    for m in new.data.materials:
+        if m is not None:
+            m.name = "game_material_%d" % int(material_slot)
 bpy.ops.object.select_all(action="DESELECT")
 arm.select_set(True)
 new.select_set(True)

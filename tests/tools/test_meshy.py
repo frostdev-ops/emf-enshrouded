@@ -77,6 +77,19 @@ class ImageTests(Fixture):
                 self.run_main("image", *args)
         self.assertEqual(self.calls, [])
 
+    def test_retexture(self):
+        """New textures on a model Meshy made (the same geometry) from a text prompt: 10 credits."""
+        out = self.run_main("retexture", "abc", "a black panther, short glossy black fur", "--keep-uv")
+        method, path, body = self.calls[0]
+        self.assertEqual((method, path), ("POST", "/v1/retexture"))
+        self.assertEqual(body, {"input_task_id": "abc", "text_style_prompt": "a black panther, short glossy black fur",
+                                "ai_model": "latest", "enable_pbr": True, "enable_original_uv": True})
+        self.assertIn("10 credits", out)
+        self.calls.clear()
+        meshy.call = lambda method, path, body=None: self.calls.append((method, path, body)) or {"status": "SUCCEEDED"}
+        self.run_main("status", "def", "--kind", "retexture")
+        self.assertEqual(self.calls[0][1], "/v1/retexture/def")
+
     def test_status_of_image_tasks(self):
         meshy.call = lambda method, path, body=None: self.calls.append((method, path, body)) or {"id": "t", "status": "SUCCEEDED"}
         self.run_main("status", "abc", "--kind", "image")
