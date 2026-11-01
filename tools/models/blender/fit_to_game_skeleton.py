@@ -2,7 +2,7 @@
 
   blender --background --factory-startup --python fit_to_game_skeleton.py -- \
       <game.glb> <creature.glb> <out.glb> [--uv-from 1] [--material 1] [--size 1.0] [--vertex-colors]
-      [--width fit|keep|<scale>] [--tail own|hips]
+      [--width fit|keep|<scale>] [--tail own|hips] [--own-proportions <sidecar.json>]
 
 Steps:
  1. Import the game model (armature with jNNN bones + its body meshes) and the creature (any rig; it is dropped).
@@ -20,10 +20,16 @@ Steps:
     skeleton has no four); bones under the head keep theirs when the game animal itself uses them on its head (the jaw).
     --tail hips gives the creature's own tail to the hips too (a long tail driven by a short tail's animation moves
     strangely); the default, own, keeps the game animal's tail bones on the creature's tail.
- 4. --vertex-colors stores the creature's own material colours as vertex colours (COLOR_0).
- 5. Export a skinned .glb that tools/models/make_mod.py reads.
+ 4. --own-proportions <sidecar.json>: the creature keeps its own shape. After the weights it goes back to its
+    original proportions (uniformly scaled to the game body's height, times --size), and the sidecar lists every game
+    joint moved into that shape by the inverse of the fit (../quad_landmarks.py unwarp, own_space): positions in this
+    script's space for a copy of the game skeleton with the creature's proportions (tools/models/make_mod.py).
+    The .glb keeps the game armature as it is.
+ 5. --vertex-colors stores the creature's own material colours as vertex colours (COLOR_0).
+ 6. Export a skinned .glb that tools/models/make_mod.py reads.
 Blender axes after the glTF import: forward is -Y (the head), up is +Z, width is X.
 """
+import json
 import os
 import sys
 
@@ -31,8 +37,8 @@ import bpy
 from mathutils import Vector
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
-from quad_landmarks import (clean_detail_weights, fit_z, kept_head_bones, landmarks, main_bones, tail_slices,  # noqa: E402
-                            width_scale)
+from quad_landmarks import (clean_detail_weights, fit_z, kept_head_bones, landmarks, main_bones,  # noqa: E402
+                            own_space, tail_slices, unwarp, warp_y, width_scale)
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 game_glb, creature_glb, out_glb = (os.path.abspath(p) for p in argv[:3])
@@ -55,6 +61,9 @@ keep_head = bool(opt("--keep-head", False))  # don't stretch the head to the gam
 tail_mode = opt("--tail", "own")
 if tail_mode not in ("own", "hips"):
     raise SystemExit("fit_to_game_skeleton: --tail needs own or hips")
+own_path = opt("--own-proportions", None)  # a sidecar .json: the creature keeps its own shape (see the docstring)
+if own_path is True:
+    raise SystemExit("fit_to_game_skeleton: --own-proportions needs the sidecar .json to write")
 width_mode = opt("--width", "fit")  # fit (the game body's width), keep (the creature's proportions) or a scale
 if width_mode is True:
     raise SystemExit("fit_to_game_skeleton: --width needs fit, keep or a number")
@@ -146,20 +155,11 @@ g = landmarks(world_points([o for o in game_meshes if o is uv_source] or game_me
 c = landmarks(world_points([body]))
 
 
-def warp_y(y):
-    # piecewise linear through (nose, front feet, back feet); beyond the back feet keep the front->back slope.
-    # --keep-head: the head keeps the body's slope too (the creature's own head length, not the game nose)
-    if y <= c["front"] and not keep_head:
-        t = (y - c["nose"]) / ((c["front"] - c["nose"]) or 1e-6)
-        return g["nose"] + t * (g["front"] - g["nose"])
-    slope = (g["back"] - g["front"]) / ((c["back"] - c["front"]) or 1e-6)
-    return g["front"] + (y - c["front"]) * slope
-
-
 sx = width_scale(c, g, width_mode)
+original = [v.co.copy() for v in body.data.vertices] if own_path else None
 for v in body.data.vertices:
     p = v.co
-    y = warp_y(p.y)
+    y = warp_y(p.y, c, g, keep_head)  # --keep-head: the head keeps the body's slope (its own length)
     v.co = Vector((p.x * sx, y, fit_z(p.z, y, c, g)))
 body.data.update()
 
@@ -278,8 +278,25 @@ if head_b is not None:
 bpy.ops.object.vertex_group_limit_total(limit=4)
 bpy.ops.object.vertex_group_normalize_all(lock_active=False)
 
+# --own-proportions: the creature back in its own shape (at the game body's height, times --size), and every game
+# joint moved into that shape by the inverse of the fit; the weights stay as the fit gave them
+if own_path:
+    for v, o in zip(body.data.vertices, original):
+        v.co = Vector(own_space(o, c, g, size))
+    joints = []
+    for b in arm.data.bones:
+        w = arm.matrix_world @ b.head_local
+        joints.append({"name": b.name, "game": list(w), "own": list(own_space(Vector(unwarp(w, c, g, sx, keep_head)),
+                                                                              c, g, size))})
+    base = max(g["ground_front"], g["ground_back"])
+    with open(os.path.abspath(own_path), "w", encoding="utf-8") as f:
+        json.dump({"space": "Blender after the glTF import (forward -y, up +z, width x), the game armature's world",
+                   "ground": base, "scale": (g["top"] - base) / ((c["top"] - c["ground"]) or 1e-6) * size,
+                   "joints": joints}, f, indent=1)
+    print("FIT own proportions: %d joints moved into the creature's shape, sidecar %s" % (len(joints), own_path))
+
 # overall size (1.0 = the game body's size): scale about the ground under the body centre
-if abs(size - 1.0) > 1e-6:
+if abs(size - 1.0) > 1e-6 and not own_path:
     centre_y = (g["front"] + g["back"]) / 2
     for v in body.data.vertices:
         p = v.co

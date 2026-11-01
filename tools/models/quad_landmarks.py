@@ -72,6 +72,59 @@ def fit_z(z, y, c, g):
     return belly - (belly - zz) * (kf + (kb - kf) * t)
 
 
+def warp_y(y, c, g, keep_head=False):
+    """Along the body: piecewise linear through (nose, front feet, back feet); beyond the back feet the front->back
+    slope goes on. keep_head: the head keeps the body's slope too (the creature's own head length, not the game's)."""
+    if y <= c["front"] and not keep_head:
+        t = (y - c["nose"]) / ((c["front"] - c["nose"]) or 1e-6)
+        return g["nose"] + t * (g["front"] - g["nose"])
+    slope = (g["back"] - g["front"]) / ((c["back"] - c["front"]) or 1e-6)
+    return g["front"] + (y - c["front"]) * slope
+
+
+def unwarp_y(y, c, g, keep_head=False):
+    """The creature's y of a game-body y (the inverse of warp_y)."""
+    if y <= g["front"] and not keep_head:
+        t = (y - g["nose"]) / ((g["front"] - g["nose"]) or 1e-6)
+        return c["nose"] + t * (c["front"] - c["nose"])
+    slope = (g["back"] - g["front"]) / ((c["back"] - c["front"]) or 1e-6)
+    return c["front"] + (y - g["front"]) / slope
+
+
+def unfit_z(z, y, c, g):
+    """The creature's height of a game-body height z at the game's y (the inverse of fit_z)."""
+    base = max(g["ground_front"], g["ground_back"])
+    sz = (g["top"] - base) / ((c["top"] - c["ground"]) or 1e-6)
+    belly = g["belly"]
+    zz = z
+    if z < belly and belly > base:
+        kf = (belly - g["ground_front"]) / (belly - base)
+        kb = (belly - g["ground_back"]) / (belly - base)
+        t = min(1.0, max(0.0, (y - g["front"]) / ((g["back"] - g["front"]) or 1e-6)))
+        zz = belly - (belly - z) / (kf + (kb - kf) * t)
+    return c["ground"] + (zz - base) / sz
+
+
+def warp(p, c, g, sx, keep_head=False):
+    """A creature point on the game body (what the fitter does to every vertex)."""
+    y = warp_y(p.y, c, g, keep_head)
+    return p.x * sx, y, fit_z(p.z, y, c, g)
+
+
+def unwarp(p, c, g, sx, keep_head=False):
+    """A game-body point in the creature's own shape (the inverse of warp)."""
+    return p.x / sx, unwarp_y(p.y, c, g, keep_head), unfit_z(p.z, p.y, c, g)
+
+
+def own_space(p, c, g, size=1.0):
+    """A point of the creature's own shape at the game body's size: a uniform scale (the fit's height scale times
+    size) that puts the creature's front feet on the ground where the game's front feet stand (at the higher of the
+    game's two grounds)."""
+    base = max(g["ground_front"], g["ground_back"])
+    k = (g["top"] - base) / ((c["top"] - c["ground"]) or 1e-6) * size
+    return p.x * k, g["front"] + (p.y - c["front"]) * k, base + (p.z - c["ground"]) * k
+
+
 def width_scale(c, g, mode="fit"):
     """The x scale for a creature with landmarks `c` on the game body `g`.
 

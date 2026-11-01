@@ -2,6 +2,7 @@
 weight only on the animal's own tail. Needs Blender (environment variable BLENDER, or blender on PATH) and the boar glb
 made by gamegltf.py from a model_survey dump (analysis/models/game_enemy_wildboar_01.glb, not in the repository):
 skipped without."""
+import json
 import os
 import shutil
 import subprocess
@@ -14,7 +15,8 @@ BLENDER_DIR = os.path.join(ROOT, "tools", "models", "blender")
 BOAR = os.path.join(ROOT, "analysis", "models", "game_enemy_wildboar_01.glb")
 BLENDER = os.environ.get("BLENDER") or shutil.which("blender")
 TAIL_ROOT = "j044"  # the boar's tail: j044 < j045 < j046 < j047 under the pelvis
-LEG_ROOTS = ("j032", "j037", "j048", "j052")  # the boar's legs (no named bones): front under the chest, hind the pelvis
+LEG_ROOTS = ("j032", "j037", "j048", "j052")
+FEET = ("j036", "j041", "j051", "j055")  # the boar's lowest joints: front left/right, hind left/right  # the boar's legs (no named bones): front under the chest, hind the pelvis
 
 
 def blender(script, *args):
@@ -63,6 +65,37 @@ class FitQuadrupedTests(unittest.TestCase):
             self.assertLess(rump, 0.02)
             self.assertLess(tail, 0.02)
             self.assertGreater(legs, 0.5)
+
+    def test_own_proportions_keep_the_creatures_shape_and_move_the_joints_into_it(self):
+        """--own-proportions: after the weights, the creature goes back to its own shape (at the game body's height)
+        and the sidecar moves every game joint into that shape: the boar's feet joints stand on the animal's feet."""
+        with tempfile.TemporaryDirectory() as d:
+            fig, fitted, side = (os.path.join(d, n) for n in ("animal.glb", "fitted.glb", "own.json"))
+            self.assertEqual(blender("make_test_quadruped.py", fig)[0], 0)
+            code, log = blender("fit_to_game_skeleton.py", BOAR, fig, fitted, "--own-proportions", side)
+            self.assertEqual(code, 0, log[-2000:])
+            src, out = bbox(fig), bbox(fitted)
+            for i in (0, 1):  # width and length against height: the animal's own, not the boar's
+                self.assertAlmostEqual(out[i] / out[2], src[i] / src[2], delta=0.01 * src[i] / src[2])
+            with open(side, encoding="utf-8") as f:
+                own = json.load(f)
+            self.assertEqual(len(own["joints"]), 58)
+            joints = {j["name"]: j["own"] for j in own["joints"]}
+            ground = own["ground"]
+            height = out[2]
+            for foot in FEET:
+                self.assertLess(joints[foot][2] - ground, 0.15 * height, foot)
+            front = [joints[f][1] for f in FEET[:2]]
+            hind = [joints[f][1] for f in FEET[2:]]
+            # the animal's legs are 1.2 m apart (y -0.6 and 0.6) before the scale to the boar's height
+            self.assertAlmostEqual((sum(hind) - sum(front)) / 2 / own["scale"], 1.2, delta=0.15)
+
+
+def bbox(path):
+    code, log = blender(os.path.join(HERE, "blender_bbox.py"), path)
+    if code != 0:
+        raise AssertionError(log[-2000:])
+    return [float(v) for v in next(line for line in log.splitlines() if line.startswith("BBOX ")).split()[1:]]
 
 
 if __name__ == "__main__":

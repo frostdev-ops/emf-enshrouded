@@ -91,6 +91,49 @@ class HeightTests(unittest.TestCase):
         self.assertAlmostEqual(ql.fit_z(0.0, 0.7, self.c, g), 0.0, delta=1e-6)
 
 
+class InverseWarpTests(unittest.TestCase):
+    """The fit's warp (creature -> game body) undone, so the game skeleton's joints can move into the creature's own
+    shape."""
+
+    def setUp(self):
+        self.c = ql.landmarks(quadruped())                                 # the creature: level feet
+        self.g = ql.landmarks(quadruped(front_ground=-0.35, tail_to=0.3))  # the game body: front paws lower
+        self.sx = ql.width_scale(self.c, self.g, "keep")
+
+    def test_the_feet_and_the_nose_go_to_the_game_bodys(self):
+        c, g = self.c, self.g
+        for k in ("nose", "front", "back"):
+            self.assertAlmostEqual(ql.warp_y(c[k], c, g), g[k], delta=1e-9)
+        # keep_head: the head keeps the body's slope instead of reaching the game's nose
+        slope = (g["back"] - g["front"]) / (c["back"] - c["front"])
+        self.assertAlmostEqual(ql.warp_y(c["nose"], c, g, keep_head=True),
+                               g["front"] + (c["nose"] - c["front"]) * slope, delta=1e-9)
+
+    def test_unwarp_undoes_warp(self):
+        for keep_head in (False, True):
+            for x in (-0.3, 0.0, 0.25):
+                for y in (-1.4, -0.9, -0.8, -0.2, 0.7, 1.0, 2.0):
+                    for z in (0.0, 0.1, 0.4, 0.79, 0.81, 1.2, 1.4):
+                        p = P(x, y, z)
+                        q = ql.warp(p, self.c, self.g, self.sx, keep_head)
+                        back = ql.unwarp(P(*q), self.c, self.g, self.sx, keep_head)
+                        for a, b in zip(back, (x, y, z)):
+                            self.assertAlmostEqual(a, b, delta=1e-9, msg=(keep_head, x, y, z))
+
+    def test_own_space_is_a_uniform_scale_to_the_game_bodys_height(self):
+        c, g = self.c, self.g
+        base = max(g["ground_front"], g["ground_back"])
+        k = (g["top"] - base) / (c["top"] - c["ground"])
+        # the creature's front feet on the ground land where the game's front feet stand (at the higher ground)
+        self.assertEqual(tuple(round(v, 9) for v in ql.own_space(P(0.0, c["front"], c["ground"]), c, g)),
+                         (0.0, round(g["front"], 9), round(base, 9)))
+        a, b = ql.own_space(P(0.1, 0.0, 0.5), c, g), ql.own_space(P(0.3, 0.4, 1.0), c, g)
+        for d_own, d in zip((b[0] - a[0], b[1] - a[1], b[2] - a[2]), (0.2, 0.4, 0.5)):
+            self.assertAlmostEqual(d_own, d * k, delta=1e-9)
+        self.assertAlmostEqual(ql.own_space(P(0.3, 0.4, 1.0), c, g, size=2.0)[2] - base,
+                               2 * (ql.own_space(P(0.3, 0.4, 1.0), c, g)[2] - base), delta=1e-9)
+
+
 class WidthTests(unittest.TestCase):
     """A creature stretched to a bigger body keeps its own proportions with "keep" (scaled 2x in length and height but
     1x in width, a creature is half as wide as designed)."""
