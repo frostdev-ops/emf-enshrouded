@@ -98,3 +98,10 @@ TEST_CASE("sha256: the standard vectors, also when fed in pieces") {
         CHECK(h.hex() == "cdc76e5c9914fb9281a1c7e284d73e67f1809a48a497200e046d39ccc7112cd0");
     }
 }
+
+TEST_CASE("game-side DLLs: the loader's static imports are KERNEL32 only (user32 and gdi32 for the content build's window load on first use)") {
+    // the dedicated server and a start without EML content load nothing more with EMF's dinput8.dll than before
+    const auto names = imported_dlls(std::string(EMF_BINARY_DIR) + "/dist/dinput8.dll");
+    REQUIRE_FALSE(names.empty());
+    CHECK(names == std::vector<std::string>{"kernel32.dll"});
+}
