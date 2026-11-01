@@ -269,6 +269,22 @@ TEST_CASE("suggest: item names for give, put and any <item> argument, by the fri
     CHECK(at_end("give wood", src, 2).rows.size() == 2);
 }
 
+TEST_CASE("suggest: an argument takes item names when its name has the word \"item\", not a longer word holding it") {
+    auto src = sources();
+    const std::vector<std::pair<std::string, std::string>> more = {
+        {"kit.give", "<itemset>: hand out a set of items"},
+        {"kit.drop", "<item_name> [count]: drop items"},
+        {"kit.pick", "<the item|all>: pick one up"},
+    };
+    for (const auto& [name, help] : more) {
+        src.commands.push_back(name);
+        src.command_help.push_back(help);
+    }
+    CHECK(at_end("kit.give torch", src).rows.empty());  // the name of a set, not of an item
+    CHECK(labels(at_end("kit.drop torch", src)) == std::vector<std::string>{"Tool_Torch01"});
+    CHECK(labels(at_end("kit.pick torch", src)) == std::vector<std::string>{"Tool_Torch01"});
+}
+
 TEST_CASE("suggest: after a name that means one item, a word that starts a choice of the next argument is that argument") {
     const auto src = sources();
     const std::string help = ": hand items to that player (within reach)";

@@ -164,7 +164,7 @@ value that moves is reported to the mod as a change.
 
 | C++ | C | Rules |
 |---|---|---|
-| `emf::add_command(name, help, f)` | `register_command(name, help, cb, user)` | `f(World, args)` when typed in the console or `emf\commands.txt` (`args[0]` is the name). Name `mod.command`, 1-32 of `A-Za-z0-9_.-`. Runs on the host's server world after its step. Register any time. Write `help` as `<args>: what it does` (`"[on\|off]: your Loot Magnet"`, `": your position"`): the console shows it as players type, marks the argument being typed, offers the words of `a\|b` choices and item names for an argument named `<item>` or `<item name>`. |
+| `emf::add_command(name, help, f)` | `register_command(name, help, cb, user)` | `f(World, args)` when typed in the console or `emf\commands.txt` (`args[0]` is the name). Name `mod.command`, 1-32 of `A-Za-z0-9_.-`. Runs on the host's server world after its step. Register any time. Write `help` as `<args>: what it does` (`"[on\|off]: your Loot Magnet"`, `": your position"`): the console shows it as players type, marks the argument being typed, offers the words of `a\|b` choices and item names for an argument named `<item>` or `<item name>`. Words that stand for a value are not offered as choices (`[count\|all]` offers only `all`): count, name, entity, item, number, n, k, m, id, value, text, player, amount, metres, meters, radius, x, y, z, guid, words, word, hours, setting, mod, key, page, label, villager, chest, species, offset, bytes, part; an argument takes item names when its name has the word `item` (not `<itemset>`). |
 | `EMF_REPLY(fmt, ...)` | `command_reply(fmt, ...)` | a reply line to whoever typed the running command. |
 
 ## v7: template data and item definitions

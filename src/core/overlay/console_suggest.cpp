@@ -58,7 +58,8 @@ std::vector<size_t> rank(size_t n, const std::function<Fit(size_t)>& fit_of) {
     return start;
 }
 
-// Words that stand for something to type, not words to type as they are, in "a|b" alternatives.
+// Words that stand for something to type, not words to type as they are, in "a|b" alternatives (docs/modding/
+// reference.md lists them for modders: keep it in step).
 bool stand_in(const std::string& w) {
     static const char* const kWords[] = {"count", "name",  "entity", "item",   "number", "n",      "k",     "m",
                                          "id",    "value", "text",   "player", "amount", "metres", "meters",
@@ -102,7 +103,16 @@ std::vector<std::string> literal_choices(std::string_view name) {
     return out;
 }
 
-bool item_arg(const HintToken& t) { return lower(t.name).find("item") != std::string::npos; }
+// An argument with the word "item" in its name ("<item>", "<item name>", "<item_name>"; not "<itemset>").
+bool item_arg(const HintToken& t) {
+    const std::string n = lower(t.name);
+    const auto word_char = [&](size_t i) {
+        return i < n.size() && ((n[i] >= 'a' && n[i] <= 'z') || (n[i] >= '0' && n[i] <= '9'));
+    };
+    for (size_t at = n.find("item"); at != std::string::npos; at = n.find("item", at + 1))
+        if ((at == 0 || !word_char(at - 1)) && !word_char(at + 4)) return true;
+    return false;
+}
 bool hash_arg(const HintToken& t) { return t.optional && !t.name.empty() && t.name[0] == '#'; }
 
 struct Word {
