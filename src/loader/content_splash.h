@@ -13,6 +13,15 @@
 
 namespace emf::loader {
 
+// The screen's DPI as this process sees it (96 when it is not DPI-aware), and a size at 96 DPI scaled to it.
+inline int screen_dpi() {
+    const HDC screen = GetDC(nullptr);
+    const int dpi = screen ? GetDeviceCaps(screen, LOGPIXELSY) : 96;
+    if (screen) ReleaseDC(nullptr, screen);
+    return dpi > 0 ? dpi : 96;
+}
+inline int splash_scaled(int px, int dpi) { return MulDiv(px, dpi, 96); }
+
 class ContentSplash {
 public:
     ContentSplash() = default;
@@ -36,8 +45,13 @@ public:
         wc.lpszClassName = kClass;
         registered_ = RegisterClassExW(&wc) != 0 || GetLastError() == ERROR_CLASS_ALREADY_EXISTS;
         if (!registered_) return false;
-        const int w = 620, h = 110;
+        const int dpi = screen_dpi();
+        const int w = splash_scaled(620, dpi), h = splash_scaled(110, dpi);
         const int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2, y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
+        font_ = CreateFontW(-MulDiv(10, dpi, 72), 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS,
+                            CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+        margin_ = splash_scaled(16, dpi);
+        line_gap_ = splash_scaled(34, dpi);
         hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClass, L"EMF", WS_POPUP | WS_BORDER,
                                 x, y, w, h, nullptr, nullptr, instance_, this);
         if (!hwnd_) return false;
@@ -78,6 +92,10 @@ public:
             UnregisterClassW(kClass, instance_);
             registered_ = false;
         }
+        if (font_) {
+            DeleteObject(font_);
+            font_ = nullptr;
+        }
     }
 
 private:
@@ -100,11 +118,11 @@ private:
             if (self) {
                 RECT r;
                 GetClientRect(hwnd, &r);
-                InflateRect(&r, -16, -14);
-                SelectObject(dc, GetStockObject(DEFAULT_GUI_FONT));
+                InflateRect(&r, -self->margin_, -self->margin_ * 7 / 8);
+                SelectObject(dc, self->font_ ? static_cast<HGDIOBJ>(self->font_) : GetStockObject(DEFAULT_GUI_FONT));
                 SetBkMode(dc, TRANSPARENT);
                 DrawTextW(dc, self->title_.c_str(), -1, &r, DT_LEFT | DT_TOP | DT_SINGLELINE | DT_END_ELLIPSIS);
-                r.top += 34;
+                r.top += self->line_gap_;
                 const std::wstring last = cio::from_utf8(self->last_line());
                 SetTextColor(dc, GetSysColor(COLOR_GRAYTEXT));
                 DrawTextW(dc, last.c_str(), -1, &r, DT_LEFT | DT_TOP | DT_WORDBREAK | DT_END_ELLIPSIS);
@@ -117,6 +135,8 @@ private:
 
     HWND hwnd_ = nullptr;
     HINSTANCE instance_ = nullptr;
+    HFONT font_ = nullptr;  // the system's UI font at the screen's DPI
+    int margin_ = 16, line_gap_ = 34;
     bool registered_ = false;
     std::wstring title_;
     mutable SRWLOCK lock_ = SRWLOCK_INIT;

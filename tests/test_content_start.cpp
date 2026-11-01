@@ -453,3 +453,15 @@ TEST_CASE("content start: a current state but a shadow whose record does not mat
     good.record_ok = [&ok] { return ok.add("record"), true; };
     CHECK(emf::loader::plan_content(good).path == ContentPath::UseCurrent);
 }
+
+TEST_CASE("content splash: its size follows the screen's DPI") {
+    CHECK(emf::loader::splash_scaled(620, 96) == 620);
+    CHECK(emf::loader::splash_scaled(620, 144) == 930);  // 150 %
+    CHECK(emf::loader::splash_scaled(110, 192) == 220);  // 200 %
+    emf::loader::ContentSplash splash;
+    REQUIRE(splash.begin("EMF is preparing EML content (first start after a change)..."));
+    RECT r{};
+    GetWindowRect(splash.window(), &r);
+    CHECK(r.right - r.left == emf::loader::splash_scaled(620, emf::loader::screen_dpi()));
+    splash.end();
+}
