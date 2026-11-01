@@ -26,6 +26,7 @@
 #include "program_access.h"
 #include "spawn.h"
 #include "teleport.h"
+#include "world_settings_service.h"
 #include "emf/generated/components.hpp"
 
 namespace emf::core {
@@ -1422,6 +1423,66 @@ bool api_teleport(EmfWorld* w, const EmfTeleport* req) {
     return g_state->teleport->request(r, w != nullptr && w == dispatching_world(), nullptr);
 }
 
+// ---- v21: world settings (docs/modding/world_settings.md; the work is ws::Service's, core/world_settings_service.h) ----
+ws::Service* world_settings_or_log(const char* what) {
+    if (!g_state || !g_state->world_settings) {
+        log_once(std::string(what) + ": world settings are not set up on this core");
+        return nullptr;
+    }
+    return g_state->world_settings;
+}
+
+bool api_world_setting_get(const char* key, double* value) {
+    if (!key || !value || !g_state || !g_state->world_settings) return false;
+    return g_state->world_settings->get(key, value, nullptr);
+}
+
+bool api_world_setting_set(const char* key, double value, uint32_t flags) {
+    ws::Service* svc = world_settings_or_log("world_setting_set");
+    if (!svc) return false;
+    if (!key || (flags & ~EMF_WS_PERSIST)) {
+        core_log("world_setting_set refused: " + std::string(key ? "unknown flag bits" : "no key"));
+        return false;
+    }
+    std::string why;
+    if (svc->set(key, value, (flags & EMF_WS_PERSIST) != 0, &why)) return true;
+    core_log("world_setting_set " + std::string(key) + " refused: " + why);
+    return false;
+}
+
+bool api_world_setting_reset(const char* key, uint32_t flags) {
+    ws::Service* svc = world_settings_or_log("world_setting_reset");
+    if (!svc) return false;
+    if (flags & ~EMF_WS_PERSIST) {
+        core_log("world_setting_reset refused: unknown flag bits");
+        return false;
+    }
+    std::string why;
+    if (svc->reset(key ? key : "", (flags & EMF_WS_PERSIST) != 0, &why)) return true;
+    core_log("world_setting_reset " + std::string(key ? key : "all") + " refused: " + why);
+    return false;
+}
+
+bool guarded_world_setting_call(EmfWorldSettingCallback cb, const char* key, double value, void* user) {
+    __try {
+        cb(key, value, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+bool api_on_world_setting_changed(EmfWorldSettingCallback cb, void* user) {
+    if (!cb) return false;
+    ws::Service* svc = world_settings_or_log("on_world_setting_changed");
+    if (!svc) return false;
+    svc->on_changed([cb, user](const std::string& key, double value) {
+        if (!guarded_world_setting_call(cb, key.c_str(), value, user))
+            core_log("a world setting callback in " + module_name_of(reinterpret_cast<const void*>(cb)) + " faulted");
+    });
+    return true;
+}
+
 bool guarded_setting_call(EmfSettingCallback cb, EmfWorld* w, const char* mod, const char* key, void* user) {
     __try {
         cb(w, mod, key, user);
@@ -1456,6 +1517,7 @@ const EmfApi kApi = {
     api_attribute_get, api_attribute_add, api_damage,
     api_chat_tell, api_chat_broadcast, api_player_name, api_on_chat, api_request_save,
     api_teleport,
+    api_world_setting_get, api_world_setting_set, api_world_setting_reset, api_on_world_setting_changed,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

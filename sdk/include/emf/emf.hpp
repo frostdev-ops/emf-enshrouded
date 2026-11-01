@@ -807,4 +807,23 @@ bool on_chat(const char* mod, F f) {
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
 inline bool request_save() { return has_v19() && api()->request_save && api()->request_save(); }
 
+// ---- v21: world settings (docs/modding/world_settings.md) ----
+inline bool has_v21() {
+    return api() && api()->size >= offsetof(EmfApi, on_world_setting_changed) + sizeof(api()->on_world_setting_changed);
+}
+// The running world's value (durations in minutes); nothing for an unknown key, no server world or an older core.
+inline std::optional<double> world_setting(const char* key) {
+    double v = 0;
+    if (!has_v21() || !api()->world_setting_get || !api()->world_setting_get(key, &v)) return std::nullopt;
+    return v;
+}
+// Queued for the next server step; false (logged with the allowed range) when refused. persist: keep it for this world.
+inline bool set_world_setting(const char* key, double value, bool persist = false) {
+    return has_v21() && api()->world_setting_set && api()->world_setting_set(key, value, persist ? EMF_WS_PERSIST : 0u);
+}
+// Back to the world's own value; nullptr: every setting. persist: forget the kept value too.
+inline bool reset_world_setting(const char* key = nullptr, bool persist = false) {
+    return has_v21() && api()->world_setting_reset && api()->world_setting_reset(key, persist ? EMF_WS_PERSIST : 0u);
+}
+
 }  // namespace emf

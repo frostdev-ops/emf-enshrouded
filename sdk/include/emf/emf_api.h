@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 20 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 21 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 20
+#define EMF_API_VERSION 21
 
 /* World kinds (the byte at world+0xE15DC8). */
 #define EMF_WORLD_SERVER 0
@@ -254,6 +254,13 @@ typedef struct EmfTeleport {
     EmfTeleportCallback cb; /* may be NULL */
     void* user;
 } EmfTeleport;
+
+/* v21 world settings (docs/modding/world_settings.md): the running world's ecs::GameSettings */
+#define EMF_WS_PERSIST 0x1u /* world_setting_set / _reset: also keep it for this world (re-applied after each load;
+                               a reset with it forgets the kept value) */
+/* key = the setting's name as enshrouded_server.json has it ("experienceCombatFactor"), value as world_setting_get
+ * gives it. Valid during the call. */
+typedef void (*EmfWorldSettingCallback)(const char* key, double value, void* user);
 
 /* v13 mod_info: what the loader found */
 #define EMF_MOD_LOADED 0u
@@ -650,6 +657,25 @@ typedef struct EmfApi {
      * NPCs: the game removes an enemy moved away from every player within a second (keep NPC teleports near a player);
      * villagers stay and keep their behaviour. A save during a teleport just drops it (Teleport is not saved). */
     bool (*teleport)(EmfWorld* world, const EmfTeleport* request);
+
+    /* ---- v21: world settings (docs/modding/world_settings.md) ---- */
+    /* The running world's settings (the game's ecs::GameSettings: the values of enshrouded_server.json's
+     * "gameSettings", or of the world's preset), changed while it runs. SERVER world only: the host or a dedicated
+     * server (a joined client gets false). Any thread. key = a setting's name as enshrouded_server.json has it
+     * ("playerHealthFactor", case-insensitive) or its short name ("loot", "day_minutes"; the list is in the docs).
+     * Values are numbers: factors as they are, durations in minutes, enums by their number, on/off as 1/0.
+     * A change is queued and written on the next server step; several changes in one step are one write, and the game
+     * sends the new settings to every player (at most once a second). Changes last until the world is left, unless
+     * EMF_WS_PERSIST keeps them for this world. EMF never edits enshrouded_server.json. */
+    bool (*world_setting_get)(const char* key, double* value); /* now; false: unknown key or no server world */
+    bool (*world_setting_set)(const char* key, double value, uint32_t flags); /* flags: EMF_WS_PERSIST. True =
+        queued; false (logged, with the allowed range): unknown key, out of range (never clamped), other flag bits,
+        no server world */
+    bool (*world_setting_reset)(const char* key, uint32_t flags); /* back to the world's own value; key NULL or
+        "all": every setting. With EMF_WS_PERSIST the kept value is forgotten too */
+    bool (*on_world_setting_changed)(EmfWorldSettingCallback cb, void* user); /* cb runs once per changed setting
+        after the server step wrote it (server world's thread), whoever changed it: a command, a mod, a kept value
+        applied after a load. False: cb NULL or no world settings on this core */
 } EmfApi;
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);

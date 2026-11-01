@@ -428,6 +428,7 @@ add_executable(emf_tests
   tests/test_world_settings_file.cpp
   tests/test_world_settings_glue.cpp
   tests/test_world_commands.cpp
+  tests/test_api_world_settings.cpp
   tests/test_mod_loading.cpp
   tests/test_api_settings.cpp
   tests/test_mods_ui.cpp

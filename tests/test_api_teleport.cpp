@@ -205,11 +205,11 @@ bool logged(const std::string& needle) {
 
 TEST_CASE("api v20: the table has teleport after v19's request_save; the flags are the core's") {
     const EmfApi* api = api_table();
-    CHECK(api->version == 20u);
-    CHECK(EMF_API_VERSION == 20);
+    CHECK(api->version >= 20u);
+    CHECK(EMF_API_VERSION >= 20);
     CHECK(api->teleport != nullptr);
     CHECK(offsetof(EmfApi, teleport) == kApiV19Size);
-    CHECK(kApiV20Size == sizeof(EmfApi));
+    CHECK(kApiV20Size == offsetof(EmfApi, world_setting_get));  // v21 appends the world settings
     CHECK(kTeleportV20Size == sizeof(EmfTeleport));
     CHECK(EMF_TELEPORT_FIND_GROUND == kTpFindGround);
     CHECK(EMF_TELEPORT_NOTIFY_READY == kTpNotifyReady);
