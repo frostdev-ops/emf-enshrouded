@@ -261,6 +261,27 @@ typedef struct EmfTeleport {
 /* key = the setting's name as enshrouded_server.json has it ("experienceCombatFactor"), value as world_setting_get
  * gives it. Valid during the call. */
 typedef void (*EmfWorldSettingCallback)(const char* key, double value, void* user);
+/* EmfWorldSettingInfo.type */
+#define EMF_WS_FLOAT 0u   /* a factor or amount */
+#define EMF_WS_BOOL 1u    /* 0 or 1 */
+#define EMF_WS_ENUM 2u    /* a choice by its number, 0 .. max */
+#define EMF_WS_MINUTES 3u /* a duration, in minutes */
+#define EMF_WS_WHOLE 4u   /* a whole number */
+/* EmfWorldSettingInfo.flags */
+#define EMF_WS_CHANGED 0x1u     /* value differs from the world's own (changed in this session or kept) */
+#define EMF_WS_NEEDS_CLIENT 0x2u /* players' games read it too: they follow after the game's resync */
+typedef struct EmfWorldSettingInfo {
+    uint32_t size;     /* set it to sizeof(EmfWorldSettingInfo) */
+    uint32_t type;     /* EMF_WS_FLOAT / _BOOL / _ENUM / _MINUTES / _WHOLE */
+    const char* key;   /* as enshrouded_server.json names it; these strings stay valid */
+    const char* alias; /* the short name, or "" */
+    const char* group; /* "Combat", "Time", ... */
+    double min, max;   /* what world_setting_set accepts */
+    double value;      /* now */
+    double world;      /* the world's own (as it loaded, before this session's changes and kept values) */
+    uint32_t flags;    /* EMF_WS_CHANGED | EMF_WS_NEEDS_CLIENT */
+    uint32_t pad;
+} EmfWorldSettingInfo;
 
 /* v13 mod_info: what the loader found */
 #define EMF_MOD_LOADED 0u
@@ -676,6 +697,8 @@ typedef struct EmfApi {
     bool (*on_world_setting_changed)(EmfWorldSettingCallback cb, void* user); /* cb runs once per changed setting
         after the server step wrote it (server world's thread), whoever changed it: a command, a mod, a kept value
         applied after a load. False: cb NULL or no world settings on this core */
+    bool (*world_setting_info)(uint32_t index, EmfWorldSettingInfo* out); /* the settings one by one from index 0:
+        false past the last one, without a server world, or when out->size is too small */
 } EmfApi;
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);

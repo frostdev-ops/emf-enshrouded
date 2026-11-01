@@ -809,7 +809,7 @@ inline bool request_save() { return has_v19() && api()->request_save && api()->r
 
 // ---- v21: world settings (docs/modding/world_settings.md) ----
 inline bool has_v21() {
-    return api() && api()->size >= offsetof(EmfApi, on_world_setting_changed) + sizeof(api()->on_world_setting_changed);
+    return api() && api()->size >= offsetof(EmfApi, world_setting_info) + sizeof(api()->world_setting_info);
 }
 // The running world's value (durations in minutes); nothing for an unknown key, no server world or an older core.
 inline std::optional<double> world_setting(const char* key) {

@@ -1483,6 +1483,35 @@ bool api_on_world_setting_changed(EmfWorldSettingCallback cb, void* user) {
     return true;
 }
 
+uint32_t world_setting_type(ws::Type t) {
+    switch (t) {
+    case ws::Type::Bool: return EMF_WS_BOOL;
+    case ws::Type::Enum: return EMF_WS_ENUM;
+    case ws::Type::Minutes: return EMF_WS_MINUTES;
+    case ws::Type::Byte: return EMF_WS_WHOLE;
+    case ws::Type::Float: break;
+    }
+    return EMF_WS_FLOAT;
+}
+
+bool api_world_setting_info(uint32_t index, EmfWorldSettingInfo* out) {
+    if (!out || out->size < sizeof(EmfWorldSettingInfo) || !g_state || !g_state->world_settings) return false;
+    const auto rows = g_state->world_settings->rows();  // empty without a hosted world
+    if (index >= rows.size()) return false;
+    const auto& r = rows[index];
+    out->type = world_setting_type(r.field->type);
+    out->key = r.field->key;
+    out->alias = r.field->alias ? r.field->alias : "";
+    out->group = r.field->group ? r.field->group : "";
+    out->min = r.field->min;
+    out->max = r.field->max;
+    out->value = r.value;
+    out->world = r.world;
+    out->flags = (r.changed ? EMF_WS_CHANGED : 0u) | (r.field->needs_client ? EMF_WS_NEEDS_CLIENT : 0u);
+    out->pad = 0;
+    return true;
+}
+
 bool guarded_setting_call(EmfSettingCallback cb, EmfWorld* w, const char* mod, const char* key, void* user) {
     __try {
         cb(w, mod, key, user);
@@ -1518,6 +1547,7 @@ const EmfApi kApi = {
     api_chat_tell, api_chat_broadcast, api_player_name, api_on_chat, api_request_save,
     api_teleport,
     api_world_setting_get, api_world_setting_set, api_world_setting_reset, api_on_world_setting_changed,
+    api_world_setting_info,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

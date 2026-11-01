@@ -51,6 +51,8 @@ TEST_CASE("api v21: the table has the world settings functions after v20's telep
     CHECK(EMF_API_VERSION == 21);
     CHECK(offsetof(EmfApi, world_setting_get) == kApiV20Size);
     CHECK(kApiV21Size == sizeof(EmfApi));
+    CHECK(api->world_setting_info != nullptr);
+    CHECK(sizeof(EmfWorldSettingInfo) == 72);
     CHECK(api->world_setting_get != nullptr);
     CHECK(api->world_setting_set != nullptr);
     CHECK(api->world_setting_reset != nullptr);
@@ -124,4 +126,61 @@ TEST_CASE("emf.hpp v21: world_setting, set_world_setting and reset_world_setting
     CHECK(emf::reset_world_setting("loot"));
     fx.ws_state.on_server_step(bytes(fx.live), 1, 3000);
     CHECK(*emf::world_setting("loot") == doctest::Approx(1));
+}
+
+TEST_CASE("api v21: world_setting_info lists every setting with its range, now and the world's own value") {
+    Fixture fx;
+    const EmfApi* api = api_table();
+    EmfWorldSettingInfo info{};
+    info.size = sizeof info;
+    uint32_t n = 0;
+    bool saw_loot = false, saw_day = false;
+    while (api->world_setting_info(n, &info)) {
+        REQUIRE(info.key != nullptr);
+        REQUIRE(info.alias != nullptr);
+        REQUIRE(info.group != nullptr);
+        if (std::string(info.alias) == "loot") {
+            saw_loot = true;
+            CHECK(info.type == EMF_WS_FLOAT);
+            CHECK(info.min == doctest::Approx(0.25));
+            CHECK(info.max == doctest::Approx(2));
+            CHECK(info.value == doctest::Approx(1));
+            CHECK(info.world == doctest::Approx(1));
+            CHECK((info.flags & EMF_WS_CHANGED) == 0);
+        }
+        if (std::string(info.alias) == "day_minutes") saw_day = true;
+        ++n;
+    }
+    CHECK(n == 38);
+    CHECK(saw_loot);
+    CHECK(saw_day);
+    // after a change: now and the world's own value differ, and the setting is marked changed
+    api->world_setting_set("day_minutes", 10, 0);
+    fx.ws_state.on_server_step(bytes(fx.live), 1, 1000);
+    for (uint32_t i = 0; api->world_setting_info(i, &info); ++i) {
+        if (std::string(info.alias) != "day_minutes") continue;
+        CHECK(info.type == EMF_WS_MINUTES);
+        CHECK(info.value == doctest::Approx(10));
+        CHECK(info.world == doctest::Approx(30));
+        CHECK((info.flags & EMF_WS_CHANGED) != 0);
+    }
+    // a too small size field, no struct, or past the end: false
+    EmfWorldSettingInfo tiny{};
+    tiny.size = 8;
+    CHECK_FALSE(api->world_setting_info(0, &tiny));
+    CHECK_FALSE(api->world_setting_info(0, nullptr));
+    CHECK_FALSE(api->world_setting_info(n, &info));
+}
+
+TEST_CASE("api v21: world_setting_info without a hosted world answers false") {
+    CoreState state;
+    state.log_line = [](const std::string&) {};
+    ws::State st;
+    ws::Service svc{st, ws::ServiceDeps{[] { return static_cast<uint8_t*>(nullptr); }, [] { return 0u; }}};
+    state.world_settings = &svc;
+    set_core_state(&state);
+    EmfWorldSettingInfo info{};
+    info.size = sizeof info;
+    CHECK_FALSE(api_table()->world_setting_info(0, &info));
+    set_core_state(nullptr);
 }
