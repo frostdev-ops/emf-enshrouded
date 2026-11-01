@@ -5,6 +5,7 @@
 #include <cmath>
 #include <fstream>
 #include <map>
+#include <set>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -407,6 +408,30 @@ TEST_CASE("raids: only creatures you are ready for: never a template from above 
     CHECK_FALSE(remove_unready_boss(false, custom[1], true));
 }
 
+TEST_CASE("raids: a bare custom GUID found to be a boss is skipped from then on: Vukah warriors come in its place") {
+    const std::string boss = "9c8e2008-7259-4114-b6fc-615f0f181c04", other = "d5d05217-52dc-467a-9192-26b4f661d8d9";
+    const std::set<std::string> found = {boss};
+    const std::vector<Template> only = {{"custom", boss, 1, 99, false}};
+    for (uint32_t rnd = 0; rnd < 6; ++rnd) {
+        CHECK(choose_raider(only, 10, 10, rnd, true, &found).guid == verified_pool()[0].guid);
+        CHECK(choose_raider({{"custom", boss, 1, 99, false}, {"custom", other, 1, 99, false}}, 10, 10, rnd, true, &found).guid ==
+              other);
+    }
+    CHECK(choose_raider(only, 10, 10, 0, true, nullptr).guid == boss);  // not found yet: it may come (then it is checked)
+    CHECK(choose_raider({{"custom", boss, 5, 99, true}}, 10, 10, 0, true, &found).guid == boss);  // GUID@5: allowed
+    CHECK(choose_raider(only, 10, 10, 0, false, &found).guid == boss);  // the rule off: as before
+}
+
+TEST_CASE("raids: custom templates take spaces around the @") {
+    std::vector<std::string> bad;
+    const auto custom = parse_custom_templates("d5d05217-52dc-467a-9192-26b4f661d8d9 @ 12,9c8e2008-7259-4114-b6fc-615f0f181c04@ 3", &bad);
+    REQUIRE(custom.size() == 2);
+    CHECK(custom[0].guid == "d5d05217-52dc-467a-9192-26b4f661d8d9");
+    CHECK(custom[0].min_level == 12u);
+    CHECK(custom[1].min_level == 3u);
+    CHECK(bad.empty());
+}
+
 // ---- where raiders appear ----
 TEST_CASE("raids: inside a base is within its radius (horizontally, the radius rule)") {
     const std::vector<Base> bases = {{1, {0, 0, 0}}, {2, {500, 0, 0}}};
@@ -576,6 +601,19 @@ TEST_CASE("raids: whom a raider fights: the nearest living player, or with allie
     CHECK(targets_mode("players") == Targets::Players);
     CHECK(targets_mode("allies") == Targets::Allies);
     CHECK(targets_mode("") == Targets::Allies);  // the default
+}
+
+TEST_CASE("raids: a raider keeps its target while it lives and is in reach (no flipping every 3 s)") {
+    const Vec3 r{0, 0, 0};
+    const std::vector<Foe> foes = {{1, {6, 0, 0}, true, true}, {5000, {3, 0, 0}, false, true}};
+    CHECK(pick_target(r, foes, 25, Targets::Allies) == 5000u);
+    CHECK(pick_target(r, foes, 25, Targets::Allies, 1) == 1u);       // it fights the player: it goes on with the player
+    CHECK(pick_target(r, foes, 25, Targets::Allies, 5000) == 5000u);
+    CHECK(pick_target(r, foes, 5, Targets::Allies, 1) == 5000u);     // the player got out of reach
+    CHECK(pick_target(r, foes, 25, Targets::Players, 5000) == 1u);   // allies are not wanted now
+    CHECK(pick_target(r, foes, 25, Targets::Allies, 777) == 5000u);  // its last target is gone
+    const std::vector<Foe> dead = {{1, {6, 0, 0}, true, false}, {5000, {3, 0, 0}, false, true}};
+    CHECK(pick_target(r, dead, 25, Targets::Allies, 1) == 5000u);    // never a dead one
 }
 
 TEST_CASE("raids: presets: gentle, standard and hard set how often and how hard; custom keeps the settings one by one") {

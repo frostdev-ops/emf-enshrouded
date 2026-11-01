@@ -22,7 +22,8 @@ The switch is kept with the world (`emf\config\raids\<world slot>.txt`). `raids.
 2. A warning: "The Shroud stirs: raiders gather outside your base and attack in 60 s!", and a countdown on screen.
 3. The waves: the raiders appear 40-60 m from the altar (always 5 m or more beyond the base radius, never inside a base),
    at the level of the strongest player at the base plus the difficulty, and march on the altar. Within 25 m of a living
-   player, companion or summon they fight the nearest one (with **Raiders attack** on "Players only", players alone).
+   player, companion or summon they fight the nearest one, and keep at it while it lives and stays near (with
+   **Raiders attack** on "Players only", players alone).
    The next wave comes after **Seconds between waves**, or 5 s after a whole wave is dead. At
    most 24 raiders are alive at once.
 4. Every raider dead: "Raid repelled!", and every player near the base (within 20 m of the raiders' ring, about 80 m
@@ -51,7 +52,7 @@ raid comes when you sleep through nightfall.
 | Seconds between waves (`wave_gap_seconds`) | 60 | 20-300 |
 | Difficulty (`difficulty`) | normal | easy (5 levels below the strongest player at the base), normal, hard (+3), deadly (+6) |
 | Boss wave (`boss`) | off | the last wave brings a Vukah brawler, a mini-boss with a boss bar (from level 5 with **Only creatures you are ready for**) |
-| Raiders attack (`targets`) | players, companions and summons | or players only. Allies are the fighters on the players' side: the companion, Necromancer's minions, Beastmaster's beasts, the game's own summons (never farm animals) |
+| Raiders attack (`targets`) | players, companions and summons | or players only. Allies are the fighters on the players' side: the companion, Necromancer's minions, Beastmaster's beasts, the game's own summons (never farm animals or villagers) |
 | Only creatures you are ready for (`progression`) | on | no boss or creature above the players' level (below) |
 | Who raids (`templates`) | Vukah warriors | or your own templates (below) |
 | My own templates (`custom_templates`) | | template GUIDs separated by commas; `GUID@12` comes from player level 12 |
@@ -110,7 +111,9 @@ and which bosses you have beaten where EMF cannot read them yet, so the rule goe
   level counts.
 - Your own templates: write `GUID@level` and that creature waits for a player of that level (a dragon as `GUID@25`).
   A bare GUID comes at any level, but if it turns out to be a boss or mini-boss (it has a boss bar), it is removed at
-  once: EMF cannot tell whether you have beaten it. When none of your templates is ready yet, Vukah warriors come.
+  once (EMF cannot tell whether you have beaten it): a Vukah warrior takes its place, a note says so once, and Vukah
+  warriors come instead of that template until the game restarts. When none of your templates is ready yet, Vukah
+  warriors come. Spaces around the `@` are fine.
 
 Switch the rule off to get the old behaviour.
 

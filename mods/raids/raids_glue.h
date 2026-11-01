@@ -27,11 +27,15 @@ inline bool is_boss(emf::World w, uint32_t id) {
 
 // A fighter on the players' side that is not a player: the companion, a summon, a tamed beast. Its faction is the
 // players' side (Player, AutomatedPlayer, PlayerAlly) and it runs the enemy AI that fights (they all guard their owner
-// through it). Baby farm animals are PlayerAlly too, but have no such AI.
+// through it). Baby farm animals are PlayerAlly too, but have no such AI; villagers (their template has ActiveNpcState,
+// as the companion's Attack order tells them) never count.
 inline bool is_ally(emf::World w, uint32_t id) {
     namespace ecs = emf::gen::ecs;
     using F = emf::gen::FactionType;
     if (w.get<ecs::PlayerState>(id)) return false;
+    const EmfApi* a = emf::api();
+    if (a && a->get_template_component && a->get_template_component(w.raw(), ecs::ActiveNpcState::kHash, id, nullptr))
+        return false;
     auto* f = w.get<ecs::Faction>(id);
     if (!f || (f->faction != F::Player && f->faction != F::AutomatedPlayer && f->faction != F::PlayerAlly)) return false;
     return w.get<ecs::DynamicEnemy01BehaviorState>(id) != nullptr;

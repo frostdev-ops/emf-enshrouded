@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -228,13 +229,18 @@ struct Foe {
     bool player = false;  // a player; else an ally of the players
     bool alive = true;    // health left
 };
-// The one a raider at `at` is told to fight: the nearest living foe within `range` metres (horizontally); allies count
-// only with Targets::Allies. 0 when there is none: the raider keeps marching on the altar.
-inline uint32_t pick_target(const Vec3& at, const std::vector<Foe>& foes, double range, Targets mode) {
+// The one a raider at `at` is told to fight: `keep` (its last target) while that one is alive, wanted and within
+// `range` metres, so it does not flip between the player and the companion; else the nearest living foe within range
+// (horizontally). Allies count only with Targets::Allies. 0 when there is none: the raider keeps marching on the altar.
+inline uint32_t pick_target(const Vec3& at, const std::vector<Foe>& foes, double range, Targets mode, uint32_t keep = 0) {
+    const auto wanted = [&](const Foe& f) { return f.alive && (f.player || mode == Targets::Allies); };
+    if (keep)
+        for (const auto& f : foes)
+            if (f.id == keep && wanted(f) && horizontal_distance(f.pos, at) <= range) return keep;
     uint32_t best = 0;
     double best_d = range;
     for (const auto& f : foes) {
-        if (!f.alive || (!f.player && mode != Targets::Allies)) continue;
+        if (!wanted(f)) continue;
         const double d = horizontal_distance(f.pos, at);
         if (d <= best_d) {
             best_d = d;
@@ -295,12 +301,17 @@ inline std::vector<Template> parse_custom_templates(const std::string& text, std
         while (!t.empty() && (t.back() == ' ' || t.back() == '\t')) t.pop_back();
         uint8_t g[16];
         if (!t.empty()) {
+            const auto trim = [](std::string v) {
+                while (!v.empty() && (v.front() == ' ' || v.front() == '\t')) v.erase(0, 1);
+                while (!v.empty() && (v.back() == ' ' || v.back() == '\t')) v.pop_back();
+                return v;
+            };
             const size_t at_sign = t.find('@');
-            const std::string guid = t.substr(0, at_sign);
+            const std::string guid = trim(t.substr(0, at_sign));
             uint32_t level = 1;
             bool ok = parse_guid_text(guid, g), known = false;
             if (ok && at_sign != std::string::npos) {
-                const std::string lv = t.substr(at_sign + 1);
+                const std::string lv = trim(t.substr(at_sign + 1));
                 ok = !lv.empty() && lv.size() <= 2 && lv.find_first_not_of("0123456789") == std::string::npos;
                 if (ok) level = static_cast<uint32_t>(std::stoul(lv));
                 ok = ok && level >= 1 && level <= 99;
@@ -319,13 +330,15 @@ inline std::vector<Template> parse_custom_templates(const std::string& text, std
 // base has reached its own level (min_level), and a boss or mini-boss likewise.
 //
 // A raider for this wave: with the rule, only templates whose level the player has reached (the tested Vukah warrior
-// when none has), by the band holding the raiders' level; without it, as pick_template.
+// when none has), by the band holding the raiders' level; without it, as pick_template. `found_bosses`: bare custom
+// GUIDs already seen to be a boss or mini-boss (remove_unready_boss), skipped with the rule.
 inline Template choose_raider(const std::vector<Template>& pool, uint32_t raider_level, uint32_t player_level,
-                              uint32_t rnd, bool progression) {
+                              uint32_t rnd, bool progression, const std::set<std::string>* found_bosses = nullptr) {
     if (!progression) return pick_template(pool, raider_level, rnd);
     std::vector<Template> ready;
     for (const auto& t : pool)
-        if (t.min_level <= (std::max)(player_level, 1u)) ready.push_back(t);
+        if (t.min_level <= (std::max)(player_level, 1u) && (t.known || !found_bosses || !found_bosses->count(t.guid)))
+            ready.push_back(t);
     if (ready.empty()) ready.push_back(verified_pool()[0]);
     return pick_template(ready, raider_level, rnd);
 }

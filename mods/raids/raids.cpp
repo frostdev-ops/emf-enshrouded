@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -153,10 +154,30 @@ std::vector<PendingLevel> g_levels;
 struct PendingVet {  // a raider from a custom template whose level is not known: watched for 10 s for a boss bar
     uint32_t id;
     uint64_t until_ms;
+    std::string guid;    // its template
+    uint32_t level, altar;
 };
 std::vector<PendingVet> g_vet;
+std::set<std::string> g_found_bosses;  // bare custom GUIDs seen to be a boss or mini-boss: Vukah warriors come instead
 std::map<uint32_t, raids::RaiderId> g_ids;  // who each raider is (template, level): ids are reused once one is gone
+std::map<uint32_t, uint32_t> g_targets;     // each raider's last target (it keeps it while it lives and is near)
 raids::StuckWatch g_stuck;
+
+// Puts one raider of template `t` at `p` (level written soon, marching on `altar`). 0 when the game refused it.
+uint32_t spawn_raider(emf::World w, const raids::Template& t, const raids::Vec3& p, uint32_t level, uint32_t altar,
+                      bool vet) {
+    uint8_t guid[16];
+    if (!raids::parse_guid_text(t.guid, guid)) return 0;
+    const uint32_t id = emf::api()->spawn(w.raw(), guid, p.x, p.y, p.z);
+    if (!id) return 0;
+    g_director.on_spawned(id);
+    g_ids[id] = raids::identify(w, id);
+    g_stuck.on_spawned(id, p, GetTickCount64());
+    g_levels.push_back({id, level, GetTickCount64() + 10000});
+    if (vet) g_vet.push_back({id, GetTickCount64() + 10000, t.guid, level, altar});
+    order(g_guards, id, altar);  // march on the altar (seen in game)
+    return id;
+}
 
 std::optional<raids::Vec3> pos_of(emf::World w, uint32_t id) {
     auto* t = w.get<gen::CurrentTransform>(id);
@@ -206,20 +227,14 @@ void spawn_wave(emf::World w, const raids::Action& a, const Config& c) {
     int spawned = 0;
     for (size_t i = 0; i < points.size(); ++i) {
         const bool boss = a.boss && i + 1 == points.size();
-        const raids::Template t =
-            boss ? raids::boss_template() : raids::choose_raider(pool, a.level, a.player_level, g_rng(), c.s.progression);
-        uint8_t guid[16];
-        if (!raids::parse_guid_text(t.guid, guid)) continue;
+        const raids::Template t = boss ? raids::boss_template()
+                                       : raids::choose_raider(pool, a.level, a.player_level, g_rng(), c.s.progression,
+                                                              &g_found_bosses);
         const auto& p = points[i];
-        const uint32_t id = emf::api()->spawn(w.raw(), guid, p.x, p.y, p.z);
+        const uint32_t id =
+            spawn_raider(w, t, p, a.level, a.altar, raids::remove_unready_boss(c.s.progression, t, true));
         if (!id) continue;
         ++spawned;
-        g_director.on_spawned(id);
-        g_ids[id] = raids::identify(w, id);
-        g_stuck.on_spawned(id, p, GetTickCount64());
-        g_levels.push_back({id, a.level, GetTickCount64() + 10000});
-        if (raids::remove_unready_boss(c.s.progression, t, true)) g_vet.push_back({id, GetTickCount64() + 10000});
-        order(g_guards, id, a.altar);  // march on the altar (seen in game)
         EMF_LOG(kMod, "raider %u (%s, level %u) at (%.1f, %.1f, %.1f), %.0f m from altar %u", id, t.name.c_str(), a.level,
                 p.x, p.y, p.z, raids::horizontal_distance(p, a.at), a.altar);
     }
@@ -256,11 +271,21 @@ void vet_bosses(emf::World w, uint64_t now) {
         const uint32_t id = g_vet[i].id;
         bool done = !ours(w, id) || now >= g_vet[i].until_ms;
         if (!done && raids::is_boss(w, id)) {
+            const PendingVet v = g_vet[i];
+            const auto at = pos_of(w, id);
             emf::api()->destroy(w.raw(), id);
             g_director.on_gone(id);
             g_stuck.forget(id);
-            EMF_LOG(kMod, "raider %u is a boss or mini-boss from a custom template without a level: removed (Only creatures "
-                          "you are ready for; give it one as GUID@level, or switch the rule off)", id);
+            EMF_LOG(kMod, "raider %u (%s) is a boss or mini-boss from a custom template without a level: removed (Only "
+                          "creatures you are ready for; write it as GUID@level, or switch the rule off)", id, v.guid.c_str());
+            if (g_found_bosses.insert(v.guid).second)
+                EMF_NOTIFY("Night Raids: one of your templates is a boss or mini-boss without a level; Vukah warriors come "
+                           "in its place (write it as GUID@level to let it come)");
+            if (at) {  // a Vukah warrior takes its place in the wave
+                const uint32_t warrior = spawn_raider(w, raids::verified_pool()[0], *at, v.level, v.altar, false);
+                EMF_LOG(kMod, "raider %u (%s) takes its place%s", warrior, raids::verified_pool()[0].name.c_str(),
+                        warrior ? "" : ": FAILED (see the core log)");
+            }
             done = true;
         }
         if (done) g_vet.erase(g_vet.begin() + static_cast<std::ptrdiff_t>(i));
@@ -361,13 +386,19 @@ void upkeep(emf::World w, uint64_t now, const std::vector<raids::Player>& player
         for (const auto& a : raids::allies_near(w, g_director.base().pos,
                                                 raids::ring_for(c.s.base_radius).max + 20 + kThreatRange))
             foes.push_back(a);
+    std::map<uint32_t, uint32_t> targets;  // the living raiders' targets now (gone raiders drop out)
     for (uint32_t id : g_director.living()) {
         auto* ai = w.get<gen::DynamicEnemy01BehaviorState>(id);
         if (ai && ai->guardEntityId.id != altar) order(g_guards, id, altar);
         const auto p = pos_of(w, id);
         if (!p) continue;
-        if (const uint32_t target = raids::pick_target(*p, foes, kThreatRange, c.targets)) order(g_threats, id, target);
+        const auto last = g_targets.find(id);
+        const uint32_t target =
+            raids::pick_target(*p, foes, kThreatRange, c.targets, last == g_targets.end() ? 0 : last->second);
+        if (target) order(g_threats, id, target);
+        targets[id] = target;
     }
+    g_targets.swap(targets);
 }
 
 // The per-world switch: the world's file decides; the setting mirrors it (switching the setting while the world is
@@ -390,6 +421,7 @@ void sync_session(emf::World w) {
     g_crumbs.clear();
     g_levels.clear();
     g_vet.clear();
+    g_targets.clear();
     g_ids.clear();
     g_stuck.clear();
     g_bases_ms = 0;

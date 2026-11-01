@@ -125,6 +125,9 @@ TEST_CASE("raids glue: allies are the players' fighters (companion, summons, tam
     CHECK_FALSE(raids::is_ally(w, 5005));
     CHECK_FALSE(raids::is_ally(w, 1));
     CHECK_FALSE(raids::is_ally(w, 9999));
+    fighter(5006, emf::gen::FactionType::Player, 12);  // a villager (its template has ActiveNpcState): never a target
+    g_tpl[{gen::ActiveNpcState::kHash, 5006}] = 0xC000;
+    CHECK_FALSE(raids::is_ally(w, 5006));
     const auto near = raids::allies_near(w, {0, 0, 0}, 100);
     REQUIRE(near.size() == 3);
     CHECK(near[0].id == 5000u);
