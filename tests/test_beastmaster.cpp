@@ -494,6 +494,7 @@ size_t logged(const Fake& f, const std::string& needle) {
 TEST_CASE("wild bears: one spawns 50-70 m from a player when none exists; none when the pack is missing") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));  // only the bear pack: the bear every time
+    b.r.fake.missing_templates.insert(guid_bytes("d4c87337-8c53-41df-8488-8079046e1502"));  // (no beasts pack snake)
     b.spawnable(3);
     b.seconds(30);
     CHECK(b.r.fake.spawns.empty());  // not before a minute of play
