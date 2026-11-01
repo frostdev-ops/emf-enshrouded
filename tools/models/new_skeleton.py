@@ -6,7 +6,8 @@ themselves (an armature with Blender's -90 degree turn and a scale) are folded i
 and its world position (times `scale`) and gets unit scale. Game space is glTF mirrored in x (gamegltf.py).
 
 A joint's name hash is CRC32 of its lowercase name, so the skeleton's clip hash (joint_animation.hierarchy_hash)
-follows from the names. write_glb writes a copy of the model on this skeleton, every joint named jNNN_<name> by its
+follows from the names; a joint of the file called root (any case) is hashed as root.1, the skeleton's own root being
+root. write_glb writes a copy of the model on this skeleton, every joint named jNNN_<name> by its
 index, which gltf_in.load_groups reads with the hierarchy.
 """
 import json
@@ -174,11 +175,16 @@ def name_hash(name):
     return zlib.crc32(name.lower().encode("utf-8"))
 
 
+def hash_names(names):
+    """The names the joints are hashed by: the skeleton's root is "root", a file joint of that name "root.1"."""
+    return [n if j == 0 or n.lower() != "root" else n + ".1" for j, n in enumerate(names)]
+
+
 def hierarchy(sk, guid):
     """The skeleton as EML shows a keen::ModelHierarchyResource: names hashed, parents (65535 at the root), the rest
     pose (defaultPoseJoints and the defaultPose vectors, both padded to a multiple of 4 joints as the game's are) and
     the inverse binds."""
-    names = [name_hash(n) for n in sk["names"]]
+    names = [name_hash(n) for n in hash_names(sk["names"])]
     seen = {}
     for n, h in zip(sk["names"], names):
         if h in seen:
