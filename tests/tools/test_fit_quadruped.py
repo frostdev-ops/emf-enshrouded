@@ -6,6 +6,7 @@ import json
 import os
 import shutil
 import subprocess
+import sys
 import tempfile
 import unittest
 
@@ -16,7 +17,10 @@ BOAR = os.path.join(ROOT, "analysis", "models", "game_enemy_wildboar_01.glb")
 BLENDER = os.environ.get("BLENDER") or shutil.which("blender")
 TAIL_ROOT = "j044"  # the boar's tail: j044 < j045 < j046 < j047 under the pelvis
 LEG_ROOTS = ("j032", "j037", "j048", "j052")
-FEET = ("j036", "j041", "j051", "j055")  # the boar's lowest joints: front left/right, hind left/right  # the boar's legs (no named bones): front under the chest, hind the pelvis
+FEET = ("j036", "j041", "j051", "j055")
+BOAR_SKELETON = os.path.join(ROOT, "analysis", "model_survey", "hierarchies", "d3cb046d-2c4a-47da-b8b0-0780d4752ba6.json")
+sys.path.insert(0, os.path.join(ROOT, "tools", "models"))
+import own_skeleton as osk  # noqa: E402  # the boar's lowest joints: front left/right, hind left/right  # the boar's legs (no named bones): front under the chest, hind the pelvis
 
 
 def blender(script, *args):
@@ -89,6 +93,13 @@ class FitQuadrupedTests(unittest.TestCase):
             hind = [joints[f][1] for f in FEET[2:]]
             # the animal's legs are 1.2 m apart (y -0.6 and 0.6) before the scale to the boar's height
             self.assertAlmostEqual((sum(hind) - sum(front)) / 2 / own["scale"], 1.2, delta=0.15)
+            if os.path.exists(BOAR_SKELETON):  # the sidecar's space against the game's: the boar's own rest pose
+                with open(BOAR_SKELETON, encoding="utf-8") as f:
+                    rest, parents = osk.rest_of(json.load(f))
+                world = osk.world(rest, parents)
+                for j, joint in enumerate(own["joints"]):
+                    for a, b in zip(osk.blender_to_game(joint["game"]), world[j][1]):
+                        self.assertAlmostEqual(a, b, delta=1e-4, msg=joint["name"])
 
 
 def bbox(path):
