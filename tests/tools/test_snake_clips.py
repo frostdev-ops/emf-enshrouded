@@ -63,6 +63,17 @@ class PoseTests(unittest.TestCase):
         for a, b in zip(self.body["joints"], self.body["joints"][1:]):
             self.assertAlmostEqual(math.dist(w[a][1], w[b][1]), 0.1, places=4)
 
+    def test_a_body_whose_tail_rests_raised_lies_at_its_middle_height(self):
+        """The pit viper's scan holds its tail up: the body lies on the ground at its middle's resting height."""
+        sk = snake()
+        sk["rest"] = sk["rest"][:9] + [(I, (0.0, 0.03, -0.1), (1.0, 1.0, 1.0))] * 3  # the last three joints rise
+        bd = sc.body(sk, "head")
+        w = osk.world(sc.pose(sk, bd, {}), sk["parents"])
+        rest = osk.world(sk["rest"], sk["parents"])
+        mid = bd["joints"][4]
+        self.assertAlmostEqual(w[mid][1][1], rest[mid][1][1], places=4)
+        self.assertAlmostEqual(w[bd["joints"][-1]][1][1], rest[mid][1][1], places=4)  # the tail down on the ground
+
     def test_a_roll_turns_the_body_over(self):
         w = self.world({"roll": 180})
         for j in self.body["joints"]:

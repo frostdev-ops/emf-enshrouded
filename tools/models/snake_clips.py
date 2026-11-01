@@ -8,7 +8,7 @@ length L): at arc length s the body points along heading phi (about y, 0 = +z) a
   phi(s)   = wave * sin(2 pi s / (wavelength L) - phase) * (1 - w(s)) + coil * sin(2 pi s / (rise_len L)) * w(s)
   theta(s) = rise * w(s) + head where s is within the first joint
   w(s)     = (1 + cos(pi s / (rise_len L))) / 2 before rise_len L, else 0 (the raised part, easing into the ground)
-Its back (the tail) stays at its resting height and the point anchor L (half way by default) where it rests
+Its back lies on the ground at the resting height of the point anchor L (half way by default; a scan may hold its tail up), which stays where it rests
 sideways: a wave travels along a body that stays in place, as the game moves creatures itself. roll turns the body
 about its length (a death on its back).
 
@@ -138,12 +138,12 @@ def pose(sk, bd, params):
     joints, s, length, rest = bd["joints"], bd["s"], bd["length"], bd["rest"]
     curve = _curve(length, p, s[1])
     placed = _chain(curve, [b - a for a, b in zip(s, s[1:])])
-    # the tail at its resting height, the anchor point where it rests sideways
-    tail_y = rest[joints[-1]][1][1] - placed[-1][0][1]
+    # the back on the ground (the curve's flat tail end) at the resting height of the anchor point (the middle: a
+    # scan may hold its tail up), the anchor where it rests sideways
     sa = p["anchor"] * length
     rest_a = _rest_point(bd, sa)
     got_a, _ = _at(curve, sa)
-    shift = (rest_a[0] - got_a[0], tail_y, rest_a[2] - got_a[2])
+    shift = (rest_a[0] - got_a[0], rest_a[1] - placed[-1][0][1], rest_a[2] - got_a[2])
     world = [list(w) for w in rest]
     for i, j in enumerate(joints):
         pt, d = placed[i]
