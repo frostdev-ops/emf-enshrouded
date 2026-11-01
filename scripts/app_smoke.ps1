@@ -9,6 +9,10 @@
 # - the canary's texts show as text, and nothing in them runs;
 # - the page cannot reach the network or leave https://emf.app/ (a fetch and a navigation from the page);
 # - clicking the chained DLL's switch comments out its line in dinput8-chain.ini (page script -> host -> file);
+# - several switches in a row share one note ("2 changes take effect at the next game start."), not one each;
+# - the Play menu: Play, Play without EMF mods (it writes the loader's one-shot flag emf\play_once.txt; a test run never
+#   opens the steam:// link) and Play without any mods; with an older loader those two stay reachable (aria-disabled,
+#   with the reason) and do nothing; the arrow keys, Home and End reach every entry;
 # - with a stand-in enshrouded.exe running from the folder, that switch is locked and the file stays as it is;
 # - mod profiles through the page: Save as writes emf\profiles\<name>.json and the picker shows it; a switch makes
 #   it say "(changed)"; Switch puts the switch back (dinput8-chain.ini as it was);
@@ -22,7 +26,9 @@
 #   of the details, Enter saves the link; with the Premium key, "Update with EMF" with the file's changelog opens the plan
 #   of the same install;
 # - "Install a downloaded file" through the page (a zip made here; install_path is the test's stand-in for the file
-#   dialog): the plan, Install, the files and the dinput8-chain.ini line; then Uninstall takes them out again;
+#   dialog): the plan, Install, the files and the dinput8-chain.ini line; then Uninstall takes them out again, its
+#   question naming the other mod of the same install; a zip of two packs installs as two installs, and uninstalling
+#   one leaves the other; one record of two packs (as EMF.exe 0.3.2 wrote it) uninstalls one pack at a time;
 # - the Nexus account (offline, recorded replies): the EMF tab's account card says the key is "not set"; the nxm://
 #   setting shows the current handler and switches in a registry in memory (the real HKCU is never written); a key
 #   saved through the page is checked, stored encrypted (never in the page) and shows the account as Premium; "Download
@@ -39,9 +45,9 @@
 #   settings saved through the page, Start and Stop against a stand-in enshrouded_server.exe (clean stop on
 #   Ctrl+C), the server's log with a password stripped, Install EMF with a package's own install.ps1, and a
 #   client mod flagged on the server's Mods tab;
-# - the Saves tab against fake save folders: the starter backup at the first start and the list, Back up now, restoring
-#   one Local file (the Steam Cloud warning for a Steam file), Delete cancelled then confirmed, and the refusal while a
-#   stand-in game runs;
+# - the Saves tab against fake save folders: the starter backup at the first start and the list, Back up now, Pick
+#   files... (the hint, the named files), restoring one Local file (the Steam Cloud warning for a Steam file), Delete
+#   cancelled then confirmed, and the refusal while a stand-in game runs;
 # - without the WebView2 runtime EMF.exe says so and exits 1;
 # - EMF.exe imports none of the proxy DLL names mods put next to the game.
 # The runs are off-screen and never take the focus. Never touches the real game folder (--game, EMF_TEST_NO_STEAM) or
@@ -126,7 +132,7 @@ function Copy-In([string]$from, [string]$rel) {
 }
 $version = "$(Get-Content -LiteralPath (Join-Path $repo "VERSION") -TotalCount 1)".Trim()
 Write-File "enshrouded.exe" "fake"
-Write-File "dinput8.dll" "EMF-LOADER-7d3c9f fake"
+Write-File "dinput8.dll" "EMF-LOADER-7d3c9f EMF-PLAY-ONCE-1 fake"  # a loader that takes the Play menu's flag
 Write-File "dbghelp.dll" "EML stand-in EML_LOG_FILE_PATH"  # EML loads the mods in mods\
 Write-File "emf\emf_core.dll" ("emf_core $version" + [char]0)
 Copy-In "src\core\known_tools.txt" "emf\known_tools.txt"
@@ -269,6 +275,45 @@ try {
     $chain = Get-Content -LiteralPath (Join-Path $game "dinput8-chain.ini") -Raw
     Check ($chain -eq "[Chain]`r`n; creative.dll`r`n") "clicking the switch of creative.dll comments out its line in dinput8-chain.ini ($($chain.Trim() -replace "`r`n", ' | '))"
 
+    # 3b. several switches in a row share one note ("2 changes take effect at the next game start."), not one each:
+    # the Clock and Life Skills off, then on again (still two mods)
+    $notesJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; var p={}; window.emfProbe=p; var sw=function(n){var r=[...document.querySelectorAll('.mod-row')].find(function(x){return x.querySelector('.mod-name')&&x.querySelector('.mod-name').textContent===n;}); return r&&r.querySelector('.switch');}; var flip=function(n,next){var s=sw(n); var b=s.getAttribute('aria-checked'); s.click(); W(function(){var t=sw(n); return t&&!t.disabled&&t.getAttribute('aria-checked')!==b;},next);}; var notes=function(){return [...document.querySelectorAll('#toasts .toast')].filter(function(t){return /next game start/.test(t.textContent);}).map(function(t){return t.textContent;});}; var st=function(){return sw('Clock').getAttribute('aria-checked')+','+sw('Life Skills').getAttribute('aria-checked');}; W(function(){return sw('Clock')&&sw('Life Skills');},function(){ p.start=st(); flip('Clock',function(){ p.one=notes(); flip('Life Skills',function(){ p.two=notes(); flip('Clock',function(){ flip('Life Skills',function(){ p.back=notes(); p.end=st(); window.emfDone=true; }); }); }); }); });"
+    $run = Invoke-Smoke -Eval $notesJs -More @("--probe-wait", "9000")
+    $pn = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+    $pnText = if ($pn) { $pn | ConvertTo-Json -Compress } else { "the page script did not run" }
+    Check ($run.Code -eq 0 -and $null -ne $pn -and (@($pn.one) -join "|") -eq "Takes effect at the next game start.") "one switch: one note, Takes effect at the next game start. ($pnText)"
+    Check ($null -ne $pn -and (@($pn.two) -join "|") -eq "2 changes take effect at the next game start.") "a second switch changes that note into 2 changes take effect at the next game start., no second note"
+    Check ($null -ne $pn -and (@($pn.back) -join "|") -eq "2 changes take effect at the next game start.") "switching the same two mods back keeps one note for 2 changes"
+    Check ($null -ne $pn -and $pn.start -eq $pn.end -and (Test-Path -LiteralPath (Join-Path $game "emf\config\life_skills.ini"))) "and both are as they were, saved in emf\config ($(if ($pn) { $pn.start + ' -> ' + $pn.end }))"
+
+    # 3c. the Play menu: Play, Play without EMF mods, Play without any mods. "Play without EMF mods" writes the loader's
+    # one-shot flag (emf\play_once.txt, mode=no-emf) and asks Steam (a test run never opens the steam:// link)
+    $playJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; var p={}; window.emfProbe=p; var more=function(){return document.getElementById('play-more');}; W(function(){return more()&&!more().hidden&&!more().disabled;},function(){ p.expanded=more().getAttribute('aria-expanded'); more().click(); W(function(){return !document.getElementById('play-menu').hidden;},function(){ p.items=[...document.querySelectorAll('#play-menu [role=menuitem] .play-item-label')].map(function(x){return x.textContent;}); p.focus=document.activeElement&&document.activeElement.id; p.open=more().getAttribute('aria-expanded'); document.getElementById('play-no-emf').click(); W(function(){return [...document.querySelectorAll('#toasts .toast')].some(function(t){return /without EMF mods/.test(t.textContent);});},function(){ p.toast=[...document.querySelectorAll('#toasts .toast')].map(function(t){return t.textContent;}).join(' | '); p.closed=document.getElementById('play-menu').hidden; window.emfDone=true; }); }); });"
+    $run = Invoke-Smoke -Eval $playJs -More @("--probe-wait", "9000")
+    $pp3 = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+    $flagFile = Join-Path $game "emf\play_once.txt"
+    $flagText = if (Test-Path -LiteralPath $flagFile) { Get-Content -LiteralPath $flagFile -Raw } else { "" }
+    Check ($run.Code -eq 0 -and $null -ne $pp3 -and (@($pp3.items) -join "|") -eq "Play|Play without EMF mods|Play without any mods" -and $pp3.expanded -eq "false" -and $pp3.open -eq "true") "the Play menu offers Play, Play without EMF mods and Play without any mods ($(if ($pp3) { $pp3 | ConvertTo-Json -Compress }))"
+    Check ($null -ne $pp3 -and $pp3.toast -like "*without EMF mods, this time only*" -and $pp3.closed) "Play without EMF mods says it is for this start only, and the menu closes"
+    Check ($flagText -match "(?m)^emf_play_once=1" -and $flagText -match "(?m)^mode=no-emf" -and $flagText -match "(?m)^written=\d+") "and writes the loader's one-shot flag emf\play_once.txt ($($flagText.Trim() -replace "`r`n", ' | '))"
+    Remove-Item -LiteralPath $flagFile -Force -ErrorAction SilentlyContinue
+
+    # 3d. with EMF 0.3.2's loader (no marker) the two starts without mods cannot work: they stay in the menu, focusable
+    # and read out with the reason (aria-disabled), do nothing when chosen; the keys move through all three (Home, End)
+    $loaderFile = Join-Path $game "dinput8.dll"
+    $loaderText = Get-Content -LiteralPath $loaderFile -Raw
+    [System.IO.File]::WriteAllText($loaderFile, "EMF-LOADER-7d3c9f fake")
+    try {
+        $menuJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; var p={}; window.emfProbe=p; var more=function(){return document.getElementById('play-more');}; var key=function(k){document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true}));}; var at=function(){return document.activeElement&&document.activeElement.id;}; W(function(){return more()&&!more().hidden&&state&&state.emf_installed;},function(){ more().click(); W(function(){return !document.getElementById('play-menu').hidden;},function(){ var it=document.getElementById('play-no-emf'); p.aria=it.getAttribute('aria-disabled'); p.disabled=it.disabled; p.sub=document.getElementById('play-no-emf-sub').textContent; p.first=at(); key('End'); p.end=at(); key('Home'); p.home=at(); key('ArrowDown'); p.down=at(); it.click(); setTimeout(function(){ p.open=!document.getElementById('play-menu').hidden; p.toasts=[...document.querySelectorAll('#toasts .toast')].filter(function(t){return /without|Steam|older/.test(t.textContent);}).length; window.emfDone=true; }, 600); }); });"
+        $run = Invoke-Smoke -Eval $menuJs -More @("--probe-wait", "9000")
+    } finally {
+        [System.IO.File]::WriteAllText($loaderFile, $loaderText)
+    }
+    $pm = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+    Check ($run.Code -eq 0 -and $null -ne $pm -and $pm.aria -eq "true" -and -not $pm.disabled -and $pm.sub -like "*older*") "with an older loader, Play without EMF mods is aria-disabled but focusable, and says why ($(if ($pm) { $pm | ConvertTo-Json -Compress }))"
+    Check ($null -ne $pm -and $pm.first -eq "play-normal" -and $pm.end -eq "play-no-mods" -and $pm.home -eq "play-normal" -and $pm.down -eq "play-no-emf") "the menu's keys reach every entry: End, Home, Arrow down"
+    Check ($null -ne $pm -and $pm.open -and $pm.toasts -eq 0 -and -not (Test-Path -LiteralPath $flagFile)) "choosing a disabled entry does nothing: no flag, no message, the menu stays open"
+
     # 4. a process called enshrouded.exe running from the folder (a copy of ping.exe standing in for the game): the
     # switch is locked, so the same click changes nothing. The page script must have run (else this proves nothing).
     Copy-Item -LiteralPath (Join-Path $env:SystemRoot "System32\PING.EXE") -Destination (Join-Path $game "enshrouded.exe") -Force
@@ -377,16 +422,71 @@ try {
         $backup = @(Get-ChildItem -LiteralPath (Join-Path $game "emf\backup") -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*\mods\auto-loot-plus\mod.json" })
         Check ($backup.Count -ge 1) "the mod's old file that was there moved to emf\backup\ first"
 
-        $uninstallJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; W(function(){return document.querySelector('[data-focus=uninstall]');},function(){ var b=document.querySelector('[data-focus=uninstall]'); window.emfProbe={found:!!b}; b.click(); W(function(){return document.querySelector('.sheet-foot .primary');},function(){ document.querySelector('.sheet-foot .primary').click(); W(function(){var t=document.getElementById('sheet-title'); return t&&(t.textContent==='Uninstalled'||t.textContent==='Not uninstalled');},function(){ window.emfProbe.title=(document.getElementById('sheet-title')||{}).textContent; window.emfDone=true; }); }); });"
+        $uninstallJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; W(function(){return document.querySelector('[data-focus=uninstall]');},function(){ var b=document.querySelector('[data-focus=uninstall]'); window.emfProbe={found:!!b}; b.click(); W(function(){return document.querySelector('.sheet-foot .primary');},function(){ window.emfProbe.lines=[...document.querySelectorAll('#sheet .part-lines li')].map(function(l){return l.textContent;}); document.querySelector('.sheet-foot .primary').click(); W(function(){var t=document.getElementById('sheet-title'); return t&&(t.textContent==='Uninstalled'||t.textContent==='Not uninstalled');},function(){ window.emfProbe.title=(document.getElementById('sheet-title')||{}).textContent; window.emfDone=true; }); }); });"
         $run = Invoke-Smoke -Eval $uninstallJs -SelectMod "eml:auto-loot-plus" -More @("--probe-wait", "9000")
         $p7 = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
         Check ($null -ne $p7 -and $p7.found -and $p7.title -eq "Uninstalled") "the mod's details offer Uninstall, which reports Uninstalled ($(if ($p7) { $p7 | ConvertTo-Json -Compress }))"
+        Check ($null -ne $p7 -and (@($p7.lines) -join " ") -like "*Also uninstalls autolootplus.dll*") "the question names the other mod of the same install that goes with it"
         Check (-not (Test-Path -LiteralPath (Join-Path $game "autolootplus.dll")) -and -not (Test-Path -LiteralPath (Join-Path $game "AutoLootPlus-README.txt")) -and -not (Test-Path -LiteralPath (Join-Path $game "mods\auto-loot-plus"))) "uninstall removed the files it installed"
         $chain = Get-Content -LiteralPath (Join-Path $game "dinput8-chain.ini") -Raw
         Check ($chain -eq "[Chain]`r`n; creative.dll`r`n") "and took its line out of dinput8-chain.ini ($($chain.Trim() -replace "`r`n", ' | '))"
     } finally {
         Remove-Item -LiteralPath $src -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $zipDir -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # 6b. several separate mods in one file (the EMF creature packs: mods\<pack>\ folders and a README.txt): each is an
+    # install of its own, so uninstalling one through the page leaves the other
+    $src = Join-Path ([System.IO.Path]::GetTempPath()) ("emf smoke packs " + [guid]::NewGuid().ToString("N").Substring(0, 8))
+    foreach ($pack in @("emf_pack_one", "emf_pack_two")) {
+        $dir = Join-Path $src "EMF-creature-packs-9.9.9\mods\$pack"
+        New-Item -ItemType Directory -Force (Join-Path $dir "src") | Out-Null
+        [System.IO.File]::WriteAllText((Join-Path $dir "mod.json"), "{""id"": ""$pack"", ""name"": ""$pack"", ""version"": ""1.0""}")
+        [System.IO.File]::WriteAllText((Join-Path $dir "src\mod.lua"), "-- $pack")
+    }
+    [System.IO.File]::WriteAllText((Join-Path $src "EMF-creature-packs-9.9.9\README.txt"), "what is in it")
+    $zipDir = "$src zip"
+    New-Item -ItemType Directory -Force $zipDir | Out-Null
+    $zip = Join-Path $zipDir "EMF-creature-packs-9.9.9.zip"
+    [System.IO.Compression.ZipFile]::CreateFromDirectory($src, $zip)
+    try {
+        $zipJs = $zip.Replace("\", "/")
+        $packsJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; window.emfProbe={}; window.chrome.webview.postMessage({cmd:'install_path',path:'$zipJs',nexus_id:0,nexus_name:''}); W(function(){return document.querySelectorAll('.part').length>0&&document.querySelector('.sheet-foot .primary');},function(){ window.emfProbe.parts=document.querySelectorAll('.part').length; window.emfProbe.notes=[...document.querySelectorAll('#sheet .notes li')].map(function(l){return l.textContent;}); var b=document.querySelector('.sheet-foot .primary'); setTimeout(function(){ if(b)b.click(); W(function(){var t=document.getElementById('sheet-title'); return t&&(t.textContent==='Installed'||t.textContent==='Not installed');},function(){ window.emfProbe.title=(document.getElementById('sheet-title')||{}).textContent; window.emfDone=true; }); }, 1200); });"
+        $run = Invoke-Smoke -Eval $packsJs -More @("--probe-wait", "9000")
+        $p6b = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+        Check ($null -ne $p6b -and $p6b.parts -eq 2 -and (@($p6b.notes) -join " ") -like "*recorded on its own*" -and $p6b.title -eq "Installed") "a file with two packs: the plan says each is recorded on its own, and Install reports Installed ($(if ($p6b) { $p6b | ConvertTo-Json -Compress }))"
+        Check ((Test-Path -LiteralPath (Join-Path $game "emf\installed_mods\emf_pack_one.json")) -and (Test-Path -LiteralPath (Join-Path $game "emf\installed_mods\emf_pack_two.json")) -and -not (Test-Path -LiteralPath (Join-Path $game "mods\README.txt"))) "each pack has its own record, and the README.txt is not copied"
+        $run = Invoke-Smoke -Eval $uninstallJs -SelectMod "eml:emf_pack_one" -More @("--probe-wait", "9000")
+        $p6c = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+        Check ($null -ne $p6c -and $p6c.found -and $p6c.title -eq "Uninstalled" -and -not ((@($p6c.lines) -join " ") -like "*Also uninstalls*")) "Uninstall on one pack names no other mod and reports Uninstalled ($(if ($p6c) { $p6c | ConvertTo-Json -Compress }))"
+        Check (-not (Test-Path -LiteralPath (Join-Path $game "mods\emf_pack_one")) -and (Test-Path -LiteralPath (Join-Path $game "mods\emf_pack_two\src\mod.lua")) -and (Test-Path -LiteralPath (Join-Path $game "emf\installed_mods\emf_pack_two.json"))) "it removed that pack only; the other pack and its record stay"
+
+        # one record of two packs, as EMF.exe 0.3.2 wrote it for the creature packs: Uninstall on one pack removes
+        # that pack only, and the record keeps the other
+        $entries = @()
+        foreach ($pack in @("emf_old_one", "emf_old_two")) {
+            Write-File "mods\$pack\mod.json" "{""id"": ""$pack"", ""name"": ""$pack"", ""version"": ""1.0""}"
+            Write-File "mods\$pack\src\mod.lua" "-- $pack"
+            foreach ($f in @("mod.json", "src\mod.lua")) {
+                $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $game "mods\$pack\$f")).Hash.ToLowerInvariant()
+                $entries += "{""path"": ""mods\\$pack\\$($f.Replace('\', '\\'))"", ""sha256"": ""$hash""}"
+            }
+        }
+        Write-File "emf\installed_mods\emf_old_one.json" ("{""key"": ""emf_old_one"", ""name"": ""emf_old_one"", ""version"": ""1.0"", ""archive"": ""EMF-creature-packs-0.3.2.zip"", ""installed_at"": ""2026-10-28 12:00:00"", ""kinds"": [""eml-mod""], ""roots"": [""mods\\emf_old_one"", ""mods\\emf_old_two""], ""chain"": [], ""chain_off"": [], ""folders"": [""mods\\emf_old_one"", ""mods\\emf_old_one\\src"", ""mods\\emf_old_two"", ""mods\\emf_old_two\\src""], ""backups"": [], ""deps"": [], ""files"": [" + ($entries -join ", ") + "]}")
+        $run = Invoke-Smoke -Eval $uninstallJs -SelectMod "eml:emf_old_one" -More @("--probe-wait", "9000")
+        $p6d = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+        $p6dLines = if ($p6d) { @($p6d.lines) -join " " } else { "" }
+        Check ($null -ne $p6d -and $p6d.title -eq "Uninstalled" -and $p6dLines -like "*Removes the 2 files EMF installed in mods\emf_old_one,*" -and $p6dLines -like "*other mods EMF installed from the same file*stay*") "one record of two packs (EMF.exe 0.3.2): Uninstall on one asks about that pack only ($(if ($p6d) { $p6d | ConvertTo-Json -Compress }))"
+        $oldRecord = Join-Path $game "emf\installed_mods\emf_old_one.json"
+        $oldText = if (Test-Path -LiteralPath $oldRecord) { Get-Content -LiteralPath $oldRecord -Raw } else { "" }
+        Check (-not (Test-Path -LiteralPath (Join-Path $game "mods\emf_old_one")) -and (Test-Path -LiteralPath (Join-Path $game "mods\emf_old_two\src\mod.lua")) -and $oldText -like "*emf_old_two*" -and $oldText -notlike "*emf_old_one\\*") "and removes that pack only; the record keeps the other"
+    } finally {
+        Remove-Item -LiteralPath $src -Recurse -Force -ErrorAction SilentlyContinue
+        Remove-Item -LiteralPath $zipDir -Recurse -Force -ErrorAction SilentlyContinue
+        foreach ($pack in @("emf_pack_one", "emf_pack_two", "emf_old_one", "emf_old_two")) {
+            Remove-Item -LiteralPath (Join-Path $game "mods\$pack") -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $game "emf\installed_mods\$pack.json") -Force -ErrorAction SilentlyContinue
+        }
     }
 
     # 8. the Nexus account, offline. The real nxm:// handler (HKCU) is read before and after: the smoke runs use a
@@ -606,9 +706,10 @@ try {
     }
 
     # 10. the Saves tab against fake save folders (EMF_TEST_STEAM_ROOT, EMF_TEST_SAVED_GAMES) and its own app
-    # data (EMF_TEST_APPDATA): the starter backup at the first start and the list, Back up now with a label, restoring
-    # one Local file (and the Steam warning when a Steam file is chosen), Delete cancelled then confirmed (the starter's
-    # extra line, Cancel has the keyboard), and the refusal while a stand-in game runs. Never a real save folder.
+    # data (EMF_TEST_APPDATA): the starter backup at the first start and the list, Back up now with a label, Pick
+    # files... with its hint and the named files, restoring one Local file (and the Steam warning when a Steam file is
+    # chosen), Delete cancelled then confirmed (the starter's extra line, Cancel has the keyboard), and the refusal while
+    # a stand-in game runs. Never a real save folder.
     $savesRoot = Join-Path $realTemp ("emf app smoke saves " + [guid]::NewGuid().ToString("N").Substring(0, 8))
     $fakeSteam = Join-Path $savesRoot "Steam"
     $fakeSaved = Join-Path $savesRoot "Saved Games"
@@ -641,10 +742,12 @@ try {
 
         # restore one Local file; choosing a Steam file shows the Steam Cloud warning
         [System.IO.File]::WriteAllText($localWorld, "ruined by a mod")
-        $js = $W + " W(function(){return rows().length>=2;},function(){ rows()[0].querySelector('.save-restore').click(); W(function(){return !!document.getElementById('saves-pick-some');},function(){ pr.focus=document.activeElement&&document.activeElement.id; document.getElementById('saves-pick-some').click(); W(function(){return !!document.querySelector('input[data-path^=steam]');},function(){ document.querySelector('input[data-path^=steam]').click(); W(function(){return !!document.getElementById('saves-steam-warning');},function(){ pr.steam=txt('saves-steam-warning'); document.querySelector('input[data-path^=steam]').click(); W(function(){return !document.getElementById('saves-steam-warning');},function(){ var w=[...document.querySelectorAll('input[data-path]')].find(function(x){return x.getAttribute('data-path')==='local/default/world0.ksd';}); w.click(); W(function(){var g=document.getElementById('saves-sheet-go'); return g&&!g.disabled;},function(){ pr.go=txt('saves-sheet-go'); document.getElementById('saves-sheet-go').click(); W(function(){return /^(Restored|Not restored)$/.test(txt('saves-sheet-title'));},function(){ pr.title=txt('saves-sheet-title'); pr.restored=txt('saves-restored'); pr.err=txt('saves-restore-error'); W(function(){return rows().length>=3;},function(){ pr.kinds=rows().map(kind); window.emfDone=true; }); }); }); }); }); }); }); });"
+        $js = $W + " W(function(){return rows().length>=2;},function(){ pr.intro=txt('saves-intro'); pr.pickLabel=(rows()[0].querySelector('.save-pick-files')||{}).textContent||''; pr.allLabel=(rows()[0].querySelector('.save-restore')||{}).textContent||''; rows()[0].querySelector('.save-pick-files').click(); W(function(){return !!document.getElementById('saves-pick-some')&&!!document.querySelector('input[data-path^=steam]');},function(){ pr.focus=document.activeElement&&document.activeElement.id; pr.picked=document.getElementById('saves-pick-some').checked; pr.what=[...document.querySelectorAll('.save-file-what')].map(function(x){return x.textContent;}); W(function(){return !!document.querySelector('input[data-path^=steam]');},function(){ document.querySelector('input[data-path^=steam]').click(); W(function(){return !!document.getElementById('saves-steam-warning');},function(){ pr.steam=txt('saves-steam-warning'); document.querySelector('input[data-path^=steam]').click(); W(function(){return !document.getElementById('saves-steam-warning');},function(){ var w=[...document.querySelectorAll('input[data-path]')].find(function(x){return x.getAttribute('data-path')==='local/default/world0.ksd';}); w.click(); W(function(){var g=document.getElementById('saves-sheet-go'); return g&&!g.disabled;},function(){ pr.go=txt('saves-sheet-go'); document.getElementById('saves-sheet-go').click(); W(function(){return /^(Restored|Not restored)$/.test(txt('saves-sheet-title'));},function(){ pr.title=txt('saves-sheet-title'); pr.restored=txt('saves-restored'); pr.err=txt('saves-restore-error'); W(function(){return rows().length>=3;},function(){ pr.kinds=rows().map(kind); window.emfDone=true; }); }); }); }); }); }); }); });"
         $run = Invoke-Smoke -Eval $js -More @("--page", "saves", "--probe-wait", "15000")
         $pr = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
         Check ($null -ne $pr -and $pr.focus -eq "saves-sheet-cancel") "Saves: the restore dialog opens with Cancel holding the keyboard ($(if ($pr) { $pr.focus }))"
+        Check ($null -ne $pr -and $pr.pickLabel -like "Pick files?*" -and $pr.allLabel -like "Restore all?*" -and $pr.intro -like "*one character or one world*Pick files*") "Saves: each backup has Restore all and Pick files, and the page says how to bring back one character ($(if ($pr) { $pr.allLabel + ' | ' + $pr.pickLabel + ' | ' + $pr.intro }))"
+        Check ($null -ne $pr -and $pr.picked -and @($pr.what | Where-Object { $_ -like "Character slot 1 * character0.ksd" }).Count -eq 2 -and @($pr.what | Where-Object { $_ -like "World slot 1 * world0.ksd" }).Count -eq 2 -and @($pr.what) -contains "global.ksd") "Saves: Pick files opens on the list of files, each character and world named ($(if ($pr) { @($pr.what) -join ' / ' }))"
         Check ($null -ne $pr -and $pr.steam -like "*Steam Cloud saves*" -and $pr.steam -like "*files on this PC*") "Saves: choosing a Steam file shows the Steam Cloud warning"
         Check ($null -ne $pr -and $pr.go -eq "Restore 1 file" -and $pr.title -eq "Restored" -and $pr.restored -like "*world slot 1 (Local)*") "Saves: one Local file restored through the page ($(if ($pr) { $pr.go + ' | ' + $pr.title + ' | ' + $pr.restored + ' | ' + $pr.err }))"
         Check ((Get-Content -LiteralPath $localWorld -Raw) -eq "local world0.ksd") "Saves: the Local world file is the backup's again"

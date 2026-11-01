@@ -51,6 +51,7 @@ struct ModEntry {
     std::vector<ModSetting> settings;  // in the order the Mods tab shows them (ungrouped first, then by group)
     bool is_loader = false;   // a loader's own DLL (other loaders' group)
     std::string install_key;  // EMF.exe installed it: the key of its record in emf\installed_mods ("" otherwise)
+    std::string install_root;  // the record's mod folder it is ("mods\\foo"; "" for a DLL in dinput8-chain.ini)
     // where it has to run (mod.json "side", servers.h): "server", "client" or "both" (also when mod.json does not say)
     std::string side = "both";
     bool side_declared = false;
@@ -68,6 +69,8 @@ struct InstalledMod {
     std::vector<std::string> roots;    // the mod folders it installed ("mods\\foo")
     std::vector<std::string> chain;    // the DLLs it listed in dinput8-chain.ini
     std::vector<std::string> outside;  // files it installed that are not inside one of its mod folders (shown on uninstall)
+    std::vector<size_t> root_files;    // how many of its files are in each of `roots`
+    bool separable = false;            // each mod folder can be uninstalled alone (install.h separable_install)
 };
 
 struct Warning {
@@ -80,6 +83,7 @@ struct FolderState {
     bool game_found = false;  // enshrouded.exe or enshrouded_server.exe is there
     bool server = false;      // a dedicated server folder (enshrouded_server.exe only)
     bool emf_installed = false;
+    bool play_once = false;  // EMF's loader here takes the one-shot flag of Play's menu (loader/play_once.h)
     std::string emf_version;  // from emf\emf_core.dll ("" when unknown)
     bool shroudforge_active = false;
     std::vector<ModEntry> mods;

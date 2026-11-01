@@ -66,7 +66,10 @@ function savesRow(b) {
       b.problems && b.problems.length
         ? el('div', { class: 'save-problem', role: 'note' }, 'Incomplete. Not copied: ' + b.problems.join('; ')) : null),
     el('div', { class: 'save-actions' },
-      el('button', { class: 'ghost small save-restore', type: 'button', onclick: () => savesShowSheet({ mode: 'restore', backup: b, all: true, chosen: [] }) }, 'Restore…'),
+      el('button', { class: 'ghost small save-restore', type: 'button', title: 'Put every file of this backup back',
+        onclick: () => savesShowSheet({ mode: 'restore', backup: b, all: true, chosen: [] }) }, 'Restore all…'),
+      el('button', { class: 'ghost small save-pick-files', type: 'button', title: 'Choose the files to put back: one character or one world, say',
+        onclick: () => savesShowSheet({ mode: 'restore', backup: b, all: false, chosen: [] }) }, 'Pick files…'),
       el('button', { class: 'ghost small danger save-delete', type: 'button', onclick: () => savesShowSheet({ mode: 'delete', backup: b }) }, 'Delete…'),
       el('button', { class: 'ghost small', type: 'button', title: 'Show this backup in Explorer', onclick: () => send({ cmd: 'saves_open', id: b.id }) }, 'Show')));
 }
@@ -98,6 +101,7 @@ function renderSaves(force) {
       el('h2', { class: 'page-title' }, 'Saves'),
       el('button', { class: 'ghost small', id: 'saves-open', type: 'button', title: d.store, onclick: () => send({ cmd: 'saves_open' }) }, 'Open folder')),
     el('p', { class: 'muted' }, 'EMF keeps copies of your Enshrouded saves on this PC: characters and worlds, Steam Cloud and Local, with the game’s settings files. Restoring a backup never removes it.'),
+    el('p', { class: 'saves-hint', id: 'saves-intro' }, 'To bring back one character or one world only (one that got damaged, say), click Pick files… on a backup and tick just that file. Your other saves stay as they are.'),
     !d.available ? el('div', { class: 'd-error', role: 'alert' }, el('span', {}, 'EMF keeps no save backups on this PC: Windows does not say where %LOCALAPPDATA% is.')) : null,
     el('div', { class: 'card saves-now' },
       el('div', { class: 'saves-now-row' }, savesLabel,
@@ -142,11 +146,20 @@ function savesFileLine(f, s) {
       renderSavesSheet();
     },
   });
-  const what = f.label === f.name ? f.name : f.label + ' — ' + f.name;
+  const what = savesWhat(f);
   return el('label', { class: 'save-file', for: id }, box,
     el('span', { class: 'save-file-what' }, what),
     el('span', { class: 'save-file-meta' }, [f.modified ? 'saved ' + savesWhen(f.modified) : '', savesPlayed(f.play_seconds),
       savesSize(f.size)].filter(Boolean).join(' · ')));
+}
+
+// What a file is, as the player knows it: "Character: Ember (level 8) — character3.ksd", "World: Embervale — world1.ksd",
+// "Character slot 2 — character1.ksd" while the name is unknown; other files by their name.
+function savesWhat(f) {
+  let what = '';
+  if (f.type === 'character') what = /^character slot /.test(f.label) ? 'C' + f.label.slice(1) : 'Character: ' + f.label;
+  else if (f.type === 'world') what = /^world slot /.test(f.label) ? 'W' + f.label.slice(1) : 'World: ' + f.label.replace(/^world /, '');
+  return what ? what + ' — ' + f.name : f.name;
 }
 
 // "12 h played", "40 min played": a world's play time as the game's menu had it ('' when unknown)
@@ -203,7 +216,7 @@ function renderSavesSheet() {
         saves.sheet = { mode: 'busy', title: 'Restoring…', text: 'EMF first backs up the files it replaces, then copies the backup’s files back and checks them.' };
         renderSavesSheet();
       },
-    }, chosen.length === files.length ? 'Restore all' : 'Restore ' + savesCount(chosen.length, 'file', 'files'));
+    }, !chosen.length ? 'Restore' : chosen.length === files.length ? 'Restore all' : 'Restore ' + savesCount(chosen.length, 'file', 'files'));
     fill(sheet,
       head('Restore', 'Restore the backup from ' + (savesWhen(b.time) || b.time_local) + (b.label ? ' (' + b.label + ')' : '')),
       el('div', { class: 'sheet-body' },
@@ -212,7 +225,8 @@ function renderSavesSheet() {
           el('label', { class: 'profile-check' }, el('input', { type: 'radio', name: 'save-pick', id: 'saves-pick-all', checked: !!s.all, onchange: pick(true) }),
             el('span', {}, 'The whole backup (' + savesCount(files.length, 'file', 'files') + ')')),
           el('label', { class: 'profile-check' }, el('input', { type: 'radio', name: 'save-pick', id: 'saves-pick-some', checked: !s.all, onchange: pick(false) }),
-            el('span', {}, 'Only the files I choose'))),
+            el('span', {}, 'Only the files I choose: one character or one world, say'))),
+        s.all ? null : el('p', { class: 'muted small', id: 'saves-pick-hint' }, 'Tick what you want back. Files you leave unticked stay as they are now.'),
         s.all ? el('p', { class: 'muted small' }, b.summary || '') : savesGroups(files).map((g) => [
           el('h3', { class: 'sheet-h' }, g.name),
           el('div', { class: 'save-files' }, g.files.map((f) => savesFileLine(f, s)))]),

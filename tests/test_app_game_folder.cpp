@@ -323,6 +323,22 @@ TEST_CASE("app chain: a DLL that failed to load gets Windows' own words for the 
     CHECK(m->error.find("(Windows error 193)") != std::string::npos);
 }
 
+TEST_CASE("app chain: a DLL the last start skipped (Play without any mods) says so, and is no error") {
+    TempGame g(L"chainskipped");
+    install_emf(g);
+    g.write(L"dinput8-chain.ini", "[Chain]\r\ncreative.dll\r\n");
+    g.write(L"creative.dll", "creative");
+    g.write(L"emf\\chain_status.txt", "creative.dll\tskipped\r\n");
+    const FolderState s = scan_game_folder(g.dir);
+    const ModEntry* m = find(s, "chain", "creative.dll");
+    REQUIRE(m);
+    CHECK(m->status == "skipped");
+    CHECK(m->error.empty());
+    CHECK(m->note.find("Not started at the last game start") != std::string::npos);
+    CHECK(m->note.find("without any mods") != std::string::npos);
+    CHECK(m->note.find("Not started yet") == std::string::npos);
+}
+
 TEST_CASE("app chain: a tool's second copy that the installer kept aside (emf\\moved.txt) is shown as not started") {
     TempGame g(L"keptaside");
     install_emf(g);
@@ -529,6 +545,22 @@ TEST_CASE("app warnings: the start-up report, and a loader whose file another to
     REQUIRE_FALSE(s.report.empty());
     CHECK(s.report[0].find("dinput8.dll = EMF") != std::string::npos);
     CHECK(has_warning(s, "warn", "ShroudForge is installed"));
+}
+
+TEST_CASE("app warnings: a loader EMF starts from dinput8-chain.ini that a start without any mods skipped is no warning") {
+    TempGame g(L"report_skipped");
+    install_emf(g);
+    g.mkdir(L"shroudforge");
+    g.write(L"shroudforge.dll", "MZ shroudforge loader");
+    g.write(L"dinput8-chain.ini", "[Chain]\r\nshroudforge.dll\r\n");
+    g.write(L"emf\\chain_status.txt", "shroudforge.dll\tstarted\r\n");
+    CHECK_FALSE(has_warning(scan_game_folder(g.dir), "warn", "ShroudForge is installed"));
+    g.write(L"emf\\chain_status.txt", "shroudforge.dll\tskipped\r\n");  // Play without any mods (loader/play_once.h)
+    const FolderState s = scan_game_folder(g.dir);
+    CHECK_FALSE(has_warning(s, "warn", "ShroudForge is installed"));  // it runs again at the next normal start
+    std::string report;
+    for (const auto& l : s.report) report += l + "\n";
+    CHECK(report.find("shroudforge.dll (skipped)") != std::string::npos);
 }
 
 // ---- changes ----

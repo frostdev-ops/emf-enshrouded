@@ -164,6 +164,11 @@ std::string game_running_reason(const std::wstring& game, const std::vector<Proc
     return {};
 }
 
+bool running_under_wine() {
+    const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+    return ntdll && GetProcAddress(ntdll, "wine_get_version") != nullptr;
+}
+
 bool nexus_url_allowed(const std::string& url) {
     const std::string scheme = "https://";
     if (url.size() <= scheme.size() || url.size() > 2048 || url.compare(0, scheme.size(), scheme) != 0) return false;

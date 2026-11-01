@@ -37,10 +37,27 @@
     <div class="emf-chip" id="emf-chip" hidden></div>
     <button class="nexus-chip" id="nexus-chip" type="button" title="Your Nexus Mods account in EMF" hidden>Nexus</button>
 
-    <button class="play" id="play" type="button">
-      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>
-      <span class="play-text"><span class="play-label" id="play-label">Play</span><span class="play-sub" id="play-sub">through Steam</span></span>
-    </button>
+    <div class="play-group" id="play-group">
+      <button class="play" id="play" type="button">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 2.5v11l9-5.5z"/></svg>
+        <span class="play-text"><span class="play-label" id="play-label">Play</span><span class="play-sub" id="play-sub">through Steam</span></span>
+      </button>
+      <button class="play-more" id="play-more" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="play-menu"
+              title="More ways to start the game: without EMF mods, or without any mods" aria-label="More ways to start the game">
+        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 6h9L8 10.5z"/></svg>
+      </button>
+      <div class="play-menu" id="play-menu" role="menu" aria-label="Start the game" hidden>
+        <button class="play-item" id="play-normal" role="menuitem" type="button">
+          <span class="play-item-label">Play</span><span class="play-item-sub">With your mods, as usual.</span>
+        </button>
+        <button class="play-item" id="play-no-emf" role="menuitem" type="button">
+          <span class="play-item-label">Play without EMF mods</span><span class="play-item-sub" id="play-no-emf-sub"></span>
+        </button>
+        <button class="play-item" id="play-no-mods" role="menuitem" type="button">
+          <span class="play-item-label">Play without any mods</span><span class="play-item-sub" id="play-no-mods-sub"></span>
+        </button>
+      </div>
+    </div>
   </div>
 
   <nav class="tabs" role="tablist" aria-label="Pages">

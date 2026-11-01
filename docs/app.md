@@ -55,7 +55,11 @@ account features are switched off, and a tester setting switches them on ("Nexus
   links** setting (with the Nexus features, below), and the end of `emf_core.log` and `emf_loader.log` (read while the
   game writes them), each with a **Copy** button. Error texts in a mod's details have one too. The chip at the top
   ("Nexus: not logged in", or the account's name and Premium) opens the account.
-- **Play** starts the game through Steam (`steam://rungameid/1203620`).
+- **Play** starts the game through Steam (`steam://rungameid/1203620`); the arrow next to it also starts it once
+  without the mods ("Play" below). Under Wine or Proton (Linux, the Steam Deck; EMF.exe tells by Wine's `ntdll.dll`,
+  which exports `wine_get_version`) a `steam://` link does not reach Linux's Steam. Play still opens it (a Windows
+  Steam in the same prefix, as Lutris or Bottles set up, takes it) and adds: if nothing starts, start Enshrouded from
+  Steam (EMF still loads when the game starts). When the link cannot be opened at all, Play says only that.
 - **Profiles**: the on/off state of every mod under a name, above the list (below).
 - **Browse**: Enshrouded mods on Nexus Mods (with the Nexus features, below).
 - **Server** (a dedicated server's folder only): its config, EMF's chat commands, Start and Stop, EMF in it and its
@@ -63,9 +67,54 @@ account features are switched off, and a tester setting switches them on ("Nexus
 
 A mod whose `mod.json` cannot be read is still listed, with the error.
 
+## Play
+
+The arrow next to **Play** opens a menu with three ways to start the game, for a game folder (a server folder has the
+Server tab instead):
+
+| Entry | What starts |
+|---|---|
+| **Play** | the game with every mod that is switched on, as the button does |
+| **Play without EMF mods** | the game without EMF and its mods, this one start; the DLL mods started by EMF still run |
+| **Play without any mods** | the game without EMF and without the DLL mods started by EMF, this one start |
+
+The DLL mods started by EMF (`dinput8-chain.ini`) are other tools the player installed, so Play without EMF mods still
+starts them; Play without any mods is for joining a public game, say. Loaders next to the game that EMF does not start
+(EML's or Greeneye's proxy DLL) still start by themselves; its message names them.
+
+Nothing is switched off. EMF.exe writes a one-shot flag, `emf\play_once.txt`, just before it asks Steam to start the
+game:
+
+```
+emf_play_once=1
+mode=no-emf            (or no-mods)
+written=1793520000     (seconds since 1970, UTC)
+```
+
+EMF's loader (`dinput8.dll`) reads the file and deletes it before it does anything else, then starts no core (and with
+`no-mods` none of the chained DLLs; `emf\chain_status.txt` names them `skipped`), and says so in `emf\emf_loader.log`.
+The next start loads everything again. So that EMF never stays off:
+
+- the loader obeys a flag only within ten minutes of `written` (a start that never happened, a crash, a PC switched
+  off), and none that says it was written more than two minutes from now;
+- a flag the loader cannot delete is not obeyed (it would count at every start), and the log says to delete it;
+- the dedicated server ignores it;
+- **Play** deletes a flag that is still waiting, and so does a failed start (Steam did not open);
+- EMF.exe writes or deletes the flag only inside the game folder shown, never without one;
+- it is refused while the game runs, when EMF is not installed in the folder, when Steam's copy of the game is another
+  folder than the one shown, and when the folder's EMF is older than this feature (EMF.exe looks for the marker
+  `EMF-PLAY-ONCE-1`, which the loader exports as `emf_loader_play_once`; the menu says to install EMF again then).
+  Such an entry stays in the menu with the reason under it (`aria-disabled`, so the keyboard and a screen reader reach
+  it), and choosing it does nothing. The arrow keys, Home and End move through the entries, Escape closes the menu.
+
+Under Wine or Proton the flag is written all the same and the link opened; the message adds that if nothing starts,
+Enshrouded is started from Steam within ten minutes, and that start is without the mods. The flag stays then also when
+the link could not be opened. A test run (`EMF_TEST=1`) never opens the `steam://` link.
+
 ## What a switch does
 
-Every switch takes effect at the next game start, and nothing is ever deleted.
+Every switch takes effect at the next game start, and nothing is ever deleted. Switches made one after another share
+one note that counts them ("3 changes take effect at the next game start."), not one note per mod.
 
 | Mod | Off means |
 |---|---|
@@ -270,6 +319,12 @@ through the same steps from step 2.)
 - **One archive, several parts**: Auto Loot Plus is a `dinput8.dll` DLL mod and an EML mod; each part installs on its
   own, and a part that cannot install does not stop the others. Files next to an EML or EMF mod folder that belong to
   no part (a README at the top) are not copied; the sheet says so.
+- **One archive, several separate mods**: when every part that installs is a mod folder of its own and nothing is
+  installed outside them (the EMF creature packs: `mods\<pack>\` folders and a `README.txt`, which is not copied),
+  each mod is recorded as an install of its own, so each one uninstalls by itself; the sheet says so. An archive
+  that installs anything outside its mod folders (Auto Loot Plus's DLL, a Greeneye loader, files in `emf\`) stays one
+  install, since its parts may need each other: the sheet says that Uninstall removes all of it together, and the
+  details and the uninstall question of each of its mods name the others that go with it.
 - **Nothing is ever overwritten.** A part that would replace another mod's file is refused and names the file (and,
   for a proxy DLL, its tool). A read-me of the same name is skipped. A file with the same bytes is left as it is. At
   install time `CopyFile` refuses to overwrite as well, so a file that appeared since the plan stops the install.
@@ -297,7 +352,21 @@ anything is never removed.
 Each install writes `emf\installed_mods\<key>.json`; the key is `nexus-<id>` when the Nexus mod is known (installed from
 its page, or `nexus_id` in the archive's `mod.json`), else the mod's id, else the archive's name. It holds the name,
 version, Nexus id, archive name and time, the kinds, the mod folders it installed, every file with its SHA-256, the
-folders it made, the DLLs it listed in `dinput8-chain.ini` and the older copies it switched off, and its backups.
+folders it made, the DLLs it listed in `dinput8-chain.ini` and the older copies it switched off, and its own backups.
+
+Each mod folder belongs to one record. An install replaces every record that holds a folder it installs, whatever key
+that record has, and the record of its own key (its earlier version: what that one installed and this one no longer does
+goes to `emf\backup\` too). A record of several separate mods (how EMF.exe 0.3.2 recorded the creature packs), or
+another install's record that also holds other things (the DLL that came with an EML folder), loses only the folders
+this install brings: the rest stays installed and recorded (under its key, or a free one when this install takes that),
+and the plan says so. A record of the same key that holds other folders and none of this install's (two files of one
+Nexus page, or two mods with one folder name in two loaders' folders) is another mod's: the install gets the next free
+key (`-2`, `-3`), and the plan says so.
+
+An archive of several separate mods writes one record per mod. A mod keeps the key of the record that holds its folder
+alone; otherwise it is keyed by its folder name (`-2`, `-3` when another install has that key for another folder). Each
+record has the archive's Nexus id and lists only its own backup. Installing the archive again updates each mod's own
+record.
 
 A file another install still has, or lists as a shared dependency (a loader's `dbgcore.dll` two Greeneye mods share,
 a file already there with the same bytes), is recorded as a dependency and is kept on uninstall, named as "also used by
@@ -310,8 +379,11 @@ game's and EMF's own files are never removed however a record names them (so a f
 `enshrouded.exe`). A record binds to a mod row only through the mod folder or the chain DLL it installed, never through
 an arbitrary file path. It removes the folders the install made (and the mod's own folder) once they are empty, takes
 its lines out of `dinput8-chain.ini` (a DLL that was left in place keeps its line) and switches the copies it switched
-off on again. Backups in `emf\backup\` stay. A record is read with the same path check, so a changed record cannot
-reach outside the game folder.
+off on again. Backups in `emf\backup\` stay. A record of several separate mods (two or more mod folders, every file
+inside one of them, no line in `dinput8-chain.ini`: how EMF.exe 0.3.2 recorded the creature packs) uninstalls one mod
+folder at a time: Uninstall on one of its mods removes that folder's files and says the mod's name, and the record keeps
+the others, named after them. Any other record with several mods is uninstalled whole, and its question names the mods
+that go with it. A record is read with the same path check, so a changed record cannot reach outside the game folder.
 
 ## Nexus account
 
@@ -667,15 +739,17 @@ writes the same format (`package\emf_common.ps1`).
   until the player deletes them. The switch writes `[backup] on_start` into `emf\emf_core.ini` (only where EMF is
   installed).
 - **Back up now**, with an optional label (one line, up to 80 characters). Refused while Enshrouded runs.
-- **Restore...**: the whole backup, or chosen files grouped by storage, each with when it was saved, a world's play time
-  and its size. Restore is refused while an `enshrouded.exe` runs (from any folder: saves belong to the Windows user,
-  not to a game folder) or a dedicated server runs from the folder shown, and the host checks again before it writes.
-  It checks the backup's copies against their hashes, makes a **before-restore** backup of the files it will replace,
-  copies each file back through a temporary file next to it (a name longer than 32 characters, which the game's
-  migration scan leaves alone) and checks the result. The backup itself always stays. Choosing a Steam file shows the
-  Steam Cloud warning: Steam keeps a copy online; the restored file gets the current time, so Steam should upload it
-  at the next game start; if Steam reports a conflict, keep the files on this PC. That Steam behaviour has not been
-  checked against Steam itself.
+- **Restore all...** and **Pick files...** on each backup: the whole backup, or chosen files grouped by storage, each
+  named by what it is ("Character: Ember (level 8)", "World: Embervale", "Character slot 2" while the name is unknown)
+  with its file name, when it was saved, a world's play time and its size. Pick files opens on that list, and a line
+  above the backups says how to bring back one character or one world only. Restore is refused while an `enshrouded.exe`
+  runs (from any folder: saves belong to the Windows user, not to a game folder) or a dedicated server runs from the
+  folder shown, and the host checks again before it writes. It checks the backup's copies against their hashes, makes a
+  **before-restore** backup of the files it will replace, copies each file back through a temporary file next to it (a
+  name longer than 32 characters, which the game's migration scan leaves alone) and checks the result. The backup itself
+  always stays. Choosing a Steam file shows the Steam Cloud warning: Steam keeps a copy online; the restored file gets
+  the current time, so Steam should upload it at the next game start; if Steam reports a conflict, keep the files on
+  this PC. That Steam behaviour has not been checked against Steam itself.
 - **Delete...** asks first, naming the backup's time and label, with Cancel holding the keyboard. The starter backup's
   question adds "This is your backup from before EMF was installed.", and the host deletes a starter only when the
   dialog's message says so (`starter: true`). Deleting runs on the worker, never following a junction inside the
@@ -723,7 +797,8 @@ game and the server folders kept in `%LOCALAPPDATA%\EMF\folders.json` ("Servers"
 - EMF.exe imports none of the proxy DLL names (`dinput8`, `dbghelp`, `dbgcore`, `winmm`, `powrprof`, `version`,
   `xinput1_4`, `dxgi`), and it loads DLLs by name only from System32: WebView2 itself loads `winmm.dll` and
   `version.dll`, and EML's proxy, for one, runs its patcher in any process that loads it.
-- In the game folder it writes only what a switch, a setting, an install or a profile changes (profiles:
+- In the game folder it writes only what a switch, a setting, an install or a profile changes, and the Play menu's
+  one-shot flag `emf\play_once.txt`, which the game's start deletes (profiles:
   `emf\profiles\`). It writes outside the game folder only `%LOCALAPPDATA%\EMF\app.ini` (the chosen folder, the window's place and
   size), `%LOCALAPPDATA%\EMF\webview\` (WebView2's own data), `%TEMP%\emf-install\<n>\` (an archive being
   installed; deleted after Install or Cancel, and left-overs older than a day at the next install), and, when the player
@@ -790,7 +865,12 @@ player's, and counts only a stand-in game running from the folder shown.
 
 - `emf_tests` (`tests/test_app_game_folder.cpp`, `test_app_locate.cpp`, `test_app_bridge.cpp`): the mod list, the
   switches (ini, rename, chain line byte for byte), settings, the Steam lookup, the game-running check, which links
-  may open and the bridge's commands, all against fake game folders in `%TEMP%`.
+  may open and the bridge's commands (Play under Wine with the host's Wine check injected; the Play menu: the flag
+  written for each way, taken back by Play and by a failed start, written under Wine, refused while the game runs, for
+  another Steam folder, an old loader and no EMF), all against fake game folders in `%TEMP%`. `test_chain_load.cpp`:
+  the loader's side of the flag (`src/loader/play_once.h`): the ten minutes, a flag from the future, anything that is
+  not the flag, deleted before it is read for what it says and not obeyed when it cannot be deleted, and what starts in
+  each way.
 - `test_profiles.cpp`, `test_app_profiles.cpp`, `test_app_profiles_bridge.cpp`: profiles: names and slugs, the file
   and bad files, the store (never replacing without asking, rename, delete, the current one), "(changed)", and
   applying over fake game folders with every kind of mod (the ini, an EML folder and zip renamed, a chain line in
@@ -818,7 +898,12 @@ player's, and counts only a stand-in game running from the folder shown.
   saves, tables, unknown, EMF itself, Auto Loot Plus's two layouts), conflicts and read-mes, unsafe paths; applying
   (record, SHA-256s, the scan linking mods to their install), an update with the old folder in `emf\backup\`, a file
   that appears before Install taking everything back (a UTF-16 `dinput8-chain.ini` byte for byte), uninstall (changed
-  files left and named, folders, chain lines, a switched-off copy on again), a forged record, and the chain line rules.
+  files left and named, folders, chain lines, a switched-off copy on again), a forged record, the chain line rules,
+  and several separate mods in one archive (the creature packs: one record each, each uninstalled alone; installed
+  again, each record updated and one record of them all split; a key another install has for another folder; mods
+  with files outside their folders kept as one install, and Greeneye mods with the loader already there split, each
+  depending on it; one record of them all uninstalled one folder at a time, and a folder of Auto Loot Plus's record
+  refused alone).
 - `test_app_browse.cpp`: the picture hosts, description links, file order, the recorded replies, the page's JSON.
 - `test_app_account.cpp`: the DPAPI round trip and the stored account (the file holds neither key nor name), the
   nxm:// setting against a registry in memory (taking the links from Vortex and giving them back exactly, nothing there
@@ -887,8 +972,11 @@ player's, and counts only a stand-in game running from the folder shown.
 - `scripts/app_smoke.ps1` (run by `scripts/verify.sh`): builds a fake game folder and runs `EMF.exe --smoke` on it. It
   checks the rows the page drew (read back from the page), that a canary mod's HTML and script texts stay text and
   nothing in them runs, that a `fetch` and a navigation from the page are stopped, that clicking a switch through the
-  page changes `dinput8-chain.ini`, that the same switch is locked while a stand-in `enshrouded.exe` runs from the
-  folder, profiles through the page (Save as, a switch makes the picker say "(changed)", Switch puts it back),
+  page changes `dinput8-chain.ini`, that several switches in a row share one note, the Play menu (its entries, the
+  keys, an older loader's entries reachable and doing nothing, and
+  Play without EMF mods writing `emf\play_once.txt` without opening Steam), that the same switch is locked while a
+  stand-in `enshrouded.exe` runs from the folder, profiles through the page (Save as, a switch makes the picker say
+  "(changed)", Switch puts it back),
   the message when WebView2 is missing, and EMF.exe's imports. The runs have the tester switch (an `app.ini` in their
   `EMF_TEST_APPDATA`), except one that is the release build (Off): started on Browse with an Enshrouded link, a stored key and
   the recorded Nexus at hand, it shows no Browse tab, no Check for updates, no account or nxm:// cards and no Download
@@ -899,7 +987,10 @@ player's, and counts only a stand-in game running from the folder shown.
   in order, the "doesn't list" note, an older file classified on request, the description in its container without
   scripts, a picture from `example.com` and a fetch blocked while a Nexus picture loads. An archive made in the test is
   installed through the page (`install_path`, the test's stand-in for the file dialog, allowed only with `EMF_TEST=1`)
-  and uninstalled again, checking the files, the `[Chain]` line, the record and the backup. The Nexus account, offline:
+  and uninstalled again, checking the files, the `[Chain]` line, the record, the backup and that the question names the
+  other mod of the same install; an archive of two packs is installed as two installs, and uninstalling one through the
+  page leaves the other; one record of two packs as EMF.exe 0.3.2 wrote it is uninstalled one pack at a time. The
+  Nexus account, offline:
   the EMF tab says the key is "not set" and hides Log in with Nexus; the nxm:// setting shows a seeded Vortex, takes the
   links and gives them back (in memory; the real HKCU is read before and after and must not change); a key saved
   through the page shows the account as Premium with its request allowance, is stored encrypted and never stays in the
@@ -915,7 +1006,9 @@ player's, and counts only a stand-in game running from the folder shown.
   the page (the ini's other keys and comments kept), Start and Stop of a stand-in server (its own shutdown ran on
   Ctrl+C; nothing left running), its log with a password stripped, and Install EMF with a package's own `install.ps1`.
   The Saves tab against fake save folders: the starter backup at the first start and the list with its sizes, Back up
-  now with a label, one Local file restored (Cancel holds the keyboard; a Steam file shows the Steam Cloud warning; a
+  now with a label, Restore all... and Pick files... on each backup with the line that says how to bring back one
+  character, Pick files opening on the named files, one Local file restored (Cancel holds the keyboard; a Steam file
+  shows the Steam Cloud warning; a
   before-restore backup first, the backup stays, no temporary file left, the Steam files untouched), Delete of the
   starter cancelled (with its extra line) then confirmed, and, with a stand-in game running, Back up now and Restore
   locked and a restore sent anyway refused.

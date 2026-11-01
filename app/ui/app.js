@@ -30,6 +30,7 @@ let detailsShown = '';
 let forceDetails = false;  // a save was refused: draw the details again even if a control has focus
 const settingErrors = {};  // "source:id:key" (the save's ref) -> why the last value was refused
 let pending = false;       // a switch is waiting for the host
+let pendingKey = '';       // the row of that switch (the note counts the mods switched)
 let account = null;        // the host's account message: whether a key is set, the account's name and Premium (never the key)
 // The host's Nexus mode (bridge.h nexus_mode; state.nexus, account.mode): "off" in the release build (no Browse,
 // no Check for updates, no account, no nxm:// setting: nothing asks Nexus, and the host refuses those commands too),
@@ -141,7 +142,14 @@ function onMessage(m) {
 }
 
 function onResult(m) {
-  if (m.cmd === 'set_enabled') pending = false;
+  if (m.cmd === 'set_enabled') {
+    pending = false;
+    if (m.ok) {  // one note for switches made one after another, not one each
+      switchNote(pendingKey);
+      if (state) render();
+      return;
+    }
+  }
   if (m.cmd === 'updates_check' || m.cmd === 'nexus_link') updatesOnResult(m);
   if (m.cmd === 'set_setting' && m.ref) {  // the host echoes the ref the save was sent with
     if (m.ok) delete settingErrors[m.ref];
@@ -159,6 +167,26 @@ function toast(text, bad) {
   const t = el('div', { class: 'toast' + (bad ? ' bad' : ''), role: bad ? 'alert' : 'status' }, text);
   $('toasts').append(t);
   setTimeout(() => t.remove(), bad ? 9000 : 4500);
+}
+
+// Switches made one after another share one note that counts the mods: "3 changes take effect at the next game
+// start." It stays while the player keeps switching and goes a few seconds after the last switch.
+const switched = { note: null, keys: new Set(), timer: 0 };
+function switchNote(key) {
+  switched.keys.add(key || '');
+  const n = switched.keys.size;
+  const text = n === 1 ? 'Takes effect at the next game start.' : n + ' changes take effect at the next game start.';
+  if (switched.note && switched.note.isConnected) switched.note.textContent = text;
+  else {
+    switched.note = el('div', { class: 'toast', role: 'status', id: 'switch-note' }, text);
+    $('toasts').append(switched.note);
+  }
+  clearTimeout(switched.timer);
+  switched.timer = setTimeout(() => {
+    if (switched.note) switched.note.remove();
+    switched.note = null;
+    switched.keys.clear();
+  }, 6000);
 }
 
 // ---- drawing ----
@@ -233,7 +261,19 @@ function renderHeader() {
   $('play-label').textContent = s.server ? 'Server' : s.game_running ? 'Running' : 'Play';
   $('play-sub').textContent = s.server ? (s.game_running ? 'running: stop it there' : 'start it in the Server tab')
     : s.game_running ? 'close it to switch mods' : 'through Steam';
-  play.title = s.server ? 'A dedicated server folder: the Server tab starts and stops it' : '';
+  play.title = s.server ? 'A dedicated server folder: the Server tab starts and stops it'
+    : s.wine ? 'Under Wine or Proton the link may not reach Steam: if nothing starts, start Enshrouded from Steam. EMF still loads with it.' : '';
+  // the Play menu (a game folder only): the two starts without mods need EMF's loader here to know the one-shot flag
+  const more = $('play-more');
+  more.hidden = !!s.server || !s.game_found;
+  more.disabled = !!s.game_running;
+  const why = !s.emf_installed ? 'EMF is not installed in this folder: Play starts the game without EMF anyway.'
+    : !s.play_once ? 'The EMF in this folder is older and cannot do this. Install EMF again from its package.' : '';
+  // aria-disabled, not disabled: the entries stay focusable, so keyboard and screen-reader users hear why
+  for (const id of ['play-no-emf', 'play-no-mods']) $(id).setAttribute('aria-disabled', why ? 'true' : 'false');
+  $('play-no-emf-sub').textContent = why || 'This start only. The DLL mods started by EMF still run.';
+  $('play-no-mods-sub').textContent = why || 'This start only. Neither EMF mods nor the DLL mods started by EMF.';
+  if (more.hidden || more.disabled) playMenu(false);
 
   const running = $('running');
   running.hidden = !s.game_running;
@@ -263,6 +303,7 @@ function statusBadges(m) {
     if (m.status === 'started') out.push(b('ok', 'Started', 'Started at the last game start'));
     else if (m.status === 'missing') out.push(b('bad', 'Missing', 'Not in the game folder at the last game start'));
     else if (m.status.startsWith('failed')) out.push(b('bad', 'Failed', 'Did not load at the last game start'));
+    else if (m.status === 'skipped') out.push(b('quiet', 'Skipped', 'Not started at the last game start: the game was started without any mods'));
     else if (!m.error) out.push(b('quiet', 'Not started yet', 'Listed after the last game start'));
   }
   const update = updateBadge(m);  // from the last "Check for updates"
@@ -281,6 +322,7 @@ function toggle(m) {
     onclick: (e) => {
       e.stopPropagation();
       pending = true;
+      pendingKey = keyOf(m);
       send({ cmd: 'set_enabled', source: m.source, id: m.id, on: !m.enabled });
       render();
     },
@@ -569,9 +611,9 @@ function renderDetails(force) {
       m.install_key ? withFocus(el('button', {
         class: 'ghost danger', type: 'button', disabled: state.game_running,
         title: state.game_running ? 'Close the game first' : 'Remove the files EMF installed for it',
-        onclick: () => confirmUninstall(m.install_key),
+        onclick: () => confirmUninstall(m.install_key, keyOf(m), m.install_root, m.name),
       }, 'Uninstall'), 'uninstall') : null),
-    m.install_key ? el('p', { class: 'd-note' }, installedText(m.install_key)) : null,
+    m.install_key ? el('p', { class: 'd-note' }, installedText(m.install_key, keyOf(m), m.install_root)) : null,
     updateSection(m),
     m.depends.length ? el('div', { class: 'd-section' }, el('h3', {}, 'Needs'), el('ul', { class: 'd-list' }, m.depends.map((x) => el('li', {}, x)))) : null,
     m.game_build ? el('p', { class: 'd-note' }, 'Made for game build ' + m.game_build + '.') : null,
@@ -1225,14 +1267,39 @@ function recordOf(key) {
   return state && (state.installed || []).find((i) => i.key === key);
 }
 
-function installedText(key) {
+// The other rows of one install (an EML folder and its DLL): Uninstall removes them too, so the details and the
+// question name them. A record of several separate mods (EMF.exe 0.3.2 recorded the creature packs as one) uninstalls
+// one mod folder at a time instead: none go with it.
+function sameInstall(key, rowKey) {
   const r = recordOf(key);
-  if (!r) return '';
-  return 'Installed by EMF on ' + r.installed_at + ' from ' + r.archive + ' (' + r.files + (r.files === 1 ? ' file' : ' files') + ').';
+  if (!state || (r && r.separable)) return [];
+  return state.mods.filter((x) => x.install_key === key && keyOf(x) !== rowKey).map((x) => x.name);
 }
 
-function confirmUninstall(key) {
-  showModal({ mode: 'confirm', key });
+// How many files of a record are in one of its mod folders (a record of several separate mods), else all of them.
+function filesOf(r, root) {
+  const i = root && r.separable && r.roots ? r.roots.indexOf(root) : -1;
+  return i >= 0 && r.root_files ? r.root_files[i] : r.files;
+}
+
+function namesText(names) {
+  return names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
+}
+
+function installedText(key, rowKey, root) {
+  const r = recordOf(key);
+  if (!r) return '';
+  const others = sameInstall(key, rowKey);
+  const n = filesOf(r, root);
+  return 'Installed by EMF on ' + r.installed_at + ' from ' + r.archive + ' (' + n + (n === 1 ? ' file' : ' files') + ').' +
+    (others.length ? ' Together with ' + namesText(others) + ', as one install: Uninstall removes them together.' : '');
+}
+
+// rowRoot: the row's mod folder, sent along when the record holds several separate mods (only that folder goes)
+function confirmUninstall(key, rowKey, rowRoot, rowName) {
+  const r = recordOf(key);
+  const root = r && r.separable && rowRoot ? rowRoot : '';
+  showModal({ mode: 'confirm', key, rowKey, root, rowName: root ? rowName : '' });
 }
 
 const ACTION = { install: 'Install', update: 'Update', skip: 'Not installed', refused: 'Not installed' };
@@ -1307,25 +1374,31 @@ function renderModal() {
       el('div', { class: 'sheet-foot' }, close('OK')));
   } else if (modal.mode === 'confirm') {
     const r = recordOf(modal.key) || { name: modal.key, files: 0, chain: [] };
+    const one = !!modal.root;  // one mod folder of a record of several separate mods
+    const title = one ? modal.rowName || modal.root : r.name;
+    const n = filesOf(r, modal.root);
     const go = el('button', {
       class: 'primary danger', type: 'button', disabled: running,
       onclick: () => {
         const k = modal.key;
-        send({ cmd: 'uninstall_mod', key: k });
-        showModal({ mode: 'busy', title: 'Uninstalling ' + r.name, text: 'Removing the files EMF installed.' });
+        send(one ? { cmd: 'uninstall_mod', key: k, root: modal.root } : { cmd: 'uninstall_mod', key: k });
+        showModal({ mode: 'busy', title: 'Uninstalling ' + title, text: 'Removing the files EMF installed.' });
       },
     }, 'Uninstall');
     focus = running ? null : go;
     fill(sheet,
       el('div', { class: 'sheet-head' },
         el('div', { class: 'd-eyebrow' }, 'Uninstall'),
-        el('h2', { id: 'sheet-title', class: 'sheet-title' }, r.name + (r.version ? ' ' + r.version : ''))),
+        el('h2', { id: 'sheet-title', class: 'sheet-title' }, one ? title : r.name + (r.version ? ' ' + r.version : ''))),
       el('div', { class: 'sheet-body' },
         running ? el('div', { class: 'sheet-warn', role: 'status' }, 'Close the game first: mods are uninstalled while the game is closed.') : null,
         el('ul', { class: 'part-lines' },
-          el('li', {}, 'Removes the ' + r.files + (r.files === 1 ? ' file' : ' files') + ' EMF installed, where they are unchanged. A file that changed since is left in place and named.'),
-          r.outside && r.outside.length ? el('li', {}, 'Including files outside the mod’s own folder: ' + r.outside.join(', ') + '.') : null,
-          r.chain && r.chain.length ? el('li', {}, 'Takes ' + r.chain.join(', ') + ' out of dinput8-chain.ini.') : null,
+          el('li', {}, 'Removes the ' + n + (n === 1 ? ' file' : ' files') + ' EMF installed' + (one ? ' in ' + modal.root : '') + ', where they are unchanged. A file that changed since is left in place and named.'),
+          one ? el('li', {}, 'The other mods EMF installed from the same file (' + r.archive + ') stay.') : null,
+          sameInstall(modal.key, modal.rowKey).length ? el('li', { class: 'also' }, 'Also uninstalls ' + namesText(sameInstall(modal.key, modal.rowKey)) +
+            ': EMF installed them from the same file as one install.') : null,
+          !one && r.outside && r.outside.length ? el('li', {}, 'Including files outside the mod’s own folder: ' + r.outside.join(', ') + '.') : null,
+          !one && r.chain && r.chain.length ? el('li', {}, 'Takes ' + r.chain.join(', ') + ' out of dinput8-chain.ini.') : null,
           el('li', {}, 'Removes the folders it made once they are empty; a file another mod still uses is kept. Earlier versions in emf\\backup stay.'))),
       el('div', { class: 'sheet-foot' }, close('Cancel'), go));
   }
@@ -1801,7 +1874,8 @@ function updatesOnDone(m) {
   const r = updates.reply;
   if (!r || !m.ok || !m.key) return;
   const nexusId = /^nexus-(\d+)$/.test(m.key) ? Number(m.key.slice(6)) : 0;
-  r.items = r.items.filter((it) => it.install_key !== m.key && it.nexus_id !== nexusId);
+  const keys = m.keys && m.keys.length ? m.keys : [m.key];  // an archive of several mods writes a record for each
+  r.items = r.items.filter((it) => !keys.includes(it.install_key) && it.nexus_id !== nexusId);
   r.summary = { update: 0, maybe: 0, current: 0, unavailable: 0, gone: 0, failed: 0 };
   for (const it of r.items) r.summary[it.state] = (r.summary[it.state] || 0) + 1;
   renderUpdates();
@@ -2009,6 +2083,46 @@ $('filter').addEventListener('input', (e) => {
   if (state && state.game_found) renderList();
 });
 $('play').addEventListener('click', () => (state && state.server ? selectTab('server') : send({ cmd: 'play' })));
+
+// ---- the Play menu: Play, Play without EMF mods, Play without any mods (docs/app.md "Play") ----
+// The two starts without mods leave the mods out for one game start: the host writes the loader's one-shot flag
+// (emf\play_once.txt) and starts the game; the next start loads them again.
+function playMenu(open) {
+  const menu = $('play-menu');
+  if (menu.hidden === !open) return;
+  menu.hidden = !open;
+  $('play-more').setAttribute('aria-expanded', String(open));
+  if (open) menu.querySelector('[role=menuitem]').focus();
+}
+function playWith(mode) {
+  const item = $(mode === 'no-emf' ? 'play-no-emf' : mode === 'no-mods' ? 'play-no-mods' : 'play-normal');
+  if (item.getAttribute('aria-disabled') === 'true') return;  // its line under it says why
+  playMenu(false);
+  $('play-more').focus();
+  send(mode ? { cmd: 'play', mode } : { cmd: 'play' });
+}
+$('play-more').addEventListener('click', (e) => { e.stopPropagation(); playMenu($('play-menu').hidden); });
+$('play-normal').addEventListener('click', () => playWith(''));
+$('play-no-emf').addEventListener('click', () => playWith('no-emf'));
+$('play-no-mods').addEventListener('click', () => playWith('no-mods'));
+document.addEventListener('click', (e) => { if (!$('play-group').contains(e.target)) playMenu(false); });
+$('play-menu').addEventListener('keydown', (e) => {
+  const items = [...$('play-menu').querySelectorAll('[role=menuitem]')];  // the disabled ones too: they say why
+  const i = items.indexOf(document.activeElement);
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    playMenu(false);
+    $('play-more').focus();
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+    e.preventDefault();
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+  } else if (e.key === 'Home' || e.key === 'End') {
+    e.preventDefault();
+    items[e.key === 'Home' ? 0 : items.length - 1].focus();
+  } else if (e.key === 'Tab') {
+    playMenu(false);
+  }
+});
 $('change-folder').addEventListener('click', () => send({ cmd: 'pick_folder' }));
 $('nogame-pick').addEventListener('click', () => send({ cmd: 'pick_folder' }));
 $('folder-path').addEventListener('click', () => { if (state && state.game) send({ cmd: 'open_folder', path: state.game }); });

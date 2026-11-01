@@ -68,6 +68,10 @@ TEST_CASE("app running: a process whose folder Windows hides counts as running f
     CHECK(r.find("administrator") != std::string::npos);
 }
 
+TEST_CASE("app wine: Windows itself is not Wine (ntdll.dll has no wine_get_version)") {
+    CHECK_FALSE(running_under_wine());
+}
+
 TEST_CASE("app links: only https links to nexusmods.com open in the browser") {
     CHECK(nexus_url_allowed("https://www.nexusmods.com/enshrouded/mods/123"));
     CHECK(nexus_url_allowed("https://nexusmods.com/enshrouded"));

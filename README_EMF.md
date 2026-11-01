@@ -8,7 +8,7 @@ Status: version 0 (the exact version is in `VERSION`), experimental. Runs in you
 
 **Release package:** `powershell -File scripts\package.ps1` (after `bash scripts/test.sh`) builds `build\package\EMF-<version>.zip`: players run its `install.cmd`; modders get the SDK, a mod template (`template/`), the docs and the mod sources. `scripts/test_package.ps1` (run by `verify.sh`) checks the install scripts and builds the template from the unzipped package.
 
-**Mod manager:** `EMF.exe` lists every installed mod (EMF, EML/ShroudForge, DLL mods EMF starts, other loaders), switches them with the game closed, saves their settings, keeps mod profiles (the switches under a name, to switch setups in one click, and to share a modlist), says which ones will not load and why, shows clashes and starts the game: [docs/app.md](docs/app.md). The package installs it as `<game>\emf\EMF.exe`.
+**Mod manager:** `EMF.exe` lists every installed mod (EMF, EML/ShroudForge, DLL mods EMF starts, other loaders), switches them with the game closed, saves their settings, keeps mod profiles (the switches under a name, to switch setups in one click, and to share a modlist), says which ones will not load and why, shows clashes and starts the game, also once without EMF mods or without any mods (to join a public game; the arrow next to Play): [docs/app.md](docs/app.md#play). The package installs it as `<game>\emf\EMF.exe`.
 
 **Writing your own mod?** Lua: [docs/modding/lua.md](docs/modding/lua.md) (no compiler, live reload). C++: start with [docs/modding/README.md](docs/modding/README.md): a step-by-step first mod, a guide to how the
 game and EMF work, a cookbook of tested recipes, the full API reference, and what to do after a game update.
@@ -75,6 +75,10 @@ game through Steam's library folders (`scripts\find_game.ps1`); `-Game <folder>`
 (`package/install.ps1`) renames another mod's `dinput8.dll` instead, lists it in `dinput8-chain.ini` and records it in
 `emf\moved.txt`; EMF's loader starts every DLL listed in `dinput8-chain.ini` from its `DllMain`, before the core
 (`src/loader/chain_list.h`, `chain_load.h`; results in `emf\emf_loader.log` and `emf\chain_status.txt`).
+Before that the loader takes EMF.exe's one-shot flag `emf\play_once.txt` ("Play without EMF mods" or "without any
+mods", `src/loader/play_once.h`): it deletes the file at once and, for that one start, starts no core (and with "without
+any mods" no chained DLL either). A flag older than ten minutes, one it cannot delete and the dedicated server are
+ignored, so EMF never stays off.
 `docs/modding/other_mods.md` has the details for authors of DLL mods.
 Logs: `<game>\emf\emf_core.log` (framework + mods), `<game>\emf\emf_loader.log` (the loader: chain-loaded DLLs and a
 core that fails to load).

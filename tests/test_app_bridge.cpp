@@ -5,6 +5,7 @@
 #include <share.h>
 
 #include <cstdio>
+#include <ctime>
 
 #include <algorithm>
 #include <filesystem>
@@ -18,6 +19,7 @@
 #include "app/text.h"
 #include "app_test_files.h"
 #include "core/json.h"
+#include "loader/play_once.h"
 #include "test_scratch.h"
 
 using namespace emf::app;
@@ -43,9 +45,10 @@ struct FakeHost : BridgeHost {
         dir = d;
     }
     std::optional<std::wstring> pick_folder() override { return picked; }
+    bool open_ok = true;  // false: the browser, Explorer or Steam did not open
     bool open(const std::wstring& target, Open how) override {
         opened.emplace_back(target, how);
-        return true;
+        return open_ok;
     }
     std::string running_reason() override { return running; }
     std::wstring steam_game() override { return steam; }
@@ -82,6 +85,8 @@ struct FakeHost : BridgeHost {
     bool personal_key_allowed() const override { return true; }  // the tester switch: Browse asks (the fake) Nexus
     bool testing = false;
     bool test_mode() const override { return testing; }
+    bool wine = false;  // EMF.exe runs under Wine or Proton
+    bool under_wine() const override { return wine; }
 };
 
 json::Value parse(const std::string& text) {
@@ -374,6 +379,129 @@ TEST_CASE("app bridge: Play warns when Steam's game folder is not the one shown"
     host.steam = g.dir;
     r = result_of(bridge.handle(R"({"cmd":"play"})"));
     CHECK(r.get("text")->s.find("Play starts the game in") == std::string::npos);
+}
+
+TEST_CASE("app bridge: under Wine or Proton Play still asks Steam and says to start the game from Steam if nothing starts") {
+    TempGame g(L"bridge_play_wine");
+    fake_game(g);
+    FakeHost host;
+    host.dir = g.dir;
+    host.wine = true;
+    Bridge bridge(host);
+    json::Value r = result_of(bridge.handle(R"({"cmd":"play"})"));
+    CHECK(r.get("ok")->b);
+    REQUIRE(host.opened.size() == 1);  // a Windows Steam in the same prefix (Lutris, Bottles) takes the link
+    CHECK(r.get("text")->s.find("Wine or Proton") != std::string::npos);
+    CHECK(r.get("text")->s.find("If nothing starts, start Enshrouded from Steam") != std::string::npos);
+    CHECK(r.get("text")->s.find("EMF still loads") != std::string::npos);
+    host.open_ok = false;  // no program for steam:// links in the prefix: the hint is all there is to do
+    r = result_of(bridge.handle(R"({"cmd":"play"})"));
+    CHECK_FALSE(r.get("ok")->b);
+    CHECK(r.get("error")->s.find("Start Enshrouded from Steam") != std::string::npos);
+    host.open_ok = true;
+    const json::Value s = parse(bridge.handle(R"({"cmd":"state"})")[0]);
+    REQUIRE(s.get("wine"));
+    CHECK(s.get("wine")->b);  // the page says so on the Play button
+    host.wine = false;
+    r = result_of(bridge.handle(R"({"cmd":"play"})"));
+    CHECK(r.get("ok")->b);
+    CHECK(r.get("text")->s.find("Wine") == std::string::npos);
+}
+
+TEST_CASE("app bridge: the Play flag has a path only inside a game folder that is there") {
+    TempGame g(L"bridge_play_path");
+    CHECK(play_once_path(g.dir) == g.dir + L"\\emf\\play_once.txt");
+    CHECK_FALSE(play_once_path(L"").has_value());  // never "\\emf\\play_once.txt" on the drive's root
+    CHECK_FALSE(play_once_path(g.dir + L"\\not here").has_value());
+    FakeHost host;  // no folder chosen: Play still asks Steam, and touches no file
+    Bridge bridge(host);
+    CHECK(result_of(bridge.handle(R"({"cmd":"play"})")).get("ok")->b);
+    CHECK_FALSE(result_of(bridge.handle(R"({"cmd":"play","mode":"no-emf"})")).get("ok")->b);
+}
+
+TEST_CASE("app bridge: Play without EMF mods writes the loader's one-shot flag, then starts the game; Play takes it back") {
+    using emf::loader::PlayOnce;
+    TempGame g(L"bridge_play_once");
+    fake_game(g);
+    g.write(L"dinput8.dll", "EMF-LOADER-7d3c9f EMF-PLAY-ONCE-1");  // a loader that takes the flag
+    g.write(L"eml.dll", "EML_LOG_FILE_PATH");
+    FakeHost host;
+    host.dir = g.dir;
+    host.steam = g.dir;
+    Bridge bridge(host);
+    const json::Value s = parse(bridge.handle(R"({"cmd":"state"})")[0]);
+    REQUIRE(s.get("play_once"));
+    CHECK(s.get("play_once")->b);  // the page offers the menu
+    const auto flag = [&] { return g.has(L"emf\\play_once.txt") ? g.read(L"emf\\play_once.txt") : std::string(); };
+    const auto now = [] { return static_cast<int64_t>(std::time(nullptr)); };
+
+    json::Value r = result_of(bridge.handle(R"({"cmd":"play","mode":"no-emf"})"));
+    REQUIRE_MESSAGE(r.get("ok")->b, r.get("error")->s);
+    CHECK(r.get("text")->s.find("without EMF mods") != std::string::npos);
+    CHECK(r.get("text")->s.find("next start") != std::string::npos);
+    REQUIRE(host.opened.size() == 1);
+    CHECK(host.opened[0].first == L"steam://rungameid/1203620");
+    CHECK(emf::loader::parse_play_once(flag(), now()).mode == PlayOnce::NoEmf);
+
+    r = result_of(bridge.handle(R"({"cmd":"play","mode":"no-mods"})"));
+    CHECK(r.get("ok")->b);
+    CHECK(r.get("text")->s.find("without any mods") != std::string::npos);
+    CHECK(emf::loader::parse_play_once(flag(), now()).mode == PlayOnce::NoMods);
+
+    // plain Play: a start without mods asked for earlier that did not happen is taken back
+    r = result_of(bridge.handle(R"({"cmd":"play"})"));
+    CHECK(r.get("ok")->b);
+    CHECK_FALSE(g.has(L"emf\\play_once.txt"));
+    CHECK(host.opened.size() == 3);
+
+    // Steam did not start: no flag left behind for a later start
+    host.open_ok = false;
+    CHECK_FALSE(result_of(bridge.handle(R"({"cmd":"play","mode":"no-emf"})")).get("ok")->b);
+    CHECK_FALSE(g.has(L"emf\\play_once.txt"));
+    host.open_ok = true;
+
+    // under Wine or Proton: the flag and the link, and if nothing starts the player starts the game from Steam;
+    // when the link reaches nothing, the flag stays for that start
+    host.wine = true;
+    const size_t opened = host.opened.size();
+    r = result_of(bridge.handle(R"({"cmd":"play","mode":"no-emf"})"));
+    CHECK(r.get("ok")->b);
+    CHECK(r.get("text")->s.find("start Enshrouded from Steam within 10 minutes") != std::string::npos);
+    CHECK(host.opened.size() == opened + 1);
+    CHECK(emf::loader::parse_play_once(flag(), now()).mode == PlayOnce::NoEmf);
+    host.open_ok = false;
+    r = result_of(bridge.handle(R"({"cmd":"play","mode":"no-mods"})"));
+    CHECK(r.get("ok")->b);
+    CHECK(r.get("text")->s.find("Start Enshrouded from Steam within 10 minutes") != std::string::npos);
+    CHECK(emf::loader::parse_play_once(flag(), now()).mode == PlayOnce::NoMods);
+    host.open_ok = true;
+    host.wine = false;
+    std::filesystem::remove(g.at(L"emf\\play_once.txt"));
+
+    // refused, and no flag written: an unknown way, the game running, another game folder in Steam, no EMF, an old loader
+    CHECK_FALSE(result_of(bridge.handle(R"({"cmd":"play","mode":"sideways"})")).get("ok")->b);
+    host.running = "Enshrouded is running from this folder";
+    r = result_of(bridge.handle(R"({"cmd":"play","mode":"no-emf"})"));
+    CHECK_FALSE(r.get("ok")->b);
+    CHECK(r.get("error")->s.find("close it first") != std::string::npos);
+    host.running.clear();
+    TempGame other(L"bridge_play_once_steam");
+    host.steam = other.dir;
+    r = result_of(bridge.handle(R"({"cmd":"play","mode":"no-emf"})"));
+    CHECK_FALSE(r.get("ok")->b);
+    CHECK(r.get("error")->s.find(utf8(other.dir)) != std::string::npos);
+    host.steam = g.dir;
+    g.write(L"dinput8.dll", "EMF-LOADER-7d3c9f");  // EMF 0.3.2's loader: it would not take the flag
+    bridge.handle(R"({"cmd":"state"})");
+    r = result_of(bridge.handle(R"({"cmd":"play","mode":"no-mods"})"));
+    CHECK_FALSE(r.get("ok")->b);
+    CHECK(r.get("error")->s.find("Update EMF") != std::string::npos);
+    std::filesystem::remove(g.at(L"emf\\emf_core.dll"));
+    bridge.handle(R"({"cmd":"state"})");
+    r = result_of(bridge.handle(R"({"cmd":"play","mode":"no-emf"})"));
+    CHECK_FALSE(r.get("ok")->b);
+    CHECK(r.get("error")->s.find("not installed") != std::string::npos);
+    CHECK_FALSE(g.has(L"emf\\play_once.txt"));
 }
 
 TEST_CASE("app bridge: copy puts a text on the clipboard (logs and errors for a bug report)") {

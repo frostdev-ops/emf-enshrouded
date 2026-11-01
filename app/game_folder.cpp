@@ -17,6 +17,7 @@
 #include "emf/emf_api.h"
 #include "loader/chain_list.h"
 #include "loader/loader_id.h"
+#include "loader/play_once.h"
 #include "text.h"
 
 namespace emf::app {
@@ -232,6 +233,14 @@ std::string dll_signature(const std::wstring& path, const std::vector<core::Know
             }
         return sig;
     });
+}
+
+// EMF's loader takes the one-shot flag of EMF.exe's Play menu ("Play without EMF mods", loader/play_once.h): its
+// marker is in the DLL. EMF 0.3.2's loader does not have it.
+bool loader_plays_once(const std::wstring& path) {
+    return cached_fact(path, "play_once", [](const std::string& bytes) {
+               return bytes.find(EMF_PLAY_ONCE_MARKER) != std::string::npos ? std::string("1") : std::string();
+           }) == "1";
 }
 
 // "emf_core <version>" that the build writes into emf_core.dll.
@@ -580,6 +589,21 @@ std::string dll_tool(const Context& c, const std::wstring& file) {
 // The same for names shown and statuses: the light scan reads no DLL for those (the names stay the file names).
 std::string tool_of(const Context& c, const std::wstring& file) { return c.light ? std::string() : dll_tool(c, file); }
 
+// The DLLs emf\chain_status.txt says the last start skipped ("<name>\tskipped": a start without any mods).
+std::vector<std::string> skipped_chain_names(const std::string& chain_status) {
+    std::vector<std::string> out;
+    size_t from = 0;
+    while (from < chain_status.size()) {
+        size_t to = chain_status.find('\n', from);
+        if (to == std::string::npos) to = chain_status.size();
+        const std::string line = loader::trim_chain(chain_status.substr(from, to - from));
+        from = to + 1;
+        const size_t tab = line.find('\t');
+        if (tab != std::string::npos && line.substr(tab + 1) == "skipped") out.push_back(line.substr(0, tab));
+    }
+    return out;
+}
+
 // ---- DLL mods EMF starts: dinput8-chain.ini, with emf\chain_status.txt from the last game start ----
 void scan_chain(FolderState& s, const Context& c) {
     std::map<std::wstring, std::string> status;  // lower-case name -> started / missing / failed N
@@ -624,6 +648,8 @@ void scan_chain(FolderState& s, const Context& c) {
             e.error = "did not load at the last game start: " + why;
         }
         else if (on && e.status.empty()) e.note += " Not started yet: it was listed after the last game start.";
+        else if (on && e.status == "skipped")  // the loader's start without mods (loader/play_once.h)
+            e.note += " Not started at the last game start: the game was started without any mods (Play's menu).";
         s.mods.push_back(std::move(e));
     };
     for (const auto& n : c.chain_active) add(n, true);
@@ -893,7 +919,11 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
         words.push_back(word);
     }
     view.chain_status = c.light ? std::string() : read_text(s.game + L"\\emf\\chain_status.txt");
-    for (const auto& name : core::started_chain_names(view.chain_status)) {
+    // a DLL the last start skipped (Play without any mods, loader/play_once.h) runs again at the next normal start: its
+    // tool counts as running, so the report does not say another tool took its file name
+    std::vector<std::string> running = core::started_chain_names(view.chain_status);
+    for (const auto& name : skipped_chain_names(view.chain_status)) running.push_back(name);
+    for (const auto& name : running) {
         const std::wstring file = loader::widen_chain(name);
         if (loader::inside_game_folder(file)) view.chained_tools.push_back(tool_of(c, file));
     }
@@ -956,6 +986,7 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
 
     const auto runs = [&](const char* w) { return std::find(words.begin(), words.end(), w) != words.end(); };
     s.emf_installed = runs("emf") && exists(s.game + L"\\emf\\emf_core.dll");
+    s.play_once = s.emf_installed && !c.light && loader_plays_once(s.game + L"\\dinput8.dll");
     if (!c.light) s.emf_version = exists(s.game + L"\\emf\\emf_core.dll") ? core_version(s.game + L"\\emf\\emf_core.dll") : "";
     s.shroudforge_active = sf_folder && runs("shroudforge") && !shroudforge_hands_to_eml(s.game);
     c.eml_loader = runs("eml") || runs("shroudforge");

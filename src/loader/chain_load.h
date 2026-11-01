@@ -9,7 +9,7 @@
 namespace emf::loader {
 
 struct ChainResult {
-    enum Kind { Loaded, Missing, Failed };
+    enum Kind { Loaded, Missing, Failed, Skipped };
     std::wstring name;
     Kind kind = Loaded;
     unsigned long error = 0;  // Windows error when Failed
@@ -28,6 +28,13 @@ std::vector<ChainResult> load_chain(const std::vector<std::wstring>& names, Exis
     return out;
 }
 
+// A start without mods (play_once.h): each listed DLL, not started.
+inline std::vector<ChainResult> skip_chain(const std::vector<std::wstring>& names) {
+    std::vector<ChainResult> out;
+    for (const auto& name : names) out.push_back({name, ChainResult::Skipped, 0});
+    return out;
+}
+
 inline std::string utf8_name(const std::wstring& w) {
     if (w.empty()) return {};
     const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
@@ -43,6 +50,8 @@ inline std::string chain_line(const ChainResult& r) {
             return "chain: started " + n;
         case ChainResult::Missing:
             return "chain: " + n + " is listed but not in the game folder; skipped";
+        case ChainResult::Skipped:
+            return "chain: " + n + " not started: this start is without mods";
         default:
             return "chain: " + n + " did not load (Windows error " + std::to_string(r.error) + "); skipped";
     }
@@ -54,6 +63,7 @@ inline std::string chain_status_text(const std::vector<ChainResult>& results) {
         s += utf8_name(r.name) + "\t";
         if (r.kind == ChainResult::Loaded) s += "started";
         else if (r.kind == ChainResult::Missing) s += "missing";
+        else if (r.kind == ChainResult::Skipped) s += "skipped";
         else s += "failed " + std::to_string(r.error);
         s += "\r\n";
     }

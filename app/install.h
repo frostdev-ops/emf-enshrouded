@@ -17,7 +17,10 @@
 // Nothing is ever overwritten: a part that would replace another mod's file is refused with the reason, and the other
 // parts still install. Files of the same install's earlier version move to emf\backup\ (never deleted).
 // emf\installed_mods\<key>.json records every installed file with its SHA-256; the key is nexus-<id> when the Nexus
-// mod is known, else the mod's id. An archive EMF downloaded from Nexus also records its Nexus file id.
+// mod is known, else the mod's id. An archive EMF downloaded from Nexus also records its Nexus file id. An archive of
+// several separate mods (each in its own mod folder, nothing installed outside them: the EMF creature packs) writes one
+// record per mod, keyed by its folder, so each uninstalls by itself. Each mod folder belongs to one record: an install
+// replaces the records that hold its folders (a record that also holds other things keeps those).
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -54,6 +57,7 @@ struct PlanPart {
     std::vector<std::string> deps;            // files it needs but did not install (already there shared, a kept loader)
     std::vector<std::string> lines;           // what goes where, in words
     std::string id, version;                  // from mod.json
+    std::string key;  // an install of its own (several separate mods in one archive), else "": the plan's key
     bool installs() const { return (action == Action::Install || action == Action::Update) && (!copies.empty() || !chain_add.empty()); }
 };
 
@@ -100,6 +104,7 @@ struct InstallResult {
     bool ok = false;
     std::string error;
     std::vector<std::string> done;  // what happened, in words
+    std::vector<std::string> keys;  // the install records it wrote (one, or one per mod)
 };
 // Applies a plan (the caller checks that the game is closed). CopyFile never overwrites; on a failure everything this
 // call did is taken back (its own new files removed, backups moved back, dinput8-chain.ini restored).
@@ -123,7 +128,13 @@ std::optional<InstallRecord> read_install_record(const std::wstring& game, const
 
 // Removes what install `key` recorded: the files whose SHA-256 still matches (others are left and named), the folders
 // it made once they are empty, and its lines in dinput8-chain.ini (copies it switched off are switched on again).
-InstallResult uninstall_mod(const std::wstring& game, const std::string& key);
+// With `root` (one of its mod folders, "mods\\foo"): only that folder's files, when the record's mods can go one by one
+// (separable_install); the record keeps the others. Refused for a record whose mods go together.
+InstallResult uninstall_mod(const std::wstring& game, const std::string& key, const std::string& root = {});
+// A record of several separate mods that can be uninstalled one by one: two or more mod folders, every file inside one
+// of them and no line in dinput8-chain.ini (as EMF.exe 0.3.2 recorded the EMF creature packs, before it recorded each
+// such mod on its own).
+bool separable_install(const InstallRecord& r);
 
 // The plan as the page shows it.
 std::string plan_json(const InstallPlan& plan, const std::string& id, const std::string& blocked);

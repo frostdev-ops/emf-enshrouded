@@ -41,6 +41,8 @@ says what EMF does about that, for players and for authors of such mods.
   does not run is named with the tool that holds the file it wants ("EML has dbghelp.dll, which both want");
   ShroudForge's `winmm.dll` alone does not count as running it (it helps ShroudForge's loader, which runs as
   `dbghelp.dll` or `dinput8.dll`).
+- EMF.exe's **Play without any mods** starts the game once without the chained DLLs (and without EMF); their lines in
+  `emf\chain_status.txt` say `skipped` then. **Play without EMF mods** still starts them ([../app.md](../app.md#play)).
 - On a dedicated server whose start another tool already holds (ShroudForge patches the entry point too), EMF does not
   hold it as well; `emf_loader.log` says so and names the DLL the entry point jumps into. Mods may then load after the
   server's world setup.

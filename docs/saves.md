@@ -63,8 +63,10 @@ min_minutes=60  ; at most one automatic backup this often
 ## Restoring with EMF.exe
 
 1. Close the game.
-2. Open EMF.exe, the Saves tab, and click **Restore...** on a backup.
-3. Choose the whole backup, or only the files you want (a character, a world).
+2. Open EMF.exe, the Saves tab. On a backup, click **Restore all...** to put every file back, or **Pick files...** to
+   bring back only some: one character or one world (one that got damaged, say). Each file is named by what it is
+   ("Character: Ember (level 8)", "World: Embervale") and the file's name.
+3. With Pick files, tick what you want back. Files you leave unticked stay as they are now.
 4. Click Restore. EMF first backs up the files it replaces ("Before restore"), then copies the backup's files back and
    checks each one.
 

@@ -115,6 +115,8 @@ public:
     virtual std::string running_reason() = 0;                    // why the game folder is busy ("" when not)
     virtual void rendered(int count, const std::vector<std::string>& titles) = 0;  // the page drew the mod list
     virtual std::wstring steam_game() = 0;                    // the game folder Steam knows ("" when none)
+    // EMF.exe runs under Wine or Proton (locate.h running_under_wine): Play's steam:// link would reach nothing there
+    virtual bool under_wine() const { return false; }
     virtual bool copy_text(const std::string& text) = 0;      // the clipboard (logs, errors for a bug report)
     // The file dialog for a downloaded mod archive (.zip, .7z, .rar); nullopt when cancelled.
     virtual std::optional<std::wstring> pick_archive() = 0;
@@ -195,6 +197,9 @@ std::string saves_busy_reason(const std::vector<ProcessInfo>& processes, const s
 
 // A JSON string literal: quotes, backslashes and control characters escaped; bytes that are not UTF-8 become U+FFFD.
 std::string json_quote(const std::string& s);
+// <game>\emf\play_once.txt, the one-shot flag of Play's menu (loader/play_once.h); none without a game folder that is
+// there, so that no flag is ever written or deleted outside one ("\emf\play_once.txt" would be on the drive's root).
+std::optional<std::wstring> play_once_path(const std::wstring& game);
 
 // The state message for the page.
 std::string state_json(const FolderState& state, const std::string& running_reason);
