@@ -947,7 +947,9 @@ TEST_CASE("bounty: a marked prop that is gone loses its mark when a player was n
     fire_load(1);
     b.seconds(20);  // the world may still be streaming in: kept
     CHECK(b.reply("bounty.boards").find("1. marked prop at 0, 10, 5") != std::string::npos);
-    b.seconds(15);  // a search after that, with player 1 beside its place: gone
+    b.seconds(15);  // one search after that missed it with player 1 beside its place: kept (they may have just come)
+    CHECK(b.reply("bounty.boards").find("1. marked prop at 0, 10, 5") != std::string::npos);
+    b.seconds(30);  // a second one in a row: gone
     CHECK(b.reply("bounty.boards").find("No Bounty Board") != std::string::npos);
     CHECK(slurp(b.data).find("\nmark ") == std::string::npos);
     // far from every player a missing prop may just not be loaded: kept
@@ -1284,4 +1286,91 @@ TEST_CASE("bounty: until the world's first Bounty Board, take and claim work any
     b.seconds(65);
     CHECK(b.reply("bounty.take 2") == "Take and claim bounties at a Bounty Board.");
     CHECK(b.board().find("no Bounty Board yet") == std::string::npos);
+}
+
+// ---- 1.2: boards are remembered by place ----
+namespace {
+// Steps `n` seconds of a host whose client world holds the board's model only while `client_has` (the server world
+// never has render models): the model is put in for each client step and taken out for the server's.
+void host_seconds(BountyRig& b, int n, uint32_t board, const std::vector<uint8_t>& model, bool client_has) {
+    for (int i = 0; i < n; ++i) {
+        if (client_has) b.r.fake.templates[{ecs::ModelResource::kHash, board}] = model;
+        b.host->tick(kClient);
+        b.r.fake.templates.erase({ecs::ModelResource::kHash, board});
+        b.seconds(1);
+    }
+}
+}  // namespace
+
+TEST_CASE("bounty: on the host a Notice Board keeps counting when the host leaves its area, and after a reload") {
+    BountyRig b({{"need_board", "1"}});
+    altar(b, 900, 0, 0);
+    prop(b, 950, 10, 10, 0);
+    const auto model = b.r.fake.templates[{ecs::ModelResource::kHash, 950}];
+    host_seconds(b, 32, 950, model, true);  // the host walks by: its client world shows the board
+    REQUIRE(b.reply("bounty.boards").find("1. Notice Board at 10, 10, 0") != std::string::npos);
+    // the host goes far away (its client world no longer holds the board); a friend stays at it
+    place(b.r.fake, 1, 500, 10, 0);
+    place(b.r.fake, 2, 10, 10, 2);
+    host_seconds(b, 70, 950, model, false);
+    CHECK(b.reply("bounty.boards").find("1. Notice Board at 10, 10, 0") != std::string::npos);
+    CHECK(b.reply("bounty.take 1", 2, 0xBB).rfind("Taken: ", 0) == 0);
+    CHECK(slurp(b.data).find("\nboard 10.00 10.00 0.00\n") != std::string::npos);
+    // a reload, before the host's client world saw the board again: it counts by its place
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.reply("bounty.boards").find("1. Notice Board at 10, 10, 0") != std::string::npos);
+    host_seconds(b, 70, 950, model, false);  // the friend still at it: the entity is there, so it is no gone board
+    CHECK(b.reply("bounty.boards").find("1. Notice Board at 10, 10, 0") != std::string::npos);
+}
+
+TEST_CASE("bounty: what the host's client world showed counts only for the same entity at the same place") {
+    BountyRig b;
+    altar(b, 900, 0, 0);
+    prop(b, 950, 10, 10, 0);
+    const auto model = b.r.fake.templates[{ecs::ModelResource::kHash, 950}];
+    host_seconds(b, 32, 950, model, true);
+    REQUIRE(b.reply("bounty.boards").find("Notice Board at 10, 10, 0") != std::string::npos);
+    // the board is taken down and its id comes back as another prop in another base, the players far from both
+    remove_entity(b.r.fake, 950);
+    altar(b, 901, 200, 0);
+    prop(b, 950, 205, 10, 0, nullptr);
+    place(b.r.fake, 1, 500, 10, 0);
+    place(b.r.fake, 2, 520, 10, 0);
+    host_seconds(b, 32, 950, model, false);
+    CHECK(b.reply("bounty.boards").find("205") == std::string::npos);
+}
+
+TEST_CASE("bounty: a Notice Board that was taken down is forgotten after two searches with a player near its place") {
+    BountyRig b;
+    altar(b, 900, 0, 0);
+    prop(b, 950, 10, 10, 0);
+    search(b);
+    REQUIRE(b.reply("bounty.boards").find("1. Notice Board at 10, 10, 0") != std::string::npos);
+    remove_entity(b.r.fake, 950);
+    place(b.r.fake, 1, 10, 10, 3);
+    search(b);
+    CHECK(b.reply("bounty.boards").find("1. Notice Board at 10, 10, 0") != std::string::npos);  // one miss: kept
+    search(b);
+    CHECK(b.reply("bounty.boards").find("No Bounty Board") != std::string::npos);
+    CHECK(slurp(b.data).find("\nboard ") == std::string::npos);
+}
+
+TEST_CASE("bounty: a marked prop stays when the player arrives while a search runs (fast travel, a respawn)") {
+    BountyRig b;
+    prop(b, 960, 0, 10, 5, nullptr);
+    b.look(1, 0, 11.5, 0, 0);
+    REQUIRE(b.reply("bounty.mark").rfind("Marked: ", 0) == 0);
+    remove_entity(b.r.fake, 960);  // everyone leaves: its area is not loaded
+    place(b.r.fake, 1, 500, 10, 0);
+    place(b.r.fake, 2, 520, 10, 0);
+    b.seconds(70);
+    place(b.r.fake, 1, 0, 10, 0);  // the host arrives after a search began: the prop is not in that search yet
+    search(b);
+    CHECK(b.reply("bounty.boards").find("1. marked prop at 0, 10, 5") != std::string::npos);
+    prop(b, 960, 0, 10, 5, nullptr);  // streamed in by the next search
+    search(b);
+    search(b);
+    CHECK(b.reply("bounty.boards").find("1. marked prop at 0, 10, 5") != std::string::npos);
 }

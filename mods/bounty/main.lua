@@ -123,11 +123,12 @@ local session = emf.session()
 local hud_at, hud_shown, client_steps = -1, false, 0
 local purge_at = 0
 local boards = {}         -- the Bounty Boards: {id (0: a marked place not found yet), x, y, z, kind "notice" / "mark"}
-local found, altars = {}, {}  -- the last search: Notice Boards {id, x, y, z} and flame altars {x, z}
-local marks = {}          -- props the host marked: {x, y, z, model ("-": unknown), id (this session, when found)}
+local altars = {}         -- the last search's flame altars: {x, z}
+local known = {}          -- Notice Boards found in a base, by place: {x, y, z, id (this session, when found), misses}
+local marks = {}          -- props the host marked: {x, y, z, model ("-": unknown), id (this session, when found), misses}
 local walk, walk_after = nil, 0    -- the search of the server world under way, and the play second of the next
 local cwalk, cwalk_after = nil, 0  -- the same on the host's client world
-local client_models = {}  -- entity id -> board model the host's client world showed
+local client_models = {}  -- entity id -> {model, x, y, z}: a board the host's client world showed, and where
 local loaded_at = 0       -- play second when this world's data came
 local tell_later          -- (player, account, text [, kind]): a chat line for a player who joined, when the limit allows
 local outbox = {}         -- chat lines waiting: {player, account, text, lines, kind}
@@ -474,6 +475,7 @@ local function serialize()
       lines[#lines + 1] = string.format("owe %s %s %d %d %s", k, o.item, o.count, o.level or 0, o.rarity or "-")
     end
   end
+  for _, k in ipairs(known) do lines[#lines + 1] = string.format("board %.2f %.2f %.2f", k.x, k.y, k.z) end
   for _, m in ipairs(marks) do lines[#lines + 1] = string.format("mark %.2f %.2f %.2f %s", m.x, m.y, m.z, m.model) end
   return table.concat(lines, "\n") .. "\n"
 end
@@ -507,7 +509,7 @@ end
 
 -- The world's data, read line by line; each kind of line is matched whole (anchored), so one never reads as another.
 local function load_text(text)
-  players, owed, marks = {}, {}, {}
+  players, owed, marks, known = {}, {}, {}, {}
   offset, dawns, play_s, seed, posted, boarded = 0, 0, 0, nil, nil, false
   local format = nil
   for line in text:gmatch("[^\r\n]+") do
@@ -553,6 +555,10 @@ local function load_text(text)
     if a and entry(id) then
       table.insert(record(a).taken, {id = id, need = tonumber(need), have = tonumber(have), state = tonumber(state)})
     end
+    local bx, by, bz = line:match("^board (%S+) (%S+) (%S+)$")
+    if bx and tonumber(bx) and tonumber(by) and tonumber(bz) then
+      known[#known + 1] = {x = tonumber(bx), y = tonumber(by), z = tonumber(bz), misses = 0}
+    end
     local mx, my, mz, model = line:match("^mark (%S+) (%S+) (%S+) (%S+)$")
     if mx and tonumber(mx) and tonumber(my) and tonumber(mz) then
       marks[#marks + 1] = {x = tonumber(mx), y = tonumber(my), z = tonumber(mz), model = model}
@@ -576,7 +582,7 @@ local function same_session()
   if session == emf.session() then return end
   session = emf.session()
   hits, gifts, moving, filled, dropped = {}, {}, {}, {}, {}
-  boards, found, altars, client_models, walk, cwalk = {}, {}, {}, {}, nil, nil
+  boards, altars, client_models, walk, cwalk = {}, {}, {}, nil, nil
   told, told_at, outbox, sent_lines, walk_up_at = {}, {}, {}, {}, 0
   pending = nil
   loaded = false  -- the old world's data is not this one's: commands wait for on_world_data
@@ -712,20 +718,26 @@ end
 
 -- ---- Bounty Boards: Notice Boards in a base, and props the host marked ----
 -- The world is searched a slice at a time (SCAN_PER_STEP entities per server step, a new search every BOARD_RESCAN
--- seconds): flame altars (BaseIdComponent), props whose model is in BOARD_MODELS, and the props at marked places.
+-- seconds): flame altars (BaseIdComponent), props whose model is in BOARD_MODELS, and the props at remembered places.
 -- Render models are client-side: on the host the client world is searched for the models too (entity ids are shared
 -- between the host's two worlds); a dedicated server has no client world, so there only marked props count unless its
--- server world has the model.
+-- server world has the model. Notice Boards found in a base and marked props are kept with the world by place.
 local function horizontal2(a, x, z) return (a.x - x) ^ 2 + (a.z - z) ^ 2 end
 local function dist(a, x, y, z) return math.sqrt((a.x - x) ^ 2 + (a.y - y) ^ 2 + (a.z - z) ^ 2) end
 local function round(v) return math.floor(v + 0.5) end
 local function base_radius() return clamp(tonumber(emf.setting("base_radius")) or 40, 10, 100) end
 
--- The model of an entity's template: on this world, else what the host's client world showed.
+-- The model of an entity's template: on this world, else what the host's client world showed for that entity at
+-- that place (an id the game hands out again elsewhere is not that board).
 local function model_of(world, id)
   local ok, t = pcall(world.template, world, "ModelResource", id)
   if ok and t then return t.model end
-  return client_models[id]
+  local c = client_models[id]
+  if c then
+    local x, y, z = world:position(id)
+    if x and dist(c, x, y, z) <= MARK_SAME_M then return c.model end
+  end
+  return nil
 end
 
 -- Every player of this world with a position: the entities 1..1023 with PlayerState.
@@ -740,20 +752,12 @@ local function players_now(world)
   return out
 end
 
--- The boards from the last search and the marks: Notice Boards within base_radius of an altar (with notice_boards
--- on), and every marked place (the prop found there, or the place alone until a search finds it).
+-- The boards: the Notice Boards found in a base (with notice_boards on) and the marked props, each by its place (the
+-- prop found there, or the place alone while its area is not loaded).
 local function rebuild_boards()
   boards = {}
   if emf.setting("notice_boards") then
-    local r2 = base_radius() ^ 2
-    for _, f in ipairs(found) do
-      for _, a in ipairs(altars) do
-        if horizontal2(a, f.x, f.z) <= r2 then
-          boards[#boards + 1] = {id = f.id, x = f.x, y = f.y, z = f.z, kind = "notice"}
-          break
-        end
-      end
-    end
+    for _, k in ipairs(known) do boards[#boards + 1] = {id = k.id or 0, x = k.x, y = k.y, z = k.z, kind = "notice"} end
   end
   for _, m in ipairs(marks) do
     local twice = false
@@ -773,28 +777,57 @@ local function search_soon()
   walk, walk_after = nil, 0
 end
 
-local function finish_walk(world)
-  found, altars = walk.found, walk.altars
-  local everyone = nil
-  for i = #marks, 1, -1 do
-    local m = marks[i]
-    local hit = walk.hit[i]
-    if hit then
-      m.id = hit
+-- Places a search did not find (`hit` by index): one that two searches in a row missed with a player within
+-- MARK_GONE_M at both ends, and not right after a load, was taken down; the rest stay (an area that is not loaded,
+-- a player who arrived while the search ran).
+local function forget_gone(list, hit, everyone, what)
+  for i = #list, 1, -1 do
+    local e = list[i]
+    if hit[i] then
+      e.id, e.misses = hit[i], 0
     else
-      m.id = nil
-      -- missed with a player near its place, the world loaded a while ago: taken down
+      e.id = nil
+      local near = false
       if play_s - loaded_at >= LOAD_GRACE then
-        everyone = everyone or players_now(world)
         for _, p in ipairs(everyone) do
-          if dist(m, p.x, p.y, p.z) <= MARK_GONE_M then
-            emf.log(string.format("the marked prop at %d, %d, %d is gone: no Bounty Board there now", round(m.x), round(m.y), round(m.z)))
-            table.remove(marks, i)
-            dirty = true
-            break
-          end
+          if dist(e, p.x, p.y, p.z) <= MARK_GONE_M then near = true end
         end
       end
+      e.misses = near and (e.misses or 0) + 1 or 0
+      if e.misses >= 2 then
+        emf.log(string.format("the %s at %d, %d, %d is gone: no Bounty Board there now", what, round(e.x), round(e.y), round(e.z)))
+        table.remove(list, i)
+        dirty = true
+      end
+    end
+  end
+end
+
+local function finish_walk(world)
+  altars = walk.altars
+  for id in pairs(client_models) do  -- entities the server world no longer has
+    if not walk.present[id] then client_models[id] = nil end
+  end
+  local everyone = players_now(world)
+  forget_gone(known, walk.khit, everyone, "Notice Board")
+  forget_gone(marks, walk.hit, everyone, "marked prop")
+  -- the Notice Boards this search saw: new ones in a base are remembered; one with no base near any more is not
+  local r2 = base_radius() ^ 2
+  for _, f in ipairs(walk.found) do
+    local in_base = false
+    for _, a in ipairs(altars) do
+      if horizontal2(a, f.x, f.z) <= r2 then in_base = true end
+    end
+    local at = nil
+    for i, k in ipairs(known) do
+      if dist(k, f.x, f.y, f.z) <= MARK_SAME_M then at = i end
+    end
+    if in_base and not at then
+      known[#known + 1] = {x = f.x, y = f.y, z = f.z, id = f.id, misses = 0}
+      dirty = true
+    elseif at and not in_base then
+      table.remove(known, at)
+      dirty = true
     end
   end
   walk = nil
@@ -802,11 +835,18 @@ local function finish_walk(world)
   rebuild_boards()
 end
 
+-- Whether a remembered place (a Notice Board, a mark) is the entity found at x, y, z with `model`: within MARK_SAME_M,
+-- and of the same model when both are known.
+local function at_place(e, x, y, z, model, want)
+  return dist(e, x, y, z) <= MARK_SAME_M and (want == nil or want == "-" or not model or model == want)
+end
+
 local function walk_step(world)
-  if not walk then walk = {ids = world:entities(), i = 1, found = {}, altars = {}, hit = {}} end
+  if not walk then walk = {ids = world:entities(), i = 1, found = {}, altars = {}, hit = {}, khit = {}, present = {}} end
   local last = math.min(#walk.ids, walk.i + SCAN_PER_STEP - 1)
   for k = walk.i, last do
     local id = walk.ids[k]
+    walk.present[id] = true
     if has(world, "BaseIdComponent", id) == true then
       local x, _, z = world:position(id)
       if x then walk.altars[#walk.altars + 1] = {x = x, z = z} end
@@ -816,13 +856,15 @@ local function walk_step(world)
       local x, y, z = world:position(id)
       if x then walk.found[#walk.found + 1] = {id = id, x = x, y = y, z = z} end
     end
-    if #marks > 0 and id > 1023 then
+    if (#marks > 0 or #known > 0) and not (id <= 1023 and is_player(world, id)) then
       local x, y, z = world:position(id)
       if x then
         for i, m in ipairs(marks) do
-          if not walk.hit[i] and dist(m, x, y, z) <= MARK_SAME_M and (m.model == "-" or not model or model == m.model) then
-            walk.hit[i] = id
-          end
+          if not walk.hit[i] and at_place(m, x, y, z, model, m.model) then walk.hit[i] = id end
+        end
+        local board_or_unknown = not model or BOARD_MODELS[model]
+        for i, kb in ipairs(known) do
+          if not walk.khit[i] and board_or_unknown and at_place(kb, x, y, z) then walk.khit[i] = id end
         end
       end
     end
@@ -831,21 +873,22 @@ local function walk_step(world)
   if walk.i > #walk.ids then finish_walk(world) end
 end
 
--- The host's client world: which entities have a board's model (render models are only there).
+-- The host's client world: which entities have a board's model, and where (render models are only there). Kept for
+-- the session while the server world has the entity, so a board counts when the host is far from it.
 local function client_walk_step(world)
-  if not cwalk then cwalk = {ids = world:entities(), i = 1, seen = {}} end
+  if not cwalk then cwalk = {ids = world:entities(), i = 1} end
   local last = math.min(#cwalk.ids, cwalk.i + SCAN_PER_STEP - 1)
   for k = cwalk.i, last do
     local id = cwalk.ids[k]
     local ok, t = pcall(world.template, world, "ModelResource", id)
     if ok and t and BOARD_MODELS[t.model] then
-      cwalk.seen[id] = t.model
-      client_models[id] = t.model
+      local x, y, z = world:position(id)
+      if x then client_models[id] = {model = t.model, x = x, y = y, z = z} end
     end
   end
   cwalk.i = last + 1
   if cwalk.i > #cwalk.ids then
-    client_models, cwalk = cwalk.seen, nil
+    cwalk = nil
     cwalk_after = play_s + BOARD_RESCAN
   end
 end
@@ -944,7 +987,7 @@ emf.on_world_data(function(world, text)
   local fresh = load_text(text)
   loaded, dirty = true, fresh  -- a new seed is kept at once
   loaded_at = play_s
-  found, altars, client_models, cwalk, cwalk_after = {}, {}, {}, nil, 0
+  altars, client_models, cwalk, cwalk_after = {}, {}, nil, 0
   told, told_at, outbox, sent_lines, walk_up_at = {}, {}, {}, {}, 0
   pending = nil
   search_soon()
