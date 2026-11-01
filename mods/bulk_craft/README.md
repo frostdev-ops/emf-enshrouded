@@ -1,12 +1,14 @@
 # Bulk Craft (`bulk_craft`)
 
-Craft one by hand, then craft many. Look at a crafting station and press **U**: a wheel offers the recipes you
+Craft one by hand, then craft many. Look at a crafting station and press **F8**: a wheel offers the recipes you
 crafted there by hand, then **x5 / x10 / x25 / max**. Or type **`/craft 25`** in the chat. Vanilla Enshrouded crafts
 one item per click; "Craft All / craft multiple", mass-crafting building blocks, "cook all" and a crafting queue
 together have about 150 votes on the official feature board.
 
 It runs where the world runs, so on the host or a dedicated server it works for every player, also those who joined
 without EMF.
+
+**New in 1.0.1:** the default key is now F8 (U is the game's slow walk); a key you chose yourself stays.
 
 ## Switch it on
 
@@ -59,7 +61,7 @@ the game (or the server).
 
 | Setting | Default | What it does |
 |---|---|---|
-| Bulk craft key (host) (`key`) | U | the wheel; again to stop |
+| Bulk craft key (host) (`key`) | F8 | the wheel; again to stop |
 | Pace (`pace`) | paced | `paced`: one at a time; `instant`: recipes without a crafting time all at once |
 | Seconds per craft (`seconds`) | 0.5 | 0.1-5, for recipes without a crafting time (paced) |
 | Most crafts per order (`max_amount`) | 100 | 5-500 |

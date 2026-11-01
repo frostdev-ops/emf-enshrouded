@@ -1,5 +1,5 @@
 // bulk_craft (Bulk Craft): an EMF mod. Craft one by hand, then craft many.
-//   - The host looks at a crafting station (or at nothing: hand crafting) and presses the key (default U): a wheel with
+//   - The host looks at a crafting station (or at nothing: hand crafting) and presses the key (default F8): a wheel with
 //     the recipes they crafted there by hand, then x5 / x10 / x25 / max.
 //   - /craft <n|max> [part of the name] does the same for every player on the server (API v17 player commands), at the
 //     station they look at or the nearest within `range`; /craft.stop, /craft.list.
@@ -41,8 +41,8 @@ constexpr size_t kWheelRecipes = 7;
 // ---- settings (the change callback may run on any world's thread) ----
 struct Config {
     bc::Settings s;
-    uint32_t key_vk = 'U';
-    std::string key_name = "U";
+    uint32_t key_vk = VK_F8;
+    std::string key_name = bc::kDefaultKey;
 };
 std::mutex g_config_lock;
 Config g_config;
@@ -62,7 +62,7 @@ Config config() {
 }
 void read_settings() {
     Config c;
-    const std::string key = emf::setting_text(kMod, "key", "U");
+    const std::string key = emf::setting_text(kMod, "key", bc::kDefaultKey);
     if (const uint32_t vk = emf::keys::parse_key(std::wstring(key.begin(), key.end()), &c.key_name)) {
         c.key_vk = vk;
     } else {

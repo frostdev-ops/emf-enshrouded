@@ -38,7 +38,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `mods/herald/` | Server Herald (server side, off by default): a message of the day, join/leave/death lines, announcements, a restart countdown, a chat log, playtime, `/players`, an opt-in Discord webhook (see below) |
 | `mods/handover/` | Hand-over (Lua, off by default): `/handover wood 20` gives items to the nearest other player; nothing is ever lost; `/handover.block` refuses them (see below) |
 | `mods/teleports/` | Waypoint Teleports: `/unstuck` and `/home` for every player, `tp`, `bring`, `tp.pos`, `tp.back` for admins (see below) |
-| `mods/bulk_craft/` | Bulk Craft (off by default): craft one by hand, then U at the station (or `/craft 25`, every player) crafts many through the game's own crafting, at the recipe's pace (see below) |
+| `mods/bulk_craft/` | Bulk Craft (off by default): craft one by hand, then F8 at the station (or `/craft 25`, every player) crafts many through the game's own crafting, at the recipe's pace (see below) |
 | `mods/beastmaster/` | Beastmaster (Lua, off by default): tame wolves, boars, sabretooths and hounds (bears and aurochs with the EMF creature packs: EML content, install EML or ShroudForge first), keep 8, call 2 to fight beside you; hold F3 for the beast wheel, `/beastmaster` for every player; rare wild pack beasts (see below) |
 | `mods/necromancer/` | Necromancer (Lua, off by default): raise up to 3 skeleton warriors that stay and follow you (a lich and a bone golem with the EMF creature packs: EML content, install EML or ShroudForge first), cast raging spirits (flaming skulls, 6 s); hold F2 for the summoning wheel, shared with Beastmaster; `/necromancer` for every player (see below) |
 | `mods/loot_scale/` | more materials per loot stack (x2 by default, off by default) by hooking the game's loot amount getter by its bytes; plants picked with E, chopping and mining (which never read that setting) get the difference after the game's PickupEvent, each with its own factor (0 = the same, so from 1.1.0 they follow the main factor); switching it off takes effect at the next start; factor 1 is the world's amounts at once for everything that follows it |
@@ -514,7 +514,7 @@ cancels). Admins get `tp <#k>`, `tp <#k> <#m>`, `bring <#k>`, `tp.pos [#k] x y z
 
 ## The bulk_craft mod (Bulk Craft)
 Installed switched off: switch it on in the Mods tab or EMF.exe. Craft one by hand, then craft many: look at a
-crafting station and press **U** for a wheel with the recipes you crafted there by hand, then x5 / x10 / x25 / max;
+crafting station and press **F8** for a wheel with the recipes you crafted there by hand, then x5 / x10 / x25 / max;
 or `/craft <n|max> [part of the name]` (every player, also from the chat), `/craft.stop`, `/craft.list`. The game
 crafts each one through its own craft request with you as the crafter, from what you carry, all or nothing per craft:
 the mod never moves an item. Because the game's request does not check unlocks, the mod repeats only recipes you

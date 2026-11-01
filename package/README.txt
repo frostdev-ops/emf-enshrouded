@@ -38,7 +38,7 @@ Included mods:
                  countdown, chat log, playtime, Discord webhook (OFF by default; see mods\herald\README.md)
   teleports      Waypoint Teleports: /unstuck and /home for every player, tp and bring for admins (OFF by default;
                  switch it on in the Mods tab and restart the game)
-  bulk_craft     craft one by hand, then U at the station (or /craft 25) crafts many through the game's own
+  bulk_craft     craft one by hand, then F8 at the station (or /craft 25) crafts many through the game's own
                  crafting, at the recipe's pace, from what you carry (OFF by default; see mods\bulk_craft\README.md)
   beastmaster    tame wild beasts and call them to fight beside you; hold F3 for the beast wheel, /beastmaster for
                  every player (a Lua mod; OFF by default; the bear and the aurochs are in the EMF creature packs

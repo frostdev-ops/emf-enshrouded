@@ -343,7 +343,7 @@ TEST_CASE("bulk_craft glue: what a player carries counts every linked inventory"
     CHECK(have.at(kStone) == 2);
 }
 
-TEST_CASE("bulk_craft: mod.json parses with every setting clean; off by default, server side, the U key, paced") {
+TEST_CASE("bulk_craft: mod.json parses with every setting clean; off by default, server side, the F8 key, paced") {
     std::ifstream f(std::string(EMF_SOURCE_DIR) + "/mods/bulk_craft/mod.json", std::ios::binary);
     REQUIRE(f.good());
     std::stringstream ss;
@@ -361,7 +361,8 @@ TEST_CASE("bulk_craft: mod.json parses with every setting clean; off by default,
         CHECK(s.warning.empty());
         defaults[s.key] = s.default_value;
     }
-    CHECK(defaults["key"] == "U");
+    CHECK(defaults["key"] == "F8");  // U is the game's slow walk (test_mod_keys.cpp checks it against the game's keys)
+    CHECK(defaults["key"] == bulkcraft::kDefaultKey);  // the mod's own fallback (a core without the setting) agrees
     CHECK(defaults["pace"] == "paced");
     CHECK(defaults.count("max_amount"));
     CHECK(defaults.count("range"));
