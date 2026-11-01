@@ -852,3 +852,257 @@ TEST_CASE("companion: the state file is replaced in one step (a crash never leav
     CHECK(GetFileAttributesW((path + L".tmp").c_str()) == INVALID_FILE_ATTRIBUTES);  // no temp file left behind
     DeleteFileW(path.c_str());
 }
+
+// ---- keeping up: lost, left behind, stuck (in 0.3.2 a following companion could drift off, vanish or stay behind) ----
+TEST_CASE("companion: one that vanished without dying while it was out comes back at once, whatever respawn says") {
+    // the game removes an enemy body away from every player within a second (re_teleport.md: 150 m, 0.6 s): after a fast
+    // travel or a long run the companion is gone without a death; 0.3.2 then only logged "F6 summons a new one"
+    companion::SummonPolicy p;  // respawn_ms 0: a death stays a death
+    p.on_session(1, 0);
+    p.on_loaded(0);
+    p.on_summoned();
+    CHECK(p.on_lost(10000));
+    CHECK(p.coming());  // the world file keeps saying it is out
+    CHECK_FALSE(p.due(10000 + companion::SummonPolicy::kLostSettleMs - 1));
+    CHECK(p.due(10000 + companion::SummonPolicy::kLostSettleMs));
+    p.on_summoned();
+    CHECK(p.on_lost(20000));
+    p.on_summoned();
+    CHECK(p.on_lost(30000));
+    p.on_summoned();
+    CHECK_FALSE(p.on_lost(40000));  // the 4th time within 2 minutes: something keeps removing it; G or F6 calls it again
+    CHECK_FALSE(p.due(999999));
+    CHECK_FALSE(p.coming());
+    p.on_summoned();  // summoned by hand
+    CHECK(p.on_lost(10000 + companion::SummonPolicy::kLostWindowMs + 1));  // the window moved on
+    // a companion that is not out (dismissed, dead) is never brought back as lost
+    companion::SummonPolicy q;
+    q.on_session(1, 0);
+    q.on_loaded(0);
+    q.on_summoned();
+    q.on_dismissed();
+    CHECK_FALSE(q.on_lost(5000));
+    CHECK_FALSE(q.due(999999));
+}
+
+TEST_CASE("companion: when your player entity changes, it guards the new one") {
+    Companion c;
+    uint32_t guard = 0, guarded = 0;
+    c.on_spawned(6817, 1, 1000, 1);
+    REQUIRE(c.take_start(&guard, &guarded));
+    CHECK_FALSE(c.on_player(1, 2000));  // the same player: nothing
+    CHECK_FALSE(c.on_player(0, 2000));  // no player now (a load screen): nothing
+    CHECK(c.on_player(2, 2000));
+    CHECK(c.player() == 2u);
+    REQUIRE(c.take_start(&guard, &guarded));
+    CHECK(guarded == 2u);
+    c.request_guard(7000, 3000);  // staying: it keeps guarding its marker, only the player it belongs to changes
+    REQUIRE(c.take_start(&guard, &guarded));
+    CHECK(c.on_player(3, 4000));
+    CHECK_FALSE(c.take_start(&guard, &guarded));
+    CHECK(c.player() == 3u);
+}
+
+namespace {
+struct Walk {
+    companion::CatchUp c;
+    uint64_t now = 0;
+    // one look a second
+    bool look(const emf::aim::Vec3& comp, const emf::aim::Vec3& player, bool following = true, bool fighting = false) {
+        now += 1000;
+        return c.tick({now, comp, player, following, fighting});
+    }
+};
+}  // namespace
+
+TEST_CASE("catch-up: left behind (over 40 m for 4 s) it is moved to the player, then not again for 10 s") {
+    Walk w;
+    const emf::aim::Vec3 player{0, 0, 0}, behind{45, 0, 0};
+    CHECK_FALSE(w.look({3, 0, 0}, player));
+    CHECK_FALSE(w.look(behind, player));  // far since this look
+    CHECK_FALSE(w.look(behind, player));
+    CHECK_FALSE(w.look(behind, player));
+    CHECK_FALSE(w.look(behind, player));
+    CHECK(w.look(behind, player));  // 4 s far
+    for (int i = 0; i < 9; ++i) CHECK_FALSE(w.look(behind, player));  // the teleport takes a few steps: no second one
+    for (int i = 0; i < 4; ++i) CHECK_FALSE(w.look(behind, player));  // after the 10 s cool-down it counts again
+    CHECK(w.look(behind, player));  // still far 4 s after the cool-down: again
+}
+
+TEST_CASE("catch-up: in a fight it may stray up to 60 m; beyond that it comes at once (the game would remove it)") {
+    Walk w;
+    const emf::aim::Vec3 player{0, 0, 0};
+    for (int i = 0; i < 20; ++i) CHECK_FALSE(w.look({45, 0, 0}, player, true, true));
+    CHECK(w.look({65, 0, 0}, player, true, true));
+    Walk v;
+    CHECK_FALSE(v.look({0, 0, 70}, player));  // very far (a fast travel, a respawn at an altar): as soon as the player
+    CHECK_FALSE(v.look({0, 0, 70}, player));  // has stood 2 s (the first look cannot tell)
+    CHECK(v.look({0, 0, 70}, player));
+}
+
+TEST_CASE("catch-up: stuck (over 20 m and not moving 2 m in 8 s) it is moved; one that walks is left alone") {
+    Walk w;
+    const emf::aim::Vec3 player{0, 0, 0};
+    for (int i = 0; i < 8; ++i) CHECK_FALSE(w.look({25, 0, 0.1 * i}, player));
+    CHECK(w.look({25, 0, 0.8}, player));  // 8 s since the first look without 2 m of way
+    Walk m;
+    for (int i = 0; i < 30; ++i) CHECK_FALSE(m.look({25, 0, 2.5 * i}, {0, 0, 2.5 * i}));  // it keeps pace, 25 m behind
+    Walk n;
+    for (int i = 0; i < 30; ++i) CHECK_FALSE(n.look({15, 0, 0}, player));  // idling 15 m away: the guard's own slack
+}
+
+TEST_CASE("catch-up: never while it stays, nor while the player is in the air or on the move (gliding, falling)") {
+    Walk w;
+    const emf::aim::Vec3 player{0, 0, 0};
+    for (int i = 0; i < 20; ++i) CHECK_FALSE(w.look({100, 0, 0}, player, false));  // "Stay here"
+    Walk g;
+    for (int i = 0; i < 10; ++i) CHECK_FALSE(g.look({0, 0, 0}, {80.0 + 12 * i, 40, 0}));  // the player glides away
+    CHECK_FALSE(g.c.player_settled());
+    CHECK_FALSE(g.look({0, 0, 0}, {200, 0, 0}));  // landed: it waits until the player has stood 2 s
+    CHECK_FALSE(g.look({0, 0, 0}, {200, 0, 0}));
+    CHECK(g.look({0, 0, 0}, {200, 0, 0}));
+    CHECK(g.c.player_settled());
+}
+
+TEST_CASE("catch-up: without a companion out the player is still watched (a lost one comes back once they stand)") {
+    companion::CatchUp c;
+    CHECK_FALSE(c.player_settled());
+    c.watch_player(1000, {10, 0, 0});
+    CHECK_FALSE(c.player_settled());
+    c.watch_player(2000, {11, 0, 0});  // within 3 m
+    CHECK_FALSE(c.player_settled());
+    c.watch_player(3000, {11, 0, 1});
+    CHECK(c.player_settled());
+    c.watch_player(4000, {20, 0, 1});  // walked on
+    CHECK_FALSE(c.player_settled());
+}
+
+// ---- fix pass: staying, summons by hand, safe spots, follow_distance, identity ----
+TEST_CASE("companion: one lost while it stays comes back at its stay spot once you are within 50 m of it, never to you") {
+    using companion::ComeBack;
+    using companion::come_back;
+    // a staying companion the game removed (you walked off) must not be brought to you: it would walk back to its spot,
+    // be removed again and loop
+    CHECK(come_back(true, true, true, 120.0) == ComeBack::Wait);
+    CHECK(come_back(true, true, false, 120.0) == ComeBack::Wait);
+    CHECK(come_back(true, true, false, companion::kStayReturnM) == ComeBack::AtStaySpot);  // standing still or not
+    CHECK(come_back(true, true, true, 10.0) == ComeBack::AtStaySpot);
+    // one lost while following comes to you once you stand still
+    CHECK(come_back(true, false, false, 0.0) == ComeBack::Wait);
+    CHECK(come_back(true, false, true, 0.0) == ComeBack::AtPlayer);
+    // any other summon (auto, respawn, after a reload) comes to you at once, as before
+    CHECK(come_back(false, false, false, 0.0) == ComeBack::AtPlayer);
+    CHECK(come_back(false, true, false, 500.0) == ComeBack::AtPlayer);
+    // the stay spot comes from the order (where it was told to stay)
+    companion::Orders o;
+    o.stay({4, 5, 6});
+    CHECK(o.stay_pos().x == 4.0);
+    CHECK(o.stay_pos().z == 6.0);
+    // the policy remembers that the summon due is a lost one, until a companion is out again
+    companion::SummonPolicy p;
+    p.on_session(1, 0);
+    p.on_loaded(0);
+    p.on_summoned();
+    CHECK_FALSE(p.lost_pending());
+    REQUIRE(p.on_lost(1000));
+    CHECK(p.lost_pending());
+    p.on_summoned();
+    CHECK_FALSE(p.lost_pending());
+}
+
+TEST_CASE("companion: a summon by hand (G, F6) starts the lost count over") {
+    companion::SummonPolicy p;
+    p.on_session(1, 0);
+    p.on_loaded(0);
+    p.on_summoned();
+    CHECK(p.on_lost(1000));
+    p.on_summoned();
+    CHECK(p.on_lost(2000));
+    p.on_summoned();
+    CHECK(p.on_lost(3000));  // back 3 times
+    p.on_summoned();
+    CHECK_FALSE(p.on_lost(4000));  // the 4th loss within 2 minutes: it stays away ("press G")
+    p.on_summoned(true);           // called by hand
+    CHECK(p.on_lost(5000));        // a fresh count: it comes back again
+    p.on_summoned();
+    CHECK(p.on_lost(6000));
+    p.on_summoned();
+    CHECK(p.on_lost(7000));
+    p.on_summoned();
+    CHECK_FALSE(p.on_lost(8000));
+}
+
+TEST_CASE("companion: every way it is lost or cannot come back says so once, in plain words") {
+    using companion::LostNotice;
+    using companion::lost_notice;
+    const std::string follow = lost_notice(LostNotice::Lost, true, false, "G");
+    const std::string stay = lost_notice(LostNotice::Lost, true, true, "G");
+    const std::string failed = lost_notice(LostNotice::ReplaceFailed, true, false, "G");
+    const std::string again = lost_notice(LostNotice::Lost, false, false, "G");
+    const std::string failed_again = lost_notice(LostNotice::ReplaceFailed, false, false, "F6");
+    CHECK(follow.find("stand still") != std::string::npos);
+    CHECK(stay.find("stay spot") != std::string::npos);
+    CHECK(failed.find("could not") != std::string::npos);
+    CHECK(again.find("press G") != std::string::npos);
+    CHECK(failed_again.find("press F6") != std::string::npos);
+    for (const auto& s : {follow, stay, failed, again, failed_again}) CHECK(s.rfind("Companion: ", 0) == 0);
+    CHECK(follow != stay);
+    CHECK(follow != failed);
+}
+
+TEST_CASE("companion: it comes back to (and catches up at) your own spot, 1 m up for the ground search, not beside you") {
+    // 2 m to the side can be over a ledge or the far side of a wall; the spot you stand on is ground
+    const emf::aim::Vec3 you{10, 50, -4};
+    const auto t = companion::catch_up_target(you);
+    CHECK(t.x == you.x);
+    CHECK(t.z == you.z);
+    CHECK(t.y == doctest::Approx(51.0));
+    const auto s = companion::return_spot(you);
+    CHECK(s.x == you.x);
+    CHECK(s.z == you.z);
+    CHECK(s.y >= you.y);
+    CHECK(s.y <= you.y + 1.0);
+}
+
+TEST_CASE("catch-up: a longer follow_distance moves every limit out (behind d + 20, stuck d + 10, very far d + 30)") {
+    companion::CatchUp c(30.0);
+    const auto l = c.limits();
+    CHECK(l.behind == doctest::Approx(50.0));
+    CHECK(l.stuck == doctest::Approx(40.0));
+    CHECK(l.very_far == doctest::Approx(60.0));
+    CHECK(companion::CatchUp(0.0).limits().behind == doctest::Approx(40.0));  // never closer than the defaults
+    CHECK(companion::CatchUp(0.0).limits().stuck == doctest::Approx(20.0));
+    CHECK(companion::CatchUp(50.0).limits().very_far == doctest::Approx(80.0));
+    uint64_t now = 0;
+    const emf::aim::Vec3 you{0, 0, 0};
+    for (int i = 0; i < 12; ++i) {  // 38 m away, not moving: within both limits for d = 30 (stuck 40, behind 50)
+        now += 1000;
+        CHECK_FALSE(c.tick({now, {38, 0, 0}, you, true, false}));
+    }
+    companion::CatchUp f(30.0);
+    now = 0;
+    bool moved = false;
+    for (int i = 0; i < 6 && !moved; ++i) {
+        now += 1000;
+        moved = f.tick({now, {55, 0, 0}, you, true, false});
+    }
+    CHECK(moved);  // beyond 50 m for 4 s
+    f.reset();
+    CHECK(f.limits().behind == doctest::Approx(50.0));  // a new companion keeps the setting
+}
+
+TEST_CASE("companion: an id that now holds another creature is never adopted; our body without its AI is cleared away") {
+    using companion::BodySeen;
+    using companion::Presence;
+    using companion::presence;
+    const uintptr_t vukah = 0xA000, wolf = 0xB000;
+    CHECK(presence({true, vukah, 11, true, 400}, vukah, 11) == Presence::Ours);
+    CHECK(presence({false, 0, -1, false, -1}, vukah, 11) == Presence::Gone);   // removed by the game
+    CHECK(presence({true, wolf, 6, true, 300}, vukah, 11) == Presence::Taken);  // another template has the id
+    CHECK(presence({true, vukah, 3, true, 300}, vukah, 11) == Presence::Taken);  // a wild Vukah of the same template
+    CHECK(presence({true, vukah, 11, false, 0}, vukah, 11) == Presence::Dead);
+    CHECK(presence({true, vukah, 11, false, 250}, vukah, 11) == Presence::Body);  // alive, its AI gone: destroy it first
+    CHECK(presence({true, vukah, 11, false, -1}, vukah, 11) == Presence::Body);
+    CHECK(presence({true, vukah, 3, true, 300}, vukah, -1) == Presence::Ours);   // faction=-1 keeps the template's
+    CHECK(presence({true, wolf, 11, true, 300}, 0, 11) == Presence::Ours);       // its template was not readable
+}

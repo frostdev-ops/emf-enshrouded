@@ -113,6 +113,28 @@ TEST_CASE("herald: the MOTD fills in {name} and {online}; lines get the prefix")
     CHECK(player_label(std::string("A\nB"), 7) == "A?B");
 }
 
+TEST_CASE("herald: the host of a game it hosts is \"Host\" when EMF cannot read their name, never \"player #1\"") {
+    // EMF reads names from the players' connections; in a game you host the host's own name is not found there, and no
+    // API gives a character's name
+    CHECK(player_label(std::nullopt, 1, 1) == "Host");
+    CHECK(player_label(std::string(""), 1, 1) == "Host");
+    CHECK(player_label(std::string("Ember"), 1, 1) == "Ember");  // a name the game gives wins
+    CHECK(player_label(std::nullopt, 2, 1) == "player #2");      // a guest without a name
+    CHECK(player_label(std::nullopt, 1, 0) == "player #1");      // a dedicated server has no host player
+    CHECK(expand_motd("Welcome {name}!", player_label(std::nullopt, 1, 1), 1) == "Welcome Host!");
+}
+
+TEST_CASE("herald: the log says once why a name is missing: the host's is never found; guests' need players' chat") {
+    const std::string host = no_name_note(true, true, 1), host_off = no_name_note(true, false, 1);
+    CHECK(host == host_off);  // players=1 does not help the host
+    CHECK(host.find("\"Host\"") != std::string::npos);
+    CHECK(host.find("players=1") == std::string::npos);
+    const std::string guest_off = no_name_note(false, false, 2), guest_on = no_name_note(false, true, 2);
+    CHECK(guest_off.find("players=1") != std::string::npos);
+    CHECK(guest_on.find("player 2") != std::string::npos);
+    CHECK(guest_on.find("players=1") == std::string::npos);
+}
+
 TEST_CASE("herald: /players numbers the players and wraps long lists") {
     Roster r;
     r.update({seen(1, kA, true, "Ember"), seen(2, kB, true, "Ash")}, 0, 0);

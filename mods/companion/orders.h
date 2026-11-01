@@ -43,6 +43,8 @@ public:
     Mode mode() const { return mode_; }
     // The entity the companion should guard: 0 = the player, else the stay marker.
     uint32_t guard_target() const { return mode_ == Mode::Stay ? marker_ : 0; }
+    // Where it was told to stay (meaningful in Mode::Stay).
+    const Vec3& stay_pos() const { return stay_pos_; }
 
     void follow() {
         leave_stay();

@@ -15,7 +15,8 @@ runs, it stops at once: no more lines, and its commands answer that it is switch
 ## What players see
 
 Names are the ones the game's chat shows (the player's platform name, e.g. their Steam name; EMF API v19
-`player_name`); when EMF cannot read one, a player is `player #<entity>`.
+`player_name`); when EMF cannot read one, the host of a game you host is `Host` and anyone else `player #<entity>`.
+Characters' names are not readable by mods yet.
 
 All of these are chat lines; the game shows them under the reader's own name, the way EMF's command replies appear
 (the game shows no chat line without a speaker). Every line starts with the prefix (the setting **In front of every
@@ -114,7 +115,10 @@ only you see the herald's lines and the chat log has no chat lines.
 
 ## Good to know
 
-- Names are the names the game knows for the players; when EMF cannot read one, the player is `player #<entity>`.
+- Names are the names the game's chat shows for the players (their platform names, not their characters' names).
+  EMF reads them from the players' connections. In a game you host the host's own name is not found there, so the host
+  is `Host`; guests' names need `players=1` (above), and a guest without one is `player #<entity>` (the log says why,
+  once).
 - `/players` numbers are only valid until someone joins or leaves.
 - Playtime counts while a player is in the world, per world (a world save slot), kept across restarts; it is saved
   every minute and when someone leaves.

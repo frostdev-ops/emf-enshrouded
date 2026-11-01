@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -218,11 +219,45 @@ private:
     std::map<uint32_t, Track> map_;
 };
 
+// ---- whom they fight ----
+// The "Raiders attack" setting: players only, or players and their allies (the companion, summons, tamed beasts).
+enum class Targets { Players, Allies };
+inline Targets targets_mode(const std::string& v) { return v == "players" ? Targets::Players : Targets::Allies; }
+struct Foe {
+    uint32_t id = 0;
+    Vec3 pos;
+    bool player = false;  // a player; else an ally of the players
+    bool alive = true;    // health left
+};
+// The one a raider at `at` is told to fight: `keep` (its last target) while that one is alive, wanted and within
+// `range` metres, so it does not flip between the player and the companion; else the nearest living foe within range
+// (horizontally). Allies count only with Targets::Allies. 0 when there is none: the raider keeps marching on the altar.
+inline uint32_t pick_target(const Vec3& at, const std::vector<Foe>& foes, double range, Targets mode, uint32_t keep = 0) {
+    const auto wanted = [&](const Foe& f) { return f.alive && (f.player || mode == Targets::Allies); };
+    if (keep)
+        for (const auto& f : foes)
+            if (f.id == keep && wanted(f) && horizontal_distance(f.pos, at) <= range) return keep;
+    uint32_t best = 0;
+    double best_d = range;
+    for (const auto& f : foes) {
+        if (!wanted(f)) continue;
+        const double d = horizontal_distance(f.pos, at);
+        if (d <= best_d) {
+            best_d = d;
+            best = f.id;
+        }
+    }
+    return best;
+}
+
 // ---- who comes ----
+// min_level / max_level: the band of levels it comes for. With the progression rule ("Only creatures you are ready
+// for") min_level is also the player level it waits for: the level at which players meet it in the game.
 struct Template {
     std::string name;
     std::string guid;
     uint32_t min_level = 1, max_level = 99;
+    bool known = true;  // its level is known (EMF's own, or "GUID@level"); a bare custom GUID's is not
 };
 // Templates seen to wake, walk to the altar and fight when spawned away from their camp. Only these by default: some
 // templates spawn asleep (the heavy wolf mini-boss did in game). Add others with the custom_templates setting.
@@ -234,9 +269,10 @@ inline const std::vector<Template>& verified_pool() {
     return k;
 }
 // The boss wave's leader: Enemy_Midboss_Vukah_Bigfoot_BossHealthBar woke, came for the player and showed its boss bar
-// (seen in game).
+// (seen in game). A Springlands mini-boss: with the progression rule it waits for a player of level 5 at the base (the
+// level players meet it at; not checked in game).
 inline const Template& boss_template() {
-    static const Template k{"Vukah brawler", "9c8e2008-7259-4114-b6fc-615f0f181c04", 1, 99};
+    static const Template k{"Vukah brawler", "9c8e2008-7259-4114-b6fc-615f0f181c04", 5, 99};
     return k;
 }
 inline bool parse_guid_text(const std::string& text, uint8_t out[16]) { return emf::parse_guid(text, out); }
@@ -252,7 +288,8 @@ inline const Template& pick_template(const std::vector<Template>& pool, uint32_t
         if (t.min_level < low->min_level) low = &t;
     return *low;
 }
-// The custom_templates setting: GUIDs separated by commas; anything else goes to *bad.
+// The custom_templates setting: GUIDs separated by commas, each optionally with "@level" (the player level it comes
+// from, 1-99: what the progression rule checks); anything else goes to *bad.
 inline std::vector<Template> parse_custom_templates(const std::string& text, std::vector<std::string>* bad) {
     std::vector<Template> out;
     size_t at = 0;
@@ -264,13 +301,53 @@ inline std::vector<Template> parse_custom_templates(const std::string& text, std
         while (!t.empty() && (t.back() == ' ' || t.back() == '\t')) t.pop_back();
         uint8_t g[16];
         if (!t.empty()) {
-            if (parse_guid_text(t, g)) out.push_back({"custom", t, 1, 99});
+            const auto trim = [](std::string v) {
+                while (!v.empty() && (v.front() == ' ' || v.front() == '\t')) v.erase(0, 1);
+                while (!v.empty() && (v.back() == ' ' || v.back() == '\t')) v.pop_back();
+                return v;
+            };
+            const size_t at_sign = t.find('@');
+            const std::string guid = trim(t.substr(0, at_sign));
+            uint32_t level = 1;
+            bool ok = parse_guid_text(guid, g), known = false;
+            if (ok && at_sign != std::string::npos) {
+                const std::string lv = trim(t.substr(at_sign + 1));
+                ok = !lv.empty() && lv.size() <= 2 && lv.find_first_not_of("0123456789") == std::string::npos;
+                if (ok) level = static_cast<uint32_t>(std::stoul(lv));
+                ok = ok && level >= 1 && level <= 99;
+                known = true;
+            }
+            if (ok) out.push_back({"custom", guid, level, 99, known});
             else if (bad) bad->push_back(t);
         }
         at = end + 1;
     }
     return out;
 }
+// ---- the progression rule ("Only creatures you are ready for", on by default) ----
+// The game keeps which zones a player has seen (the map, on their own PC) and which bosses they beat (knowledge, in a
+// part of the save EMF cannot read), so the rule goes by levels: a template comes only once the strongest player at the
+// base has reached its own level (min_level), and a boss or mini-boss likewise.
+//
+// A raider for this wave: with the rule, only templates whose level the player has reached (the tested Vukah warrior
+// when none has), by the band holding the raiders' level; without it, as pick_template. `found_bosses`: bare custom
+// GUIDs already seen to be a boss or mini-boss (remove_unready_boss), skipped with the rule.
+inline Template choose_raider(const std::vector<Template>& pool, uint32_t raider_level, uint32_t player_level,
+                              uint32_t rnd, bool progression, const std::set<std::string>* found_bosses = nullptr) {
+    if (!progression) return pick_template(pool, raider_level, rnd);
+    std::vector<Template> ready;
+    for (const auto& t : pool)
+        if (t.min_level <= (std::max)(player_level, 1u) && (t.known || !found_bosses || !found_bosses->count(t.guid)))
+            ready.push_back(t);
+    if (ready.empty()) ready.push_back(verified_pool()[0]);
+    return pick_template(ready, raider_level, rnd);
+}
+// With the rule, a creature that turned out to be a boss or mini-boss from a template whose level is not known (a bare
+// custom GUID) is removed: EMF cannot tell whether the players have beaten it.
+inline bool remove_unready_boss(bool progression, const Template& t, bool is_boss) {
+    return progression && is_boss && !t.known;
+}
+
 // The raiders' level: the strongest player's at the base plus the difficulty, 1-99 (0 = unknown counts as 1).
 inline uint32_t raider_level(uint32_t strongest, int offset) {
     const int v = static_cast<int>((std::max)(strongest, 1u)) + offset;
@@ -341,8 +418,50 @@ struct Settings {
     double base_radius = 30;
     int max_alive = 24;
     bool boss = false;
+    bool progression = true;  // only creatures the players are ready for (boss_template()'s level and the like)
     BasePick bases = BasePick::Busiest;
 };
+
+// ---- presets (the "Raid strength" setting) ----
+// How often and how hard raids come, in one choice. "custom" (the default, so an update never overrides what a player
+// chose) uses the settings one by one; a preset replaces exactly the settings in preset_keys(), which mod.json greys out
+// meanwhile. Standard is the mod's defaults.
+struct Preset {
+    int chance, warning_s, cooldown_nights, waves, per_wave, wave_gap_s;
+    std::string difficulty;  // the difficulty setting's value
+    bool boss;
+    std::string reward;  // the reward setting's value
+};
+inline const std::vector<std::string>& preset_keys() {
+    static const std::vector<std::string> k = {"chance",   "warning_seconds",  "cooldown_nights", "waves", "per_wave",
+                                               "wave_gap_seconds", "difficulty", "boss",            "reward"};
+    return k;
+}
+// The preset by its setting value; nothing for "custom" or an unknown value.
+inline std::optional<Preset> preset(const std::string& name) {
+    // gentle: for the early game: now and then one small wave, 5 levels below the players, a long warning, a quiet night
+    // after each raid
+    if (name == "gentle") return Preset{25, 120, 1, 1, 3, 90, "easy", false, "materials"};
+    if (name == "standard") return Preset{35, 60, 0, 2, 4, 60, "normal", false, "materials"};
+    // hard: often, three waves of 6 three levels above the players, the boss wave, a rare weapon when repelled
+    if (name == "hard") return Preset{50, 45, 0, 3, 6, 45, "hard", true, "rare"};
+    return std::nullopt;
+}
+// The preset's values put into the raid's settings and the reward; false and nothing changed for "custom".
+inline bool apply_preset(const std::string& name, Settings& s, RewardKind& reward) {
+    const auto p = preset(name);
+    if (!p) return false;
+    s.chance = p->chance;
+    s.warning_s = p->warning_s;
+    s.cooldown_nights = p->cooldown_nights;
+    s.waves = p->waves;
+    s.per_wave = p->per_wave;
+    s.wave_gap_s = p->wave_gap_s;
+    s.level_offset = difficulty_offset(p->difficulty);
+    s.boss = p->boss;
+    reward = reward_kind(p->reward);
+    return true;
+}
 
 enum class Phase { Idle, Warning, Fighting };
 
@@ -350,7 +469,8 @@ struct Action {
     enum Kind { Notice, Log, Hud, Spawn, Reward, Destroy } kind = Log;
     std::string text;           // Notice, Log, Hud ("" removes the line)
     int count = 0;              // Spawn: raiders (the boss comes on top); Reward: raiders killed
-    uint32_t level = 1;         // Spawn
+    uint32_t level = 1;         // Spawn: the raiders' level
+    uint32_t player_level = 1;  // Spawn: the strongest player's at the base (what the progression rule checks)
     bool boss = false;          // Spawn: one Vukah brawler on top
     uint32_t altar = 0;         // Spawn, Reward
     Vec3 at;                    // Spawn, Reward: the altar's position
@@ -619,7 +739,15 @@ private:
                 a.kind = Action::Spawn;
                 a.count = s_.per_wave;
                 a.level = raider_level(level, s_.level_offset);
+                a.player_level = (std::max)(level, 1u);
                 a.boss = s_.boss && last;
+                if (a.boss && s_.progression && a.player_level < boss_template().min_level) {
+                    a.boss = false;
+                    out.push_back(note(Action::Log, "the boss stays away: the strongest player at the base is level " +
+                                                        std::to_string(a.player_level) + ", the " + boss_template().name +
+                                                        " comes from level " + std::to_string(boss_template().min_level) +
+                                                        " (Only creatures you are ready for)"));
+                }
                 a.altar = base_.altar;
                 a.at = base_.pos;
                 out.push_back(a);

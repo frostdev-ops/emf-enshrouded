@@ -238,12 +238,29 @@ from you; while you stand still it may wander a few metres), never attacks you, 
 damage**: in the test it hit a hostile Vukah three times for 48 and killed it, and the game credited you with the kill
 ("Enemy slain", XP).
 
+**Keeping up.** The companion only walks, and the game removes a creature of its kind that ends up away from every
+player within a second. So:
+
+- While it follows you (Follow me, Attack): left behind (more than 40 m away for 4 s, or more than 60 m even in a
+  fight) or stuck (more than 20 m away without 2 m of way in 8 s), it is moved to the spot where you stand with the
+  game's own teleport, which looks for the ground there (EMF API v20; on an older EMF, or when the teleport fails, a new
+  companion comes instead). With `follow_distance` d these limits move out to d + 20, d + 30 and d + 10 m.
+- Gone without dying while it follows (after a fast travel, a respawn at an altar, a long glide): "it got lost; it
+  comes back to you when you stand still". The new one appears on the spot where you stand.
+- Gone while it stays (you went far away): it is not brought to you. "it waits at its stay spot; it shows up again when
+  you come back there": it appears at its spot once you are within 50 m of it.
+- It comes back by itself 3 times within 2 minutes; at the 4th loss it stays away until you call it (G or F6), which
+  starts the count over.
+
+The catch-up and the return to you wait until you have stood still for 2 s and aim at the ground you stand on, not a
+spot beside you (over a ledge, or beyond a wall). Gear, order and level stay the same.
+
 **Orders.** With the companion out, hold **G**: a wheel titled "Companion (level N)" offers
 
 | Entry | What happens |
 |---|---|
 | Follow me | it guards you again (the default) |
-| Stay here | a small barrel is put down where the companion stands and it guards that instead: it stays there when you walk off (and still fights what comes near). Follow me (or Dismiss) removes the barrel. If the barrel keeps disappearing (smashed, or out of the loaded area) it is put back at most every 5 s, and after the third time the companion follows you again ("The companion cannot keep its stay spot") |
+| Stay here | a small barrel is put down where the companion stands and it guards that instead: it stays there when you walk off (and still fights what comes near; if you go so far that the game removes it, it shows up at its spot again when you come back). Follow me (or Dismiss) removes the barrel. If the barrel keeps disappearing (smashed, or out of the loaded area) it is put back at most every 5 s, and after the third time the companion follows you again ("The companion cannot keep its stay spot") |
 | Attack (what you look at) | the creature under your crosshair within 40 m becomes its target: the game's own threat event, sent again every 2 s while the target lives and is within 40 m of you, for at most 30 s ("The companion gave up the attack"). Players, other allies and villagers are never picked |
 | Gear | a second wheel: give it a weapon or armour from your backpack / action bar, or take all of it back (below) |
 | Dismiss | it leaves (`StopGuardingEvent`, then removed) |
@@ -286,7 +303,7 @@ yours.
 | `faction=11` | the faction number written on the companion right after it spawns (and again if the game changes it). 11 = `PlayerAlly`, the faction of the game's own summons: full damage. 7 = `Player` follows too but every hit does 0. -1 keeps the template's faction: **with the default enemy body that leaves a hostile Vukah next to you**, and other non-ally numbers can too. Anything that is not a number from -1 to 15 falls back to 11 (logged). Level and gear need 11 |
 | `guid=` | the body (default `d5d05217-52dc-467a-9192-26b4f661d8d9`, `Enemy_Vukah_Melee`). Plain enemy-AI actors without `PlayerInput` work; the old default `FakePlayer_Vukah_Melee` (`9543cfb0-...`) follows but does no damage. Tested ones: `docs/engine_parts/re_companions.md` |
 | `auto_summon=1` | summons one by itself once a world you host is running |
-| `respawn_seconds=N` | after the companion dies (or is gone), a new one comes N seconds later; 0 (default): press G |
+| `respawn_seconds=N` | after the companion dies, a new one comes N seconds later; 0 (default): press G. One the game removed (left far behind) did not die: it always comes back (above) |
 | `follow_distance=<m>` | changes the template's guard distances (start following at d + 2 m, stop at d m). Template data: with an enemy body it changes **every wild Vukah of that template** too, until the game restarts. Not set by default |
 
 Console: `companion.gear` (what it wears, its level, and pieces still on their way back to you), `companion.aim` (your camera ray and the creatures near it, with
@@ -398,10 +415,13 @@ difficulty. A warning first ("raiders gather outside your base and attack in 60 
 raiders left, "Raid repelled!" and a reward for every player at the base when all are dead (runes and furs, or also a
 rare weapon); survivors flee at dawn. Off in every world until you switch it on there: `raids.world on` (or the setting
 "Raids in the world you are in"); kept per world in `emf\config\raids\<slot>.txt`. Commands: `raids.status` (every
-player), `raids.world on|off`, `raids.start [seconds]`, `raids.stop`, `raids.kill` (host). Settings: chance, hour,
-warning, quiet nights, waves, raiders per wave, gap, difficulty, boss wave, who raids (the tested Vukah, or your own
-template GUIDs), which base, base radius, reward, corner and colour. Spawned raiders are not saved: a reload ends the
-raid. Details: `mods/raids/README.md`.
+player), `raids.world on|off`, `raids.start [seconds]`, `raids.stop`, `raids.kill` (host). Settings: **Raid strength**
+(a preset: gentle, standard or hard, or your own settings below), chance, hour, warning, quiet nights, waves, raiders
+per wave, gap, difficulty, boss wave, **Raiders attack** (players, companions and summons, or players only), **Only
+creatures you are ready for** (on: the boss wave's brawler waits until the strongest player at the base is level 5,
+your own templates for their `GUID@level`), who raids (the tested Vukah, or your own template GUIDs), which base, base
+radius, reward, corner and colour. Spawned raiders are not saved: a reload ends the raid. Details:
+`mods/raids/README.md`.
 
 ## The loot_magnet mod (Loot Magnet)
 Installed switched off: switch it on in the Mods tab or EMF.exe. The corpses of creatures killed near a player are looted into that player a moment later, with the game's own loot
@@ -418,7 +438,8 @@ default for new players, the host's key, base radius. Details: `mods/loot_magnet
 Installed switched off: switch it on in the Mods tab or EMF.exe. Every so often, while a player is outdoors at night, a champion (the Vukah brawler mini-boss, with its boss bar)
 appears 80-150 m away at that player's level + 2, patrols spots players walked, and hunts a player who comes within
 30 m. The line on screen shows its distance and direction; the slayer gets 10 runes and a rare weapon at their level;
-it leaves after 10 minutes, at dawn or when everyone is far away. Commands: `champion.where`, `champion.stats` (every
+it leaves after 10 minutes, at dawn or when everyone is far away. With **Only creatures you are ready for** (on by
+default) it comes only for a player of level 5 or more (the brawler's `min_level`). Commands: `champion.where`, `champion.stats` (every
 player), `champion.summon`, `champion.dismiss`, `champion.kill` (host). The template table and the rewards are at the
 top of `emf\mods\champion\main.lua`: change them while the game runs. Details: `mods/champion/README.md`.
 

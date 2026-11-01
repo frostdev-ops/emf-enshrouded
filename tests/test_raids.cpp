@@ -3,10 +3,15 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <map>
+#include <set>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "../mods/raids/raid_logic.h"
+#include "core/manifest.h"
 
 using namespace raids;
 
@@ -334,6 +339,99 @@ TEST_CASE("raids: the boss wave adds a Vukah brawler to the last wave only") {
     CHECK(w2->boss);
 }
 
+TEST_CASE("raids: only creatures you are ready for: the boss wave's brawler stays away below its level, unless the rule is off") {
+    const uint32_t ready = boss_template().min_level;
+    REQUIRE(ready > 1);
+    CHECK(boss_template().known);
+    const auto last_wave = [](Settings s, uint32_t level, std::vector<Action>* all) {
+        s.boss = true;
+        s.waves = 1;
+        Director d(s);
+        std::string why;
+        d.start(at(0, 21.0, home(level)), 0, &why);
+        *all = d.tick(at(kSec, 21.0, home(level)));
+        const Action* a = find(*all, Action::Spawn);
+        REQUIRE(a);
+        return *a;
+    };
+    std::vector<Action> all;
+    Settings s = settings();
+    CHECK(s.progression);  // on by default
+    CHECK(Settings{}.progression);
+    Action a = last_wave(s, ready - 1, &all);
+    CHECK_FALSE(a.boss);
+    CHECK(a.count == s.per_wave);
+    CHECK(a.player_level == ready - 1);
+    bool told = false;
+    for (const auto& x : all) told |= x.kind == Action::Log && x.text.find("boss stays away") != std::string::npos;
+    CHECK(told);
+    CHECK(last_wave(s, ready, &all).boss);
+    s.progression = false;
+    CHECK(last_wave(s, 1, &all).boss);  // the rule off: as before
+    // the players' level decides, not the raiders' level: a higher difficulty does not let the boss in
+    s.progression = true;
+    s.level_offset = 6;
+    a = last_wave(s, ready - 1, &all);
+    CHECK_FALSE(a.boss);
+    CHECK(a.level == ready + 5);
+}
+
+TEST_CASE("raids: only creatures you are ready for: never a template from above the strongest player's level") {
+    const std::vector<Template> pool = {{"wolf", "a", 1, 99}, {"dragon", "b", 25, 99}};
+    for (uint32_t rnd = 0; rnd < 8; ++rnd) {
+        CHECK(choose_raider(pool, 8, 3, rnd, true).name == "wolf");
+        CHECK(choose_raider(pool, 33, 30, rnd, true).name != "");  // both may come at 30
+    }
+    bool dragon = false;
+    for (uint32_t rnd = 0; rnd < 8; ++rnd) dragon |= choose_raider(pool, 33, 30, rnd, true).name == "dragon";
+    CHECK(dragon);
+    const std::vector<Template> late = {{"dragon", "b", 25, 99}};
+    CHECK(choose_raider(late, 3, 3, 0, false).name == "dragon");  // the rule off: the lowest band, as before
+    CHECK(choose_raider(late, 3, 3, 0, true).guid == verified_pool()[0].guid);  // on: the tested Vukah instead
+    // custom templates: "GUID@level" comes from that player level; a bare GUID's level is not known
+    std::vector<std::string> bad;
+    const auto custom = parse_custom_templates(
+        "d5d05217-52dc-467a-9192-26b4f661d8d9@12, 9c8e2008-7259-4114-b6fc-615f0f181c04, d5d05217-52dc-467a-9192-26b4f661d8d9@x",
+        &bad);
+    REQUIRE(custom.size() == 2);
+    CHECK(custom[0].guid == "d5d05217-52dc-467a-9192-26b4f661d8d9");
+    CHECK(custom[0].min_level == 12u);
+    CHECK(custom[0].known);
+    CHECK(custom[1].min_level == 1u);
+    CHECK_FALSE(custom[1].known);
+    CHECK(bad == std::vector<std::string>{"d5d05217-52dc-467a-9192-26b4f661d8d9@x"});
+    // a boss or mini-boss from a template whose level is not known is removed under the rule (EMF cannot tell whether
+    // the players beat it); a known one, or any with the rule off, stays
+    CHECK(remove_unready_boss(true, custom[1], true));
+    CHECK_FALSE(remove_unready_boss(true, custom[1], false));
+    CHECK_FALSE(remove_unready_boss(true, custom[0], true));
+    CHECK_FALSE(remove_unready_boss(false, custom[1], true));
+}
+
+TEST_CASE("raids: a bare custom GUID found to be a boss is skipped from then on: Vukah warriors come in its place") {
+    const std::string boss = "9c8e2008-7259-4114-b6fc-615f0f181c04", other = "d5d05217-52dc-467a-9192-26b4f661d8d9";
+    const std::set<std::string> found = {boss};
+    const std::vector<Template> only = {{"custom", boss, 1, 99, false}};
+    for (uint32_t rnd = 0; rnd < 6; ++rnd) {
+        CHECK(choose_raider(only, 10, 10, rnd, true, &found).guid == verified_pool()[0].guid);
+        CHECK(choose_raider({{"custom", boss, 1, 99, false}, {"custom", other, 1, 99, false}}, 10, 10, rnd, true, &found).guid ==
+              other);
+    }
+    CHECK(choose_raider(only, 10, 10, 0, true, nullptr).guid == boss);  // not found yet: it may come (then it is checked)
+    CHECK(choose_raider({{"custom", boss, 5, 99, true}}, 10, 10, 0, true, &found).guid == boss);  // GUID@5: allowed
+    CHECK(choose_raider(only, 10, 10, 0, false, &found).guid == boss);  // the rule off: as before
+}
+
+TEST_CASE("raids: custom templates take spaces around the @") {
+    std::vector<std::string> bad;
+    const auto custom = parse_custom_templates("d5d05217-52dc-467a-9192-26b4f661d8d9 @ 12,9c8e2008-7259-4114-b6fc-615f0f181c04@ 3", &bad);
+    REQUIRE(custom.size() == 2);
+    CHECK(custom[0].guid == "d5d05217-52dc-467a-9192-26b4f661d8d9");
+    CHECK(custom[0].min_level == 12u);
+    CHECK(custom[1].min_level == 3u);
+    CHECK(bad.empty());
+}
+
 // ---- where raiders appear ----
 TEST_CASE("raids: inside a base is within its radius (horizontally, the radius rule)") {
     const std::vector<Base> bases = {{1, {0, 0, 0}}, {2, {500, 0, 0}}};
@@ -482,6 +580,145 @@ TEST_CASE("raids: occupied bases are the altars with players within the base rad
     REQUIRE(o[0].players.size() == 1);
     CHECK(o[0].players[0].id == 1u);
     CHECK(players_near(kAltar, players, 80) == 1);
+}
+
+TEST_CASE("raids: whom a raider fights: the nearest living player, or with allies on also a companion or summon") {
+    const Vec3 r{0, 0, 0};
+    const std::vector<Foe> foes = {
+        {1, {12, 0, 0}, true, true},      // a player 12 m away
+        {5000, {4, 0, 3}, false, true},   // the companion 5 m away
+        {2, {3, 0, 0}, true, false},      // a dead player, nearer: never (seen in game: the raider then wandered off)
+        {5001, {2, 0, 0}, false, false},  // a dead summon
+    };
+    CHECK(pick_target(r, foes, 25, Targets::Players) == 1u);
+    CHECK(pick_target(r, foes, 25, Targets::Allies) == 5000u);
+    CHECK(pick_target(r, foes, 10, Targets::Players) == 0u);  // the only living player is out of reach
+    CHECK(pick_target(r, foes, 10, Targets::Allies) == 5000u);
+    CHECK(pick_target(r, foes, 4, Targets::Allies) == 0u);
+    CHECK(pick_target(r, {}, 25, Targets::Allies) == 0u);
+    const std::vector<Foe> close = {{1, {3, 0, 0}, true, true}, {5000, {6, 0, 0}, false, true}};
+    CHECK(pick_target(r, close, 25, Targets::Allies) == 1u);  // the player is nearer
+    CHECK(targets_mode("players") == Targets::Players);
+    CHECK(targets_mode("allies") == Targets::Allies);
+    CHECK(targets_mode("") == Targets::Allies);  // the default
+}
+
+TEST_CASE("raids: a raider keeps its target while it lives and is in reach (no flipping every 3 s)") {
+    const Vec3 r{0, 0, 0};
+    const std::vector<Foe> foes = {{1, {6, 0, 0}, true, true}, {5000, {3, 0, 0}, false, true}};
+    CHECK(pick_target(r, foes, 25, Targets::Allies) == 5000u);
+    CHECK(pick_target(r, foes, 25, Targets::Allies, 1) == 1u);       // it fights the player: it goes on with the player
+    CHECK(pick_target(r, foes, 25, Targets::Allies, 5000) == 5000u);
+    CHECK(pick_target(r, foes, 5, Targets::Allies, 1) == 5000u);     // the player got out of reach
+    CHECK(pick_target(r, foes, 25, Targets::Players, 5000) == 1u);   // allies are not wanted now
+    CHECK(pick_target(r, foes, 25, Targets::Allies, 777) == 5000u);  // its last target is gone
+    const std::vector<Foe> dead = {{1, {6, 0, 0}, true, false}, {5000, {3, 0, 0}, false, true}};
+    CHECK(pick_target(r, dead, 25, Targets::Allies, 1) == 5000u);    // never a dead one
+}
+
+TEST_CASE("raids: presets: gentle, standard and hard set how often and how hard; custom keeps the settings one by one") {
+    Settings s = settings();
+    RewardKind reward = RewardKind::Rare;
+    CHECK_FALSE(apply_preset("custom", s, reward));  // the settings as they are
+    CHECK_FALSE(apply_preset("nonsense", s, reward));
+    CHECK(s.chance == 100);
+    CHECK(reward == RewardKind::Rare);
+    REQUIRE(apply_preset("standard", s, reward));  // the mod's defaults
+    const Settings def;
+    CHECK(s.chance == def.chance);
+    CHECK(s.waves == def.waves);
+    CHECK(s.per_wave == def.per_wave);
+    CHECK(s.wave_gap_s == def.wave_gap_s);
+    CHECK(s.warning_s == def.warning_s);
+    CHECK(s.level_offset == def.level_offset);
+    CHECK(s.cooldown_nights == def.cooldown_nights);
+    CHECK(s.boss == def.boss);
+    CHECK(reward == RewardKind::Materials);
+    CHECK(s.start_hour == 20.0);  // what a preset does not set stays
+    CHECK(s.base_radius == 30);
+    Settings g = settings(), h = settings();
+    RewardKind gr, hr;
+    REQUIRE(apply_preset("gentle", g, gr));
+    REQUIRE(apply_preset("hard", h, hr));
+    CHECK(g.chance < s.chance);
+    CHECK(h.chance > s.chance);
+    CHECK(g.waves * g.per_wave < s.waves * s.per_wave);
+    CHECK(h.waves * h.per_wave > s.waves * s.per_wave);
+    CHECK(g.level_offset < 0);
+    CHECK(h.level_offset > 0);
+    CHECK(g.warning_s > s.warning_s);
+    CHECK_FALSE(g.boss);
+    CHECK(h.boss);
+    CHECK(hr == RewardKind::Rare);
+    for (const char* name : {"gentle", "standard", "hard"}) {
+        const auto p = preset(name);
+        REQUIRE(p);
+        CHECK(p->waves * p->per_wave + (p->boss ? 1 : 0) <= s.max_alive);  // a whole raid fits under the cap
+    }
+}
+
+TEST_CASE("raids: mod.json: a preset's settings are greyed out unless it is custom, and their defaults are the standard preset") {
+    std::ifstream f(std::string(EMF_SOURCE_DIR) + "/mods/raids/mod.json", std::ios::binary);
+    REQUIRE(f.good());
+    std::stringstream ss;
+    ss << f.rdbuf();
+    const auto r = emf::core::parse_manifest(ss.str());
+    REQUIRE_MESSAGE(r.manifest, r.error);
+    const auto def = [&](const std::string& key) -> const emf::core::SettingDef* {
+        for (const auto& d : r.manifest->settings)
+            if (d.key == key) return &d;
+        return nullptr;
+    };
+    const auto* p = def("preset");
+    REQUIRE(p);
+    CHECK(p->default_value == "custom");  // an update never overrides settings a player chose
+    std::vector<std::string> values;
+    for (const auto& o : p->options) values.push_back(o.value);
+    CHECK(values == std::vector<std::string>{"custom", "gentle", "standard", "hard"});
+    // the greyed-out settings keep showing the player's own values, so each preset's label spells out its numbers
+    CHECK(p->help.find("decides") != std::string::npos);
+    for (const auto& o : p->options) {
+        const auto pr = preset(o.value);
+        if (!pr) continue;
+        CAPTURE(o.label);
+        CHECK(o.label.find(std::to_string(pr->chance) + "%") != std::string::npos);
+        CHECK(o.label.find(std::to_string(pr->waves) + (pr->waves == 1 ? " wave of " : " waves of ") +
+                           std::to_string(pr->per_wave)) != std::string::npos);
+        CHECK(o.label.find(std::to_string(pr->warning_s) + " s") != std::string::npos);
+        if (pr->waves > 1) CHECK(o.label.find(std::to_string(pr->wave_gap_s) + " s apart") != std::string::npos);
+        const int off = difficulty_offset(pr->difficulty);
+        const std::string level = off == 0 ? "your level"
+                                           : std::to_string(off < 0 ? -off : off) + (off < 0 ? " levels below" : " levels above");
+        CHECK(o.label.find(level) != std::string::npos);
+        CHECK((o.label.find("boss") != std::string::npos) == pr->boss);
+        CHECK((o.label.find("rare") != std::string::npos) == (pr->reward == "rare"));
+        CHECK((o.label.find("quiet night") != std::string::npos) == (pr->cooldown_nights > 0));
+    }
+    const auto standard = preset("standard");
+    REQUIRE(standard);
+    const std::map<std::string, std::string> want = {
+        {"chance", std::to_string(standard->chance)},
+        {"warning_seconds", std::to_string(standard->warning_s)},
+        {"cooldown_nights", std::to_string(standard->cooldown_nights)},
+        {"waves", std::to_string(standard->waves)},
+        {"per_wave", std::to_string(standard->per_wave)},
+        {"wave_gap_seconds", std::to_string(standard->wave_gap_s)},
+        {"difficulty", standard->difficulty},
+        {"boss", standard->boss ? "1" : "0"},
+        {"reward", standard->reward}};
+    const auto* rule = def("progression");  // the progression rule: on by default, its help names the brawler's level
+    REQUIRE(rule);
+    CHECK(rule->default_value == "1");
+    CHECK(rule->help.find("level " + std::to_string(boss_template().min_level)) != std::string::npos);
+    CHECK(want.size() == preset_keys().size());
+    for (const auto& key : preset_keys()) {
+        CAPTURE(key);
+        const auto* d = def(key);
+        REQUIRE(d);
+        CHECK(d->when_key == "preset");
+        CHECK(d->when_value == "custom");
+        CHECK(d->default_value == want.at(key));
+    }
 }
 
 TEST_CASE("raids: the per-world switch is kept in the world's file as on=1 / on=0 (off when missing)") {

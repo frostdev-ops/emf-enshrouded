@@ -3,12 +3,16 @@
 // program (sends StartGuardingEvent / StopGuardingEvent, watches EntityDiedEvent) on a game worker thread.
 #include <windows.h>
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <cwchar>
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <string>
+
+#include "emf/aim.hpp"
 
 namespace companion {
 
@@ -44,6 +48,19 @@ public:
         guard_target_ = target;
         start_pending_ = true;
         last_start_ms_ = now_ms;
+    }
+    // Server tick, each check: the local player's entity now (emf::local_player()). When it is another one than the
+    // companion belongs to, the companion is theirs from now on and, unless it guards a stay marker, guards them (one
+    // start). False when nothing changed (the same player, none, or no companion out).
+    bool on_player(uint32_t player, uint64_t now_ms) {
+        std::lock_guard<std::mutex> l(m_);
+        if (phase_ != Phase::Active || !player || player == player_) return false;
+        player_ = player;
+        if (!guard_target_) {
+            start_pending_ = true;
+            last_start_ms_ = now_ms;
+        }
+        return true;
     }
     // Server tick: dismiss the companion (stop guarding, then destroy).
     void request_stop() {
@@ -182,6 +199,9 @@ public:
     static constexpr uint64_t kLoadFallbackMs = 60000;
     static constexpr uint64_t kFirstBackoffMs = 5000;
     static constexpr uint64_t kMaxBackoffMs = 60000;
+    static constexpr uint64_t kLostSettleMs = 2000;    // a lost companion comes back this long after it was missed
+    static constexpr int kMaxLost = 3;                 // lost more often than this within kLostWindowMs: it stays away
+    static constexpr uint64_t kLostWindowMs = 120000;
     bool auto_summon = false;
     uint64_t respawn_ms = 0;
 
@@ -190,6 +210,7 @@ public:
         session_ = session;
         wanted_ = auto_summon || active_;
         armed_ = false;
+        lost_pending_ = false;
         loaded_ = false;
         session_start_ms_ = now_ms;
         backoff_ms_ = kFirstBackoffMs;
@@ -206,11 +227,14 @@ public:
         armed_ = true;
         due_ms_ = now_ms + kSettleMs;
     }
-    void on_summoned() {
+    // A companion is out. `by_hand`: the player called it (G, F6), which starts the lost count over.
+    void on_summoned(bool by_hand = false) {
         active_ = true;
         armed_ = false;
         wanted_ = false;
+        lost_pending_ = false;
         backoff_ms_ = kFirstBackoffMs;
+        if (by_hand) lost_.clear();
     }
     // A due summon could not spawn: try again after the back-off.
     void on_spawn_failed(uint64_t now_ms) {
@@ -221,11 +245,37 @@ public:
         active_ = false;
         armed_ = false;
         wanted_ = false;
+        lost_pending_ = false;
     }
+    // The companion vanished without dying while it was out: the game removes an enemy body that is away from every
+    // player within a second (docs/engine_parts/re_teleport.md: 150 m away, removed 0.6 s later), so a fast travel, a
+    // respawn at an altar or a long run leaves it behind and gone. A new one is due kLostSettleMs later, whatever
+    // respawn_ms says (it did not die); where it comes back is come_back()'s. It comes back kMaxLost times within
+    // kLostWindowMs; the next loss returns false (nothing armed): something keeps removing it, and a summon by hand
+    // starts the count over.
+    bool on_lost(uint64_t now_ms) {
+        const bool was_out = active_;
+        active_ = false;
+        lost_pending_ = false;
+        if (!was_out) return false;
+        while (!lost_.empty() && now_ms - lost_.front() > kLostWindowMs) lost_.pop_front();
+        if (static_cast<int>(lost_.size()) >= kMaxLost) {
+            armed_ = false;
+            return false;
+        }
+        lost_.push_back(now_ms);
+        armed_ = true;
+        lost_pending_ = true;
+        due_ms_ = now_ms + kLostSettleMs;
+        return true;
+    }
+    // The summon now due brings back a lost companion (come_back() decides where and when).
+    bool lost_pending() const { return armed_ && lost_pending_; }
     // True when a new companion is now due respawn_ms later.
     bool on_died(uint64_t now_ms) {
         const bool was_out = active_;
         active_ = false;
+        lost_pending_ = false;
         armed_ = was_out && respawn_ms > 0;
         due_ms_ = now_ms + respawn_ms;
         return armed_;
@@ -251,6 +301,147 @@ private:
     bool active_ = false;  // a companion is out (summoned, not dismissed, not dead)
     uint64_t due_ms_ = 0;
     uint64_t backoff_ms_ = kFirstBackoffMs;
+    std::deque<uint64_t> lost_;  // when it was lost, within the last kLostWindowMs
+    bool lost_pending_ = false;  // the armed summon brings back a lost one
+};
+
+// Where a due summon happens now. A companion lost while it followed comes to the player once they have stood still
+// (CatchUp::player_settled: never into the air beside a gliding player). One lost while it stayed comes back at its
+// stay spot, and only once the player is within kStayReturnM of it: brought to the player it would walk back to its spot
+// and be removed there again. Any other summon (auto, respawn, after a reload) comes to the player at once, as before.
+constexpr double kStayReturnM = 50.0;
+enum class ComeBack { Wait, AtPlayer, AtStaySpot };
+inline ComeBack come_back(bool lost, bool staying, bool player_settled, double player_to_spot_m) {
+    if (!lost) return ComeBack::AtPlayer;
+    if (staying) return player_to_spot_m <= kStayReturnM ? ComeBack::AtStaySpot : ComeBack::Wait;
+    return player_settled ? ComeBack::AtPlayer : ComeBack::Wait;
+}
+
+// The note for the player when the companion is lost or cannot come back. `armed`: it comes back by itself; else it
+// stays away until called with `key`.
+enum class LostNotice { Lost, ReplaceFailed };
+inline std::string lost_notice(LostNotice what, bool armed, bool staying, const std::string& key) {
+    if (!armed) return "Companion: it keeps getting lost; press " + key + " to call it again";
+    if (what == LostNotice::ReplaceFailed)
+        return "Companion: it could not be brought to you right now; it comes back when you stand still";
+    if (staying) return "Companion: it waits at its stay spot; it shows up again when you come back there";
+    return "Companion: it got lost; it comes back to you when you stand still";
+}
+
+// Where a lost companion comes back, and where a catch-up teleport aims: the player's own spot (the ground they stand
+// on), not 2 m beside them (over a ledge, or beyond a wall). The teleport's target is 1 m up, for the game's ground
+// search; a spawn goes half a metre up.
+inline emf::aim::Vec3 catch_up_target(const emf::aim::Vec3& player) { return {player.x, player.y + 1.0, player.z}; }
+inline emf::aim::Vec3 return_spot(const emf::aim::Vec3& player) { return {player.x, player.y + 0.5, player.z}; }
+
+// What the server world shows at the companion's id, and what that means. Ids are reused once an entity is gone, so the
+// template (its Enemy01BehaviorState template data, shared by every creature of the template) and the faction written
+// at the spawn tell whether it is still ours.
+struct BodySeen {
+    bool exists = false;  // it has a CurrentTransform
+    uintptr_t tpl = 0;    // its template data now (0: none)
+    int faction = -1;     // its Faction now (-1: none)
+    bool ai = false;      // DynamicEnemy01BehaviorState
+    int64_t health = -1;  // -1: unknown
+};
+enum class Presence {
+    Ours,   // there and well
+    Dead,   // our body, health 0 (the death event follows)
+    Gone,   // nothing there: the game removed it
+    Taken,  // another creature has the id now: never touched, never adopted
+    Body,   // our body without its AI, health left: destroy it before a new one comes
+};
+// `tpl_spawned`: the template data at the spawn (0: not readable, then not checked); `faction_expected`: the faction
+// written at the spawn (-1: the template's own was kept, not checked).
+inline Presence presence(const BodySeen& b, uintptr_t tpl_spawned, int faction_expected) {
+    if (!b.exists) return Presence::Gone;
+    if ((tpl_spawned && b.tpl != tpl_spawned) || (faction_expected >= 0 && b.faction != faction_expected))
+        return Presence::Taken;
+    if (b.ai) return Presence::Ours;
+    return b.health == 0 ? Presence::Dead : Presence::Body;
+}
+
+// Keeps the companion with the player while it follows (the Follow and Attack orders; never while it stays): it is
+// moved next to the player when it fell far behind or got stuck. The guard AI only walks, and the game removes an enemy
+// body away from every player within a second, so after a teleport, a respawn at an altar, a long glide or a path it
+// cannot find it would stay behind and vanish. Not while the player is on the move or in the air (it would land in the
+// air): the player must have stood within 3 m for 2 s. One look a second (server tick).
+class CatchUp {
+public:
+    // The limits for follow_distance 0 (the body's own guard distances); a longer follow_distance d moves them out to
+    // d + 20, d + 30 and d + 10 m.
+    static constexpr double kFar = 40.0;  // metres: farther than this for kFarMs (not in a fight): catch up
+    static constexpr uint64_t kFarMs = 4000;
+    static constexpr double kVeryFar = 60.0;  // farther than this: catch up even in a fight (the game would remove it)
+    static constexpr double kStuckFar = 20.0;  // farther than this and not kStuckMove of way in kStuckMs: stuck
+    static constexpr double kStuckMove = 2.0;
+    static constexpr uint64_t kStuckMs = 8000;
+    static constexpr double kSettled = 3.0;  // the player stood within this for kSettleMs: on the ground
+    static constexpr uint64_t kSettleMs = 2000;
+    static constexpr uint64_t kCooldownMs = 10000;  // between two catch-ups (a teleport takes a few steps)
+
+    struct Limits {
+        double behind, very_far, stuck;
+    };
+    explicit CatchUp(double follow_distance = 0.0) : follow_(follow_distance > 0.0 ? follow_distance : 0.0) {}
+    Limits limits() const {
+        return {(std::max)(kFar, follow_ + 20.0), (std::max)(kVeryFar, follow_ + 30.0), (std::max)(kStuckFar, follow_ + 10.0)};
+    }
+    struct Look {
+        uint64_t now_ms = 0;
+        emf::aim::Vec3 companion, player;
+        bool following = true;  // its order keeps it with the player (Follow, Attack)
+        bool fighting = false;  // its AI is in combat (enemy01 state Combat)
+    };
+    // True when the companion should be moved next to the player now.
+    bool tick(const Look& l) {
+        track(player_, l.player, kSettled, l.now_ms);
+        track(companion_, l.companion, kStuckMove, l.now_ms);
+        const double d = emf::aim::length(emf::aim::sub(l.companion, l.player));
+        const Limits lim = limits();
+        if (!l.following || l.now_ms < cooldown_until_ms_) {
+            far_since_ms_ = 0;
+            companion_.since_ms = l.now_ms;
+            return false;
+        }
+        if (d > lim.behind) {
+            if (!far_since_ms_) far_since_ms_ = l.now_ms;
+        } else {
+            far_since_ms_ = 0;
+        }
+        if (!player_settled()) return false;
+        const bool behind = far_since_ms_ && l.now_ms - far_since_ms_ >= kFarMs;
+        const bool stuck = d > lim.stuck && l.now_ms - companion_.since_ms >= kStuckMs;
+        if (!(d > lim.very_far || (!l.fighting && (behind || stuck)))) return false;
+        cooldown_until_ms_ = l.now_ms + kCooldownMs;
+        far_since_ms_ = 0;
+        return true;
+    }
+    bool player_settled() const { return player_.seen && last_ms_ - player_.since_ms >= kSettleMs; }
+    // The player's position without a companion out (for player_settled before a lost companion comes back).
+    void watch_player(uint64_t now_ms, const emf::aim::Vec3& p) { track(player_, p, kSettled, now_ms); }
+    // A new companion or session (the follow distance stays).
+    void reset() { *this = CatchUp{follow_}; }
+
+private:
+    struct Anchor {
+        bool seen = false;
+        emf::aim::Vec3 at;
+        uint64_t since_ms = 0;  // when it was last farther than the step from `at`
+    };
+    void track(Anchor& a, const emf::aim::Vec3& p, double step, uint64_t now_ms) {
+        last_ms_ = now_ms;
+        if (!a.seen || emf::aim::length(emf::aim::sub(p, a.at)) > step) {
+            a.seen = true;
+            a.at = p;
+            a.since_ms = now_ms;
+        }
+    }
+    double follow_ = 0.0;
+    Anchor player_, companion_;
+    uint64_t last_ms_ = 0;
+    uint64_t far_since_ms_ = 0;
+    uint64_t cooldown_until_ms_ = 0;
 };
 
 // What the log says after the companion died.

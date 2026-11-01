@@ -1,7 +1,7 @@
 {
   "id": "herald",
   "name": "Server Herald",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "For dedicated servers and games you host: a message of the day for each player who joins, join, leave and death lines in the chat, announcements in turn from a file, a restart countdown (herald.restart, also from emf\\commands.txt), a chat log per day, playtime per player, /players /playtime /motd for everyone, and an opt-in Discord webhook. Off until you switch it on: it changes what players see. Players need nothing.",
   "authors": ["EMF"],
   "enabled": false,

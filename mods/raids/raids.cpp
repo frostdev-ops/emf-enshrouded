@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <mutex>
 #include <random>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -30,7 +31,7 @@ constexpr const char* kMod = "raids";
 constexpr const char* kHudLine = "raids.status";
 constexpr double kFixed = 4294967296.0;
 constexpr uint64_t kGuardEveryMs = 3000;
-constexpr double kThreatRange = 25.0;  // a raider this close to a living player is told to fight that player
+constexpr double kThreatRange = 25.0;  // a raider this close to a living player (or ally) is told to fight it
 
 // ---- settings (written by the change callback, any world's thread; read by the server tick) ----
 struct Config {
@@ -38,6 +39,8 @@ struct Config {
     bool custom = false;
     std::vector<raids::Template> custom_pool;
     raids::RewardKind reward = raids::RewardKind::Materials;
+    raids::Targets targets = raids::Targets::Allies;
+    std::string preset = "custom";  // the "Raid strength" setting
     uint32_t corner = EMF_HUD_TOP_RIGHT;
     uint32_t rgba = 0;
 };
@@ -73,9 +76,13 @@ void read_settings() {
     c.s.wave_gap_s = static_cast<int>(emf::setting_int(kMod, "wave_gap_seconds", 60));
     c.s.level_offset = raids::difficulty_offset(emf::setting_text(kMod, "difficulty", "normal"));
     c.s.boss = emf::setting_bool(kMod, "boss", false);
+    c.s.progression = emf::setting_bool(kMod, "progression", true);
     c.s.bases = raids::base_pick(emf::setting_text(kMod, "bases", "busiest"));
     c.s.base_radius = emf::setting_float(kMod, "base_radius", 30.0);
     c.reward = raids::reward_kind(emf::setting_text(kMod, "reward", "materials"));
+    c.targets = raids::targets_mode(emf::setting_text(kMod, "targets", "allies"));
+    c.preset = emf::setting_text(kMod, "preset", "custom");
+    if (!raids::apply_preset(c.preset, c.s, c.reward)) c.preset = "custom";  // a preset replaces its settings
     c.custom = emf::setting_text(kMod, "templates", "verified") == "custom";
     std::vector<std::string> bad;
     c.custom_pool = raids::parse_custom_templates(emf::setting_text(kMod, "custom_templates", ""), &bad);
@@ -144,8 +151,33 @@ struct PendingLevel {
     uint64_t until_ms;
 };
 std::vector<PendingLevel> g_levels;
+struct PendingVet {  // a raider from a custom template whose level is not known: watched for 10 s for a boss bar
+    uint32_t id;
+    uint64_t until_ms;
+    std::string guid;    // its template
+    uint32_t level, altar;
+};
+std::vector<PendingVet> g_vet;
+std::set<std::string> g_found_bosses;  // bare custom GUIDs seen to be a boss or mini-boss: Vukah warriors come instead
 std::map<uint32_t, raids::RaiderId> g_ids;  // who each raider is (template, level): ids are reused once one is gone
+std::map<uint32_t, uint32_t> g_targets;     // each raider's last target (it keeps it while it lives and is near)
 raids::StuckWatch g_stuck;
+
+// Puts one raider of template `t` at `p` (level written soon, marching on `altar`). 0 when the game refused it.
+uint32_t spawn_raider(emf::World w, const raids::Template& t, const raids::Vec3& p, uint32_t level, uint32_t altar,
+                      bool vet) {
+    uint8_t guid[16];
+    if (!raids::parse_guid_text(t.guid, guid)) return 0;
+    const uint32_t id = emf::api()->spawn(w.raw(), guid, p.x, p.y, p.z);
+    if (!id) return 0;
+    g_director.on_spawned(id);
+    g_ids[id] = raids::identify(w, id);
+    g_stuck.on_spawned(id, p, GetTickCount64());
+    g_levels.push_back({id, level, GetTickCount64() + 10000});
+    if (vet) g_vet.push_back({id, GetTickCount64() + 10000, t.guid, level, altar});
+    order(g_guards, id, altar);  // march on the altar (seen in game)
+    return id;
+}
 
 std::optional<raids::Vec3> pos_of(emf::World w, uint32_t id) {
     auto* t = w.get<gen::CurrentTransform>(id);
@@ -157,13 +189,6 @@ std::optional<raids::Vec3> pos_of(emf::World w, uint32_t id) {
 uint32_t level_of(emf::World w, uint32_t id) {
     auto* l = w.get<gen::Level>(id);
     return l ? l->dataStorage[0] : 0;
-}
-
-// A player with health left (the replicated health, else the first Health slot: the current health in game tests).
-bool alive(emf::World w, uint32_t id) {
-    if (auto* n = w.get<gen::NetworkHealth>(id)) return n->health > 0;
-    auto* h = w.get<gen::Health>(id);
-    return h && h->dataStorage[0] > 0;
 }
 
 void refresh_bases(emf::World w) {
@@ -202,18 +227,14 @@ void spawn_wave(emf::World w, const raids::Action& a, const Config& c) {
     int spawned = 0;
     for (size_t i = 0; i < points.size(); ++i) {
         const bool boss = a.boss && i + 1 == points.size();
-        const raids::Template& t = boss ? raids::boss_template() : raids::pick_template(pool, a.level, g_rng());
-        uint8_t guid[16];
-        if (!raids::parse_guid_text(t.guid, guid)) continue;
+        const raids::Template t = boss ? raids::boss_template()
+                                       : raids::choose_raider(pool, a.level, a.player_level, g_rng(), c.s.progression,
+                                                              &g_found_bosses);
         const auto& p = points[i];
-        const uint32_t id = emf::api()->spawn(w.raw(), guid, p.x, p.y, p.z);
+        const uint32_t id =
+            spawn_raider(w, t, p, a.level, a.altar, raids::remove_unready_boss(c.s.progression, t, true));
         if (!id) continue;
         ++spawned;
-        g_director.on_spawned(id);
-        g_ids[id] = raids::identify(w, id);
-        g_stuck.on_spawned(id, p, GetTickCount64());
-        g_levels.push_back({id, a.level, GetTickCount64() + 10000});
-        order(g_guards, id, a.altar);  // march on the altar (seen in game)
         EMF_LOG(kMod, "raider %u (%s, level %u) at (%.1f, %.1f, %.1f), %.0f m from altar %u", id, t.name.c_str(), a.level,
                 p.x, p.y, p.z, raids::horizontal_distance(p, a.at), a.altar);
     }
@@ -239,6 +260,36 @@ void apply_levels(emf::World w, uint64_t now) {
             EMF_LOG(kMod, "raider %u has no Level: it keeps the template's strength", p.id);
         }
         g_levels.erase(g_levels.begin() + static_cast<std::ptrdiff_t>(i));
+    }
+}
+
+// The progression rule: a raider from a bare custom GUID that turns out to be a boss or mini-boss is removed (no kill):
+// EMF cannot tell whether the players have beaten it. Its boss components may appear a step after the spawn: watched
+// for 10 s.
+void vet_bosses(emf::World w, uint64_t now) {
+    for (size_t i = 0; i < g_vet.size();) {
+        const uint32_t id = g_vet[i].id;
+        bool done = !ours(w, id) || now >= g_vet[i].until_ms;
+        if (!done && raids::is_boss(w, id)) {
+            const PendingVet v = g_vet[i];
+            const auto at = pos_of(w, id);
+            emf::api()->destroy(w.raw(), id);
+            g_director.on_gone(id);
+            g_stuck.forget(id);
+            EMF_LOG(kMod, "raider %u (%s) is a boss or mini-boss from a custom template without a level: removed (Only "
+                          "creatures you are ready for; write it as GUID@level, or switch the rule off)", id, v.guid.c_str());
+            if (g_found_bosses.insert(v.guid).second)
+                EMF_NOTIFY("Night Raids: one of your templates is a boss or mini-boss without a level; Vukah warriors come "
+                           "in its place (write it as GUID@level to let it come)");
+            if (at) {  // a Vukah warrior takes its place in the wave
+                const uint32_t warrior = spawn_raider(w, raids::verified_pool()[0], *at, v.level, v.altar, false);
+                EMF_LOG(kMod, "raider %u (%s) takes its place%s", warrior, raids::verified_pool()[0].name.c_str(),
+                        warrior ? "" : ": FAILED (see the core log)");
+            }
+            done = true;
+        }
+        if (done) g_vet.erase(g_vet.begin() + static_cast<std::ptrdiff_t>(i));
+        else ++i;
     }
 }
 
@@ -308,8 +359,9 @@ raids::Tick make_tick(emf::World w, uint64_t now, const std::vector<raids::Playe
     return t;
 }
 
-// Raiders: gone ones noted; the others kept marching on the altar and fighting living players near them.
-void upkeep(emf::World w, uint64_t now, const std::vector<raids::Player>& players) {
+// Raiders: gone ones noted; the others kept marching on the altar and fighting the living players (and, with the
+// "Raiders attack" setting on allies, the companion and summons) near them.
+void upkeep(emf::World w, uint64_t now, const std::vector<raids::Player>& players, const Config& c) {
     for (uint32_t id : g_director.living()) {
         if (!ours(w, id)) {  // gone (or its id is someone else's now)
             g_director.on_gone(id);
@@ -328,22 +380,25 @@ void upkeep(emf::World w, uint64_t now, const std::vector<raids::Player>& player
     if (now - g_guard_ms < kGuardEveryMs || g_director.phase() != raids::Phase::Fighting) return;
     g_guard_ms = now;
     const uint32_t altar = g_director.base().altar;
+    std::vector<raids::Foe> foes;  // never a dead one (seen in game: a raider told to fight a dead player wandered off)
+    for (const auto& pl : players) foes.push_back({pl.id, pl.pos, true, raids::has_health(w, pl.id)});
+    if (c.targets == raids::Targets::Allies)
+        for (const auto& a : raids::allies_near(w, g_director.base().pos,
+                                                raids::ring_for(c.s.base_radius).max + 20 + kThreatRange))
+            foes.push_back(a);
+    std::map<uint32_t, uint32_t> targets;  // the living raiders' targets now (gone raiders drop out)
     for (uint32_t id : g_director.living()) {
         auto* ai = w.get<gen::DynamicEnemy01BehaviorState>(id);
         if (ai && ai->guardEntityId.id != altar) order(g_guards, id, altar);
         const auto p = pos_of(w, id);
         if (!p) continue;
-        uint32_t target = 0;
-        double best = kThreatRange;
-        for (const auto& pl : players) {
-            const double d = raids::horizontal_distance(pl.pos, *p);
-            if (d <= best && alive(w, pl.id)) {  // never a dead player (seen in game: the raider then wandered off)
-                best = d;
-                target = pl.id;
-            }
-        }
+        const auto last = g_targets.find(id);
+        const uint32_t target =
+            raids::pick_target(*p, foes, kThreatRange, c.targets, last == g_targets.end() ? 0 : last->second);
         if (target) order(g_threats, id, target);
+        targets[id] = target;
     }
+    g_targets.swap(targets);
 }
 
 // The per-world switch: the world's file decides; the setting mirrors it (switching the setting while the world is
@@ -365,6 +420,8 @@ void sync_session(emf::World w) {
     g_session = session;
     g_crumbs.clear();
     g_levels.clear();
+    g_vet.clear();
+    g_targets.clear();
     g_ids.clear();
     g_stuck.clear();
     g_bases_ms = 0;
@@ -406,6 +463,7 @@ void on_tick(emf::World w) {
     });
     sync_switch();
     apply_levels(w, now);
+    vet_bosses(w, now);
     if (now - g_last_ms < 1000) return;
     g_last_ms = now;
     if (now - g_bases_ms >= 10000) {
@@ -419,7 +477,7 @@ void on_tick(emf::World w) {
         for (const auto& p : players)
             if (!raids::inside_any_base(p.pos, g_bases, c.s.base_radius)) g_crumbs.add(p.pos, now);
     }
-    upkeep(w, now, players);
+    upkeep(w, now, players, c);
     run(w, g_director.tick(make_tick(w, now, players, c)), c);
 }
 
@@ -434,8 +492,9 @@ void cmd_status(emf::World w, const std::vector<std::string>&) {
         EMF_REPLY("Night Raids: no world loaded that this game hosts");
         return;
     }
-    EMF_REPLY("Night Raids is %s in this world; %d%% chance each night at %.1f h (now %s); %d wave(s) of %d", g_world_on ? "on" : "off",
-              c.s.chance, c.s.start_hour, time, c.s.waves, c.s.per_wave);
+    const std::string strength = c.preset == "custom" ? "own settings" : c.preset + " raids";
+    EMF_REPLY("Night Raids is %s in this world (%s); %d%% chance each night at %.1f h (now %s); %d wave(s) of %d",
+              g_world_on ? "on" : "off", strength.c_str(), c.s.chance, c.s.start_hour, time, c.s.waves, c.s.per_wave);
     EMF_REPLY("%s", g_director.status().c_str());
 }
 
