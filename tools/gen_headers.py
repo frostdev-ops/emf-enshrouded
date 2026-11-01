@@ -301,22 +301,37 @@ def from_eml(data):
 
 
 def load(path):
-    """The types of a source: an exe (read with exe_types.py), EMF's types file, or EML's types.json."""
-    with open(path, "rb") as f:
-        magic = f.read(2)
-    if magic == b"MZ":
-        try:
-            return exe_types.read_exe(path)
-        except exe_types.ImageError as e:
-            sys.exit(f"gen_headers.py: {path}: {e}")
-    with open(path, encoding="utf-8") as f:
-        data = json.load(f)
-    if data.get("format") == exe_types.FORMAT:
-        if data.get("format_version", 0) > exe_types.FORMAT_VERSION:
-            sys.exit(f"gen_headers.py: {path} is a newer types file (format {data.get('format_version')}) than this "
-                     f"generator reads ({exe_types.FORMAT_VERSION}); update EMF's tools.")
-        return data
-    return from_eml(data)
+    """The types of a source: an exe (read with exe_types.py), EMF's types file, or EML's types.json. A source that
+    cannot be read stops the run with one line saying why."""
+    try:
+        with open(path, "rb") as f:
+            magic = f.read(2)
+        if magic == b"MZ":
+            doc = exe_types.read_exe(path)
+        else:
+            with open(path, encoding="utf-8") as f:
+                data = json.load(f)
+            if not isinstance(data, dict):
+                raise ValueError("not a JSON object")
+            if data.get("format") == exe_types.FORMAT:
+                if data.get("format_version", 0) > exe_types.FORMAT_VERSION:
+                    sys.exit(f"gen_headers.py: {path} is a newer types file (format {data.get('format_version')}) "
+                             f"than this generator reads ({exe_types.FORMAT_VERSION}); update EMF's tools.")
+                doc = data
+            else:
+                doc = from_eml(data)
+    except OSError as e:
+        sys.exit(f"gen_headers.py: cannot read {path}: {e.strerror or e}")
+    except exe_types.ImageError as e:
+        sys.exit(f"gen_headers.py: {path}: {e}")
+    except ValueError as e:  # not JSON, not UTF-8
+        sys.exit(f"gen_headers.py: {path} is neither the game's exe nor a types file ({e})")
+    except (KeyError, TypeError) as e:
+        sys.exit(f"gen_headers.py: {path} is not a types file (no {e})")
+    if (doc.get("type_table") or {}).get("root_rva", 0) is None:
+        sys.exit(f"gen_headers.py: {path}: the game's type registry root was not found next to its type list, so the "
+                 f"layout may have changed (docs/engine_parts/re_reflection.md); nothing was written.")
+    return doc
 
 
 def source_lines(doc):
@@ -343,10 +358,16 @@ def generate(doc, out_path):
             seen += 1
         return False
 
+    if gen.component_base is None:
+        sys.exit(f"gen_headers.py: the types have no {COMPONENT_BASE_NAME}, so there are no components; nothing was "
+                 f"written (is the source the game's exe?)")
     # Components derive from keen::ecs::Component directly or through a base (Actor <- BaseActor, Health <- FloatAttribute).
     component_like = [t for t in types if t.get("kind") == "struct" and derives_from_component(t)]
     components = sorted((t for t in component_like if not has_attribute(t, "abstract")),
                         key=lambda t: t["qualified_name"])
+    if not components:
+        sys.exit(f"gen_headers.py: no components found (no type derives from {COMPONENT_BASE_NAME}); nothing was "
+                 f"written")
     abstract_bases = sorted((t for t in component_like if has_attribute(t, "abstract")),
                             key=lambda t: t["qualified_name"])
     dynamics = sorted((t for t in types if t["qualified_name"].startswith("keen::ecs::Dynamic")

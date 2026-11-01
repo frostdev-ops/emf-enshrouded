@@ -139,6 +139,82 @@ class Sources(unittest.TestCase):
         self.assertNotIn('{"keen::ecs::Component"', c)  # abstract
 
 
+class RefusesToWriteEmptyHeaders(unittest.TestCase):
+    """With the default output these would overwrite the SDK's headers: nothing is written, the run stops."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="emf_gen_headers_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.out = os.path.join(self.tmp, "gen", "components.hpp")
+
+    def refused(self, doc):
+        with redirect_stdout(io.StringIO()), self.assertRaises(SystemExit) as e:
+            gen_headers.generate(doc, self.out)
+        self.assertFalse(os.path.exists(os.path.dirname(self.out)))
+        return str(e.exception.code)
+
+    def test_without_keen_ecs_component(self):
+        doc = emf_form()
+        doc["types"] = [t for t in doc["types"] if t["qualified_name"] != "keen::ecs::Component"]
+        doc["types"][-1]["inner"] = None
+        self.assertIn("keen::ecs::Component", self.refused(doc))
+
+    def test_without_any_component(self):
+        doc = emf_form()
+        doc["types"] = [t for t in doc["types"] if t["qualified_name"] != "keen::ecs::Thing"]
+        self.assertIn("no components", self.refused(doc))
+
+
+class BadSources(unittest.TestCase):
+    """A wrong path or a broken file ends with one line saying what is wrong, not a traceback."""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="emf_gen_headers_")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+
+    def write(self, name, data):
+        path = os.path.join(self.tmp, name)
+        with open(path, "wb") as f:
+            f.write(data)
+        return path
+
+    def says(self, path):
+        with self.assertRaises(SystemExit) as e:
+            gen_headers.load(path)
+        msg = str(e.exception.code)
+        self.assertIn("gen_headers.py", msg)
+        self.assertNotIn("\n", msg.strip())
+        return msg
+
+    def test_a_missing_file(self):
+        self.assertIn("nothing.exe", self.says(os.path.join(self.tmp, "nothing.exe")))
+
+    def test_emf_game_dir_without_the_exe(self):
+        """A dedicated server folder holds enshrouded_server.exe, not enshrouded.exe."""
+        from unittest import mock
+        with mock.patch.dict(os.environ, {"EMF_GAME_DIR": self.tmp}), self.assertRaises(SystemExit) as e:
+            gen_headers.main([])
+        self.assertIn("enshrouded.exe", str(e.exception.code))
+
+    def test_broken_json(self):
+        self.says(self.write("types.json", b"{not json"))
+
+    def test_json_without_types(self):
+        self.says(self.write("types.json", b'{"version": "1"}'))
+
+    def test_a_cut_off_exe(self):
+        b, t, order = fx.small_game()
+        self.says(self.write("enshrouded.exe", b.pe_bytes()[:0x300]))
+
+    def test_an_exe_without_the_registry_root(self):
+        b = fx.ImageBuilder()
+        keen = b.namespace("keen")
+        types = [b.type("keen::T%d" % i, "uint32", size=4, align=4, namespace=keen, hash=0x5EED0100 + i)
+                 for i in range(3)]
+        b.holder(b.pointers(types), 3)
+        self.assertIn("root", self.says(self.write("enshrouded.exe", b.pe_bytes())))
+
+
 def game_exe_of_the_headers():
     """EMF_GAME_DIR's enshrouded.exe when it is the build the committed headers were made from, else None."""
     game = os.environ.get("EMF_GAME_DIR")
