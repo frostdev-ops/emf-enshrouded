@@ -28,6 +28,7 @@ Confidence levels:
 - [`engine_parts/re_companion_orders.md`](engine_parts/re_companion_orders.md): companion orders through game events (attack: `AddThreatTargetEvent`; stay: guard a static entity; come back: guard the player) and its strength through `Level` (level 10: health 119 -> 417, hits 48 -> 156).
 - [`engine_parts/re_villager_jobs.md`](engine_parts/re_villager_jobs.md): real crafting with a chest as the operator (`CraftRecipeEvent`), a station's recipes (`RecipeRegistry` + 0xF8), moving villagers (`NpcCommandEvent`), what the player looks at (`PlayerInput.fromClient.camera`).
 - [`engine_parts/re_inventory_api.md`](engine_parts/re_inventory_api.md): the inventory transaction API (setup block, `addItems`, commit) and a simpler "spawn a pickup" route for giving items.
+- [`engine_parts/file_redirect_spike.md`](engine_parts/file_redirect_spike.md) (build 1273043): the exe's file imports (all from KERNEL32, C runtime linked in, no DirectStorage), and the loader's off-by-default spike that logs the exe's file calls (`emf\file_opens.log`) and can send the content files' opens to a shadow copy (`emf\content\client\`, `scripts\content_shadow.ps1`).
 
 ## Confirmed in game: the probe DLL (a local test world)
 Seen with the probe DLL (`src/probe`):
