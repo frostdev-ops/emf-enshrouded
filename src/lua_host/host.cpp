@@ -751,6 +751,7 @@ void Host::Impl::unload(Script& s) {
     s.setting_cbs.clear();
     s.keys.clear();
     s.chat_cbs.clear();
+    s.ws_cbs.clear();
     s.commands.clear();  // the command names stay registered; they answer "not loaded" until registered again
     s.events.clear();
     ++s.generation;

@@ -60,6 +60,7 @@ struct Script {
     std::set<std::string> hud;                         // full HUD ids shown
     std::vector<KeyWatch> keys;                        // emf.on_key
     std::vector<int> chat_cbs;                         // emf.on_chat (lua 1.6)
+    std::vector<int> ws_cbs;                           // emf.on_world_setting_changed (lua 1.10)
     // While a take's callback runs: the taken items not handed on yet (emf.put / emf.give of that item lower it). If the
     // callback raises, what is left goes back into the source.
     struct TakeHand {
@@ -125,6 +126,7 @@ struct Host::Impl {
     std::function<bool(uint32_t)> key_down;              // a key is held and the game is in front (tests replace it)
     std::atomic<uint64_t> server_seen{0};                // GetTickCount64 of the last server world step
     std::atomic<int> chat_hooked{0};                     // the core's on_chat for emf.on_chat: 0 not asked, 1 on, -1 refused
+    std::atomic<int> ws_hooked{0};                       // the core's on_world_setting_changed: 0 not asked, 1 on, -1 refused
     std::atomic<int> moves{0};                           // emf.move requests in flight (each holds one place in the item queue)
     std::function<uint64_t()> now_ms;                    // the clock of the chat limit and time limit (tests replace it)
 

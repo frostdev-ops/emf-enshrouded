@@ -1539,6 +1539,182 @@ int l_wheel(lua_State* L) {
     return 1;
 }
 
+// ---- lua 1.10: world settings (API v21, docs/modding/world_settings.md) ----
+bool has_v21(const EmfApi* a) {
+    return a && a->size >= offsetof(EmfApi, world_setting_info) + sizeof(a->world_setting_info);
+}
+constexpr const char* kWsTooOld = "this EMF is too old for world settings (API 21)";
+
+const char* ws_type_name(uint32_t t) {
+    switch (t) {
+    case EMF_WS_BOOL: return "bool";
+    case EMF_WS_ENUM: return "enum";
+    case EMF_WS_MINUTES: return "minutes";
+    case EMF_WS_WHOLE: return "whole";
+    default: return "float";
+    }
+}
+
+// The setting `key` (key or alias, any case) as the core lists it; false when unknown or no world is hosted.
+bool ws_find(const EmfApi* a, const char* key, EmfWorldSettingInfo* out) {
+    for (uint32_t i = 0;; ++i) {
+        out->size = sizeof *out;
+        if (!a->world_setting_info(i, out)) return false;
+        if (_stricmp(key, out->key) == 0 || (out->alias[0] && _stricmp(key, out->alias) == 0)) return true;
+    }
+}
+
+std::string ws_number(double v) {
+    char buf[32];
+    std::snprintf(buf, sizeof buf, "%g", v);
+    return buf;
+}
+
+// emf.world_settings.get(key): the running world's value (durations in minutes), or nil (unknown, no world hosted here).
+int l_ws_get(lua_State* L) {
+    const char* key = luaL_checkstring(L, 1);
+    const EmfApi* a = script_of(L)->host->api;
+    double v = 0;
+    if (!has_v21(a) || !a->world_setting_get || !a->world_setting_get(key, &v)) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushnumber(L, v);
+    return 1;
+}
+
+// emf.world_settings.set(key, value [, persist]): true when queued for the next server step; false and why when refused.
+int l_ws_set(lua_State* L) {
+    const char* key = luaL_checkstring(L, 1);
+    const double value = lua_isboolean(L, 2) ? (lua_toboolean(L, 2) ? 1.0 : 0.0) : luaL_checknumber(L, 2);
+    const bool persist = lua_toboolean(L, 3) != 0;
+    const EmfApi* a = script_of(L)->host->api;
+    if (!has_v21(a) || !a->world_setting_set) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, kWsTooOld);
+        return 2;
+    }
+    if (a->world_setting_set(key, value, persist ? EMF_WS_PERSIST : 0u)) {
+        lua_pushboolean(L, true);
+        return 1;
+    }
+    std::string why;
+    EmfWorldSettingInfo info{};
+    info.size = sizeof info;
+    if (!a->world_setting_info(0, &info))
+        why = "no world is hosted here";
+    else if (!ws_find(a, key, &info))
+        why = std::string("unknown setting: ") + key;
+    else if (value < info.min || value > info.max)
+        why = std::string(key) + ": allowed " + ws_number(info.min) + " to " + ws_number(info.max);
+    else
+        why = std::string(key) + ": refused (see emf_core.log)";
+    lua_pushboolean(L, false);
+    lua_pushstring(L, why.c_str());
+    return 2;
+}
+
+// emf.world_settings.reset([key] [, persist]): back to the world's own value; no key (or "all"): every setting.
+int l_ws_reset(lua_State* L) {
+    const char* key = nullptr;
+    int persist_at = 1;
+    if (lua_type(L, 1) == LUA_TSTRING) {
+        key = lua_tostring(L, 1);
+        persist_at = 2;
+    } else if (lua_isnil(L, 1) && lua_gettop(L) >= 2) {
+        persist_at = 2;
+    }
+    const bool persist = lua_toboolean(L, persist_at) != 0;
+    const EmfApi* a = script_of(L)->host->api;
+    lua_pushboolean(L, has_v21(a) && a->world_setting_reset && a->world_setting_reset(key, persist ? EMF_WS_PERSIST : 0u));
+    return 1;
+}
+
+// emf.world_settings.list(): {{key, alias, group, type, min, max, value, world, changed, needs_client}, ...}; empty
+// when no world is hosted here.
+int l_ws_list(lua_State* L) {
+    const EmfApi* a = script_of(L)->host->api;
+    lua_newtable(L);
+    if (!has_v21(a) || !a->world_setting_info) return 1;
+    EmfWorldSettingInfo info{};
+    for (uint32_t i = 0;; ++i) {
+        info.size = sizeof info;
+        if (!a->world_setting_info(i, &info)) break;
+        lua_createtable(L, 0, 10);
+        lua_pushstring(L, info.key);
+        lua_setfield(L, -2, "key");
+        lua_pushstring(L, info.alias);
+        lua_setfield(L, -2, "alias");
+        lua_pushstring(L, info.group);
+        lua_setfield(L, -2, "group");
+        lua_pushstring(L, ws_type_name(info.type));
+        lua_setfield(L, -2, "type");
+        lua_pushnumber(L, info.min);
+        lua_setfield(L, -2, "min");
+        lua_pushnumber(L, info.max);
+        lua_setfield(L, -2, "max");
+        lua_pushnumber(L, info.value);
+        lua_setfield(L, -2, "value");
+        lua_pushnumber(L, info.world);
+        lua_setfield(L, -2, "world");
+        lua_pushboolean(L, (info.flags & EMF_WS_CHANGED) != 0);
+        lua_setfield(L, -2, "changed");
+        lua_pushboolean(L, (info.flags & EMF_WS_NEEDS_CLIENT) != 0);
+        lua_setfield(L, -2, "needs_client");
+        lua_rawseti(L, -2, static_cast<lua_Integer>(i) + 1);
+    }
+    return 1;
+}
+
+void ws_cb_body(const char* key, double value, void* user) {
+    auto* h = static_cast<Host::Impl*>(user);
+    for (auto& sp : h->scripts) {
+        Script& s = *sp;
+        std::lock_guard<std::recursive_mutex> l(s.m);
+        if (!s.L || s.paused || s.ws_cbs.empty()) continue;
+        const std::vector<int> refs = s.ws_cbs;
+        for (int ref : refs) {
+            lua_rawgeti(s.L, LUA_REGISTRYINDEX, ref);
+            lua_pushstring(s.L, key ? key : "");
+            lua_pushnumber(s.L, value);
+            if (!call_lua(s, 2)) break;
+        }
+        ++s.generation;
+    }
+}
+
+// Called by EMF: nothing may escape into the game (a Lua error is a C++ exception).
+void ws_cb(const char* key, double value, void* user) {
+    try {
+        ws_cb_body(key, value, user);
+    } catch (...) {
+    }
+}
+
+// emf.on_world_setting_changed(fn): fn(key, value) for each world setting the core wrote (anyone's change, or a kept
+// value applied after a load), on the server world after that step. False on an older core.
+int l_on_world_setting_changed(lua_State* L) {
+    Script* s = script_of(L);
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    Host::Impl* h = s->host;
+    const EmfApi* a = h->api;
+    int state = h->ws_hooked.load();
+    if (state == 0) {  // the first call of any script subscribes the host once, for the process
+        const bool ok = has_v21(a) && a->on_world_setting_changed && a->on_world_setting_changed(ws_cb, h);
+        int expected = 0;
+        h->ws_hooked.compare_exchange_strong(expected, ok ? 1 : -1);
+        state = h->ws_hooked.load();
+    }
+    if (state != 1) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    lua_pushvalue(L, 1);
+    s->ws_cbs.push_back(luaL_ref(L, LUA_REGISTRYINDEX));
+    lua_pushboolean(L, true);
+    return 1;
+}
+
 // ---- wheel groups (lua 1.9): several mods' sections on one wheel ----
 // emf.wheel_section(group, title, labels, pick): the calling mod's section of `group` (replaced; an empty list or nil
 // removes it). emf.wheel_group(group, title, key): one wheel with every section; a pick runs the owner's `pick` with
@@ -1704,10 +1880,15 @@ void open_bindings(lua_State* L, Script&) {
                                    {"damage", l_damage},
                                    {"tell", l_tell},       {"broadcast", l_broadcast}, {"on_chat", l_on_chat},
                                    {"request_save", l_request_save}, {"teleport", l_teleport},
+                                   {"on_world_setting_changed", l_on_world_setting_changed},
                                    {"on_event", l_on_event}, {"emits", l_emits},       {"emit", l_emit},
                                    {"wheel", l_wheel},     {"wheel_section", l_wheel_section},
                                    {"wheel_group", l_wheel_group}, {nullptr, nullptr}};
     luaL_setfuncs(L, fns, 0);  // into the emf table on top of the stack
+    static const luaL_Reg ws_fns[] = {{"get", l_ws_get},     {"set", l_ws_set}, {"reset", l_ws_reset},
+                                      {"list", l_ws_list},   {nullptr, nullptr}};
+    luaL_newlib(L, ws_fns);  // emf.world_settings (lua 1.10)
+    lua_setfield(L, -2, "world_settings");
     if (luaL_newmetatable(L, kWorldMeta)) {
         static const luaL_Reg methods[] = {{"is_server", w_is_server}, {"is_client", w_is_client}, {"tick", w_tick},
                                            {"get", w_get},             {"entities", w_entities},   {"position", w_position},

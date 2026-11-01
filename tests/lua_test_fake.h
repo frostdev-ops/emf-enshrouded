@@ -99,6 +99,21 @@ struct Fake {
     // v20 teleport: the requests made (answer them with their cb/user as the core would)
     std::vector<EmfTeleport> teleports;
     bool teleport_ok = true;
+    // v21 world settings: two settings, what set and reset were asked (key as passed, "" for NULL; flags), the
+    // change listeners; ws_world false = no hosted world (every call answers false)
+    struct WsField {
+        const char* key;
+        const char* alias;
+        const char* group;
+        uint32_t type;
+        double min, max, value, world;
+    };
+    std::vector<WsField> ws = {{"resourceDropStackAmountFactor", "loot", "Resources", EMF_WS_FLOAT, 0.25, 2, 1, 1},
+                               {"dayTimeDuration", "day_minutes", "Time", EMF_WS_MINUTES, 2, 60, 30, 30}};
+    std::vector<std::tuple<std::string, double, uint32_t>> ws_sets;
+    std::vector<std::pair<std::string, uint32_t>> ws_resets;
+    std::vector<std::pair<EmfWorldSettingCallback, void*>> ws_cbs;
+    bool ws_world = true;
     void player_info(uint32_t index, uint32_t entity, uint64_t account) {
         if (player_infos.size() < (index + 1) * 0xA0) player_infos.resize((index + 1) * 0xA0, 0);
         std::memcpy(player_infos.data() + index * 0xA0, &entity, 4);
@@ -328,6 +343,56 @@ bool f_teleport(EmfWorld*, const EmfTeleport* t) {
 }
 // A v20 core (fake_api is older for the Lua host's teleport: without it emf.teleport answers false).
 void with_teleport(EmfApi& a) { a.teleport = f_teleport; }
+const Fake::WsField* f_ws_find(const char* key) {
+    if (!key) return nullptr;
+    for (const auto& f : g->ws)
+        if (_stricmp(key, f.key) == 0 || _stricmp(key, f.alias) == 0) return &f;
+    return nullptr;
+}
+bool f_ws_get(const char* key, double* value) {
+    const auto* f = g->ws_world ? f_ws_find(key) : nullptr;
+    if (!f || !value) return false;
+    *value = f->value;
+    return true;
+}
+bool f_ws_set(const char* key, double value, uint32_t flags) {
+    const auto* f = g->ws_world ? f_ws_find(key) : nullptr;
+    if (!f || value < f->min || value > f->max || (flags & ~EMF_WS_PERSIST)) return false;
+    g->ws_sets.emplace_back(key, value, flags);
+    return true;
+}
+bool f_ws_reset(const char* key, uint32_t flags) {
+    if (!g->ws_world || (key && !f_ws_find(key) && _stricmp(key, "all") != 0)) return false;
+    g->ws_resets.emplace_back(key ? key : "", flags);
+    return true;
+}
+bool f_ws_on_changed(EmfWorldSettingCallback cb, void* user) {
+    if (!cb) return false;
+    g->ws_cbs.emplace_back(cb, user);
+    return true;
+}
+bool f_ws_info(uint32_t index, EmfWorldSettingInfo* out) {
+    if (!g->ws_world || !out || out->size < sizeof(EmfWorldSettingInfo) || index >= g->ws.size()) return false;
+    const auto& f = g->ws[index];
+    out->type = f.type;
+    out->key = f.key;
+    out->alias = f.alias;
+    out->group = f.group;
+    out->min = f.min;
+    out->max = f.max;
+    out->value = f.value;
+    out->world = f.world;
+    out->flags = f.value != f.world ? EMF_WS_CHANGED : 0u;
+    return true;
+}
+// A v21 core (fake_api is older for the Lua host's world settings: without it they answer nil and false).
+void with_world_settings(EmfApi& a) {
+    a.world_setting_get = f_ws_get;
+    a.world_setting_set = f_ws_set;
+    a.world_setting_reset = f_ws_reset;
+    a.on_world_setting_changed = f_ws_on_changed;
+    a.world_setting_info = f_ws_info;
+}
 uint32_t f_session() { return g->session; }
 uint32_t f_tick(EmfWorld*) { return g->tick; }
 bool f_chat_tell(EmfWorld*, uint32_t player, const char* text) {

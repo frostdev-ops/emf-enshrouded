@@ -1041,3 +1041,88 @@ TEST_CASE("lua 1.6: a take callback that raises puts back into the source what i
     CHECK(r.fake.puts[2].entity == 1u);  // the 6 it did not hand on go back
     CHECK(r.fake.puts[2].count == 6u);
 }
+
+// ---- Lua host 1.10: world settings (API v21) ----
+
+TEST_CASE("lua 1.10: emf.world_settings get, set, reset and list go to the core; a refusal says why") {
+    Rig r(L"world_settings");
+    with_world_settings(r.api);
+    add_script(r.dir, "ws",
+               "local function j(...) local t = {} for i = 1, select('#', ...) do t[#t + 1] = tostring((select(i, ...))) end return table.concat(t, ' ') end\n"
+               "emf.command('go', '', function(w)\n"
+               "  local ws = emf.world_settings\n"
+               "  emf.reply(j(ws.get('loot'), ws.get('DAY_MINUTES'), ws.get('nope')))\n"
+               "  emf.reply(j(ws.set('loot', 1.5)))\n"
+               "  emf.reply(j(ws.set('day_minutes', 10, true)))\n"
+               "  emf.reply(j(ws.set('loot', 10)))\n"
+               "  emf.reply(j(ws.set('nope', 1)))\n"
+               "  emf.reply(j(ws.reset('loot'), ws.reset(), ws.reset(true), ws.reset('day_minutes', true)))\n"
+               "  local l = ws.list()\n"
+               "  emf.reply(j(#l, l[1].key, l[1].alias, l[1].group, l[1].type, l[1].min, l[1].max, l[1].value, l[1].world, l[1].changed, l[2].type))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("ws.go");
+    REQUIRE(r.fake.replies.size() == 7);
+    CHECK(r.fake.replies[0] == "1.0 30.0 nil");
+    CHECK(r.fake.replies[1] == "true");
+    CHECK(r.fake.replies[2] == "true");
+    CHECK(r.fake.replies[3] == "false loot: allowed 0.25 to 2");
+    CHECK(r.fake.replies[4] == "false unknown setting: nope");
+    CHECK(r.fake.replies[5] == "true true true true");
+    CHECK(r.fake.replies[6] == "2 resourceDropStackAmountFactor loot Resources float 0.25 2.0 1.0 1.0 false minutes");
+    REQUIRE(r.fake.ws_sets.size() == 2);
+    CHECK(std::get<0>(r.fake.ws_sets[0]) == "loot");
+    CHECK(std::get<1>(r.fake.ws_sets[0]) == 1.5);
+    CHECK(std::get<2>(r.fake.ws_sets[0]) == 0u);
+    CHECK(std::get<2>(r.fake.ws_sets[1]) == EMF_WS_PERSIST);
+    REQUIRE(r.fake.ws_resets.size() == 4);
+    CHECK(r.fake.ws_resets[0] == std::make_pair(std::string("loot"), 0u));
+    CHECK(r.fake.ws_resets[1] == std::make_pair(std::string(""), 0u));
+    CHECK(r.fake.ws_resets[2] == std::make_pair(std::string(""), EMF_WS_PERSIST));
+    CHECK(r.fake.ws_resets[3] == std::make_pair(std::string("day_minutes"), EMF_WS_PERSIST));
+}
+
+TEST_CASE("lua 1.10: emf.on_world_setting_changed calls fn(key, value) after the core wrote a change") {
+    Rig r(L"world_settings_cb");
+    with_world_settings(r.api);
+    add_script(r.dir, "wc",
+               "emf.log('sub ' .. tostring(emf.on_world_setting_changed(function(k, v) emf.log('changed ' .. k .. ' ' .. tostring(v)) end)))\n"
+               "emf.log('bad ' .. tostring(pcall(emf.on_world_setting_changed, 5)))\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK(logged("sub true"));
+    CHECK(logged("bad false"));
+    REQUIRE(r.fake.ws_cbs.size() == 1);  // the host subscribes once for every script
+    r.fake.ws_cbs[0].first("dayTimeDuration", 10.0, r.fake.ws_cbs[0].second);
+    CHECK(logged("changed dayTimeDuration 10.0"));
+}
+
+TEST_CASE("lua 1.10: without a hosted world or on an older core, world settings answer nil, false and an empty list") {
+    const char* script =
+        "local function j(...) local t = {} for i = 1, select('#', ...) do t[#t + 1] = tostring((select(i, ...))) end return table.concat(t, ' ') end\n"
+        "emf.command('go', '', function(w)\n"
+        "  local ws = emf.world_settings\n"
+        "  emf.reply(j(ws.get('loot'), ws.reset(), #ws.list(), emf.on_world_setting_changed(function() end), ws.set('loot', 1)))\n"
+        "end)\n";
+    {
+        Rig r(L"world_settings_old");  // a v20 core
+        add_script(r.dir, "wo", script);
+        Host host(&r.api, r.dir);
+        host.load_all();
+        r.run_command("wo.go");
+        REQUIRE(r.fake.replies.size() == 1);
+        CHECK(r.fake.replies[0] == "nil false 0 false false this EMF is too old for world settings (API 21)");
+    }
+    {
+        Rig r(L"world_settings_noworld");  // a v21 core on a joined client or in the menu
+        with_world_settings(r.api);
+        r.fake.ws_world = false;
+        add_script(r.dir, "wo", script);
+        Host host(&r.api, r.dir);
+        host.load_all();
+        r.run_command("wo.go");
+        REQUIRE(r.fake.replies.size() == 1);
+        CHECK(r.fake.replies[0] == "nil false 0 true false no world is hosted here");
+    }
+}
