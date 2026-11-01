@@ -84,6 +84,22 @@ add_library(emf_standin_mod SHARED
 set_target_properties(emf_standin_mod PROPERTIES OUTPUT_NAME dinput8 RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin
   ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/standin)
 
+# --- Stand-in for emf_content.dll (the content loader's tests only; not shipped): the same two exports, doing what the
+# build folder's standin.txt says (tools/standin_content/standin_content.cpp); a second build says it has ABI 2 ---
+foreach(abi 1 2)
+  set(_standin emf_standin_content)
+  set(_dir standin_content)
+  if(abi EQUAL 2)
+    set(_standin emf_standin_content_abi2)
+    set(_dir standin_content_abi2)
+  endif()
+  add_library(${_standin} SHARED tools/standin_content/standin_content.cpp src/core/json.cpp)
+  target_include_directories(${_standin} PRIVATE src)
+  target_compile_definitions(${_standin} PRIVATE STANDIN_ABI=${abi})
+  set_target_properties(${_standin} PROPERTIES OUTPUT_NAME emf_content RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${_dir}
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/${_dir})
+endforeach()
+
 # --- Offline signature check ---
 add_executable(emf_sigcheck tools/sigcheck/main.cpp)
 target_link_libraries(emf_sigcheck PRIVATE emf_common)
@@ -525,6 +541,7 @@ add_executable(emf_tests
   tests/test_file_hooks.cpp
   tests/test_content_loader.cpp
   tests/test_module_threads.cpp
+  tests/test_content_build.cpp
   tests/test_known_tools.cpp
   tests/test_vk_overlay_device.cpp
   tests/test_app_game_folder.cpp
@@ -582,6 +599,7 @@ target_link_libraries(herald PRIVATE winhttp)
 target_sources(emf_tests PRIVATE tests/test_herald.cpp tests/test_herald_dll.cpp)
 add_dependencies(emf_tests herald)
 add_dependencies(emf_tests emf_core emf_loader)  # test_game_imports reads their import tables
+add_dependencies(emf_tests emf_standin_content emf_standin_content_abi2 emf_standin_mod)  # the content loader's tests
 
 # --- Save backups (docs/saves.md). src/saves/ is shared by EMF.exe (the Saves tab, the starter backup) and
 # the core (automatic backups at game start, the console's saves.* commands, save-info.json from the game's menu). ---
