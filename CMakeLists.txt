@@ -512,6 +512,7 @@ add_executable(emf_tests
   tests/test_teleports_glue.cpp
   tests/test_bulk_craft.cpp
   tests/test_bulk_craft_glue.cpp
+  tests/test_blessings.cpp
   tests/test_lua_round2.cpp
   tests/test_bounty.cpp
   tests/test_lua_take_back.cpp
