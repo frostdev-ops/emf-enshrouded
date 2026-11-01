@@ -868,6 +868,7 @@ TEST_CASE("beastmaster: no panther: a small sabretooth is a sabretooth, give pan
     BeastRig b;
     CHECK(b.reply(std::string("beastmaster.species ") + kSabretoothGraph + " 6 0.85") == "sabretooth");
     CHECK(b.reply("beastmaster.give panther").find("no species panther") != std::string::npos);
+    CHECK(b.reply("beastmaster.give panther").find("aurochs") != std::string::npos);  // the list names every species
 }
 
 TEST_CASE("beastmaster: a panther saved by Beastmaster 1.1 loads as a sabretooth (it keeps its name and slot)") {

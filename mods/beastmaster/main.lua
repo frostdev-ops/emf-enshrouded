@@ -371,7 +371,9 @@ emf.command("give", "<species>: add a beast to your collection (admin)", functio
 	end
 	local s = species.by_id(args[1])
 	if not s then
-		emf.reply("no species " .. tostring(args[1]) .. " (wolf, boar, sabretooth, hound, bear)")
+		local ids = {}
+		for _, sp in ipairs(species.list) do ids[#ids + 1] = sp.id end
+		emf.reply("no species " .. tostring(args[1]) .. " (" .. table.concat(ids, ", ") .. ")")
 		return
 	end
 	local _, account = who(world)

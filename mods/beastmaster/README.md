@@ -131,5 +131,5 @@ packs and EML (or ShroudForge), and one that was out when you saved goes home wi
   their own path to a foe.
 - The bear's and the aurochs' health boost needs Beastmaster to spawn them: one made another way (the `spawn` console
   command) has a wolf's or a boar's health.
-- Beasts are called with the wheel or the chat command; there are no spell items for it. The species are the seven
+- Beasts are called with the wheel or the chat command; there are no spell items for it. The species are the six
   above.
