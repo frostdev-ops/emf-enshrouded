@@ -81,7 +81,7 @@ local MARK_REACH_M = 8      -- m: bounty.mark and bounty.unmark reach this far
 local MARK_GONE_M = 40      -- m: missed by a search with a player this close to its place, a marked prop is gone ...
 local LOAD_GRACE = 30       -- s: ... but never this soon after a load (places may still be streaming in)
 local AT_BOARD_M = 8        -- m: "at a Bounty Board" for /bounty.take, /bounty.claim, /bounty.reroll and the notices
-local KEY_COS = 0.87        -- read_key: the board within 30 degrees of where the camera looks
+local KEY_RAY_M = 1         -- read_key: the crosshair passes within this of the board's middle (PROP_HEIGHT up)
 local WALK_COS = 0.7        -- walking up: within 45 degrees
 local WALK_EVERY = 0.5      -- s between two looks at who walked up to a board
 local REARM_M = 8           -- m: told about a board, a player is told again after going this far from it ...
@@ -979,6 +979,28 @@ local function board_in_front(world, player, range, min_cos)
   return best
 end
 
+-- The board under `player`'s crosshair within `range` metres: the camera ray passes within KEY_RAY_M of its middle
+-- (PROP_HEIGHT above its place); the nearest to the ray. No camera: the nearest board within range. nil when none.
+local function board_under_crosshair(world, player, range)
+  local px, py, pz = world:position(player)
+  if not px then return nil end
+  local ray = camera_ray(world, player)
+  if not ray then return board_near(world, player, range) end
+  local best, best_perp
+  for _, b in ipairs(boards) do
+    if dist(b, px, py, pz) <= range then
+      local vx, vy, vz = b.x - ray.ox, b.y + PROP_HEIGHT - ray.oy, b.z - ray.oz
+      local t = vx * ray.dx + vy * ray.dy + vz * ray.dz
+      if t > 0 then
+        local ex, ey, ez = vx - ray.dx * t, vy - ray.dy * t, vz - ray.dz * t
+        local perp = math.sqrt(ex * ex + ey * ey + ez * ez)
+        if perp <= KEY_RAY_M and (not best or perp < best_perp) then best, best_perp = b, perp end
+      end
+    end
+  end
+  return best
+end
+
 -- The world's data: after the world loaded (and after a reload of this mod).
 emf.on_world_data(function(world, text)
   load_pool()  -- pool.lua may have changed since
@@ -1646,14 +1668,14 @@ local function run_pick(world, p)
   if text then emf.notify(text) end
 end
 
--- read_key opens the wheel only while the host looks at a Bounty Board within read_range; else it does nothing (the
--- game gets the key too: E is its own key for using things).
+-- read_key opens the wheel only while the host's crosshair is on a Bounty Board within read_range; else it does nothing
+-- (the game gets the key too: E is its own key for using things).
 emf.on_key("read_key", function(world)
   if not world:is_server() or not loaded then return end
   local player = emf.local_player()
   if not player or player == 0 then return end
   local account = world:account(player)
-  if not account or not board_in_front(world, player, read_range(), KEY_COS) then return end
+  if not account or not board_under_crosshair(world, player, read_range()) then return end
   local labels, entries = wheel_items(account)
   local title = "Bounty Board: " .. lower_first(until_text())
   emf.wheel(title, labels, "", function(w, choice) pending = choice and entries[choice] or nil end)

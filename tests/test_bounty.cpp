@@ -1374,3 +1374,14 @@ TEST_CASE("bounty: a marked prop stays when the player arrives while a search ru
     search(b);
     CHECK(b.reply("bounty.boards").find("1. marked prop at 0, 10, 5") != std::string::npos);
 }
+
+TEST_CASE("bounty: E opens the wheel only with the crosshair on the board; a chest or a station beside it gets E alone") {
+    BountyRig b({{"need_board", "1"}});
+    board_ahead(b);
+    b.look(1, 0, 11.5, 0, 25);  // at something about 1.4 m beside the board
+    b.press('E');
+    CHECK(b.r.fake.wheels.empty());
+    b.look(1, 0, 11.5, 0, 10);  // the crosshair on the board's edge
+    b.press('E');
+    CHECK(b.r.fake.wheels.size() == 1);
+}
