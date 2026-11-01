@@ -250,6 +250,8 @@ head_b = slot("_Head")
 tail_pos = {}  # --tail fit: the game's tail bones' new places (this script's space, on the creature's tail)
 if tail_mode == "fit" and not own_path:
     raise SystemExit("fit_to_game_skeleton: --tail fit needs --own-proportions (the game skeleton itself cannot move)")
+if tail_mode == "fit" and head_b is None:
+    raise SystemExit("fit_to_game_skeleton: --tail fit needs a _Head bone on the game skeleton (to find its spine)")
 if head_b is not None:
     try:
         main = main_bones({b.name: (b.parent.name if b.parent else None) for b in bones},
@@ -313,6 +315,8 @@ if head_b is not None:
         for s_ in seg:
             fractions.append(fractions[-1] + s_ / (sum(seg) or 1.0))
         curve = tail_curve(world, dist, 16)
+        if len(curve) < 2:
+            raise SystemExit("fit_to_game_skeleton: --tail fit: the creature's tail is too short to follow")
         tail_pos = {b_.name: Vector(p) for b_, p in zip(chain, along(curve, fractions))}
         # the first part of the tail blends from the hips (the bone the tail hangs from) into the tail bones
         ramp = min(0.15, fractions[1] if len(fractions) > 1 else 0.15)
@@ -361,6 +365,9 @@ if own_path:
     joints = []
     for b in arm.data.bones:
         w = arm.matrix_world @ b.head_local
+        if b.parent is None:  # the root stays at the creature's origin, where the game skeleton has it
+            joints.append({"name": b.name, "game": list(w), "own": list(w)})
+            continue
         at = tail_pos.get(b.name, w)  # a fitted tail bone: its place on the creature's tail
         joints.append({"name": b.name, "game": list(w), "own": list(own_space(Vector(unwarp(at, c, g, sx, keep_head)),
                                                                               c, g, size))})

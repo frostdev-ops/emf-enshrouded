@@ -87,6 +87,9 @@ class FitQuadrupedTests(unittest.TestCase):
                 own = json.load(f)
             self.assertEqual(len(own["joints"]), 58)
             joints = {j["name"]: j["own"] for j in own["joints"]}
+            # the root stays where the game skeleton has it (the creature's origin)
+            root = next(j for j in own["joints"] if j["name"] == "j000_Root")
+            self.assertEqual(root["own"], root["game"])
             ground = own["ground"]
             height = out[2]
             for foot in FEET:
