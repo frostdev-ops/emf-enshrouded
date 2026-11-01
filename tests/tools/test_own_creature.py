@@ -95,7 +95,7 @@ class BuildTests(Fixture):
 
     def test_the_bones_keep_the_game_skeletons_frames(self):
         """Only the joints move: the game graph's own nodes (foot IK, leaning, aiming) turn bones about their axes as
-        they would on the game creature (seen in game: a pelvis frame turned 90 degrees sat the panther upright)."""
+        they would on the game creature."""
         built = oc.build(self.cfg, hierarchy())
         for (q, _, _), (q0, _, _) in zip(built["bind"], REST):
             self.assertEqual(q, q0)
@@ -174,8 +174,7 @@ SABRE_IDLE = os.path.join(ANALYSIS, "models", "anim", "export_2026-11-01b", "cli
                      "needs the panther's fit and the sabretooth's dumps in analysis/")
 class PantherTests(unittest.TestCase):
     def test_bones_that_sit_on_their_parent_do_not_turn(self):
-        """The sabretooth's pelvis and chest have a child at their own place: a direction from rounding noise turned
-        them 90 and 54 degrees."""
+        """The sabretooth's pelvis and chest each have a child at their own place: their frames stay as they are."""
         with open(SABRE, encoding="utf-8") as f:
             hier = json.load(f)
         cfg = {"sidecar": PANTHER, "skeleton_guid": "22222222-2222-4222-8222-222222222222",

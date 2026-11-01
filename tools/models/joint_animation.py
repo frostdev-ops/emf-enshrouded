@@ -9,8 +9,8 @@ A block: three sections (rotations with 4 components, positions and scales with 
 joint (bit i: a key at frame startTime + i), per animated joint its u16 index and its keys (the values, then the
 per-frame tangents, int16 each), per constant joint its u16 index and its values, then a u16 count and the joints
 that take the rest pose; each section padded to 8 bytes. After the last block: padding to 16 bytes and 16 more.
-Between keys the game samples a cubic Hermite spline and normalises rotations. Read from the game's clip sampler
-(build 1273043); the research notes have the details.
+Between keys the game samples a cubic Hermite spline and normalises rotations (read from the game's clip sampler,
+build 1273043).
 """
 import math
 import struct

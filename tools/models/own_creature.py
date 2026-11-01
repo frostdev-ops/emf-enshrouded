@@ -14,10 +14,8 @@ The creature's pack entry has "own_proportions":
 The skeleton copy keeps the game skeleton's joints and names (so its hash, and the clips' link to it, stay) and every
 bone's frame (the rest rotations); only the joints move, to where the creature stands in its own shape, and its
 inverse binds are that pose's. A clip frame becomes: each joint turned in the world as the game creature's turned away
-from its standing pose (own_skeleton.retarget), which does not depend on the bones' frames. Turning frames to point
-along the creature's limbs (own_skeleton.align_rest) is not used: the game graph's own nodes turn bones about their
-axes, and a turned frame tilts them (seen in game: a pelvis turned 90 degrees, from a bone of zero length, sat the
-panther upright).
+from its standing pose (own_skeleton.retarget), which does not depend on the bones' frames. The frames stay the
+game's because the game graph's own nodes (foot IK, leaning, aiming) turn bones about their axes.
 """
 import glob
 import json

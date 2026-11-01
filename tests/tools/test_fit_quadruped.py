@@ -16,11 +16,11 @@ BLENDER_DIR = os.path.join(ROOT, "tools", "models", "blender")
 BOAR = os.path.join(ROOT, "analysis", "models", "game_enemy_wildboar_01.glb")
 BLENDER = os.environ.get("BLENDER") or shutil.which("blender")
 TAIL_ROOT = "j044"  # the boar's tail: j044 < j045 < j046 < j047 under the pelvis
-LEG_ROOTS = ("j032", "j037", "j048", "j052")
-FEET = ("j036", "j041", "j051", "j055")
+LEG_ROOTS = ("j032", "j037", "j048", "j052")  # the boar's legs (no named bones): front, chest; hind, pelvis
+FEET = ("j036", "j041", "j051", "j055")  # the boar's lowest joints: front left/right, hind left/right
 BOAR_SKELETON = os.path.join(ROOT, "analysis", "model_survey", "hierarchies", "d3cb046d-2c4a-47da-b8b0-0780d4752ba6.json")
 sys.path.insert(0, os.path.join(ROOT, "tools", "models"))
-import own_skeleton as osk  # noqa: E402  # the boar's lowest joints: front left/right, hind left/right  # the boar's legs (no named bones): front under the chest, hind the pelvis
+import own_skeleton as osk  # noqa: E402
 
 
 def blender(script, *args):
