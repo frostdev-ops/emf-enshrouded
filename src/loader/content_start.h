@@ -51,18 +51,19 @@ struct FactsIo {
     std::function<BaseChoice()> base;
 };
 
-// Asks only what the decision needs: a start without emf_content.dll checks for another tool's dbghelp.dll and the
-// DLL, and reads no DLL and no mod folder. Reading the chained DLLs' text comes after the mods, just before the base.
-inline ContentFacts collect_facts(const FactsIo& io, PlayOnce play, bool server) {
+// Asks only what the decision needs: a start without emf_content.dll looks for the DLL and another tool's dbghelp.dll
+// and reads no DLL and no mod folder. Reading the chained DLLs' text comes after the mods, just before the base.
+// `game`: the exe is the game client or the dedicated server.
+inline ContentFacts collect_facts(const FactsIo& io, PlayOnce play, bool server, bool game = true) {
     ContentFacts f;
     f.server = server;
     f.play = play;
+    f.game = game;
     f.mode = io.mode ? io.mode() : ContentMode::Auto;
-    if (f.mode == ContentMode::Off || play == PlayOnce::NoMods) return f;
-    f.other_tool = other_content_tool(io.look, false);
-    if (f.other_tool) return f;
+    if (f.mode == ContentMode::Off || play == PlayOnce::NoMods || !game) return f;
     f.dll_present = io.dll_present && io.dll_present();
-    if (!f.dll_present || server) return f;
+    f.other_tool = other_content_tool(io.look, f.dll_present, false);  // dbghelp.dll read only with the DLL there
+    if (f.other_tool || !f.dll_present || server) return f;
     if (io.scan_mods) f.mods = io.scan_mods();
     if (f.mods.usable.empty()) return f;
     f.other_tool = chained_tool_by_text(io.look);

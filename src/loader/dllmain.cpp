@@ -144,10 +144,16 @@ emf::loader::PlayOnce take_play_once_flag(const std::wstring& dir) {
     return r.mode;
 }
 
+// The DLLs dinput8-chain.ini lists, read once per start (the content loader looks at them too).
+const std::vector<std::wstring>& chain_names(const std::wstring& dir) {
+    static const std::vector<std::wstring> names = emf::loader::parse_chain_list(read_file(dir + L"\\dinput8-chain.ini"));
+    return names;
+}
+
 // Starts the DLLs listed in dinput8-chain.ini (or, for a start without mods, none of them), logs each and writes
 // emf\chain_status.txt (read by EMF's core, which starts after this, and by the manager).
 void run_chain(const std::wstring& dir, bool start) {
-    const auto names = emf::loader::parse_chain_list(read_file(dir + L"\\dinput8-chain.ini"));
+    const auto& names = chain_names(dir);
     const auto results = !start ? emf::loader::skip_chain(names) : emf::loader::load_chain(
         names,
         [&](const std::wstring& name) {
@@ -313,6 +319,18 @@ std::string dll_tool_name(const std::wstring& rel) {
     return word;
 }
 
+// The state the last build left (read once per start).
+const std::optional<emf::loader::ContentState>& prev_state() {
+    static const std::optional<emf::loader::ContentState> state = emf::loader::read_state(state_path());
+    return state;
+}
+
+// "<dll>TAB<size>TAB<time>" for a chained DLL as it is now.
+std::string chain_stamp(const std::wstring& rel) {
+    const auto s = emf::loader::cio::stat(g_dir + L"\\" + rel);
+    return emf::loader::cio::to_utf8(rel) + "\t" + std::to_string(s.size) + "\t" + std::to_string(s.written);
+}
+
 emf::loader::FactsIo facts_io() {
     emf::loader::FactsIo io;
     io.mode = [] {
@@ -328,7 +346,16 @@ emf::loader::FactsIo facts_io() {
         return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
     };
     io.look.tool_name = [](const std::wstring& rel) { return dll_tool_name(rel); };
-    io.look.chain = emf::loader::parse_chain_list(read_file(g_dir + L"\\dinput8-chain.ini"));
+    io.look.chain = chain_names(g_dir);
+    // a chained DLL the last good build read (and found not EML's) and that has not changed since is not read again
+    io.look.known_clean = [](const std::wstring& rel) {
+        const auto& st = prev_state();
+        if (!st || st->code != 0) return false;
+        const std::string now = chain_stamp(rel);
+        for (const auto& c : st->chain_checked)
+            if (c == now) return true;
+        return false;
+    };
     io.dll_present = [] {
         const DWORD a = GetFileAttributesW(content_dll().c_str());
         return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
@@ -345,14 +372,16 @@ emf::loader::ContentPlan plan_this_start(emf::loader::PlayOnce play) {
     try {
         emf::loader::PlanSteps p;
         p.facts = [play] {
-            g_facts = emf::loader::collect_facts(facts_io(), play, emf::loader::is_server_exe(g_exe));
+            const bool server = emf::loader::is_server_exe(g_exe);
+            g_facts = emf::loader::collect_facts(facts_io(), play, server,
+                                                 server || emf::loader::is_game_client_exe(g_exe));
             return g_facts;
         };
         p.fingerprint = [] {
             return emf::loader::content_fingerprint(emf::loader::collect_fingerprint_input(
                 g_dir, "enshrouded", g_facts.base, g_facts.mods.usable, content_dll(), EMF_VERSION));
         };
-        p.read_state = [] { return emf::loader::read_state(state_path()); };
+        p.read_state = [] { return prev_state(); };
         p.record_ok = [] {
             const auto game = emf::loader::normal_game_dir(g_dir);
             return game && emf::loader::shadow_problem(emf::loader::file_hooks::shadow_facts(*game)).empty();
@@ -463,7 +492,9 @@ emf::loader::StartSteps make_start_steps() {
         return out;
     };
     s.write_state = [](const emf::loader::ContentState& st) {
-        if (!emf::loader::write_state(state_path(), st)) loader_log(g_dir, "EML content: could not write emf_content_state.json");
+        emf::loader::ContentState with = st;
+        for (const auto& dll : chain_names(g_dir)) with.chain_checked.push_back(chain_stamp(dll));  // all read: not EML's
+        if (!emf::loader::write_state(state_path(), with)) loader_log(g_dir, "EML content: could not write emf_content_state.json");
     };
     s.drop_record = [] { DeleteFileW((shadow_dir() + L"\\shadow.txt").c_str()); };
     s.now = [] { return utc_now(); };

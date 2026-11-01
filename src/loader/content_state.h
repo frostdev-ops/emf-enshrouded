@@ -28,6 +28,8 @@ struct ContentState {
     std::string built_at;    // UTC, "YYYY-MM-DDTHH:MM:SSZ"
     bool unloaded = true;    // emf_content.dll was unloaded after the build
     bool truncated = false;  // its reply was cut: the result is unknown
+    std::vector<std::string> chain_checked;  // "<dll> <size> <time>": chained DLLs read at this build, not EML's
+    int attempts = 0;  // a build that is running (kBuildRunning): how many starts in a row began it
 };
 
 inline std::string state_json(const ContentState& s) {
@@ -40,7 +42,7 @@ inline std::string state_json(const ContentState& s) {
            ", \"message\": " + cio::json_string(s.message) + ", \"mods\": " + list(s.mods) + ", \"errors\": " +
            list(s.errors) + ", \"ms\": " + std::to_string(s.ms) + ", \"built_at\": " + cio::json_string(s.built_at) +
            ", \"unloaded\": " + (s.unloaded ? "true" : "false") + ", \"truncated\": " + (s.truncated ? "true" : "false") +
-           "}\r\n";
+           ", \"chain_checked\": " + list(s.chain_checked) + ", \"attempts\": " + std::to_string(s.attempts) + "}\r\n";
 }
 
 // nullopt for anything but a state object with a fingerprint and a code.
@@ -56,7 +58,8 @@ inline std::optional<ContentState> parse_state(std::string_view text) {
     s.fingerprint = fp->s;
     s.code = static_cast<int>(code->n);
     if (const auto* m = v.get("message"); m && m->is(T::String)) s.message = m->s;
-    for (const auto& [key, list] : {std::pair<const char*, std::vector<std::string>*>{"mods", &s.mods}, {"errors", &s.errors}})
+    for (const auto& [key, list] : {std::pair<const char*, std::vector<std::string>*>{"mods", &s.mods}, {"errors", &s.errors},
+                                {"chain_checked", &s.chain_checked}})
         if (const auto* a = v.get(key); a && a->is(T::Array))
             for (const auto& x : a->arr)
                 if (x.is(T::String)) list->push_back(x.s);
@@ -64,6 +67,7 @@ inline std::optional<ContentState> parse_state(std::string_view text) {
     if (const auto* at = v.get("built_at"); at && at->is(T::String)) s.built_at = at->s;
     if (const auto* u = v.get("unloaded"); u && u->is(T::Bool)) s.unloaded = u->b;
     if (const auto* t = v.get("truncated"); t && t->is(T::Bool)) s.truncated = t->b;
+    if (const auto* a = v.get("attempts"); a && a->is(T::Number) && a->n >= 0) s.attempts = static_cast<int>(a->n);
     return s;
 }
 

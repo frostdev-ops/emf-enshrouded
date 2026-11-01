@@ -49,6 +49,7 @@ struct ContentFacts {
     ModScan mods;
     BaseChoice base;
     bool server = false;
+    bool game = true;  // the exe is the game client or the dedicated server (not another program that loads the DLL)
 };
 
 struct ContentDecision {
@@ -62,6 +63,8 @@ inline ContentDecision decide_content(const ContentFacts& f) {
         d.why = "off ([content] mode=off in emf\\emf_core.ini)";
     } else if (f.play == PlayOnce::NoMods) {
         d.why = "off for this start (Play without any mods in EMF.exe)";
+    } else if (!f.game) {
+        d.why = "off (not the game: another program loaded EMF's loader)";
     } else if (f.other_tool) {
         d.why = "applied by " + *f.other_tool + ", so EMF leaves it alone";
     } else if (!f.dll_present) {
@@ -85,12 +88,15 @@ struct ToolLook {
     std::function<bool(const std::wstring&)> exists;
     std::function<std::string(const std::wstring&)> tool_name;  // the tool a DLL's text names, as players know it; ""
     std::vector<std::wstring> chain;                            // the DLLs dinput8-chain.ini lists
+    // a chained DLL read at the last good build and unchanged since (its size and time): not read again
+    std::function<bool(const std::wstring&)> known_clean;
 };
 
 // A chained DLL whose text names EML or ShroudForge (read with look.tool_name), or nullopt.
 inline std::optional<std::string> chained_tool_by_text(const ToolLook& look) {
     if (!look.tool_name) return std::nullopt;
     for (const auto& dll : look.chain) {
+        if (look.known_clean && look.known_clean(dll)) continue;
         const std::string name = look.tool_name(dll);
         if (name.rfind("EML", 0) == 0 || name.rfind("ShroudForge", 0) == 0)
             return name + " (from dinput8-chain.ini: " + cio::to_utf8(dll) + ")";
@@ -99,12 +105,13 @@ inline std::optional<std::string> chained_tool_by_text(const ToolLook& look) {
 }
 
 // The tool that applies EML content at this start, or nullopt. A dbghelp.dll in the game folder is EML's or
-// ShroudForge's proxy (Windows' own lives in System32). A chained DLL is known by the name EMF's installer gives it
-// (<word>.dll: eml.dll, shroudforge.dll); under another name only by reading it, which `read_chain` allows (the loader
-// asks only when it would build otherwise: reading DLLs costs time at every start).
-inline std::optional<std::string> other_content_tool(const ToolLook& look, bool read_chain) {
+// ShroudForge's proxy (Windows' own lives in System32): it is read for its name only when `read_dbghelp` (the loader
+// asks only with emf_content.dll installed; the file is up to 32 MB). A chained DLL is known by the name EMF's
+// installer gives it (<word>.dll: eml.dll, shroudforge.dll); under another name only by reading it, which `read_chain`
+// allows (the loader asks only when it would build otherwise).
+inline std::optional<std::string> other_content_tool(const ToolLook& look, bool read_dbghelp, bool read_chain) {
     if (look.exists && look.exists(L"dbghelp.dll")) {
-        const std::string name = look.tool_name ? look.tool_name(L"dbghelp.dll") : std::string();
+        const std::string name = read_dbghelp && look.tool_name ? look.tool_name(L"dbghelp.dll") : std::string();
         return name.empty() ? std::string("dbghelp.dll (EML or ShroudForge)") : name;
     }
     for (const auto& dll : look.chain) {

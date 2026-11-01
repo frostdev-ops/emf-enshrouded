@@ -44,7 +44,7 @@ TEST_CASE("kfc header: truncated") {
     CHECK_FALSE(emf::loader::parse_kfc_header(kfc_bytes("1|x|y", 3).substr(0, 20)).has_value());
     CHECK_FALSE(emf::loader::parse_kfc_header("").has_value());
 }
-// ---- Task 2: the base the shadow is built from, and the EML mods in <game>\mods ----
+// ---- the base the shadow is built from, and the EML mods in <game>\mods ----
 
 namespace {
 emf::loader::BaseFile base_file(const std::string& version, uint32_t containers, uint64_t size) {
@@ -194,7 +194,7 @@ TEST_CASE("eml mods: non-ASCII folder name") {
     std::filesystem::remove_all(mods);
 }
 
-// ---- Task 3: who applies the EML content at this start ----
+// ---- who applies the EML content at this start ----
 
 namespace {
 using emf::loader::ContentFacts;
@@ -324,29 +324,59 @@ TEST_CASE("content owner: another tool: a dbghelp.dll in the game folder, or EML
         if (name == L"modloader.dll") return "EML (Enshrouded Mod Loader)";
         return "";
     };
-    CHECK_FALSE(emf::loader::other_content_tool(look, true).has_value());
+    CHECK_FALSE(emf::loader::other_content_tool(look, true, true).has_value());
 
     present = {L"dbghelp.dll"};
-    CHECK(emf::loader::other_content_tool(look, false) == std::optional<std::string>("ShroudForge"));
+    CHECK(emf::loader::other_content_tool(look, true, false) == std::optional<std::string>("ShroudForge"));
     look.tool_name = [&](const std::wstring&) { return std::string(); };  // a dbghelp.dll EMF does not know
-    CHECK(emf::loader::other_content_tool(look, false) == std::optional<std::string>("dbghelp.dll (EML or ShroudForge)"));
+    CHECK(emf::loader::other_content_tool(look, true, false) == std::optional<std::string>("dbghelp.dll (EML or ShroudForge)"));
 
     // the installer renames another tool's dinput8.dll to <word>.dll and lists it in dinput8-chain.ini
     present.clear();
     look.chain = {L"creative.dll", L"eml.dll"};
     read.clear();
-    CHECK(emf::loader::other_content_tool(look, false) == std::optional<std::string>("EML (from dinput8-chain.ini: eml.dll)"));
+    CHECK(emf::loader::other_content_tool(look, true, false) == std::optional<std::string>("EML (from dinput8-chain.ini: eml.dll)"));
     CHECK(read.empty());  // known by its name: no DLL read
     look.chain = {L"ShroudForge.dll"};
-    CHECK(emf::loader::other_content_tool(look, false) == std::optional<std::string>("ShroudForge (from dinput8-chain.ini: ShroudForge.dll)"));
+    CHECK(emf::loader::other_content_tool(look, true, false) == std::optional<std::string>("ShroudForge (from dinput8-chain.ini: ShroudForge.dll)"));
     // under another name it takes reading the DLLs, which only happens when asked
     look.chain = {L"creative.dll", L"modloader.dll"};
     look.tool_name = [&](const std::wstring& name) -> std::string {
         read.push_back(name);
         return name == L"modloader.dll" ? "EML (Enshrouded Mod Loader)" : "";
     };
-    CHECK_FALSE(emf::loader::other_content_tool(look, false).has_value());
+    CHECK_FALSE(emf::loader::other_content_tool(look, true, false).has_value());
     CHECK(read.empty());
-    CHECK(emf::loader::other_content_tool(look, true) ==
+    CHECK(emf::loader::other_content_tool(look, true, true) ==
           std::optional<std::string>("EML (Enshrouded Mod Loader) (from dinput8-chain.ini: modloader.dll)"));
+}
+
+TEST_CASE("content owner: a dbghelp.dll is named without reading it unless asked, and chained DLLs known clean are not read") {
+    emf::loader::ToolLook look;
+    std::vector<std::wstring> read;
+    look.exists = [](const std::wstring& name) { return name == L"dbghelp.dll"; };
+    look.tool_name = [&](const std::wstring& name) -> std::string {
+        read.push_back(name);
+        return "EML (Enshrouded Mod Loader)";
+    };
+    CHECK(emf::loader::other_content_tool(look, false, false) == std::optional<std::string>("dbghelp.dll (EML or ShroudForge)"));
+    CHECK(read.empty());
+    CHECK(emf::loader::other_content_tool(look, true, false) == std::optional<std::string>("EML (Enshrouded Mod Loader)"));
+    CHECK(read == std::vector<std::wstring>{L"dbghelp.dll"});
+
+    look.exists = [](const std::wstring&) { return false; };
+    look.chain = {L"creative.dll", L"stats.dll"};
+    look.tool_name = [&](const std::wstring& name) -> std::string { return read.push_back(name), std::string(); };
+    look.known_clean = [](const std::wstring& name) { return name == L"creative.dll"; };  // unchanged since the last build
+    read.clear();
+    CHECK_FALSE(emf::loader::chained_tool_by_text(look).has_value());
+    CHECK(read == std::vector<std::wstring>{L"stats.dll"});
+}
+
+TEST_CASE("content owner: another program that loads EMF's loader gets no EML content") {
+    auto f = all_there();
+    f.game = false;
+    const auto d = emf::loader::decide_content(f);
+    CHECK_FALSE(d.emf_owns);
+    CHECK(d.why.find("not the game") != std::string::npos);
 }

@@ -272,3 +272,21 @@ TEST_CASE("e2e content: an entry another tool patched is not held: content off, 
           std::string::npos);
     CHECK(log.find("EML content: off for this start") != std::string::npos);
 }
+
+TEST_CASE("e2e content: EML's dbghelp.dll without emf_content.dll is not read; with the DLL it is, and EMF stays out") {
+    for (const bool with_dll : {false, true}) {
+        ContentGame g(with_dll ? L"emf_e2e_dbghelp_dll" : L"emf_e2e_dbghelp", with_dll);
+        put_file(g.dir + L"\\dbghelp.dll", std::string("MZ a stand-in for EML's proxy: EML_LOG_FILE_PATH"));
+        std::filesystem::copy_file(bin_dir() + L"\\dist\\emf\\known_tools.txt", g.dir + L"\\emf\\known_tools.txt");
+        const std::string out = g.run();
+        CHECK(out.find("kfc=KFC4") != std::string::npos);
+        CHECK(out.find("loaded chain_standin.dll=yes\n") != std::string::npos);
+        const std::string log = g.loader_log();
+        INFO(log);
+        // without the DLL the file is named by its place only (reading it would give EML's name)
+        CHECK(log.find(with_dll ? "EML content: applied by EML (Enshrouded Mod Loader), so EMF leaves it alone"
+                                : "EML content: applied by dbghelp.dll (EML or ShroudForge), so EMF leaves it alone") !=
+              std::string::npos);
+        CHECK_FALSE(std::filesystem::exists(g.shadow + L"\\shadow.txt"));
+    }
+}
