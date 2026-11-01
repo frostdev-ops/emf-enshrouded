@@ -284,8 +284,9 @@ TEST_CASE("necromancer: F2 opens the summons wheel with the Undead section; Rais
     REQUIRE(n.r.fake.wheels.size() == 1);
     const auto w = n.r.fake.wheels[0];
     CHECK(w.hold == VK_F2);
-    for (const char* a : {"Raise Skeleton (0/3)", "Raging Spirits", "Gather", "Attack", "Dismiss all"})
+    for (const char* a : {"Raise Skeleton (0/3)", "Raging Spirits", "Gather", "Attack"})
         CHECK_MESSAGE(item_at(w.items, a) >= 0, a);
+    CHECK(item_at(w.items, "Dismiss") < 0);  // no undead: nothing to dismiss
     w.cb(kClient, item_at(w.items, "Raise Skeleton"), w.user);  // the wheel answers on the client world
     n.seconds(1);                                               // the raise runs on the server's next step
     CHECK(n.spawned(kSkeleton) == 1);
@@ -377,6 +378,64 @@ TEST_CASE("necromancer: /necromancer <word> for guests acts on their own skeleto
     const std::string help = n.reply("necromancer", 2, 0xBB);
     for (const char* word : {"raise", "spirits", "gather", "attack", "dismiss", "list"})
         CHECK_MESSAGE(help.find(word) != std::string::npos, word);
+}
+
+TEST_CASE("necromancer: dismiss one kind or all: /necromancer dismiss skeleton sends the newest skeleton back, no word or all every one; the wheel has both") {
+    NecroRig n;
+    n.spawnable(3);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(1);
+    CHECK(n.reply("necromancer.raise").find("rises (2/3)") != std::string::npos);
+    n.seconds(1);
+    CHECK(n.reply("necromancer.raise lich").find("rises (1/1)") != std::string::npos);
+    n.seconds(1);
+    press_key(n, VK_F2);
+    REQUIRE(n.r.fake.wheels.size() == 1);
+    const auto w = n.r.fake.wheels[0];
+    for (const char* a : {"Dismiss Skeleton", "Dismiss Lich", "Dismiss all"}) CHECK_MESSAGE(item_at(w.items, a) >= 0, a);
+    CHECK(item_at(w.items, "Dismiss Bone Golem") < 0);  // none to dismiss
+    CHECK(n.reply("necromancer.dismiss skeleton").find("A skeleton returns to the ground (1/3)") != std::string::npos);
+    CHECK(has(n.r.fake.destroyed, 1235));  // the newest skeleton
+    CHECK(!has(n.r.fake.destroyed, 1234));
+    CHECK(n.reply("necromancer.list").find("Skeletons 1/3, Liches 1/1") != std::string::npos);
+    CHECK(n.reply("necromancer.dismiss golem").find("You have no bone golems") != std::string::npos);
+    CHECK(n.reply("necromancer.dismiss dragon").find("Dismiss what?") != std::string::npos);
+    w.cb(kClient, item_at(w.items, "Dismiss Lich"), w.user);
+    n.seconds(1);
+    CHECK(n.noted("A lich returns to the ground (0/1)"));
+    CHECK(has(n.r.fake.destroyed, 1236));
+    n.seconds(2);
+    CHECK(n.reply("necromancer.list").find("Skeletons 1/3, Liches 0/1") != std::string::npos);  // not raised again
+    CHECK(n.reply("necromancer.dismiss").find("1 undead returns to the ground") != std::string::npos);  // no word: all
+    CHECK(n.reply("necromancer.dismiss all").find("You have no undead") != std::string::npos);
+    bool told = false;
+    for (const auto& c : n.r.fake.commands)
+        if (c.name == "necromancer.dismiss") told = c.help.find("all") != std::string::npos && c.help.find("skeleton") != std::string::npos;
+    CHECK(told);
+    // a guest dismisses their own
+    n.spawnable(1);
+    CHECK(n.reply("necromancer raise", 2, 0xBB).find("rises (1/3)") != std::string::npos);
+    CHECK(n.reply("necromancer dismiss skeleton", 2, 0xBB).find("returns to the ground (0/3)") != std::string::npos);
+}
+
+TEST_CASE("necromancer: a wheel pick dismisses what was shown, though new undead moved the items meanwhile (shared and own wheel)") {
+    for (const char* shared : {"true", "false"}) {
+        NecroRig n({{"shared_wheel", shared}});
+        n.spawnable(2);
+        CHECK(n.reply("necromancer.raise lich").find("rises (1/1)") != std::string::npos);
+        n.seconds(2);
+        press_key(n, VK_F2);
+        REQUIRE(n.r.fake.wheels.size() == 1);
+        const auto w = n.r.fake.wheels[0];
+        const int lich = item_at(w.items, "Dismiss Lich");
+        REQUIRE(lich >= 0);
+        CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);  // "Dismiss Skeleton" comes first now
+        n.seconds(2);
+        w.cb(kClient, lich, w.user);
+        n.seconds(1);
+        const std::string list = n.reply("necromancer.list");
+        CHECK_MESSAGE(list.find("Skeletons 1/3, Liches 0/1") != std::string::npos, shared << ": " << list);
+    }
 }
 
 TEST_CASE("necromancer: a wheel pick runs the item that was shown, though its label changed meanwhile") {

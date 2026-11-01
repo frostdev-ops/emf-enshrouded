@@ -125,9 +125,18 @@ function actions.list(world, player, account)
 	return "Your undead: " .. minions:summary(account) .. "."
 end
 
-function actions.dismiss(world, player, account)
+-- No word or "all": every minion; a kind ("skeleton", "lich", "bone golem"): the newest of that kind.
+function actions.dismiss(world, player, account, args)
 	if not account then return "Your account is not known yet." end
-	return minions:dismiss_all(world, account)
+	local word = args and #args > 0 and table.concat(args, " ") or nil
+	if not word or word:lower() == "all" then return minions:dismiss_all(world, account) end
+	local kind = minions:kind(word)
+	if not kind then
+		local names = {}
+		for _, k in ipairs(KINDS) do names[#names + 1] = k.id end
+		return "Dismiss what? " .. table.concat(names, " | ") .. " | all"
+	end
+	return minions:dismiss_one(world, account, kind)
 end
 
 function actions.gather(world, player, account)
@@ -162,7 +171,8 @@ command("spirits", ": raging spirits rush the creature you look at, or the neare
 command("list", ": your undead", actions.list)
 command("gather", ": your undead come to you", actions.gather)
 command("attack", ": your undead attack the creature you look at (else what hit you)", actions.attack)
-command("dismiss", ": your undead return to the ground", actions.dismiss)
+command("dismiss", "[skeleton|lich|golem|all]: one undead of that kind returns to the ground (the newest); nothing or "
+	.. "all: every one", actions.dismiss)
 
 emf.command(emf.id, "<word>: " .. table.concat(word_list, ", "), function(world, args)
 	local word = args[1] and args[1]:lower()
@@ -181,8 +191,19 @@ local GROUP = "summons"
 local wheel_entries = {}  -- what each wheel item does: {action name, args}
 local pending = nil       -- the host's pick, run on the server world's next step
 
-local function picked(world, choice)
-	pending = choice and wheel_entries[choice] or nil
+local recent = {}       -- label -> {entry, at}: what each label published in the last 2 minutes meant
+local own_entries = {}  -- the own wheel's entries as they were when it opened
+
+-- A pick on the shared wheel: by the label that was shown (the list may have moved since the wheel opened: a raise or a
+-- fall adds or takes away a Dismiss item).
+local function picked(world, choice, label)
+	local r = label and recent[label]
+	pending = r and r.entry or (choice and wheel_entries[choice]) or nil
+end
+
+-- A pick on Necromancer's own wheel: by its place in the list as it was when the wheel opened.
+local function picked_own(world, choice)
+	pending = choice and own_entries[choice] or nil
 end
 
 local function wheel_items(world)
@@ -200,11 +221,23 @@ local function wheel_items(world)
 		{ string.format("Raging Spirits (%d %% mana)", setting("spirit_mana_pct")), "spirits" },
 		{ "Gather (your undead come)", "gather" },
 		{ "Attack (what you look at)", "attack" },
-		{ "Dismiss all", "dismiss" },
 	}
 	for _, r in ipairs(rest) do
 		labels[#labels + 1] = r[1]
 		entries[#entries + 1] = { r[2], {} }
+	end
+	local total = 0
+	for _, k in ipairs(KINDS) do
+		local n = account and minions:count(account, k.id) or 0
+		if n > 0 then
+			total = total + n
+			labels[#labels + 1] = "Dismiss " .. k.title
+			entries[#entries + 1] = { "dismiss", { k.id } }
+		end
+	end
+	if total > 1 then
+		labels[#labels + 1] = "Dismiss all"
+		entries[#entries + 1] = { "dismiss", { "all" } }
 	end
 	return labels, entries
 end
@@ -212,6 +245,11 @@ end
 local function publish(world)
 	local labels, entries = wheel_items(world)
 	wheel_entries = entries
+	local t = now(world)
+	for i, l in ipairs(labels) do recent[l] = { entry = entries[i], at = t } end
+	for l, r in pairs(recent) do
+		if t - r.at > 120 or t < r.at then recent[l] = nil end  -- old, or the clock restarted
+	end
 	if setting("shared_wheel") then
 		emf.wheel_section(GROUP, "Undead", labels, picked)
 	else
@@ -229,7 +267,8 @@ emf.on_key("wheel_key", function(world)
 	if setting("shared_wheel") then
 		emf.wheel_group(GROUP, "Summons", emf.setting("wheel_key"))
 	else
-		emf.wheel("Undead", labels, emf.setting("wheel_key"), picked)
+		own_entries = wheel_entries
+		emf.wheel("Undead", labels, emf.setting("wheel_key"), picked_own)
 	end
 end)
 

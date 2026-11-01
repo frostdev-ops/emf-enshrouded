@@ -415,7 +415,8 @@ TEST_CASE("beastmaster: the wheel lists the actions and up to 6 beasts to call; 
     REQUIRE(b.r.fake.wheels.size() == 1);
     const auto& w = b.r.fake.wheels[0];
     CHECK(w.hold == VK_F3);
-    for (const char* a : {"Tame", "Feed", "Attack", "Dismiss all"}) CHECK(index_of(w.items, a) >= 0);
+    for (const char* a : {"Tame", "Feed", "Attack"}) CHECK(index_of(w.items, a) >= 0);
+    CHECK(index_of(w.items, "Dismiss") < 0);  // none out: nothing to dismiss
     int calls = 0;
     for (const auto& it : w.items) calls += it.rfind("Call ", 0) == 0;
     CHECK(calls == 6);  // 7 beasts at home: 6 on the wheel
@@ -427,6 +428,42 @@ TEST_CASE("beastmaster: the wheel lists the actions and up to 6 beasts to call; 
     CHECK(guid_text(b.r.fake.spawns[0].guid) == kWolfTemplate);
     CHECK(b.noted("Wolf the wolf comes"));
     CHECK(b.hud("out").find("Wolf (out)") != std::string::npos);
+}
+
+TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give boar");
+    b.spawnable(2);
+    CHECK(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(11);
+    CHECK(b.reply("beastmaster.call Boar").find("comes") != std::string::npos);
+    b.seconds(2);
+    press(b, VK_F3);
+    REQUIRE(b.r.fake.wheels.size() == 1);
+    const auto w = b.r.fake.wheels[0];
+    for (const char* a : {"Dismiss Wolf", "Dismiss Boar", "Dismiss all"}) CHECK_MESSAGE(index_of(w.items, a) >= 0, a);
+    w.cb(kClient, index_of(w.items, "Dismiss Wolf"), w.user);
+    b.seconds(1);
+    CHECK(b.noted("Wolf goes home"));
+    const std::string list = b.reply("beastmaster.list");
+    CHECK(list.find("Wolf - wolf, at home") != std::string::npos);
+    CHECK(list.find("Boar - boar, out") != std::string::npos);
+    press(b, VK_F3);  // one out: its own item, no Dismiss all
+    REQUIRE(b.r.fake.wheels.size() == 2);
+    CHECK(index_of(b.r.fake.wheels[1].items, "Dismiss Boar") >= 0);
+    CHECK(index_of(b.r.fake.wheels[1].items, "Dismiss all") < 0);
+    CHECK(index_of(b.r.fake.wheels[1].items, "Dismiss Wolf") < 0);
+    CHECK(b.reply("beastmaster.dismiss").find("Boar goes home") != std::string::npos);  // no name: all
+    CHECK(b.reply("beastmaster.dismiss all").find("No beast is out") != std::string::npos);
+    // the help says how
+    const std::string help = b.reply("beastmaster");
+    CHECK(help.find("dismiss") != std::string::npos);
+    CHECK(help.find("all") != std::string::npos);
+    bool told = false;
+    for (const auto& c : b.r.fake.commands)
+        if (c.name == "beastmaster.dismiss") told = c.help.find("all") != std::string::npos && c.help.find("nothing") != std::string::npos;
+    CHECK(told);
 }
 
 TEST_CASE("beastmaster: a guest's /beastmaster call acts on the guest's own beasts") {

@@ -32,11 +32,14 @@ everything else works and those beasts are simply not there.
    once.
 6. **A beast that falls** rests for 2 minutes at home, and then you can call it again. Its body is gone a second after,
    so our own beasts never drop loot.
-7. **Dismiss** a beast (`/beastmaster dismiss <name>` or **Dismiss all**) to send it home. Beasts that are out stay out
-   when you reload the world, and they come back beside you, free of mana.
+7. **Dismiss** a beast to send it home: **Dismiss <name>** on the wheel (one for each beast that is out), **Dismiss
+   all** (with two or more out), or `/beastmaster dismiss <name or number>`; `/beastmaster dismiss` alone sends every
+   beast home. A dismissed beast waits at home: call it again whenever you like. Beasts that are out stay out when you
+   reload the world, and they come back beside you, free of mana.
 
-**The wheel (hold F3):** Tame, Feed, Attack, Dismiss all, then **Call <name>** for up to 6 beasts that are at home or
-resting; a resting one shows its time left. With **Necromancer** installed too, F3 and F2 open one "Summons" wheel with
+**The wheel (hold F3):** Tame, Feed, Attack, **Dismiss <name>** for each beast that is out (and **Dismiss all** with
+two or more out), then **Call <name>** for up to 6 beasts that are at home or resting; a resting one shows its time
+left. With **Necromancer** installed too, F3 and F2 open one "Summons" wheel with
 "Beasts: ..." and "Undead: ..." items; turn **One wheel** (`shared_wheel`) off to keep Beastmaster's own wheel. A line at the bottom left lists your beasts that are out or resting:
 "Beasts: Wolf (out), Bear (rests 1:20)".
 
@@ -58,7 +61,8 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster tame` | tame the beast you look at, else the nearest beaten-down one (under 25 % health, within 8 m) |
 | `/beastmaster feed` | feed the beast you look at (else the nearest) its bait: 3 times to tame it |
 | `/beastmaster call <name or number>` | call a beast from your collection |
-| `/beastmaster dismiss <name, number or all>` | send a beast home |
+| `/beastmaster dismiss <name or number>` | send that beast home |
+| `/beastmaster dismiss` (or `dismiss all`) | send every beast that is out home |
 | `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs) |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear is the wolf's graph at 1.4x, the aurochs the boar's at 1.3x) |

@@ -26,13 +26,16 @@ download, which is EML content: **install EML (or ShroudForge) first** (below).
    monsters and wild animals only: never players, allies, farm animals, or your base's dummies and mines. Each lasts
    6 s, at most 10 at a time (the oldest go first). Spirits are never saved.
 4. **Attack** sends your undead at the creature you look at (within 40 m), or at what hit you in the last 10 s.
-   **Gather** calls them to you. **Dismiss all** returns them to the ground.
-5. **Kills:** when a minion's or a spirit's hit leaves a foe at 25 % health or less, you land the killing blow (XP and
+   **Gather** calls them to you.
+5. **Dismiss:** **Dismiss Skeleton** (or Lich, Bone Golem) on the wheel returns one of that kind to the ground, the
+   newest; **Dismiss all** (with two or more) returns every one. In the chat: `/necromancer dismiss skeleton` (or
+   `lich`, `golem`) and `/necromancer dismiss` for all. A dismissed one is gone: raise a new one when you need it.
+6. **Kills:** when a minion's or a spirit's hit leaves a foe at 25 % health or less, you land the killing blow (XP and
    loot are yours). Never on bosses, mini-bosses or players.
-6. **They stay close:** a minion more than 40 m from you comes back after 3 s; more than 80 m at once.
+7. **They stay close:** a minion more than 40 m from you comes back after 3 s; more than 80 m at once.
 
 **The wheel (hold F2):** Raise Skeleton (n/3), Raise Lich (n/1), Raise Bone Golem (n/1), Raging Spirits, Gather,
-Attack, Dismiss all. With Beastmaster installed and **One wheel** on in both mods, F2 and F3 open the same "Summons"
+Attack, then **Dismiss <kind>** for each kind you have (and **Dismiss all** with two or more). With Beastmaster installed and **One wheel** on in both mods, F2 and F3 open the same "Summons"
 wheel: "Undead: ..." and "Beasts: ..." items. Turn **One wheel** off in a mod to give it its own wheel again. A line
 at the bottom left: "Undead: Skeletons 2/3, Liches 1/1, Spirits 2".
 
@@ -49,7 +52,8 @@ All of these work from the game's chat for every player (`/necromancer <word>`) 
 | `/necromancer spirits` | raging spirits at what you look at (else the nearest foe) |
 | `/necromancer attack` | your undead attack what you look at (else what hit you) |
 | `/necromancer gather` | your undead come to you |
-| `/necromancer dismiss` | your undead return to the ground |
+| `/necromancer dismiss skeleton` (or `lich`, `golem`) | one undead of that kind returns to the ground (the newest) |
+| `/necromancer dismiss` (or `dismiss all`) | all your undead return to the ground |
 | `/necromancer list` | how many undead of each kind you have |
 
 ## Settings (Mods tab, EMF.exe, or `set necromancer <key> <value>`)

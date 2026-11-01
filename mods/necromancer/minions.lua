@@ -246,6 +246,25 @@ function P:dismiss_all(world, account)
 	return string.format("%d undead return%s to the ground.", n, n == 1 and "s" or "")
 end
 
+-- necromancer.dismiss <kind>: the newest minion of `kind` returns to the ground (one counted but not in the world, after
+-- a load or while it is away, is taken off the count).
+function P:dismiss_one(world, account, kind)
+	local n = self:count(account, kind.id)
+	if n == 0 then return string.format("You have no %s.", kind.plural:lower()) end
+	local list = self.out[account] or {}
+	for i = #list, 1, -1 do
+		local id = list[i]
+		if self.kind_of[id] == kind.id then
+			if ours(world, id) then emf.destroy(world, id) end
+			forget(self, account, id)
+			break
+		end
+	end
+	set_count(self, account, kind.id, n - 1)
+	self.env.save()
+	return string.format("A %s returns to the ground (%d/%d).", kind.name, n - 1, self.env.setting(kind.cap))
+end
+
 -- necromancer.gather: every minion guards its owner again and comes beside them. Returns the number.
 function P:gather(world, owner, account)
 	local x, y, z = world:position(owner)
