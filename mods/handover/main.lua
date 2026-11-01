@@ -176,36 +176,55 @@ local function carried(world, id)
   return list
 end
 
--- Item names as people type them, the way EMF's give and items commands read them: case ignored, spaces for '_',
--- words in any order, a part of a word is enough ("fishing bait" finds Material_T0_simple_FishingBait).
--- The words of a name, in lower case: split at '_', '-', spaces and where a capital follows a small letter.
+-- Item names as people type them, the way EMF's give and items commands read them (src/core/item_names.cpp): case
+-- ignored, spaces for '_', words in any order, a part of a word is enough ("simple bait" finds
+-- Material_T0_simple_FishingBait, "wood logs" Material_T1_Wood_Logs).
+-- The words of a name, in lower case: split at '_', '-' and spaces, where a capital follows a small letter
+-- (FishingBait), where a number follows a word of two or more letters (Torch01; not lvl5) and where a word of two or
+-- more letters follows a number (01COMMON; not 1H or 2m).
 local function words_of(text)
   local out = {}
   for chunk in text:gmatch("[^_%-%s]+") do
-    local start = 1
-    for i = 2, #chunk do
-      if chunk:sub(i - 1, i - 1):match("%l") and chunk:sub(i, i):match("%u") then
-        out[#out + 1] = chunk:sub(start, i - 1):lower()
-        start = i
+    local word = ""
+    for i = 1, #chunk do
+      local c = chunk:sub(i, i)
+      if word ~= "" then
+        local prev = word:sub(-1)
+        local split = (prev:match("%l") and c:match("%u"))
+          or (c:match("%d") and word:match("^%a%a+$") and word:lower() ~= "lvl")
+          or (c:match("%a") and word:match("^%d+$") and chunk:sub(i + 1, i + 1):match("%a"))
+        if split then
+          out[#out + 1] = word:lower()
+          word = ""
+        end
       end
+      word = word .. c
     end
-    out[#out + 1] = chunk:sub(start):lower()
+    if word ~= "" then out[#out + 1] = word:lower() end
   end
   return out
 end
 
--- The word a debug name starts with to say what kind of item it is (Material_T1_Wood_Logs, Tool_Torch_01).
+-- The word a debug name starts with to say what kind of item it is (Material_T1_Wood_Logs, Tool_Torch01).
 local CATEGORY = {material = true, food = true, tool = true, ammo = true, weapon = true, armor = true, armour = true,
   block = true, build = true, prop = true, resource = true, consumable = true}
 
--- Every own word of the item (not its category, tier or number: "Material", "T1", "01") was typed: a typed word starts
--- it, or it starts a typed word.
-local function all_own_words_typed(words, typed)
-  local need = {}
+local function is_number(w) return w:match("^%d+$") ~= nil end
+local function number_value(w) return (w:gsub("^0+(%d)", "%1")) end
+
+-- An item's own words: not the category it starts with, not tiers and numbers (T1, TX, lvl5, 01), not "simple".
+local function own_words(words)
+  local own = {}
   for i, w in ipairs(words) do
-    local tier = w:match("^%d+$") or w:match("^t%d+$") or w:match("^lvl%d+$")
-    if not tier and not (i == 1 and CATEGORY[w]) then need[#need + 1] = w end
+    local tier = is_number(w) or w == "tx" or w:match("^t%d+$") or w:match("^lvl%d*$")
+    if not tier and not (i == 1 and CATEGORY[w]) and w ~= "simple" then own[#own + 1] = w end
   end
+  return own
+end
+
+-- Every own word of the item was typed: a typed word starts it, or it starts a typed word.
+local function all_own_words_typed(words, typed)
+  local need = own_words(words)
   if #need == 0 then need = words end
   for _, w in ipairs(need) do
     local typed_it = false
@@ -217,14 +236,31 @@ local function all_own_words_typed(words, typed)
   return true
 end
 
--- The item `part` names among what the giver carries: an exact name wins, then the item with exactly the words typed,
--- then the only item whose name holds every word typed, then the only one of those whose own words were all typed.
--- Returns the entry, or nil and why.
+-- A typed word in an item's words: a number as a whole number word of the same value ("torch 3" is not T3), another
+-- word anywhere in the name with its separators removed.
+local function word_in(t, words, compact)
+  if not is_number(t) then return compact:find(t, 1, true) ~= nil end
+  for _, w in ipairs(words) do
+    if is_number(w) and number_value(w) == number_value(t) then return true end
+  end
+  return false
+end
+
+local function by_value(words)
+  local out = {}
+  for i, w in ipairs(words) do out[i] = is_number(w) and number_value(w) or w end
+  return table.concat(out, " ")
+end
+
+-- The item `part` names among what the giver carries: the exact name; the item with exactly the words typed; the only
+-- item whose name holds every word typed; the only one of those whose own words were all typed (not when it has a typed
+-- word only as a part, "wolf" in Wolfsbane, while another has every typed word whole); the only one with every typed
+-- word whole. Returns the entry, or nil and why.
 local function match(list, part)
   local q = part:lower()
   if q == "" then return nil, "say which item: /handover <part of its name> [count|all]" end
   local typed = words_of(part)
-  local hits, same, meant = {}, {}, {}
+  local hits, same, meant, whole = {}, {}, {}, {}
   for _, e in ipairs(list) do
     local n = e.name:lower()
     if n == q then return e end
@@ -232,31 +268,43 @@ local function match(list, part)
     local compact = table.concat(words)
     local all = #typed > 0
     for _, t in ipairs(typed) do
-      if not compact:find(t, 1, true) then all = false break end
+      if not word_in(t, words, compact) then all = false break end
     end
     if all then
       hits[#hits + 1] = e
-      if table.concat(words, " ") == table.concat(typed, " ") then same[#same + 1] = e end
-      if all_own_words_typed(words, typed) then meant[#meant + 1] = e end
+      if by_value(words) == by_value(typed) then same[#same + 1] = e end
+      local whole_all = true
+      for _, t in ipairs(typed) do
+        local found = is_number(t)
+        for _, w in ipairs(words) do found = found or w == t end
+        whole_all = whole_all and found
+      end
+      if whole_all then whole[#whole + 1] = e end
+      if all_own_words_typed(words, typed) then meant[#meant + 1] = {e = e, whole = whole_all} end
     end
   end
   if #same == 1 then return same[1] end
   if #hits == 1 then return hits[1] end
-  if #meant == 1 then return meant[1] end
+  if #meant == 1 then
+    local part_only = not meant[1].whole and (#whole > 1 or (#whole == 1 and whole[1] ~= meant[1].e))
+    if not part_only then return meant[1].e end
+  elseif #meant == 0 and #whole == 1 then
+    return whole[1]
+  end
   if #hits == 0 then return nil, "you carry nothing named like '" .. part .. "'" end
   local names = {}
   for i = 1, math.min(5, #hits) do names[i] = hits[i].name end
   return nil, "which one? " .. table.concat(names, ", ") .. (#hits > 5 and (" (and " .. (#hits - 5) .. " more)") or "")
 end
 
--- The item part and the count from the words after the command: the last word is the count when it is a number or
--- "all".
+-- The item part and the count from the words after the command: the last word is the count when it is "all" or a
+-- number without a leading zero (Tool_Torch01's 01 belongs to the name).
 local function split_args(words, from)
   local parts = {}
   for i = from, #words do parts[#parts + 1] = words[i] end
   local count = nil
   local last = parts[#parts]
-  if last and (last:lower() == "all" or last:match("^%d+$")) and #parts > 1 then
+  if last and (last:lower() == "all" or (last:match("^%d+$") and not last:match("^0%d"))) and #parts > 1 then
     count = last:lower()
     parts[#parts] = nil
   end

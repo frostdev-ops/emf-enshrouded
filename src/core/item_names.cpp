@@ -8,6 +8,8 @@ namespace emf::core {
 namespace {
 
 char low(char c) { return static_cast<char>(std::tolower(static_cast<unsigned char>(c))); }
+bool is_digit(char c) { return c >= '0' && c <= '9'; }
+bool is_alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
 std::string lower(std::string_view s) {
     std::string out(s);
@@ -15,18 +17,23 @@ std::string lower(std::string_view s) {
     return out;
 }
 
-bool digits(const std::string& w) {
-    return !w.empty() && std::all_of(w.begin(), w.end(), [](char c) { return c >= '0' && c <= '9'; });
+bool digits(const std::string& w) { return !w.empty() && std::all_of(w.begin(), w.end(), is_digit); }
+bool letters(const std::string& w) { return !w.empty() && std::all_of(w.begin(), w.end(), is_alpha); }
+
+// A number word by its value: "01" and "1" are the same number.
+std::string number_value(const std::string& w) {
+    const size_t nz = w.find_first_not_of('0');
+    return nz == std::string::npos ? "0" : w.substr(nz);
 }
 
-// A tier or a number in a debug name: T1, lvl3, 01.
+// A tier, level or number in a debug name: T1, TX, lvl5, 01.
 bool tier_word(const std::string& w) {
-    if (digits(w)) return true;
+    if (digits(w) || w == "tx") return true;
     if (w.size() >= 2 && w[0] == 't' && digits(w.substr(1))) return true;
-    return w.size() >= 4 && w.compare(0, 3, "lvl") == 0 && digits(w.substr(3));
+    return w.compare(0, 3, "lvl") == 0 && (w.size() == 3 || digits(w.substr(3)));
 }
 
-// The word a debug name starts with to say what kind of item it is (Material_T1_Wood_Logs, Tool_Torch_01).
+// The word a debug name starts with to say what kind of item it is (Material_T1_Wood_Logs, Tool_Torch01).
 bool category_word(const std::string& w) {
     static const char* const kinds[] = {"material", "food",  "tool",  "ammo", "weapon",   "armor",
                                         "armour",   "block", "build", "prop", "resource", "consumable"};
@@ -35,52 +42,71 @@ bool category_word(const std::string& w) {
     return false;
 }
 
-// An item's own words: its name's words without the category it starts with and without tiers and numbers.
+// An item's own words: not the category it starts with, not tiers and numbers, not "simple"
+// (Material_T0_simple_FishingBait is the plain fishing bait).
 std::vector<std::string> own_words(const std::vector<std::string>& words) {
     std::vector<std::string> out;
     for (size_t i = 0; i < words.size(); ++i)
-        if (!tier_word(words[i]) && !(i == 0 && category_word(words[i]))) out.push_back(words[i]);
+        if (!tier_word(words[i]) && !(i == 0 && category_word(words[i])) && words[i] != "simple")
+            out.push_back(words[i]);
     return out;
 }
 
-std::string joined(const std::vector<std::string>& words) {
-    std::string s;
-    for (const auto& w : words) s += w;
-    return s;
+// Every own word of an item was typed: a typed word starts it, or it starts a typed word.
+bool own_words_typed(const std::vector<std::string>& words, const std::vector<std::string>& typed) {
+    const auto own = own_words(words);
+    const auto& need = own.empty() ? words : own;
+    return std::all_of(need.begin(), need.end(), [&](const std::string& w) {
+        return std::any_of(typed.begin(), typed.end(), [&](const std::string& t) {
+            return w.compare(0, t.size(), t) == 0 || t.compare(0, w.size(), w) == 0;
+        });
+    });
+}
+
+std::vector<std::string> by_value(std::vector<std::string> words) {
+    for (auto& w : words)
+        if (digits(w)) w = number_value(w);
+    return words;
 }
 
 struct Scored {
     size_t index = 0;
-    bool meant = false;  // every own word of the item was typed (a typed word starts it, or it starts the typed word)
-    size_t whole = 0;    // typed words that are whole words of the name
+    bool meant = false;      // own_words_typed
+    bool whole_all = false;  // every typed word is a whole word of the name
+    size_t whole = 0;        // typed words that are whole words of the name
     size_t own = 0, all = 0;
-    std::string name;    // lower case
+    std::string name;        // lower case
+    std::vector<std::string> words;
 };
 
-// Every item whose name holds every word typed (with the separators removed: "woodlog" and "wood log" both match
-// Material_T1_Wood_Logs), best first.
+// A typed word in an item's words: a number as a whole number word of the same value ("torch 3" is not T3); another
+// word anywhere in the name with its separators removed ("woodlog" and "wood log" both match Material_T1_Wood_Logs).
+bool word_in(const std::string& typed, const std::vector<std::string>& words, const std::string& compact) {
+    if (!digits(typed)) return compact.find(typed) != std::string::npos;
+    const std::string v = number_value(typed);
+    return std::any_of(words.begin(), words.end(),
+                       [&](const std::string& w) { return digits(w) && number_value(w) == v; });
+}
+
 std::vector<Scored> scored_matches(const std::vector<NamedItem>& items, const std::vector<std::string>& typed) {
     std::vector<Scored> out;
     for (size_t i = 0; i < items.size(); ++i) {
-        const auto words = item_words(items[i].name);
+        auto words = item_words(items[i].name);
         if (words.empty()) continue;
-        const std::string compact = joined(words);
-        bool all = true;
-        for (const auto& t : typed) all = all && compact.find(t) != std::string::npos;
-        if (!all) continue;
+        std::string compact;
+        for (const auto& w : words) compact += w;
+        if (!std::all_of(typed.begin(), typed.end(), [&](const std::string& t) { return word_in(t, words, compact); }))
+            continue;
         Scored s;
         s.index = i;
         s.name = lower(items[i].name);
         s.all = words.size();
-        const auto own = own_words(words);
-        s.own = own.size();
-        const auto& need = own.empty() ? words : own;
-        s.meant = std::all_of(need.begin(), need.end(), [&](const std::string& w) {
-            return std::any_of(typed.begin(), typed.end(), [&](const std::string& t) {
-                return w.compare(0, t.size(), t) == 0 || t.compare(0, w.size(), w) == 0;
-            });
-        });
-        for (const auto& t : typed) s.whole += std::find(words.begin(), words.end(), t) != words.end() ? 1 : 0;
+        s.own = own_words(words).size();
+        s.meant = own_words_typed(words, typed);
+        for (const auto& t : typed)  // (a typed number matches whole number words only)
+            s.whole += digits(t) || std::find(words.begin(), words.end(), t) != words.end() ? 1 : 0;
+        s.whole_all = s.whole == typed.size();
+        s.words = std::move(words);
         out.push_back(std::move(s));
     }
     std::stable_sort(out.begin(), out.end(), [](const Scored& a, const Scored& b) {
@@ -91,6 +117,12 @@ std::vector<Scored> scored_matches(const std::vector<NamedItem>& items, const st
         return a.name < b.name;
     });
     return out;
+}
+
+std::string trimmed(std::string_view s) {
+    while (!s.empty() && (s.front() == ' ' || s.front() == '\t')) s.remove_prefix(1);
+    while (!s.empty() && (s.back() == ' ' || s.back() == '\t')) s.remove_suffix(1);
+    return std::string(s);
 }
 
 }  // namespace
@@ -108,8 +140,13 @@ std::vector<std::string> item_words(std::string_view text) {
             flush();
             continue;
         }
-        const bool capital = c >= 'A' && c <= 'Z';
-        if (capital && !word.empty() && word.back() >= 'a' && word.back() <= 'z') flush();  // FishingBait
+        if (!word.empty()) {
+            const char prev = word.back();
+            const bool next_letter = i + 1 < text.size() && is_alpha(text[i + 1]);
+            if (prev >= 'a' && prev <= 'z' && c >= 'A' && c <= 'Z') flush();                             // FishingBait
+            else if (is_digit(c) && letters(word) && word.size() >= 2 && lower(word) != "lvl") flush();  // Torch01
+            else if (is_alpha(c) && digits(word) && next_letter) flush();                                // 01COMMON
+        }
         word += c;
     }
     flush();
@@ -118,40 +155,48 @@ std::vector<std::string> item_words(std::string_view text) {
 
 ItemMatch match_item(const std::vector<NamedItem>& items, std::string_view typed_in) {
     ItemMatch m;
-    std::string_view typed = typed_in;
-    while (!typed.empty() && (typed.front() == ' ' || typed.front() == '\t')) typed.remove_prefix(1);
-    while (!typed.empty() && (typed.back() == ' ' || typed.back() == '\t')) typed.remove_suffix(1);
+    const std::string typed = trimmed(typed_in);
     if (typed.empty()) return m;
-    for (const auto& it : items)  // the exact debug name
-        if (it.name == typed) {
-            m.id = it.id;
+    const auto typed_words = item_words(typed);
+    const auto found = [&](size_t index, ItemHow how) {
+        m.id = items[index].id;
+        m.how = how;
+        m.own_words_typed = own_words_typed(item_words(items[index].name), typed_words);
+    };
+    for (size_t i = 0; i < items.size(); ++i)  // the exact debug name
+        if (items[i].name == typed) {
+            found(i, ItemHow::Exact);
             return m;
         }
     const std::string want = lower(typed);
-    for (const auto& it : items)  // in any case
-        if (lower(it.name) == want) {
-            m.id = it.id;
+    for (size_t i = 0; i < items.size(); ++i)  // in any case
+        if (lower(items[i].name) == want) {
+            found(i, ItemHow::Exact);
             return m;
         }
-    const auto typed_words = item_words(typed);
     if (typed_words.empty()) return m;
     const auto scored = scored_matches(items, typed_words);
     for (const auto& s : scored) m.matches.push_back(s.index);
-    size_t same = 0, meant = 0;  // items with exactly the words typed; items whose own words were all typed
-    uint32_t same_id = 0, meant_id = 0;
+    const auto typed_values = by_value(typed_words);
+    std::vector<const Scored*> same, meant, whole;
     for (const auto& s : scored) {
-        if (item_words(items[s.index].name) == typed_words) {
-            ++same;
-            same_id = items[s.index].id;
-        }
-        if (s.meant) {
-            ++meant;
-            meant_id = items[s.index].id;
-        }
+        if (by_value(s.words) == typed_values) same.push_back(&s);
+        if (s.meant) meant.push_back(&s);
+        if (s.whole_all) whole.push_back(&s);
     }
-    if (same == 1) m.id = same_id;
-    else if (scored.size() == 1) m.id = items[scored[0].index].id;
-    else if (meant == 1) m.id = meant_id;
+    if (same.size() == 1) {
+        found(same[0]->index, ItemHow::SameWords);
+    } else if (scored.size() == 1) {
+        found(scored[0].index, ItemHow::Only);
+    } else if (meant.size() == 1) {
+        // not when it has a typed word only as a part ("wolf" in Wolfsbane) while another match has every typed
+        // word whole
+        const bool part_only = !meant[0]->whole_all &&
+                               std::any_of(whole.begin(), whole.end(), [&](const Scored* s) { return s != meant[0]; });
+        if (!part_only) found(meant[0]->index, ItemHow::Meant);
+    } else if (meant.empty() && whole.size() == 1) {
+        found(whole[0]->index, ItemHow::Whole);
+    }
     return m;
 }
 
@@ -159,6 +204,90 @@ std::vector<size_t> search_items(const std::vector<NamedItem>& items, std::strin
     std::vector<size_t> out;
     for (const auto& s : scored_matches(items, item_words(typed))) out.push_back(s.index);
     return out;
+}
+
+namespace {
+struct Reading {
+    std::string name;
+    std::vector<std::string> numbers;
+    ItemMatch match;
+    bool strong() const { return match.id && (match.how == ItemHow::Exact || match.how == ItemHow::SameWords); }
+    bool same_outcome(const Reading& o) const {  // the same item and numbers (no count is a count of 1)
+        const auto n = [](const std::vector<std::string>& v) {
+            return v.empty() ? std::vector<std::string>{"1"} : by_value(v);
+        };
+        return match.id == o.match.id && n(numbers) == n(o.numbers);
+    }
+};
+}  // namespace
+
+ItemArgs read_item_args(const std::vector<NamedItem>& items, const std::vector<std::string>& words, size_t max_numbers) {
+    ItemArgs a;
+    if (words.empty()) return a;
+    std::vector<size_t> splits;  // how many words at the end are the command's numbers
+    if (words[0].find(' ') != std::string::npos) {  // "quoted name" [numbers]
+        for (size_t i = 1; i < words.size(); ++i) a.bad = a.bad || !digits(words[i]);
+        a.bad = a.bad || words.size() - 1 > max_numbers;
+        splits.push_back(words.size() - 1);
+    } else {
+        // a number with a leading zero (01) is never one of the command's numbers
+        const auto plain_number = [](const std::string& w) { return digits(w) && (w.size() == 1 || w[0] != '0'); };
+        splits.push_back(0);
+        for (size_t k = 1; k <= max_numbers && k < words.size() && plain_number(words[words.size() - k]); ++k)
+            splits.push_back(k);
+    }
+    std::vector<Reading> readings;
+    for (size_t k : splits) {
+        Reading r;
+        for (size_t i = 0; i + k < words.size(); ++i) r.name += (i ? " " : "") + words[i];
+        r.numbers.assign(words.end() - static_cast<std::ptrdiff_t>(k), words.end());
+        r.match = match_item(items, r.name);
+        readings.push_back(std::move(r));
+    }
+    const auto take = [&](const Reading& r) {
+        a.id = r.match.id;
+        a.name = r.name;
+        a.numbers = r.numbers;
+        a.match = r.match;
+    };
+    const auto unclear = [&](const std::vector<const Reading*>& rs) {
+        take(*rs.back());
+        a.id = 0;
+        for (const Reading* r : rs) a.readings.emplace_back(r->match.id, r->numbers);
+    };
+    const auto all_agree = [](const std::vector<const Reading*>& rs) {
+        return std::all_of(rs.begin(), rs.end(), [&](const Reading* r) { return r->same_outcome(*rs[0]); });
+    };
+    // a split whose name is an item's debug name or has exactly its words
+    std::vector<const Reading*> strong;
+    for (const auto& r : readings)
+        if (r.strong()) strong.push_back(&r);
+    if (!strong.empty()) {
+        if (all_agree(strong)) take(*strong[0]);
+        else unclear(strong);
+        return a;
+    }
+    // else the split with the most numbers, unless one with fewer names something else by all its own words
+    const Reading& most = readings.back();
+    std::vector<const Reading*> others;
+    for (size_t i = 0; i + 1 < readings.size(); ++i)
+        if (readings[i].match.id && readings[i].match.own_words_typed) others.push_back(&readings[i]);
+    if (most.match.id) {
+        std::vector<const Reading*> differ;
+        for (const Reading* r : others)
+            if (!r->same_outcome(most)) differ.push_back(r);
+        if (differ.empty()) {
+            take(most);
+        } else {
+            differ.push_back(&most);
+            unclear(differ);
+        }
+    } else if (!others.empty() && all_agree(others)) {
+        take(*others[0]);
+    } else {
+        take(most);  // no item: the candidates of the name with the numbers taken off
+    }
+    return a;
 }
 
 }  // namespace emf::core

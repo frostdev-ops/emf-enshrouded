@@ -82,43 +82,51 @@ ItemList all_items(BuiltinContext& c, EmfWorld* w) {
     return l;
 }
 
-bool all_digits(const char* s) {
-    if (!s || !*s) return false;
-    for (; *s; ++s)
-        if (*s < '0' || *s > '9') return false;
-    return true;
-}
+// What read_item found.
+enum class ItemRead { Ok, Usage, Replied };
 
-// A command's item name and the numbers after it: the numbers are the plain numbers at the end (at most max_numbers of
-// them), the name is every word before them ("give fishing bait 4", "put Fishing Bait 3 77", "give tool torch 01 5";
-// "quotes" work too). False when there is no name.
-struct ItemArgs {
-    std::string name;
-    std::vector<const char*> numbers;
-};
-bool split_item_args(int argc, const char* const* argv, size_t max_numbers, ItemArgs* out) {
-    int end = argc;
-    while (end > 2 && static_cast<size_t>(argc - end) < max_numbers && all_digits(argv[end - 1])) --end;
-    for (int i = 1; i < end; ++i) out->name += (i > 1 ? " " : "") + std::string(argv[i]);
-    for (int i = end; i < argc; ++i) out->numbers.push_back(argv[i]);
-    return !out->name.empty();
-}
-
-// The item a command means (match_item), or 0 after saying why: no item has that name, or which items it could be.
-uint32_t item_named(BuiltinContext& c, EmfWorld* w, const std::string& typed) {
+// The item and numbers a command's words mean (read_item_args: "give simple bait 4", "take tool torch 01 5"). Usage when
+// there is no name, or a quoted name is followed by something else than up to max_numbers numbers; Replied after saying
+// that no item has that name, which items it could be, or, when the words can be read as different items, how to type
+// each reading.
+ItemRead read_item(BuiltinContext& c, EmfWorld* w, const char* cmd, int argc, const char* const* argv,
+                   size_t max_numbers, uint32_t* id, std::vector<std::string>* numbers) {
+    if (argc < 2) return ItemRead::Usage;
+    const std::vector<std::string> words(argv + 1, argv + argc);
     const ItemList l = all_items(c, w);
-    const ItemMatch m = match_item(l.named, typed);
-    if (m.id) return m.id;
+    const ItemArgs a = read_item_args(l.named, words, max_numbers);
+    if (a.bad) return ItemRead::Usage;
+    if (a.id) {
+        *id = a.id;
+        *numbers = a.numbers;
+        return ItemRead::Ok;
+    }
+    const auto name_of = [&](uint32_t item) {
+        for (const auto& n : l.named)
+            if (n.id == item) return n.name;
+        return std::string("?");
+    };
+    if (!a.readings.empty()) {
+        std::string typed, choices;
+        for (const auto& word : words) typed += (typed.empty() ? "" : " ") + word;
+        for (const auto& [item, nums] : a.readings) {
+            choices += (choices.empty() ? "" : " | ") + std::string(cmd) + " " + name_of(item);
+            for (const auto& n : nums) choices += " " + n;
+        }
+        command_reply_line("'" + typed + "' can be read more than one way; type one of: " + choices);
+        return ItemRead::Replied;
+    }
+    const ItemMatch& m = a.match;
     if (m.matches.empty()) {
-        command_reply_line("unknown item '" + typed + "' (items <part of a name> lists names)");
-        return 0;
+        command_reply_line("unknown item '" + a.name + "' (items <part of a name> lists names)");
+        return ItemRead::Replied;
     }
     constexpr size_t kNamed = 8;
-    std::string line = "'" + typed + "' could be " + std::to_string(m.matches.size()) + " items: ";
+    std::string line = "'" + a.name + "' could be " + std::to_string(m.matches.size()) + " items: ";
     for (size_t k = 0; k < m.matches.size() && k < kNamed; ++k) line += (k ? ", " : "") + l.named[m.matches[k]].name;
     if (m.matches.size() > kNamed) line += " and " + std::to_string(m.matches.size() - kNamed) + " more";
     command_reply_line(line + ". Type more of the name.");
-    return 0;
+    return ItemRead::Replied;
 }
 
 bool player_pos(BuiltinContext& c, EmfWorld* w, uint32_t player, double out[3]) {
@@ -492,20 +500,21 @@ void cmd_items(EmfWorld* w, int argc, const char* const* argv, void* u) {
         const NamedItem& it = l.named[found[k]];
         command_reply_line(fmt("%s (0x%08x, stack %u)", it.name.c_str(), it.id, unsigned(l.stack[found[k]])));
     }
-    command_reply_line(fmt("%zu of %zu items%s", found.size(), l.named.size(), found.size() > 50 ? " (first 50 shown)" : ""));
+    command_reply_line(
+        fmt("%zu of %zu items%s", found.size(), l.named.size(), found.size() > 50 ? " (first 50 shown)" : ""));
 }
 
 void cmd_give(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
-    uint32_t count = 1;
-    ItemArgs a;
-    if (!split_item_args(argc, argv, 1, &a) ||
-        (a.numbers.size() == 1 && (!parse_uint(a.numbers[0], 65535, &count) || count == 0))) {
+    uint32_t count = 1, id = 0;
+    std::vector<std::string> numbers;
+    const ItemRead read = read_item(c, w, "give", argc, argv, 1, &id, &numbers);
+    if (read == ItemRead::Replied) return;
+    if (read == ItemRead::Usage ||
+        (numbers.size() == 1 && (!parse_uint(numbers[0].c_str(), 65535, &count) || count == 0))) {
         command_reply_line("usage: give <item name> [count]");
         return;
     }
-    const uint32_t id = item_named(c, w, a.name);
-    if (!id) return;
     EmfItemInfo info{};
     info.size = sizeof(info);
     c.api->item_info(w, id, &info);
@@ -543,24 +552,24 @@ void take_done(EmfWorld* w, uint32_t entity, uint32_t item, uint32_t requested, 
 // put <item> [count] [entity] [level] [rarity] / take <item> [count] [entity]
 void cmd_items(EmfWorld* w, int argc, const char* const* argv, void* u, bool take) {
     auto& c = ctx_of(u);
-    uint32_t count = 1, entity = 0, level = 0, rarity = 0xFF;
-    ItemArgs a;
-    bool ok = split_item_args(argc, argv, take ? 2 : 4, &a);
-    if (ok && a.numbers.size() >= 1) ok = parse_uint(a.numbers[0], 65535, &count) && count > 0;
-    if (ok && a.numbers.size() >= 2) ok = parse_uint(a.numbers[1], 0xffffffffu, &entity) && entity > 0;
-    if (ok && a.numbers.size() >= 3) ok = parse_uint(a.numbers[2], 1000, &level);
-    if (ok && a.numbers.size() >= 4) ok = parse_uint(a.numbers[3], 4, &rarity);
+    uint32_t count = 1, entity = 0, level = 0, rarity = 0xFF, id = 0;
+    std::vector<std::string> numbers;
+    const ItemRead read = read_item(c, w, take ? "take" : "put", argc, argv, take ? 2 : 4, &id, &numbers);
+    if (read == ItemRead::Replied) return;
+    bool ok = read == ItemRead::Ok;
+    if (ok && numbers.size() >= 1) ok = parse_uint(numbers[0].c_str(), 65535, &count) && count > 0;
+    if (ok && numbers.size() >= 2) ok = parse_uint(numbers[1].c_str(), 0xffffffffu, &entity) && entity > 0;
+    if (ok && numbers.size() >= 3) ok = parse_uint(numbers[2].c_str(), 1000, &level);
+    if (ok && numbers.size() >= 4) ok = parse_uint(numbers[3].c_str(), 4, &rarity);
     if (!ok) {
         command_reply_line(take ? "usage: take <item name> [count 1-65535] [entity]"
                                 : "usage: put <item name> [count 1-65535] [entity] [level] [rarity 0-4]");
         return;
     }
-    const uint32_t id = item_named(c, w, a.name);
-    if (!id) return;
     if (!entity) entity = c.player ? c.player() : 0;
     auto* late = new LateItems{&c, current_reply()};  // freed by the result callback, or below when refused
     bool queued = false;
-    if (!take && a.numbers.size() < 3) {
+    if (!take && numbers.size() < 3) {
         queued = c.api->put_items(w, entity, id, count, put_done, late);
     } else {
         EmfItemsRequest r{};
@@ -936,14 +945,14 @@ void cmd_tplset(EmfWorld* w, int argc, const char* const* argv, void* u) {
 
 void cmd_stack(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
-    uint32_t max = 0;
-    ItemArgs a;
-    if (!split_item_args(argc, argv, 1, &a) || a.numbers.size() != 1 || !parse_uint(a.numbers[0], 65535, &max) || max == 0) {
+    uint32_t max = 0, id = 0;
+    std::vector<std::string> numbers;
+    const ItemRead read = read_item(c, w, "stack", argc, argv, 1, &id, &numbers);
+    if (read == ItemRead::Replied) return;
+    if (read == ItemRead::Usage || numbers.size() != 1 || !parse_uint(numbers[0].c_str(), 65535, &max) || max == 0) {
         command_reply_line("usage: stack <item name> <max 1-65535>");
         return;
     }
-    const uint32_t id = item_named(c, w, a.name);
-    if (!id) return;
     EmfItemInfo info{};
     info.size = sizeof(info);
     c.api->item_info(w, id, &info);

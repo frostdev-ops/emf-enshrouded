@@ -25,11 +25,13 @@ it lets any player within reach put items into another player's bag: switch it o
 | `handover.debug_target <entity\|off>` | host / admins | for tests without a second player: this villager or chest receives every hand-over until `off` |
 
 - `<item>` is the item's name as the game knows it (`items wood` in the console lists them), typed the easy way: any
-  case, spaces instead of `_`, words in any order, a part of a word is enough. `logs`, `wood log` and `Wood Logs` find
-  `Material_T1_Wood_Logs`; `fishing bait` finds `Material_T0_simple_FishingBait`. A name that matches exactly wins;
-  of several matches, the one whose own words you typed wins (`wood logs`: not the dead logs, which have a word more);
-  otherwise the first five are listed so you can say which. When two players have the same name, `/handover.to` asks
-  for their `#k`.
+  case, spaces instead of `_`, words in any order, a part of a word is enough. `wood logs`, `wood log` and `Wood Logs`
+  find `Material_T1_Wood_Logs` (not the dead logs: those have a word more); `simple bait` finds
+  `Material_T0_simple_FishingBait`. A name that matches exactly wins. When the words fit several items you carry and
+  none of them is clearly meant, the first five are listed so you can say which: `logs` alone fits every kind of log,
+  and `wolf` is only the start of Wolfsbane but a whole word of wolf meat. A number with a leading zero is part of the
+  name (`/handover tool torch 01`), never the count. When two players have the same name, `/handover.to` asks for their
+  `#k`.
 - Without a count you hand over your biggest stack of that item (one piece of gear-like items); `all` hands over every
   one you carry; a number hands over that many.
 - "Any player" works from the game's chat on a dedicated server, and in a game you host with `[chat] players=1` in

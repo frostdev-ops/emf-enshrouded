@@ -233,6 +233,22 @@ TEST_CASE("handover: item names as people type them: spaces, words in any order,
     CHECK(h.reply("handover bait") == "which one? Food_T2_Dog_Bait, Material_T0_simple_FishingBait");
 }
 
+TEST_CASE("handover: a name may end in a number (01 is never the count); a word only part of one item but whole in another asks") {
+    HandoverRig h;
+    h.player(1, 0, 0xA1, "Alice");
+    h.player(2, 2, 0xB2, "Bob");
+    h.r.fake.item_names[0x61] = "Tool_Torch01";
+    h.r.fake.item_names[0x62] = "Material_T5_Wolfsbane";
+    h.r.fake.item_names[0x63] = "Food_T1_raw_bad_meat_WolfMeat";
+    h.carry(1, {{0x61, 10}, {0x62, 3}, {0x63, 2}});
+    h.chat_from(1, 0xA1);
+    CHECK(h.reply("handover tool torch 01") == "Handing 10 x Tool_Torch01 to Bob");  // the biggest stack, not 1
+    h.seconds(3);
+    // "wolf" is only the start of Wolfsbane, but a whole word of the wolf meat: no guess
+    CHECK(h.reply("handover wolf") == "which one? Food_T1_raw_bad_meat_WolfMeat, Material_T5_Wolfsbane");
+    CHECK(h.reply("handover wolfsbane 2") == "Handing 2 x Material_T5_Wolfsbane to Bob");
+}
+
 TEST_CASE("handover: nobody in reach is refused; the giver never receives; the reach is a setting") {
     HandoverRig h;
     h.player(1, 0, 0xA1, "Alice");

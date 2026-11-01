@@ -3,8 +3,10 @@
 #include <doctest.h>
 
 #include <cstring>
+#include <fstream>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "common/fnv.h"
@@ -189,80 +191,186 @@ TEST_CASE("write_game_memory unlocks only private memory: image constants and fi
 
 // ---- item names as people type them (give, put, take, stack, items) ----
 namespace {
-// debug names of the kind the game uses (the ones in EMF's docs and tests)
-std::vector<NamedItem> named_items() {
-    return {{0x11, "Material_T1_Wood_Logs"},        {0x12, "Material_T1_Wood_Logs_Dead"},
-            {0x13, "Material_T4_Wood_Logs_Palm"},   {0x14, "Material_T1_Wood_Twigs"},
-            {0x15, "Shield_T0_Wooden"},             {0x21, "Material_T0_simple_FishingBait"},
-            {0x22, "Food_T2_Dog_Bait"},             {0x31, "Tool_Torch_01"},
-            {0x41, "Material_T1_Stone"},            {0x42, "Material_T1_Stone_Flint"},
-            {0x43, "Block_T1_Stone_Rough"}};
+// 105 of the game's 4207 debug names (tests/fixtures/items): the groups that share words
+std::vector<NamedItem> real_items() {
+    std::ifstream f(std::string(EMF_SOURCE_DIR) + "/tests/fixtures/items/debug_names_sample.txt", std::ios::binary);
+    std::vector<NamedItem> out;
+    std::string line;
+    uint32_t id = 1;
+    while (std::getline(f, line)) {
+        while (!line.empty() && (line.back() == '\r' || line.back() == ' ')) line.pop_back();
+        if (!line.empty() && line[0] != '#') out.push_back({id++, line});
+    }
+    return out;
+}
+uint32_t id_of(const std::vector<NamedItem>& items, const std::string& name) {
+    for (const auto& i : items)
+        if (i.name == name) return i.id;
+    return 0;
+}
+std::string name_of(const std::vector<NamedItem>& items, uint32_t id) {
+    for (const auto& i : items)
+        if (i.id == id) return i.name;
+    return id ? "?" : "";
 }
 std::vector<std::string> names_of(const std::vector<NamedItem>& items, const std::vector<size_t>& at) {
     std::vector<std::string> out;
     for (size_t i : at) out.push_back(items[i].name);
     return out;
 }
+bool listed(const std::vector<NamedItem>& items, const std::vector<size_t>& at, const std::string& name) {
+    for (size_t i : at)
+        if (items[i].name == name) return true;
+    return false;
+}
+std::string meant(const std::vector<NamedItem>& items, const char* typed) {
+    return name_of(items, match_item(items, typed).id);
+}
+std::vector<std::string> split_words(const std::string& line) {
+    std::vector<std::string> out;
+    size_t from = 0;
+    while (from < line.size()) {
+        size_t to = line.find(' ', from);
+        if (to == std::string::npos) to = line.size();
+        if (to > from) out.push_back(line.substr(from, to - from));
+        from = to + 1;
+    }
+    return out;
+}
 }  // namespace
 
-TEST_CASE("item names: the words of a debug name: split at _ - spaces and where a capital follows a small letter") {
+TEST_CASE("item names: the words of a debug name") {
     CHECK(item_words("Material_T0_simple_FishingBait") ==
           std::vector<std::string>{"material", "t0", "simple", "fishing", "bait"});
     CHECK(item_words("  Fishing  Bait ") == std::vector<std::string>{"fishing", "bait"});
     CHECK(item_words("wood-log") == std::vector<std::string>{"wood", "log"});
+    CHECK(item_words("Tool_Torch01") == std::vector<std::string>{"tool", "torch", "01"});  // a number after a word
+    CHECK(item_words("Material_T6_01COMMON_FishingBait_improved") ==
+          std::vector<std::string>{"material", "t6", "01", "common", "fishing", "bait", "improved"});
+    CHECK(item_words("Ammo_T1_Arrow_Flint_lvl5") == std::vector<std::string>{"ammo", "t1", "arrow", "flint", "lvl5"});
+    CHECK(item_words("Weapon_T1_1H_Sword_01") == std::vector<std::string>{"weapon", "t1", "1h", "sword", "01"});
     CHECK(item_words("").empty());
 }
 
-TEST_CASE("item names: the exact debug name wins, also in another case") {
-    const auto items = named_items();
-    CHECK(match_item(items, "Material_T1_Wood_Logs").id == 0x11);
-    CHECK(match_item(items, "material_t1_wood_logs_dead").id == 0x12);
-    CHECK(match_item(items, "Material T1 Wood Logs Dead").id == 0x12);  // spaces for '_'
+TEST_CASE("item names (real names): the exact debug name wins, in any case, also with spaces for '_'") {
+    const auto items = real_items();
+    REQUIRE(items.size() == 105);
+    CHECK(meant(items, "Material_T1_Wood_Logs_Dead") == "Material_T1_Wood_Logs_Dead");
+    CHECK(meant(items, "material_t1_wood_logs") == "Material_T1_Wood_Logs");
+    CHECK(meant(items, "Material T1 Wood Logs Dead") == "Material_T1_Wood_Logs_Dead");
+    CHECK(match_item(items, "Material_T1_Wood_Logs").how == ItemHow::Exact);
 }
 
-TEST_CASE("item names: words in any order and parts of words; a unique match is used") {
-    const auto items = named_items();
-    CHECK(match_item(items, "fishing bait").id == 0x21);
-    CHECK(match_item(items, "Fishing Bait").id == 0x21);
-    CHECK(match_item(items, "FishingBait").id == 0x21);
-    CHECK(match_item(items, "bait fishing").id == 0x21);
-    CHECK(match_item(items, "dog").id == 0x22);
-    CHECK(match_item(items, "palm").id == 0x13);
-    CHECK(match_item(items, "twig").id == 0x14);
-    CHECK(match_item(items, "flint").id == 0x42);
+TEST_CASE("item names (real names): what common words find") {
+    const auto items = real_items();
+    CHECK(meant(items, "wood logs") == "Material_T1_Wood_Logs");  // 6 match: the others have a word more
+    CHECK(match_item(items, "wood logs").matches.size() == 6);
+    CHECK(meant(items, "wood log") == "Material_T1_Wood_Logs");   // a part of a word is enough
+    CHECK(meant(items, "Simple Bait") == "Material_T0_simple_FishingBait");
+    CHECK(meant(items, "bait simple") == "Material_T0_simple_FishingBait");
+    CHECK(meant(items, "dog bait") == "Food_T2_Dog_Bait");
+    // 13 fishing baits; "simple" is no own word, so the plain one has no word more than was typed
+    CHECK(match_item(items, "fishing bait").matches.size() == 13);
+    CHECK(meant(items, "fishing bait") == "Material_T0_simple_FishingBait");
+    CHECK(meant(items, "torch") == "Tool_Torch01");               // Tool_ and 01 are no own words
+    CHECK(meant(items, "moonstone") == "Material_T7_Moonstone");
+    CHECK(meant(items, "salt") == "Material_T1_Salt");
+    CHECK(meant(items, "spores") == "Material_T1_Fog_Essence01_ShroudSpores");
+    // the only match with "hardwood" as a whole word (the props have Hard and Wood)
+    CHECK(meant(items, "hardwood") == "Material_T2_Wood_Hardwood");
+    CHECK(match_item(items, "hardwood").how == ItemHow::Whole);
 }
 
-TEST_CASE("item names: of several matches, the one whose own words are all typed is meant (not its category or tier)") {
-    const auto items = named_items();
-    CHECK(match_item(items, "wood logs").id == 0x11);  // not ..._Dead or ..._Palm: they have a word more
-    CHECK(match_item(items, "wood log").id == 0x11);   // a part of a word is enough
-    CHECK(match_item(items, "torch").id == 0x31);      // Tool_ and _01 are not its own words
-    CHECK(match_item(items, "stone").id == 0x41);
+TEST_CASE("item names (real names): a word that is only part of the one meant item, but whole in others, lists them") {
+    const auto items = real_items();
+    const auto wolf = match_item(items, "wolf");  // not Wolfsbane: 7 items have Wolf as a whole word
+    CHECK(wolf.id == 0);
+    CHECK(wolf.matches.size() == 10);
+    CHECK(listed(items, wolf.matches, "_Material_TX_Trophy_Wolf_Heavy_head"));
+    CHECK(listed(items, wolf.matches, "Material_T5_Wolfsbane"));
+    const auto moon = match_item(items, "moon");  // not Moonstone: the PactMoon vanity items have Moon
+    CHECK(moon.id == 0);
+    CHECK(moon.matches.size() == 14);
 }
 
-TEST_CASE("item names: several matches and none of them meant: no item, every match listed, best first") {
-    const auto items = named_items();
-    const auto bait = match_item(items, "bait");
-    CHECK(bait.id == 0);
-    CHECK(names_of(items, bait.matches) == std::vector<std::string>{"Food_T2_Dog_Bait", "Material_T0_simple_FishingBait"});
-    const auto wood = match_item(items, "wood");
-    CHECK(wood.id == 0);
-    CHECK(wood.matches.size() == 5);
-    // whole words first ("wood" is a word of Material_T1_Wood_Logs, only a part of "wooden"), then the shorter names
-    CHECK(names_of(items, wood.matches) == std::vector<std::string>{"Material_T1_Wood_Logs", "Material_T1_Wood_Twigs",
-                                                                  "Material_T1_Wood_Logs_Dead", "Material_T4_Wood_Logs_Palm",
-                                                                  "Shield_T0_Wooden"});
-    const auto none = match_item(items, "hardwood");
-    CHECK(none.id == 0);
-    CHECK(none.matches.empty());
+TEST_CASE("item names (real names): several matches and none meant: no item, every match listed, best first") {
+    const auto items = real_items();
+    const auto logs = match_item(items, "logs");
+    CHECK(logs.id == 0);
+    CHECK(names_of(items, logs.matches) ==
+          std::vector<std::string>{"Material_T1_Wood_Logs", "Material_T1_Wood_Logs_Dead", "Material_T4_Wood_Logs_Palm",
+                                   "Material_T5_Wood_Logs_Pine", "Material_T6_Wood_Logs_Bamboo",
+                                   "Material_T6_Wood_Logs_Tropical"});
+    CHECK(match_item(items, "bait").matches.size() == 22);
+    CHECK(match_item(items, "bait").id == 0);
+    CHECK(match_item(items, "stone").id == 0);
+    CHECK(match_item(items, "plant fiber").matches.empty());
     CHECK(match_item(items, "").id == 0);
     CHECK(match_item(items, "   ").matches.empty());
+    // a number only as a whole number word: "stone 10" is not Tombstone10's "stone" and a 1 in T1
+    CHECK(meant(items, "tombstone 10") == "Prop_Decoration_T3_Tombstone10");
+    CHECK(match_item(items, "bait 7").matches.empty());  // the 7 of T7 is no number word
 }
 
-TEST_CASE("item names: search lists every match, best first; nothing typed lists every item") {
-    const auto items = named_items();
-    CHECK(names_of(items, search_items(items, "stone")) ==
-          std::vector<std::string>{"Material_T1_Stone", "Block_T1_Stone_Rough", "Material_T1_Stone_Flint"});
+TEST_CASE("item names (real names): search lists every match, best first; nothing typed lists every item") {
+    const auto items = real_items();
+    const auto found = names_of(items, search_items(items, "wood logs"));
+    REQUIRE(found.size() == 6);
+    CHECK(found[0] == "Material_T1_Wood_Logs");
     CHECK(search_items(items, "").size() == items.size());
     CHECK(search_items(items, "nothing like it").empty());
+}
+
+TEST_CASE("item names (real names): a command's numbers are the plain numbers at the end; a name may end in a number") {
+    const auto items = real_items();
+    const auto read = [&](const char* line, size_t max_numbers) {
+        return read_item_args(items, split_words(line), max_numbers);
+    };
+    // take/put (count, entity): the 01 belongs to the name, so 5 is the count, not an entity
+    auto a = read("tool torch 01 5", 2);
+    CHECK(name_of(items, a.id) == "Tool_Torch01");
+    CHECK(a.numbers == std::vector<std::string>{"5"});
+    a = read("weapon t1 1h sword 01 3", 4);
+    CHECK(name_of(items, a.id) == "Weapon_T1_1H_Sword_01");
+    CHECK(a.numbers == std::vector<std::string>{"3"});
+    a = read("weapon t1 2h bow 01", 1);  // give: no count
+    CHECK(name_of(items, a.id) == "Weapon_T1_2H_Bow_01");
+    CHECK(a.numbers.empty());
+    // without the leading zero, the split whose name has exactly an item's words wins
+    a = read("tool torch 1 5", 2);
+    CHECK(name_of(items, a.id) == "Tool_Torch01");
+    CHECK(a.numbers == std::vector<std::string>{"5"});
+    // the usual case: the numbers at the end
+    a = read("wood logs 20 1025", 4);
+    CHECK(name_of(items, a.id) == "Material_T1_Wood_Logs");
+    CHECK(a.numbers == (std::vector<std::string>{"20", "1025"}));
+    a = read("fishing bait 4", 1);  // not Material_T6_04EPIC_FishingBait_Improved
+    CHECK(name_of(items, a.id) == "Material_T0_simple_FishingBait");
+    CHECK(a.numbers == std::vector<std::string>{"4"});
+    a = read("torch 3", 1);  // 3 torches, not Tool_Torch03_Wax (wax was not typed)
+    CHECK(name_of(items, a.id) == "Tool_Torch01");
+    CHECK(a.numbers == std::vector<std::string>{"3"});
+    // no item: the candidates of the name with the numbers taken off ("stone", not Tombstone10)
+    a = read("stone 10", 1);
+    CHECK(a.id == 0);
+    CHECK(a.name == "stone");
+    CHECK(a.numbers == std::vector<std::string>{"10"});
+    CHECK(a.match.matches.size() == 16);
+}
+
+TEST_CASE("item names: a quoted name is the whole name; readings that name different items are unclear") {
+    const std::vector<NamedItem> items{{1, "Tool_Torch"}, {2, "Tool_Torch_2"}, {3, "Material_T1_Wood_Logs"}};
+    auto a = read_item_args(items, {"tool torch", "2"}, 1);  // "tool torch" 2
+    CHECK(a.id == 1);
+    CHECK(a.numbers == std::vector<std::string>{"2"});
+    CHECK(read_item_args(items, {"wood logs", "many"}, 1).bad);
+    CHECK(read_item_args(items, {"wood logs", "1", "2"}, 1).bad);
+    a = read_item_args(items, {"tool", "torch", "2"}, 1);  // 2 x Tool_Torch, or 1 x Tool_Torch_2
+    CHECK(a.id == 0);
+    REQUIRE(a.readings.size() == 2);
+    CHECK(a.readings[0] == std::make_pair(uint32_t(2), std::vector<std::string>{}));
+    CHECK(a.readings[1] == std::make_pair(uint32_t(1), std::vector<std::string>{"2"}));
+    a = read_item_args(items, {"wood", "logs", "many"}, 1);  // not a number: part of the name
+    CHECK(a.id == 0);
+    CHECK(a.name == "wood logs many");
 }

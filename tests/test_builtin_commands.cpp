@@ -329,7 +329,9 @@ struct FriendlyItemsWorld : ItemsWorld {
         reg.add(0x13, 50, 250, "Material_T1_Wood_Logs_Dead");
         reg.add(0x14, 60, 20, "Material_T0_simple_FishingBait");
         reg.add(0x15, 70, 20, "Food_T2_Dog_Bait");
-        reg.add(0x16, 80, 1, "Tool_Torch_01");
+        reg.add(0x16, 80, 1, "Tool_Torch01");  // real names that end in a number
+        reg.add(0x17, 90, 1, "Weapon_T1_1H_Sword_01");
+        reg.add(0x18, 100, 1, "Weapon_T1_2H_Bow_01");
     }
 };
 }  // namespace
@@ -346,7 +348,7 @@ TEST_CASE("builtin commands: give and stack take item names as people type them:
     f.center.enqueue("give tool torch 01 5");  // the count is the number at the end
     f.run(iw.w);
     CHECK(g_pickup_amounts == std::vector<uint32_t>{4, 2, 5});
-    CHECK(bsaid("gave 5 x Tool_Torch_01"));
+    CHECK(bsaid("gave 5 x Tool_Torch01"));
     CHECK(bsaid("gave 4 x Material_T0_simple_FishingBait"));
     CHECK(bsaid("gave 2 x Material_T1_Wood_Logs to"));
     CHECK(bsaid("'bait' could be 2 items: Food_T2_Dog_Bait, Material_T0_simple_FishingBait"));
@@ -359,7 +361,7 @@ TEST_CASE("builtin commands: items finds items by words in any order, best match
     FriendlyItemsWorld iw;
     f.center.enqueue("items logs wood");
     f.run(iw.w);
-    CHECK(bsaid("2 of 6 items"));
+    CHECK(bsaid("2 of 8 items"));
     const auto at = [](const std::string& start) {
         for (size_t i = 0; i < g_bout.size(); ++i)
             if (g_bout[i].find(start) != std::string::npos) return i;
@@ -389,6 +391,41 @@ TEST_CASE("builtin commands: put and take take item names as people type them; t
     CHECK(service.pending_at(1).count == 2);
     service.world_reset();
     f.state.inventory = nullptr;
+}
+
+TEST_CASE("builtin commands: take and put never read a number of the item's name as the entity") {
+    BFixture f;
+    FriendlyItemsWorld iw;
+    InventoryService::Deps deps;
+    deps.after_step = [](std::function<void(EmfWorld*)>) {};
+    deps.fns.remove_items = reinterpret_cast<RemoveItemsFn>(0x1);  // present (not called: no program runs here)
+    InventoryService service(std::move(deps));
+    f.state.inventory = &service;
+    f.center.enqueue("take tool torch 01 5");         // 5 torches from you, not 1 from entity 5
+    f.center.enqueue("put weapon t1 1h sword 01 3");  // 3 swords into your bag, not 1 into entity 3
+    f.center.enqueue("give weapon t1 2h bow 01");
+    f.run(iw.w);
+    REQUIRE(service.pending() == 2);
+    CHECK(service.pending_at(0).item == 0x16);
+    CHECK(service.pending_at(0).count == 5);
+    CHECK(service.pending_at(0).entity == 42);
+    CHECK(service.pending_at(1).item == 0x17);
+    CHECK(service.pending_at(1).count == 3);
+    CHECK(service.pending_at(1).entity == 42);
+    CHECK(g_pickup_amounts == std::vector<uint32_t>{1});
+    CHECK(bsaid("gave 1 x Weapon_T1_2H_Bow_01"));
+    service.world_reset();
+    f.state.inventory = nullptr;
+}
+
+TEST_CASE("builtin commands: words that can be read as two different items give nothing and say how to type each") {
+    BFixture f;
+    ItemsWorld iw;
+    iw.reg.add(0x31, 90, 10, "Torch_2");
+    f.center.enqueue("give torch 2");  // 1 x Torch_2, or 2 x Torch
+    f.run(iw.w);
+    CHECK(g_pickup_amounts.empty());
+    CHECK(bsaid("'torch 2' can be read more than one way; type one of: give Torch_2 | give Torch 2"));
 }
 
 TEST_CASE("builtin commands: spawn places count copies near the player") {
