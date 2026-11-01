@@ -91,6 +91,40 @@ inline std::string read_manifest(const std::wstring& folder_path, EmlMod& m) {
 }
 }  // namespace detail
 
+// A mod's files, for the fingerprint and the shadow's copy: every file under its folder, by its path relative to the
+// folder ("sub\a.lua"), sorted. Junctions and links inside are passed over (never followed), as the copy does.
+struct ModFile {
+    std::wstring rel;
+    uint64_t size = 0;
+    uint64_t written = 0;
+};
+
+constexpr size_t kMaxModFiles = 100000;  // a mod folder past this is not walked further
+
+inline void add_mod_files(const std::wstring& root, const std::wstring& rel, std::vector<ModFile>& out, int depth) {
+    if (depth > 32) return;
+    for (const auto& e : detail::list_dir(rel.empty() ? root : cio::join(root, rel))) {
+        if (out.size() >= kMaxModFiles) return;
+        if (e.attrs & FILE_ATTRIBUTE_REPARSE_POINT) continue;
+        const std::wstring r = rel.empty() ? e.name : rel + L"\\" + e.name;
+        if (e.attrs & FILE_ATTRIBUTE_DIRECTORY) {
+            add_mod_files(root, r, out, depth + 1);
+        } else {
+            const cio::Stat s = cio::stat(cio::join(root, r));
+            out.push_back({r, s.size, s.written});
+        }
+    }
+}
+
+inline std::vector<ModFile> mod_files(const std::wstring& mod_dir) {
+    std::vector<ModFile> out;
+    add_mod_files(mod_dir, L"", out, 0);
+    std::sort(out.begin(), out.end(), [](const ModFile& a, const ModFile& b) {
+        return CompareStringOrdinal(a.rel.c_str(), -1, b.rel.c_str(), -1, TRUE) == CSTR_LESS_THAN;
+    });
+    return out;
+}
+
 inline ModScan scan_eml_mods(const std::wstring& mods_dir) {
     ModScan scan;
     for (const auto& e : detail::list_dir(mods_dir)) {

@@ -213,7 +213,8 @@ add_library(emf_loader SHARED
   src/proxy/dinput8_proxy.cpp
   src/proxy/dinput8.def
   src/loader/loader.rc
-  src/core/json.cpp)  # the content loader reads EML mods' mod.json and its own state file
+  src/core/json.cpp  # the content loader reads EML mods' mod.json and its own state file
+  src/common/sha256.cpp)  # its fingerprint (EMF's own SHA-256: no Windows crypto in the game's process)
 target_include_directories(emf_loader PRIVATE src)
 # Version information in the file's properties (the resource compiler gets these definitions too)
 target_compile_definitions(emf_loader PRIVATE EMF_VERSION="${EMF_VERSION}" EMF_VER_MAJOR=${PROJECT_VERSION_MAJOR}
@@ -542,6 +543,7 @@ add_executable(emf_tests
   tests/test_content_loader.cpp
   tests/test_module_threads.cpp
   tests/test_content_build.cpp
+  tests/test_content_state.cpp
   tests/test_known_tools.cpp
   tests/test_vk_overlay_device.cpp
   tests/test_app_game_folder.cpp

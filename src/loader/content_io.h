@@ -89,6 +89,26 @@ inline Stat stat(const std::wstring& path) {
     return s;
 }
 
+// Writes `text` as `path`.tmp and renames it over `path`, so a reader sees the old file or the new one, never half of
+// one. A file another process just closed may stay locked for a moment (a virus scanner): tried again for 3 s.
+inline bool write_file_atomic(const std::wstring& path, const std::string& text) {
+    const std::wstring tmp = path + L".tmp";
+    for (int attempt = 0; attempt < 30; ++attempt) {
+        if (attempt) Sleep(100);
+        DeleteFileW(tmp.c_str());  // a leftover (a crash); a link there is removed, never written through
+        const HANDLE f = CreateFileW(tmp.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_NEW, FILE_ATTRIBUTE_NORMAL, nullptr);
+        if (f == INVALID_HANDLE_VALUE) continue;
+        DWORD n = 0;
+        const BOOL ok = WriteFile(f, text.data(), static_cast<DWORD>(text.size()), &n, nullptr) && n == text.size() &&
+                        FlushFileBuffers(f);
+        CloseHandle(f);
+        if (!ok) continue;
+        if (MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) return true;
+    }
+    DeleteFileW(tmp.c_str());
+    return false;
+}
+
 // `dir` + "\" + `name`.
 inline std::wstring join(const std::wstring& dir, std::wstring_view name) {
     std::wstring out = dir;
