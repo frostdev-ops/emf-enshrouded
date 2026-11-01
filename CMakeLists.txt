@@ -84,6 +84,22 @@ add_library(emf_standin_mod SHARED
 set_target_properties(emf_standin_mod PROPERTIES OUTPUT_NAME dinput8 RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin
   ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/standin)
 
+# --- Stand-in for emf_content.dll (the content loader's tests only; not shipped): the same two exports, doing what the
+# build folder's standin.txt says (tools/standin_content/standin_content.cpp); a second build says it has ABI 2 ---
+foreach(abi 1 2)
+  set(_standin emf_standin_content)
+  set(_dir standin_content)
+  if(abi EQUAL 2)
+    set(_standin emf_standin_content_abi2)
+    set(_dir standin_content_abi2)
+  endif()
+  add_library(${_standin} SHARED tools/standin_content/standin_content.cpp src/core/json.cpp)
+  target_include_directories(${_standin} PRIVATE src)
+  target_compile_definitions(${_standin} PRIVATE STANDIN_ABI=${abi})
+  set_target_properties(${_standin} PROPERTIES OUTPUT_NAME emf_content RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${_dir}
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/${_dir})
+endforeach()
+
 # --- Offline signature check ---
 add_executable(emf_sigcheck tools/sigcheck/main.cpp)
 target_link_libraries(emf_sigcheck PRIVATE emf_common)
@@ -196,7 +212,15 @@ add_library(emf_loader SHARED
   src/loader/dllmain.cpp
   src/proxy/dinput8_proxy.cpp
   src/proxy/dinput8.def
-  src/loader/loader.rc)
+  src/loader/loader.rc
+  src/core/json.cpp  # the content loader reads EML mods' mod.json and its own state file
+  src/common/sha256.cpp  # its fingerprint (EMF's own SHA-256: no Windows crypto in the game's process)
+  src/core/known_tools.cpp)  # which tool a dbghelp.dll or a chained DLL belongs to (another tool may apply EML content)
+target_include_directories(emf_loader PRIVATE src)
+# The content build's small window (content_splash.h) is the loader's only use of user32 and gdi32: they load on first
+# use, on the held entry point, so a start without EML content (and the dedicated server) loads nothing more than before
+target_link_options(emf_loader PRIVATE /DELAYLOAD:USER32.dll /DELAYLOAD:GDI32.dll)
+target_link_libraries(emf_loader PRIVATE delayimp)
 # Version information in the file's properties (the resource compiler gets these definitions too)
 target_compile_definitions(emf_loader PRIVATE EMF_VERSION="${EMF_VERSION}" EMF_VER_MAJOR=${PROJECT_VERSION_MAJOR}
   EMF_VER_MINOR=${PROJECT_VERSION_MINOR} EMF_VER_PATCH=${PROJECT_VERSION_PATCH})
@@ -379,6 +403,18 @@ add_executable(emf_standin_game tools/standin_game/main.cpp)
 target_link_libraries(emf_standin_game PRIVATE emf_loader)
 set_target_properties(emf_standin_game PROPERTIES OUTPUT_NAME standin_game
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin_game)
+# The same stand-in with the real client's entry shape: Steam's DRM stub in a ".bind" section (held for a content build),
+# and with another tool's jump at the entry instead (never held) (tools/standin_game/entry_stub.cpp)
+foreach(_entry bind jump)
+  add_executable(emf_standin_game_${_entry} tools/standin_game/main.cpp tools/standin_game/entry_stub.cpp)
+  target_link_libraries(emf_standin_game_${_entry} PRIVATE emf_loader)
+  target_link_options(emf_standin_game_${_entry} PRIVATE /ENTRY:standin_entry)
+  if(_entry STREQUAL "jump")
+    target_compile_definitions(emf_standin_game_${_entry} PRIVATE STANDIN_ENTRY_JUMP)
+  endif()
+  set_target_properties(emf_standin_game_${_entry} PROPERTIES OUTPUT_NAME standin_game_${_entry}
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin_game)
+endforeach()
 
 # --- Tests ---
 enable_testing()
@@ -521,6 +557,14 @@ add_executable(emf_tests
   tests/test_chain_load.cpp
   tests/test_file_redirect.cpp
   tests/test_file_hooks.cpp
+  tests/test_content_loader.cpp
+  tests/test_module_threads.cpp
+  tests/test_content_build.cpp
+  tests/test_content_state.cpp
+  tests/test_content_shadow.cpp
+  tests/test_content_start.cpp
+  tests/test_content_e2e.cpp
+  tests/test_content_status.cpp
   tests/test_known_tools.cpp
   tests/test_vk_overlay_device.cpp
   tests/test_app_game_folder.cpp
@@ -578,6 +622,8 @@ target_link_libraries(herald PRIVATE winhttp)
 target_sources(emf_tests PRIVATE tests/test_herald.cpp tests/test_herald_dll.cpp)
 add_dependencies(emf_tests herald)
 add_dependencies(emf_tests emf_core emf_loader)  # test_game_imports reads their import tables
+add_dependencies(emf_tests emf_standin_content emf_standin_content_abi2 emf_standin_mod emf_standin_game_bind
+  emf_standin_game_jump)  # the content loader's tests
 
 # --- Save backups (docs/saves.md). src/saves/ is shared by EMF.exe (the Saves tab, the starter backup) and
 # the core (automatic backups at game start, the console's saves.* commands, save-info.json from the game's menu). ---

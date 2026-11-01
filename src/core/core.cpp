@@ -32,6 +32,7 @@
 #include "chat_commands.h"
 #include "server_chat.h"
 #include "console.h"
+#include "content_status.h"
 #include "inventory.h"
 #include "teleport.h"
 #include "world_settings_glue.h"
@@ -75,6 +76,9 @@ std::vector<emf::core::LoadedMod> g_mods;
 // Open once emf_core_start is done (mods loaded, or EMF stays idle). The dedicated server sets up its world during
 // start-up; that setup waits here so mods' programs and event subscriptions reach the world.
 emf::core::ReadyGate g_mods_ready;
+// EML content at this start (content_status.h): set once in emf_core_start; its notice is shown when a world loads
+emf::core::ContentLines g_content_lines;
+std::atomic<bool> g_content_notice_said{false};
 constexpr auto kModsReadyTimeout = std::chrono::seconds(30);
 emf::core::BuiltinContext g_builtin;                     // the core's own commands
 emf::core::ProfileCommandContext g_profiles;             // "profile": mod profiles
@@ -313,6 +317,9 @@ uint8_t* hk_load_savegame_step(uint8_t* out, uint8_t* inst) {
         const int faults = g_state->load_events.fire(slot);
         emf::logf("world loaded (slot 0x%04x)%s", slot, faults ? ", a load callback faulted" : "");
         if (auto* info = emf::core::save_info_recorder()) info->on_world_loaded(slot);  // save-info.json
+        // EML content could not be applied at this start: said once on screen, when the first world is there
+        if (!g_content_lines.notice.empty() && !g_content_notice_said.exchange(true) && g_state->notify)
+            g_state->notify(g_content_lines.notice);
     }
     return r;
 }
@@ -397,14 +404,19 @@ std::wstring widen(const std::string& s) {
 // min_minutes), the starter backup when there is none yet. It runs on its own thread, so EMF's start does not wait; the
 // game is still starting then (logos, loading), long before a world can write a save, and a file that changes while it
 // is copied is copied again or named. Never in the dedicated server (its world lives in its own savegame folder).
-void start_auto_backup(const std::wstring& dir) {
-    const emf::saves::AutoSettings settings = emf::saves::read_auto_settings(dir + L"\\emf\\emf_core.ini");
-    std::thread([settings] {
+// `label`: a backup EML content asks for when it could not be built (mod items vanish when a world loads without their
+// mod): min_minutes does not hold that one back.
+void start_auto_backup(const std::wstring& dir, const char* label = nullptr) {
+    emf::saves::AutoSettings settings = emf::saves::read_auto_settings(dir + L"\\emf\\emf_core.ini");
+    if (label) settings.min_minutes = 0;
+    const std::string why = label ? label : "";
+    std::thread([settings, why] {
         try {
             const ULONGLONG t0 = GetTickCount64();
             const auto roots = emf::saves::with_app_data(emf::saves::default_roots(false), emf::saves::default_app_data());
             emf::saves::BackupOptions o;
             o.made_by = "game";
+            o.label = why;
             o.emf_version = EMF_VERSION;
             o.info = emf::saves::read_save_info(roots.info).slots;
             const auto a = emf::saves::auto_backup(roots, settings, o);
@@ -483,10 +495,15 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     if (debug_bridge) emf::log_ring_enable(5000);
     emf::logf("%s starting (game dir %s)", kVersion, utf8(dir).c_str());
     {
+        // EML content at this start, as the loader set it before it started the core (content_status.h)
+        g_content_lines = emf::core::content_lines(emf::core::read_content_status(),
+                                                   emf::saves::read_auto_settings(dir + L"\\emf\\emf_core.ini").on);
+        if (!g_content_lines.console.empty()) emf::logf("%s", g_content_lines.console.c_str());
         wchar_t self[MAX_PATH];
         GetModuleFileNameW(nullptr, self, MAX_PATH);
         const std::wstring exe_name = std::wstring(self).substr(std::wstring(self).find_last_of(L"\\/") + 1);
-        if (_wcsicmp(exe_name.c_str(), L"enshrouded_server.exe") != 0) start_auto_backup(dir);  // first: before any save
+        if (_wcsicmp(exe_name.c_str(), L"enshrouded_server.exe") != 0)  // first: before any save
+            start_auto_backup(dir, g_content_lines.backup ? emf::core::kContentBackupLabel : nullptr);
     }
     std::thread([dir] {
         try {
@@ -991,6 +1008,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
                     emf::logf("[note] %s", s.c_str());
                     emf::core::overlay_notify(s);
                 };
+                // how EML content went at this start, in the console's scrollback
+                if (!g_content_lines.console.empty())
+                    if (auto* console = emf::core::overlay_console()) console->add_line(g_content_lines.console);
             }
         } else {
             emf::logf("overlay: off ([overlay] enabled=0)");

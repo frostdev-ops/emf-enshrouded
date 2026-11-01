@@ -18,7 +18,8 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 |---|---|
 | `src/common/` | scanner, signatures (37), code offsets (5), MinHook wrapper, Keen hash map reader, safe world reader, logger |
 | `src/probe/` | `emf_probe`: read-only test DLL (logs worlds, player position, villager states) |
-| `src/loader/` + `src/proxy/` | `dinput8.dll` loader: forwards DirectInput to Windows, starts `emf/emf_core.dll` |
+| `src/loader/` + `src/proxy/` | `dinput8.dll` loader: forwards DirectInput to Windows, starts `emf/emf_core.dll`; builds EML content into a shadow copy when `emf/emf_content.dll` is installed (`content_*.h`) |
+| `tools/standin_game/`, `tools/standin_content/`, `tools/standin_mod/` | stand-ins for the game exe, `emf_content.dll` and a chained DLL mod, for the loader's tests (never shipped) |
 | `src/core/` | `emf_core.dll`: hooks the ECS sim step, runs mod callbacks, program hooks, mod programs (with engine events), spawn, items, save/load events, developer commands, the in-game console (`overlay/`: Dear ImGui through a Vulkan layer), loads mods |
 | `app/` | `EMF.exe`, the desktop mod manager: a WebView2 page in a Win32 window ([docs/app.md](docs/app.md)) |
 | `src/saves/` | save backups: the engine shared by EMF.exe's Saves tab and the core's automatic backups and `saves.*` commands, and `save-info.json` ([docs/saves.md](docs/saves.md)) |
@@ -79,6 +80,14 @@ Before that the loader takes EMF.exe's one-shot flag `emf\play_once.txt` ("Play 
 mods", `src/loader/play_once.h`): it deletes the file at once and, for that one start, starts no core (and with "without
 any mods" no chained DLL either). A flag older than ten minutes, one it cannot delete and the dedicated server are
 ignored, so EMF never stays off.
+EML content (the loader, `src/loader/content_*.h`, [docs/engine_parts/content_loader.md](docs/engine_parts/content_loader.md)):
+with `emf\emf_content.dll` installed and EML mods in `<game>\mods\` that no other tool applies, the loader builds them
+into a shadow copy of the game's data (`emf\content\client\`, hard links and copies; the game's files are never written)
+and sends the game's data opens there. A start that needs a build holds the game's entry point, builds (a small window
+says so, about 30 s), unloads the DLL, and only then starts the chained DLLs and the core; a start where nothing
+changed loads no DLL. Without `emf_content.dll` it writes one line and does what it did before. `[content] mode=auto`
+(the default), `on` (the console also says why content is off) or `off` (never) in `emf\emf_core.ini`; the build's own
+log is `emf\content.log`.
 `docs/modding/other_mods.md` has the details for authors of DLL mods.
 Logs: `<game>\emf\emf_core.log` (framework + mods), `<game>\emf\emf_loader.log` (the loader: chain-loaded DLLs and a
 core that fails to load).

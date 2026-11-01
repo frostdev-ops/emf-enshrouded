@@ -1,7 +1,9 @@
 # The content redirect spike: which files the game opens, and can it read them from a shadow copy
 
 Game build **1273043** (the import table). Status: in the loader, **off by default**. Run in the game on 2026-11-01:
-the game ran on a shadow copy of its content (results below).
+the game ran on a shadow copy of its content (results below). The EML content loader
+([content_loader.md](content_loader.md)) now makes that copy itself and turns the redirect on from its own state; the
+`redirect_test=1` switch below stays for a hand-made copy while EMF does not own the content.
 
 Two questions:
 
