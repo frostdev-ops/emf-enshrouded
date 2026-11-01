@@ -987,3 +987,97 @@ TEST_CASE("bounty: with need_board on, take and claim work only near a Bounty Bo
     CHECK(b.reply("bounty.take 2").rfind("Taken: ", 0) == 0);
     CHECK(count_of(notices_of(b.board()), "\n") == 3);
 }
+
+// ---- 1.2: the host reads a board with E ----
+namespace {
+int index_of(const std::vector<std::string>& items, const std::string& start) {
+    for (size_t i = 0; i < items.size(); ++i)
+        if (items[i].rfind(start, 0) == 0) return static_cast<int>(i);
+    return -1;
+}
+// A base with a Notice Board 3 m in front of the host (player 1 at 0, 10, 0, looking along +z), searched.
+void board_ahead(BountyRig& b) {
+    altar(b, 900, 0, 0);
+    prop(b, 950, 0, 10, 3);
+    search(b);
+    b.look(1, 0, 11.5, 0, 0);
+}
+}  // namespace
+
+TEST_CASE("bounty: E at a Bounty Board opens the wheel with the notices; a pick takes it on the server's next step") {
+    BountyRig b({{"need_board", "1"}});
+    board_ahead(b);
+    b.press('E');
+    REQUIRE(b.r.fake.wheels.size() == 1);
+    const auto w = b.r.fake.wheels[0];
+    CHECK(w.title == "Bounty Board: new notices in 4 days");
+    CHECK(w.hold == 0u);  // click to choose
+    REQUIRE(w.items.size() == 3);
+    const std::string first = w.items[0];
+    CHECK(notices_of(b.board()).rfind("1. " + first + "\n", 0) == 0);  // the notices, as /bounty.board lists them
+    w.cb(kClient, 0, w.user);  // the wheel answers on the client world
+    CHECK(yours_of(b.board()).empty());
+    b.seconds(1);              // the take runs on the server's next step
+    CHECK(b.noted("Taken: "));
+    CHECK(count_of(yours_of(b.board()), "\n") == 1);
+    b.press('E');
+    REQUIRE(b.r.fake.wheels.size() == 2);
+    const auto& again = b.r.fake.wheels[1];
+    CHECK(std::find(again.items.begin(), again.items.end(), first) == again.items.end());  // taken: off the wheel
+    CHECK(index_of(again.items, "Drop: ") >= 0);
+}
+
+TEST_CASE("bounty: E with no board in front opens nothing; Claim and Drop act; a pick after new notices takes nothing") {
+    BountyRig b({{"need_board", "1"}});
+    board_ahead(b);
+    b.look(1, 0, 11.5, 0, 180);  // turned away from it
+    b.press('E');
+    CHECK(b.r.fake.wheels.empty());
+    CHECK(b.r.fake.notes.empty());  // E is the game's key too: nothing is said
+    place(b.r.fake, 1, 0, 10, -6);  // 9 m away, facing it: out of reading distance
+    b.look(1, 0, 11.5, -6, 0);
+    b.press('E');
+    CHECK(b.r.fake.wheels.empty());
+    place(b.r.fake, 1, 0, 10, 0);
+    b.look(1, 0, 11.5, 0, 0);
+    // a pick that comes after new notices were posted takes nothing
+    b.press('E');
+    REQUIRE(b.r.fake.wheels.size() == 1);
+    const auto stale = b.r.fake.wheels[0];
+    b.reply("bounty.reset");
+    stale.cb(kClient, 0, stale.user);
+    b.seconds(1);
+    CHECK(b.noted("The notices changed: look at the board again."));
+    CHECK(yours_of(b.board()).empty());
+    // Claim
+    b.reply("bounty.give kill_vukah");
+    for (uint32_t id = 3010; id < 3016; ++id) {
+        b.creature(id, 3);
+        b.kill(id, {1});
+    }
+    b.press('E');
+    const auto w = b.r.fake.wheels.back();
+    const int claim = index_of(w.items, "Claim: 8 runes");
+    REQUIRE(claim >= 0);
+    w.cb(kClient, claim, w.user);
+    b.seconds(1);
+    CHECK(b.r.fake.puts.size() == 1);
+    CHECK(b.noted("Claimed: 8 x Material_T1_Token_WeaponUpgrade_Rune01"));
+    // Drop
+    b.reply("bounty.give kill_scavenger");
+    b.press('E');
+    const auto w2 = b.r.fake.wheels.back();
+    const int drop = index_of(w2.items, "Drop: Scavengers 0/6");
+    REQUIRE(drop >= 0);
+    w2.cb(kClient, drop, w2.user);
+    b.seconds(1);
+    CHECK(b.noted("Dropped: Slay 6 Scavengers"));
+    CHECK(yours_of(b.board()).empty());
+    // a wheel closed without a choice does nothing
+    b.press('E');
+    const auto w3 = b.r.fake.wheels.back();
+    const size_t notes = b.r.fake.notes.size();
+    w3.cb(kClient, -1, w3.user);
+    b.seconds(1);
+    CHECK(b.r.fake.notes.size() == notes);
+}

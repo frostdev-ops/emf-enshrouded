@@ -81,6 +81,8 @@ local MARK_REACH_M = 8      -- m: bounty.mark and bounty.unmark reach this far
 local MARK_GONE_M = 40      -- m: missed by a search with a player this close to its place, a marked prop is gone ...
 local LOAD_GRACE = 30       -- s: ... but never this soon after a load (places may still be streaming in)
 local AT_BOARD_M = 8        -- m: "at a Bounty Board" for /bounty.take, /bounty.claim, /bounty.reroll and the notices
+local KEY_COS = 0.87        -- read_key: the board within 30 degrees of where the camera looks
+local WALK_COS = 0.7        -- walking up: within 45 degrees
 local PROP_HEIGHT = 1       -- m: the point of a prop the crosshair aims at, above its position
 local FIX = 4294967296.0    -- 1 m in the game's fixed-point positions
 
@@ -832,6 +834,8 @@ local function gate(world, player)
   return nil
 end
 
+local function read_range() return clamp(tonumber(emf.setting("read_range")) or 4, 2, 8) end
+
 -- The camera ray of `player` (PlayerInput.fromClient.camera on the server world), or nil when there is none.
 local function camera_ray(world, player)
   local ok, input = pcall(world.get, world, "PlayerInput", player)
@@ -887,6 +891,28 @@ emf.on_world_data(function(world, text)
   session = emf.session()
   hud_at = -1
 end)
+
+-- The board `player` faces within `range` metres: horizontally within the cone `min_cos` of the camera's view (no
+-- camera, or one looking straight down: the nearest board within range), the nearest such; nil when none.
+local function board_in_front(world, player, range, min_cos)
+  local px, py, pz = world:position(player)
+  if not px then return nil end
+  local ray = camera_ray(world, player)
+  local best, best_d
+  for _, b in ipairs(boards) do
+    local d = dist(b, px, py, pz)
+    if d <= range then
+      local facing = true
+      if ray then
+        local vx, vz = b.x - ray.ox, b.z - ray.oz
+        local hl, fl = math.sqrt(vx * vx + vz * vz), math.sqrt(ray.dx * ray.dx + ray.dz * ray.dz)
+        if hl > 0.5 and fl > 1e-6 then facing = (vx * ray.dx + vz * ray.dz) / (hl * fl) >= min_cos end
+      end
+      if facing and (not best or d < best_d) then best, best_d = b, d end
+    end
+  end
+  return best
+end
 
 -- ---- progress and rewards ----
 local function account_of(world, player) return world:account(player) end
@@ -1365,6 +1391,88 @@ emf.command("boards", ": the Bounty Boards of this world (host)", function(world
   end
 end)
 
+-- ---- the host's wheel: read_key while looking at a Bounty Board ----
+local pending = nil  -- the host's pick, run on the server world's next step
+
+-- The wheel's entries for `account`: the notices they did not take, Drop for each open bounty they hold, Claim when
+-- something is done or owed. Labels "Text (details)" show the details on a second line.
+local function wheel_items(account)
+  local rec = record(account)
+  local labels, entries = {}, {}
+  local key = period_key()
+  local took = took_of(rec)
+  for _, id in ipairs(notices_for(account)) do
+    local e = entry(id)
+    if e and not took[id] then
+      labels[#labels + 1] = notice_text(e)
+      entries[#entries + 1] = {action = "take", id = id, key = key}
+    end
+  end
+  local rewards = {}
+  for _, b in ipairs(rec.taken) do
+    local e = entry(b.id)
+    if e and b.state == 0 then
+      labels[#labels + 1] = string.format("Drop: %s %d/%d", short_of(e), b.have, b.need)
+      entries[#entries + 1] = {action = "drop", id = b.id}
+    elseif e then
+      rewards[#rewards + 1] = short_reward(e)
+    end
+  end
+  if owed[account] then rewards[#rewards + 1] = "rewards waiting" end
+  if #rewards > 0 then
+    labels[#labels + 1] = "Claim: " .. table.concat(rewards, ", ")
+    entries[#entries + 1] = {action = "claim"}
+  end
+  if #labels == 0 then
+    labels[1] = "No notices"
+    entries[1] = {action = "none"}
+  end
+  return labels, entries
+end
+
+-- A wheel pick, on the server world: by what the entry meant when the wheel opened.
+local function run_pick(world, p)
+  local player = emf.local_player()
+  local account = player and player ~= 0 and world:account(player)
+  if not account then return end
+  local text
+  if p.action == "take" then
+    local n
+    for i, id in ipairs(notices_for(account)) do
+      if id == p.id then n = i end
+    end
+    if p.key ~= period_key() or not n then
+      text = "The notices changed: look at the board again."
+    else
+      text = take(account, n)
+    end
+  elseif p.action == "drop" then
+    local n
+    for i, b in ipairs(record(account).taken) do
+      if b.id == p.id then n = i end
+    end
+    text = n and drop_bounty(account, n) or "You do not hold that bounty now."
+  elseif p.action == "claim" then
+    local parts = claim_all(world, player, account)
+    text = #parts > 0 and ("Claimed: " .. table.concat(parts, "; ")) or "No finished bounty to claim."
+    hud_at = -1
+  end
+  if text then emf.notify(text) end
+end
+
+-- read_key opens the wheel only while the host looks at a Bounty Board within read_range; else it does nothing (the
+-- game gets the key too: E is its own key for using things).
+emf.on_key("read_key", function(world)
+  if not world:is_server() or not loaded then return end
+  local player = emf.local_player()
+  if not player or player == 0 then return end
+  local account = world:account(player)
+  if not account or not board_in_front(world, player, read_range(), KEY_COS) then return end
+  local labels, entries = wheel_items(account)
+  local title = "Bounty Board: " .. (until_text():gsub("^%u", string.lower))
+  emf.wheel(title, labels, "", function(w, choice) pending = choice and entries[choice] or nil end)
+end)
+
 -- ---- every step ----
 -- A dawn between two readings of the clock: it passed 6:00, or it went back (past midnight: the host set the time, or
 -- the players slept through the night) to 6:00 or later. The game keeps no day number, so the mod counts dawns.
@@ -1427,6 +1535,11 @@ emf.on_tick(function(world)
     end
   end
   if walk or play_s >= walk_after then walk_step(world) end
+  if pending then
+    local p = pending
+    pending = nil
+    run_pick(world, p)
+  end
   if dirty then save() end
   local s = math.floor(play_s)
   if s ~= hud_at then
