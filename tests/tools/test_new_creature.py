@@ -76,6 +76,17 @@ class BuildTests(Fixture):
                 self.assertEqual(t, (0.0, 0.0, 0.0))
                 self.assertEqual(s, (0.0, 0.0, 0.0))
 
+    def test_a_file_scaled_unevenly_needs_uneven_scale(self):
+        """uneven_scale: true lets new_skeleton fold a file's uneven scale above its joints into positions."""
+        nodes = [dict(n) for n in rig.NODES]
+        nodes[6] = dict(nodes[6], scale=[100.0, 50.0, 100.0])
+        glb = rig.small_rig(os.path.join(self.tmp.name, "squashed.glb"), nodes)
+        tclips.add_animation(glb, tclips.Fixture.CHANNELS)
+        with self.assertRaises(ValueError):
+            nc.build(config(), glb)
+        built = nc.build(config(uneven_scale=True), glb)
+        self.assertEqual([c["name"] for c in built["clips"]], ["move", "stand"])
+
     def test_made_and_faster_clips(self):
         """A clip may play its animation faster (speed) or be made from key turns on a pose of an animation (made:
         a death or a flinch the file does not have)."""

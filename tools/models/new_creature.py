@@ -23,6 +23,8 @@ The pack names, per creature:
                  the built-in zero offset (_additive_zero) where its role names a whole pose
   slots          {slot: our joint name}: the graph's attachment slots (gamegltf.SLOTS: Root, Head, Chest, Pelvis,
                  FootL, ...); a slot not named points at the root
+  uneven_scale   optional, true: the file is scaled unevenly above its joints (an FBX export's 1.2 x 1.2 x 1.1):
+                 fold that into the joints' positions, each joint taking the nearest rotation (new_skeleton.decompose)
 """
 import os
 import re
@@ -95,7 +97,7 @@ def build(cfg, glb_path, creature="creature"):
     slots: 36 joint indices}."""
     check(cfg, creature)
     gltf, binc = gltf_in.read_glb(glb_path)
-    sk = new_skeleton.build(gltf, binc, scale=float(cfg["scale"]))
+    sk = new_skeleton.build(gltf, binc, scale=float(cfg["scale"]), uneven=bool(cfg.get("uneven_scale")))
     hier = new_skeleton.hierarchy(sk, cfg["skeleton_guid"])
     slots = [0] * len(gamegltf.SLOTS)
     for slot, joint in cfg["slots"].items():

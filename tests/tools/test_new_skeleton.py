@@ -157,6 +157,34 @@ class BuildTests(Fixture):
         with self.assertRaises(ValueError):
             ns.build(gltf, binc)
 
+    def test_uneven_scale_folds_into_the_positions_on_request(self):
+        """A file scaled unevenly above its joints (an FBX export's 1.2 x 1.2 x 1.1): with uneven=True every joint
+        stands exactly where the file puts it (times the scale), with the nearest rotation and unit scale."""
+        nodes = json.loads(json.dumps(NODES))
+        nodes[6]["scale"] = [100.0, 50.0, 100.0]
+        gltf, binc = gltf_in.read_glb(small_rig(os.path.join(self.tmp.name, "squashed.glb"), nodes))
+        sk = ns.build(gltf, binc, scale=0.5, uneven=True)
+        world = osk.world(sk["rest"], sk["parents"])
+        binds = ns.bind_worlds(gltf, binc)
+        for j in range(1, len(sk["nodes"])):
+            m = binds[sk["nodes"][j]]
+            want = (-m[0][3] * 0.5, m[1][3] * 0.5, m[2][3] * 0.5)  # game space mirrors x
+            for a, b in zip(world[j][1], want):
+                self.assertAlmostEqual(a, b, places=6, msg=sk["names"][j])
+            for a in world[j][2]:
+                self.assertAlmostEqual(a, 1.0, places=6, msg=sk["names"][j])
+            self.assertAlmostEqual(sum(c * c for c in world[j][0]), 1.0, places=6)
+
+    def test_the_rotation_of_a_stretched_matrix_is_its_own(self):
+        """A rotation stretched afterwards along the world's axes (S x R) keeps R: the polar factor."""
+        r = trs(q=(0.0, math.sin(0.35), 0.0, math.cos(0.35)))  # 40 degrees about y
+        stretched = gltf_in.mat_mul([[1.2, 0, 0, 0], [0, 1.2, 0, 0], [0, 0, 1.1, 0], [0, 0, 0, 1]], r)
+        with self.assertRaises(ValueError):
+            ns.decompose(stretched)
+        q, p, s = ns.decompose(stretched, uneven=True)
+        self.assertTrue(same_rotation(q, (0.0, math.sin(0.35), 0.0, math.cos(0.35))), q)
+        self.assertAlmostEqual(s, (1.2 * 1.2 * 1.1) ** (1 / 3), places=6)  # the even scale of the same volume
+
     def test_rest_is_the_bind_pose_when_the_nodes_hold_another(self):
         nodes = json.loads(json.dumps(NODES))
         nodes[4]["translation"] = [0.0, 0.003, -0.002]  # the tail lifted in the file's nodes, not in its binds

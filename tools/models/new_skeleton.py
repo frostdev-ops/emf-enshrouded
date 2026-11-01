@@ -86,18 +86,43 @@ def _quat(r):
     return tuple(c / n for c in q)
 
 
-def decompose(m, what="a node"):
-    """(rotation, position, uniform scale) of a world matrix; a scale that differs per axis or mirrors is refused."""
+def _det3(a):
+    return (a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+            + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]))
+
+
+def _polar(a):
+    """The rotation nearest to a 3x3 matrix (its polar factor: a = R P, P symmetric), by Newton's iteration."""
+    r = [row[:] for row in a]
+    for _ in range(60):
+        d = _det3(r)
+        inv_t = [[(r[(i + 1) % 3][(j + 1) % 3] * r[(i + 2) % 3][(j + 2) % 3]
+                   - r[(i + 1) % 3][(j + 2) % 3] * r[(i + 2) % 3][(j + 1) % 3]) / d for j in range(3)] for i in range(3)]
+        nxt = [[0.5 * (r[i][j] + inv_t[i][j]) for j in range(3)] for i in range(3)]
+        done = max(abs(nxt[i][j] - r[i][j]) for i in range(3) for j in range(3)) < 1e-13
+        r = nxt
+        if done:
+            break
+    return r
+
+
+def decompose(m, what="a node", uneven=False):
+    """(rotation, position, uniform scale) of a world matrix; a scale that differs per axis is refused, or with
+    uneven=True taken as the nearest rotation (the polar factor) and the even scale of the same volume; a mirror is
+    refused."""
     cols = [[m[r][c] for r in range(3)] for c in range(3)]
     lens = [math.sqrt(sum(v * v for v in col)) for col in cols]
-    if min(lens) <= 0 or max(lens) / min(lens) - 1 > 1e-4:
-        raise ValueError("%s is scaled unevenly (%s): only a uniform scale can be folded into a skeleton"
-                         % (what, ", ".join("%.4g" % v for v in lens)))
-    r = [[m[i][c] / lens[c] for c in range(3)] for i in range(3)]
-    det = (r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1]) - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
-           + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]))
-    if det < 0:
+    if min(lens) <= 0:
+        raise ValueError("%s has a zero scale" % what)
+    a = [[m[i][c] for c in range(3)] for i in range(3)]
+    if _det3(a) < 0:
         raise ValueError("%s is mirrored: a skeleton cannot hold a mirror" % what)
+    if max(lens) / min(lens) - 1 > 1e-4:
+        if not uneven:
+            raise ValueError("%s is scaled unevenly (%s): only a uniform scale can be folded into a skeleton (a pack "
+                             "can allow it: uneven_scale)" % (what, ", ".join("%.4g" % v for v in lens)))
+        return _quat(_polar(a)), (m[0][3], m[1][3], m[2][3]), _det3(a) ** (1.0 / 3.0)
+    r = [[m[i][c] / lens[c] for c in range(3)] for i in range(3)]
     return _quat(r), (m[0][3], m[1][3], m[2][3]), sum(lens) / 3
 
 
@@ -122,10 +147,12 @@ def bind_worlds(gltf, binc, skin=0):
     return {n: gltf_in.mat_mul(mesh, gltf_in.mat_inv_affine(m)) for n, m in zip(s["joints"], ibm)}
 
 
-def build(gltf, binc, skin=0, scale=1.0):
+def build(gltf, binc, skin=0, scale=1.0, uneven=False):
     """The skeleton of a glTF skin: names (the root's "root", then the nodes' names), nodes (the glTF node of each
     joint, None at the root), parents (None at the root), rest (per joint local rotation, position, scale in game
-    space: the bind pose), scale and rest_scale (each joint's world scale in the file at the bind pose, for poses)."""
+    space: the bind pose), scale and rest_scale (each joint's world scale in the file at the bind pose, for poses).
+    uneven: a scale that differs per axis above the joints (an FBX export's) is folded into the positions, each joint
+    taking the nearest rotation (decompose); refused without."""
     nodes = gltf["nodes"]
     joints = set(gltf["skins"][skin]["joints"])
     order, parents = [None], [None]
@@ -143,8 +170,8 @@ def build(gltf, binc, skin=0, scale=1.0):
         raise ValueError("skin joints outside the scene: %s" % ", ".join(nodes[n].get("name", str(n)) for n in missing))
     worlds = bind_worlds(gltf, binc, skin)
     sk = {"names": ["root"] + [nodes[n].get("name") or "joint%d" % n for n in order[1:]], "nodes": order,
-          "parents": parents, "scale": scale,
-          "rest_scale": [1.0] + [decompose(worlds[n], nodes[n].get("name", str(n)))[2] for n in order[1:]]}
+          "parents": parents, "scale": scale, "uneven": bool(uneven),
+          "rest_scale": [1.0] + [decompose(worlds[n], nodes[n].get("name", str(n)), uneven)[2] for n in order[1:]]}
     sk["rest"] = pose(sk, worlds, gltf)
     return sk
 
@@ -158,7 +185,7 @@ def pose(sk, worlds, gltf=None):
     for j in range(1, len(sk["nodes"])):
         n = sk["nodes"][j]
         what = gltf["nodes"][n].get("name", str(n)) if gltf else str(n)
-        q, p, s = decompose(worlds[n], what)
+        q, p, s = decompose(worlds[n], what, sk.get("uneven", False))
         q = gamegltf.mirror_quat(q)
         p = tuple(v * sk["scale"] for v in gamegltf.mirror_vec(p))
         s = s / sk["rest_scale"][j]
