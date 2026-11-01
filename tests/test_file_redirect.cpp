@@ -135,6 +135,19 @@ TEST_CASE("redirect: a content file in the game folder maps to emf\\content\\cli
           L"\\\\?\\UNC\\nas\\games\\Enshrouded\\emf\\content\\client\\enshrouded.kfc");
 }
 
+TEST_CASE("redirect: shadow_path_in takes a game folder that is normal already (the hooks keep it from start)") {
+    using emf::loader::shadow_path_in;
+    CHECK(shadow_path_in(L"C:\\Games\\Enshrouded\\enshrouded.kfc", kGame, L"") == kShadow + L"enshrouded.kfc");
+    CHECK(shadow_path_in(L"c:/games/enshrouded/ENSHROUDED_001.DAT", kGame, L"") == kShadow + L"ENSHROUDED_001.DAT");
+    CHECK(shadow_path_in(L"enshrouded.kfc", kGame, L"C:\\Games\\Enshrouded") == kShadow + L"enshrouded.kfc");
+    CHECK(shadow_path_in(L"enshrouded.kfc", L"C:\\", L"C:\\") == L"C:\\emf\\content\\client\\enshrouded.kfc");
+    CHECK(shadow_path_in(L"\\\\?\\C:\\Games\\Enshrouded\\enshrouded.kfc", kGame, L"") ==
+          L"\\\\?\\" + kShadow + L"enshrouded.kfc");
+    CHECK(shadow_path_in(L"C:\\Games\\enshrouded.kfc", kGame, L"").empty());
+    CHECK(shadow_path_in(L"C:\\Games\\Enshrouded\\enshrouded.exe", kGame, L"").empty());
+    CHECK(shadow_path_in(L"C:\\Games\\Enshrouded\\enshrouded.kfc", L"", L"").empty());
+}
+
 TEST_CASE("redirect: a game folder at a drive root gives C:\\emf\\content\\client, never C:\\\\emf") {
     using emf::loader::normal_game_dir;
     using emf::loader::path_join;

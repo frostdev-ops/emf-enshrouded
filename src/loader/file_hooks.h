@@ -63,7 +63,7 @@ inline bool default_is_file(const wchar_t* path) {
 
 struct State {
     Real real;
-    std::wstring game_dir;
+    std::wstring game_dir;  // normal (normal_game_dir), worked out once in start(): decide() compares every path with it
     ContentSwitches sw;
     unsigned long long start_ms = 0;  // when the hooks went in
     unsigned max_lines = kMaxLines;
@@ -128,7 +128,7 @@ inline Decision decide(const wchar_t* path, bool open, DWORD access, DWORD dispo
     Decision d;
     if (!g.sw.redirect_test || !path || g.game_dir.empty()) return d;
     const std::wstring cwd = path_needs_cwd(path) ? g.cwd() : std::wstring();
-    std::wstring s = shadow_path(path, g.game_dir, cwd);
+    std::wstring s = shadow_path_in(path, g.game_dir, cwd);  // game_dir: made normal once, in start()
     if (s.empty()) return d;
     d.content = true;
     if (open && !redirect_allowed(access, disposition, flags)) {

@@ -223,18 +223,25 @@ inline std::wstring shadow_folder(std::wstring_view game_dir) {
 
 // Where an open of `opened` goes with the redirect on: <game>\emf\content\client\<name> for a content file directly in
 // the game folder, "" for anything else. A \\?\ path stays one, and so does a result too long for a plain path.
-inline std::wstring shadow_path(std::wstring_view opened, std::wstring_view game_dir, std::wstring_view cwd) {
+// `game` is the game folder as normal_game_dir gives it (the hooks work it out once, in start()).
+inline std::wstring shadow_path_in(std::wstring_view opened, const std::wstring& game, std::wstring_view cwd) {
+    if (game.empty()) return {};
     const auto o = normalize_path(opened, cwd);
-    const auto g = normal_game_dir(game_dir);
-    if (!o || !g) return {};
+    if (!o) return {};
     const size_t slash = o->path.find_last_of(L'\\');
     if (slash == std::wstring::npos) return {};
     const std::wstring_view name = std::wstring_view(o->path).substr(slash + 1);
     if (!is_content_file_name(name)) return {};
-    if (!same_path(std::wstring_view(o->path).substr(0, slash), *g)) return {};
-    std::wstring out = path_join(path_join(*g, kShadowSubdir), name);
+    if (!same_path(std::wstring_view(o->path).substr(0, slash), game)) return {};
+    std::wstring out = path_join(path_join(game, kShadowSubdir), name);
     if (o->verbatim || out.size() >= MAX_PATH) out = with_verbatim_prefix(out);
     return out;
+}
+
+// The same for a game folder in any form ("C:/Games/Enshrouded/", "C:").
+inline std::wstring shadow_path(std::wstring_view opened, std::wstring_view game_dir, std::wstring_view cwd) {
+    const auto g = normal_game_dir(game_dir);
+    return g ? shadow_path_in(opened, *g, cwd) : std::wstring();
 }
 
 // The access rights an open may ask for and still go to the shadow copy: reading only.
