@@ -1,6 +1,6 @@
 # Hotkey Wheel (Lua example)
 
-Hold F3 to open a radial wheel, move the mouse to a time of day (dawn, noon, dusk, midnight) and let go: the world's
+Hold F9 to open a radial wheel, move the mouse to a time of day (dawn, noon, dusk, midnight) and let go: the world's
 clock jumps there. Only the host can change the time.
 
 ## What it teaches
@@ -19,8 +19,9 @@ clock jumps there. Only the host can change the time.
 `{players = true}`. A line waits until a world you host runs. The hand-off itself is safe: EMF renames the file before
 it reads it, and while a mod has it open the rename fails and is tried again a second later.
 
-The default key is F3 because no EMF mod uses it (the developer `sample_mod` has F7 to F12, the companion F6). If the
-game or another tool uses it on your PC, bind another key in the Mods tab.
+The default key is F9 because neither the game nor an EMF mod uses it (Necromancer has F2, Beastmaster F3, the
+companion F6, Hand-over F7, Bulk Craft F8). If the game or another tool uses it on your PC, bind another key in the
+Mods tab.
 
 ## Install
 
@@ -29,11 +30,11 @@ needs EMF's `lua` mod, which the EMF installer puts in and switches on.
 
 ## Try it
 
-1. Load a world you host. Hold F3: the wheel opens in the middle of the screen. Move the mouse to "Dusk" and let go:
+1. Load a world you host. Hold F9: the wheel opens in the middle of the screen. Move the mouse to "Dusk" and let go:
    a note says "Time of day: Dusk", and within a second the sky turns to evening. `<game>\emf\emf_core.log` has
    `[hotkey_wheel] wrote "time 18" into emf\commands.txt` and EMF's `[cmd] time of day is now 18.00 h` answer.
-2. Tap F3 instead: the wheel stays open and a click picks an entry. Esc or a right click closes it without a change.
+2. Tap F9 instead: the wheel stays open and a click picks an entry. Esc or a right click closes it without a change.
 3. Bind another key in the Mods tab (the key under Esc, then Ctrl+Tab, "Hotkey Wheel"): it opens the wheel at once.
-4. Join someone else's game: F3 only says "Only the host can change the time of day".
+4. Join someone else's game: F9 only says "Only the host can change the time of day".
 5. Open `main.lua`, add `{label = "Evening (20:00)", name = "Evening", hours = 20},` to `TIMES` and save: the wheel has
    a fifth entry.

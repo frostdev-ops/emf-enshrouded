@@ -26,6 +26,7 @@
 #include "core/settings.h"
 #include "emf/emf.hpp"
 #include "emf/generated/components.hpp"
+#include "game_bindings.h"
 #include "lua_host/host.h"
 #include "lua_test_fake.h"
 
@@ -1655,20 +1656,20 @@ void console_ran(EmfWorld*, int argc, const char* const* argv, void*) {
 TEST_CASE("lua example hotkey_wheel: the host's key opens the wheel; a pick runs EMF's time command through commands.txt") {
     ExampleRig x("hotkey_wheel");
     x.tick(kServer);  // this game hosts a world
-    x.press(VK_F3, kServer);
+    x.press(VK_F9, kServer);
     REQUIRE(x.r.fake.wheels.size() == 1);
     const auto& w = x.r.fake.wheels[0];
     CHECK(w.title == "Time of day");
     CHECK(w.items == std::vector<std::string>{"Dawn (06:00)", "Noon (12:00)", "Dusk (18:00)", "Midnight (00:00)"});
-    CHECK(w.hold == static_cast<uint32_t>(VK_F3));  // held when it opens: releasing it picks
+    CHECK(w.hold == static_cast<uint32_t>(VK_F9));  // held when it opens: releasing it picks
     w.cb(kClient, 0, w.user);                       // Dawn
     CHECK(commands_txt(x) == "time 6\n");
     CHECK(noted(x.r.fake, "Time of day: Dawn"));
-    x.press(VK_F3, kServer);
+    x.press(VK_F9, kServer);
     REQUIRE(x.r.fake.wheels.size() == 2);
     x.r.fake.wheels[1].cb(kClient, 3, x.r.fake.wheels[1].user);  // Midnight
     CHECK(commands_txt(x) == "time 6\ntime 0\n");
-    x.press(VK_F3, kServer);
+    x.press(VK_F9, kServer);
     x.r.fake.wheels[2].cb(kClient, -1, x.r.fake.wheels[2].user);  // Esc: nothing
     CHECK(commands_txt(x) == "time 6\ntime 0\n");
     // the core's own reader and command center take the file as written: the built-in "time" runs with each hour
@@ -1682,6 +1683,15 @@ TEST_CASE("lua example hotkey_wheel: the host's key opens the wheel; a pick runs
     CHECK(g_console_ran == std::vector<std::string>{"time 6", "time 0"});
 }
 
+TEST_CASE("lua example hotkey_wheel: its key is F9 by default, which neither the game nor a shipped mod uses") {
+    const std::string key = game_bindings::manifest_default("examples/lua/hotkey_wheel/mod.json", "wheel_key");
+    CHECK(key == "F9");  // F3 is Beastmaster's
+    CHECK_FALSE(game_bindings::is_game_key(key));
+    const auto taken = game_bindings::shipped_keys();
+    const auto it = taken.find(emf::keys::parse_key(std::wstring(key.begin(), key.end())));
+    CHECK_MESSAGE(it == taken.end(), key << " is " << (it == taken.end() ? std::string() : it->second.front()));
+}
+
 TEST_CASE("lua example hotkey_wheel: emf.dir\\..\\..\\commands.txt is the file the core reads (<game>\\emf\\commands.txt)") {
     // The Lua host runs mods from <game>\emf\mods\<id> (emf.dir), and the core reads <game>\emf\commands.txt. If either
     // moves, the example (and its README) must change: this fails first.
@@ -1693,12 +1703,12 @@ TEST_CASE("lua example hotkey_wheel: emf.dir\\..\\..\\commands.txt is the file t
 
 TEST_CASE("lua example hotkey_wheel: in someone else's game the key says only the host may; a new key works at once") {
     ExampleRig x("hotkey_wheel");
-    x.press(VK_F3, kClient);  // no server world steps: a guest
+    x.press(VK_F9, kClient);  // no server world steps: a guest
     CHECK(x.r.fake.wheels.empty());
     CHECK(noted(x.r.fake, "Only the host can change the time of day"));
     x.set("wheel_key", "G");
     x.tick(kServer);
-    x.press(VK_F3, kServer);
+    x.press(VK_F9, kServer);
     CHECK(x.r.fake.wheels.empty());
     x.press('G', kServer);
     REQUIRE(x.r.fake.wheels.size() == 1);
