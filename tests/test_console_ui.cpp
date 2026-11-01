@@ -209,6 +209,26 @@ TEST_CASE("console UI: a suggestion that would not fit the input line is not tak
     CHECK(r.ui.input == line.substr(0, line.size() - 1));
 }
 
+TEST_CASE("console UI: the ghost text shows after the line, and not while the input line is scrolled sideways") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.display = ImVec2(400, 1080);  // a narrow console: about 50 characters fit
+    r.frame();
+    r.frame();
+    r.type("loot.toggle o");
+    CHECK(r.ui.ghost_shown == "n");
+    r.press(ImGuiKey_Backspace);
+    r.type(std::string(60, ' ').c_str());  // longer than the line: ImGui scrolls it sideways
+    for (int i = 0; i < 32; ++i) r.press(ImGuiKey_Backspace);  // short again (40 characters), but still scrolled
+    r.type("o");
+    REQUIRE(r.ui.input == "loot.toggle" + std::string(29, ' ') + "o");
+    REQUIRE(r.ui.suggester.ghost() == "n");
+    REQUIRE(GImGui->InputTextState.ID != 0);
+    REQUIRE(GImGui->InputTextState.Scroll.x > 0.0f);
+    CHECK(r.ui.ghost_shown.empty());  // it would draw where the text is not
+}
+
 TEST_CASE("console UI: Right takes the suggestion only at the end of the line; elsewhere it moves the caret") {
     Headless h;
     Rig r;

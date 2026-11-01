@@ -6,6 +6,8 @@
 #include <iterator>
 #include <string>
 
+#include "imgui_internal.h"  // the input line's sideways scroll (ImGuiInputTextState)
+
 namespace emf::core {
 namespace {
 
@@ -214,6 +216,7 @@ int input_callback(ImGuiInputTextCallbackData* d) {
 void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSources& sources, ImVec2 display,
                   const std::function<void(const std::string&)>& submit, const std::function<void()>& mods_tab) {
     ui.wants_escape = false;  // set again below while the suggestions show
+    ui.ghost_shown.clear();   // and the ghost text while it draws
     if (ui.open_fraction <= 0.0f) return;
     const float height = (std::max)(display.y * 0.5f * (std::min)(ui.open_fraction, 1.0f), 1.0f);
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -320,13 +323,17 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
     ui.input = buf;
     if (ui.suggest && !entered && ImGui::IsItemActive()) {  // grey ghost text completes the top match after the caret
         const std::string ghost = ui.suggester.ghost();
-        if (!ghost.empty()) {
+        // not while the line is scrolled sideways (also after it got short again): the text is not where it would go
+        const ImGuiInputTextState* st = ImGui::GetInputTextState(ImGui::GetItemID());
+        if (!ghost.empty() && st && st->Scroll.x == 0.0f) {
             const ImGuiStyle& style = ImGui::GetStyle();
             const ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
             const float x = lo.x + style.FramePadding.x + ImGui::CalcTextSize(ui.input.c_str()).x;
-            if (x + ImGui::CalcTextSize(ghost.c_str()).x <= hi.x - style.FramePadding.x)  // only while nothing scrolls
+            if (x + ImGui::CalcTextSize(ghost.c_str()).x <= hi.x - style.FramePadding.x) {  // only while nothing scrolls
                 ImGui::GetWindowDrawList()->AddText(ImVec2(x, lo.y + style.FramePadding.y), ImGui::GetColorU32(kGhost),
                                                     ghost.c_str());
+                ui.ghost_shown = ghost;
+            }
         }
     }
     if (entered) {

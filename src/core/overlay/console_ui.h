@@ -33,6 +33,7 @@ struct ConsoleUiState {
     bool escape = false;        // Esc reached the console (the router sends it only while the list shows): hide it
     bool wants_escape = false;  // after a frame: the list shows, so the next Esc is its (InputRouter::set_esc_to_console)
     bool accept_right = false;  // this frame: Right was pressed with the caret at the end of the line
+    std::string ghost_shown;    // after a frame: the grey ghost text drawn after the input ("" = none)
 };
 
 // `mods_tab` (optional) draws the Mods tab's content; with it the console shows a tab bar (Console | Mods; Ctrl+Tab
