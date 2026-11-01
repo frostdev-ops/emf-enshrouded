@@ -1,11 +1,13 @@
-"""Generate sdk/include/emf/generated/components.hpp from EML's types.json.
+"""Generate sdk/include/emf/generated/components.hpp (and reflection.hpp) from the game's reflection data.
 
 Emits every ECS component (types deriving from keen::ecs::Component), every keen::ecs::Dynamic* struct,
 every ECS event (types deriving from keen::ecs::GameEvent or keen::ecs::Event, with kName = short name),
 and the value types they use, as byte-exact packed structs with static_asserts on size and field offsets.
 
-Usage: python tools/gen_headers.py [types.json] [out.hpp]
-Without types.json: EML's .cache/types.json in the game folder EMF_GAME_DIR names, else a plain error.
+Usage: python tools/gen_headers.py [source] [out.hpp]
+source: the game's enshrouded.exe (read with tools/re/exe_types.py), the types file exe_types.py writes, or EML's
+types.json. Without a source: EML's .cache/types.json in the game folder EMF_GAME_DIR names, else a plain error.
+The generator works on EMF's types format (see tools/re/exe_types.py); EML's types.json is converted to it on load.
 """
 import json
 import os
@@ -13,16 +15,19 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "re"))
+import exe_types  # noqa: E402
+
 DEFAULT_OUT = Path(__file__).resolve().parent.parent / "sdk" / "include" / "emf" / "generated" / "components.hpp"
-COMPONENT_BASE = 136  # index of keen::ecs::Component
+COMPONENT_BASE_NAME = "keen::ecs::Component"
 EVENT_BASE_NAMES = ("keen::ecs::GameEvent", "keen::ecs::Event")
 
 PRIMS = {
-    "BOOL": "bool", "UINT8": "uint8_t", "SINT8": "int8_t", "UINT16": "uint16_t", "SINT16": "int16_t",
-    "UINT32": "uint32_t", "SINT32": "int32_t", "UINT64": "uint64_t", "SINT64": "int64_t",
-    "FLOAT32": "float", "FLOAT64": "double",
+    "bool": "bool", "uint8": "uint8_t", "sint8": "int8_t", "uint16": "uint16_t", "sint16": "int16_t",
+    "uint32": "uint32_t", "sint32": "int32_t", "uint64": "uint64_t", "sint64": "int64_t",
+    "float32": "float", "float64": "double",
 }
-BITMASKS = {"BITMASK8": "uint8_t", "BITMASK16": "uint16_t", "BITMASK32": "uint32_t", "BITMASK64": "uint64_t"}
+BITMASKS = {"bitmask8": "uint8_t", "bitmask16": "uint16_t", "bitmask32": "uint32_t", "bitmask64": "uint64_t"}
 CPP_KEYWORDS = set("""alignas alignof and and_eq asm auto bitand bitor bool break case catch char char8_t char16_t
 char32_t class compl concept const consteval constexpr constinit const_cast continue co_await co_return co_yield
 decltype default delete do double dynamic_cast else enum explicit export extern false float for friend goto if
@@ -55,12 +60,18 @@ def ident(name):
     return s
 
 
+def has_attribute(t, name):
+    return any(a[0] == name for a in t.get("attributes") or ())
+
+
 class Gen:
     def __init__(self, types):
         self.by_index = {t["index"]: t for t in types}
         self.emitted = set()
         self.out = []
         self.short_names = set()  # types that get a kName (events)
+        base = [t["index"] for t in types if t["qualified_name"] == COMPONENT_BASE_NAME]
+        self.component_base = base[0] if base else None
 
     def cpp_name(self, t):
         ns = [ident(n) for n in t["namespace"][1:]]  # drop leading keen
@@ -71,25 +82,25 @@ class Gen:
         t = self.by_index.get(idx)
         if t is None:
             return None
-        p = t.get("primitiveType")
-        if p in PRIMS:
-            return PRIMS[p], [], None
-        if p in BITMASKS:
-            return BITMASKS[p], [], None
-        if p == "TYPEDEF":
-            return self.resolve(t.get("innerType")) if t.get("innerType") is not None else None
-        if p in ("GUID", "OBJECT_REFERENCE") and t["size"] == 16:
+        k = t.get("kind")
+        if k in PRIMS:
+            return PRIMS[k], [], None
+        if k in BITMASKS:
+            return BITMASKS[k], [], None
+        if k == "typedef":
+            return self.resolve(t.get("inner")) if t.get("inner") is not None else None
+        if k in ("guid", "object_reference") and t["size"] == 16:
             return "::emf::gen::Guid", [], None
-        if p == "ENUM":
+        if k == "enum":
             return self.cpp_name(t), [], idx
-        if p == "STRUCT":
+        if k == "struct":
             return self.cpp_name(t), [], idx
-        if p == "STATIC_ARRAY":
-            elem = self.by_index.get(t.get("innerType"))
-            inner = self.resolve(t.get("innerType"))
+        if k == "static_array":
+            elem = self.by_index.get(t.get("inner"))
+            inner = self.resolve(t.get("inner"))
             if inner is None or elem is None or elem["size"] == 0:
                 return None
-            count = t.get("fieldCount") or (t["size"] // elem["size"])
+            count = t.get("count") or (t["size"] // elem["size"])
             if count * elem["size"] != t["size"]:
                 return None
             ctype, dims, dep = inner
@@ -99,21 +110,21 @@ class Gen:
     def fields_of(self, t):
         """All fields including those of non-empty base structs, sorted by offset."""
         fields = []
-        base = self.by_index.get(t.get("innerType")) if t.get("primitiveType") == "STRUCT" else None
-        if base is not None and base.get("primitiveType") == "STRUCT" and base["index"] != COMPONENT_BASE:
+        base = self.by_index.get(t.get("inner")) if t.get("kind") == "struct" else None
+        if base is not None and base.get("kind") == "struct" and base["index"] != self.component_base:
             fields += self.fields_of(base)
-        fields += list((t.get("structFields") or {}).values())
-        return sorted(fields, key=lambda f: f["dataOffset"])
+        fields += list(t.get("fields") or ())
+        return sorted(fields, key=lambda f: f["offset"])
 
     def emit(self, idx):
         if idx in self.emitted:
             return
         t = self.by_index[idx]
         self.emitted.add(idx)
-        p = t.get("primitiveType")
-        if p == "ENUM":
+        k = t.get("kind")
+        if k == "enum":
             self.emit_enum(t)
-        elif p == "STRUCT":
+        elif k == "struct":
             # dependencies first
             for f in self.fields_of(t):
                 r = self.resolve(f["type"])
@@ -127,10 +138,10 @@ class Gen:
 
     def emit_enum(self, t):
         under = {1: "uint8_t", 2: "uint16_t", 4: "uint32_t", 8: "uint64_t"}.get(t["size"], "uint32_t")
-        inner = self.by_index.get(t.get("innerType"))
-        if inner is not None and inner.get("primitiveType") in PRIMS:
-            under = PRIMS[inner["primitiveType"]]
-        values = sorted((t.get("enumFields") or {}).values(), key=lambda v: v["value"])
+        inner = self.by_index.get(t.get("inner"))
+        if inner is not None and inner.get("kind") in PRIMS:
+            under = PRIMS[inner["kind"]]
+        values = sorted(t.get("values") or (), key=lambda v: v["value"])
         lines = [self.open_ns(t), f"enum class {ident(t['name'])} : {under} {{"]
         seen = set()
         for v in values:
@@ -145,9 +156,9 @@ class Gen:
     def emit_struct(self, t):
         name = ident(t["name"])
         size = t["size"]
-        lines = [self.open_ns(t), f"// {t['qualifiedName']}", f"struct {name} {{"]
-        lines.append(f"    static constexpr uint32_t kHash = 0x{t['qualifiedHash']:08x}u;")
-        lines.append(f"    static constexpr uint32_t kInternalHash = 0x{t['internalHash']:08x}u;")
+        lines = [self.open_ns(t), f"// {t['qualified_name']}", f"struct {name} {{"]
+        lines.append(f"    static constexpr uint32_t kHash = 0x{t['hash']:08x}u;")
+        lines.append(f"    static constexpr uint32_t kInternalHash = 0x{t['internal_hash']:08x}u;")
         lines.append(f"    static constexpr uint32_t kSize = {size};")
         if t["index"] in self.short_names:
             lines.append(f"    static constexpr const char* kName = \"{t['name']}\";")
@@ -156,7 +167,7 @@ class Gen:
         used = set()
         pad = 0
         for f in self.fields_of(t):
-            off = f["dataOffset"]
+            off = f["offset"]
             ft = self.by_index.get(f["type"])
             fsize = ft["size"] if ft else 0
             if off < cur or fsize == 0 or off + fsize > size:
@@ -170,7 +181,7 @@ class Gen:
             used.add(fname)
             r = self.resolve(f["type"])
             if r is None:
-                lines.append(f"    uint8_t {fname}[{fsize}];  // {ft['qualifiedName']}")
+                lines.append(f"    uint8_t {fname}[{fsize}];  // {ft['qualified_name']}")
             else:
                 ctype, dims, _ = r
                 lines.append(f"    {ctype} {fname}{''.join(f'[{d}]' for d in dims)};")
@@ -189,11 +200,11 @@ REFLECT_KINDS = {"bool": "Bool", "uint8_t": "U8", "int8_t": "I8", "uint16_t": "U
                  "double": "F64"}
 
 
-def reflection(gen, components, dynamics, events):
+def reflection(gen, components, dynamics, events, generated_line):
     """sdk/include/emf/generated/reflection.hpp: every emitted struct with its fields (names, offsets, kinds), so
     tools and script hosts can read and write fields by name."""
-    structs = [i for i in sorted(gen.emitted, key=lambda i: gen.by_index[i]["qualifiedName"])
-               if gen.by_index[i].get("primitiveType") == "STRUCT"]
+    structs = [i for i in sorted(gen.emitted, key=lambda i: gen.by_index[i]["qualified_name"])
+               if gen.by_index[i].get("kind") == "struct"]
     slot = {idx: n for n, idx in enumerate(structs)}
     comp = {t["index"] for t in components} | {t["index"] for t in dynamics}
     evts = {t["index"] for t in events}
@@ -203,7 +214,7 @@ def reflection(gen, components, dynamics, events):
         t = gen.by_index[idx]
         first, count, cur, used = nfield, 0, 0, set()
         for f in gen.fields_of(t):
-            off = f["dataOffset"]
+            off = f["offset"]
             ft = gen.by_index.get(f["type"])
             fsize = ft["size"] if ft else 0
             if off < cur or fsize == 0 or off + fsize > t["size"]:
@@ -222,24 +233,24 @@ def reflection(gen, components, dynamics, events):
                     kind = "Guid"
                 elif ctype in REFLECT_KINDS:
                     kind = REFLECT_KINDS[ctype]
-                elif dep is not None and gen.by_index[dep].get("primitiveType") == "STRUCT":
+                elif dep is not None and gen.by_index[dep].get("kind") == "struct":
                     kind, ref = "Struct", slot[dep]
                 elif dep is not None:  # an enum: its underlying integer
                     e = gen.by_index[dep]
                     under = {1: "U8", 2: "U16", 4: "U32", 8: "U64"}.get(e["size"], "U32")
-                    inner = gen.by_index.get(e.get("innerType"))
-                    if inner is not None and inner.get("primitiveType") in PRIMS:
-                        under = REFLECT_KINDS[PRIMS[inner["primitiveType"]]]
+                    inner = gen.by_index.get(e.get("inner"))
+                    if inner is not None and inner.get("kind") in PRIMS:
+                        under = REFLECT_KINDS[PRIMS[inner["kind"]]]
                     kind = under
             field_lines.append(f'    {{"{f["name"]}", {off}, {fsize}, Kind::{kind}, 0x{ref:04x}, {elems}}},')
             nfield += 1
             count += 1
             cur = off + fsize
         flags = (1 if idx in comp else 0) | (2 if idx in evts else 0)
-        type_lines.append(f'    {{"{t["qualifiedName"]}", "{t["name"]}", 0x{t["qualifiedHash"]:08x}u, {t["size"]}, '
+        type_lines.append(f'    {{"{t["qualified_name"]}", "{t["name"]}", 0x{t["hash"]:08x}u, {t["size"]}, '
                           f'{first}, {count}, {flags}}},')
     head = [
-        "// GENERATED by tools/gen_headers.py from EML types.json. Do not edit.",
+        generated_line,
         "// Every struct of components.hpp with its fields, for reading and writing fields by name at run time.",
         "#pragma once",
         "#include <cstdint>",
@@ -270,62 +281,100 @@ def reflection(gen, components, dynamics, events):
     return "\n".join(head + type_lines + tail)
 
 
-def default_types():
-    """EML's types.json in the game folder EMF_GAME_DIR names; stops with what to pass when it is not set."""
-    game = os.environ.get("EMF_GAME_DIR")
-    if not game:
-        sys.exit("gen_headers.py: where is EML's types.json? Pass it (python tools/gen_headers.py <types.json> "
-                 "[out.hpp]), or set EMF_GAME_DIR to the game folder (its .cache\\types.json is read).")
-    return os.path.join(game, ".cache", "types.json")
+def from_eml(data):
+    """EML's types.json in EMF's types format (the one tools/re/exe_types.py writes)."""
+    types = []
+    for t in data["types"]:
+        e = {"index": t["index"], "name": t["name"], "qualified_name": t["qualifiedName"],
+             "namespace": t.get("namespace") or [], "kind": (t.get("primitiveType") or "").lower(),
+             "size": t["size"], "hash": t.get("qualifiedHash", 0), "internal_hash": t.get("internalHash", 0),
+             "inner": t.get("innerType"), "count": t.get("fieldCount") or 0}
+        if t.get("structFields"):
+            e["fields"] = [{"name": f["name"], "type": f["type"], "offset": f["dataOffset"]}
+                           for f in t["structFields"].values()]
+        if t.get("enumFields"):
+            e["values"] = [{"name": v["name"], "value": v["value"]} for v in t["enumFields"].values()]
+        if t.get("attributes"):
+            e["attributes"] = [[name, ""] for name in t["attributes"]]
+        types.append(e)
+    return {"format": "eml-types", "source": {"eml_version": data.get("version", "?")}, "types": types}
 
 
-def main():
-    types_path = sys.argv[1] if len(sys.argv) > 1 else default_types()
-    out_path = Path(sys.argv[2]) if len(sys.argv) > 2 else DEFAULT_OUT
-    data = json.load(open(types_path, encoding="utf-8"))
-    types = [t for t in data["types"] if not t["qualifiedName"].startswith("keen::ds::")]
+def load(path):
+    """The types of a source: an exe (read with exe_types.py), EMF's types file, or EML's types.json."""
+    with open(path, "rb") as f:
+        magic = f.read(2)
+    if magic == b"MZ":
+        try:
+            return exe_types.read_exe(path)
+        except exe_types.ImageError as e:
+            sys.exit(f"gen_headers.py: {path}: {e}")
+    with open(path, encoding="utf-8") as f:
+        data = json.load(f)
+    if data.get("format") == exe_types.FORMAT:
+        if data.get("format_version", 0) > exe_types.FORMAT_VERSION:
+            sys.exit(f"gen_headers.py: {path} is a newer types file (format {data.get('format_version')}) than this "
+                     f"generator reads ({exe_types.FORMAT_VERSION}); update EMF's tools.")
+        return data
+    return from_eml(data)
+
+
+def source_lines(doc):
+    """The first line of each header and the line naming the source."""
+    if doc.get("format") == "eml-types":
+        return ("// GENERATED by tools/gen_headers.py from EML types.json. Do not edit.",
+                f"// Source version: {doc['source'].get('eml_version', '?')}")
+    return ("// GENERATED by tools/gen_headers.py from the game's reflection data (tools/re/exe_types.py). "
+            "Do not edit.", "// Source: " + exe_types.describe(doc.get("source") or {}))
+
+
+def generate(doc, out_path):
+    """Writes components.hpp at out_path and reflection.hpp next to it from a types document (EMF's format)."""
+    out_path = Path(out_path)
+    types = [t for t in doc["types"] if not t["qualified_name"].startswith("keen::ds::")]
     gen = Gen(types)
+
     def derives_from_component(t):
         cur, seen = t, 0
-        while cur is not None and cur.get("primitiveType") == "STRUCT" and seen < 32:
-            if cur.get("innerType") == COMPONENT_BASE:
+        while cur is not None and cur.get("kind") == "struct" and seen < 32 and gen.component_base is not None:
+            if cur.get("inner") == gen.component_base:
                 return True
-            cur = gen.by_index.get(cur.get("innerType"))
+            cur = gen.by_index.get(cur.get("inner"))
             seen += 1
         return False
 
-    def is_abstract(t):
-        return "abstract" in (t.get("attributes") or {})
-
     # Components derive from keen::ecs::Component directly or through a base (Actor <- BaseActor, Health <- FloatAttribute).
-    component_like = [t for t in types if t.get("primitiveType") == "STRUCT" and derives_from_component(t)]
-    components = sorted((t for t in component_like if not is_abstract(t)), key=lambda t: t["qualifiedName"])
-    abstract_bases = sorted((t for t in component_like if is_abstract(t)), key=lambda t: t["qualifiedName"])
-    dynamics = sorted((t for t in types if t["qualifiedName"].startswith("keen::ecs::Dynamic") and t.get("primitiveType") == "STRUCT"),
-                      key=lambda t: t["qualifiedName"])
-    by_name = {t["qualifiedName"]: t for t in types}
+    component_like = [t for t in types if t.get("kind") == "struct" and derives_from_component(t)]
+    components = sorted((t for t in component_like if not has_attribute(t, "abstract")),
+                        key=lambda t: t["qualified_name"])
+    abstract_bases = sorted((t for t in component_like if has_attribute(t, "abstract")),
+                            key=lambda t: t["qualified_name"])
+    dynamics = sorted((t for t in types if t["qualified_name"].startswith("keen::ecs::Dynamic")
+                       and t.get("kind") == "struct"), key=lambda t: t["qualified_name"])
+    by_name = {t["qualified_name"]: t for t in types}
     event_bases = {by_name[n]["index"] for n in EVENT_BASE_NAMES if n in by_name}
 
     def is_event(t):
         seen = 0
         cur = t
-        while cur is not None and cur.get("primitiveType") == "STRUCT" and seen < 32:
-            base = cur.get("innerType")
+        while cur is not None and cur.get("kind") == "struct" and seen < 32:
+            base = cur.get("inner")
             if base in event_bases:
                 return True
             cur = gen.by_index.get(base)
             seen += 1
         return False
 
-    events = sorted((t for t in types if t["qualifiedName"].startswith("keen::ecs::") and t["index"] not in event_bases
-                     and t.get("primitiveType") == "STRUCT" and is_event(t)), key=lambda t: t["qualifiedName"])
+    events = sorted((t for t in types if t["qualified_name"].startswith("keen::ecs::") and t["index"] not in event_bases
+                     and t.get("kind") == "struct" and is_event(t)), key=lambda t: t["qualified_name"])
     gen.short_names = {t["index"] for t in events}
     for t in abstract_bases + components + dynamics + events:
         gen.emit(t["index"])
 
+    generated_line, source_line = source_lines(doc)
     head = [
-        "// GENERATED by tools/gen_headers.py from EML types.json. Do not edit.",
-        f"// Source version: {data.get('version', '?')}",
+        generated_line,
+        source_line,
         "#pragma once",
         "#include <cstddef>",
         "#include <cstdint>",
@@ -345,23 +394,39 @@ def main():
            f"inline constexpr size_t kComponentCount = {len(components)};",
            "inline constexpr ComponentInfo kComponents[kComponentCount] = {"]
     for t in components:
-        reg.append(f"    {{\"{t['qualifiedName']}\", 0x{t['qualifiedHash']:08x}u, {t['size']}}},")
+        reg.append(f"    {{\"{t['qualified_name']}\", 0x{t['hash']:08x}u, {t['size']}}},")
     reg += ["};", f"inline constexpr size_t kDynamicComponentCount = {len(dynamics)};",
             "// The per-entity halves of split components (DynamicX for X), keyed by their own hash.",
             "inline constexpr ComponentInfo kDynamicComponents[kDynamicComponentCount] = {"]
     for t in dynamics:
-        reg.append(f"    {{\"{t['qualifiedName']}\", 0x{t['qualifiedHash']:08x}u, {t['size']}}},")
+        reg.append(f"    {{\"{t['qualified_name']}\", 0x{t['hash']:08x}u, {t['size']}}},")
     reg += ["};", f"inline constexpr size_t kEventCount = {len(events)};",
             "inline constexpr EventInfo kEvents[kEventCount] = {"]
     for t in events:
-        reg.append(f"    {{\"{t['name']}\", 0x{t['qualifiedHash']:08x}u, {t['size']}}},")
+        reg.append(f"    {{\"{t['name']}\", 0x{t['hash']:08x}u, {t['size']}}},")
     reg += ["};", "}  // namespace emf::gen", ""]
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text("\n".join(head + gen.out + reg), encoding="utf-8")
     refl_path = out_path.parent / "reflection.hpp"
-    refl_path.write_text(reflection(gen, components, dynamics, events), encoding="utf-8")
+    refl_path.write_text(reflection(gen, components, dynamics, events, generated_line), encoding="utf-8")
     print(f"wrote {out_path}: {len(components)} components, {len(dynamics)} dynamic structs, {len(events)} events, "
           f"{len(gen.emitted)} types; and {refl_path.name}")
+
+
+def default_types():
+    """EML's types.json in the game folder EMF_GAME_DIR names; stops with what to pass when it is not set."""
+    game = os.environ.get("EMF_GAME_DIR")
+    if not game:
+        sys.exit("gen_headers.py: where is EML's types.json? Pass it (python tools/gen_headers.py <types.json> "
+                 "[out.hpp]), or set EMF_GAME_DIR to the game folder (its .cache\\types.json is read).")
+    return os.path.join(game, ".cache", "types.json")
+
+
+def main(argv=None):
+    args = sys.argv[1:] if argv is None else list(argv)
+    source = args[0] if args else default_types()
+    out_path = Path(args[1]) if len(args) > 1 else DEFAULT_OUT
+    generate(load(source), out_path)
 
 
 if __name__ == "__main__":
