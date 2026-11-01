@@ -78,6 +78,7 @@ local SCAN_PER_STEP = 250   -- entities looked at per server step while the worl
 local BOARD_RESCAN = 30     -- s between two searches (a new board counts within a minute)
 local MARK_SAME_M = 1       -- m: a marked prop is found again at its place within this
 local MARK_REACH_M = 8      -- m: bounty.mark and bounty.unmark reach this far
+local MARK_NEAR_M = 3       -- m: bounty.mark without camera data takes the nearest prop this close
 local MARK_GONE_M = 40      -- m: missed by a search with a player this close to its place, a marked prop is gone ...
 local LOAD_GRACE = 30       -- s: ... but never this soon after a load (places may still be streaming in)
 local AT_BOARD_M = 8        -- m: "at a Bounty Board" for /bounty.take, /bounty.claim, /bounty.reroll and the notices
@@ -941,18 +942,17 @@ local function prop_in_front(world, player, range)
   if not ray or not px then return nil end
   local best, best_perp, best_t
   for _, id in ipairs(world:entities()) do
-    if id ~= player and not is_player(world, id) then
-      local x, y, z = world:position(id)
-      if x and math.sqrt((x - px) ^ 2 + (y - py) ^ 2 + (z - pz) ^ 2) <= range then
-        local vx, vy, vz = x - ray.ox, y + PROP_HEIGHT - ray.oy, z - ray.oz
-        local t = vx * ray.dx + vy * ray.dy + vz * ray.dz
-        if t > 0 then
-          local ex, ey, ez = vx - ray.dx * t, vy - ray.dy * t, vz - ray.dz * t
-          local perp = math.sqrt(ex * ex + ey * ey + ez * ez)
-          if perp <= 1.5 and (has(world, "StaticCollider", id) == true or model_of(world, id)) and
-             (not best or perp < best_perp - 0.25 or (math.abs(perp - best_perp) <= 0.25 and t < best_t)) then
-            best, best_perp, best_t = id, perp, t
-          end
+    local x, y, z = world:position(id)
+    -- the cheap tests first: a place in range, then not a player
+    if x and id ~= player and math.sqrt((x - px) ^ 2 + (y - py) ^ 2 + (z - pz) ^ 2) <= range and not is_player(world, id) then
+      local vx, vy, vz = x - ray.ox, y + PROP_HEIGHT - ray.oy, z - ray.oz
+      local t = vx * ray.dx + vy * ray.dy + vz * ray.dz
+      if t > 0 then
+        local ex, ey, ez = vx - ray.dx * t, vy - ray.dy * t, vz - ray.dz * t
+        local perp = math.sqrt(ex * ex + ey * ey + ez * ez)
+        if perp <= 1.5 and (has(world, "StaticCollider", id) == true or model_of(world, id)) and
+           (not best or perp < best_perp - 0.25 or (math.abs(perp - best_perp) <= 0.25 and t < best_t)) then
+          best, best_perp, best_t = id, perp, t
         end
       end
     end
@@ -999,6 +999,22 @@ local function board_under_crosshair(world, player, range)
         local perp = math.sqrt(ex * ex + ey * ey + ez * ez)
         if perp <= KEY_RAY_M and (not best or perp < best_perp) then best, best_perp = b, perp end
       end
+    end
+  end
+  return best
+end
+
+-- The prop with a collider nearest to `player` within `range` metres (for a sender whose camera the server does not
+-- know), or nil.
+local function prop_nearest(world, player, range)
+  local px, py, pz = world:position(player)
+  if not px then return nil end
+  local best, best_d = nil, range
+  for _, id in ipairs(world:entities()) do
+    local x, y, z = world:position(id)
+    if x and id ~= player then
+      local d = math.sqrt((x - px) ^ 2 + (y - py) ^ 2 + (z - pz) ^ 2)
+      if d <= best_d and not is_player(world, id) and has(world, "StaticCollider", id) == true then best, best_d = id, d end
     end
   end
   return best
@@ -1453,8 +1469,13 @@ emf.command("mark", ": the prop you look at is a Bounty Board", function(world, 
   local me = ready(world)
   if not me then return end
   local id = prop_in_front(world, me.id, MARK_REACH_M)
+  local nearest = false
+  if not id and not camera_ray(world, me.id) then  -- no camera data for the sender: the prop beside them
+    id = prop_nearest(world, me.id, MARK_NEAR_M)
+    nearest = id ~= nil
+  end
   if not id then
-    emf.reply("Look at a prop within 8 m (a sign, a post, a table) and try again.")
+    emf.reply("Look at a prop within 8 m (a sign, a post, a table), or stand next to one, and try again.")
     return
   end
   local x, y, z = world:position(id)
@@ -1470,7 +1491,11 @@ emf.command("mark", ": the prop you look at is a Bounty Board", function(world, 
   search_soon()
   rebuild_boards()
   emf.log(string.format("prop %d at %d, %d, %d (model %s) marked as a Bounty Board", id, round(x), round(y), round(z), model))
-  emf.reply(string.format("Marked: this prop is a Bounty Board now (at %d, %d, %d).", round(x), round(y), round(z)))
+  if nearest then
+    emf.reply(string.format("Marked: the prop nearest to you (at %d, %d, %d) is a Bounty Board now.", round(x), round(y), round(z)))
+  else
+    emf.reply(string.format("Marked: this prop is a Bounty Board now (at %d, %d, %d).", round(x), round(y), round(z)))
+  end
 end)
 
 emf.command("unmark", ": the marked prop nearest you is no board", function(world, args)
@@ -1494,14 +1519,16 @@ emf.command("unmark", ": the marked prop nearest you is no board", function(worl
 end)
 
 emf.command("boards", ": this world's Bounty Boards", function(world, args)
-  local me = ready(world)
-  if not me then return end
+  same_session()
+  if not loaded then return not_loaded() end
+  local me = sender(world)  -- none on a dedicated server's console: no distance then
   if #boards == 0 then
     emf.reply(string.format("No Bounty Board in this world yet: build a Notice Board within %d m of a flame altar, or " ..
       "mark a prop with bounty.mark (a new board counts within a minute).", round(base_radius())))
     return
   end
-  local x, y, z = world:position(me.id)
+  local x, y, z
+  if me then x, y, z = world:position(me.id) end
   for i, b in ipairs(boards) do
     emf.reply(string.format("%d. %s at %d, %d, %d%s", i, b.kind == "notice" and "Notice Board" or "marked prop",
       round(b.x), round(b.y), round(b.z), x and string.format(" (%d m from you)", round(dist(b, x, y, z))) or ""))

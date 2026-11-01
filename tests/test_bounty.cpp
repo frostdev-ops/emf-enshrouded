@@ -1433,3 +1433,22 @@ TEST_CASE("bounty: a waiting chat line goes only to the player it was for; a ref
     for (const auto& line : tells_to(b, 2)) CHECK(line.find("Bounty done: Slay 6 Scavengers") == std::string::npos);
     CHECK(logged("was not sent"));
 }
+
+// ---- 1.2: the host's and admins' board commands ----
+TEST_CASE("bounty: bounty.boards works from a dedicated server's console") {
+    BountyRig b;
+    altar(b, 900, 0, 0);
+    prop(b, 950, 10, 10, 0);
+    search(b);
+    b.r.api.local_player = no_local_player;  // no player of its own: no distance to say
+    CHECK(b.reply("bounty.boards") == "1. Notice Board at 10, 10, 0");
+}
+
+TEST_CASE("bounty: bounty.mark without camera data takes the prop nearest to the sender within 3 m and says which") {
+    BountyRig b;
+    prop(b, 960, 0, 10, 2, nullptr);  // 2 m from the host, whose camera the server does not know
+    prop(b, 961, 0, 10, 6, nullptr);
+    CHECK(b.reply("bounty.mark") == "Marked: the prop nearest to you (at 0, 10, 2) is a Bounty Board now.");
+    place(b.r.fake, 1, 50, 10, 0);  // nothing within 3 m
+    CHECK(b.reply("bounty.mark").rfind("Look at a prop", 0) == 0);
+}
