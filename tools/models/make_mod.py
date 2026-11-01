@@ -30,12 +30,14 @@ Component names without "::" are keen::ecs:: ones. template_set field paths are 
 import json
 import os
 import re
+import struct
 import sys
 import uuid
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import encode  # noqa: E402
 import gltf_in  # noqa: E402
+import own_creature  # noqa: E402
 import rendermodel as rm  # noqa: E402
 
 NAME = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
@@ -227,6 +229,73 @@ for _, c in ipairs(require("creatures")) do
 			or (": texture failed, keeping the source material: " .. tostring(result))))
 	end
 
+	-- 1b) a skeleton of its own (own_proportions): a copy of the game skeleton fitted to the creature, the game
+	-- creature's clips retargeted to it, and a copy of its animation graph that plays them
+	if c.skeleton then
+		local sk = require(c.name .. "_skeleton")
+		local src_h = game.assets.get_resource(sk.source, "keen::ModelHierarchyResource")
+		assert(src_h, c.name .. ": the game skeleton " .. sk.source .. " was not found (the game changed?)")
+		local h = game.assets.create_resource(src_h.data, "keen::ModelHierarchyResource", sk.guid, 0).data
+		h.hierarchyId = sk.guid
+		local n = #sk.joints
+		for i, j in ipairs(sk.joints) do
+			local d = h.defaultPoseJoints[i]
+			d.orientation.x, d.orientation.y, d.orientation.z, d.orientation.w = j.q[1], j.q[2], j.q[3], j.q[4]
+			d.position.x, d.position.y, d.position.z = j.t[1], j.t[2], j.t[3]
+			h.defaultPose.data[i] = { data = j.qb }
+			h.defaultPose.data[n + i] = { data = j.tb }
+			local b = h.skinToJointMatrices[i]
+			for _, col in ipairs({ "x", "y", "z" }) do
+				for _, k in ipairs({ "x", "y", "z" }) do b.rot[col][k] = j.ibm.rot[col][k] end
+			end
+			b.pos.x, b.pos.y, b.pos.z = j.ibm.pos.x, j.ibm.pos.y, j.ibm.pos.z
+		end
+		m.hierarchy = sk.guid
+		local map = {}
+		for _, cl in ipairs(require(c.name .. "_clips")) do
+			local src_c = game.assets.get_resource(cl.source, "keen::JointAnimation")
+			assert(src_c, c.name .. ": the game clip " .. cl.source .. " was not found (the game changed?)")
+			local a = game.assets.create_resource(src_c.data, "keen::JointAnimation", cl.guid, 0).data
+			a.positionFactor, a.positionTangent, a.scaleFactor = cl.positionFactor, cl.positionTangent, cl.scaleFactor
+			a.fps, a.frameCount, a.flags = cl.fps, cl.frameCount, cl.flags
+			fill(a.headers, cl.headers)
+			local units = {}
+			for i = 1, #cl.bytes, 16 do units[#units + 1] = { data = { cl.bytes:byte(i, i + 15) } } end
+			fill(a.data, units)
+			map[cl.source] = cl.guid
+		end
+		local GRAPH = "keen::anim_graph::runtime_graph::AnimationGraphResource2_0"
+		local src_g = game.assets.get_resource(c.animation.graph, GRAPH)
+		assert(src_g, c.name .. ": the game graph " .. c.animation.graph .. " was not found (the game changed?)")
+		local g = game.assets.create_resource(src_g.data, GRAPH, c.animation.graph_guid, 0).data
+		g.hierarchy = sk.guid
+		local ours, left = 0, 0
+		local function swap(obj, field)
+			local old = tostring(obj[field])
+			if map[old] then
+				obj[field] = map[old]
+				ours = ours + 1
+			elseif old ~= "nil" and old ~= "00000000-0000-0000-0000-000000000000" then
+				left = left + 1
+			end
+		end
+		for _, node in ipairs(g.nodeDefinitions) do
+			local t = tostring(node.type)
+			if t:find("SampleAnimationClip", 1, true) then
+				for _, f in ipairs({ "animation", "animationGenderAlternative", "additiveReferenceAnimation",
+					"additiveReferenceAnimationGenderAlternative" }) do swap(node.value, f) end
+			elseif t:find("BlendSpace", 1, true) then
+				swap(node.value, "additiveReferenceAnimation")
+				for _, it in ipairs(node.value.items) do
+					swap(it, "animation")
+					swap(it, "animationGenderAlternative")
+				end
+			end
+		end
+		log(string.format("%%s: skeleton %%s (%%d joints), %%d clips, graph %%s: %%d clip references ours, %%d left as the game's",
+			c.name, sk.guid, n, #require(c.name .. "_clips"), c.animation.graph_guid, ours, left))
+	end
+
 	-- 2) the creature: a copy of the source template, pointing at the new model
 	local source = templates[c.source_template]
 	assert(source, c.name .. ": the source template " .. c.source_template .. " was not found (the game changed?)")
@@ -240,6 +309,16 @@ for _, c in ipairs(require("creatures")) do
 		end
 	end
 	assert(set, c.name .. ": the source template has no ModelResource")
+	if c.animation then
+		local found = false
+		for _, comp in ipairs(tpl.components) do
+			if comp.type == "keen::ecs::AnimationGraphResourceComponent2" then
+				comp.value.animationGraph = c.animation.graph_guid
+				found = true
+			end
+		end
+		assert(found, c.name .. ": the source template has no AnimationGraphResourceComponent2")
+	end
 	if c.faction then
 		for _, comp in ipairs(tpl.components) do
 			if comp.type == "keen::ecs::Faction" then comp.value.faction = c.faction end
@@ -313,7 +392,41 @@ def listing_entry(c):
     if c.get("template_set"):
         entry["template_set"] = [set_entry(component_type(comp), field_path(f), v)
                                  for comp, fields in c["template_set"].items() for f, v in fields.items()]
+    if c.get("own_proportions"):
+        op = c["own_proportions"]
+        missing = [k for k in OWN_KEYS if not op.get(k)]
+        if missing:
+            raise SystemExit("%s: own_proportions needs %s" % (c["name"], ", ".join(missing)))
+        entry["skeleton"] = {"guid": op["skeleton_guid"]}
+        entry["animation"] = {"graph": op["graph"], "graph_guid": op["graph_guid"]}
     return entry
+
+
+OWN_KEYS = ("sidecar", "skeleton_guid", "reference_clip", "clips", "graph", "graph_guid")
+
+
+def write_own(src, name, built):
+    """<name>_skeleton.lua and <name>_clips.lua from own_creature.build: the skeleton copy's rest pose and inverse
+    binds, and the retargeted clips."""
+    joints = []
+    for (q, t, _), ibm in zip(built["skeleton"]["rest"], built["skeleton"]["skinToJointMatrices"]):
+        joints.append({"q": list(q), "t": list(t), "qb": list(struct.pack("<4f", *q)),
+                       "tb": list(struct.pack("<4f", t[0], t[1], t[2], 0.0)), "ibm": ibm})
+    with open(os.path.join(src, name + "_skeleton.lua"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("-- generated by tools/models/make_mod.py: the skeleton of %s (a copy of %s fitted to it)\nreturn %s\n"
+                % (name, built["skeleton"]["source"], lua_value({"source": built["skeleton"]["source"],
+                                                                 "guid": built["skeleton"]["guid"], "joints": joints})))
+    parts = []
+    for cl in built["clips"]:
+        k = cl["clip"]
+        raw = bytes(x for u in k["data"] for x in u["data"])
+        head = {"source": cl["source"], "guid": cl["guid"], "positionFactor": k["positionFactor"],
+                "positionTangent": k["positionTangent"], "scaleFactor": k["scaleFactor"], "fps": k["fps"],
+                "frameCount": k["frameCount"], "flags": k["flags"], "headers": k["headers"]}
+        parts.append(lua_value(head)[:-1] + ", bytes = " + lua_bytes(raw) + "}")
+    with open(os.path.join(src, name + "_clips.lua"), "w", encoding="ascii", newline="\n") as f:
+        f.write("-- generated by tools/models/make_mod.py: the clips of %s, retargeted from the game creature's\n"
+                "return {\n%s\n}\n" % (name, ",\n".join(parts)))
 
 
 def set_entry(component, path, v):
@@ -336,7 +449,7 @@ def write_scripts(src, pack, listing):
         f.write(MOD_LUA % {"title": pack.get("title", pack["id"]), "id": pack["id"]})
 
 
-GENERATED = ("_data.lua", "_blob.lua", "_albedo.lua")
+GENERATED = ("_data.lua", "_blob.lua", "_albedo.lua", "_skeleton.lua", "_clips.lua")
 
 
 def remove_stale(src, names):
@@ -391,6 +504,13 @@ def main():
             f.write("-- generated by tools/models/make_mod.py: render data of %s (vertices, skin, indices), %d bytes\n"
                     "return %s\n" % (c["name"], len(blob), lua_bytes(blob)))
         entry = listing_entry(c)
+        if c.get("own_proportions"):
+            op = dict(c["own_proportions"])
+            for k in ("sidecar", "reference_clip", "clips"):
+                op[k] = path(op[k])
+            built = own_creature.build(op, rm.load_record(path(c["hierarchy"])))
+            write_own(os.path.join(out, "src"), c["name"], built)
+            print("%s: own skeleton %s, %d clips retargeted" % (c["name"], op["skeleton_guid"], len(built["clips"])))
         if c.get("texture"):
             t = c["texture"]
             if not t.get("material_guid"):

@@ -1,4 +1,5 @@
 """Unit tests for tools/models (encoder against the decoder; byte-exact against a game model when one is dumped)."""
+import json
 import os
 import shutil
 import subprocess
@@ -125,6 +126,52 @@ class MakeModTests(unittest.TestCase):
             # the lich and the bone golem, on the mage's and the knight's models, glitched as they walked)
             self.assertIn("model %s cloth none" % BEAR["model_guid"], out.stdout)
             self.assertIn("model %s cloth kept" % BEAR["source_model_guid"], out.stdout)
+
+
+    @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
+    def test_a_creature_on_a_skeleton_of_its_own(self):
+        """own_proportions: a skeleton copy, the model on it, the retargeted clips, a graph copy whose clip
+        references (clip nodes and blend-space items) are ours, and the template on that graph."""
+        import own_creature
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)  # the fixtures of test_own_creature.py
+        import test_own_creature as toc
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as src:
+            with open(os.path.join(src, "own.json"), "w", encoding="utf-8") as f:
+                json.dump(toc.sidecar(), f)
+            stand = [toc.REST] * 11
+            with open(os.path.join(src, "beast_aaaaaaaa-0000-4000-8000-000000000001.json"), "w", encoding="utf-8") as f:
+                json.dump(toc.clip(stand), f)
+            with open(os.path.join(src, "beast_bbbbbbbb-0000-4000-8000-000000000002.json"), "w", encoding="utf-8") as f:
+                json.dump(toc.clip(stand, loop=False), f)
+            cfg = {"sidecar": os.path.join(src, "own.json"), "skeleton_guid": "22222222-2222-4222-8222-222222222222",
+                   "reference_clip": os.path.join(src, "beast_aaaaaaaa-0000-4000-8000-000000000001.json"),
+                   "clips": os.path.join(src, "beast_*.json"), "graph": "33333333-3333-4333-8333-333333333333",
+                   "graph_guid": "44444444-4444-4444-8444-444444444444"}
+            built = own_creature.build(cfg, toc.hierarchy())
+            bear = dict(BEAR, own_proportions=cfg)
+            make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(bear)])
+            make_mod.write_own(d, bear["name"], built)
+            with open(os.path.join(d, "beast_bear_data.lua"), "w", encoding="utf-8") as f:
+                f.write(STUB_DATA)
+            with open(os.path.join(d, "beast_bear_blob.lua"), "w", encoding="utf-8") as f:
+                f.write('return "blob"\n')
+            mock = os.path.join(HERE, "..", "..", "tools", "models", "mock_eml.lua")
+            out = subprocess.run(["lua", mock, d], capture_output=True, text=True, timeout=60)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            text = out.stdout
+            self.assertIn("skeleton 22222222-2222-4222-8222-222222222222 joints 12 id 22222222-2222-4222-8222-222222222222",
+                          text)
+            self.assertIn("model %s hierarchy 22222222-2222-4222-8222-222222222222" % BEAR["model_guid"], text)
+            self.assertEqual(text.count("clip copy "), 2)
+            # the mock graph: a clip node per source clip and a blend space with both clips and one other
+            self.assertIn("graph 44444444-4444-4444-8444-444444444444 hierarchy 22222222-2222-4222-8222-222222222222 "
+                          "ours 4 left 1", text)
+            self.assertIn("template Beast_Bear keen::ecs::AnimationGraphResourceComponent2 animationGraph "
+                          "44444444-4444-4444-8444-444444444444", text)
+            # the joints' rest pose and inverse binds as built
+            q = built["bind"][3][0]
+            self.assertIn("pose 4 %.4f %.4f %.4f %.4f" % q, text)
 
 
 if __name__ == "__main__":

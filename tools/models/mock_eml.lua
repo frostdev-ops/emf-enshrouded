@@ -17,9 +17,39 @@ local function texture(name, fmt, size)
 		mipChainContentRanges = { { start = 0, count = 10 } } }
 end
 
+local GRAPH = "keen::anim_graph::runtime_graph::AnimationGraphResource2_0"
+local NONE = "00000000-0000-0000-0000-000000000000"
 local resources = {
 	["keen::RenderModel"] = {}, ["keen::RenderMaterialResource"] = {}, ["keen::ecs::TemplateResource"] = {},
+	["keen::ModelHierarchyResource"] = {}, ["keen::JointAnimation"] = {}, [GRAPH] = {},
 }
+-- a creature on a skeleton of its own: the game skeleton, the game clips and the game graph it copies (the graph: a
+-- clip node per clip, and a blend space naming every clip and one more)
+for _, c in ipairs(require("creatures")) do
+	if c.skeleton then
+		local sk = require(c.name .. "_skeleton")
+		local n = #sk.joints
+		local joints, units, binds = {}, {}, {}
+		for i = 1, n do
+			joints[i] = { orientation = { x = 0, y = 0, z = 0, w = 1 }, position = { x = 0, y = 0, z = 0 }, scale = { x = 1, y = 1, z = 1 } }
+			binds[i] = { rot = { x = { x = 1, y = 0, z = 0 }, y = { x = 0, y = 1, z = 0 }, z = { x = 0, y = 0, z = 1 } }, pos = { x = 0, y = 0, z = 0 } }
+		end
+		for i = 1, 3 * n do units[i] = { data = {} } end
+		resources["keen::ModelHierarchyResource"][sk.source] = { guid = sk.source, data = { hierarchyId = sk.source,
+			defaultPoseJoints = joints, defaultPose = { data = units }, skinToJointMatrices = binds } }
+		local nodes, items = {}, {}
+		for _, cl in ipairs(require(c.name .. "_clips")) do
+			resources["keen::JointAnimation"][cl.source] = { guid = cl.source, data = { headers = {}, data = {} } }
+			nodes[#nodes + 1] = { type = "keen::anim_graph::runtime_graph::SampleAnimationClipNodeDefinition",
+				value = { animation = cl.source, additiveReferenceAnimation = NONE } }
+			items[#items + 1] = { animation = cl.source }
+		end
+		items[#items + 1] = { animation = "99999999-9999-4999-8999-999999999999" }
+		nodes[#nodes + 1] = { type = "keen::anim_graph::runtime_graph::BlendSpace_1DNodeDefinition",
+			value = { items = items, additiveReferenceAnimation = NONE } }
+		resources[GRAPH][c.animation.graph] = { guid = c.animation.graph, data = { hierarchy = sk.source, nodeDefinitions = nodes } }
+	end
+end
 local function model(guid)
 	return { guid = guid, data = { debugName = "src", wholeModelRadius = 1.0, meshlets = {}, meshes = { {} }, lods = { {} },
 		skinningMap = { 1 }, blendShapes = {}, blendShapeMask = 0, renderData = { hash = {} },
@@ -41,6 +71,7 @@ local templates = {}
 for _, c in ipairs(require("creatures")) do
 	templates[#templates + 1] = { guid = "tpl-" .. c.source_template, data = { name = c.source_template,
 		components = { { type = "keen::ecs::ModelResource", value = { model = "old" } }, { type = "keen::ecs::Faction", value = {} },
+			{ type = "keen::ecs::AnimationGraphResourceComponent2", value = { animationGraph = "source-graph" } },
 			-- the game wolf's attribute storage (DamageMod: value, base, multiplier, adder; Movement: 18 speeds)
 			{ type = "keen::ecs::DamageMod", value = { dataStorage = { 0, 0.5, 1, 0 } } },
 			{ type = "keen::ecs::Movement", value = { dataStorage = { 0, 1, 0.5, 2.3, 6, 10, 1.8, 0, 2.3, 3.6, 1, 1, 2, 3.5, 2, 3.5, 1, 1 } } } } } }
@@ -126,6 +157,39 @@ for _, t in ipairs(templates) do show_template(t) end
 for _, t in pairs(resources["keen::ecs::TemplateResource"]) do show_template(t) end
 for g, r in pairs(resources["keen::RenderModel"]) do
 	print(string.format("model %s cloth %s", g, r.data.cloth == nil and "none" or "kept"))
+	if r.data.hierarchy then print(string.format("model %s hierarchy %s", g, tostring(r.data.hierarchy))) end
+end
+-- skeleton copies, clip copies and graph copies
+local copies = {}
+for _, line in ipairs(created) do
+	local typ, guid = line:match("^(%S+) (%S+)$")
+	copies[guid] = typ
+end
+for g, r in pairs(resources["keen::ModelHierarchyResource"]) do
+	if copies[g] then
+		local d = r.data
+		print(string.format("skeleton %s joints %d id %s", g, #d.defaultPoseJoints, tostring(d.hierarchyId)))
+		local o = d.defaultPoseJoints[4] and d.defaultPoseJoints[4].orientation
+		if o then print(string.format("pose 4 %.4f %.4f %.4f %.4f", o.x, o.y, o.z, o.w)) end
+	end
+end
+for g in pairs(resources["keen::JointAnimation"]) do
+	if copies[g] then print("clip copy " .. g) end
+end
+for g, r in pairs(resources[GRAPH]) do
+	if copies[g] then
+		local ours, left = 0, 0
+		local function count(v)
+			if v == nil or tostring(v) == NONE then return end
+			if copies[tostring(v)] == "keen::JointAnimation" then ours = ours + 1 else left = left + 1 end
+		end
+		for _, node in ipairs(r.data.nodeDefinitions) do
+			count(node.value.animation)
+			count(node.value.additiveReferenceAnimation)
+			for _, it in ipairs(node.value.items or {}) do count(it.animation) end
+		end
+		print(string.format("graph %s hierarchy %s ours %d left %d", g, tostring(r.data.hierarchy), ours, left))
+	end
 end
 for g, r in pairs(resources["keen::RenderMaterialResource"]) do
 	if g:find("-") and #g > 10 then
