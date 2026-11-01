@@ -963,9 +963,6 @@ TEST_CASE("bounty: a marked prop that is gone loses its mark when a player was n
 // ---- 1.2: take and claim at a board ----
 TEST_CASE("bounty: with need_board on, take and claim work only near a Bounty Board; off, anywhere") {
     BountyRig b({{"need_board", "1"}});
-    CHECK(b.reply("bounty.take 1").rfind("This world has no Bounty Board yet", 0) == 0);
-    CHECK(b.board().find("This world has no Bounty Board yet") != std::string::npos);
-    CHECK(notices_of(b.board()).empty());
     altar(b, 900, 20, 0);
     prop(b, 950, 20, 10, 5);  // beside player 2 (at 20, 10, 0), 20 m from the host
     search(b);
@@ -1257,4 +1254,34 @@ TEST_CASE("bounty: the finished counts are saved in a line 1.1 reads too") {
     fire_load(1);
     b.seconds(1);
     CHECK(b.reply("bounty.top").find("1. 0x00000000000000aa: 1 (you)") != std::string::npos);
+}
+
+TEST_CASE("bounty: until the world's first Bounty Board, take and claim work anywhere; then only at a board, also when its area is unloaded") {
+    BountyRig b({{"need_board", "1"}, {"hold_max", "2"}});
+    write(b.data, "offset 0\ndawns 0\nplay 10\np 0x00000000000000aa d2026300.0 0 0\n"
+                  "b 0x00000000000000aa gather_wood 60 60 1\n");  // a world from 1.1, with a finished bounty
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    const std::string board = b.board();
+    CHECK(board.find("This world has no Bounty Board yet") != std::string::npos);
+    CHECK(count_of(notices_of(board), "\n") == 3);
+    CHECK(b.reply("bounty.claim").rfind("Claimed: 5 x Material_T1_Token_WeaponUpgrade_Rune01", 0) == 0);  // anywhere
+    CHECK(b.reply("bounty.take 1").rfind("Taken: ", 0) == 0);
+    altar(b, 900, 20, 0);  // the first board: from now on at a board
+    prop(b, 950, 20, 10, 5);
+    search(b);
+    CHECK(slurp(b.data).find("\nboarded 1\n") != std::string::npos);
+    CHECK(b.reply("bounty.take 2") == "Take and claim bounties at a Bounty Board.");
+    CHECK(b.board().find("Notices: at a Bounty Board.") != std::string::npos);
+    // everyone far away, the board's area unloaded, a reload: still at a board, never "build one"
+    remove_entity(b.r.fake, 950);
+    remove_entity(b.r.fake, 900);
+    place(b.r.fake, 1, 500, 10, 0);
+    place(b.r.fake, 2, 520, 10, 0);
+    b.r.fake.session = 3;
+    fire_load(1);
+    b.seconds(65);
+    CHECK(b.reply("bounty.take 2") == "Take and claim bounties at a Bounty Board.");
+    CHECK(b.board().find("no Bounty Board yet") == std::string::npos);
 }

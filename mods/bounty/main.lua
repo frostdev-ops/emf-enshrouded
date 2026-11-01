@@ -117,6 +117,7 @@ local owed = {}    -- account -> list of {item (debug name), count, level, rarit
                      -- (the player left before they landed); they come with that player's next /bounty.claim
 local loaded, dirty = false, false
 local read_only = false  -- the world's file was written by a newer Bounty Board: never written over
+local boarded = false    -- this world has had a Bounty Board (kept with the world): till then, take and claim anywhere
 local last_tick, last_tod = nil, nil
 local session = emf.session()
 local hud_at, hud_shown, client_steps = -1, false, 0
@@ -454,6 +455,7 @@ end
 local function serialize()
   local lines = {"format 2", "offset " .. offset, "dawns " .. dawns, "posted " .. posted, "play " .. math.floor(play_s),
                  "seed " .. seed}
+  if boarded then lines[#lines + 1] = "boarded 1" end
   for _, k in ipairs(sorted_keys(players)) do
     local rec = players[k]
     lines[#lines + 1] = string.format("p %s - 0 %d", k, rec.done or 0)  -- the shape 1.1 reads: finished counts survive
@@ -506,7 +508,7 @@ end
 -- The world's data, read line by line; each kind of line is matched whole (anchored), so one never reads as another.
 local function load_text(text)
   players, owed, marks = {}, {}, {}
-  offset, dawns, play_s, seed, posted = 0, 0, 0, nil, nil
+  offset, dawns, play_s, seed, posted, boarded = 0, 0, 0, nil, nil, false
   local format = nil
   for line in text:gmatch("[^\r\n]+") do
     format = format or tonumber(line:match("^format (%d+)$"))
@@ -529,6 +531,7 @@ local function load_text(text)
     if v then play_s = tonumber(v) end
     v = line:match("^seed (%d+)$")
     if v then seed = tonumber(v) end
+    if line == "boarded 1" then boarded = true end
     local account, done = line:match("^p (%S+) %S+ %d+ (%d+)$")
     if not account then account, done = line:match("^p (%S+) (%d+)$") end
     if account and not old then record(account).done = tonumber(done) end
@@ -759,6 +762,10 @@ local function rebuild_boards()
     end
     if not twice then boards[#boards + 1] = {id = m.id or 0, x = m.x, y = m.y, z = m.z, kind = "mark"} end
   end
+  if #boards > 0 and not boarded then
+    boarded, dirty = true, true
+    emf.log("this world has its first Bounty Board: from now on bounties are taken and claimed at a board (need_board)")
+  end
 end
 
 -- A new search at the next step (after a mark, an unmark, a load).
@@ -856,11 +863,10 @@ local function board_near(world, player, range)
 end
 
 -- Why `player` cannot take or claim here (nil: they can): with need_board on, only within AT_BOARD_M of a board.
+-- Until the world's first Bounty Board was found or marked (`boarded`, kept with the world), anywhere: a new world,
+-- or one from 1.1, has bounties before anyone could build a Notice Board.
 local function gate(world, player)
-  if not emf.setting("need_board") then return nil end
-  if #boards == 0 then
-    return "This world has no Bounty Board yet: build a Notice Board in a base, or the host marks a prop with bounty.mark."
-  end
+  if not emf.setting("need_board") or not boarded then return nil end
   if not board_near(world, player, AT_BOARD_M) then return "Take and claim bounties at a Bounty Board." end
   return nil
 end
@@ -1226,12 +1232,13 @@ emf.command("board", ": the notices and your bounties", function(world, args)
   local me = ready(world)
   if not me then return end
   local rec = record(me.account)
-  local why = gate(world, me.id)
-  if why and #boards > 0 then
+  if gate(world, me.id) then
     emf.reply("Notices: at a Bounty Board.")
-  elseif why then
-    emf.reply(why)
   else
+    if emf.setting("need_board") and not boarded then
+      emf.reply("This world has no Bounty Board yet: until a Notice Board is built in a base (or the host marks a prop " ..
+        "with bounty.mark), take and claim anywhere.")
+    end
     emf.reply("Notices (take one with /bounty.take <n>):")
     for _, l in ipairs(notice_lines(me.account)) do emf.reply(l) end
   end
