@@ -27,8 +27,46 @@ local resources = {
 -- clip node per clip, and a blend space naming every clip and one more); MOCK_MISSING=<guid> leaves one out (a game
 -- update that removed it)
 local missing = os.getenv("MOCK_MISSING") or ""
+-- a creature on a skeleton of its own (new_skeleton): its source model's game skeleton (3 joints), a game clip for
+-- each role, and the game graph: a clip node per role (the game's non-additive nodes name their clip as the additive
+-- reference too), a clip node for a clip the pack does not name, a blend space, the slot map, and (MOCK_IK=1) an IK
+-- chain
+local MOCK_HIERARCHY = "55555555-5555-4555-8555-555555555555"
+local new_skeleton = {}
 for _, c in ipairs(require("creatures")) do
-	if c.skeleton then
+	if c.skeleton and c.skeleton.new then
+		new_skeleton[c.source_model_guid] = true
+		local unit = { data = {} }
+		resources["keen::ModelHierarchyResource"][MOCK_HIERARCHY] = { guid = MOCK_HIERARCHY, data = {
+			hierarchyId = MOCK_HIERARCHY, jointCount = 3, jointNames = { 1, 2, 3 }, jointParentIndices = { 65535, 0, 1 },
+			unbendableJoints = {}, skinToJointMatrices = { {}, {}, {} }, defaultPoseJoints = { {}, {}, {}, {} },
+			defaultPose = { data = { unit, unit, unit, unit, unit, unit, unit, unit, unit, unit, unit, unit },
+				alignedJointCount = 4 } } }
+		local olds = {}
+		for old in pairs(c.animation.roles) do olds[#olds + 1] = old end
+		table.sort(olds)
+		local nodes = {}
+		for i, old in ipairs(olds) do
+			resources["keen::JointAnimation"][old] = { guid = old, data = { headers = {}, data = {}, hierarchyHash = 7,
+				jointCount = 3 } }
+			nodes[#nodes + 1] = { type = "keen::anim_graph::runtime_graph::SampleAnimationClipNodeDefinition",
+				value = { animation = old, additiveReferenceAnimation = i == 1 and old or NONE, animationDuration = 4 } }
+		end
+		nodes[#nodes + 1] = { type = "keen::anim_graph::runtime_graph::SampleAnimationClipNodeDefinition",
+			value = { animation = "cccccccc-0000-4000-8000-000000000003", additiveReferenceAnimation = NONE,
+				animationDuration = 4 } }
+		nodes[#nodes + 1] = { type = "keen::anim_graph::runtime_graph::BlendSpace_1DNodeDefinition",
+			value = { additiveReferenceAnimation = NONE, items = { { animation = olds[1], animationDuration = 0.95 },
+				{ animation = "dddddddd-0000-4000-8000-000000000004", animationDuration = 0.95 } } } }
+		local slots = {}
+		for i = 1, 36 do slots[i] = 7 end
+		resources[GRAPH][c.animation.graph] = { guid = c.animation.graph, data = { hierarchy = MOCK_HIERARCHY,
+			nodeDefinitions = nodes, slotBoneIndexMapping = slots, ikChains = os.getenv("MOCK_IK") and { {} } or {},
+			bipedFeetIkNodeId = { value = 0 }, genericFeetIkNodeId = { value = 0 } } }
+	end
+end
+for _, c in ipairs(require("creatures")) do
+	if c.skeleton and not c.skeleton.new then
 		local sk = require(c.name .. "_skeleton")
 		local n = #sk.joints
 		local a = (n + 3) // 4 * 4  -- the game pads the default pose vectors to a multiple of 4 joints
@@ -67,6 +105,9 @@ local function model(guid)
 end
 for _, c in ipairs(require("creatures")) do
 	resources["keen::RenderModel"][c.source_model_guid] = model(c.source_model_guid)
+	if new_skeleton[c.source_model_guid] then
+		resources["keen::RenderModel"][c.source_model_guid].data.hierarchy = MOCK_HIERARCHY
+	end
 end
 for _, g in ipairs({ "mat-0", "mat-1" }) do
 	resources["keen::RenderMaterialResource"][g] = { guid = g, data = { images = {
@@ -166,6 +207,9 @@ for _, t in pairs(resources["keen::ecs::TemplateResource"]) do show_template(t) 
 for g, r in pairs(resources["keen::RenderModel"]) do
 	print(string.format("model %s cloth %s", g, r.data.cloth == nil and "none" or "kept"))
 	if r.data.hierarchy then print(string.format("model %s hierarchy %s", g, tostring(r.data.hierarchy))) end
+	if r.data.hierarchyJointCount then
+		print(string.format("model %s hierarchyJointCount %s", g, tostring(r.data.hierarchyJointCount)))
+	end
 end
 -- skeleton copies, clip copies and graph copies
 local copies = {}
@@ -177,6 +221,9 @@ for g, r in pairs(resources["keen::ModelHierarchyResource"]) do
 	if copies[g] then
 		local d = r.data
 		print(string.format("skeleton %s joints %d id %s", g, #d.defaultPoseJoints, tostring(d.hierarchyId)))
+		print(string.format("skeleton %s jointCount %s names %d parents %d binds %d aligned %s poses %d data %d id %s", g,
+			tostring(d.jointCount), #(d.jointNames or {}), #(d.jointParentIndices or {}), #d.skinToJointMatrices,
+			tostring(d.defaultPose.alignedJointCount), #d.defaultPoseJoints, #d.defaultPose.data, tostring(d.hierarchyId)))
 		local o = d.defaultPoseJoints[4] and d.defaultPoseJoints[4].orientation
 		if o then print(string.format("pose 4 %.4f %.4f %.4f %.4f", o.x, o.y, o.z, o.w)) end
 		-- the last joint's position in the default pose vectors (after the padded rotations)
@@ -187,8 +234,11 @@ for g, r in pairs(resources["keen::ModelHierarchyResource"]) do
 		end
 	end
 end
-for g in pairs(resources["keen::JointAnimation"]) do
-	if copies[g] then print("clip copy " .. g) end
+for g, r in pairs(resources["keen::JointAnimation"]) do
+	if copies[g] then
+		print(string.format("clip copy %s hash %s joints %s frames %s", g, tostring(r.data.hierarchyHash),
+			tostring(r.data.jointCount), tostring(r.data.frameCount)))
+	end
 end
 for g, r in pairs(resources[GRAPH]) do
 	if copies[g] then
@@ -203,6 +253,18 @@ for g, r in pairs(resources[GRAPH]) do
 			for _, it in ipairs(node.value.items or {}) do count(it.animation) end
 		end
 		print(string.format("graph %s hierarchy %s ours %d left %d", g, tostring(r.data.hierarchy), ours, left))
+		for i, node in ipairs(r.data.nodeDefinitions) do
+			if node.value.animationDuration then
+				print(string.format("graph %s node %d %s duration %s", g, i, tostring(node.value.animation),
+					num(node.value.animationDuration)))
+			end
+			for k, it in ipairs(node.value.items or {}) do
+				print(string.format("graph %s item %d %s duration %s", g, k, tostring(it.animation), num(it.animationDuration)))
+			end
+		end
+		if r.data.slotBoneIndexMapping then
+			print(string.format("graph %s slots %s", g, table.concat(r.data.slotBoneIndexMapping, " ")))
+		end
 	end
 end
 for g, r in pairs(resources["keen::RenderMaterialResource"]) do
