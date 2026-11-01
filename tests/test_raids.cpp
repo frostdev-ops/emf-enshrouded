@@ -338,6 +338,75 @@ TEST_CASE("raids: the boss wave adds a Vukah brawler to the last wave only") {
     CHECK(w2->boss);
 }
 
+TEST_CASE("raids: only creatures you are ready for: the boss wave's brawler stays away below its level, unless the rule is off") {
+    const uint32_t ready = boss_template().min_level;
+    REQUIRE(ready > 1);
+    CHECK(boss_template().known);
+    const auto last_wave = [](Settings s, uint32_t level, std::vector<Action>* all) {
+        s.boss = true;
+        s.waves = 1;
+        Director d(s);
+        std::string why;
+        d.start(at(0, 21.0, home(level)), 0, &why);
+        *all = d.tick(at(kSec, 21.0, home(level)));
+        const Action* a = find(*all, Action::Spawn);
+        REQUIRE(a);
+        return *a;
+    };
+    std::vector<Action> all;
+    Settings s = settings();
+    CHECK(s.progression);  // on by default
+    CHECK(Settings{}.progression);
+    Action a = last_wave(s, ready - 1, &all);
+    CHECK_FALSE(a.boss);
+    CHECK(a.count == s.per_wave);
+    CHECK(a.player_level == ready - 1);
+    bool told = false;
+    for (const auto& x : all) told |= x.kind == Action::Log && x.text.find("boss stays away") != std::string::npos;
+    CHECK(told);
+    CHECK(last_wave(s, ready, &all).boss);
+    s.progression = false;
+    CHECK(last_wave(s, 1, &all).boss);  // the rule off: as before
+    // the players' level decides, not the raiders' level: a higher difficulty does not let the boss in
+    s.progression = true;
+    s.level_offset = 6;
+    a = last_wave(s, ready - 1, &all);
+    CHECK_FALSE(a.boss);
+    CHECK(a.level == ready + 5);
+}
+
+TEST_CASE("raids: only creatures you are ready for: never a template from above the strongest player's level") {
+    const std::vector<Template> pool = {{"wolf", "a", 1, 99}, {"dragon", "b", 25, 99}};
+    for (uint32_t rnd = 0; rnd < 8; ++rnd) {
+        CHECK(choose_raider(pool, 8, 3, rnd, true).name == "wolf");
+        CHECK(choose_raider(pool, 33, 30, rnd, true).name != "");  // both may come at 30
+    }
+    bool dragon = false;
+    for (uint32_t rnd = 0; rnd < 8; ++rnd) dragon |= choose_raider(pool, 33, 30, rnd, true).name == "dragon";
+    CHECK(dragon);
+    const std::vector<Template> late = {{"dragon", "b", 25, 99}};
+    CHECK(choose_raider(late, 3, 3, 0, false).name == "dragon");  // the rule off: the lowest band, as before
+    CHECK(choose_raider(late, 3, 3, 0, true).guid == verified_pool()[0].guid);  // on: the tested Vukah instead
+    // custom templates: "GUID@level" comes from that player level; a bare GUID's level is not known
+    std::vector<std::string> bad;
+    const auto custom = parse_custom_templates(
+        "d5d05217-52dc-467a-9192-26b4f661d8d9@12, 9c8e2008-7259-4114-b6fc-615f0f181c04, d5d05217-52dc-467a-9192-26b4f661d8d9@x",
+        &bad);
+    REQUIRE(custom.size() == 2);
+    CHECK(custom[0].guid == "d5d05217-52dc-467a-9192-26b4f661d8d9");
+    CHECK(custom[0].min_level == 12u);
+    CHECK(custom[0].known);
+    CHECK(custom[1].min_level == 1u);
+    CHECK_FALSE(custom[1].known);
+    CHECK(bad == std::vector<std::string>{"d5d05217-52dc-467a-9192-26b4f661d8d9@x"});
+    // a boss or mini-boss from a template whose level is not known is removed under the rule (EMF cannot tell whether
+    // the players beat it); a known one, or any with the rule off, stays
+    CHECK(remove_unready_boss(true, custom[1], true));
+    CHECK_FALSE(remove_unready_boss(true, custom[1], false));
+    CHECK_FALSE(remove_unready_boss(true, custom[0], true));
+    CHECK_FALSE(remove_unready_boss(false, custom[1], true));
+}
+
 // ---- where raiders appear ----
 TEST_CASE("raids: inside a base is within its radius (horizontally, the radius rule)") {
     const std::vector<Base> bases = {{1, {0, 0, 0}}, {2, {500, 0, 0}}};
@@ -580,6 +649,10 @@ TEST_CASE("raids: mod.json: a preset's settings are greyed out unless it is cust
         {"difficulty", standard->difficulty},
         {"boss", standard->boss ? "1" : "0"},
         {"reward", standard->reward}};
+    const auto* rule = def("progression");  // the progression rule: on by default, its help names the brawler's level
+    REQUIRE(rule);
+    CHECK(rule->default_value == "1");
+    CHECK(rule->help.find("level " + std::to_string(boss_template().min_level)) != std::string::npos);
     CHECK(want.size() == preset_keys().size());
     for (const auto& key : preset_keys()) {
         CAPTURE(key);

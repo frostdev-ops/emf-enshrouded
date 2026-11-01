@@ -245,10 +245,13 @@ inline uint32_t pick_target(const Vec3& at, const std::vector<Foe>& foes, double
 }
 
 // ---- who comes ----
+// min_level / max_level: the band of levels it comes for. With the progression rule ("Only creatures you are ready
+// for") min_level is also the player level it waits for: the level at which players meet it in the game.
 struct Template {
     std::string name;
     std::string guid;
     uint32_t min_level = 1, max_level = 99;
+    bool known = true;  // its level is known (EMF's own, or "GUID@level"); a bare custom GUID's is not
 };
 // Templates seen to wake, walk to the altar and fight when spawned away from their camp. Only these by default: some
 // templates spawn asleep (the heavy wolf mini-boss did in game). Add others with the custom_templates setting.
@@ -260,9 +263,10 @@ inline const std::vector<Template>& verified_pool() {
     return k;
 }
 // The boss wave's leader: Enemy_Midboss_Vukah_Bigfoot_BossHealthBar woke, came for the player and showed its boss bar
-// (seen in game).
+// (seen in game). A Springlands mini-boss: with the progression rule it waits for a player of level 5 at the base (the
+// level players meet it at; not checked in game).
 inline const Template& boss_template() {
-    static const Template k{"Vukah brawler", "9c8e2008-7259-4114-b6fc-615f0f181c04", 1, 99};
+    static const Template k{"Vukah brawler", "9c8e2008-7259-4114-b6fc-615f0f181c04", 5, 99};
     return k;
 }
 inline bool parse_guid_text(const std::string& text, uint8_t out[16]) { return emf::parse_guid(text, out); }
@@ -278,7 +282,8 @@ inline const Template& pick_template(const std::vector<Template>& pool, uint32_t
         if (t.min_level < low->min_level) low = &t;
     return *low;
 }
-// The custom_templates setting: GUIDs separated by commas; anything else goes to *bad.
+// The custom_templates setting: GUIDs separated by commas, each optionally with "@level" (the player level it comes
+// from, 1-99: what the progression rule checks); anything else goes to *bad.
 inline std::vector<Template> parse_custom_templates(const std::string& text, std::vector<std::string>* bad) {
     std::vector<Template> out;
     size_t at = 0;
@@ -290,13 +295,46 @@ inline std::vector<Template> parse_custom_templates(const std::string& text, std
         while (!t.empty() && (t.back() == ' ' || t.back() == '\t')) t.pop_back();
         uint8_t g[16];
         if (!t.empty()) {
-            if (parse_guid_text(t, g)) out.push_back({"custom", t, 1, 99});
+            const size_t at_sign = t.find('@');
+            const std::string guid = t.substr(0, at_sign);
+            uint32_t level = 1;
+            bool ok = parse_guid_text(guid, g), known = false;
+            if (ok && at_sign != std::string::npos) {
+                const std::string lv = t.substr(at_sign + 1);
+                ok = !lv.empty() && lv.size() <= 2 && lv.find_first_not_of("0123456789") == std::string::npos;
+                if (ok) level = static_cast<uint32_t>(std::stoul(lv));
+                ok = ok && level >= 1 && level <= 99;
+                known = true;
+            }
+            if (ok) out.push_back({"custom", guid, level, 99, known});
             else if (bad) bad->push_back(t);
         }
         at = end + 1;
     }
     return out;
 }
+// ---- the progression rule ("Only creatures you are ready for", on by default) ----
+// The game keeps which zones a player has seen (the map, on their own PC) and which bosses they beat (knowledge, in a
+// part of the save EMF cannot read), so the rule goes by levels: a template comes only once the strongest player at the
+// base has reached its own level (min_level), and a boss or mini-boss likewise.
+//
+// A raider for this wave: with the rule, only templates whose level the player has reached (the tested Vukah warrior
+// when none has), by the band holding the raiders' level; without it, as pick_template.
+inline Template choose_raider(const std::vector<Template>& pool, uint32_t raider_level, uint32_t player_level,
+                              uint32_t rnd, bool progression) {
+    if (!progression) return pick_template(pool, raider_level, rnd);
+    std::vector<Template> ready;
+    for (const auto& t : pool)
+        if (t.min_level <= (std::max)(player_level, 1u)) ready.push_back(t);
+    if (ready.empty()) ready.push_back(verified_pool()[0]);
+    return pick_template(ready, raider_level, rnd);
+}
+// With the rule, a creature that turned out to be a boss or mini-boss from a template whose level is not known (a bare
+// custom GUID) is removed: EMF cannot tell whether the players have beaten it.
+inline bool remove_unready_boss(bool progression, const Template& t, bool is_boss) {
+    return progression && is_boss && !t.known;
+}
+
 // The raiders' level: the strongest player's at the base plus the difficulty, 1-99 (0 = unknown counts as 1).
 inline uint32_t raider_level(uint32_t strongest, int offset) {
     const int v = static_cast<int>((std::max)(strongest, 1u)) + offset;
@@ -367,6 +405,7 @@ struct Settings {
     double base_radius = 30;
     int max_alive = 24;
     bool boss = false;
+    bool progression = true;  // only creatures the players are ready for (boss_template()'s level and the like)
     BasePick bases = BasePick::Busiest;
 };
 
@@ -417,7 +456,8 @@ struct Action {
     enum Kind { Notice, Log, Hud, Spawn, Reward, Destroy } kind = Log;
     std::string text;           // Notice, Log, Hud ("" removes the line)
     int count = 0;              // Spawn: raiders (the boss comes on top); Reward: raiders killed
-    uint32_t level = 1;         // Spawn
+    uint32_t level = 1;         // Spawn: the raiders' level
+    uint32_t player_level = 1;  // Spawn: the strongest player's at the base (what the progression rule checks)
     bool boss = false;          // Spawn: one Vukah brawler on top
     uint32_t altar = 0;         // Spawn, Reward
     Vec3 at;                    // Spawn, Reward: the altar's position
@@ -686,7 +726,15 @@ private:
                 a.kind = Action::Spawn;
                 a.count = s_.per_wave;
                 a.level = raider_level(level, s_.level_offset);
+                a.player_level = (std::max)(level, 1u);
                 a.boss = s_.boss && last;
+                if (a.boss && s_.progression && a.player_level < boss_template().min_level) {
+                    a.boss = false;
+                    out.push_back(note(Action::Log, "the boss stays away: the strongest player at the base is level " +
+                                                        std::to_string(a.player_level) + ", the " + boss_template().name +
+                                                        " comes from level " + std::to_string(boss_template().min_level) +
+                                                        " (Only creatures you are ready for)"));
+                }
                 a.altar = base_.altar;
                 a.at = base_.pos;
                 out.push_back(a);

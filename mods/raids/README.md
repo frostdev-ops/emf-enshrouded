@@ -52,8 +52,9 @@ raid comes when you sleep through nightfall.
 | Difficulty (`difficulty`) | normal | easy (5 levels below the strongest player at the base), normal, hard (+3), deadly (+6) |
 | Boss wave (`boss`) | off | the last wave brings a Vukah brawler, a mini-boss with a boss bar |
 | Raiders attack (`targets`) | players, companions and summons | or players only. Allies are the fighters on the players' side: the companion, Necromancer's minions, Beastmaster's beasts, the game's own summons (never farm animals) |
+| Only creatures you are ready for (`progression`) | on | no boss or creature above the players' level (below) |
 | Who raids (`templates`) | Vukah warriors | or your own templates (below) |
-| My own templates (`custom_templates`) | | template GUIDs separated by commas |
+| My own templates (`custom_templates`) | | template GUIDs separated by commas; `GUID@12` comes from player level 12 |
 | Which base (`bases`) | the busiest | or any base with players, at random |
 | Base radius (`base_radius`) | 30 m | 10-100. The game's own build zone is not readable (its size reads 0), so this is a fixed radius: a flame altar of a higher level builds a bigger zone, so raise it for an upgraded altar, or raiders may appear inside the zone's edge |
 | Reward when repelled (`reward`) | runes and furs | none / runes and furs / also a rare weapon |
@@ -97,6 +98,20 @@ Only templates seen to wake and fight when spawned away from their camp are used
 (`Enemy_Vukah_Melee`) and, for the boss wave, the **Vukah brawler** (`Enemy_Midboss_Vukah_Bigfoot_BossHealthBar`).
 Some templates spawn asleep (the heavy wolf mini-boss did). To try others, choose **My own templates** and list their
 GUIDs (`export/template_guids.csv` from the guid_dump mod has every template); untested ones may stand still.
+
+### Only creatures you are ready for
+
+On by default: raids bring nothing the players at the base are not ready for. The game keeps which zones you have seen
+and which bosses you have beaten where EMF cannot read them yet, so the rule goes by levels:
+
+- The boss wave's **Vukah brawler**, a Springlands mini-boss, waits until the strongest player at the base is level 5.
+  Below that the last wave comes without it (the log says so). The difficulty does not change this: the players' own
+  level counts.
+- Your own templates: write `GUID@level` and that creature waits for a player of that level (a dragon as `GUID@25`).
+  A bare GUID comes at any level, but if it turns out to be a boss or mini-boss (it has a boss bar), it is removed at
+  once: EMF cannot tell whether you have beaten it. When none of your templates is ready yet, Vukah warriors come.
+
+Switch the rule off to get the old behaviour.
 
 ## Good to know
 

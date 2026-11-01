@@ -136,6 +136,20 @@ TEST_CASE("raids glue: allies are the players' fighters (companion, summons, tam
     CHECK_FALSE(near[2].alive);
 }
 
+TEST_CASE("raids glue: a boss or mini-boss is a creature with Boss or a boss health bar (as Beastmaster and Necromancer tell)") {
+    Rig r;
+    emf::World w(kW);
+    raider(5000);
+    raider(5001);
+    plant<gen::BossHealthBar>(5001);
+    raider(5002);
+    plant<gen::Boss>(5002);
+    CHECK_FALSE(raids::is_boss(w, 5000));
+    CHECK(raids::is_boss(w, 5001));
+    CHECK(raids::is_boss(w, 5002));
+    CHECK_FALSE(raids::is_boss(w, 9999));
+}
+
 TEST_CASE("raids glue: the per-world switch's setting follows the world's file; a change of the setting in a loaded world switches it") {
     using raids::switch_step;
     CHECK_FALSE(switch_step(false, 1, false).has_value());  // no world file yet: nothing to switch

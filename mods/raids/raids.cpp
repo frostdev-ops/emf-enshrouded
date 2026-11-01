@@ -75,6 +75,7 @@ void read_settings() {
     c.s.wave_gap_s = static_cast<int>(emf::setting_int(kMod, "wave_gap_seconds", 60));
     c.s.level_offset = raids::difficulty_offset(emf::setting_text(kMod, "difficulty", "normal"));
     c.s.boss = emf::setting_bool(kMod, "boss", false);
+    c.s.progression = emf::setting_bool(kMod, "progression", true);
     c.s.bases = raids::base_pick(emf::setting_text(kMod, "bases", "busiest"));
     c.s.base_radius = emf::setting_float(kMod, "base_radius", 30.0);
     c.reward = raids::reward_kind(emf::setting_text(kMod, "reward", "materials"));
@@ -149,6 +150,11 @@ struct PendingLevel {
     uint64_t until_ms;
 };
 std::vector<PendingLevel> g_levels;
+struct PendingVet {  // a raider from a custom template whose level is not known: watched for 10 s for a boss bar
+    uint32_t id;
+    uint64_t until_ms;
+};
+std::vector<PendingVet> g_vet;
 std::map<uint32_t, raids::RaiderId> g_ids;  // who each raider is (template, level): ids are reused once one is gone
 raids::StuckWatch g_stuck;
 
@@ -200,7 +206,8 @@ void spawn_wave(emf::World w, const raids::Action& a, const Config& c) {
     int spawned = 0;
     for (size_t i = 0; i < points.size(); ++i) {
         const bool boss = a.boss && i + 1 == points.size();
-        const raids::Template& t = boss ? raids::boss_template() : raids::pick_template(pool, a.level, g_rng());
+        const raids::Template t =
+            boss ? raids::boss_template() : raids::choose_raider(pool, a.level, a.player_level, g_rng(), c.s.progression);
         uint8_t guid[16];
         if (!raids::parse_guid_text(t.guid, guid)) continue;
         const auto& p = points[i];
@@ -211,6 +218,7 @@ void spawn_wave(emf::World w, const raids::Action& a, const Config& c) {
         g_ids[id] = raids::identify(w, id);
         g_stuck.on_spawned(id, p, GetTickCount64());
         g_levels.push_back({id, a.level, GetTickCount64() + 10000});
+        if (raids::remove_unready_boss(c.s.progression, t, true)) g_vet.push_back({id, GetTickCount64() + 10000});
         order(g_guards, id, a.altar);  // march on the altar (seen in game)
         EMF_LOG(kMod, "raider %u (%s, level %u) at (%.1f, %.1f, %.1f), %.0f m from altar %u", id, t.name.c_str(), a.level,
                 p.x, p.y, p.z, raids::horizontal_distance(p, a.at), a.altar);
@@ -237,6 +245,26 @@ void apply_levels(emf::World w, uint64_t now) {
             EMF_LOG(kMod, "raider %u has no Level: it keeps the template's strength", p.id);
         }
         g_levels.erase(g_levels.begin() + static_cast<std::ptrdiff_t>(i));
+    }
+}
+
+// The progression rule: a raider from a bare custom GUID that turns out to be a boss or mini-boss is removed (no kill):
+// EMF cannot tell whether the players have beaten it. Its boss components may appear a step after the spawn: watched
+// for 10 s.
+void vet_bosses(emf::World w, uint64_t now) {
+    for (size_t i = 0; i < g_vet.size();) {
+        const uint32_t id = g_vet[i].id;
+        bool done = !ours(w, id) || now >= g_vet[i].until_ms;
+        if (!done && raids::is_boss(w, id)) {
+            emf::api()->destroy(w.raw(), id);
+            g_director.on_gone(id);
+            g_stuck.forget(id);
+            EMF_LOG(kMod, "raider %u is a boss or mini-boss from a custom template without a level: removed (Only creatures "
+                          "you are ready for; give it one as GUID@level, or switch the rule off)", id);
+            done = true;
+        }
+        if (done) g_vet.erase(g_vet.begin() + static_cast<std::ptrdiff_t>(i));
+        else ++i;
     }
 }
 
@@ -361,6 +389,7 @@ void sync_session(emf::World w) {
     g_session = session;
     g_crumbs.clear();
     g_levels.clear();
+    g_vet.clear();
     g_ids.clear();
     g_stuck.clear();
     g_bases_ms = 0;
@@ -402,6 +431,7 @@ void on_tick(emf::World w) {
     });
     sync_switch();
     apply_levels(w, now);
+    vet_bosses(w, now);
     if (now - g_last_ms < 1000) return;
     g_last_ms = now;
     if (now - g_bases_ms >= 10000) {

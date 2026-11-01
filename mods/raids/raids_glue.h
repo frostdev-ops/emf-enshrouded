@@ -20,6 +20,11 @@ inline bool has_health(emf::World w, uint32_t id) {
     return h && h->dataStorage[0] > 0;
 }
 
+// A boss or a mini-boss: it carries Boss or a boss health bar (as Beastmaster and Necromancer tell them).
+inline bool is_boss(emf::World w, uint32_t id) {
+    return w.get<emf::gen::ecs::Boss>(id) != nullptr || w.get<emf::gen::ecs::BossHealthBar>(id) != nullptr;
+}
+
 // A fighter on the players' side that is not a player: the companion, a summon, a tamed beast. Its faction is the
 // players' side (Player, AutomatedPlayer, PlayerAlly) and it runs the enemy AI that fights (they all guard their owner
 // through it). Baby farm animals are PlayerAlly too, but have no such AI.
