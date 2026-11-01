@@ -217,7 +217,7 @@ local function picked_own(world, choice)
 	pending = choice and own_entries[choice] or nil
 end
 
--- Short labels: a name of at most 20 characters, a detail in brackets of at most 14 (the wheel's slices are narrow).
+-- Short labels: a name of at most 20 characters, a detail in brackets of at most 13 (the wheel's slices are narrow).
 local function wheel_items(world)
 	local account = world:account(emf.local_player())
 	local labels, entries = {}, {}

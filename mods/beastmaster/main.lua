@@ -251,7 +251,7 @@ local function wheel_items(world)
 		labels[#labels + 1] = label
 		entries[#entries + 1] = entry
 	end
-	-- short labels: a name of at most 20 characters, a detail in brackets of at most 14 (the wheel's slices are narrow)
+	-- short labels: a name of at most 20 characters, a detail in brackets of at most 13 (the wheel's slices are narrow)
 	add("Tame (weakened)", { action = "tame" })
 	add("Feed (bait)", { action = "feed" })
 	add("Attack", { action = "attack" })
