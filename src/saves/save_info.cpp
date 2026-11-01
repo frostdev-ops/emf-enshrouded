@@ -7,6 +7,7 @@
 
 #include "core/json.h"
 #include "saves/detail.h"
+#include "saves/move_retry.h"
 
 namespace emf::saves {
 
@@ -79,7 +80,7 @@ bool write_save_info(const std::wstring& path, const SaveInfo& info) {
         DeleteFileW(tmp.c_str());
         return false;
     }
-    if (!MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    if (!move_retrying(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         DeleteFileW(tmp.c_str());
         return false;
     }
