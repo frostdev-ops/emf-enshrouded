@@ -666,7 +666,8 @@ main { flex: 1; min-height: 0; position: relative; }
 .save-sub { margin-top: 4px; color: var(--haze); font-size: 13px; overflow-wrap: anywhere; }
 .save-meta { margin-top: 2px; color: var(--fog); font-size: 12px; }
 .save-problem { margin-top: 6px; color: var(--amber); font-size: 12.5px; overflow-wrap: anywhere; }
-.save-actions { display: flex; gap: 6px; flex: none; }
+.save-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 6px; flex: none; max-width: 52%; }
+.saves-hint { margin: 0 0 10px; padding: 8px 12px; border-left: 3px solid var(--tide); border-radius: 6px; background: rgba(106, 165, 255, 0.07); color: var(--mist); font-size: 13px; }
 .badge.kind-starter { color: var(--verdant); border-color: rgba(98, 211, 161, 0.4); }
 .badge.kind-manual { color: var(--ember-hot); border-color: rgba(255, 138, 61, 0.42); }
 .badge.kind-auto { color: var(--haze); }

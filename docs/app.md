@@ -671,8 +671,10 @@ writes the same format (`package\emf_common.ps1`).
   until the player deletes them. The switch writes `[backup] on_start` into `emf\emf_core.ini` (only where EMF is
   installed).
 - **Back up now**, with an optional label (one line, up to 80 characters). Refused while Enshrouded runs.
-- **Restore...**: the whole backup, or chosen files grouped by storage, each with when it was saved, a world's play time
-  and its size. Restore is refused while an `enshrouded.exe` runs (from any folder: saves belong to the Windows user,
+- **Restore all...** and **Pick files...** on each backup: the whole backup, or chosen files grouped by storage, each
+  named by what it is ("Character: Ember (level 8)", "World: Embervale", "Character slot 2" while the name is unknown)
+  with its file name, when it was saved, a world's play time and its size. Pick files opens on that list, and a line
+  above the backups says how to bring back one character or one world only. Restore is refused while an `enshrouded.exe` runs (from any folder: saves belong to the Windows user,
   not to a game folder) or a dedicated server runs from the folder shown, and the host checks again before it writes.
   It checks the backup's copies against their hashes, makes a **before-restore** backup of the files it will replace,
   copies each file back through a temporary file next to it (a name longer than 32 characters, which the game's
@@ -926,7 +928,8 @@ player's, and counts only a stand-in game running from the folder shown.
   the page (the ini's other keys and comments kept), Start and Stop of a stand-in server (its own shutdown ran on
   Ctrl+C; nothing left running), its log with a password stripped, and Install EMF with a package's own `install.ps1`.
   The Saves tab against fake save folders: the starter backup at the first start and the list with its sizes, Back up
-  now with a label, one Local file restored (Cancel holds the keyboard; a Steam file shows the Steam Cloud warning; a
+  now with a label, Restore all... and Pick files... on each backup with the line that says how to bring back one
+  character, Pick files opening on the named files, one Local file restored (Cancel holds the keyboard; a Steam file shows the Steam Cloud warning; a
   before-restore backup first, the backup stays, no temporary file left, the Steam files untouched), Delete of the
   starter cancelled (with its extra line) then confirmed, and, with a stand-in game running, Back up now and Restore
   locked and a restore sent anyway refused.

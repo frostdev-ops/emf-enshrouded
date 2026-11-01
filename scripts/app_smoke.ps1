@@ -42,9 +42,9 @@
 #   settings saved through the page, Start and Stop against a stand-in enshrouded_server.exe (clean stop on
 #   Ctrl+C), the server's log with a password stripped, Install EMF with a package's own install.ps1, and a
 #   client mod flagged on the server's Mods tab;
-# - the Saves tab against fake save folders: the starter backup at the first start and the list, Back up now, restoring
-#   one Local file (the Steam Cloud warning for a Steam file), Delete cancelled then confirmed, and the refusal while a
-#   stand-in game runs;
+# - the Saves tab against fake save folders: the starter backup at the first start and the list, Back up now, Pick
+#   files... (the hint, the named files), restoring one Local file (the Steam Cloud warning for a Steam file), Delete
+#   cancelled then confirmed, and the refusal while a stand-in game runs;
 # - without the WebView2 runtime EMF.exe says so and exits 1;
 # - EMF.exe imports none of the proxy DLL names mods put next to the game.
 # The runs are off-screen and never take the focus. Never touches the real game folder (--game, EMF_TEST_NO_STEAM) or
@@ -675,9 +675,10 @@ try {
     }
 
     # 10. the Saves tab against fake save folders (EMF_TEST_STEAM_ROOT, EMF_TEST_SAVED_GAMES) and its own app
-    # data (EMF_TEST_APPDATA): the starter backup at the first start and the list, Back up now with a label, restoring
-    # one Local file (and the Steam warning when a Steam file is chosen), Delete cancelled then confirmed (the starter's
-    # extra line, Cancel has the keyboard), and the refusal while a stand-in game runs. Never a real save folder.
+    # data (EMF_TEST_APPDATA): the starter backup at the first start and the list, Back up now with a label, Pick
+    # files... with its hint and the named files, restoring one Local file (and the Steam warning when a Steam file is
+    # chosen), Delete cancelled then confirmed (the starter's extra line, Cancel has the keyboard), and the refusal while
+    # a stand-in game runs. Never a real save folder.
     $savesRoot = Join-Path $realTemp ("emf app smoke saves " + [guid]::NewGuid().ToString("N").Substring(0, 8))
     $fakeSteam = Join-Path $savesRoot "Steam"
     $fakeSaved = Join-Path $savesRoot "Saved Games"
@@ -710,10 +711,12 @@ try {
 
         # restore one Local file; choosing a Steam file shows the Steam Cloud warning
         [System.IO.File]::WriteAllText($localWorld, "ruined by a mod")
-        $js = $W + " W(function(){return rows().length>=2;},function(){ rows()[0].querySelector('.save-restore').click(); W(function(){return !!document.getElementById('saves-pick-some');},function(){ pr.focus=document.activeElement&&document.activeElement.id; document.getElementById('saves-pick-some').click(); W(function(){return !!document.querySelector('input[data-path^=steam]');},function(){ document.querySelector('input[data-path^=steam]').click(); W(function(){return !!document.getElementById('saves-steam-warning');},function(){ pr.steam=txt('saves-steam-warning'); document.querySelector('input[data-path^=steam]').click(); W(function(){return !document.getElementById('saves-steam-warning');},function(){ var w=[...document.querySelectorAll('input[data-path]')].find(function(x){return x.getAttribute('data-path')==='local/default/world0.ksd';}); w.click(); W(function(){var g=document.getElementById('saves-sheet-go'); return g&&!g.disabled;},function(){ pr.go=txt('saves-sheet-go'); document.getElementById('saves-sheet-go').click(); W(function(){return /^(Restored|Not restored)$/.test(txt('saves-sheet-title'));},function(){ pr.title=txt('saves-sheet-title'); pr.restored=txt('saves-restored'); pr.err=txt('saves-restore-error'); W(function(){return rows().length>=3;},function(){ pr.kinds=rows().map(kind); window.emfDone=true; }); }); }); }); }); }); }); });"
+        $js = $W + " W(function(){return rows().length>=2;},function(){ pr.intro=txt('saves-intro'); pr.pickLabel=(rows()[0].querySelector('.save-pick-files')||{}).textContent||''; pr.allLabel=(rows()[0].querySelector('.save-restore')||{}).textContent||''; rows()[0].querySelector('.save-pick-files').click(); W(function(){return !!document.getElementById('saves-pick-some')&&!!document.querySelector('input[data-path^=steam]');},function(){ pr.focus=document.activeElement&&document.activeElement.id; pr.picked=document.getElementById('saves-pick-some').checked; pr.what=[...document.querySelectorAll('.save-file-what')].map(function(x){return x.textContent;}); W(function(){return !!document.querySelector('input[data-path^=steam]');},function(){ document.querySelector('input[data-path^=steam]').click(); W(function(){return !!document.getElementById('saves-steam-warning');},function(){ pr.steam=txt('saves-steam-warning'); document.querySelector('input[data-path^=steam]').click(); W(function(){return !document.getElementById('saves-steam-warning');},function(){ var w=[...document.querySelectorAll('input[data-path]')].find(function(x){return x.getAttribute('data-path')==='local/default/world0.ksd';}); w.click(); W(function(){var g=document.getElementById('saves-sheet-go'); return g&&!g.disabled;},function(){ pr.go=txt('saves-sheet-go'); document.getElementById('saves-sheet-go').click(); W(function(){return /^(Restored|Not restored)$/.test(txt('saves-sheet-title'));},function(){ pr.title=txt('saves-sheet-title'); pr.restored=txt('saves-restored'); pr.err=txt('saves-restore-error'); W(function(){return rows().length>=3;},function(){ pr.kinds=rows().map(kind); window.emfDone=true; }); }); }); }); }); }); }); });"
         $run = Invoke-Smoke -Eval $js -More @("--page", "saves", "--probe-wait", "15000")
         $pr = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
         Check ($null -ne $pr -and $pr.focus -eq "saves-sheet-cancel") "Saves: the restore dialog opens with Cancel holding the keyboard ($(if ($pr) { $pr.focus }))"
+        Check ($null -ne $pr -and $pr.pickLabel -like "Pick files?*" -and $pr.allLabel -like "Restore all?*" -and $pr.intro -like "*one character or one world*Pick files*") "Saves: each backup has Restore all and Pick files, and the page says how to bring back one character ($(if ($pr) { $pr.allLabel + ' | ' + $pr.pickLabel + ' | ' + $pr.intro }))"
+        Check ($null -ne $pr -and $pr.picked -and @($pr.what | Where-Object { $_ -like "Character slot 1 * character0.ksd" }).Count -eq 2 -and @($pr.what | Where-Object { $_ -like "World slot 1 * world0.ksd" }).Count -eq 2 -and @($pr.what) -contains "global.ksd") "Saves: Pick files opens on the list of files, each character and world named ($(if ($pr) { @($pr.what) -join ' / ' }))"
         Check ($null -ne $pr -and $pr.steam -like "*Steam Cloud saves*" -and $pr.steam -like "*files on this PC*") "Saves: choosing a Steam file shows the Steam Cloud warning"
         Check ($null -ne $pr -and $pr.go -eq "Restore 1 file" -and $pr.title -eq "Restored" -and $pr.restored -like "*world slot 1 (Local)*") "Saves: one Local file restored through the page ($(if ($pr) { $pr.go + ' | ' + $pr.title + ' | ' + $pr.restored + ' | ' + $pr.err }))"
         Check ((Get-Content -LiteralPath $localWorld -Raw) -eq "local world0.ksd") "Saves: the Local world file is the backup's again"
