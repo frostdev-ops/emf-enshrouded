@@ -198,6 +198,82 @@ def kept_head_bones(use, total):
     return {b for b, w in use.items() if w >= HEAD_SHARE * total}
 
 
+def tail_distances(points, edges, in_tail):
+    """Per tail vertex, its distance along the mesh's edges (within the tail) from where the tail leaves the body
+    (tail vertices joined to a body vertex start at 0). A curled or hooked tail is measured along its length, not as
+    the crow flies. `edges`: vertex index pairs; `in_tail`: per vertex."""
+    import heapq
+    near = {}
+    for a, b in edges:
+        near.setdefault(a, []).append(b)
+        near.setdefault(b, []).append(a)
+    dist = {}
+    heap = []
+    for v, tail in enumerate(in_tail):
+        if tail and any(not in_tail[u] for u in near.get(v, ())):
+            heap.append((0.0, v))
+    heapq.heapify(heap)
+    while heap:
+        d, v = heapq.heappop(heap)
+        if v in dist:
+            continue
+        dist[v] = d
+        for u in near.get(v, ()):
+            if in_tail[u] and u not in dist:
+                p, q = points[v], points[u]
+                step = ((p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2) ** 0.5
+                heapq.heappush(heap, (d + step, u))
+    return dist
+
+
+def tail_curve(points, dist, n):
+    """The tail's centre line: n + 1 points from where it leaves the body to its tip, each the centroid of the tail's
+    vertices at that distance along it (within half a step)."""
+    top = max(dist.values()) or 1.0
+    half = top / (2 * n)
+    curve = []
+    for i in range(n + 1):
+        t = top * i / n
+        near = [points[v] for v, d in dist.items() if abs(d - t) <= half]
+        if near:
+            curve.append(tuple(sum(getattr(p, a) for p in near) / len(near) for a in "xyz"))
+    return curve
+
+
+def along(curve, fractions):
+    """Points at the given fractions (0..1) of a polyline's length."""
+    seg = [sum((a - b) ** 2 for a, b in zip(p, q)) ** 0.5 for p, q in zip(curve, curve[1:])]
+    total = sum(seg) or 1.0
+    out = []
+    for f in fractions:
+        left = min(max(f, 0.0), 1.0) * total
+        for i, s in enumerate(seg):
+            if left <= s or i == len(seg) - 1:
+                t = min(left / s, 1.0) if s > 0 else 0.0
+                out.append(tuple(a + (b - a) * t for a, b in zip(curve[i], curve[i + 1])))
+                break
+            left -= s
+    return out
+
+
+def tail_chain_weights(dist, fractions, chain):
+    """Per tail vertex, its weights on a chain of tail bones placed at `fractions` (0..1) of the tail's length: shared
+    between the two bones around its own fraction (its distance along the tail over the tail's length)."""
+    top = max(dist.values()) or 1.0
+    out = {}
+    for v, d in dist.items():
+        s = d / top
+        if s >= fractions[-1]:
+            out[v] = {chain[-1]: 1.0}
+            continue
+        k = max(i for i, f in enumerate(fractions) if f <= s) if s > fractions[0] else 0
+        span = fractions[k + 1] - fractions[k]
+        t = (s - fractions[k]) / span if span > 0 else 0.0
+        w = {chain[k]: 1.0 - t, chain[k + 1]: t}
+        out[v] = {b: x for b, x in w.items() if x > 0}
+    return out
+
+
 def rigid_weights(weights, parents, roots):
     """Every bone below one of `roots` gives its weight to that root, so the part follows the root as one piece (a
     cat's paw on the game creature's wrist, not on its clawed fingers). `weights`: per vertex {bone: weight};

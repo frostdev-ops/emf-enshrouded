@@ -1,6 +1,7 @@
 """tools/models/quad_landmarks.py: the landmarks of a four-legged body and the height map fit_to_game_skeleton.py uses
 (plain Python, no Blender)."""
 import collections
+import math
 import os
 import sys
 import unittest
@@ -203,6 +204,65 @@ class DetailWeightTests(unittest.TestCase):
     def test_the_head_bones_kept_are_those_the_game_animal_uses_on_its_head(self):
         # use: each bone under the head with its weight on the game animal's head; total: all weight there
         self.assertEqual(ql.kept_head_bones({"jaw": 8.0, "crest": 0.5}, 100.0), {"jaw"})
+
+
+def hooked_tail(rings=40, around=6, radius=0.03):
+    """A tube along a J: 1 m straight back (+y) from the rump, then a half circle of radius 0.2 m curling up and
+    forward (a big cat's tail tip). Vertex 0 is a body vertex the tube's first ring touches. Returns (points, edges,
+    in_tail, centre(t)) with t in 0..1 along the tube."""
+    import math
+
+    def centre(t):
+        straight = 1.0 / (1.0 + math.pi * 0.2)
+        if t <= straight:
+            return (0.0, t / straight * 1.0, 1.0)
+        a = (t - straight) / (1 - straight) * math.pi
+        return (0.0, 1.0 + 0.2 * math.sin(a), 1.0 + 0.2 * (1 - math.cos(a)))
+
+    pts, edges, in_tail = [P(0.0, -0.05, 1.0)], [], [False]
+    for r in range(rings + 1):
+        cx, cy, cz = centre(r / rings)
+        for k in range(around):
+            a = 2 * math.pi * k / around
+            pts.append(P(cx + radius * math.cos(a), cy, cz + radius * math.sin(a)))
+            in_tail.append(True)
+            i = len(pts) - 1
+            edges.append((i, 1 + r * around + (k + 1) % around))
+            if r == 0:
+                edges.append((0, i))
+            else:
+                edges.append((i, i - around))
+    return pts, edges, in_tail, centre
+
+
+class TailFitTests(unittest.TestCase):
+    """The game's tail bones moved along the creature's own tail, and its tail weighted along its length."""
+
+    def test_distances_run_along_the_tail_from_the_body(self):
+        pts, edges, in_tail, _ = hooked_tail()
+        d = ql.tail_distances(pts, edges, in_tail)
+        self.assertNotIn(0, d)  # the body vertex is not tail
+        first, last = d[1], d[len(pts) - 1]
+        self.assertLess(first, 0.05)
+        # the tube is 1 + pi * 0.2 = 1.63 m long; the hook's tip is that far along, though only 0.4 m from y = 1
+        self.assertAlmostEqual(last, 1.0 + math.pi * 0.2, delta=0.08)
+
+    def test_the_curve_follows_the_hook_and_the_bones_go_along_it(self):
+        pts, edges, in_tail, centre = hooked_tail()
+        d = ql.tail_distances(pts, edges, in_tail)
+        curve = ql.tail_curve(pts, d, 16)
+        for f in (0.0, 0.3, 0.7, 1.0):
+            p = ql.along(curve, [f])[0]
+            c = centre(f)
+            self.assertLess(sum((a - b) ** 2 for a, b in zip(p, c)) ** 0.5, 0.06, f)
+
+    def test_tail_weights_blend_between_neighbouring_bones(self):
+        w = ql.tail_chain_weights({7: 0.0, 8: 0.5, 9: 0.75, 10: 1.0}, [0.0, 0.5, 1.0], ["t0", "t1", "t2"])
+        self.assertEqual(w[7], {"t0": 1.0})
+        self.assertEqual(w[8], {"t1": 1.0})
+        self.assertAlmostEqual(w[9]["t1"], 0.5)
+        self.assertAlmostEqual(w[9]["t2"], 0.5)
+        self.assertEqual(w[10], {"t2": 1.0})
 
 
 class RigidTests(unittest.TestCase):
