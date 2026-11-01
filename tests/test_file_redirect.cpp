@@ -332,6 +332,7 @@ TEST_CASE("redirect: the [content] switches are off by default; only 1 turns one
 
 TEST_CASE("redirect: the switches read from a real emf_core.ini; no file and no section mean off") {
     const std::wstring dir = test_scratch::temp_path(L"emf_redirect_ini");
+    test_scratch::remove_at_exit(dir);  // also when a check below stops the test
     REQUIRE(CreateDirectoryW(dir.c_str(), nullptr));
     const std::wstring ini = dir + L"\\emf_core.ini";
     auto write = [&](const char* text) {

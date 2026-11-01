@@ -106,6 +106,17 @@ BOOL WINAPI fake_set_dir_w(LPCWSTR p) {
     return TRUE;
 }
 
+// injected failures: a step that throws, as building a string does when memory runs out
+bool throwing_is_file(const wchar_t*) { throw std::bad_alloc(); }
+std::wstring throwing_cwd() { throw std::bad_alloc(); }
+void throwing_write(const char*, size_t) { throw std::bad_alloc(); }
+
+int g_clock_reads = 0;
+unsigned long long counting_now() {
+    ++g_clock_reads;
+    return g_now;
+}
+
 const std::wstring kGame = L"C:\\Games\\Enshrouded";
 const std::wstring kShadow = L"C:\\Games\\Enshrouded\\emf\\content\\client\\";
 
@@ -294,6 +305,111 @@ TEST_CASE("file hooks: after log_seconds only the content files are logged; the 
     CHECK(log.find("# the log stops here", stop + 1) == std::string::npos);
 }
 
+TEST_CASE("file hooks: once the log is full (or there is none) a call does not build its line") {
+    setup(false, true);
+    auto& g = fh::state();
+    g.now_ms = counting_now;  // each line's head reads the clock: a line not built does not
+    g.max_lines = 1;
+    g_shadow_files = {kShadow + L"enshrouded.kfc"};
+    g_clock_reads = 0;
+    fh::create_file_w((kGame + L"\\enshrouded.kfc").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    CHECK(g_clock_reads == 1);
+    g_clock_reads = 0;
+    for (int i = 0; i < 3; ++i)
+        fh::create_file_w((kGame + L"\\enshrouded.kfc").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    CHECK(g_clock_reads == 0);
+    CHECK(g_opened == kShadow + L"enshrouded.kfc");  // the redirect goes on all the same
+    const std::string log = logged();
+    CHECK(log.find("CreateFileW") == log.rfind("CreateFileW"));  // one line
+    CHECK(log.find("# the log stops here: 1 lines") != std::string::npos);
+
+    setup(false, true);
+    fh::state().write = nullptr;  // no log file
+    fh::state().now_ms = counting_now;
+    g_shadow_files = {kShadow + L"enshrouded.kfc"};
+    g_clock_reads = 0;
+    fh::create_file_w((kGame + L"\\enshrouded.kfc").c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);
+    CHECK(g_clock_reads == 0);
+    CHECK(g_opened == kShadow + L"enshrouded.kfc");
+}
+
+TEST_CASE("file hooks: a step that throws never leaves a hook: the call goes through unchanged, with its own error") {
+    const std::wstring kfc = kGame + L"\\enshrouded.kfc";
+    // deciding throws (the shadow check, the current folder): the game's own path
+    setup(true, true);
+    fh::state().is_file = throwing_is_file;
+    g_shadow_files = {kShadow + L"enshrouded.kfc"};
+    g_open_error = ERROR_SHARING_VIOLATION;
+    HANDLE h = nullptr;
+    CHECK_NOTHROW(h = fh::create_file_w(kfc.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    CHECK(GetLastError() == ERROR_SHARING_VIOLATION);
+    CHECK(h == reinterpret_cast<HANDLE>(0x1a4));
+    CHECK(g_opened == kfc);
+    CHECK_NOTHROW(h = fh::create_file_a("C:\\Games\\Enshrouded\\enshrouded.kfc", GENERIC_READ, 0, nullptr, OPEN_EXISTING,
+                                        0, nullptr));
+    CHECK(GetLastError() == ERROR_SHARING_VIOLATION);
+    CHECK(g_opened_a == "C:\\Games\\Enshrouded\\enshrouded.kfc");
+    DWORD a = 0;
+    CHECK_NOTHROW(a = fh::get_file_attributes_w(kfc.c_str()));
+    CHECK(a == INVALID_FILE_ATTRIBUTES);
+    CHECK(GetLastError() == ERROR_SHARING_VIOLATION);
+    CHECK(g_opened == kfc);
+    g_opened_a.clear();
+    CHECK_NOTHROW(fh::get_file_attributes_a("C:\\Games\\Enshrouded\\enshrouded.kfc"));
+    CHECK(g_opened_a == "C:\\Games\\Enshrouded\\enshrouded.kfc");
+    WIN32_FILE_ATTRIBUTE_DATA data{};
+    g_opened.clear();
+    CHECK_NOTHROW(fh::get_file_attributes_ex_w(kfc.c_str(), GetFileExInfoStandard, &data));
+    CHECK(GetLastError() == ERROR_SHARING_VIOLATION);
+    CHECK(g_opened == kfc);
+    fh::state().is_file = fake_is_file;
+    fh::state().cwd = throwing_cwd;  // a relative path needs it
+    CHECK_NOTHROW(fh::create_file_w(L"enshrouded.kfc", GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    CHECK(g_opened == L"enshrouded.kfc");
+    CHECK(GetLastError() == ERROR_SHARING_VIOLATION);
+
+    // logging throws (after the real call): the result and its error stand
+    setup(true, true);
+    fh::state().write = throwing_write;
+    g_shadow_files = {kShadow + L"enshrouded.kfc"};
+    g_open_error = ERROR_ALREADY_EXISTS;
+    CHECK_NOTHROW(h = fh::create_file_w(kfc.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    CHECK(h == reinterpret_cast<HANDLE>(0x1a4));
+    CHECK(GetLastError() == ERROR_ALREADY_EXISTS);
+    CHECK(g_opened == kShadow + L"enshrouded.kfc");
+    CHECK_NOTHROW(fh::create_file_a("C:\\x.txt", GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr));
+    CHECK(GetLastError() == ERROR_ALREADY_EXISTS);
+    CHECK_NOTHROW(fh::get_file_attributes_w(L"C:\\x.txt"));
+    CHECK_NOTHROW(fh::get_file_attributes_a("C:\\x.txt"));
+    CHECK_NOTHROW(fh::get_file_attributes_ex_w(L"C:\\x.txt", GetFileExInfoStandard, &data));
+    WIN32_FIND_DATAW fd{};
+    CHECK_NOTHROW(h = fh::find_first_file_w(L"C:\\x\\*", &fd));
+    CHECK(h == reinterpret_cast<HANDLE>(0x77));
+    CHECK_NOTHROW(fh::find_first_file_ex_w(L"C:\\x\\*", FindExInfoBasic, &fd, FindExSearchNameMatch, nullptr, 0));
+    CHECK_NOTHROW(fh::find_next_file_w(h, &fd));
+    BOOL ok = FALSE;
+    CHECK_NOTHROW(ok = fh::set_current_directory_w(L"C:\\x"));
+    CHECK(ok);
+    CHECK(GetLastError() == 0);
+}
+
+TEST_CASE("file hooks: nothing is made before start(): the hooks' state comes with them") {
+    fh::discard_for_test();  // as the DLL is when it loads
+    CHECK_FALSE(fh::has_state());
+    const std::wstring game = test_scratch::temp_path(L"emf_file_hooks_state");
+    test_scratch::remove_at_exit(game);
+    REQUIRE(CreateDirectoryW(game.c_str(), nullptr));
+    REQUIRE(CreateDirectoryW((game + L"\\emf").c_str(), nullptr));
+    emf::loader::ContentSwitches sw;
+    sw.log_opens = true;
+    const HMODULE self = GetModuleHandleW(nullptr);
+    fh::start(self, game, sw);
+    CHECK(fh::has_state());
+    fh::uninstall_for_test(self);
+    fh::close_log_for_test();
+    fh::reset_for_test();
+}
+
 TEST_CASE("file hooks: the exe's file functions come from kernel32 or its API sets") {
     using emf::loader::is_kernel_dll;
     CHECK(is_kernel_dll("KERNEL32.dll"));
@@ -359,6 +475,8 @@ TEST_CASE("file hooks: installed into emf_tests.exe's import table, calls go thr
     g.sw.log_opens = true;
     g.sw.log_seconds = 300;
     g.write = capture;
+    // never the real shadow check here: it calls GetFileAttributesW through this exe's own table, which is hooked now
+    g.is_file = fake_is_file;
     {
         const std::lock_guard<std::mutex> l(g_log_mutex);
         g_log.clear();
@@ -392,10 +510,13 @@ TEST_CASE("file hooks: installed into emf_tests.exe's import table, calls go thr
 
 TEST_CASE("file hooks: the loader's step writes emf\\file_opens.log: the header first, then the calls") {
     const std::wstring game = test_scratch::temp_path(L"emf_file_hooks_game");
+    test_scratch::remove_at_exit(game);
     REQUIRE(CreateDirectoryW(game.c_str(), nullptr));
     REQUIRE(CreateDirectoryW((game + L"\\emf").c_str(), nullptr));
     const HMODULE self = GetModuleHandleW(nullptr);
     fh::reset_for_test();
+    // never the real shadow check here: it calls GetFileAttributesW through this exe's own table, which start() hooks
+    fh::state().is_file = fake_is_file;
     emf::loader::ContentSwitches sw;
     sw.log_opens = true;
     const std::string line = fh::start(self, game + L"\\", sw);

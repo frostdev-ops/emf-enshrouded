@@ -76,34 +76,48 @@ struct State {
     std::vector<std::pair<void**, void*>> patched;  // slot, what was there (for the tests' uninstall)
 };
 
-// Never destroyed: the hooks stay in the exe's table until the process is gone, so a call that comes late at exit must
-// not find a destroyed state.
-inline State& g_state = *new State;
-inline State& state() { return g_state; }
+// Made by start() (or a test), so a loader with the switches off makes nothing at all. Never destroyed: the hooks stay
+// in the exe's table until the process is gone, so a call that comes late at exit must not find a destroyed state.
+inline State* g_state = nullptr;
 
-inline unsigned long long elapsed() { return g_state.now_ms() - g_state.start_ms; }
+// The hooks' state; start() makes it before any hook goes in.
+inline State& state() { return *g_state; }
+inline State& make_state() {
+    if (!g_state) g_state = new State;
+    return *g_state;
+}
+inline bool has_state() { return g_state != nullptr; }
+
+inline unsigned long long elapsed() { return state().now_ms() - state().start_ms; }
 
 inline LineHead head(const char* fn) { return {elapsed(), GetCurrentThreadId(), fn}; }
 
 inline void write_raw(const std::string& s) {
-    if (g_state.write) g_state.write(s.data(), s.size());
+    if (state().write) state().write(s.data(), s.size());
 }
 
-// One line into the log, up to max_lines; then one line that says the log stops.
-inline void emit(const std::string& line) {
-    auto& g = g_state;
-    if (!g.write) return;
-    if (g.lines.load(std::memory_order_relaxed) < g.max_lines && g.lines.fetch_add(1) < g.max_lines) {
-        g.write(line.data(), line.size());
-        return;
-    }
+// Takes one line of the log: true while there is a log and it is below max_lines; at the limit it says once that the
+// log stops. Asked before a line is built, so a full log (or none) costs a call nothing.
+inline bool reserve_line() {
+    auto& g = state();
+    if (!g.write) return false;
+    if (g.lines.load(std::memory_order_relaxed) < g.max_lines && g.lines.fetch_add(1) < g.max_lines) return true;
     if (!g.cap_said.exchange(true))
         write_raw("# the log stops here: " + std::to_string(g.max_lines) + " lines (the limit)\r\n");
+    return false;
+}
+
+// One line into the log; `build` makes it, and only once there is room for it.
+template <class Build>
+void emit(Build build) {
+    if (!reserve_line()) return;
+    const std::string line = build();
+    state().write(line.data(), line.size());
 }
 
 // True while every call is logged (log_opens=1, within log_seconds); says once when that time is over.
 inline bool in_window() {
-    auto& g = g_state;
+    auto& g = state();
     if (!g.sw.log_opens || !g.write) return false;
     const unsigned long long ms = elapsed();
     if (ms < g.sw.log_seconds * 1000ull) return true;
@@ -124,7 +138,7 @@ struct Decision {
 
 // `open`: a CreateFile (only reads are redirected); else an attribute query.
 inline Decision decide(const wchar_t* path, bool open, DWORD access, DWORD disposition, DWORD flags) {
-    auto& g = g_state;
+    auto& g = state();
     Decision d;
     if (!g.sw.redirect_test || !path || g.game_dir.empty()) return d;
     const std::wstring cwd = path_needs_cwd(path) ? g.cwd() : std::wstring();
@@ -157,21 +171,44 @@ inline std::wstring from_ansi(const char* s) {
 }
 
 // The originals, or the loader's own imports for one the exe does not import (the A hooks redirect through W).
-inline CreateFileW_t real_create_w() { return g_state.real.CreateFileW ? g_state.real.CreateFileW : &::CreateFileW; }
+inline CreateFileW_t real_create_w() { return state().real.CreateFileW ? state().real.CreateFileW : &::CreateFileW; }
 inline GetFileAttributesW_t real_attrs_w() {
-    return g_state.real.GetFileAttributesW ? g_state.real.GetFileAttributesW : &::GetFileAttributesW;
+    return state().real.GetFileAttributesW ? state().real.GetFileAttributesW : &::GetFileAttributesW;
+}
+
+// No C++ exception ever leaves a hook into the game's code (a std::bad_alloc while a path or a line is built, say).
+// The deciding part, before the real call: when it throws, the call goes through unchanged.
+template <class Step>
+Decision decide_safely(Step step) noexcept {
+    try {
+        return step();
+    } catch (...) {
+        return Decision{};
+    }
+}
+// The logging part, after the real call: when it throws, only the line is lost; the result and its error stand.
+template <class Log>
+void log_safely(Log log) noexcept {
+    try {
+        log();
+    } catch (...) {
+    }
 }
 
 inline HANDLE WINAPI create_file_w(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disposition,
                                    DWORD flags, HANDLE template_file) {
     const DWORD entry_error = GetLastError();
-    const Decision d = decide(name, true, access, disposition, flags);
+    const Decision d = decide_safely([&] { return decide(name, true, access, disposition, flags); });
     SetLastError(entry_error);
     const HANDLE h = real_create_w()(d.use ? d.shadow.c_str() : name, access, share, sa, disposition, flags, template_file);
     const DWORD error = GetLastError();
-    if (d.content || in_window())
-        emit(open_line(head("CreateFileW"), name ? name : L"", d.shadow, d.note, access, share, disposition, flags, h,
-                       error));
+    log_safely([&] {
+        if (d.content || in_window())
+            emit([&] {
+                return open_line(head("CreateFileW"), name ? name : L"", d.shadow, d.note, access, share, disposition,
+                                 flags, h, error);
+            });
+    });
     SetLastError(error);
     return h;
 }
@@ -179,105 +216,139 @@ inline HANDLE WINAPI create_file_w(LPCWSTR name, DWORD access, DWORD share, LPSE
 inline HANDLE WINAPI create_file_a(LPCSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disposition,
                                    DWORD flags, HANDLE template_file) {
     const DWORD entry_error = GetLastError();
-    const std::wstring wide = from_ansi(name);
-    const Decision d = name ? decide(wide.c_str(), true, access, disposition, flags) : Decision{};
+    std::wstring wide;
+    const Decision d = decide_safely([&] {
+        wide = from_ansi(name);
+        return name ? decide(wide.c_str(), true, access, disposition, flags) : Decision{};
+    });
     SetLastError(entry_error);
     const HANDLE h = d.use ? real_create_w()(d.shadow.c_str(), access, share, sa, disposition, flags, template_file)
-                     : g_state.real.CreateFileA
-                         ? g_state.real.CreateFileA(name, access, share, sa, disposition, flags, template_file)
+                     : state().real.CreateFileA
+                         ? state().real.CreateFileA(name, access, share, sa, disposition, flags, template_file)
                          : ::CreateFileA(name, access, share, sa, disposition, flags, template_file);
     const DWORD error = GetLastError();
-    if (d.content || in_window())
-        emit(open_line(head("CreateFileA"), wide, d.shadow, d.note, access, share, disposition, flags, h, error));
+    log_safely([&] {
+        if (d.content || in_window())
+            emit([&] {
+                return open_line(head("CreateFileA"), wide, d.shadow, d.note, access, share, disposition, flags, h, error);
+            });
+    });
     SetLastError(error);
     return h;
 }
 
 inline DWORD WINAPI get_file_attributes_w(LPCWSTR name) {
     const DWORD entry_error = GetLastError();
-    const Decision d = decide(name, false, 0, 0, 0);
+    const Decision d = decide_safely([&] { return decide(name, false, 0, 0, 0); });
     SetLastError(entry_error);
     const DWORD a = real_attrs_w()(d.use ? d.shadow.c_str() : name);
     const DWORD error = GetLastError();
-    if (d.content || in_window())
-        emit(attributes_line(head("GetFileAttributesW"), name ? name : L"", d.shadow, d.note, a, error));
+    log_safely([&] {
+        if (d.content || in_window())
+            emit([&] { return attributes_line(head("GetFileAttributesW"), name ? name : L"", d.shadow, d.note, a, error); });
+    });
     SetLastError(error);
     return a;
 }
 
 inline DWORD WINAPI get_file_attributes_a(LPCSTR name) {
     const DWORD entry_error = GetLastError();
-    const std::wstring wide = from_ansi(name);
-    const Decision d = name ? decide(wide.c_str(), false, 0, 0, 0) : Decision{};
+    std::wstring wide;
+    const Decision d = decide_safely([&] {
+        wide = from_ansi(name);
+        return name ? decide(wide.c_str(), false, 0, 0, 0) : Decision{};
+    });
     SetLastError(entry_error);
     const DWORD a = d.use                            ? real_attrs_w()(d.shadow.c_str())
-                    : g_state.real.GetFileAttributesA ? g_state.real.GetFileAttributesA(name)
+                    : state().real.GetFileAttributesA ? state().real.GetFileAttributesA(name)
                                                       : ::GetFileAttributesA(name);
     const DWORD error = GetLastError();
-    if (d.content || in_window()) emit(attributes_line(head("GetFileAttributesA"), wide, d.shadow, d.note, a, error));
+    log_safely([&] {
+        if (d.content || in_window())
+            emit([&] { return attributes_line(head("GetFileAttributesA"), wide, d.shadow, d.note, a, error); });
+    });
     SetLastError(error);
     return a;
 }
 
 inline BOOL WINAPI get_file_attributes_ex_w(LPCWSTR name, GET_FILEEX_INFO_LEVELS level, LPVOID info) {
     const DWORD entry_error = GetLastError();
-    const Decision d = decide(name, false, 0, 0, 0);
+    const Decision d = decide_safely([&] { return decide(name, false, 0, 0, 0); });
     SetLastError(entry_error);
-    const auto real = g_state.real.GetFileAttributesExW ? g_state.real.GetFileAttributesExW : &::GetFileAttributesExW;
+    const auto real = state().real.GetFileAttributesExW ? state().real.GetFileAttributesExW : &::GetFileAttributesExW;
     const BOOL ok = real(d.use ? d.shadow.c_str() : name, level, info);
     const DWORD error = GetLastError();
-    if (d.content || in_window())
-        emit(attributes_ex_line(head("GetFileAttributesExW"), name ? name : L"", d.shadow, d.note, static_cast<int>(level),
-                                ok != FALSE, static_cast<const WIN32_FILE_ATTRIBUTE_DATA*>(info), error));
+    log_safely([&] {
+        if (d.content || in_window())
+            emit([&] {
+                return attributes_ex_line(head("GetFileAttributesExW"), name ? name : L"", d.shadow, d.note,
+                                          static_cast<int>(level), ok != FALSE,
+                                          static_cast<const WIN32_FILE_ATTRIBUTE_DATA*>(info), error);
+            });
+    });
     SetLastError(error);
     return ok;
 }
 
 inline HANDLE WINAPI find_first_file_w(LPCWSTR pattern, LPWIN32_FIND_DATAW data) {
-    const auto real = g_state.real.FindFirstFileW ? g_state.real.FindFirstFileW : &::FindFirstFileW;
+    const auto real = state().real.FindFirstFileW ? state().real.FindFirstFileW : &::FindFirstFileW;
     const HANDLE h = real(pattern, data);
     const DWORD error = GetLastError();
-    if (in_window())
-        emit(find_first_line(head("FindFirstFileW"), pattern ? pattern : L"", "", h,
-                             h != INVALID_HANDLE_VALUE && data ? data->cFileName : L"", error));
+    log_safely([&] {
+        if (in_window())
+            emit([&] {
+                return find_first_line(head("FindFirstFileW"), pattern ? pattern : L"", "", h,
+                                       h != INVALID_HANDLE_VALUE && data ? data->cFileName : L"", error);
+            });
+    });
     SetLastError(error);
     return h;
 }
 
 inline HANDLE WINAPI find_first_file_ex_w(LPCWSTR pattern, FINDEX_INFO_LEVELS level, LPVOID data,
                                           FINDEX_SEARCH_OPS search, LPVOID filter, DWORD flags) {
-    const auto real = g_state.real.FindFirstFileExW ? g_state.real.FindFirstFileExW : &::FindFirstFileExW;
+    const auto real = state().real.FindFirstFileExW ? state().real.FindFirstFileExW : &::FindFirstFileExW;
     const HANDLE h = real(pattern, level, data, search, filter, flags);
     const DWORD error = GetLastError();
-    if (in_window()) {
-        char extra[64];
-        std::snprintf(extra, sizeof extra, "level=%d search=%d flags=0x%lx", static_cast<int>(level),
-                      static_cast<int>(search), static_cast<unsigned long>(flags));
-        const auto* found = static_cast<const WIN32_FIND_DATAW*>(data);
-        emit(find_first_line(head("FindFirstFileExW"), pattern ? pattern : L"", extra, h,
-                             h != INVALID_HANDLE_VALUE && found ? found->cFileName : L"", error));
-    }
+    log_safely([&] {
+        if (in_window())
+            emit([&] {
+                char extra[64];
+                std::snprintf(extra, sizeof extra, "level=%d search=%d flags=0x%lx", static_cast<int>(level),
+                              static_cast<int>(search), static_cast<unsigned long>(flags));
+                const auto* found = static_cast<const WIN32_FIND_DATAW*>(data);
+                return find_first_line(head("FindFirstFileExW"), pattern ? pattern : L"", extra, h,
+                                       h != INVALID_HANDLE_VALUE && found ? found->cFileName : L"", error);
+            });
+    });
     SetLastError(error);
     return h;
 }
 
 inline BOOL WINAPI find_next_file_w(HANDLE find, LPWIN32_FIND_DATAW data) {
-    const auto real = g_state.real.FindNextFileW ? g_state.real.FindNextFileW : &::FindNextFileW;
+    const auto real = state().real.FindNextFileW ? state().real.FindNextFileW : &::FindNextFileW;
     const BOOL ok = real(find, data);
     const DWORD error = GetLastError();
-    if (in_window())
-        emit(find_next_line(head("FindNextFileW"), find, ok != FALSE, ok && data ? data->cFileName : L"", error));
+    log_safely([&] {
+        if (in_window())
+            emit([&] {
+                return find_next_line(head("FindNextFileW"), find, ok != FALSE, ok && data ? data->cFileName : L"",
+                                      error);
+            });
+    });
     SetLastError(error);
     return ok;
 }
 
 inline BOOL WINAPI set_current_directory_w(LPCWSTR path) {
-    const auto real = g_state.real.SetCurrentDirectoryW ? g_state.real.SetCurrentDirectoryW : &::SetCurrentDirectoryW;
+    const auto real = state().real.SetCurrentDirectoryW ? state().real.SetCurrentDirectoryW : &::SetCurrentDirectoryW;
     const BOOL ok = real(path);
     const DWORD error = GetLastError();
-    // relative content paths depend on it: logged for as long as content files are
-    if (in_window() || g_state.sw.redirect_test)
-        emit(set_dir_line(head("SetCurrentDirectoryW"), path ? path : L"", ok != FALSE, error));
+    log_safely([&] {
+        // with redirect_test=1 relative content paths depend on it: then it is logged for as long as content files are
+        if (in_window() || state().sw.redirect_test)
+            emit([&] { return set_dir_line(head("SetCurrentDirectoryW"), path ? path : L"", ok != FALSE, error); });
+    });
     SetLastError(error);
     return ok;
 }
@@ -289,7 +360,7 @@ struct HookSpec {
 };
 
 inline std::vector<HookSpec> hook_specs() {
-    auto& r = g_state.real;
+    auto& r = state().real;
     return {
         {"CreateFileW", reinterpret_cast<void*>(&create_file_w), reinterpret_cast<void**>(&r.CreateFileW)},
         {"CreateFileA", reinterpret_cast<void*>(&create_file_a), reinterpret_cast<void**>(&r.CreateFileA)},
@@ -328,7 +399,7 @@ struct Installed {
 // Puts the hooks into `exe`'s import table (kernel32 and its API sets only); `state()` must be set up first. Each
 // original is kept before its slot changes.
 inline Installed install(HMODULE exe) {
-    auto& g = g_state;
+    auto& g = state();
     Installed out;
     if (!g.start_ms) g.start_ms = g.now_ms();
     const auto specs = hook_specs();
@@ -365,12 +436,12 @@ inline Installed install(HMODULE exe) {
 
 // Puts back what install() replaced. Only the tests do this: the loader keeps its hooks for the life of the game.
 inline void uninstall_for_test(HMODULE) {
-    for (const auto& [slot, before] : g_state.patched) patch_import_slot(slot, before);
-    g_state.patched.clear();
+    for (const auto& [slot, before] : state().patched) patch_import_slot(slot, before);
+    state().patched.clear();
 }
 
 inline void reset_for_test() {
-    auto& g = g_state;
+    auto& g = make_state();
     g.real = {};
     g.game_dir.clear();
     g.sw = {};
@@ -384,6 +455,12 @@ inline void reset_for_test() {
     g.now_ms = default_now;
     g.cwd = default_cwd;
     g.patched.clear();
+}
+
+// Drops the state, as before start(): only a test does this, with no hook in place.
+inline void discard_for_test() {
+    delete g_state;
+    g_state = nullptr;
 }
 
 inline std::string joined(const std::vector<std::string>& v) {
@@ -443,7 +520,7 @@ inline void close_log_for_test() {
 // The loader's whole step (DllMain, the game only, once the switches said yes): log file, hooks, header. Returns the
 // line for emf_loader.log.
 inline std::string start(HMODULE exe, const std::wstring& game_dir, const ContentSwitches& sw) {
-    auto& g = g_state;
+    auto& g = make_state();
     g.game_dir = normal_game_dir(game_dir).value_or(game_dir);
     g.sw = sw;
     const bool logging = open_log(path_join(g.game_dir, L"emf\\file_opens.log"));

@@ -188,9 +188,13 @@ void enable_vulkan_layer() {
 // own code runs (its entry point comes after every DllMain), so no hold of the entry point is needed; they stay for the
 // life of the game. After the chained DLLs: a hook one of them put into the same table is called through.
 void start_file_hooks(const std::wstring& dir) {
-    const auto sw = emf::loader::read_content_switches(dir + L"\\emf\\emf_core.ini");
-    if (!sw.hooks()) return;
-    loader_log(dir, emf::loader::file_hooks::start(GetModuleHandleW(nullptr), dir, sw).c_str());
+    try {  // no C++ exception leaves DllMain
+        const auto sw = emf::loader::read_content_switches(dir + L"\\emf\\emf_core.ini");
+        if (!sw.hooks()) return;
+        loader_log(dir, emf::loader::file_hooks::start(GetModuleHandleW(nullptr), dir, sw).c_str());
+    } catch (...) {
+        loader_log(dir, "content spike: could not start (out of memory); the game runs without it");
+    }
 }
 }  // namespace
 
