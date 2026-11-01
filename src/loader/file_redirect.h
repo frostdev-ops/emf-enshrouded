@@ -171,24 +171,43 @@ inline std::wstring with_verbatim_prefix(const std::wstring& abs) {
     return L"\\\\?\\" + abs;
 }
 
+// `dir` + "\" + `name`, without a second backslash after a root that has one already ("C:\").
+inline std::wstring path_join(const std::wstring& dir, std::wstring_view name) {
+    std::wstring out = dir;
+    if (!out.empty() && out.back() != L'\\') out += L'\\';
+    out.append(name);
+    return out;
+}
+
+// The game folder as the redirect compares it: absolute and normal (normalize_path). "C:", which the loader gets for
+// C:\enshrouded.exe (the exe's path up to its last backslash), is that drive's root "C:\". nullopt when it is not an
+// absolute path.
+inline std::optional<std::wstring> normal_game_dir(std::wstring_view dir) {
+    std::wstring d(dir);
+    if (d.size() == 2 && is_drive_letter(d[0]) && d[1] == L':') d += L'\\';
+    const auto n = normalize_path(d, L"");
+    if (!n) return std::nullopt;
+    return n->path;
+}
+
 // <game>\emf\content\client
 inline std::wstring shadow_folder(std::wstring_view game_dir) {
-    const auto g = normalize_path(game_dir, L"");
-    return g ? g->path + L"\\" + kShadowSubdir : std::wstring();
+    const auto g = normal_game_dir(game_dir);
+    return g ? path_join(*g, kShadowSubdir) : std::wstring();
 }
 
 // Where an open of `opened` goes with the redirect on: <game>\emf\content\client\<name> for a content file directly in
 // the game folder, "" for anything else. A \\?\ path stays one, and so does a result too long for a plain path.
 inline std::wstring shadow_path(std::wstring_view opened, std::wstring_view game_dir, std::wstring_view cwd) {
     const auto o = normalize_path(opened, cwd);
-    const auto g = normalize_path(game_dir, L"");
+    const auto g = normal_game_dir(game_dir);
     if (!o || !g) return {};
     const size_t slash = o->path.find_last_of(L'\\');
     if (slash == std::wstring::npos) return {};
     const std::wstring_view name = std::wstring_view(o->path).substr(slash + 1);
     if (!is_content_file_name(name)) return {};
-    if (!same_path(std::wstring_view(o->path).substr(0, slash), g->path)) return {};
-    std::wstring out = g->path + L"\\" + kShadowSubdir + L"\\" + std::wstring(name);
+    if (!same_path(std::wstring_view(o->path).substr(0, slash), *g)) return {};
+    std::wstring out = path_join(path_join(*g, kShadowSubdir), name);
     if (o->verbatim || out.size() >= MAX_PATH) out = with_verbatim_prefix(out);
     return out;
 }

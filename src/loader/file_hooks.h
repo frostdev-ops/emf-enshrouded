@@ -440,10 +440,9 @@ inline void close_log_for_test() {
 // line for emf_loader.log.
 inline std::string start(HMODULE exe, const std::wstring& game_dir, const ContentSwitches& sw) {
     auto& g = g_state;
-    const auto normal = normalize_path(game_dir, L"");
-    g.game_dir = normal ? normal->path : game_dir;
+    g.game_dir = normal_game_dir(game_dir).value_or(game_dir);
     g.sw = sw;
-    const bool logging = open_log(g.game_dir + L"\\emf\\file_opens.log");
+    const bool logging = open_log(path_join(g.game_dir, L"emf\\file_opens.log"));
     g.write = logging ? &write_log : nullptr;
     // before the hooks: in a module whose own imports are hooked (the tests) these calls would be logged
     const DWORD shadow = GetFileAttributesW(shadow_folder(g.game_dir).c_str());

@@ -99,6 +99,32 @@ TEST_CASE("redirect: a content file in the game folder maps to emf\\content\\cli
           L"\\\\?\\UNC\\nas\\games\\Enshrouded\\emf\\content\\client\\enshrouded.kfc");
 }
 
+TEST_CASE("redirect: a game folder at a drive root gives C:\\emf\\content\\client, never C:\\\\emf") {
+    using emf::loader::normal_game_dir;
+    using emf::loader::path_join;
+    using emf::loader::shadow_folder;
+    // the loader's game folder for C:\enshrouded.exe is "C:" (the exe's path up to its last backslash)
+    CHECK(normal_game_dir(L"C:").value_or(L"<none>") == L"C:\\");
+    CHECK(normal_game_dir(L"C:\\").value_or(L"<none>") == L"C:\\");
+    CHECK(normal_game_dir(L"C:\\Games\\Enshrouded\\").value_or(L"<none>") == L"C:\\Games\\Enshrouded");
+    CHECK(normal_game_dir(L"\\\\nas\\games").value_or(L"<none>") == L"\\\\nas\\games");
+    CHECK_FALSE(normal_game_dir(L"Games\\Enshrouded"));
+    CHECK_FALSE(normal_game_dir(L""));
+    CHECK(path_join(L"C:\\", L"emf") == L"C:\\emf");
+    CHECK(path_join(L"C:\\Games", L"emf") == L"C:\\Games\\emf");
+    CHECK(path_join(L"\\\\nas\\games", L"emf") == L"\\\\nas\\games\\emf");
+    CHECK(shadow_folder(L"C:\\") == L"C:\\emf\\content\\client");
+    CHECK(shadow_folder(L"C:") == L"C:\\emf\\content\\client");
+    CHECK(shadow_path(L"C:\\enshrouded.kfc", L"C:\\", L"") == L"C:\\emf\\content\\client\\enshrouded.kfc");
+    CHECK(shadow_path(L"C:\\enshrouded_003.dat", L"C:", L"") == L"C:\\emf\\content\\client\\enshrouded_003.dat");
+    CHECK(shadow_path(L"\\\\?\\C:\\enshrouded.kfc", L"C:\\", L"") == L"\\\\?\\C:\\emf\\content\\client\\enshrouded.kfc");
+    CHECK(shadow_path(L"enshrouded.kfc", L"C:\\", L"C:\\") == L"C:\\emf\\content\\client\\enshrouded.kfc");
+    CHECK(shadow_path(L"C:\\Games\\enshrouded.kfc", L"C:\\", L"").empty());
+    // a share's root as the game folder
+    CHECK(shadow_path(L"\\\\nas\\games\\enshrouded.kfc", L"\\\\nas\\games", L"") ==
+          L"\\\\nas\\games\\emf\\content\\client\\enshrouded.kfc");
+}
+
 TEST_CASE("redirect: other folders and other files are left alone") {
     CHECK(shadow_path(L"C:\\Games\\Enshrouded\\sub\\enshrouded.kfc", kGame, L"").empty());       // a subfolder
     CHECK(shadow_path(L"C:\\Games\\enshrouded.kfc", kGame, L"").empty());                        // the parent
