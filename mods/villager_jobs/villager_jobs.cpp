@@ -236,11 +236,12 @@ bool is_pickable(emf::World w, uint32_t id) {
 // What a plant's stage carries: a crop's harvest, or a planted tree to chop / a fruit tree that refills (work.h).
 jobs::StageParts stage_parts(emf::World w, uint32_t stage) {
     jobs::StageParts p;
+    p.interaction_offer = has<gen::ecs::InteractionOfferRuntime>(w, stage);
     p.destroy_on_loot = has<gen::ecs::DestroyOnLoot>(w, stage);
     p.default_inventory = has<gen::ecs::DefaultInventory>(w, stage);
     p.mining_node = has<gen::ecs::MiningNode>(w, stage);
     p.health = has<gen::ecs::Health>(w, stage);
-    p.inventory_setup = has<gen::ecs::InventorySetup>(w, stage);
+    p.container = has<gen::ecs::InventorySetup>(w, stage) || has<gen::ecs::Inventory>(w, stage);
     return p;
 }
 

@@ -1268,8 +1268,11 @@ TEST_CASE("farm: a planted tree near the chest is never targeted; the crop is fa
 
 TEST_CASE("farm: only a crop's harvest stage is farmed, not a grown tree, a plant that is mined or a fruit tree that refills") {
     StageParts crop;  // T1_Plant_Growth_Tomato_Seedling_2_harvest and every crop's last stage (mushrooms too)
-    crop.destroy_on_loot = crop.default_inventory = true;
+    crop.interaction_offer = crop.destroy_on_loot = crop.default_inventory = true;
     CHECK(harvestable_stage(crop));
+    StageParts no_offer = crop;  // the game's loot refuses a host without an interaction offer
+    no_offer.interaction_offer = false;
+    CHECK_FALSE(harvestable_stage(no_offer));
     StageParts mined = crop;  // chopped or mined (a grown tree, aloe's harvest)
     mined.mining_node = true;
     CHECK_FALSE(harvestable_stage(mined));
@@ -1277,10 +1280,10 @@ TEST_CASE("farm: only a crop's harvest stage is farmed, not a grown tree, a plan
     chopped.health = true;
     CHECK_FALSE(harvestable_stage(chopped));
     StageParts refill;  // ..._fruits_harvest_PlayerPlanted_Refill: date palm, coconut, banana, coffee, hazelnut
-    refill.inventory_setup = refill.mining_node = true;
+    refill.container = refill.mining_node = refill.interaction_offer = true;
     CHECK_FALSE(harvestable_stage(refill));
-    StageParts container = crop;
-    container.inventory_setup = true;
+    StageParts container = crop;  // a loot moves its slots instead of rolling its loot table
+    container.container = true;
     CHECK_FALSE(harvestable_stage(container));
     StageParts no_loot;  // removed on loot, but nothing to roll
     no_loot.destroy_on_loot = true;
