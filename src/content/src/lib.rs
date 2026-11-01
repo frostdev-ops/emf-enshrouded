@@ -4,13 +4,15 @@
 //! `ModEnvironment::load` and `mod_loader::lua::run`. The request and the reply are UTF-8 JSON; log lines go to a
 //! callback. The ABI is in `emf_content.h`; README.md has the rules for loading the DLL.
 //!
-//! Nothing outlives a call: no panic leaves an export, no thread is started, and the log subscriber is set only for
-//! the length of the call (never a global one). The reply goes into the caller's buffer, so no memory crosses.
+//! Nothing outlives a call: no panic leaves an export, no thread is started (and EML's image crate is built without
+//! rayon, patch P3), the log subscriber and a panic hook are set only for the length of the call, and the reply goes
+//! into the caller's buffer, so no memory crosses. Calls are one at a time.
 
 use std::ffi::{CStr, c_char, c_int, c_void};
 use std::io;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::path::Path;
+use std::sync::{Mutex, TryLockError};
 use std::time::Instant;
 
 use mod_loader::ModEnvironment;
@@ -39,7 +41,7 @@ pub struct Logger {
 }
 
 // The callback is only ever called on the thread that called emf_content_build, while that call runs; tracing's
-// writer traits want Send + Sync all the same.
+// writer traits and the panic hook want Send + Sync all the same.
 unsafe impl Send for Logger {}
 unsafe impl Sync for Logger {}
 
@@ -52,14 +54,16 @@ impl Logger {
         Logger { callback: None, ctx: std::ptr::null_mut() }
     }
 
+    /// Sends `text` line by line, without control characters (tab stays): a mod's text cannot move a console's
+    /// cursor or colour the log it lands in.
     fn send(&self, level: c_int, text: &str) {
         let Some(callback) = self.callback else { return };
         for line in text.split('\n') {
-            let line = line.trim_end_matches('\r');
+            let line: String = line.chars().filter(|&c| c == '\t' || (c as u32) >= 0x20).collect();
             if line.is_empty() {
                 continue;
             }
-            let mut bytes = line.replace('\0', " ").into_bytes();
+            let mut bytes = line.into_bytes();
             bytes.push(0);
             // SAFETY: the caller promises the callback and its context are valid for the whole call.
             unsafe { callback(self.ctx, level, bytes.as_ptr() as *const c_char) };
@@ -125,6 +129,9 @@ struct Request {
     force: bool,
     #[serde(default)]
     server: Option<bool>,
+    /// For tests only: the call panics with this message, so the PANIC path can be tested through the built DLL.
+    #[serde(default)]
+    test_panic: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -140,12 +147,18 @@ struct ModErrorInfo {
     error: String,
 }
 
-#[derive(Serialize, Default)]
+#[derive(Serialize, Deserialize, Default)]
 struct Reply {
     code: i32,
     message: String,
+    /// Only in a reply cut to fit the caller's buffer.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    truncated: bool,
+    #[serde(skip_deserializing)]
     mods: Vec<ModInfo>,
+    #[serde(skip_deserializing)]
     mod_errors: Vec<ModErrorInfo>,
+    #[serde(skip_deserializing)]
     dlls: Vec<String>,
     ms: u64,
 }
@@ -180,6 +193,36 @@ fn resolve_file_name(game_dir: &Path, requested: Option<String>) -> String {
     first.unwrap_or_else(|| "enshrouded".to_string())
 }
 
+#[repr(C)]
+#[derive(Default)]
+struct ByHandleFileInformation {
+    attributes: u32,
+    creation_time: [u32; 2],
+    last_access_time: [u32; 2],
+    last_write_time: [u32; 2],
+    volume_serial_number: u32,
+    size_high: u32,
+    size_low: u32,
+    number_of_links: u32,
+    index_high: u32,
+    index_low: u32,
+}
+
+#[link(name = "kernel32")]
+unsafe extern "system" {
+    fn GetFileInformationByHandle(file: *mut c_void, info: *mut ByHandleFileInformation) -> i32;
+}
+
+/// How many names the file at `path` has (more than 1: a hard link), or None when it cannot be opened.
+fn link_count(path: &Path) -> Option<u32> {
+    use std::os::windows::io::AsRawHandle;
+    let file = std::fs::File::open(path).ok()?;
+    let mut info = ByHandleFileInformation::default();
+    // SAFETY: a valid open handle and a struct laid out as BY_HANDLE_FILE_INFORMATION.
+    let ok = unsafe { GetFileInformationByHandle(file.as_raw_handle() as *mut c_void, &mut info) };
+    (ok != 0).then_some(info.number_of_links)
+}
+
 fn sorted_mods(env: &ModEnvironment) -> Vec<ModInfo> {
     let mut mods: Vec<ModInfo> = env
         .mod_registry()
@@ -192,6 +235,9 @@ fn sorted_mods(env: &ModEnvironment) -> Vec<ModInfo> {
 
 /// The build itself, inside the call's log subscriber.
 fn build(request: Request) -> Reply {
+    if let Some(message) = request.test_panic {
+        panic!("{message}");
+    }
     let game_dir = Path::new(&request.game_dir);
     tracing::info!(target: "emf::content", "Building the content of the EML mods in {}", request.game_dir);
 
@@ -205,6 +251,19 @@ fn build(request: Request) -> Reply {
         let message = format!("No {file_name}.kfc or {file_name}.exe in {}", request.game_dir);
         tracing::error!(target: "emf::content", "{message}");
         return Reply::failed(RUN_FAILED, message);
+    }
+    // EML writes these three in place: through a hard link it would change the linked file (the game's own) too.
+    for ext in ["kfc", "kfc_resources", "kfc.bak"] {
+        let name = format!("{file_name}.{ext}");
+        if let Some(links) = link_count(&game_dir.join(&name)).filter(|&n| n > 1) {
+            let message = format!(
+                "{name} in {} is a hard link ({links} names): EML writes it in place and would change the linked \
+                 file too. It must be a copy of its own.",
+                request.game_dir
+            );
+            tracing::error!(target: "emf::content", "{message}");
+            return Reply::failed(RUN_FAILED, message);
+        }
     }
 
     let env = match ModEnvironment::load(request.game_dir.as_str()) {
@@ -279,40 +338,82 @@ pub fn build_json(request_json: &str, logger: Logger) -> (i32, String) {
     (reply.code, reply.to_json())
 }
 
+fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
+    payload
+        .downcast_ref::<&str>()
+        .map(|s| s.to_string())
+        .or_else(|| payload.downcast_ref::<String>().cloned())
+        .unwrap_or_else(|| "(no message)".to_string())
+}
+
 /// Runs `f` and turns a panic into a PANIC reply that carries the panic's message.
 pub fn guarded<F: FnOnce() -> (i32, String)>(f: F) -> (i32, String) {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(result) => result,
         Err(payload) => {
-            let text = payload
-                .downcast_ref::<&str>()
-                .map(|s| s.to_string())
-                .or_else(|| payload.downcast_ref::<String>().cloned())
-                .unwrap_or_else(|| "(no message)".to_string());
+            let text = panic_text(payload.as_ref());
             (PANIC, Reply::failed(PANIC, format!("emf_content panicked: {text}")).to_json())
         }
     }
 }
 
-/// Copies `json` and a NUL into the caller's buffer. `*reply_len` always gets the length with the NUL; a buffer that
-/// is too small (or NULL) gets nothing and the result is REPLY_TOO_SMALL.
+/// The panic hook for the length of one call: the message and its place go to the caller's log (not to stderr, and
+/// with no backtrace to symbolise).
+fn log_panic(logger: Logger, info: &std::panic::PanicHookInfo<'_>) {
+    let place = info.location().map(|l| format!(" at {}:{}:{}", l.file(), l.line(), l.column())).unwrap_or_default();
+    logger.send(0, &format!("emf::content: panicked{place}: {}", panic_text(info.payload())));
+}
+
+/// A reply that fits `cap` bytes with its NUL: the real code and ms, `"truncated": true`, no lists, and as much of
+/// the message as fits. None when even an empty message does not fit.
+fn cut_reply(json: &str, cap: usize) -> Option<String> {
+    let full: Reply = serde_json::from_str(json).ok()?;
+    let mut cut = Reply { code: full.code, message: full.message, truncated: true, ms: full.ms, ..Default::default() };
+    loop {
+        let text = cut.to_json();
+        if text.len() < cap {
+            return Some(text);
+        }
+        if cut.message.is_empty() {
+            return None;
+        }
+        let over = text.len() + 1 - cap;
+        let mut keep = cut.message.len().saturating_sub(over);
+        while !cut.message.is_char_boundary(keep) {
+            keep -= 1;
+        }
+        cut.message.truncate(keep);
+    }
+}
+
+/// Copies the reply and a NUL into the caller's buffer and gives the call's result. `*reply_len` always gets the
+/// full reply's length with the NUL. When the full reply does not fit, a cut one (cut_reply) goes in and the call
+/// still gives `code`; when not even that fits (or `reply` is NULL), nothing is written: REPLY_TOO_SMALL.
 ///
 /// # Safety
-/// `reply` is NULL or points to `reply_cap` writable bytes; `reply_len` is NULL or points to a writable size_t.
-pub unsafe fn write_reply(json: &str, reply: *mut c_char, reply_cap: usize, reply_len: *mut usize) -> Result<(), i32> {
-    let needed = json.len() + 1;
-    if !reply_len.is_null() {
-        unsafe { *reply_len = needed };
+/// `reply` is NULL or points to `reply_cap` writable bytes; `reply_len` points to a writable size_t.
+unsafe fn write_reply(json: &str, code: i32, reply: *mut c_char, reply_cap: usize, reply_len: *mut usize) -> i32 {
+    unsafe { *reply_len = json.len() + 1 };
+    if reply.is_null() {
+        return REPLY_TOO_SMALL;
     }
-    if reply.is_null() || reply_cap < needed {
-        return Err(REPLY_TOO_SMALL);
-    }
+    let text = if json.len() < reply_cap {
+        json.to_string()
+    } else {
+        match cut_reply(json, reply_cap) {
+            Some(cut) => cut,
+            None => return REPLY_TOO_SMALL,
+        }
+    };
     unsafe {
-        std::ptr::copy_nonoverlapping(json.as_ptr(), reply as *mut u8, json.len());
-        *reply.add(json.len()) = 0;
+        std::ptr::copy_nonoverlapping(text.as_ptr(), reply as *mut u8, text.len());
+        *reply.add(text.len()) = 0;
     }
-    Ok(())
+    code
 }
+
+/// One call at a time: the call swaps the process's panic hook, and EML's state is not made for two runs at once.
+static CALL: Mutex<()> = Mutex::new(());
 
 /// The ABI version: 1.
 #[unsafe(no_mangle)]
@@ -338,19 +439,37 @@ pub unsafe extern "C" fn emf_content_build(
         return BAD_REQUEST;
     }
     let outcome = catch_unwind(AssertUnwindSafe(|| {
-        let (code, json) = guarded(|| {
-            if request_json.is_null() {
-                return (BAD_REQUEST, Reply::failed(BAD_REQUEST, "The request is NULL").to_json());
+        let turn = match CALL.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        };
+        let (code, json) = match turn {
+            None => {
+                let message = "emf_content_build is already running: one call at a time, never from the log callback";
+                (BAD_REQUEST, Reply::failed(BAD_REQUEST, message).to_json())
             }
-            match unsafe { CStr::from_ptr(request_json) }.to_str() {
-                Ok(text) => build_json(text, Logger::new(log, log_ctx)),
-                Err(e) => (BAD_REQUEST, Reply::failed(BAD_REQUEST, format!("The request is not UTF-8: {e}")).to_json()),
+            Some(_turn) => {
+                let logger = Logger::new(log, log_ctx);
+                let previous = std::panic::take_hook();
+                std::panic::set_hook(Box::new(move |info| log_panic(logger, info)));
+                let result = guarded(|| {
+                    if request_json.is_null() {
+                        return (BAD_REQUEST, Reply::failed(BAD_REQUEST, "The request is NULL").to_json());
+                    }
+                    match unsafe { CStr::from_ptr(request_json) }.to_str() {
+                        Ok(text) => build_json(text, logger),
+                        Err(e) => {
+                            (BAD_REQUEST, Reply::failed(BAD_REQUEST, format!("The request is not UTF-8: {e}")).to_json())
+                        }
+                    }
+                });
+                drop(std::panic::take_hook());
+                std::panic::set_hook(previous);
+                result
             }
-        });
-        match unsafe { write_reply(&json, reply, reply_cap, reply_len) } {
-            Ok(()) => code,
-            Err(too_small) => too_small,
-        }
+        };
+        unsafe { write_reply(&json, code, reply, reply_cap, reply_len) }
     }));
     outcome.unwrap_or(PANIC)
 }
@@ -405,15 +524,40 @@ mod tests {
     }
 
     /// Calls the exported function the way C does, with a reply buffer of `cap` bytes.
-    fn call_export(request: &str, cap: usize, fill: u8) -> (i32, Vec<u8>, usize) {
+    /// The export takes one call at a time and swaps the process's panic hook for its length, so the tests that call
+    /// it, or panic, take turns.
+    static EXPORT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    fn export_turn() -> std::sync::MutexGuard<'static, ()> {
+        EXPORT_LOCK.lock().unwrap_or_else(|e| e.into_inner())
+    }
+
+    fn call_export_logged(
+        request: &str,
+        cap: usize,
+        fill: u8,
+        log: Option<&mut Vec<(i32, String)>>,
+    ) -> (i32, Vec<u8>, usize) {
         let request = std::ffi::CString::new(request).unwrap();
         let mut buf = vec![fill; cap];
         let mut len = 0usize;
         let ptr = if cap == 0 { std::ptr::null_mut() } else { buf.as_mut_ptr() as *mut c_char };
-        let code = unsafe {
-            emf_content_build(request.as_ptr(), None, std::ptr::null_mut(), ptr, cap, &mut len)
+        let (callback, ctx): (LogFn, *mut c_void) = match log {
+            Some(lines) => (Some(collect), lines as *mut _ as *mut c_void),
+            None => (None, std::ptr::null_mut()),
         };
+        let code = unsafe { emf_content_build(request.as_ptr(), callback, ctx, ptr, cap, &mut len) };
         (code, buf, len)
+    }
+
+    fn call_export(request: &str, cap: usize, fill: u8) -> (i32, Vec<u8>, usize) {
+        let _turn = export_turn();
+        call_export_logged(request, cap, fill, None)
+    }
+
+    fn reply_text(buf: &[u8], len: usize) -> &str {
+        assert_eq!(buf[len - 1], 0, "the reply ends with a NUL");
+        std::str::from_utf8(&buf[..len - 1]).unwrap()
     }
 
     #[test]
@@ -476,6 +620,7 @@ mod tests {
 
     #[test]
     fn panic_is_caught() {
+        let _turn = export_turn();
         let (code, reply) = guarded(|| panic!("x marks the panic"));
         assert_eq!(code, PANIC);
         let reply = parse(&reply);
@@ -515,6 +660,116 @@ mod tests {
         let eml_error = lines.iter().find(|(level, line)| *level == 0 && line.starts_with("eml::"));
         assert!(eml_error.is_some(), "an error line from EML itself: {lines:?}");
         assert!(eml_error.unwrap().1.contains("enshrouded.exe"), "{lines:?}");
+    }
+
+    #[test]
+    fn hard_linked_kfc_files_are_refused() {
+        // EML writes the .kfc, .kfc_resources and .kfc.bak in place: through a link it would change another file.
+        for name in ["enshrouded.kfc", "enshrouded.kfc_resources", "enshrouded.kfc.bak"] {
+            let dir = TempDir::new("linked");
+            std::fs::write(dir.0.join("enshrouded.exe"), b"MZ but not a game").unwrap();
+            let original = dir.0.join("original.bin");
+            std::fs::write(&original, b"GAME DATA").unwrap();
+            std::fs::hard_link(&original, dir.0.join(name)).unwrap();
+            let (code, reply) = build_json(&request_for(dir.utf8()), Logger::none());
+            assert_eq!(code, RUN_FAILED, "{name}");
+            let message = parse(&reply)["message"].as_str().unwrap().to_string();
+            assert!(message.contains(name) && message.contains("link"), "{name}: {message}");
+            assert!(!dir.0.join("mods").exists(), "{name}: EML must not run");
+            assert_eq!(std::fs::read(&original).unwrap(), b"GAME DATA");
+        }
+    }
+
+    #[test]
+    fn a_panic_reaches_the_log_with_its_place() {
+        let _turn = export_turn();
+        let mut lines: Vec<(i32, String)> = Vec::new();
+        let request = serde_json::json!({ "game_dir": "unused", "test_panic": "boom for the test" }).to_string();
+        let (code, buf, len) = call_export_logged(&request, 64 * 1024, 0, Some(&mut lines));
+        assert_eq!(code, PANIC);
+        let reply = parse(reply_text(&buf, len));
+        assert!(reply["message"].as_str().unwrap().contains("boom for the test"));
+        let line = lines.iter().find(|(level, line)| *level == 0 && line.contains("boom for the test"));
+        assert!(line.is_some_and(|(_, l)| l.contains("lib.rs:")), "the log names the place: {lines:?}");
+    }
+
+    #[test]
+    fn the_callers_panic_hook_is_back_after_a_call() {
+        let _turn = export_turn();
+        static OURS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+        let previous = std::panic::take_hook();
+        std::panic::set_hook(Box::new(|_| {
+            OURS.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }));
+        let request = serde_json::json!({ "game_dir": "unused", "test_panic": "inside" }).to_string();
+        let (code, _, _) = call_export_logged(&request, 64 * 1024, 0, None);
+        let during = OURS.load(std::sync::atomic::Ordering::SeqCst);
+        let _ = std::panic::catch_unwind(|| panic!("after the call"));
+        let after = OURS.load(std::sync::atomic::Ordering::SeqCst);
+        std::panic::set_hook(previous);
+        assert_eq!(code, PANIC);
+        assert_eq!(during, 0, "the call's own hook took its panic");
+        assert_eq!(after, 1, "the caller's hook is back");
+    }
+
+    #[test]
+    fn a_call_from_inside_the_log_callback_is_refused() {
+        let _turn = export_turn();
+        unsafe extern "C" fn call_again(ctx: *mut c_void, _level: c_int, _line: *const c_char) {
+            let inner = unsafe { &mut *(ctx as *mut Vec<(i32, String)>) };
+            if !inner.is_empty() {
+                return;
+            }
+            let request = std::ffi::CString::new("{\"game_dir\": \"unused\"}").unwrap();
+            let mut buf = vec![0u8; 4096];
+            let mut len = 0usize;
+            let code = unsafe {
+                emf_content_build(request.as_ptr(), None, std::ptr::null_mut(), buf.as_mut_ptr() as *mut c_char,
+                    buf.len(), &mut len)
+            };
+            let text = if len > 0 && len <= buf.len() {
+                String::from_utf8_lossy(&buf[..len - 1]).into_owned()
+            } else {
+                String::new()
+            };
+            inner.push((code, text));
+        }
+        let dir = TempDir::new("reentry");
+        let mut inner: Vec<(i32, String)> = Vec::new();
+        let request = std::ffi::CString::new(request_for(dir.utf8())).unwrap();
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut len = 0usize;
+        let code = unsafe {
+            emf_content_build(request.as_ptr(), Some(call_again), &mut inner as *mut _ as *mut c_void,
+                buf.as_mut_ptr() as *mut c_char, buf.len(), &mut len)
+        };
+        assert_eq!(code, RUN_FAILED, "the outer call goes on");
+        assert_eq!(inner.len(), 1);
+        assert_eq!(inner[0].0, BAD_REQUEST, "{:?}", inner[0].1);
+        assert!(inner[0].1.contains("already"), "{:?}", inner[0].1);
+    }
+
+    #[test]
+    fn a_reply_cut_to_fit_keeps_the_real_code() {
+        let dir = TempDir::new("cut");
+        let request = request_for(dir.utf8());
+        let (code, buf, len) = call_export(&request, 120, b'#');
+        assert_eq!(code, RUN_FAILED);
+        assert!(len > 120, "the full length: {len}");
+        let end = buf.iter().position(|&b| b == 0).expect("a NUL inside the buffer");
+        let reply = parse(std::str::from_utf8(&buf[..end]).unwrap());
+        assert_eq!(reply["code"], RUN_FAILED);
+        assert_eq!(reply["truncated"], true);
+        assert!(reply["message"].as_str().unwrap().starts_with("No enshrouded.kfc"));
+        assert!(reply["mods"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn control_characters_are_dropped_from_log_lines() {
+        let mut lines: Vec<(i32, String)> = Vec::new();
+        let logger = Logger::new(Some(collect), &mut lines as *mut _ as *mut c_void);
+        logger.send(2, "a\u{1b}[31mb\u{7}\tc\0d\r\nnext");
+        assert_eq!(lines, vec![(2, "a[31mb\tcd".to_string()), (2, "next".to_string())]);
     }
 
     #[test]

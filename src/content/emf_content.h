@@ -25,15 +25,23 @@ int32_t emf_content_build(const char* request_json, emf_content_log_fn log, void
       "server": null}
    file_name is optional (enshrouded or enshrouded_server when its .kfc or .exe is there, else the first .kfc or .exe);
    force rebuilds even when nothing changed; server is optional (null: EML decides from the file name). The run
-   always patches, never exports and never registers runtime DLLs. log may be NULL; it is called only on the calling
-   thread, during the call.
+   always patches, never exports and never registers runtime DLLs. For tests only, "test_panic": "<message>" makes
+   the call panic with that message (it gives EMF_CONTENT_PANIC).
+
+   log may be NULL. It is called only on the calling thread, during the call. It must return normally: no C++
+   exception and no longjmp may leave it.
+
+   One call at a time: a call made while another runs (from another thread, or from inside the log callback) gives
+   EMF_CONTENT_BAD_REQUEST at once. Call emf_content_build and FreeLibrary on the same thread.
 
    reply: a NUL-terminated UTF-8 JSON
      {"code": n, "message": "...", "mods": [{"id": "...", "version": "..."}],
       "mod_errors": [{"id": "..." or null, "path": "...", "error": "..."}], "dlls": ["..."], "ms": n}
-   *reply_len is always set to the reply's byte length with the NUL (reply_len must not be NULL: BAD_REQUEST).
-   When reply_cap < *reply_len the call returns EMF_CONTENT_REPLY_TOO_SMALL and writes nothing; a retry with that
-   size runs the build again, so pass a big buffer (64 KB). reply may be NULL when reply_cap is 0. */
+   *reply_len is always set to the full reply's byte length with the NUL (reply_len must not be NULL: BAD_REQUEST).
+   When reply_cap < *reply_len, the reply is cut to fit: it keeps the real code and ms, adds "truncated": true, has
+   empty lists and as much of the message as fits, and the call still returns the real code. Only when not even that
+   fits (about 100 bytes), or reply is NULL, does the call return EMF_CONTENT_REPLY_TOO_SMALL and write nothing; the
+   build has run then and its result is unknown. Pass a big buffer (1 MB). */
 
 #ifdef __cplusplus
 }
