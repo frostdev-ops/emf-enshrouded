@@ -157,6 +157,38 @@ TEST_CASE("console UI: suggestions show as you type, with ghost text; Tab takes 
     CHECK(r.ui.suggester.current().hint.empty());
 }
 
+TEST_CASE("console UI: the frame Tab takes a row already has the new line's suggestions, not the old list and ghost") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.frame();
+    r.frame();
+    r.type("lo");
+    REQUIRE(r.ui.wants_escape);
+    ImGuiIO& io = ImGui::GetIO();
+    io.AddKeyEvent(ImGuiKey_Tab, true);
+    r.frame();
+    CHECK(r.ui.input == "loot.status ");
+    CHECK_FALSE(r.ui.suggester.showing());     // loot.status takes nothing: no rows
+    CHECK(r.ui.suggester.ghost().empty());     // not "ot.status" after "loot.status "
+    CHECK_FALSE(r.ui.wants_escape);            // so the next Esc closes the console
+    CHECK_FALSE(r.ui.suggester.current().hint.empty());  // the hint line of loot.status at once
+    io.AddKeyEvent(ImGuiKey_Tab, false);
+    r.frame();
+    r.press(ImGuiKey_Enter);
+    r.frame();  // the input line takes the keyboard again
+    r.type("loot.t");
+    REQUIRE(r.ui.suggester.showing());
+    io.AddKeyEvent(ImGuiKey_RightArrow, true);  // Right at the end: the same at once
+    r.frame();
+    CHECK(r.ui.input == "loot.toggle ");
+    REQUIRE(r.ui.suggester.current().rows.size() == 2);  // [on|off]
+    CHECK(r.ui.suggester.current().rows[0].label == "on");
+    CHECK(r.ui.suggester.ghost() == "on");
+    io.AddKeyEvent(ImGuiKey_RightArrow, false);
+    r.frame();
+}
+
 TEST_CASE("console UI: Right takes the suggestion only at the end of the line; elsewhere it moves the caret") {
     Headless h;
     Rig r;

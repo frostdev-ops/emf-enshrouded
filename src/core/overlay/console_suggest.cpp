@@ -384,6 +384,10 @@ void Suggester::update(std::string_view line, size_t caret, const CompletionSour
         hidden_ = false;  // typing shows the list again
     }
     caret_ = (std::min)(caret, text_.size());
+    compute(src);
+}
+
+void Suggester::compute(const CompletionSources& src) {
     version_ = src.version;
     stale_ = false;
     now_ = suggest(text_, caret_, src, rows_);
@@ -414,20 +418,19 @@ bool Suggester::escape() {
     return true;
 }
 
-std::optional<LineEdit> Suggester::accept() {
+std::optional<LineEdit> Suggester::accept(const CompletionSources& src) {
     if (now_.rows.empty()) return std::nullopt;
     LineEdit e = take_row(text_, now_, (std::min)(selected_, now_.rows.size() - 1));
     text_ = e.text;  // the input gets this line: not an edit of the player's, the list stays
     caret_ = e.caret;
     hidden_ = false;
-    stale_ = true;
-    selected_ = 0;
+    compute(src);  // at once: the rest of this frame shows the new line's list and ghost, not the old ones
     return e;
 }
 
-std::optional<LineEdit> Suggester::accept_right() {
+std::optional<LineEdit> Suggester::accept_right(const CompletionSources& src) {
     if (!showing() || caret_ != text_.size()) return std::nullopt;
-    return accept();
+    return accept(src);
 }
 
 void Suggester::clear() {

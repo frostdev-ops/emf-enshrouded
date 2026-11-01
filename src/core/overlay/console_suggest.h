@@ -107,12 +107,16 @@ public:
     void replaced(std::string_view line, size_t caret);
     // True when it hid the list; false when none showed (Esc closes the console then).
     bool escape();
-    std::optional<LineEdit> accept();        // Tab
-    std::optional<LineEdit> accept_right();  // Right
-    void clear();                            // the line was sent
+    // Tab and Right: the line with the selected row taken. The suggestions for that line are worked out at once (from
+    // `src`), so the list, the ghost and showing() fit the new line in the same frame.
+    std::optional<LineEdit> accept(const CompletionSources& src);        // Tab
+    std::optional<LineEdit> accept_right(const CompletionSources& src);  // Right
+    void clear();                                                        // the line was sent
     uint64_t computed() const { return computed_; }  // how often the suggestions were worked out (tests)
 
 private:
+    void compute(const CompletionSources& src);
+
     size_t rows_ = 8;
     std::string text_;
     size_t caret_ = 0;

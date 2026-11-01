@@ -144,7 +144,7 @@ int input_callback(ImGuiInputTextCallbackData* d) {
     switch (d->EventFlag) {
         case ImGuiInputTextFlags_CallbackCompletion: {
             if (ui.suggest) {
-                if (const auto e = ui.suggester.accept()) {  // Tab takes the highlighted suggestion
+                if (const auto e = ui.suggester.accept(*c->sources)) {  // Tab takes the highlighted suggestion
                     set_line(d, *e);
                     ui.completions.clear();
                     break;
@@ -190,7 +190,7 @@ int input_callback(ImGuiInputTextCallbackData* d) {
             break;
         default:
             if (ui.suggest && ui.accept_right)  // Right at the end of the line takes the suggestion
-                if (const auto e = ui.suggester.accept_right()) set_line(d, *e);
+                if (const auto e = ui.suggester.accept_right(*c->sources)) set_line(d, *e);
             break;
     }
     ui.caret = static_cast<size_t>(d->CursorPos);

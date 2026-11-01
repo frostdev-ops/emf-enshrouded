@@ -398,7 +398,7 @@ TEST_CASE("Suggester: Tab takes the selected row (also while hidden), Right only
     const auto src = sources();
     Suggester g;
     g.update("loot.t", 6, src);
-    auto e = g.accept();
+    auto e = g.accept(src);
     REQUIRE(e);
     CHECK(e->text == "loot.toggle ");
     CHECK(e->caret == 12);
@@ -409,26 +409,48 @@ TEST_CASE("Suggester: Tab takes the selected row (also while hidden), Right only
     REQUIRE(g.current().rows.size() == 2);
     CHECK(g.current().rows[1].label == "off");
     CHECK(g.move(+1));
-    e = g.accept_right();
+    e = g.accept_right(src);
     REQUIRE(e);
     CHECK(e->text == "loot.toggle off ");
     g.update("loot.toggle off ", 16, src);
-    CHECK_FALSE(g.accept());  // no rows
-    CHECK_FALSE(g.accept_right());
+    CHECK_FALSE(g.accept(src));  // no rows
+    CHECK_FALSE(g.accept_right(src));
 
     g.update("lo", 2, src);
     g.escape();
-    CHECK_FALSE(g.accept_right());  // hidden: Right just moves the caret
-    e = g.accept();                 // Tab still completes
+    CHECK_FALSE(g.accept_right(src));  // hidden: Right just moves the caret
+    e = g.accept(src);                 // Tab still completes
     REQUIRE(e);
     CHECK(e->text == "loot.status ");
 
     g.update("lo 5", 2, src);  // the caret is not at the end of the line
     REQUIRE(g.showing());
-    CHECK_FALSE(g.accept_right());
-    e = g.accept();
+    CHECK_FALSE(g.accept_right(src));
+    e = g.accept(src);
     REQUIRE(e);
     CHECK(e->text == "loot.status 5");
+}
+
+TEST_CASE("Suggester: taking a row works out the new line's suggestions at once, with no old list or ghost left over") {
+    const auto src = sources();
+    Suggester g;
+    g.update("lo", 2, src);
+    REQUIRE(g.ghost() == "ot.status");
+    auto e = g.accept(src);
+    REQUIRE(e);
+    CHECK(e->text == "loot.status ");
+    CHECK_FALSE(g.showing());  // loot.status takes nothing
+    CHECK(g.ghost().empty());  // not "ot.status" again after "loot.status "
+    CHECK(shown(g.current()) == "loot.status: is your Loot Magnet on, and its rules");
+    g.update("loot.t", 6, src);
+    e = g.accept_right(src);
+    REQUIRE(e);
+    CHECK(labels(g.current()) == std::vector<std::string>{"on", "off"});
+    CHECK(g.ghost() == "on");
+    const uint64_t n = g.computed();
+    g.update(e->text, e->caret, src);  // the input now has that line: nothing to work out again
+    CHECK(g.computed() == n);
+    CHECK(g.ghost() == "on");
 }
 
 TEST_CASE("Suggester: works out the suggestions only when the line, the caret or the sources change") {
