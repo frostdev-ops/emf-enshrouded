@@ -327,7 +327,9 @@ wild pickables around a chest.
    - **Farm the crops here (N plants, M ripe)**: the villager walks to each fully grown plant within 20 m of the chest
      and harvests it straight into the chest (the game's own loot roll); the plant then grows again from a seedling,
      so the field stays planted (no seed is used). Plants still growing, or capped with the game's growth limit, are
-     left alone. In the test a villager harvested three tomato plants (2 tomatoes each) and all three regrew.
+     left alone, and so are trees you planted (you chop those) and planted fruit trees and nut bushes whose fruit
+     grows back on the plant: the wheel counts only the crops it will farm. In the test a villager harvested three
+     tomato plants (2 tomatoes each) and all three regrew.
    - **Tend the animals here (N animals, M feeders)**: it collects what the farm animals within 20 m have made (eggs,
      milk, wool...) into the chest, and fills feeders holding fewer than 5 items with 10 animal food items from the
      chest (items whose name contains `_Feeding`, e.g. `Material_T3_Turkey_Feeding`; a food a feeder refuses is not

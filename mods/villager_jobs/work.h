@@ -15,11 +15,31 @@ namespace jobs {
 using Vec3 = emf::aim::Vec3;
 
 // A plant root near the chest: `stage` = its current stage entity (what is harvested), ripe = fully grown.
+// harvestable = that stage is a crop's harvest (harvestable_stage); the farm job leaves every other plant alone.
 struct Crop {
     uint32_t root = 0, stage = 0;
     Vec3 pos;
     bool ripe = false;
+    bool harvestable = true;
 };
+
+// What a plant's current stage entity carries (on it or on its template).
+struct StageParts {
+    bool destroy_on_loot = false;    // DestroyOnLoot: looting removes it
+    bool default_inventory = false;  // DefaultInventory: the loot table a loot rolls
+    bool mining_node = false;        // MiningNode: chopped or mined
+    bool health = false;             // Health: hit until it breaks
+    bool inventory_setup = false;    // InventorySetup: a container
+};
+// The farm job harvests with a loot (the chest as the looter), which works on a stage the game removes on loot and that
+// rolls a loot table: every crop's last stage in the game data (179 templates, mushrooms included). A tree the player
+// planted grows into something to chop, and planted fruit trees and nut bushes (date palm, coconut, banana, coffee,
+// hazelnut) end in a container whose fruit grows back (`..._PlayerPlanted_Refill`, with a MiningNode). Such a loot
+// brings nothing (a false "chest full" pause of the whole job), or, if it did, re-arming the plant would cut it back
+// to a seedling: not harvestable.
+inline bool harvestable_stage(const StageParts& p) {
+    return p.destroy_on_loot && p.default_inventory && !p.mining_node && !p.health && !p.inventory_setup;
+}
 // An animal feeder and how many items it holds.
 struct Feeder {
     uint32_t id = 0;

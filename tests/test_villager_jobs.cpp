@@ -1222,3 +1222,68 @@ TEST_CASE("villager_jobs manifest: every setting the mod reads from its ini is i
     CHECK(declared["gather_seconds"].max == 600.0);
     CHECK(r.manifest->description.find("gather") != std::string::npos);
 }
+
+// ---- planted trees near a farm ----
+TEST_CASE("farm: a planted tree near the chest is never targeted; the crop is farmed, with no false 'chest full' pause") {
+    JobBook book(test_cfg());
+    World w;
+    Field f;
+    w.pos[1025] = {0, 0, 0};
+    w.pos[6830] = {0, 0, 0};
+    Crop tree{7009, 7109, {2, 0, 0}, true};  // grown: its stage is a tree to chop, not a harvest to loot
+    tree.harvestable = false;
+    f.crops = {tree, {7002, 7102, {6, 0, 0}, true}};
+    REQUIRE(book.assign(farm_job(), 0, 30000));
+    std::vector<Action> all;
+    auto run = [&](uint64_t t) {
+        const auto a = book.tick(t, w.fn(), f.view());
+        all.insert(all.end(), a.begin(), a.end());
+        return a;
+    };
+    auto a = run(0);
+    const Action* go = first_of(a, ActionKind::GoToPos);
+    REQUIRE(go);
+    CHECK(go->pos.x == 6);  // the crop, though the tree is nearer (and within reach)
+    w.pos[1025] = {5, 0, 0};
+    a = run(500);
+    const Action* h = first_of(a, ActionKind::Harvest);
+    REQUIRE(h);
+    CHECK(h->target == 7102);
+    REQUIRE(book.on_pickup(6830, 7102, 600) == std::vector<uint32_t>{7002});
+    f.crops[1].ripe = false;  // re-armed: it grows again
+    for (uint64_t t = 1000; t <= 5000; t += 500) run(t);
+    f.crops[1].ripe = true;  // ripe again a few seconds later: harvested at once, no pause
+    size_t again = 0;
+    for (uint64_t t = 5500; t <= 7500; t += 500) again += count(run(t), ActionKind::Harvest);
+    CHECK(again == 1);
+    for (const auto& x : all) {
+        CAPTURE(static_cast<int>(x.kind));
+        CHECK(x.kind != ActionKind::Notice);  // no "is it full?"
+        CHECK(x.target != 7109);
+        CHECK(x.aux != 7009);
+        if (x.kind == ActionKind::GoToPos) CHECK(x.pos.x != 2);
+    }
+    CHECK(book.find(1025)->work.done == 1);
+}
+
+TEST_CASE("farm: only a crop's harvest stage is farmed, not a grown tree, a plant that is mined or a fruit tree that refills") {
+    StageParts crop;  // T1_Plant_Growth_Tomato_Seedling_2_harvest and every crop's last stage (mushrooms too)
+    crop.destroy_on_loot = crop.default_inventory = true;
+    CHECK(harvestable_stage(crop));
+    StageParts mined = crop;  // chopped or mined (a grown tree, aloe's harvest)
+    mined.mining_node = true;
+    CHECK_FALSE(harvestable_stage(mined));
+    StageParts chopped = crop;  // hit until it breaks
+    chopped.health = true;
+    CHECK_FALSE(harvestable_stage(chopped));
+    StageParts refill;  // ..._fruits_harvest_PlayerPlanted_Refill: date palm, coconut, banana, coffee, hazelnut
+    refill.inventory_setup = refill.mining_node = true;
+    CHECK_FALSE(harvestable_stage(refill));
+    StageParts container = crop;
+    container.inventory_setup = true;
+    CHECK_FALSE(harvestable_stage(container));
+    StageParts no_loot;  // removed on loot, but nothing to roll
+    no_loot.destroy_on_loot = true;
+    CHECK_FALSE(harvestable_stage(no_loot));
+    CHECK_FALSE(harvestable_stage(StageParts{}));
+}
