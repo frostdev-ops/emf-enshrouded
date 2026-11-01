@@ -474,6 +474,10 @@ public:
     bool server_stopping() const { return bridge_ && bridge_->server_stopping(); }
     bool collecting() const { return collecting_; }
     std::wstring steam_game() override { return find_game_in_steam(steam_root_from_registry()); }
+    bool under_wine() const override {
+        static const bool wine = running_under_wine();  // it never changes while EMF.exe runs
+        return wine;
+    }
     // Save backups: the real Steam and Saved Games folders and %LOCALAPPDATA%\EMF; a smoke run only what EMF_TEST_STEAM_ROOT
     // and EMF_TEST_SAVED_GAMES name (never the player's saves) and its own app data folder.
     emf::saves::SaveRoots save_roots() override {

@@ -82,6 +82,8 @@ struct FakeHost : BridgeHost {
     bool personal_key_allowed() const override { return true; }  // the tester switch: Browse asks (the fake) Nexus
     bool testing = false;
     bool test_mode() const override { return testing; }
+    bool wine = false;  // EMF.exe runs under Wine or Proton
+    bool under_wine() const override { return wine; }
 };
 
 json::Value parse(const std::string& text) {
@@ -374,6 +376,27 @@ TEST_CASE("app bridge: Play warns when Steam's game folder is not the one shown"
     host.steam = g.dir;
     r = result_of(bridge.handle(R"({"cmd":"play"})"));
     CHECK(r.get("text")->s.find("Play starts the game in") == std::string::npos);
+}
+
+TEST_CASE("app bridge: under Wine or Proton Play opens nothing and says to start the game from Steam") {
+    TempGame g(L"bridge_play_wine");
+    fake_game(g);
+    FakeHost host;
+    host.dir = g.dir;
+    host.wine = true;
+    Bridge bridge(host);
+    const json::Value r = result_of(bridge.handle(R"({"cmd":"play"})"));
+    CHECK_FALSE(r.get("ok")->b);
+    CHECK(r.get("error")->s.find("Wine or Proton") != std::string::npos);
+    CHECK(r.get("error")->s.find("Start Enshrouded from Steam") != std::string::npos);
+    CHECK(r.get("error")->s.find("EMF still loads") != std::string::npos);
+    CHECK(host.opened.empty());  // no steam:// link: it would reach nothing
+    const json::Value s = parse(bridge.handle(R"({"cmd":"state"})")[0]);
+    REQUIRE(s.get("wine"));
+    CHECK(s.get("wine")->b);  // the page says so on the Play button
+    host.wine = false;
+    CHECK(result_of(bridge.handle(R"({"cmd":"play"})")).get("ok")->b);
+    CHECK(host.opened.size() == 1);
 }
 
 TEST_CASE("app bridge: copy puts a text on the clipboard (logs and errors for a bug report)") {

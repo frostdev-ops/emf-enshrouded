@@ -46,7 +46,10 @@ account features are switched off, and a tester setting switches them on ("Nexus
   links** setting (with the Nexus features, below), and the end of `emf_core.log` and `emf_loader.log` (read while the
   game writes them), each with a **Copy** button. Error texts in a mod's details have one too. The chip at the top
   ("Nexus: not logged in", or the account's name and Premium) opens the account.
-- **Play** starts the game through Steam (`steam://rungameid/1203620`).
+- **Play** starts the game through Steam (`steam://rungameid/1203620`). Under Wine or Proton (Linux, the Steam Deck;
+  EMF.exe tells by Wine's `ntdll.dll`, which exports `wine_get_version`) a `steam://` link does not reach Linux's
+  Steam, so Play opens nothing and says to start Enshrouded from Steam instead (EMF still loads when the game starts);
+  the button says "start it in Steam" there.
 - **Profiles**: the on/off state of every mod under a name, above the list (below).
 - **Browse**: Enshrouded mods on Nexus Mods (with the Nexus features, below).
 - **Server** (a dedicated server's folder only): its config, EMF's chat commands, Start and Stop, EMF in it and its
@@ -796,7 +799,8 @@ player's, and counts only a stand-in game running from the folder shown.
 
 - `emf_tests` (`tests/test_app_game_folder.cpp`, `test_app_locate.cpp`, `test_app_bridge.cpp`): the mod list, the
   switches (ini, rename, chain line byte for byte), settings, the Steam lookup, the game-running check, which links
-  may open and the bridge's commands, all against fake game folders in `%TEMP%`.
+  may open and the bridge's commands (Play under Wine with the host's Wine check injected), all against fake game
+  folders in `%TEMP%`.
 - `test_profiles.cpp`, `test_app_profiles.cpp`, `test_app_profiles_bridge.cpp`: profiles: names and slugs, the file
   and bad files, the store (never replacing without asking, rename, delete, the current one), "(changed)", and
   applying over fake game folders with every kind of mod (the ini, an EML folder and zip renamed, a chain line in

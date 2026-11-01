@@ -143,6 +143,11 @@ std::string done_json(const char* type, const InstallResult& r, const std::strin
     return Obj().str("type", type).boolean("ok", r.ok).str("error", r.error).strs("lines", r.done).str("key", key).strs("keys", r.keys).text();
 }
 
+// Play under Wine or Proton (BridgeHost::under_wine).
+constexpr const char* kWinePlay =
+    "EMF.exe runs under Wine or Proton here, and from there Play cannot reach Steam. Start Enshrouded from Steam "
+    "instead: EMF still loads when the game starts.";
+
 constexpr int64_t kExpiryGrace = 300;  // seconds a link's expiry may lie behind this PC's clock before EMF refuses it
 
 // NexusMode::Off: what the host answers a command that would ask Nexus or use the account (the page hides them all).
@@ -321,6 +326,7 @@ std::optional<std::string> Bridge::state_if_changed(bool force) {
     s.insert(s.size() - 1, desk_->state_fields(folder_));  // the folder switcher and the Server tab
     s.insert(s.size() - 1, std::string(",\"nexus\":\"") + nexus_mode_name(mode()) + "\"");  // the Nexus features
     s.insert(s.size() - 1, ",\"saves_busy\":" + json_quote(host_.saves_busy()));  // the Saves tab (bridge_saves.cpp)
+    s.insert(s.size() - 1, std::string(",\"wine\":") + (host_.under_wine() ? "true" : "false"));  // Play cannot reach Steam
     if (!force && s == last_state_) return std::nullopt;
     last_state_ = s;
     return s;
@@ -787,6 +793,8 @@ std::vector<std::string> Bridge::handle(const std::string& message) {
     if (cmd == "play") {
         if (!game.empty() && !exists(game + L"\\enshrouded.exe") && exists(game + L"\\enshrouded_server.exe"))
             return {result(cmd, false, "This is a dedicated server folder: start the server with enshrouded_server.exe.")};
+        if (host_.under_wine())  // Linux's Steam never hears a steam:// link opened inside Wine or Proton
+            return {result(cmd, false, kWinePlay)};
         const bool ok = host_.open(L"steam://rungameid/1203620", BridgeHost::Open::Url);
         std::string text = ok ? "Starting Enshrouded through Steam..." : "";
         // Steam starts its own copy of the game: say so when that is not the folder shown

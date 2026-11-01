@@ -34,6 +34,10 @@ bool nexus_url_allowed(const std::string& url);
 // backslashes or odd characters: a link the player clicked in a mod's description.
 bool web_url_allowed(const std::string& url);
 
+// EMF.exe runs under Wine or Proton (Linux, the Steam Deck): Wine's ntdll.dll exports wine_get_version. There a
+// steam:// link does not reach Linux's Steam, so Play cannot start the game.
+bool running_under_wine();
+
 // `path` is `folder` or inside it (full paths, case ignored; "..\" tricks resolved first).
 bool path_inside(const std::wstring& folder, const std::wstring& path);
 // The same folder or file reached through any path: the paths as written, or where they lead with junctions, symbolic
