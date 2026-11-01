@@ -1,4 +1,5 @@
-// A stand-in for enshrouded.exe, for the content redirect spike's test only (tests/test_file_hooks.cpp); never shipped.
+// A stand-in for enshrouded.exe, for the content redirect spike's and the content loader's tests only
+// (tests/test_file_hooks.cpp, tests/test_content_e2e.cpp); never shipped.
 // The test copies it into a temp game folder as enshrouded.exe (the loader hooks only an exe of that name).
 // Like the game it imports dinput8.dll statically, so EMF's loader copied next to it runs its DllMain before this
 // program's own code, and the program's file calls go through its own import table, as the game's do. It writes what
@@ -7,6 +8,10 @@
 //   dat=<the first line of enshrouded_000.dat, opened relative to the current folder with CreateFileA>
 //   attrs=<GetFileAttributesW of enshrouded.kfc_resources: "file" or "error <n>">
 //   found=<what FindFirstFileW/FindNextFileW list for enshrouded_*.dat, comma-separated>
+// With standin_check.txt (the content loader's tests: one module name per line; "wait <name>" waits up to 10 s for
+// that one first) also:
+//   loaded <name>=<yes|no>   for each module named there, when this program's own code ran
+//   status=<EMF_CONTENT_STATUS: what the loader tells EMF's core about EML content>
 #include <windows.h>
 
 #include <string>
@@ -54,6 +59,33 @@ int wmain() {
         FindClose(f);
     }
     out += "found=" + found + "\n";
+    const HANDLE c = CreateFileW((dir + L"\\standin_check.txt").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                 OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (c != INVALID_HANDLE_VALUE) {
+        std::string check;
+        char buf[1024];
+        DWORD n = 0;
+        if (ReadFile(c, buf, sizeof buf, &n, nullptr)) check.assign(buf, n);
+        CloseHandle(c);
+        size_t from = 0;
+        while (from < check.size()) {
+            size_t to = check.find_first_of("\r\n", from);
+            if (to == std::string::npos) to = check.size();
+            std::string line = check.substr(from, to - from);
+            from = to + 1;
+            if (line.empty()) continue;
+            const bool wait = line.rfind("wait ", 0) == 0;
+            if (wait) line = line.substr(5);
+            const std::wstring name(line.begin(), line.end());
+            for (int i = 0; wait && i < 200 && !GetModuleHandleW(name.c_str()); ++i) Sleep(50);
+            if (!wait) out += "loaded " + line + "=" + (GetModuleHandleW(name.c_str()) ? "yes" : "no") + "\n";
+        }
+        wchar_t status[1024] = {};
+        const DWORD sn = GetEnvironmentVariableW(L"EMF_CONTENT_STATUS", status, 1024);
+        std::string st;
+        for (DWORD i = 0; i < sn && i < 1024; ++i) st += static_cast<char>(status[i] < 128 ? status[i] : '?');
+        out += "status=" + st + "\n";
+    }
     const HANDLE o = CreateFileW((dir + L"\\standin_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
                                  FILE_ATTRIBUTE_NORMAL, nullptr);
     if (o == INVALID_HANDLE_VALUE) return 1;
