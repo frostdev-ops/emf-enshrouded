@@ -24,7 +24,7 @@ TEST_CASE("loot_scale: the world's own setting is multiplied (so 'Loot Amount' i
     CHECK(lootscale::scaled(1.0f, 100.0) == doctest::Approx(10.0f)); // clamped
 }
 
-// ---- what the hook does not reach: plants picked with E, chopping, mining (the owner: "not when harvesting bushes") ----
+// ---- what the hook does not reach: plants picked with E, chopping, mining (bushes kept the game's amounts) ----
 using lootscale::Source;
 using lootscale::SourceInfo;
 
@@ -47,10 +47,12 @@ TEST_CASE("loot_scale: a bush or plant picked with E, a chopped tree and a mined
     CHECK(lootscale::classify(bush(), "Material_T1_Plant_Fibre") == Source::Harvest);
     CHECK(lootscale::classify(node(0), "Material_T1_Wood_Logs") == Source::Chopping);
     CHECK(lootscale::classify(node(1), "Material_T1_Stone") == Source::Mining);
-    SourceInfo fruit_tree = node(0);  // a fruit tree: its fruit is picked with E out of its own inventory
+    // a fruit tree: its fruit comes out of its own inventory, which the game filled with its loot setting (the hook
+    // already scaled it): never a second time
+    SourceInfo fruit_tree = node(0);
     fruit_tree.inventory = true;
-    CHECK(lootscale::classify(fruit_tree, "Food_T2_raw_fruit_Banana") == Source::Harvest);
-    CHECK(lootscale::classify(fruit_tree, "Material_T1_Wood_Logs") == Source::Chopping);
+    CHECK(lootscale::classify(fruit_tree, "Food_T2_raw_fruit_Banana") == Source::Other);
+    CHECK(lootscale::classify(fruit_tree, "Material_T1_Wood_Logs") == Source::Other);
     // left to the game's loot setting (the hook scales those when their loot is made) or never scaled:
     SourceInfo pickup = bush();
     pickup.pickup = true;  // twigs and stones on the ground: already scaled by the hook

@@ -44,20 +44,14 @@ struct SourceInfo {
     int node = -1;                   // MiningNode.resourceType: 0 wood (trees, bushes hit with an axe), 1 stone; -1 none
 };
 
-inline bool is_food(const std::string& name) {
-    std::string n = name;
-    for (auto& c : n)
-        if (c >= 'A' && c <= 'Z') c = static_cast<char>(c - 'A' + 'a');
-    return n.rfind("food_", 0) == 0 || n.rfind("_food_", 0) == 0;
-}
-
 // What an item picked up from `s` counts as. Other: left to the game (loot made with its setting, which the hook
-// scales; or something a player made, dropped or stored, which must never be multiplied).
-inline Source classify(const SourceInfo& s, const std::string& item_name) {
-    if (!s.exists || s.pickup || s.health) return Source::Other;
+// scales; or something a player made, dropped or stored, which must never be multiplied). Whatever comes out of an
+// inventory is Other, also from a tree: a fruit tree's inventory was filled with the game's setting (the hook) already.
+// The item's name is not needed today (kept for rules by item).
+inline Source classify(const SourceInfo& s, const std::string& /*item_name*/) {
+    if (!s.exists || s.pickup || s.health || s.inventory) return Source::Other;
     if (s.node == 1) return Source::Mining;
-    if (s.node == 0) return s.inventory && is_food(item_name) ? Source::Harvest : Source::Chopping;  // a fruit tree's fruit
-    if (s.inventory) return Source::Other;
+    if (s.node == 0) return Source::Chopping;
     if (s.default_inventory) return Source::Harvest;
     return Source::Other;
 }

@@ -56,9 +56,11 @@ scripts\content_test.ps1 -Restore                                              #
 
 `loot_scale` (an EMF mod, off by default) multiplies the world's "Loot Amount" setting: chests, enemy drops and
 pickups give more (or fewer) materials, and nothing is saved into the world. Its function is found in the dedicated
-server too (not tested on a running server). Switching it off takes effect at the next start; factor 1 is "off"
-at once. Set
+server too (not tested on a running server). Switching it off takes effect at the next start; factor 1 brings
+chests, enemy drops and pickups back to the world's amounts at once (harvesting, chopping and mining follow it unless
+they have their own factor). Set
 `factor` in the Mods tab or `emf\config\loot_scale.ini`. It is also a short example of hooking a game function by its
 bytes (`hook_pattern`). Plants picked with E, chopped trees and mined rocks never read that setting: for those it
 watches the game's `PickupEvent` and gives the difference (`put_items_ex`) or takes it back (`take_items`), with
-their own factors (`harvest`, `chopping`, `mining`; 0 = the same as `factor`). See `mods/loot_scale/README.md`.
+their own factors (`harvest`, `chopping`, `mining`; 0 = the same as `factor`). Fruit out of a tree's own inventory
+follows `factor` (that inventory was filled with the game's setting). See `mods/loot_scale/README.md`.

@@ -2,7 +2,7 @@
   "id": "loot_scale",
   "name": "Loot Scale",
   "version": "1.1.0",
-  "description": "More (or fewer) materials per loot stack: chests, enemy loot, things on the ground, plants and bushes you pick, trees you chop and rocks you mine, on top of the world's own Loot Amount setting. Nothing is saved into the world. In a game you host it applies to every player (not tested on a dedicated server).",
+  "description": "More (or fewer) materials per loot stack: chests, enemy loot, things on the ground, plants and bushes you pick, trees you chop and rocks you mine, on top of the world's own Loot Amount setting. From 1.1.0 picking plants, chopping and mining follow the main factor unless you set them. Nothing is saved into the world. In a game you host it applies to every player (not tested on a dedicated server).",
   "authors": ["EMF"],
   "emf": 14,
   "enabled": false,
