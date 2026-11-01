@@ -112,6 +112,7 @@ add_library(emf_core_lib STATIC
   src/core/manifest.cpp
   src/core/mod_order.cpp
   src/core/settings.cpp
+  src/core/world_settings.cpp
   src/core/hook_table.cpp
   src/core/api.cpp
   src/core/world_tracker.cpp
@@ -417,6 +418,7 @@ add_executable(emf_tests
   tests/test_setting_controls.cpp
   tests/test_mod_order.cpp
   tests/test_settings.cpp
+  tests/test_world_settings.cpp
   tests/test_mod_loading.cpp
   tests/test_api_settings.cpp
   tests/test_mods_ui.cpp
