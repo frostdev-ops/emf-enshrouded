@@ -384,7 +384,10 @@ emf::loader::ContentPlan plan_this_start(emf::loader::PlayOnce play) {
         p.read_state = [] { return prev_state(); };
         p.record_ok = [] {
             const auto game = emf::loader::normal_game_dir(g_dir);
-            return game && emf::loader::shadow_problem(emf::loader::file_hooks::shadow_facts(*game)).empty();
+            if (!game || !emf::loader::shadow_problem(emf::loader::file_hooks::shadow_facts(*game)).empty()) return false;
+            const std::string broken = emf::loader::shadow_intact(g_dir, shadow_dir(), "enshrouded", g_facts.base.dat_count);
+            if (!broken.empty()) loader_log(g_dir, ("EML content: " + broken).c_str());
+            return broken.empty();
         };
         p.log = [](const std::string& line) { loader_log(g_dir, line.c_str()); };
         return emf::loader::plan_content(p);
@@ -477,7 +480,7 @@ emf::loader::StartSteps make_start_steps() {
         if (!r.ok) g_content_log.close();
         return r;
     };
-    s.run_build = [] {
+    s.run_build = [](const std::atomic<bool>& abandoned) {
         g_content_log.line("emf", "loading emf_content.dll");
         const auto out = emf::loader::run_content_build(
             content_dll(), emf::loader::content_request(shadow_dir(), "enshrouded", false),
@@ -485,18 +488,35 @@ emf::loader::StartSteps make_start_steps() {
                 static const char* names[] = {"error", "warning", "info", "debug"};
                 g_content_log.line(level >= 0 && level <= 3 ? names[level] : "log", line);
                 if (level <= 2) g_splash.line(line);
-            });
+            },
+            emf::loader::kReplyCapacity, &abandoned);
         g_content_log.line("emf", "code " + std::to_string(out.code) + ": " + out.message +
                                       (out.unloaded ? "; emf_content.dll is unloaded" : "; emf_content.dll stays loaded"));
         g_content_log.close();
         return out;
     };
+    // EMF's own files in the shadow folder are written and deleted only while no folder on the way is a junction
     s.write_state = [](const emf::loader::ContentState& st) {
+        if (!emf::loader::shadow_path_safe(g_dir, shadow_dir())) {
+            loader_log(g_dir, "EML content: emf\\content is a junction or link; EMF writes nothing there");
+            return;
+        }
         emf::loader::ContentState with = st;
         for (const auto& dll : chain_names(g_dir)) with.chain_checked.push_back(chain_stamp(dll));  // all read: not EML's
         if (!emf::loader::write_state(state_path(), with)) loader_log(g_dir, "EML content: could not write emf_content_state.json");
     };
-    s.drop_record = [] { DeleteFileW((shadow_dir() + L"\\shadow.txt").c_str()); };
+    s.write_record = [](const std::string& record) {
+        if (!emf::loader::shadow_path_safe(g_dir, shadow_dir())) return;
+        if (!emf::loader::cio::write_file_atomic(shadow_dir() + L"\\shadow.txt", record))
+            loader_log(g_dir, "EML content: could not write shadow.txt; the redirect stays off");
+    };
+    s.drop_record = [] {
+        if (emf::loader::shadow_path_safe(g_dir, shadow_dir())) DeleteFileW((shadow_dir() + L"\\shadow.txt").c_str());
+    };
+    s.dll_gone = [] { return GetModuleHandleW(content_dll().c_str()) == nullptr; };
+    s.alert = [](const std::string& text) {
+        MessageBoxW(nullptr, emf::loader::cio::from_utf8(text).c_str(), L"EMF", MB_OK | MB_ICONWARNING | MB_TOPMOST);
+    };
     s.now = [] { return utc_now(); };
     return s;
 }
@@ -549,6 +569,8 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
                                     emf::loader::utf8_name(self) + ") does nothing").c_str());
             return TRUE;
         }
+        // set again below only for this start's EML content: a value a parent process passed on never counts
+        SetEnvironmentVariableW(emf::loader::kContentStatusVariable, nullptr);
         wchar_t exe[MAX_PATH];
         GetModuleFileNameW(nullptr, exe, MAX_PATH);
         g_exe = exe;

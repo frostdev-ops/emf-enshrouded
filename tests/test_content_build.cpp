@@ -5,6 +5,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <filesystem>
 #include <stdexcept>
 #include <string>
@@ -13,6 +14,7 @@
 
 #include "content_fixtures.h"
 #include "loader/content_build.h"
+#include "loader/content_splash.h"
 #include "test_scratch.h"
 
 using content_fixtures::file_text;
@@ -165,4 +167,25 @@ TEST_CASE("content build: log lines reach the callback, and one that throws stay
                                          [](int, const std::string&) { throw std::runtime_error("the log is full"); });
     CHECK(out.code == 0);
     CHECK(out.unloaded);
+}
+
+TEST_CASE("content build: a build given up on (its time was up) never loads the DLL") {
+    BuildFolder f(L"emf_content_build_abandoned", "ok");
+    const std::atomic<bool> abandoned{true};
+    const auto out = emf::loader::run_content_build(standin_dll(), f.request(), nullptr, emf::loader::kReplyCapacity,
+                                                    &abandoned);
+    CHECK(out.code == emf::loader::kBuildAbandoned);
+    CHECK(out.unloaded);
+    CHECK_FALSE(std::filesystem::exists(f.dir + L"\\built.txt"));
+}
+
+TEST_CASE("content build: a build that needs a deep stack (EML's Lua on big files) runs on the loader's worker") {
+    // the stand-in recurses through about 64 MB of stack: past a thread's usual 1 MB, inside the worker's reserve
+    BuildFolder f(L"emf_content_build_deep", "deep");
+    emf::loader::BuildOutcome out;
+    const bool done = emf::loader::run_with_splash(
+        nullptr, [&] { out = emf::loader::run_content_build(standin_dll(), f.request(), nullptr); }, 60000);
+    CHECK(done);
+    CHECK(out.code == 0);
+    CHECK(out.message.find("deep") != std::string::npos);
 }

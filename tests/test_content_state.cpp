@@ -165,6 +165,8 @@ emf::loader::ContentState sample_state() {
     s.ms = 28000;
     s.built_at = "2026-11-01T20:00:00Z";
     s.chain_checked = {"creative.dll 1000 132000000000000000"};  // chained DLLs read at this build: not EML's
+    s.reported = true;
+    s.attempts = 2;
     return s;
 }
 }  // namespace
@@ -185,6 +187,8 @@ TEST_CASE("content state: round trip") {
     CHECK(back->ms == 28000);
     CHECK(back->built_at == "2026-11-01T20:00:00Z");
     CHECK(back->chain_checked == sample_state().chain_checked);
+    CHECK(back->reported);
+    CHECK(back->attempts == 2);
     CHECK(back->unloaded);
     CHECK_FALSE(back->truncated);
     CHECK(emf::loader::state_current(back, "sha256:abc"));

@@ -30,6 +30,7 @@ struct ContentState {
     bool truncated = false;  // its reply was cut: the result is unknown
     std::vector<std::string> chain_checked;  // "<dll> <size> <time>": chained DLLs read at this build, not EML's
     int attempts = 0;  // a build that is running (kBuildRunning): how many starts in a row began it
+    bool reported = false;  // EMF's core was told of this outcome (and backed up the saves after a failure)
 };
 
 inline std::string state_json(const ContentState& s) {
@@ -42,7 +43,8 @@ inline std::string state_json(const ContentState& s) {
            ", \"message\": " + cio::json_string(s.message) + ", \"mods\": " + list(s.mods) + ", \"errors\": " +
            list(s.errors) + ", \"ms\": " + std::to_string(s.ms) + ", \"built_at\": " + cio::json_string(s.built_at) +
            ", \"unloaded\": " + (s.unloaded ? "true" : "false") + ", \"truncated\": " + (s.truncated ? "true" : "false") +
-           ", \"chain_checked\": " + list(s.chain_checked) + ", \"attempts\": " + std::to_string(s.attempts) + "}\r\n";
+           ", \"chain_checked\": " + list(s.chain_checked) + ", \"attempts\": " + std::to_string(s.attempts) +
+           ", \"reported\": " + (s.reported ? "true" : "false") + "}\r\n";
 }
 
 // nullopt for anything but a state object with a fingerprint and a code.
@@ -68,6 +70,7 @@ inline std::optional<ContentState> parse_state(std::string_view text) {
     if (const auto* u = v.get("unloaded"); u && u->is(T::Bool)) s.unloaded = u->b;
     if (const auto* t = v.get("truncated"); t && t->is(T::Bool)) s.truncated = t->b;
     if (const auto* a = v.get("attempts"); a && a->is(T::Number) && a->n >= 0) s.attempts = static_cast<int>(a->n);
+    if (const auto* r = v.get("reported"); r && r->is(T::Bool)) s.reported = r->b;
     return s;
 }
 

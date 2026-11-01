@@ -123,22 +123,26 @@ private:
     std::string line_;
 };
 
-// Runs `work` on a worker thread and keeps `splash` (may be null) alive until it ends or `timeout_ms` passes; false
-// then (the work goes on, owning what it uses). Without a thread it runs here.
+// The worker's stack, reserved (used pages are committed as it grows): EML's Lua and parsers recurse deep on big mod
+// files (emm.exe ended with a stack overflow, 0xC0000409, on packs with 22-31 MB Lua files), and inside the game that
+// would end the game at its start.
+constexpr SIZE_T kWorkerStackReserve = 256u << 20;
+
+// Runs `work` on a worker thread with a big stack and keeps `splash` (may be null) alive until it ends or `timeout_ms`
+// passes; false then (the work goes on, owning what it uses). Without a thread it runs here.
 inline bool run_with_splash(ContentSplash* splash, std::function<void()> work, DWORD timeout_ms) {
     (void)splash;  // its window is this thread's: the messages below keep it drawn
     auto owned = std::make_unique<std::function<void()>>(std::move(work));
-    const HANDLE t = CreateThread(
-        nullptr, 0,
-        [](void* p) -> DWORD {
-            const std::unique_ptr<std::function<void()>> w(static_cast<std::function<void()>*>(p));
-            try {
-                (*w)();
-            } catch (...) {
-            }
-            return 0;
-        },
-        owned.get(), 0, nullptr);
+    const LPTHREAD_START_ROUTINE run = [](void* p) -> DWORD {
+        const std::unique_ptr<std::function<void()>> w(static_cast<std::function<void()>*>(p));
+        try {
+            (*w)();
+        } catch (...) {
+        }
+        return 0;
+    };
+    HANDLE t = CreateThread(nullptr, kWorkerStackReserve, run, owned.get(), STACK_SIZE_PARAM_IS_A_RESERVATION, nullptr);
+    if (!t) t = CreateThread(nullptr, 0, run, owned.get(), 0, nullptr);  // no room for the big one
     if (!t) {
         try {
             (*owned)();

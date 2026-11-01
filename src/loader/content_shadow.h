@@ -11,7 +11,9 @@
 //                                                     refuses to build when one of the three has a second name.
 //   mods\<folder>\                                    real folders with copies of the usable mods (EML skips junctions)
 //   shadow.txt                                        the record of the game's files the redirect checks at each start
-//                                                     (file_redirect.h): taken before anything is copied, written last
+//                                                     (file_redirect.h): taken before anything is copied (`record`)
+//                                                     and written only after a good build (content_start.h), so a
+//                                                     shadow a crash left half-built never passes that check
 // Before each build it removes what the last one left: the index files, every .tmp, .cache\, mods\, and every
 // container at N or past it. Links are only ever deleted, never opened for writing; the game's files are never
 // written. Every file it writes is written as .tmp and renamed. No hard links (exFAT, another drive): content is off,
@@ -33,7 +35,8 @@ namespace emf::loader {
 
 struct ShadowResult {
     bool ok = false;
-    std::string why;  // when !ok: what went wrong, for the log and the state
+    std::string why;     // when !ok: what went wrong, for the log and the state
+    std::string record;  // shadow.txt's text, the game's files as they were before the copy: written after a good build
 };
 
 // The file system calls a test replaces.
@@ -256,13 +259,41 @@ inline ShadowResult build_shadow(const std::wstring& game, const std::wstring& s
         }
     }
 
-    // 7. the record, last
-    if (!cio::write_file_atomic(cio::join(shadow, L"shadow.txt"), record)) {
-        why = "could not write shadow.txt in the shadow copy";
-        return r;
-    }
+    // 7. the record goes back to the caller: written only once the build worked
+    r.record = record;
     r.ok = true;
     return r;
+}
+
+// True when no folder from the game folder down to the shadow is a junction or link (a missing one is fine): only then
+// does EMF write or delete its own files there (the state, shadow.txt).
+inline bool shadow_path_safe(const std::wstring& game, const std::wstring& shadow) {
+    for (std::wstring p = shadow; p.size() > game.size() && _wcsnicmp(p.c_str(), game.c_str(), game.size()) == 0;) {
+        if (cio::stat(p).reparse) return false;
+        const size_t slash = p.find_last_of(L"\\/");
+        if (slash == std::wstring::npos) break;
+        p = p.substr(0, slash);
+    }
+    return true;
+}
+
+// "" when the shadow made by build_shadow is still whole: its private copies of the index files are there, and its
+// exe and container links are still the game's own files (Steam can replace a container without touching the .kfc);
+// else what is wrong.
+inline std::string shadow_intact(const std::wstring& game, const std::wstring& shadow, const std::string& file_name,
+                                 uint32_t dat_count) {
+    namespace d = shadow_detail;
+    const std::wstring name = cio::from_utf8(file_name);
+    for (const wchar_t* ext : {L".kfc", L".kfc_resources"}) {
+        const cio::Stat s = cio::stat(cio::join(shadow, name + ext));
+        if (!s.exists || s.dir) return cio::to_utf8(name + ext) + " is missing from the shadow copy";
+    }
+    std::vector<std::wstring> links = {name + L".exe"};
+    for (uint32_t i = 0; i < dat_count; ++i) links.push_back(d::dat_name(name, i));
+    for (const auto& f : links)
+        if (!d::same_file(cio::join(shadow, f), cio::join(game, f)))
+            return "the shadow copy's " + cio::to_utf8(f) + " is not the game's file any more";
+    return {};
 }
 
 }  // namespace emf::loader

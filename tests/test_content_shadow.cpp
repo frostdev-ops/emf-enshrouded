@@ -122,7 +122,10 @@ TEST_CASE("shadow: fresh build links, copies, and real mod folders") {
     CHECK(file_text(g.shadow + L"\\mods\\beasts\\sub\\bear.lua") == "-- the bear");
     CHECK(file_id(g.shadow + L"\\mods\\beasts\\mod.json").links == 1);
     CHECK(no_tmp_in(g.shadow));
-    CHECK(exists(g.shadow + L"\\shadow.txt"));
+    // the record of the game's files is taken before the copy, but written only after a good build (content_start.h)
+    CHECK_FALSE(exists(g.shadow + L"\\shadow.txt"));
+    CHECK(r.record.find("source enshrouded.exe ") != std::string::npos);
+    CHECK(r.record.find("dat_count 3\r\n") != std::string::npos);
 }
 
 TEST_CASE("shadow: non-ASCII mod folder") {
@@ -197,7 +200,9 @@ TEST_CASE("shadow: the game's files are unchanged") {
 
 TEST_CASE("shadow: record accepted by the redirect's staleness check") {
     FakeGame g(L"emf_shadow_record");
-    REQUIRE(g.build().ok);
+    const auto r = g.build();
+    REQUIRE(r.ok);
+    put_file(g.shadow + L"\\shadow.txt", r.record);
     const auto game = emf::loader::normal_game_dir(g.dir);
     REQUIRE(game.has_value());
     CHECK(emf::loader::shadow_problem(emf::loader::file_hooks::shadow_facts(*game)) == "");
@@ -264,4 +269,41 @@ TEST_CASE("shadow: refused when its folder is a junction (it would write somewhe
     CHECK(r.why.find("junction") != std::string::npos);
     CHECK(std::filesystem::is_empty(elsewhere));
     RemoveDirectoryW((g.dir + L"\\emf\\content").c_str());  // the junction, not what it points to
+}
+
+TEST_CASE("shadow: intact after a build; a container Steam replaced, a missing copy or a missing link is not") {
+    FakeGame g(L"emf_shadow_intact");
+    REQUIRE(g.build().ok);
+    CHECK(emf::loader::shadow_intact(g.dir, g.shadow, "enshrouded", 3) == "");
+    // Steam replaced a container without changing the .kfc: the shadow's link is the old file now
+    REQUIRE(DeleteFileW(g.dat(1).c_str()));
+    put_file(g.dat(1), "the game's dat 1, updated");
+    CHECK(emf::loader::shadow_intact(g.dir, g.shadow, "enshrouded", 3).find("enshrouded_001.dat") != std::string::npos);
+    REQUIRE(g.build().ok);
+    CHECK(emf::loader::shadow_intact(g.dir, g.shadow, "enshrouded", 3) == "");
+    REQUIRE(DeleteFileW((g.shadow + L"\\enshrouded.exe").c_str()));
+    CHECK(emf::loader::shadow_intact(g.dir, g.shadow, "enshrouded", 3).find("enshrouded.exe") != std::string::npos);
+    REQUIRE(g.build().ok);
+    REQUIRE(DeleteFileW((g.shadow + L"\\enshrouded.kfc_resources").c_str()));
+    CHECK(emf::loader::shadow_intact(g.dir, g.shadow, "enshrouded", 3).find("enshrouded.kfc_resources") !=
+          std::string::npos);
+}
+
+TEST_CASE("shadow: EMF's own writes there need its folders to be real folders, not junctions") {
+    FakeGame g(L"emf_shadow_safe");
+    CHECK(emf::loader::shadow_path_safe(g.dir, g.shadow));  // not made yet: nothing in the way
+    REQUIRE(g.build().ok);
+    CHECK(emf::loader::shadow_path_safe(g.dir, g.shadow));
+    const std::wstring elsewhere = g.dir + L"\\elsewhere";
+    std::filesystem::create_directories(elsewhere);
+    std::filesystem::remove_all(g.dir + L"\\emf\\content");
+    std::wstring cmd = L"cmd.exe /c mklink /J \"" + g.dir + L"\\emf\\content\" \"" + elsewhere + L"\"";
+    STARTUPINFOW si{sizeof si};
+    PROCESS_INFORMATION pi{};
+    REQUIRE(CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, nullptr, &si, &pi));
+    WaitForSingleObject(pi.hProcess, 10000);
+    CloseHandle(pi.hThread);
+    CloseHandle(pi.hProcess);
+    CHECK_FALSE(emf::loader::shadow_path_safe(g.dir, g.shadow));
+    RemoveDirectoryW((g.dir + L"\\emf\\content").c_str());
 }

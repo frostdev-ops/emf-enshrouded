@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "content_fixtures.h"
+#include "loader/content_io.h"
 #include "loader/content_state.h"
 #include "loader/play_once.h"
 #include "test_scratch.h"
@@ -81,6 +82,36 @@ struct ContentGame {
         std::error_code ec;
         std::filesystem::remove_all(dir, ec);
     }
+    std::string box_text;  // the text of the message box the loader showed ("" for none)
+    struct BoxSearch {
+        DWORD pid;
+        HWND box;
+    };
+    void answer_box(DWORD pid) {
+        BoxSearch search{pid, nullptr};
+        EnumWindows(
+            [](HWND hwnd, LPARAM lp) -> BOOL {
+                auto* f = reinterpret_cast<BoxSearch*>(lp);
+                DWORD owner = 0;
+                GetWindowThreadProcessId(hwnd, &owner);
+                wchar_t cls[16] = {};
+                GetClassNameW(hwnd, cls, 16);
+                if (owner == f->pid && std::wstring(cls) == L"#32770" && IsWindowVisible(hwnd)) {
+                    f->box = hwnd;
+                    return FALSE;
+                }
+                return TRUE;
+            },
+            reinterpret_cast<LPARAM>(&search));
+        if (!search.box) return;
+        wchar_t text[2048] = {};
+        GetDlgItemTextW(search.box, 0xFFFF, text, 2048);  // a message box's text
+        box_text = emf::loader::cio::to_utf8(text);
+        // its OK button, by the id the box gave it
+        const HWND button = FindWindowExW(search.box, nullptr, L"Button", nullptr);
+        const int id = button ? GetDlgCtrlID(button) : IDOK;
+        PostMessageW(search.box, WM_COMMAND, MAKEWPARAM(id, BN_CLICKED), reinterpret_cast<LPARAM>(button));
+    }
     // the modules the stand-in game reports (and waits for, with "wait <name>")
     void check(const std::string& lines) { put_file(dir + L"\\standin_check.txt", lines); }
     std::string loader_log() const { return file_text(dir + L"\\emf\\emf_loader.log"); }
@@ -103,7 +134,12 @@ struct ContentGame {
         PROCESS_INFORMATION pi{};
         REQUIRE(CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, dir.c_str(), &si,
                                &pi));
-        const DWORD w = WaitForSingleObject(pi.hProcess, 60000);
+        // a message box the loader shows is read and answered (OK) like a player would
+        DWORD w = WAIT_TIMEOUT;
+        for (int i = 0; i < 600 && w == WAIT_TIMEOUT; ++i) {
+            w = WaitForSingleObject(pi.hProcess, 100);
+            if (w == WAIT_TIMEOUT) answer_box(pi.dwProcessId);
+        }
         if (w != WAIT_OBJECT_0) TerminateProcess(pi.hProcess, 1);
         DWORD code = 99;
         GetExitCodeProcess(pi.hProcess, &code);
@@ -247,7 +283,7 @@ TEST_CASE("e2e content: a shadow copy whose record is gone is built again, never
     CHECK(file_text(g.shadow + L"\\built.txt").find("seq=2 ") == 0);
     CHECK(out.find("kfc=built kfc 2\n") != std::string::npos);
     CHECK(out.find("status=built\t1\t") != std::string::npos);
-    CHECK(g.loader_log().find("the shadow copy's record, shadow.txt, is missing") != std::string::npos);
+    CHECK(g.loader_log().find("its record, shadow.txt, is missing") != std::string::npos);
 }
 
 TEST_CASE("e2e content: the real client's entry (Steam's DRM stub in .bind) is held, and the build runs") {
@@ -289,4 +325,45 @@ TEST_CASE("e2e content: EML's dbghelp.dll without emf_content.dll is not read; w
               std::string::npos);
         CHECK_FALSE(std::filesystem::exists(g.shadow + L"\\shadow.txt"));
     }
+}
+
+TEST_CASE("e2e content: a failed build: the game's own data, chain and core; the same files are not built again") {
+    ContentGame g(L"emf_e2e_fail", true, L"standin_game.exe", "fail");
+    std::string out = g.run();
+    CHECK(out.find("kfc=KFC4") != std::string::npos);
+    CHECK(out.find("loaded chain_standin.dll=yes\n") != std::string::npos);
+    CHECK(out.find("loaded emf_core.dll=yes\n") != std::string::npos);
+    CHECK(out.find("status=failed\t") != std::string::npos);  // the core warns and backs up the saves
+    CHECK(emf::loader::read_state(g.shadow + L"\\emf_content_state.json")->code == 2);
+    CHECK_FALSE(std::filesystem::exists(g.shadow + L"\\shadow.txt"));
+    out = g.run();
+    CHECK(out.find("status=failed_again\t") != std::string::npos);  // the warning again, no second backup
+    CHECK(out.find("loaded chain_standin.dll=yes\n") != std::string::npos);
+    CHECK(g.dll_attaches() == 1);  // not loaded again for the same files
+    CHECK(g.loader_log().find("could not be built at an earlier start with the same files") != std::string::npos);
+}
+
+TEST_CASE("e2e content: emf_content.dll that stays loaded: a message box, no chain, no core; then on without content") {
+    ContentGame g(L"emf_e2e_stuck", true, L"standin_game.exe", "thread");
+    g.check("emf_content.dll\r\nchain_standin.dll\r\nemf_core.dll\r\n");
+    std::string out = g.run();
+    INFO(g.loader_log());
+    INFO(out);
+    CHECK(g.box_text.find("EMF could not finish preparing EML content; the game starts without EMF's mods this time") ==
+          0);
+    CHECK(out.find("loaded emf_content.dll=yes\n") != std::string::npos);  // kept: a thread of its own runs
+    CHECK(out.find("loaded chain_standin.dll=no\n") != std::string::npos);
+    CHECK(out.find("loaded emf_core.dll=no\n") != std::string::npos);
+    CHECK(out.find("kfc=KFC4") != std::string::npos);
+    CHECK(g.loader_log().find("without the chained DLLs and without EMF's core") != std::string::npos);
+    // the next start does not load it again: chain and core as usual, and the core hears of it now (with a backup)
+    g.box_text.clear();
+    g.check("wait emf_core.dll\r\nemf_content.dll\r\nchain_standin.dll\r\nemf_core.dll\r\n");
+    out = g.run();
+    CHECK(g.box_text.empty());
+    CHECK(out.find("loaded emf_content.dll=no\n") != std::string::npos);
+    CHECK(out.find("loaded chain_standin.dll=yes\n") != std::string::npos);
+    CHECK(out.find("loaded emf_core.dll=yes\n") != std::string::npos);
+    CHECK(out.find("status=failed\t") != std::string::npos);
+    CHECK(g.dll_attaches() == 1);
 }

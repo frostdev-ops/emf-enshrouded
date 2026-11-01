@@ -6,6 +6,7 @@
 //                as EML) and writes built.txt: "seq=<n> chain_loaded=<yes|no> core_loaded=<yes|no>", n counted in
 //                standin_seq.txt (chain_standin.dll and emf_core.dll: the e2e test's chained DLL and EMF's core)
 //   slow         sleeps 2 s, then as ok
+//   deep         recurses through about 64 MB of stack (a thread's usual 1 MB is not enough), then as ok
 //   fail         code 2
 //   mods_failed  code 1 with one mod error
 //   big          a reply of 1.5 MB (more than the loader's buffer): the cut reply, as the real DLL makes it
@@ -117,6 +118,15 @@ DWORD WINAPI wait_then_leave(void*) {
     FreeLibraryAndExitThread(g_self, 0);
 }
 
+// About 64 KB of stack per level: 1000 levels need about 64 MB, past a thread's usual 1 MB (EML's Lua on big files).
+__declspec(noinline) int descend(int n) {
+    volatile char pad[64 * 1024];
+    pad[0] = static_cast<char>(n);
+    pad[sizeof pad - 1] = 1;
+    if (n == 0) return pad[0];
+    return descend(n - 1) + pad[sizeof pad - 1];
+}
+
 void build_ok(const std::wstring& dir, Reply& r) {
     for (const wchar_t* name : {L"enshrouded.kfc", L"enshrouded.kfc_resources", L"enshrouded.kfc.bak"}) {
         if (links_of(cio::join(dir, name)) > 1) {
@@ -218,7 +228,9 @@ extern "C" __declspec(dllexport) int32_t emf_content_build(const char* request_j
             r.message = "standin: left a thread running";
         } else {
             if (word == "slow") Sleep(2000);
+            const int depth = word == "deep" ? descend(1000) : 0;
             build_ok(dir, r);
+            if (word == "deep") r.message += " after a deep descent (" + std::to_string(depth) + ")";
         }
     }
     r.ms = static_cast<uint32_t>(GetTickCount64() - t0);

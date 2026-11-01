@@ -9,6 +9,7 @@
 // is false then, and the loader starts neither the chained DLLs nor EMF's core.
 #include <windows.h>
 
+#include <atomic>
 #include <cstdint>
 #include <cstring>
 #include <functional>
@@ -28,6 +29,9 @@ constexpr int kBuildWrongAbi = -3;      // emf_content_abi() is not 1
 constexpr int kBuildBadReply = -4;      // the reply is not the JSON object it should be
 constexpr int kBuildError = -5;         // the loader itself failed (out of memory)
 constexpr int kBuildShadowFailed = -6;  // the shadow copy could not be made, so no build ran (content_start.h)
+constexpr int kBuildRunning = -7;       // the state while a build runs: a crash or a kill leaves it, never current
+constexpr int kBuildTimedOut = -8;      // the build did not come back in time (content_start.h)
+constexpr int kBuildAbandoned = -9;     // the build was given up on before emf_content.dll was loaded
 
 constexpr size_t kReplyCapacity = 1u << 20;
 
@@ -110,13 +114,21 @@ inline void unload(HMODULE module, const std::wstring& dll, BuildOutcome& out) {
 }
 }  // namespace detail
 
-// `reply_capacity`: the reply buffer (tests make it small).
+// `reply_capacity`: the reply buffer (tests make it small). `abandoned`: set when the held start gave up waiting for
+// this build (its time was up and the game goes on): then the DLL is never loaded, so it can never run while the game
+// starts Steam.
 inline BuildOutcome run_content_build(const std::wstring& dll, const std::string& request, const BuildLog& log,
-                                      size_t reply_capacity = kReplyCapacity) {
+                                      size_t reply_capacity = kReplyCapacity,
+                                      const std::atomic<bool>* abandoned = nullptr) {
     namespace abi = content_abi;
     BuildOutcome out;
     HMODULE module = nullptr;
     try {
+        if (abandoned && abandoned->load()) {
+            out.code = kBuildAbandoned;
+            out.message = "the held start gave up waiting before emf_content.dll was loaded";
+            return out;
+        }
         module = LoadLibraryExW(dll.c_str(), nullptr, LOAD_WITH_ALTERED_SEARCH_PATH);
         if (!module) {
             out.code = kBuildNoDll;

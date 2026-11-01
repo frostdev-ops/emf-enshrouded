@@ -6,6 +6,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <functional>
 #include <optional>
 #include <string>
@@ -114,12 +115,18 @@ emf::loader::StartSteps start_steps(Recorder& r, bool holdable = true, emf::load
         res.why = shadow_ok ? "" : "the game folder's drive does not allow hard links";
         return res;
     };
-    s.run_build = [&r, outcome] { return r.add("run_build"), outcome; };
+    s.run_build = [&r, outcome](const std::atomic<bool>&) { return r.add("run_build"), outcome; };
     s.write_state = [&r](const emf::loader::ContentState& st) {
         r.add("write_state");
         r.states.push_back(st);
     };
+    s.write_record = [&r](const std::string&) { r.add("write_record"); };
     s.drop_record = [&r] { r.add("drop_record"); };
+    s.dll_gone = [] { return true; };
+    s.alert = [&r](const std::string& text) {
+        r.add("alert");
+        r.log.push_back("alert " + text);
+    };
     s.now = [] { return std::string("2026-11-01T21:00:00Z"); };
     return s;
 }
@@ -171,20 +178,62 @@ TEST_CASE("content start: current shadow redirects without loading the dll") {
     CHECK(r.logged("status current 1 28000"));  // the state's mods and build time, for the core's line
 }
 
-TEST_CASE("content start: a state from a failed build, from other files, or none builds again") {
-    for (const auto& state : {std::optional<emf::loader::ContentState>(), std::optional(good_state("sha256:before"))}) {
+TEST_CASE("content start: a state from other files, or none, builds again") {
+    auto failed_before = good_state("sha256:before");
+    failed_before.code = 2;
+    for (const auto& state : {std::optional<emf::loader::ContentState>(), std::optional(good_state("sha256:before")),
+                              std::optional(failed_before)}) {
         Recorder r;
         const auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), state));
         CHECK(plan.path == ContentPath::BuildHeld);
         CHECK(plan.fingerprint == "sha256:now");
+        CHECK(plan.attempts == 1);
         CHECK(r.joined() == "facts, fingerprint, read_state");
+        CHECK(r.logged("left out rt: needs EML's runtime loader"));
     }
-    Recorder r;
+}
+
+TEST_CASE("content start: a build that failed with the same files is not tried again at every start") {
     auto failed = good_state("sha256:now");
     failed.code = 2;
-    CHECK(emf::loader::plan_content(plan_steps(r, owned_facts(), failed)).path == ContentPath::BuildHeld);
-    CHECK(r.logged("the last build did not work"));
-    CHECK(r.logged("left out rt: needs EML's runtime loader"));
+    failed.message = "EML could not patch the bear";
+    Recorder r;
+    auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), failed));
+    CHECK(plan.path == ContentPath::KnownFailed);
+    CHECK(r.logged("EML content could not be built at an earlier start with the same files: EML could not patch the bear"));
+    // the core was told at that start (and backed up the saves): now the warning only, no build, no redirect
+    failed.reported = true;
+    plan = emf::loader::plan_content(plan_steps(r, owned_facts(), failed));
+    r.calls.clear();
+    auto steps = start_steps(r);
+    CHECK_FALSE(emf::loader::start_in_dllmain(plan, steps));
+    CHECK(r.joined() == "chain, hooks(content off), status(failed_again), core");
+    // a failure the core never heard of (the DLL stayed loaded, so the core did not start): told now, once
+    failed.reported = false;
+    failed.unloaded = false;
+    plan = emf::loader::plan_content(plan_steps(r, owned_facts(), failed));
+    REQUIRE(plan.path == ContentPath::KnownFailed);
+    r.calls.clear();
+    r.states.clear();
+    emf::loader::start_in_dllmain(plan, steps);
+    CHECK(r.joined() == "chain, hooks(content off), write_state, status(failed), core");
+    CHECK(r.states.at(0).reported);
+    CHECK(r.states.at(0).fingerprint == "sha256:now");
+}
+
+TEST_CASE("content start: a build the game stopped in is tried once more, then left alone") {
+    auto running = good_state("sha256:now");
+    running.code = emf::loader::kBuildRunning;
+    running.attempts = 1;
+    Recorder r;
+    auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), running));
+    CHECK(plan.path == ContentPath::BuildHeld);
+    CHECK(plan.attempts == 2);
+    CHECK(r.logged("the last build did not finish"));
+    running.attempts = 2;
+    plan = emf::loader::plan_content(plan_steps(r, owned_facts(), running));
+    CHECK(plan.path == ContentPath::KnownFailed);
+    CHECK(r.logged("stopped the game"));
 }
 
 TEST_CASE("content start: build runs before chain and core") {
@@ -197,12 +246,17 @@ TEST_CASE("content start: build runs before chain and core") {
     CHECK(r.joined() == "hold");  // nothing else in DllMain: no chained DLL, no core
     r.calls.clear();
     emf::loader::run_held_content(plan, steps);
-    CHECK(r.joined() ==
-          "splash, build_shadow, run_build, write_state, splash end, chain, hooks(content on), status(built), core");
-    REQUIRE(r.states.size() == 1);
+    // a state that is never current before anything is touched (a crash leaves it), shadow.txt only after a good build
+    CHECK(r.joined() == "splash, write_state, build_shadow, run_build, write_state, write_record, splash end, chain, "
+                        "hooks(content on), status(built), core");
+    REQUIRE(r.states.size() == 2);
     CHECK(r.states[0].fingerprint == "sha256:now");
-    CHECK(r.states[0].code == 0);
-    CHECK(r.states[0].built_at == "2026-11-01T21:00:00Z");
+    CHECK(r.states[0].code == emf::loader::kBuildRunning);
+    CHECK(r.states[0].attempts == 1);
+    CHECK(r.states[1].fingerprint == "sha256:now");
+    CHECK(r.states[1].code == 0);
+    CHECK(r.states[1].reported);
+    CHECK(r.states[1].built_at == "2026-11-01T21:00:00Z");
     CHECK(r.logged("EML content: built 1 mod in 1.5 s"));
     CHECK(r.logged("status built 1 1500"));
 }
@@ -216,9 +270,10 @@ TEST_CASE("content start: failed build starts chain and core without redirect") 
     auto steps = start_steps(r, true, failed);
     r.calls.clear();
     emf::loader::run_held_content(plan, steps);
-    CHECK(r.joined() == "splash, build_shadow, run_build, write_state, splash end, drop_record, chain, hooks(content off), "
-                        "status(failed), core");
-    CHECK(r.states.at(0).code == 2);
+    CHECK(r.joined() == "splash, write_state, build_shadow, run_build, write_state, splash end, drop_record, chain, "
+                        "hooks(content off), status(failed), core");
+    CHECK(r.states.at(1).code == 2);
+    CHECK(r.states.at(1).reported);  // the core is told at this start
     CHECK(r.logged("EML content could not be built: EML could not patch the bear"));
     // a cut reply keeps code 0 but its result is unknown: no redirect either
     auto cut = built_ok();
@@ -227,15 +282,15 @@ TEST_CASE("content start: failed build starts chain and core without redirect") 
     auto cut_steps = start_steps(c, true, cut);
     emf::loader::run_held_content(plan, cut_steps);
     CHECK(c.joined().find("hooks(content off)") != std::string::npos);
-    CHECK(c.states.at(0).truncated);
+    CHECK(c.states.at(1).truncated);
     // the shadow could not be made: the DLL is never loaded
     Recorder s;
     auto shadow_steps = start_steps(s, true, built_ok(), false);
     emf::loader::run_held_content(plan, shadow_steps);
-    CHECK(s.joined() == "splash, build_shadow, write_state, splash end, drop_record, chain, hooks(content off), "
-                        "status(failed), core");
-    CHECK(s.states.at(0).code == emf::loader::kBuildShadowFailed);
-    CHECK(s.states.at(0).message.find("hard links") != std::string::npos);
+    CHECK(s.joined() == "splash, write_state, build_shadow, write_state, splash end, drop_record, chain, "
+                        "hooks(content off), status(failed), core");
+    CHECK(s.states.at(1).code == emf::loader::kBuildShadowFailed);
+    CHECK(s.states.at(1).message.find("hard links") != std::string::npos);
 }
 
 TEST_CASE("content start: dll not unloaded starts neither chain nor core") {
@@ -247,9 +302,22 @@ TEST_CASE("content start: dll not unloaded starts neither chain nor core") {
     auto steps = start_steps(r, true, stuck);
     r.calls.clear();
     emf::loader::run_held_content(plan, steps);
-    CHECK(r.joined() == "splash, build_shadow, run_build, write_state, splash end, drop_record");
+    CHECK(r.joined() == "splash, write_state, build_shadow, run_build, write_state, splash end, drop_record, alert");
     CHECK(r.logged("without the chained DLLs and without EMF's core"));
-    CHECK_FALSE(r.states.at(0).unloaded);
+    CHECK(r.logged("alert EMF could not finish preparing EML content"));  // the player sees why EMF's mods are missing
+    CHECK_FALSE(r.states.at(1).unloaded);
+    CHECK_FALSE(r.states.at(1).reported);  // the core does not start: it is told at the next start
+}
+
+TEST_CASE("content start: the DLL still in the process before the chained DLLs: neither starts") {
+    Recorder r;
+    auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), std::nullopt));
+    auto steps = start_steps(r);
+    steps.dll_gone = [] { return false; };  // the outcome said unloaded, but the module is still there
+    r.calls.clear();
+    emf::loader::run_held_content(plan, steps);
+    CHECK(r.joined() == "splash, write_state, build_shadow, run_build, write_state, splash end, drop_record, alert");
+    CHECK_FALSE(r.states.at(1).unloaded);
 }
 
 TEST_CASE("content start: a build that does not come back in time starts neither chain nor core") {
@@ -258,8 +326,26 @@ TEST_CASE("content start: a build that does not come back in time starts neither
     auto steps = start_steps(r, true, built_ok(), true, false);
     r.calls.clear();
     emf::loader::run_held_content(plan, steps);
-    CHECK(r.joined() == "splash, write_state, splash end, drop_record");
+    CHECK(r.joined() == "splash, write_state, write_state, splash end, drop_record, alert");
     CHECK(r.logged("did not finish"));
+    CHECK(r.states.at(1).code == emf::loader::kBuildTimedOut);
+    CHECK_FALSE(r.states.at(1).unloaded);
+}
+
+TEST_CASE("content start: a build that comes back too late never loads the DLL") {
+    Recorder r;
+    auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), std::nullopt));
+    auto steps = start_steps(r);
+    std::function<void()> late;
+    steps.run_work = [&late](const std::function<void()>& work) {
+        late = work;  // the worker is still on its way when the time is up
+        return false;
+    };
+    r.calls.clear();
+    emf::loader::run_held_content(plan, steps);
+    REQUIRE(late);
+    late();  // the worker goes on after the game started
+    CHECK(r.joined().find("run_build") == std::string::npos);
 }
 
 TEST_CASE("content start: client entry not holdable turns content off") {
@@ -269,7 +355,7 @@ TEST_CASE("content start: client entry not holdable turns content off") {
     r.calls.clear();
     CHECK_FALSE(emf::loader::start_in_dllmain(plan, steps));
     // the player's EML mods are missing at this start: the core warns and backs up the saves, as after a failed build
-    CHECK(r.joined() == "hold, chain, hooks(spike), status(failed), core");
+    CHECK(r.joined() == "hold, chain, hooks(content off), status(failed), core");
     CHECK(plan.path == ContentPath::Off);
     CHECK(r.logged("EML content: off for this start"));
 }
@@ -361,7 +447,7 @@ TEST_CASE("content start: a current state but a shadow whose record does not mat
     const auto plan = emf::loader::plan_content(steps);
     CHECK(plan.path == ContentPath::BuildHeld);
     CHECK(r.joined() == "facts, fingerprint, read_state, record");
-    CHECK(r.logged("the shadow copy's record"));
+    CHECK(r.logged("its record, shadow.txt, is missing"));
     Recorder ok;
     auto good = plan_steps(ok, owned_facts(), good_state("sha256:now"));
     good.record_ok = [&ok] { return ok.add("record"), true; };
