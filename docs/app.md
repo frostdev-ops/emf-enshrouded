@@ -9,6 +9,11 @@ installs an archive the player downloaded, so that EMF can uninstall it again. I
 mods, settings, who may use chat commands, EMF itself, starting and stopping them, and their logs ("Servers" below).
 Its Saves tab backs up the game's saves and restores them ("Saves" below).
 
+It is `emf\EMF.exe` in the game folder. `install.cmd` asks once, "Add an EMF shortcut to the desktop? [Y/n]", and
+remembers the answer (`emf\desktop_shortcut.txt`); `install.ps1 -DesktopShortcut` or `-NoDesktopShortcut` answers for a
+scripted install, which is never asked. `uninstall.cmd` removes the shortcut it made while it still points to that
+EMF.exe, and no other.
+
 EMF.exe also has Nexus features that use Nexus's API. Its Browse tab shows the mods on Nexus Mods and what each file
 would do in this folder. With the player's Nexus account it downloads files itself: from the website's "Mod Manager
 Download" button (nxm:// links, once the player lets EMF open them) and, for Premium members, from a "Download with
@@ -28,7 +33,11 @@ account features are switched off, and a tester setting switches them on ("Nexus
     `known_tools.txt`), otherwise "not listed";
   - **other loaders and their mods**: the tool behind each proxy DLL next to the game (`known_tools.txt`), Greeneye
     mods (`greeneye\<mod>\mod.json`), Shroudtopia mods (`shroudtopia.json`, DLLs in `mods\`) and ModLoader Proxy's
-    list (the `[Load]` section of `chainloader.ini`).
+    list: what it starts from its `chainloader.ini` (`ForwardTo`, `[Load]`, and its `ModsFolder` DLLs with
+    `LoadFromFolder = true`), read as EMF's core reads it. When ModLoader Proxy runs (as a proxy DLL, listed in
+    `dinput8-chain.ini` or started by EMF at the last start), the DLLs it starts count as running: EMF's own loader
+    there means EMF is installed, a ShroudForge DLL there means ShroudForge is active (also for the quick scan that
+    profiles and the EML switches use).
 - **Details** of the chosen mod: name, version, authors, description, who loads it, what it needs, its README, its
   settings (controls from the `mod.json` setting types: switches, number boxes and sliders with their steps, lists,
   colour pickers, key binds that take the next key press, text with its length limit; under their `group` headings,

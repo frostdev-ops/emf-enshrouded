@@ -214,6 +214,41 @@ TEST_CASE("handover: an exact name wins over parts; several matches list the fir
     CHECK(h.r.fake.takes.size() == 1);
 }
 
+TEST_CASE("handover: item names as people type them: spaces, words in any order, a part of a word") {
+    HandoverRig h;
+    h.player(1, 0, 0xA1, "Alice");
+    h.player(2, 2, 0xB2, "Bob");
+    h.r.fake.item_names[0x51] = "Material_T0_simple_FishingBait";
+    h.r.fake.item_names[0x52] = "Food_T2_Dog_Bait";
+    h.r.fake.item_names[0x53] = "Material_T1_Wood_Logs_Dead";
+    h.carry(1, {{0x51, 5}, {0x52, 3}, {kLogs, 10}, {0x53, 4}});
+    h.chat_from(1, 0xA1);
+    CHECK(h.reply("handover Fishing Bait") == "Handing 5 x Material_T0_simple_FishingBait to Bob");
+    h.seconds(3);
+    CHECK(h.reply("handover bait dog 2") == "Handing 2 x Food_T2_Dog_Bait to Bob");
+    h.seconds(3);
+    // the logs, not the dead logs: those have a word more than was typed
+    CHECK(h.reply("handover wood log 4") == "Handing 4 x Material_T1_Wood_Logs to Bob");
+    h.seconds(3);
+    CHECK(h.reply("handover bait") == "which one? Food_T2_Dog_Bait, Material_T0_simple_FishingBait");
+}
+
+TEST_CASE("handover: a name may end in a number (01 is never the count); a word only part of one item but whole in another asks") {
+    HandoverRig h;
+    h.player(1, 0, 0xA1, "Alice");
+    h.player(2, 2, 0xB2, "Bob");
+    h.r.fake.item_names[0x61] = "Tool_Torch01";
+    h.r.fake.item_names[0x62] = "Material_T5_Wolfsbane";
+    h.r.fake.item_names[0x63] = "Food_T1_raw_bad_meat_WolfMeat";
+    h.carry(1, {{0x61, 10}, {0x62, 3}, {0x63, 2}});
+    h.chat_from(1, 0xA1);
+    CHECK(h.reply("handover tool torch 01") == "Handing 10 x Tool_Torch01 to Bob");  // the biggest stack, not 1
+    h.seconds(3);
+    // "wolf" is only the start of Wolfsbane, but a whole word of the wolf meat: no guess
+    CHECK(h.reply("handover wolf") == "which one? Food_T1_raw_bad_meat_WolfMeat, Material_T5_Wolfsbane");
+    CHECK(h.reply("handover wolfsbane 2") == "Handing 2 x Material_T5_Wolfsbane to Bob");
+}
+
 TEST_CASE("handover: nobody in reach is refused; the giver never receives; the reach is a setting") {
     HandoverRig h;
     h.player(1, 0, 0xA1, "Alice");

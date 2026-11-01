@@ -1,6 +1,6 @@
-# Removes EMF from the game folder: EMF's dinput8.dll and the emf folder. Your settings (emf\config and
-# emf\emf_core.ini) and mod profiles (emf\profiles) stay unless -All. Another mod's dinput8.dll that EMF renamed
-# (emf\moved.txt) is put back.
+# Removes EMF from the game folder: EMF's dinput8.dll and the emf folder, and the desktop shortcut install.cmd made.
+# Your settings (emf\config and emf\emf_core.ini) and mod profiles (emf\profiles) stay unless -All. Another mod's
+# dinput8.dll that EMF renamed (emf\moved.txt) is put back.
 # EMF.exe's Nexus API key and downloads (%LOCALAPPDATA%\EMF) and its saved nxm:// setting (HKCU\Software\EMF\NxmBackup)
 # stay unless -All; the saved setting also stays while a copy of EMF still opens nxm:// links (it needs it to give them
 # back). When this folder's EMF.exe opens nxm:// links, it gives them back first.
@@ -66,6 +66,38 @@ if ($nxmCommand -and (Test-Path -LiteralPath $app) -and $nxmCommand.StartsWith('
     } else {
         "gave Nexus's Mod Manager Download links (nxm://) back to the program that had them before EMF"
     }
+}
+# The desktop shortcut install.cmd made (emf\desktop_shortcut.txt), and only while it still points to this EMF.exe:
+# never one the player made or changed. When the recorded one is gone (the desktop moved, OneDrive), the one EMF names
+# on the current desktop that opens this EMF.exe. A problem here is said; the uninstall goes on.
+try {
+    foreach ($line in @(Read-Lines (Join-Path $Game $script:ShortcutRecord))) {
+        if ($line -notlike "made`t*") { continue }
+        $lnk = $line.Substring(5)
+        if (-not (Test-Path -LiteralPath $lnk)) {
+            $desk = Get-DesktopFolder
+            $lnk = ""
+            if ($desk) {
+                foreach ($name in @("EMF.lnk", "EMF (server).lnk")) {
+                    $here = Join-Path $desk $name
+                    if ((Test-Path -LiteralPath $here) -and (Get-ShortcutTarget $here) -ieq $app) { $lnk = $here }
+                }
+            }
+            if (-not $lnk) { continue }
+        }
+        if ((Get-ShortcutTarget $lnk) -ieq $app) {
+            try {
+                Remove-Item -LiteralPath $lnk -Force
+                "removed the desktop shortcut EMF made ($lnk)"
+            } catch {
+                "could not remove the desktop shortcut $lnk ($($_.Exception.Message)): delete it yourself"
+            }
+        } else {
+            "left the desktop shortcut $lnk alone: it no longer points to this folder's EMF.exe"
+        }
+    }
+} catch {
+    "could not read emf\desktop_shortcut.txt ($($_.Exception.Message)): delete EMF's desktop shortcut yourself"
 }
 # Other mods' dinput8.dll that the installer renamed: the newest goes back to its name, its chain line goes. Only one
 # file can be dinput8.dll: the others stay renamed (and are named in the output); the record of them is kept.

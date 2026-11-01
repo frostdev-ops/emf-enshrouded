@@ -9,8 +9,8 @@ says what EMF does about that, for players and for authors of such mods.
 - EMF's loader is `dinput8.dll`. Mods under other names run next to it untouched.
 - When `install.cmd` finds another mod's `dinput8.dll`, it renames it, lists the new name in `dinput8-chain.ini` and
   records it in `emf\moved.txt`. `uninstall.cmd` puts it back. The new name is `<tool>.dll` when it recognises the
-  tool from `emf\known_tools.txt`, else a name from the DLL's version information (its product name), else
-  `dinput8-previous.dll`.
+  tool from `emf\known_tools.txt` (a text inside its DLL, as plain text or UTF-16), else a name from the DLL's version
+  information (its product name), else `dinput8-previous.dll`.
 - Nothing EMF moves is overwritten or deleted. A newer copy of a recognised tool gets `<tool>-2.dll` and the older copy
   is switched off (`; ` in front of its line). Two unrecognised DLLs both run, and `install.cmd` says so: if the
   second is a newer copy of the first, switch the first off.
@@ -27,8 +27,15 @@ says what EMF does about that, for players and for authors of such mods.
   (EML does that for a broken mod), stops the game as it would have without EMF.
 - The game's DirectInput calls go to Windows' own `dinput8.dll`, not to a chained mod's exports: a mod that does its
   work there (rather than from `DllMain` or a thread it starts) loses that part. None of the known ones does.
-- `chainloader.ini` is ModLoader Proxy's own file (with settings such as delayed loading and a mods folder). EMF does
-  not read it: when ModLoader Proxy was the `dinput8.dll`, EMF starts it, and it reads its file as before.
+- `chainloader.ini` is ModLoader Proxy's own file (with settings such as delayed loading and a mods folder). When
+  ModLoader Proxy was the `dinput8.dll`, EMF starts it, and it reads its file as before. EMF can also be one of the
+  DLLs ModLoader Proxy starts (ModLoader Proxy as `dinput8.dll`, EMF's loader renamed and listed under `[Load]`).
+  EMF reads `chainloader.ini` only to know what runs: when ModLoader Proxy runs (as a proxy DLL, or started by EMF),
+  the DLLs it starts (`ForwardTo`, the `[Load]` list, and the `ModsFolder` DLLs with `LoadFromFolder = true`) count
+  as running, and `emf\emf_core.log` lists them ("started by ModLoader Proxy (chainloader.ini): ..."). EMF reads the
+  `chainloader.ini` next to ModLoader Proxy's DLL (also in a subfolder) and paths relative to it, as ModLoader Proxy
+  does; a path outside the game folder (a drive, `..`, a `ModsFolder` elsewhere) is listed but not read, and a device
+  name such as `CON` or `COM1` is never opened.
 - `emf\emf_loader.log` has one line per chained DLL, `emf\chain_status.txt` the same as a table, and
   `emf\emf_core.log` says at start-up which tool owns each proxy DLL next to the game. A loader that is installed but
   does not run is named with the tool that holds the file it wants ("EML has dbghelp.dll, which both want");

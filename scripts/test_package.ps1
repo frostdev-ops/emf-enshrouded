@@ -137,6 +137,12 @@ function Test-InstallScripts([string]$scripts, [string]$gameTree) {
     Write-File (Join-Path $xe "dbghelp.dll") "EML dbghelp EML_LOG_FILE_PATH"
     & $inst -Game $xe -From $gameTree | Out-Null
     Check ((Get-Content -LiteralPath (Join-Path $xe "dinput8-chain.ini")) -contains "eml.dll") "only a tool marked same-loader is kept aside; another is listed and started"
+    # a tool whose DLL holds its text only as UTF-16 (ModLoader Proxy is built with wide strings: L"chainloader.ini")
+    $mlp = New-TempDir "mlp"
+    Write-File (Join-Path $mlp "enshrouded.exe") "fake"
+    [System.IO.File]::WriteAllBytes((Join-Path $mlp "dinput8.dll"), [System.Text.Encoding]::Unicode.GetBytes("MZ reads chainloader.ini"))
+    & $inst -Game $mlp -From $gameTree | Out-Null
+    Check ((Test-Path -LiteralPath (Join-Path $mlp "modloader-proxy.dll")) -and ((Get-Content -LiteralPath (Join-Path $mlp "dinput8-chain.ini")) -contains "modloader-proxy.dll")) "a DLL with a tool's text in UTF-16 is named after that tool (modloader-proxy.dll) and started"
 
     # a chain file the player already had (XHL-Core's way) keeps its entries; only EMF's line comes and goes
     $own = New-TempDir "ownchain"
@@ -448,6 +454,97 @@ function Test-InstallScripts([string]$scripts, [string]$gameTree) {
         Remove-Item Env:\EMF_TEST_STEAM_ROOT, Env:\EMF_TEST_SAVED_GAMES -ErrorAction SilentlyContinue
         foreach ($d in @($sv, $sg)) { Remove-Item -LiteralPath $d -Recurse -Force -ErrorAction SilentlyContinue }
     }
+
+    # a desktop shortcut to EMF.exe: install.cmd asks once, -DesktopShortcut makes it, -NoDesktopShortcut never does;
+    # uninstall removes only the one it made. On a fake desktop (EMF_TEST_DESKTOP), never the player's.
+    $desk = New-TempDir "desktop [1]"
+    $env:EMF_TEST_DESKTOP = $desk
+    try {
+        $wsh = New-Object -ComObject WScript.Shell
+        $sc = New-TempDir "shortcut [1]"
+        Write-File (Join-Path $sc "enshrouded.exe") "fake"
+        Write-File (Join-Path $sc "emf\EMF.exe") "fake manager"  # the fake package has none
+        $lnk = Join-Path $desk "EMF.lnk"
+        $out = (& $inst -Game $sc -From $gameTree) -join "`n"
+        Check (-not (Test-Path -LiteralPath $lnk) -and $out -notmatch "desktop") "a scripted install (no switch) makes no shortcut and asks nothing ($out)"
+        & $inst -Game $sc -From $gameTree -NoDesktopShortcut | Out-Null
+        Check (-not (Test-Path -LiteralPath $lnk)) "-NoDesktopShortcut makes none"
+        $out = (& $inst -Game $sc -From $gameTree -DesktopShortcut) -join "`n"
+        Check ((Test-Path -LiteralPath $lnk) -and $wsh.CreateShortcut($lnk).TargetPath -ieq (Join-Path $sc "emf\EMF.exe")) "-DesktopShortcut puts a shortcut to emf\EMF.exe on the desktop"
+        Check ($out -match "desktop") "install says it added the shortcut ($out)"
+        $mine = $wsh.CreateShortcut((Join-Path $desk "Mine.lnk")); $mine.TargetPath = (Join-Path $sc "emf\EMF.exe"); $mine.Save()
+        & $inst -Game $sc -From $gameTree -AskDesktopShortcut | Out-Null  # answered already: no second question, no copy
+        Check (@(Get-ChildItem -LiteralPath $desk -Filter *.lnk).Count -eq 2) "a reinstall adds no second shortcut"
+        $out = (& $uninst -Game $sc) -join "`n"
+        Check (-not (Test-Path -LiteralPath $lnk) -and ($out -match "shortcut")) "uninstall removes the shortcut it made ($out)"
+        Check (Test-Path -LiteralPath (Join-Path $desk "Mine.lnk")) "uninstall leaves the player's own shortcut alone"
+        # an EMF.lnk the player made for something else is never replaced, and uninstall leaves it
+        $notes = Join-Path $desk "notes.txt"
+        Write-File $notes "the player's notes"
+        $other = $wsh.CreateShortcut($lnk); $other.TargetPath = $notes; $other.Save()
+        Write-File (Join-Path $sc "emf\EMF.exe") "fake manager"
+        $out = (& $inst -Game $sc -From $gameTree -DesktopShortcut) -join "`n"
+        Check ($wsh.CreateShortcut($lnk).TargetPath -ieq $notes) "a shortcut named EMF that is not EMF's own is not replaced ($out)"
+        & $uninst -Game $sc | Out-Null
+        Check (Test-Path -LiteralPath $lnk) "uninstall leaves a shortcut EMF did not make"
+        # without EMF.exe (the manual download) there is nothing to point at
+        Remove-Item -LiteralPath $lnk -Force
+        if (-not (Test-Path -LiteralPath (Join-Path $gameTree "emf\EMF.exe"))) {
+            $man = New-TempDir "shortcut manual"
+            Write-File (Join-Path $man "enshrouded.exe") "fake"
+            $out = (& $inst -Game $man -From $gameTree -DesktopShortcut) -join "`n"
+            Check (-not (Test-Path -LiteralPath $lnk)) "no EMF.exe, no shortcut ($out)"
+        }
+        # the question: [Y/n], Enter means yes; asked only when install.cmd asks for it, once; a no is remembered
+        . (Join-Path $scripts "emf_common.ps1")
+        Check ((Resolve-DesktopShortcut "" $false $false $true { param($q) "" }) -eq "make") "Enter answers yes"
+        Check ((Resolve-DesktopShortcut "" $false $false $true { param($q) " N " }) -eq "decline") "n answers no"
+        Check ((Resolve-DesktopShortcut "" $false $false $true { param($q) $null }) -eq "none") "no console to ask in: no shortcut, nothing remembered"
+        Check ((Resolve-DesktopShortcut "" $false $false $false { param($q) throw "asked" }) -eq "none") "not asked unless install.cmd asks for it"
+        Check ((Resolve-DesktopShortcut "declined" $false $false $true { param($q) throw "asked" }) -eq "keep") "a no is remembered: not asked again"
+        Check ((Resolve-DesktopShortcut "made`tx.lnk" $false $false $true { param($q) throw "asked" }) -eq "keep") "a shortcut made before: not asked again"
+        Check ((Resolve-DesktopShortcut "declined" $true $false $true { param($q) throw "asked" }) -eq "make") "-DesktopShortcut wins over an earlier no"
+        Check ((Resolve-DesktopShortcut "" $false $true $true { param($q) throw "asked" }) -eq "decline") "-NoDesktopShortcut wins over the question"
+        $q = $null
+        Resolve-DesktopShortcut "" $false $false $true { param($text) $script:q = $text; "y" } | Out-Null
+        Check ($script:q -eq "Add an EMF shortcut to the desktop? [Y/n]") "the question's words ($($script:q))"
+        Check ((Get-Content -LiteralPath (Join-Path $scripts "install.cmd") -Raw) -match "-AskDesktopShortcut") "install.cmd asks the question (-AskDesktopShortcut)"
+
+        # a shortcut problem never breaks the install or the uninstall: it is said, and the rest goes on
+        $bad = New-TempDir "shortcut broken"
+        Write-File (Join-Path $bad "enshrouded.exe") "fake"
+        Write-File (Join-Path $bad "dinput8.dll") "someone else's proxy"
+        Write-File (Join-Path $bad "emf\EMF.exe") "fake manager"
+        New-Item -ItemType Directory -Force (Join-Path $bad "emf\desktop_shortcut.txt") | Out-Null  # the record cannot be written
+        $threw = $null
+        try { $out = (& $inst -Game $bad -From $gameTree -DesktopShortcut) -join "`n" } catch { $threw = $_.Exception.Message }
+        Check ($null -eq $threw -and (Test-EmfLoader (Join-Path $bad "dinput8.dll")) -and $out -match "shortcut") "a record that cannot be written does not fail the install ($threw | $out)"
+        Remove-Item -LiteralPath (Join-Path $bad "emf\desktop_shortcut.txt") -Recurse -Force
+        if (Test-Path -LiteralPath $lnk) { Remove-Item -LiteralPath $lnk -Force }
+        & $inst -Game $bad -From $gameTree -DesktopShortcut | Out-Null
+        $hold = [System.IO.File]::Open($lnk, "Open", "Read", "Read")  # readable, but it cannot be deleted
+        $threw = $null
+        try { $out = (& $uninst -Game $bad) -join "`n" } catch { $threw = $_.Exception.Message } finally { $hold.Close() }
+        Check ($null -eq $threw -and (Get-Content -LiteralPath (Join-Path $bad "dinput8.dll") -Raw) -eq "someone else's proxy" -and $out -match "could not remove") "a shortcut that cannot be removed does not stop the uninstall: the other mod's dinput8.dll is back ($threw | $out)"
+        if (Test-Path -LiteralPath $lnk) { Remove-Item -LiteralPath $lnk -Force }
+
+        # the desktop moved since (OneDrive): the shortcut on the current desktop that opens this EMF.exe is EMF's
+        $moved = New-TempDir "shortcut moved"
+        Write-File (Join-Path $moved "enshrouded.exe") "fake"
+        Write-File (Join-Path $moved "emf\EMF.exe") "fake manager"
+        & $inst -Game $moved -From $gameTree -DesktopShortcut | Out-Null
+        Write-File (Join-Path $moved "emf\desktop_shortcut.txt") ("made`t" + (Join-Path $bad "old desktop\EMF.lnk"))
+        & $inst -Game $moved -From $gameTree -DesktopShortcut | Out-Null
+        Check (@(Get-ChildItem -LiteralPath $desk -Filter "EMF*.lnk").Count -eq 1 -and ((Get-Content -LiteralPath (Join-Path $moved "emf\desktop_shortcut.txt") -Raw) -match [regex]::Escape($lnk))) "after the desktop moved, -DesktopShortcut takes its shortcut back on the new desktop (no second one)"
+        Write-File (Join-Path $moved "emf\desktop_shortcut.txt") ("made`t" + (Join-Path $bad "old desktop\EMF.lnk"))
+        $out = (& $uninst -Game $moved) -join "`n"
+        Check (-not (Test-Path -LiteralPath $lnk)) "after the desktop moved, uninstall finds its shortcut on the new desktop ($out)"
+    } finally {
+        Remove-Item Env:\EMF_TEST_DESKTOP -ErrorAction SilentlyContinue
+    }
+    # a test run never touches the real desktop: without EMF_TEST_DESKTOP there is no desktop folder to use
+    . (Join-Path $scripts "emf_common.ps1")
+    Check ($null -eq (Get-DesktopFolder)) "in a test run (EMF_TEST_NO_STEAM) there is no desktop folder unless the test names one"
 
     # a failure while copying leaves the old loader in place: dinput8.dll is copied last
     $old = New-TempDir "oldemf"

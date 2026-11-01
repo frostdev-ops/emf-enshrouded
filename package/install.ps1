@@ -9,11 +9,17 @@
 # Before it changes anything in the game folder it backs up your saves once (the starter backup, "Before EMF", in
 # %LOCALAPPDATA%\EMF\save-backups; docs\saves.md). When that fails it says so and asks whether to go on;
 # -IfBackupFails Continue or Stop answers for a run without a console.
+# install.cmd also asks once whether to put a shortcut to emf\EMF.exe on the desktop (-AskDesktopShortcut; the download
+# with the mod manager has EMF.exe). -DesktopShortcut or -NoDesktopShortcut answers for a scripted install, which is
+# never asked. uninstall.cmd removes the shortcut it made (emf\desktop_shortcut.txt), and only that one.
 param(
     [string]$Game = "",
     [string]$From = (Join-Path $PSScriptRoot "game"),
     [string]$SteamRoot = "",
-    [ValidateSet("Ask", "Continue", "Stop")][string]$IfBackupFails = "Ask"
+    [ValidateSet("Ask", "Continue", "Stop")][string]$IfBackupFails = "Ask",
+    [switch]$DesktopShortcut,
+    [switch]$NoDesktopShortcut,
+    [switch]$AskDesktopShortcut
 )
 $ErrorActionPreference = "Stop"
 
@@ -95,12 +101,61 @@ function Install-Emf([string]$Dir, [string]$Source) {
         }
     }
     $notes
+    # EMF is installed now: a problem with the shortcut is said, never an install failure
+    try { Set-DesktopShortcut $Dir } catch { "EMF could not set up the desktop shortcut: $($_.Exception.Message)" }
     if (Test-Path -LiteralPath (Join-Path $Dir "enshrouded_server.exe")) {
         "Start the server normally. Its window and emf\emf_core.log show what loaded; players' chat commands need " +
             "[chat] admins in emf\emf_core.ini (docs\modding\server.md)."
     } else {
         "Start the game normally. emf\emf_core.log shows what loaded; the key under Esc opens the EMF console."
     }
+}
+
+# The desktop shortcut to emf\EMF.exe: asked once by install.cmd, or -DesktopShortcut / -NoDesktopShortcut. The answer
+# is remembered in emf\desktop_shortcut.txt; a shortcut of the same name that EMF did not make is never replaced. When
+# the recorded one is gone (the desktop moved, OneDrive), the one of that name on the current desktop that opens this
+# EMF.exe is EMF's.
+function Set-DesktopShortcut([string]$Dir) {
+    $exe = Join-Path $Dir "emf\EMF.exe"
+    if (-not (Test-Path -LiteralPath $exe)) { return }  # the manual download has no EMF.exe
+    $recordPath = Join-Path $Dir $script:ShortcutRecord
+    $record = "$(@(Read-Lines $recordPath | Where-Object { $_ }) | Select-Object -First 1)"
+    $prompt = {
+        param($question)
+        if (-not [Environment]::UserInteractive -or [Console]::IsInputRedirected) { return $null }
+        Read-Host $question
+    }
+    $choice = Resolve-DesktopShortcut $record $DesktopShortcut.IsPresent $NoDesktopShortcut.IsPresent `
+        $AskDesktopShortcut.IsPresent $prompt
+    if ($choice -eq "decline" -and $record -notlike "made`t*") { Write-Lines $recordPath @("declined") }
+    if ($choice -ne "make") { return }
+    $desk = Get-DesktopFolder
+    if (-not $desk -or -not (Test-Path -LiteralPath $desk -PathType Container)) {
+        "EMF could not find your desktop folder, so it added no shortcut."
+        return
+    }
+    $name = if (Test-Path -LiteralPath (Join-Path $Dir "enshrouded.exe")) { "EMF" } else { "EMF (server)" }
+    $lnk = Join-Path $desk "$name.lnk"
+    $recorded = if ($record -like "made`t*") { $record.Substring(5) } else { "" }
+    $moved = $recorded -and -not (Test-Path -LiteralPath $recorded) -and (Test-Path -LiteralPath $lnk) -and
+        (Get-ShortcutTarget $lnk) -ieq $exe
+    $ours = $recorded -and (($recorded -ieq $lnk) -or $moved)
+    if ((Test-Path -LiteralPath $lnk) -and -not $ours) {
+        "There is already a shortcut called $name on your desktop, so EMF left it as it is and added none."
+        return
+    }
+    try {
+        $s = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+        $s.TargetPath = $exe
+        $s.WorkingDirectory = Split-Path $exe
+        $s.Description = "EMF, the mod manager for Enshrouded"
+        $s.Save()
+    } catch {
+        "EMF could not add the desktop shortcut: $($_.Exception.Message)"
+        return
+    }
+    Write-Lines $recordPath @("made`t$lnk")
+    "Added a shortcut to EMF.exe on your desktop ($name). uninstall.cmd removes it."
 }
 
 # The starter backup of the saves ("Before EMF") when there is none yet. Says what it did; when the copy fails it asks

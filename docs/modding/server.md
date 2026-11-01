@@ -39,7 +39,8 @@ log and `emf_core.log` as they grow (EMF's docs/app.md, "Servers", has the detai
 
 ## Commands from players' chat
 
-A player types `/help`, `/give Material_T1_Wood_Logs 20` (item names as `/items wood` lists them) or any EMF command
+A player types `/help`, `/give wood logs 20` (item names as `/items wood` lists them, typed the easy way: see
+[reference.md](reference.md#console-commands-built-in)) or any EMF command
 (`/<mod>.<command>` for a mod's own) into the game's chat. EMF runs it, nobody else sees the line, and the replies
 come back as chat lines that only that player sees, under their own name: `Ember: [EMF] gave 20 x
 Material_T1_Wood_Logs to player 1` (the game shows no chat line without a speaker). At most 10 lines per command; the

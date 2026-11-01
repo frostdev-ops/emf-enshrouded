@@ -1,7 +1,7 @@
 {
   "id": "handover",
   "name": "Hand-over",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Give items to the player next to you: /handover wood 20 in the game's chat hands 20 wood logs to the nearest other player within 5 m (/handover.to Alice wood 20 picks one). It runs where the world runs (the host or a dedicated server), so players who joined need nothing. Items are never lost: what does not fit comes back, and what cannot come back drops at your feet. Gear is refused (it would lose its gems and perks). The host also gets a wheel on a key.",
   "authors": ["EMF"],
   "enabled": false,

@@ -484,3 +484,23 @@ dedicated server, with their account hashes for `[chat] admins`, their connectio
 running world's settings, [world_settings.md](world_settings.md)). Commands go into the in-game console (the key under Esc), the optional
 console window (`[console] window=1` in `emf\emf_core.ini`), or `<game>\emf\commands.txt` (one per line; EMF runs the
 file about once a second). Replies are `[cmd]` lines in the log.
+
+**Item names** in `give`, `put`, `take` and `stack` are the game's debug names (`Material_T1_Wood_Logs`), typed the
+easy way: any case, spaces instead of `_`, words in any order, a part of a word is enough (`give wood logs 20`, `give
+simple bait 5`, `give hardwood 10`). An item matches when its name holds every word typed; a typed number only matches
+a whole number in the name (the 3 of `torch 3` matches the 03 of `Tool_Torch03_Wax`, never the 3 of a T3). Of the matches, in this order: the exact
+name; the item with exactly the words typed; the only match; the only match whose own words were all typed (`wood logs`
+is `Material_T1_Wood_Logs`, not `..._Logs_Dead`; the category, tier and number words such as `Material`, `T1`, `01`
+and `simple` do not count), unless a typed word is only the start of a word in it while another match has it as a whole
+word (`wolf` is not `Material_T5_Wolfsbane`: seven items have Wolf as a word); the only match that has every typed word
+as a whole word (`hardwood` is `Material_T2_Wood_Hardwood`; the props have Hard and Wood). Otherwise nothing is given
+and the reply names the candidates (`'logs' could be 6 items: ...`); `items <words>` lists them by the same rules, best
+match first.
+
+The plain numbers at the end are the command's numbers (`put wood logs 20 1025`); a number with a leading zero always
+belongs to the name (`take tool torch 01 5` takes 5 torches from you, not 1 from entity 5). When a split whose words are
+exactly an item's (`put tool torch 1 5`: Tool_Torch01) differs from reading every number at the end as the command's,
+the exact one wins; when two readings name different items, nothing happens and the reply shows how to type each
+(`'torch 2' can be read more than one way; type one of: give Torch_2 | give Torch 2`). A "quoted name" is the whole
+name. The names the game shows ("Wood Log") are in its text tables, which EMF does not read: type words of the debug
+name (`items wood` lists them). Mods still look items up by the exact debug name (`find_item`, `emf.item`).

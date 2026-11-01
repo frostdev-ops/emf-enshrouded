@@ -3,10 +3,13 @@
 #   word | name players see | text:<text inside its DLLs> | beside:<a file or folder of its own next to the exe>
 #        | same-loader:<another proxy name through which the same loader runs: its dinput8.dll copy is not started>
 #        | helper:<a proxy name of its own that does not start it alone (a helper of its loader)>
+# A text counts as plain text or as UTF-16 (a DLL built with wide strings), case ignored.
 # The first line whose text a DLL contains wins: ShroudForge's DLLs contain EML's text too, so ShroudForge comes first.
+# ModLoader Proxy: modloader-proxy.dll is the name its export table keeps after a rename (1.0.0, 1.1.0); its
+# chainloader.ini text is UTF-16.
 shroudforge | ShroudForge | text:shroudforge | beside:shroudforge | same-loader:dbghelp.dll | helper:winmm.dll
 eml | EML (Enshrouded Mod Loader) | text:EML_LOG_FILE_PATH
-modloader-proxy | ModLoader Proxy | text:chainloader.ini | beside:chainloader.ini
+modloader-proxy | ModLoader Proxy | text:modloader-proxy.dll | text:chainloader.ini | beside:chainloader.ini
 shroudtopia | Shroudtopia (or its Shroudweave fork) | text:shroudtopia | beside:shroudtopia.json
 greeneye | Greeneye Loader | text:greeneye | beside:greeneye
 aldrich-modmenu | Aldrich Mod Menu | text:aldrich | beside:aldrich-modmenu

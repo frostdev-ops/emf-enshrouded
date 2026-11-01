@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 
 #include <string>
 #include <vector>
@@ -57,6 +58,12 @@ bool has_warning(const FolderState& s, const std::string& level, const std::stri
     for (const auto& w : s.warnings)
         if (w.level == level && w.text.find(part) != std::string::npos) return true;
     return false;
+}
+
+// A file of the source tree (the shipped known_tools.txt).
+std::string repo_text(const char* rel) {
+    std::ifstream f(std::string(EMF_SOURCE_DIR) + "/" + rel, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
 }
 
 }  // namespace
@@ -345,8 +352,90 @@ TEST_CASE("app chain: chainloader.ini is ModLoader Proxy's list, shown read-only
             CHECK_FALSE(m.can_toggle);
         }
     CHECK(listed);
-    for (const auto& m : s.mods) CHECK(m.name.find("fwd") == std::string::npos);  // a setting, not its list
+    // the list is what ModLoader Proxy starts: the ForwardTo DLL first, then [Load] (missing files said so)
+    std::vector<std::string> names;
+    for (const auto& m : s.mods)
+        if (m.source == "other" && m.loaded_by == "ModLoader Proxy") names.push_back(m.name);
+    CHECK(names == (std::vector<std::string>{"fwd.dll", "atlas.dll"}));
     CHECK(has_warning(s, "info", "chainloader.ini"));
+}
+
+TEST_CASE("app chain: the list of what ModLoader Proxy starts has its mods folder; a folder named like a DLL is not one") {
+    TempGame g(L"mlproxylist");
+    install_emf(g);
+    g.write(L"chainloader.ini", "[Settings]\r\nLoadFromFolder = true\r\n[Load]\r\ndir.dll\r\n");
+    g.mkdir(L"dir.dll");
+    g.write(L"mods\\b.dll", "MZ b");
+    g.write(L"mods\\a.dll", "MZ a");
+    const FolderState s = scan_game_folder(g.dir);
+    std::vector<std::string> names;
+    for (const auto& m : s.mods)
+        if (m.source == "other" && m.loaded_by == "ModLoader Proxy") names.push_back(m.name);
+    CHECK(names == (std::vector<std::string>{"dir.dll", "mods\\a.dll", "mods\\b.dll"}));
+    const ModEntry* dir = find(s, "other", "modloader-proxy:dir.dll");
+    REQUIRE(dir);
+    CHECK_FALSE(dir->error.empty());  // a folder, not a DLL
+    CHECK_FALSE(has_warning(s, "warn", "nothing loads it"));  // ModLoader Proxy loads mods\a.dll and b.dll
+}
+
+TEST_CASE("app chain: a ModLoader Proxy that EMF starts counts in the quick scan too (no status read yet)") {
+    // the setup install.cmd makes: EMF's loader, ModLoader Proxy renamed and listed in dinput8-chain.ini, ShroudForge in
+    // chainloader.ini; before any game start there is no emf\chain_status.txt
+    TempGame g(L"mlproxylight");
+    install_emf(g);
+    g.write(L"modloader-proxy.dll", "MZ fake modloader-proxy.dll");
+    g.write(L"dinput8-chain.ini", "[Chain]\r\nmodloader-proxy.dll\r\n");
+    g.write(L"chainloader.ini", "[Load]\r\nshroudforge.dll\r\n");
+    g.write(L"shroudforge.dll", "MZ ShroudForge EML_LOG_FILE_PATH");
+    g.mkdir(L"shroudforge");
+    g.write(L"emf\\known_tools.txt", repo_text("src/core/known_tools.txt"));
+    CHECK(scan_mod_folder(g.dir, ScanDepth::Profiles).shroudforge_active);
+    CHECK(scan_game_folder(g.dir).shroudforge_active);
+}
+
+TEST_CASE("app chain: ModLoader Proxy as dinput8.dll starts EMF and ShroudForge from chainloader.ini") {
+    // a player's setup: ModLoader Proxy (its strings are UTF-16) is dinput8.dll and lists EMF's loader and ShroudForge
+    TempGame g(L"mlproxyfirst");
+    const std::string wide_ini("c\0h\0a\0i\0n\0l\0o\0a\0d\0e\0r\0.\0i\0n\0i\0", 30);
+    g.write(L"dinput8.dll", "MZ fake " + wide_ini);
+    g.write(L"chainloader.ini", "[Settings]\r\nDeferred = true\r\n[Load]\r\nEMF.dll\r\nshroudforge.dll\r\ngone.dll\r\n");
+    g.write(L"EMF.dll", "MZ EMF-LOADER-7d3c9f fake");
+    g.write(L"emf\\emf_core.dll", std::string("MZ emf_core 0.9.1\0 more", 23));
+    g.write(L"emf\\known_tools.txt", kTools);
+    g.write(L"shroudforge.dll", "MZ ShroudForge EML_LOG_FILE_PATH");  // its only DLL: it runs through ModLoader Proxy
+    g.mkdir(L"shroudforge");
+    const FolderState s = scan_game_folder(g.dir);
+    CHECK(s.emf_installed);
+    CHECK(s.shroudforge_active);
+    CHECK_FALSE(has_warning(s, "warn", "none of its DLLs is active"));
+    CHECK_FALSE(has_warning(s, "warn", "EMF is not installed"));
+    CHECK_FALSE(has_warning(s, "warn", "started by"));  // the report's list is not a warning
+    CHECK(std::find(s.report.begin(), s.report.end(),
+                    "started by ModLoader Proxy (chainloader.ini): EMF.dll = EMF, shroudforge.dll = ShroudForge; "
+                    "listed but not found: gone.dll") != s.report.end());
+    CHECK(has_warning(s, "info", "ModLoader Proxy (dinput8.dll) starts the DLLs listed in chainloader.ini"));
+    const ModEntry* proxy = find(s, "other", "loader:dinput8.dll");
+    REQUIRE(proxy);
+    CHECK(proxy->name == "ModLoader Proxy");
+}
+
+TEST_CASE("app chain: ModLoader Proxy started by EMF starts its own list too") {
+    TempGame g(L"mlproxychained");
+    install_emf(g);
+    g.write(L"modloader-proxy.dll", "MZ fake modloader-proxy.dll");  // renamed by EMF's installer
+    g.write(L"dinput8-chain.ini", "[Chain]\r\nmodloader-proxy.dll\r\n");
+    g.write(L"emf\\chain_status.txt", "modloader-proxy.dll\tstarted\r\n");
+    g.write(L"chainloader.ini", "[Load]\r\nshroudforge.dll\r\n");
+    g.write(L"shroudforge.dll", "MZ ShroudForge EML_LOG_FILE_PATH");
+    g.mkdir(L"shroudforge");
+    g.write(L"emf\\known_tools.txt", repo_text("src/core/known_tools.txt"));  // the shipped table
+    const FolderState s = scan_game_folder(g.dir);
+    CHECK(s.emf_installed);
+    CHECK(s.shroudforge_active);
+    CHECK_FALSE(has_warning(s, "warn", "none of its DLLs is active"));
+    CHECK(std::find(s.report.begin(), s.report.end(),
+                    "started by ModLoader Proxy (chainloader.ini): shroudforge.dll = ShroudForge") != s.report.end());
+    CHECK(has_warning(s, "info", "EMF starts ModLoader Proxy (dinput8-chain.ini), and ModLoader Proxy starts the DLLs"));
 }
 
 TEST_CASE("app chain: switching a line off puts \"; \" in front; on takes it away; every other byte stays") {
