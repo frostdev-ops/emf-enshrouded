@@ -30,9 +30,10 @@ def solid_png(path, rgb, size=8):
         return f.read()
 
 
-def two_texture_rig(path, tmp):
+def two_texture_rig(path, tmp, unlit=False):
     """The small rig of test_new_skeleton.py with its triangle twice, each in a material with its own image texture
-    (solid red, solid blue), UVs inside the image."""
+    (solid red, solid blue), UVs inside the image; unlit: the second material unlit (KHR_materials_unlit, a scan's
+    baked light: Blender draws it with an emission shader)."""
     gltf, binc = gltf_in.read_glb(rig.small_rig(path))
     binc = bytearray(binc)
 
@@ -50,6 +51,9 @@ def two_texture_rig(path, tmp):
     gltf["textures"] = [{"source": 0}, {"source": 1}]
     gltf["materials"] = [{"name": "Body", "pbrMetallicRoughness": {"baseColorTexture": {"index": 0}}},
                          {"name": "Mouth", "pbrMetallicRoughness": {"baseColorTexture": {"index": 1}}}]
+    if unlit:
+        gltf["materials"][1]["extensions"] = {"KHR_materials_unlit": {}}
+        gltf["extensionsUsed"] = ["KHR_materials_unlit"]
     prim = gltf["meshes"][0]["primitives"][0]
     prim["attributes"]["TEXCOORD_0"] = uv_acc
     gltf["meshes"][0]["primitives"] = [dict(prim, material=0), dict(prim, material=1)]
@@ -66,10 +70,12 @@ def sample(png, u, v):
 
 @unittest.skipUnless(BLENDER, "needs Blender")
 class AtlasTests(unittest.TestCase):
+    UNLIT = False
+
     @classmethod
     def setUpClass(cls):
         cls.tmp = tempfile.TemporaryDirectory()
-        src = two_texture_rig(os.path.join(cls.tmp.name, "rig.glb"), cls.tmp.name)
+        src = two_texture_rig(os.path.join(cls.tmp.name, "rig.glb"), cls.tmp.name, unlit=cls.UNLIT)
         gltf, binc = gltf_in.read_glb(src)
         cls.sk = ns.build(gltf, binc)
         copy = os.path.join(cls.tmp.name, "copy.glb")
@@ -110,6 +116,11 @@ class AtlasTests(unittest.TestCase):
         _, report = gltf_in.load_groups(self.out, ns.hierarchy(self.sk, "22222222-2222-4222-8222-222222222222"),
                                         warn=self.fail)
         self.assertLess(report["max_rest_difference"], 1e-3)
+
+
+class UnlitAtlasTests(AtlasTests):
+    """The same with the second material unlit: its texture still goes into the atlas."""
+    UNLIT = True
 
 
 if __name__ == "__main__":

@@ -87,6 +87,11 @@ for o in meshes:
                 if bsdf:
                     tex = upstream_image(bsdf.inputs["Base Color"])
                     colour = tuple(bsdf.inputs["Base Color"].default_value)
+                else:  # an unlit material (KHR_materials_unlit: a scan's baked light) draws through an emission
+                    emit = next((n for n in m.node_tree.nodes if n.type == "EMISSION"), None)
+                    if emit:
+                        tex = upstream_image(emit.inputs["Color"])
+                        colour = tuple(emit.inputs["Color"].default_value)
             info[key] = {"material": m, "tex": tex, "colour": colour}
             order.append(key)
 
