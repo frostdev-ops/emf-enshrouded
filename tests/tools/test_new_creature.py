@@ -63,7 +63,9 @@ class BuildTests(Fixture):
         self.assertEqual((stand["clip"]["frameCount"], stand["clip"]["flags"]), (120, 1))  # a loop closes
 
     def test_an_additive_clip_that_adds_nothing(self):
-        """The graph's additive layers (the wolf's leaning) play offsets: our clip for them turns and moves no joint."""
+        """The graph's additive layers (the wolf's leaning) play offsets: our clip for them turns and moves no joint,
+        and its scales are 0 for every joint (an additive layer adds scales: the game's offset clips store 0; an
+        offset of 1 doubled every joint's scale)."""
         built = nc.build(config(clips={"move": {"animation": "Move"}, "stand": {"additive_zero": True}}), self.glb)
         stand = built["clips"][1]["clip"]
         self.assertEqual((stand["frameCount"], stand["flags"]), (9, 0))
@@ -72,7 +74,7 @@ class BuildTests(Fixture):
             for q, t, s in ja.sample(stand, frame, rest):
                 self.assertTrue(rig.same_rotation(q, (0.0, 0.0, 0.0, 1.0), 1e-6), q)
                 self.assertEqual(t, (0.0, 0.0, 0.0))
-                self.assertEqual(s, (1.0, 1.0, 1.0))
+                self.assertEqual(s, (0.0, 0.0, 0.0))
 
     def test_model_from_a_retextured_copy(self):
         """model_glb: the model from a copy on the skeleton (new_skeleton.write_glb, then retextured): bones named

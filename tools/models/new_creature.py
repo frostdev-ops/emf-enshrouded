@@ -7,8 +7,9 @@ The pack names, per creature:
   skeleton_guid  the skeleton's GUID (fixed forever; the clips' GUIDs follow from it and their names)
   graph, graph_guid   the game's animation graph and its copy's GUID
   clips          our clips: {name: {"animation": the glb's animation, "loop": true for a looping clip}}, or
-                 {name: {"additive_zero": true}}: an additive clip that adds nothing (every joint unturned and
-                 unmoved), for the graph's additive layers whose game clips are offsets (the wolf's leaning)
+                 {name: {"additive_zero": true}}: an additive clip that adds nothing (every joint unturned,
+                 unmoved, scale 0: an additive layer adds scales, as the game's offset clips show), for the graph's
+                 additive layers whose game clips are offsets (the wolf's leaning)
   model_glb      optional: the model from this glb instead (a copy on the skeleton, new_skeleton.write_glb, then
                  retextured; its bones named jNNN_<name>)
   roles          {game clip GUID: our clip name}: which of our clips plays where the graph plays that game clip
@@ -73,7 +74,7 @@ def build(cfg, glb_path, creature="creature"):
     for name in sorted(cfg["clips"]):
         spec = cfg["clips"][name]
         if spec.get("additive_zero"):
-            zero = [((0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0))] * len(sk["rest"])
+            zero = [((0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))] * len(sk["rest"])
             clip = joint_animation.encode([zero] * (ADDITIVE_FRAMES + 1), sk["rest"],
                                           hierarchy_hash=new_skeleton.clip_hash(hier))
             out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
