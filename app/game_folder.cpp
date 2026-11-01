@@ -314,8 +314,8 @@ struct Context {
     std::wstring shroudtopia_name = L"Shroudtopia";
     std::vector<std::pair<std::wstring, std::wstring>> shroudtopia_dlls;  // name shown, path: DLL mods in mods\ for Shroudtopia
     bool light = false;  // ScanDepth::Profiles: only what the mods' switches and settings need
-    std::string modloader_proxy;            // the DLL ModLoader Proxy runs as ("" when it does not run)
-    bool modloader_proxy_is_proxy = false;  // that DLL sits next to the game under a proxy name (else EMF starts it)
+    bool modloader_proxy = false;    // ModLoader Proxy runs (a proxy DLL next to the game, or started by EMF)
+    std::string modloader_proxy_as;  // the proxy name it runs as ("" when EMF starts it)
 };
 
 void warn(FolderState& s, const std::string& level, const std::string& text) { s.warnings.push_back({level, text}); }
@@ -792,10 +792,10 @@ void scan_other(FolderState& s, const Context& c) {
             if (!exists(e.path)) e.error = "listed in chainloader.ini, but not in the game folder";
             s.mods.push_back(std::move(e));
         }
-        if (c.modloader_proxy_is_proxy)
-            warn(s, "info", "ModLoader Proxy (" + c.modloader_proxy + ") starts the DLLs listed in chainloader.ini. It reads "
-                            "that file itself, with its own settings.");
-        else if (!c.modloader_proxy.empty())
+        if (!c.modloader_proxy_as.empty())
+            warn(s, "info", "ModLoader Proxy (" + c.modloader_proxy_as + ") starts the DLLs listed in chainloader.ini. It "
+                            "reads that file itself, with its own settings.");
+        else if (c.modloader_proxy)
             warn(s, "info", "EMF starts ModLoader Proxy (dinput8-chain.ini), and ModLoader Proxy starts the DLLs listed in "
                             "chainloader.ini. It reads that file itself, with its own settings.");
         else
@@ -920,10 +920,9 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
         for (const auto& d : view.loader_started)
             if (d.found && !d.word.empty()) words.push_back(d.word);
         std::string self;
-        if (core::modloader_proxy_runs(view, &self)) {
-            c.modloader_proxy = self.empty() ? "?" : self;
-            for (const auto& p : view.proxies) c.modloader_proxy_is_proxy |= p.first == self;
-        }
+        c.modloader_proxy = core::modloader_proxy_runs(view, &self);
+        for (const auto& p : view.proxies)
+            if (c.modloader_proxy && p.first == self) c.modloader_proxy_as = self;
     }
     if (!c.light)
         for (const auto& line : core::installed_report(c.tools, view)) {

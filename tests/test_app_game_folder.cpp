@@ -6,6 +6,7 @@
 
 #include <algorithm>
 #include <fstream>
+#include <iterator>
 
 #include <string>
 #include <vector>
@@ -57,6 +58,12 @@ bool has_warning(const FolderState& s, const std::string& level, const std::stri
     for (const auto& w : s.warnings)
         if (w.level == level && w.text.find(part) != std::string::npos) return true;
     return false;
+}
+
+// A file of the source tree (the shipped known_tools.txt).
+std::string repo_text(const char* rel) {
+    std::ifstream f(std::string(EMF_SOURCE_DIR) + "/" + rel, std::ios::binary);
+    return std::string(std::istreambuf_iterator<char>(f), std::istreambuf_iterator<char>());
 }
 
 }  // namespace
@@ -373,6 +380,25 @@ TEST_CASE("app chain: ModLoader Proxy as dinput8.dll starts EMF and ShroudForge 
     const ModEntry* proxy = find(s, "other", "loader:dinput8.dll");
     REQUIRE(proxy);
     CHECK(proxy->name == "ModLoader Proxy");
+}
+
+TEST_CASE("app chain: ModLoader Proxy started by EMF starts its own list too") {
+    TempGame g(L"mlproxychained");
+    install_emf(g);
+    g.write(L"modloader-proxy.dll", "MZ fake modloader-proxy.dll");  // renamed by EMF's installer
+    g.write(L"dinput8-chain.ini", "[Chain]\r\nmodloader-proxy.dll\r\n");
+    g.write(L"emf\\chain_status.txt", "modloader-proxy.dll\tstarted\r\n");
+    g.write(L"chainloader.ini", "[Load]\r\nshroudforge.dll\r\n");
+    g.write(L"shroudforge.dll", "MZ ShroudForge EML_LOG_FILE_PATH");
+    g.mkdir(L"shroudforge");
+    g.write(L"emf\\known_tools.txt", repo_text("src/core/known_tools.txt"));  // the shipped table
+    const FolderState s = scan_game_folder(g.dir);
+    CHECK(s.emf_installed);
+    CHECK(s.shroudforge_active);
+    CHECK_FALSE(has_warning(s, "warn", "none of its DLLs is active"));
+    CHECK(std::find(s.report.begin(), s.report.end(),
+                    "started by ModLoader Proxy (chainloader.ini): shroudforge.dll = ShroudForge") != s.report.end());
+    CHECK(has_warning(s, "info", "EMF starts ModLoader Proxy (dinput8-chain.ini), and ModLoader Proxy starts the DLLs"));
 }
 
 TEST_CASE("app chain: switching a line off puts \"; \" in front; on takes it away; every other byte stays") {
