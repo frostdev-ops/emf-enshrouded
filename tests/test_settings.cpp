@@ -205,6 +205,29 @@ TEST_CASE("settings: a key setting can be empty (no key)") {
     CHECK(ini.values["m.key_stay"].empty());
 }
 
+TEST_CASE("settings: a mod's new default key reaches only players who never set that key; a chosen key stays") {
+    // Defaults are never written into the ini, so a value there is one the player (or a profile they loaded) set.
+    FakeIni ini;
+    SettingsStore before(&ini);
+    REQUIRE(before.declare("companion", def("key", SettingType::Key, "G")));
+    CHECK(before.get("companion", "key") == "G");
+    CHECK(before.set("companion", "key", "G") == SettingsStore::SetResult::Unchanged);  // picking the default: nothing kept
+    CHECK(ini.writes == 0);
+    CHECK(ini.values.empty());
+    SettingsStore after(&ini);  // the next game start, with the new mod.json
+    REQUIRE(after.declare("companion", def("key", SettingType::Key, "F6")));
+    CHECK(after.get("companion", "key") == "F6");
+    CHECK(ini.values.empty());
+
+    FakeIni chose;  // a player who picked G (or any key) keeps it
+    chose.values["companion.key"] = "G";
+    SettingsStore mine(&chose);
+    REQUIRE(mine.declare("companion", def("key", SettingType::Key, "F6")));
+    CHECK(mine.get("companion", "key") == "G");
+    CHECK(chose.writes == 0);
+    CHECK(chose.values["companion.key"] == "G");
+}
+
 TEST_CASE("settings: a corrected ini value is written back, so mods reading their ini see what the Mods tab shows") {
     FakeIni ini;
     ini.values["m.radius"] = "999";

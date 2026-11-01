@@ -24,7 +24,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `src/saves/` | save backups: the engine shared by EMF.exe's Saves tab and the core's automatic backups and `saves.*` commands, and `save-info.json` ([docs/saves.md](docs/saves.md)) |
 | `sdk/include/emf/` | mod SDK: `emf_api.h` (C API v20), `emf.hpp` (C++ helpers), `generated/components.hpp` (661 components, 65 dynamic halves, 129 events) |
 | `mods/sample_mod/` | example EMF mod (see below) |
-| `mods/companion/` | G: a companion that follows you, fights at your side, takes orders (stay, attack) and wears gear you give it; saved per world (see below) |
+| `mods/companion/` | F6: a companion that follows you, fights at your side, takes orders (stay, attack) and wears gear you give it; saved per world (see below) |
 | `mods/clock/` | the time of day on screen (read-only, on by default) |
 | `mods/quick_stack/` | Quick Stack and Chest Machines: tap L to put what you carry into nearby chests that already hold it; hold L at a chest for sorting chests, recyclers and overflow chests; `/qs` for every player (see below) |
 | `mods/villager_jobs/` | K: villagers farm, tend animals, haul between chests and craft (or trade) at a chest, assigned with a radial wheel; saved per world (see below) |
@@ -235,8 +235,8 @@ died or was hit (player, villager, enemy), then a count per kind every 10 s. Exa
 ```
 
 ## The companion mod
-With `-EnableWrite` (`emf\config\companion.ini`: `enabled=1`), **G** (or F6) on the host spawns a Vukah warrior
-(`Enemy_Vukah_Melee`) 2 m from you, turns it into an ally and makes it guard you through the game's own
+With `-EnableWrite` (`emf\config\companion.ini`: `enabled=1`), **F6** (the order wheel key) on the host spawns a
+Vukah warrior (`Enemy_Vukah_Melee`) 2 m from you, turns it into an ally and makes it guard you through the game's own
 `StartGuardingEvent`, sent from the mod's ECS program. It follows you (when you walk away it catches up and stays 1-3 m
 from you; while you stand still it may wander a few metres), never attacks you, and **fights at your side at full
 damage**: in the test it hit a hostile Vukah three times for 48 and killed it, and the game credited you with the kill
@@ -253,13 +253,13 @@ player within a second. So:
   comes back to you when you stand still". The new one appears on the spot where you stand.
 - Gone while it stays (you went far away): it is not brought to you. "it waits at its stay spot; it shows up again when
   you come back there": it appears at its spot once you are within 50 m of it.
-- It comes back by itself 3 times within 2 minutes; at the 4th loss it stays away until you call it (G or F6), which
+- It comes back by itself 3 times within 2 minutes; at the 4th loss it stays away until you call it (F6), which
   starts the count over.
 
 The catch-up and the return to you wait until you have stood still for 2 s and aim at the ground you stand on, not a
 spot beside you (over a ledge, or beyond a wall). Gear, order and level stay the same.
 
-**Orders.** With the companion out, hold **G**: a wheel titled "Companion (level N)" offers
+**Orders.** With the companion out, hold **F6**: a wheel titled "Companion (level N)" offers
 
 | Entry | What happens |
 |---|---|
@@ -269,7 +269,7 @@ spot beside you (over a ledge, or beyond a wall). Gear, order and level stay the
 | Gear | a second wheel: give it a weapon or armour from your backpack / action bar, or take all of it back (below) |
 | Dismiss | it leaves (`StopGuardingEvent`, then removed) |
 
-Release G over an entry, or tap G and click. Each order can also have its own key (`key_follow`, `key_stay`,
+Release F6 over an entry, or tap F6 and click. Each order can also have its own key (`key_follow`, `key_stay`,
 `key_attack`, `key_dismiss`; off by default). For Attack, aim with the crosshair; a fast animal can outrun it (in the
 test it chased a rabbit for 30 s and gave up).
 
@@ -298,16 +298,20 @@ being handed over is never lost: a piece that was being given back is given back
 in the 2 minutes after "Take all gear back" can return it twice), and a piece the game had not confirmed taking stays
 yours.
 
+**New in 1.7:** the order wheel key is F6 by default (it was G, which the game uses in build mode and to sort the
+backpack); a key you chose yourself stays. F6 no longer dismisses at once: pick Dismiss on the wheel, or set
+`key_dismiss`.
+
 | companion.ini | What it does |
 |---|---|
-| `key=G` | the order wheel key (with no companion out it summons one): a letter, a digit or a keyboard key's virtual-key code (`0x71` = F2; mouse buttons are refused); counts only while the game window is in front |
+| `key=F6` | the order wheel key (with no companion out it calls one; every companion key is a setting): a letter, a digit or a keyboard key's virtual-key code (`0x71` = F2; mouse buttons are refused); counts only while the game window is in front |
 | `key_follow=` `key_stay=` `key_attack=` `key_dismiss=` | optional one-key orders, same format; empty = off |
 | `gear_bonus_max=10` | the most levels gear can add |
 | `marker_guid=` | what "Stay here" puts down for it to guard (default `0ce28db1-522f-4455-b358-3888fb5e089b`, a small barrel). It must be a template the game can spawn standing still |
 | `faction=11` | the faction number written on the companion right after it spawns (and again if the game changes it). 11 = `PlayerAlly`, the faction of the game's own summons: full damage. 7 = `Player` follows too but every hit does 0. -1 keeps the template's faction: **with the default enemy body that leaves a hostile Vukah next to you**, and other non-ally numbers can too. Anything that is not a number from -1 to 15 falls back to 11 (logged). Level and gear need 11 |
 | `guid=` | the body (default `d5d05217-52dc-467a-9192-26b4f661d8d9`, `Enemy_Vukah_Melee`). Plain enemy-AI actors without `PlayerInput` work; the old default `FakePlayer_Vukah_Melee` (`9543cfb0-...`) follows but does no damage. Tested ones: `docs/engine_parts/re_companions.md` |
 | `auto_summon=1` | summons one by itself once a world you host is running |
-| `respawn_seconds=N` | after the companion dies, a new one comes N seconds later; 0 (default): press G. One the game removed (left far behind) did not die: it always comes back (above) |
+| `respawn_seconds=N` | after the companion dies, a new one comes N seconds later; 0 (default): press the order wheel key. One the game removed (left far behind) did not die: it always comes back (above) |
 | `follow_distance=<m>` | changes the template's guard distances (start following at d + 2 m, stop at d m). Template data: with an enemy body it changes **every wild Vukah of that template** too, until the game restarts. Not set by default |
 
 Console: `companion.gear` (what it wears, its level, and pieces still on their way back to you), `companion.aim` (your camera ray and the creatures near it, with

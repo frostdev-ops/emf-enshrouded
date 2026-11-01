@@ -20,7 +20,7 @@ in the console ( settings <mod>  lists the keys;  set big_stacks enabled 1  swit
 come with EMF: every mod starts with its defaults, and your changes are saved in <game>\emf\config\<mod>.ini.
 
 Included mods:
-  companion      G: a companion that follows you, fights, takes orders (stay, attack) and wears gear you give it
+  companion      F6: a companion that follows you, fights, takes orders (stay, attack) and wears gear you give it
   villager_jobs  K: villagers farm, tend animals, haul between chests and craft at a chest
   quick_stack    L: put what you carry into nearby chests that already hold it
   clock          the time of day in a corner of the screen
@@ -81,7 +81,7 @@ your mod profiles (emf\profiles). Save backups always stay, also with -All.
 It also removes the desktop shortcut that install.cmd made (none other).
 To remove the settings too, run  uninstall.cmd -All  in a command prompt in this folder.
 Gear you gave the companion exists only in its settings files (emf\config\companion): take it back in game
-(G, Gear) before  uninstall.cmd -All  (it refuses while the companion holds gear; -All -Force deletes it anyway).
+(F6, Gear) before  uninstall.cmd -All  (it refuses while the companion holds gear; -All -Force deletes it anyway).
 Installing a newer EMF over an older one keeps your settings.
 
 FOR MODDERS

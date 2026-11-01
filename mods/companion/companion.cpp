@@ -1,5 +1,6 @@
-// companion: an EMF mod. G or F6 (host) spawns a companion next to you that follows you and fights at your side,
-// through the game's own guard system (StartGuardingEvent); G then opens its order wheel. Needs
+// companion: an EMF mod. The order wheel key (F6 by default; host) spawns a companion next to you that follows you and
+// fights at your side, through the game's own guard system (StartGuardingEvent); the same key then opens its order
+// wheel. Needs
 // emf/config/companion.ini:
 //   [companion]
 //   enabled=1
@@ -7,11 +8,11 @@
 //   faction=11          (default 11 = PlayerAlly: written on the companion right after it spawns, so it guards you and
 //                        fights at full damage; 7 = Player hits for 0; -1 keeps the template's faction)
 //   auto_summon=0       (1: summon one by itself once a world you host is running)
-//   respawn_seconds=0   (N: after it dies, a new one comes N seconds later; 0: press F6)
+//   respawn_seconds=0   (N: after it dies, a new one comes N seconds later; 0: press the order wheel key)
 //   follow_distance=6   (optional, metres: how close it stays; changes the TEMPLATE's guardSetup, so with an enemy body
 //                        every wild Vukah of that template in this session uses it too)
-//   key=G               (the order wheel: Follow me / Stay here / Attack / Gear / Dismiss; with no companion out it
-//                        summons one)
+//   key=F6              (the order wheel: Follow me / Stay here / Attack / Gear / Dismiss; with no companion out it
+//                        summons one. Every key is a setting: the mod has no key of its own)
 //   key_follow= key_stay= key_attack= key_dismiss=   (optional single-key orders; empty = off)
 //   marker_guid=0ce28db1-522f-4455-b358-3888fb5e089b (what "Stay here" puts down for it to guard: a small barrel)
 //   gear_bonus_max=10   (the most levels gear can add on top of the player's level)
@@ -48,7 +49,6 @@ constexpr double kFixed = 4294967296.0;                                        /
 constexpr int kActorReadyForGameplay = 50;                                     // keen::actor::StateFlag
 
 companion::Companion g_companion;
-companion::KeyEdge g_f6;
 uint8_t g_guid[16] = {};
 uint64_t g_last_check_ms = 0;
 uint64_t g_last_report_ms = 0;
@@ -79,6 +79,8 @@ struct Hotkey {
     emf::keys::Edge edge;
 };
 Hotkey g_key_wheel, g_key_follow, g_key_stay, g_key_attack, g_key_dismiss;
+// What calls the companion, for notes and log lines: the order wheel key's name.
+std::string call_key() { return companion::call_key_text(g_key_wheel.vk ? g_key_wheel.name : std::string()); }
 std::mutex g_m;                    // guards the two below (server tick <-> the program's worker thread)
 companion::ThreatBox g_threats;   // targets to send AddThreatTargetEvent for (per companion and session)
 companion::DeathLog g_dead;       // entities whose EntityDiedEvent was seen, per session (attack targets end on them)
@@ -197,7 +199,7 @@ void guard_program(void* ctx) {
 enum class Summon { Ok, NoPlayer, Failed };
 
 // Spawns a companion and makes it an ally: at `at` (metres), else 2 m from the local player. `by_hand`: the player
-// called it (G, F6). NoPlayer (logged when `loud`) while the player's position is unknown, Failed (logged) when the game
+// called it (the order wheel key). NoPlayer (logged when `loud`) while the player's position is unknown, Failed (logged) when the game
 // refused the spawn.
 Summon summon(emf::World w, uint64_t now, const char* why, bool loud,
               const std::optional<emf::aim::Vec3>& at = std::nullopt, bool by_hand = false) {
@@ -232,7 +234,7 @@ Summon summon(emf::World w, uint64_t now, const char* why, bool loud,
 void lose(uint64_t now, uint32_t id, companion::LostNotice what, const char* how) {
     const bool armed = g_policy.on_lost(now);
     const bool staying = g_orders.mode() == companion::Mode::Stay;
-    const std::string key = g_key_wheel.vk ? g_key_wheel.name : std::string("F6");
+    const std::string key = call_key();
     EMF_LOG(kMod, "companion %u %s: %s", id, how,
             !armed ? "lost too often in 2 minutes, it stays away until called"
                    : staying ? "it comes back at its stay spot once you are near it" : "a new one comes to you");
@@ -303,7 +305,8 @@ void check_companion(emf::World w, uint64_t now) {
         case companion::Presence::Dead: {
             g_companion.on_gone();
             const bool again = g_policy.on_died(now);  // its body is there, dead: a death after all
-            EMF_LOG(kMod, "companion %u died: %s", id, companion::death_message(again, g_policy.respawn_ms / 1000ull).c_str());
+            EMF_LOG(kMod, "companion %u died: %s", id,
+                    companion::death_message(again, g_policy.respawn_ms / 1000ull, call_key()).c_str());
             return;
         }
         case companion::Presence::Gone:
@@ -737,10 +740,11 @@ void open_order_wheel(emf::World w) {
 void read_keys(emf::World w, uint64_t now) {
     const bool active = g_companion.phase() == companion::Companion::Phase::Active;
     if (g_key_wheel.edge.pressed(emf::keys::down(g_key_wheel.vk))) {
-        if (active)
-            open_order_wheel(w);
-        else if (g_companion.phase() == companion::Companion::Phase::None)
-            summon(w, now, "wheel key", true, std::nullopt, true);
+        switch (companion::wheel_press(g_companion.phase())) {
+            case companion::WheelPress::OpenWheel: open_order_wheel(w); break;
+            case companion::WheelPress::Summon: summon(w, now, "wheel key", true, std::nullopt, true); break;
+            case companion::WheelPress::Nothing: break;  // a dismissal is under way
+        }
     }
     if (g_key_follow.edge.pressed(emf::keys::down(g_key_follow.vk)) && active) order_follow();
     if (g_key_stay.edge.pressed(emf::keys::down(g_key_stay.vk)) && active) order_stay(w);
@@ -774,9 +778,9 @@ void on_tick(emf::World w) {
     if (g_loaded_session == session) g_policy.on_loaded(now);
     if (g_died.exchange(false)) {
         const bool again = g_policy.on_died(now);
-        EMF_LOG(kMod, "the companion died: %s", companion::death_message(again, g_policy.respawn_ms / 1000ull).c_str());
+        EMF_LOG(kMod, "the companion died: %s",
+                companion::death_message(again, g_policy.respawn_ms / 1000ull, call_key()).c_str());
     }
-    if (g_f6.pressed(emf::keys::down(VK_F6))) summon_or_dismiss(w, now, "F6");
     read_keys(w, now);
     if (g_companion.phase() == companion::Companion::Phase::Active) run_orders(w, now);
     if (const uint32_t dead = g_companion.take_destroy()) {
@@ -875,7 +879,8 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
         k.vk = emf::keys::parse_key(text, &k.name);
         if (!k.vk) EMF_LOG(kMod, "%ls=%ls is not a letter, a digit or a keyboard key's virtual-key number: off", name, text);
     };
-    read_key(L"key", L"G", g_key_wheel);
+    const std::string wheel_default = companion::kWheelKeyDefault;
+    read_key(L"key", std::wstring(wheel_default.begin(), wheel_default.end()).c_str(), g_key_wheel);
     read_key(L"key_follow", L"", g_key_follow);
     read_key(L"key_stay", L"", g_key_stay);
     read_key(L"key_attack", L"", g_key_attack);
@@ -906,7 +911,8 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
         for (const auto& piece : g_gear.held())
             EMF_REPLY("  %s: %s (level %u, %s)", companion::slot_name(piece.slot), item_name(w, piece.item).c_str(),
                       piece.level, rarity_name(piece.rarity));
-        if (g_gear.held().empty()) EMF_REPLY("  no gear (G -> Gear gives some from your backpack)");
+        if (g_gear.held().empty())
+            EMF_REPLY("  no gear (%s, then Gear, gives some from your backpack)", call_key().c_str());
         for (const auto& piece : g_gear.unreturned())
             EMF_REPLY(piece.put_failed ? "  waiting for room in your inventory (then Take all gear back): %s (level %u, %s)"
                                        : "  on the way back to you: %s (level %u, %s)",
@@ -940,8 +946,8 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
         });
     });
     emf::on_tick(on_tick);
-    EMF_LOG(kMod, "ready: F6 summons/dismisses a companion, %s opens its order wheel (template %s, faction %d, "
-            "auto_summon %d, respawn %llu s)", g_key_wheel.vk ? g_key_wheel.name.c_str() : "no key", guid.c_str(),
+    EMF_LOG(kMod, "ready: %s summons a companion, then opens its order wheel (template %s, faction %d, "
+            "auto_summon %d, respawn %llu s)", g_key_wheel.vk ? g_key_wheel.name.c_str() : "no key (none set)", guid.c_str(),
             g_faction, g_policy.auto_summon ? 1 : 0, g_policy.respawn_ms / 1000ull);
     return true;
 }

@@ -7,7 +7,8 @@
 #   uninstall.cmd                              finds the game through Steam
 #   uninstall.cmd "D:\Games\Enshrouded" -All   also removes the settings
 # -All refuses while the companion still holds gear you gave it: those items exist only in its file under
-# emf\config\companion. Take them back in game first (G, Gear), or add -Force to delete them anyway.
+# emf\config\companion. Take them back in game first (the order wheel key, F6 by default, then Gear), or add -Force
+# to delete them anyway.
 # Your world saves are not touched (they live in Saved Games, not in the game folder). The save backups EMF made
 # (%LOCALAPPDATA%\EMF\save-backups) always stay, also with -All: delete that folder yourself if you do not want them.
 param(
@@ -40,7 +41,8 @@ if ($All -and -not $Force) {
     }
     if ($held -gt 0) {
         throw ("the companion still holds $held gear piece(s) you gave it; they exist only in emf\config\companion and " +
-               "would be lost. Take them back in game first (G, Gear), or run: uninstall.cmd -All -Force")
+               "would be lost. Take them back in game first (the companion's wheel key, F6 by default, then Gear), or run: " +
+               "uninstall.cmd -All -Force")
     }
 }
 $removed = @()
