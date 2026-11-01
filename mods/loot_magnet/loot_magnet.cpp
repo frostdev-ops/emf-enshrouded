@@ -3,8 +3,9 @@
 // {guest = the player, host = the corpse, lootAll, bypassInteraction} (seen in game: the corpse's stacks moved into the
 // player, a PickupEvent each). Players who joined need no EMF: it runs where the world runs. Each player switches their
 // own magnet with /loot.toggle (a command for every player, API v17); the host's default and key are settings. Never: a
-// corpse twice, a player's or an ally's body, anything owned or tame, anything inside a base. The rules (tested without
-// the game) are magnet_logic.h.
+// corpse twice, a player's or an ally's body, anything owned or tame, anything inside a base. Most creatures leave their
+// loot in a loot container where they died (the glowing loot spot) and fade away: that container is looted then. The
+// rules (tested without the game) are magnet_logic.h.
 #define NOMINMAX
 #include <windows.h>
 
@@ -125,6 +126,9 @@ magnet::Body body_of(emf::World w, uint32_t id) {
     return magnet::read_body(w, id, [w](uint32_t item) { return item_name(w, item); });
 }
 
+// How far from a death the magnet looks for loot containers: their reach, plus how far the body may slide before it fades.
+double scan_radius(const magnet::Rules& r) { return r.container_reach + r.moved_max; }
+
 double nearest_base(const magnet::Vec3& p) {
     double best = -1;
     for (const auto& b : g_bases) {
@@ -137,15 +141,20 @@ double nearest_base(const magnet::Vec3& p) {
 // The decision log: what became of each corpse the magnet watched (looted lines always; the rest with debug_log).
 void log_decision(const magnet::Decision& d, const Config& c) {
     if (d.why == magnet::Why::Ok) {
-        EMF_LOG(kMod, "corpse %u looted into player %u (%.1f m; interaction offer %s)", d.corpse, d.player, d.distance,
-                d.offer ? "yes" : "no");
+        if (d.container)
+            EMF_LOG(kMod, "corpse %u looted into player %u from the loot it left where it died (loot container %u, %.1f m)",
+                    d.corpse, d.player, d.container, d.distance);
+        else
+            EMF_LOG(kMod, "corpse %u looted into player %u (%.1f m; interaction offer %s)", d.corpse, d.player, d.distance,
+                    d.offer ? "yes" : "no");
         return;
     }
     if (!c.debug_log) return;
     if (d.why == magnet::Why::TooLate) {
-        if (d.waited == magnet::Why::NoLoot)
-            EMF_LOG(kMod, "corpse %u left: no loot appeared within %.0f s of its death (no Health or no Inventory)", d.corpse,
-                    c.rules.window_ms / 1000.0);
+        if (d.waited == magnet::Why::NoLoot || d.waited == magnet::Why::Gone || d.waited == magnet::Why::Moved ||
+            d.waited == magnet::Why::Reused)
+            EMF_LOG(kMod, "corpse %u left: no loot appeared within %.0f s of its death (none on it, and no loot container "
+                          "within %.0f m of where it died)", d.corpse, c.rules.window_ms / 1000.0, c.rules.container_reach);
         else if (d.waited == magnet::Why::TooFar && d.distance >= 0)
             EMF_LOG(kMod, "corpse %u left: its time ran out while %s (the nearest player with a magnet was %.1f m away, reach %.0f m)",
                     d.corpse, magnet::why_text(d.waited), d.distance, c.rules.radius);
@@ -153,7 +162,11 @@ void log_decision(const magnet::Decision& d, const Config& c) {
             EMF_LOG(kMod, "corpse %u left: its time ran out while waiting (%s)", d.corpse, magnet::why_text(d.waited));
         return;
     }
-    EMF_LOG(kMod, "corpse %u skipped: %s", d.corpse, magnet::why_text(d.why));
+    if (d.container)
+        EMF_LOG(kMod, "corpse %u skipped: the loot it left (loot container %u) %s", d.corpse, d.container,
+                magnet::why_text(d.why));
+    else
+        EMF_LOG(kMod, "corpse %u skipped: %s", d.corpse, magnet::why_text(d.why));
 }
 
 void refresh_bases(emf::World w) {
@@ -212,9 +225,12 @@ void on_tick(emf::World w) {
     std::vector<magnet::Looter> looters;
     for (uint32_t id : emf::players(w))
         if (const auto p = pos_of(w, id)) looters.push_back({id, *p, magnet_on(w, id, c)});
+    // the loot containers near the deaths it watches (one walk of the world, only while it watches a death)
+    const auto containers = magnet::containers_near(w, g_magnet.watched_places(), scan_radius(c.rules),
+                                                    [w](uint32_t item) { return item_name(w, item); });
     std::vector<magnet::Decision> decisions;
-    const auto loots =
-        g_magnet.tick(now, session, looters, [w](uint32_t id) { return body_of(w, id); }, g_bases, c.rules, &decisions);
+    const auto loots = g_magnet.tick(now, session, looters, [w](uint32_t id) { return body_of(w, id); }, g_bases, c.rules,
+                                     &decisions, containers);
     for (const auto& d : decisions) log_decision(d, c);
     for (const auto& l : loots) {
         {
@@ -310,10 +326,14 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
             if (config().debug_log) EMF_LOG(kMod, "death of %u: it has no position any more; not watched", id);
             return;
         }
-        g_magnet.on_death(id, *p, GetTickCount64(), emf::server_session(), magnet::template_of(w, id));
+        const magnet::Rules rules = config().rules;
+        magnet::Death d{id, *p, GetTickCount64(), emf::server_session(), magnet::template_of(w, id)};
+        d.guarded = magnet::guarded(body_of(w, id));  // a player's, an ally's...: nothing it leaves is taken
+        if (!d.guarded) d.before = magnet::container_ids_near(w, *p, scan_radius(rules));  // these are not its loot
         if (config().debug_log)
-            EMF_LOG(kMod, "death of %u noted at (%.1f, %.1f, %.1f), %.0f m from the nearest flame altar", id, p->x, p->y,
-                    p->z, nearest_base(*p));
+            EMF_LOG(kMod, "death of %u noted at (%.1f, %.1f, %.1f), %.0f m from the nearest flame altar%s", id, p->x, p->y,
+                    p->z, nearest_base(*p), d.guarded ? " (a player's, an ally's, owned or tame: nothing is taken)" : "");
+        g_magnet.on_death(std::move(d));
     });
     emf::on_event<gen::PickupEvent>(EMF_WORLD_SERVER, [](emf::World, const gen::PickupEvent& e) {
         g_magnet.on_pickup(e.pickedUpByEntityId.id, e.pickedUpFromEntityId.id);

@@ -361,3 +361,134 @@ TEST_CASE("loot magnet: only lasting reasons skip a corpse at once (player, owne
     CHECK_FALSE(is_final(Why::TooSoon));
     CHECK_FALSE(is_final(Why::TooFar));
 }
+
+// ---- most creatures leave their loot in a loot container where they died (the owner's "fresh corpse") ----
+namespace {
+// What most creatures leave where they die (templates LootContainer_Enemy_*: Inventory, DefaultInventory, DestroyOnLoot,
+// an interaction offer; no Health): the glowing loot spot. The creature itself fades and is removed.
+Body loot_spot(uint32_t id, Vec3 pos, std::vector<std::string> items = {"Material_T1_Animal_Fur"}) {
+    Body b;
+    b.id = id;
+    b.exists = true;
+    b.pos = pos;
+    b.has_inventory = true;
+    b.has_offer = true;
+    b.container = true;
+    b.items = std::move(items);
+    return b;
+}
+Body faded_creature(uint32_t id, Vec3 pos) {  // dead, no loot on it: the game puts the loot in a loot container
+    Body b = corpse(id, pos, {});
+    b.has_inventory = false;
+    return b;
+}
+}  // namespace
+
+TEST_CASE("loot magnet: a fresh kill whose loot the game leaves in a loot container where it died is looted from it") {
+    Magnet m;
+    World w;
+    w.bodies[6938] = faded_creature(6938, kHere);
+    m.on_death(6938, kHere, 0, 1);
+    const std::vector<Looter> players = {{1, {kHere.x + 3, kHere.y, kHere.z}, true}};
+    std::vector<Decision> out;
+    std::vector<Body> spots;  // nothing there yet
+    for (uint64_t t = 1000; t <= 2000; t += 500) CHECK(m.tick(t, 1, players, w.lookup(), kNoBases, rules(), &out, spots).empty());
+    CHECK(out.empty());
+    // 2.5 s: the creature has faded away, and its loot lies in a loot container half a metre from where it died
+    w.bodies.erase(6938);
+    spots.push_back(loot_spot(7100, {kHere.x + 0.5, kHere.y - 0.4, kHere.z + 0.3}, {"Material_T1_Animal_Fur", "Food_T1_raw_bad_meat_LeanMeat"}));
+    const auto sent = m.tick(2500, 1, players, w.lookup(), kNoBases, rules(), &out, spots);
+    REQUIRE(sent.size() == 1);
+    CHECK(sent[0].corpse == 7100u);  // the loot event goes to the container
+    CHECK(sent[0].player == 1u);
+    REQUIRE(out.size() == 1);
+    CHECK(out[0].corpse == 6938u);
+    CHECK(out[0].container == 7100u);
+    CHECK(out[0].why == Why::Ok);
+    CHECK(m.watched() == 0);
+    CHECK(m.tick(3000, 1, players, w.lookup(), kNoBases, rules(), &out, spots).empty());  // never twice
+}
+
+TEST_CASE("loot magnet: a loot container already there when the creature died, or too far from it, is not its loot") {
+    Magnet m;
+    World w;
+    Death d{6938, kHere, 0, 1};
+    d.before = {7100};  // an earlier kill's loot (or a chest) lying there at the death
+    m.on_death(d);
+    const std::vector<Looter> players = {{1, kHere, true}};
+    const std::vector<Body> spots = {loot_spot(7100, kHere), loot_spot(7101, {kHere.x + 6, kHere.y, kHere.z})};
+    std::vector<Decision> out;
+    CHECK(m.tick(3000, 1, players, w.lookup(), kNoBases, rules(), &out, spots).empty());
+    CHECK(out.empty());  // it waits for its own
+    m.tick(12 * kSec, 1, players, w.lookup(), kNoBases, rules(), &out, spots);  // the window ends, also for a body gone
+    REQUIRE(out.size() == 1);
+    CHECK(out[0].why == Why::TooLate);
+    CHECK(out[0].waited == Why::Gone);
+}
+
+TEST_CASE("loot magnet: a loot container follows the corpse's rules: materials only, a base, an ally's or a player's death") {
+    const std::vector<Looter> players = {{1, kHere, true}};
+    auto run = [&](Death d, Body spot, const std::vector<Vec3>& bases, const Rules& r) {
+        Magnet m;
+        World w;
+        m.on_death(d);
+        std::vector<Decision> out;
+        auto sent = m.tick(3000, 1, players, w.lookup(), bases, r, &out, {spot});
+        return std::make_pair(sent.size(), out.empty() ? Why::Ok : out[0].why);
+    };
+    const Death d{6938, kHere, 0, 1};
+    const Body gear = loot_spot(7100, kHere, {"Material_T1_Animal_Fur", "Weapon_T1_1H_SwordEpic_01"});
+    CHECK(run(d, gear, kNoBases, rules()) == std::make_pair(size_t(0), Why::Filtered));  // left for the player to open
+    Rules all = rules();
+    all.materials_only = false;
+    CHECK(run(d, gear, kNoBases, all) == std::make_pair(size_t(1), Why::Ok));
+    CHECK(run(d, loot_spot(7100, kHere), {{kHere.x + 10, kHere.y, kHere.z}}, rules()) == std::make_pair(size_t(0), Why::InBase));
+    Death ally = d;
+    ally.guarded = true;  // a player's, the companion's or a summon's death: whatever it leaves is not taken
+    CHECK(run(ally, loot_spot(7100, kHere), kNoBases, rules()) == std::make_pair(size_t(0), Why::Protected));
+    Body empty = loot_spot(7100, kHere, {});  // its loot is not in it yet: wait
+    CHECK(run(d, empty, kNoBases, rules()) == std::make_pair(size_t(0), Why::Ok));  // no decision yet
+}
+
+TEST_CASE("loot magnet: two kills side by side: each loot container is looted once") {
+    Magnet m;
+    World w;
+    m.on_death(500, kHere, 0, 1);
+    m.on_death(501, {kHere.x + 2, kHere.y, kHere.z}, 0, 1);
+    const std::vector<Looter> players = {{1, kHere, true}};
+    const std::vector<Body> spots = {loot_spot(7100, kHere), loot_spot(7101, {kHere.x + 2, kHere.y, kHere.z})};
+    const auto sent = m.tick(3000, 1, players, w.lookup(), kNoBases, rules(), nullptr, spots);
+    REQUIRE(sent.size() == 2);
+    CHECK(sent[0].corpse != sent[1].corpse);
+    CHECK(m.tick(3500, 1, players, w.lookup(), kNoBases, rules(), nullptr, spots).empty());
+}
+
+TEST_CASE("loot magnet: a corpse that holds its loot itself is still looted itself (the loot event takes it there)") {
+    Magnet m;
+    World w;
+    w.bodies[6938] = corpse(6938, kHere);
+    m.on_death(6938, kHere, 0, 1);
+    const std::vector<Looter> players = {{1, kHere, true}};
+    const auto sent = m.tick(2000, 1, players, w.lookup(), kNoBases, rules(), nullptr, {});
+    REQUIRE(sent.size() == 1);
+    CHECK(sent[0].corpse == 6938u);
+}
+
+TEST_CASE("loot magnet: who is guarded at their death: a player, an ally, a farm animal, anything owned or tame, a villager") {
+    Body b = corpse(500, kHere);
+    CHECK_FALSE(guarded(b));
+    b.player = true;
+    CHECK(guarded(b));
+    b = corpse(500, kHere);
+    b.faction = 11;  // PlayerAlly: the companion, summons
+    CHECK(guarded(b));
+    b = corpse(500, kHere);
+    b.owner = 1;
+    CHECK(guarded(b));
+    b = corpse(500, kHere);
+    b.tame = true;
+    CHECK(guarded(b));
+    b = corpse(500, kHere);
+    b.villager = true;
+    CHECK(guarded(b));
+}

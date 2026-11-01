@@ -22,32 +22,38 @@ by account (`emf\config\loot_magnet\<world slot>.txt`). The host can also bind a
 
 ## What comes, and what never does
 
-A corpse is looted into the nearest player whose magnet is on when all of these hold:
+Most creatures do not keep their loot: a moment after they die they fade away, and the game leaves their loot in a
+**loot spot** where they died (the small glowing pile you open with E). The magnet takes that loot spot. A creature that
+keeps its loot in its own body is looted from the body.
+
+The loot of a kill comes to the nearest player whose magnet is on when all of these hold:
 
 - the creature died (the game's `EntityDiedEvent`) at least **After the kill** ago, and less than **Looks for loot for**
-  ago (15 s by default, at least 8 s: the game gives a corpse its loot, its `Inventory`, 1-3 s after it dies, so until
-  then the magnet looks again every half second);
-- the player is within **Reach** of it;
-- it is dead (its health is 0) and still the creature that died (the same kind, within 5 m of where it died);
-- it is a creature with loot the game's own loot event can take (it has `Health` and an `Inventory`, which the game
-  gives a corpse when it dies), and it holds something;
+  ago (15 s by default, at least 8 s: the loot appears 1-3 s after the death, so until then the magnet looks again
+  every half second);
+- the player is within **Reach** of the loot;
+- the loot is in the body (dead, its health 0, still the creature that died: the same kind, within 5 m of where it
+  died), or in a loot spot that appeared after the death within 5 m of where it died (a loot spot that was already
+  there, from an earlier kill or a chest, is not this kill's);
+- it holds something;
 - with **What comes** = materials: every stack in it is a material or food, by its debug name: starting with
   `Material_`, `Food_` or `_Food_`, or a terrain block (`Build_TerrainMaterial_`); arrows (`Ammo_`) if **Arrows count
-  as materials**. A corpse with gear in it is left for you to open.
+  as materials**. Loot with gear in it is left for you to open.
 
 A kill without a hit counts too (the champion's `champion.kill`, or anything else that kills).
 
 Never:
 
 - a corpse twice;
-- a player's body, an ally's (the companion, summons), a farm animal, anything tame or with an owner, a villager;
+- a player's body or grave, an ally's (the companion, summons), a farm animal, anything tame or with an owner, a
+  villager, or anything they leave when they die;
 - anything inside a base: within **Never within** metres of a flame altar (raids at your base are looted by hand);
-- chests and props (they are not creatures that die).
+- chests and props (they are not creatures that die, and a loot spot that was there before the kill is not its loot).
 
 The loot moves with the game's own loot event, as when you press "take all": the stacks go into your inventory and
-the game shows them. **A full inventory loses nothing**: the game moves the corpse's stacks one slot at a time, each
-in its own inventory transaction (`docs/engine_parts/re_villages.md`, `immediate_loot_action`), so what fits comes and
-the rest stays in the corpse; the host gets a note "no room in your inventory" (once per session).
+the game shows them. **A full inventory loses nothing**: the game moves the stacks one slot at a time, each in its own
+inventory transaction (`docs/engine_parts/re_villages.md`, `immediate_loot_action`), so what fits comes and the rest
+stays where it was; the host gets a note "no room in your inventory" (once per session).
 
 ## Settings (Mods tab, EMF.exe, or `set loot_magnet <key> <value>`)
 
@@ -69,12 +75,15 @@ With **Log every decision** (`debug_log`, on by default) `emf\emf_core.log` has 
 noticed and for what became of each corpse:
 
 - `[loot_magnet] death of 6938 noted at (3739.5, 841.0, 1473.5), 46 m from the nearest flame altar`
-- `[loot_magnet] corpse 6938 looted into player 1 (1.0 m; interaction offer no)`
-- `[loot_magnet] corpse 6938 skipped: inside a base` (or: a player's or an ally's body, no inventory, holds something
-  that is not a material, more than 5 m from where it died, already looted...)
+- `[loot_magnet] corpse 6938 looted into player 1 from the loot it left where it died (loot container 7012, 1.0 m)`
+- `[loot_magnet] corpse 6938 looted into player 1 (1.0 m; interaction offer no)` (the loot was in the body)
+- `[loot_magnet] corpse 6938 skipped: inside a base` (or: a player's or an ally's body, holds something that is not a
+  material, already looted...; `skipped: the loot it left (loot container 7012) holds something that is not a
+  material`)
 - `[loot_magnet] corpse 6938 left: its time ran out while nobody with a magnet within reach (the nearest player with a
   magnet was 14.2 m away, reach 8 m)`
-- `[loot_magnet] corpse 6938 left: no loot appeared within 15 s of its death (no Health or no Inventory)`
+- `[loot_magnet] corpse 6938 left: no loot appeared within 15 s of its death (none on it, and no loot container within 5 m
+  of where it died)`
 - `[loot_magnet] corpse 6938: nothing came from the loot event yet (try 1 of 5): sent again`: a corpse may become
   lootable a moment after it died, so a loot event nothing came from is sent again, every 2 s, up to 5 times (nothing
   moved, so nothing is taken twice).
@@ -84,6 +93,6 @@ Switch it off once you trust it: then only the looted lines are written.
 ## Good to know
 
 - **Host or dedicated server only.** In someone else's game it does nothing (that game's host decides).
-- **Loose drops** (separate pickups lying on the ground) are not picked up: in the tests the loot of a kill stayed in the
-  corpse, and picking up whatever lies near a kill could take a quest item or something a player dropped.
+- **Loose drops** (separate pickups lying on the ground) are not picked up: picking up whatever lies near a kill could
+  take a quest item or something a player dropped. The loot spot a kill leaves is not a loose drop: it is taken.
 - The log (`emf\emf_core.log`, lines `[loot_magnet]`) names every corpse looted and the player it went to.

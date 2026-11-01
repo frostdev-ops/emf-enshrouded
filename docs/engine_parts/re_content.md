@@ -216,6 +216,17 @@ The Emberbrand example (`content/emberbrand/`, applied with `scripts/content_tes
   It uses the `g38_loot::LootGenerationSystem` singleton (built by `update_loot_generation_system`), `DefaultLootLabelRegistry` and `g38_loot::LootShufflebag`.
   Containers carry `RandomLoot{defaultLabels}`, `RandomLootContainer`, `RandomLootSlotCount` and `RandomLootProbability`. Items are picked by label/tag weights (`LootableItemInfo.labelGroups` against the container's lootSettings tags) and rarity rates.
 - **Enemy drops and fixed chests:** the `DefaultInventory{DefaultInventoryResource GUID}` component is applied by `default_inventory` → `applyDefaultInventory` **`0x1403f3610`** (1269579 `0x1403f3290`). The admin "apply inventory" in `inventory_actions` uses the same function.
+- **Where an enemy's loot lies [tpl, inf; not confirmed in game]:** enemy templates have no `Inventory` and no
+  `InteractionOfferRuntime` (406 of 410 `Enemy_*` creatures: only `RandomLoot`, `RandomLootContainer`). The loot is a
+  separate entity: the 76 `LootContainer_Enemy_*` templates (for example `LootContainer_Enemy_Scavenger_Melee01`,
+  `_Wildlife_Bird_Feather`, `_Fogger_Soldier`) all carry `Inventory`, `InventorySetup(Init)`, `DefaultInventory`,
+  `DestroyOnLoot`, `InteractionOfferRuntime`, `DoNotSave`, `SpawnTime`, and 59 of them `LifeTime` and no model (the
+  glowing loot spot), so they are spawned at the death (`actor_spawn_entity` reads the actor's `RandomLoot*`); the
+  creature fades (`Fade`). `default_inventory` (with `InventorySetup`, without `RandomLootLock`) fills them. A second
+  path, `transform_to_loot` (component `TransformToLoot`, added at runtime: no template has it), turns the actor itself
+  into loot: it adds `InventorySetup`, `DefaultInventory`, `InteractionOfferRuntime`, `DestroyOnLoot`... and removes
+  `Faction`, `ExperienceSource` and the AI components; its loot is in linked inventories, not an `Inventory` of its own.
+  Loot Magnet takes either (`mods/loot_magnet`).
 - **Other sources:**
   - world pickups: `random_pickup_loot_spawner`, `loot_pickup_in_range`, `loot_pickup_item`;
   - destructibles: `spawn_random_loot_on_destroy`;

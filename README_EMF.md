@@ -398,7 +398,9 @@ event. It runs where the world runs, so on the host or a dedicated server it wor
 joined without EMF. Each player switches their own with `/loot.toggle` (and sees it with `/loot.status`); kept per world
 and account. Never a corpse twice, a player's or an ally's body, a farm animal, anything tame or owned, or anything
 within the base radius of a flame altar; by default only corpses that hold nothing but materials. A full inventory
-loses nothing (what does not fit stays in the corpse). Settings: reach, delay after the kill, how long it looks for loot (the game gives a corpse its loot 1-3 s after the death), what comes, arrows,
+loses nothing (what does not fit stays where it was). Most creatures leave their loot in a loot spot where they died
+(a loot container the game spawns as the body fades): the magnet takes that one, or the body when it keeps its loot.
+Settings: reach, delay after the kill, how long it looks for loot (the loot appears 1-3 s after the death), what comes, arrows,
 default for new players, the host's key, base radius. Details: `mods/loot_magnet/README.md`.
 
 ## The champion mod (Wandering Champion, Lua)
