@@ -1,8 +1,11 @@
--- bounty (Bounty Board): daily bounties for every player: slay creatures of a faction, gather a material, slay a
--- champion. Rewards with /bounty.claim (or at once, a setting). Kept per world and per player (by account).
---   /bounty.board   your bounties, progress and the time to new ones (every player, also from the chat)
+-- bounty (Bounty Board): bounties for every player: slay creatures of a faction, gather a material, slay a champion.
+-- The board posts notices (the same for everyone, or each player their own) every few in-game days; a player takes
+-- one (holds up to hold_max), works on it anywhere, and claims the reward. Kept per world and per player (by account).
+--   /bounty.board   the notices, your bounties, progress and the time to new notices (every player, also from the chat)
+--   /bounty.take    <n>: take notice n
+--   /bounty.drop    <n>: give up bounty n of yours
 --   /bounty.claim   the rewards of your finished bounties
---   /bounty.reroll  <n>: swap one bounty for another (once a period by default)
+--   /bounty.reroll  <n>: swap notice n for another (notices of your own only)
 --   /bounty.top     who finished the most bounties in this world
 --   bounty.give <id>, bounty.reset (host / admins)
 -- Runs where the world runs (the host or a dedicated server); players who join need nothing.
@@ -19,10 +22,12 @@
 --     CHAMPION_HEALTH health.
 -- n: how many on "normal" (tiny x0.2, easy x0.6, hard x1.5). weight: how often it is drawn (3 when left out). reward:
 -- items by their debug name (`items rune` in the console); gear = true comes at the player's level and the
--- reward_rarity setting; counts are scaled by the reward_scale setting.
--- starter = true: a quick one for players who have not finished a bounty yet. Their boards (and rerolls) are drawn
---   from the starters, until they finish their first bounty (with fewer starters than a board holds, the rest comes
---   from the other bounties); later boards never have starters. A pool without starters draws as before.
+-- reward_rarity setting; counts are scaled by the reward_scale setting; name: the word the notices show for it
+-- (REWARD_NAMES below, else a word of the debug name).
+-- starter = true: a quick one for players who have not finished a bounty yet. They see notices drawn from the
+--   starters (and their rerolls draw starters), until they finish their first bounty (with fewer starters than the
+--   board holds, the rest comes from the other bounties); the others never see starters. A pool without starters
+--   gives everyone the same kind of notices.
 -- A kill counts for the player who hit, and for the player whose ally hit (the companion, a Beastmaster beast, a
 -- Necromancer undead: a creature of the players' side that guards that player).
 local RUNES = "Material_T1_Token_WeaponUpgrade_Rune01"
@@ -65,14 +70,21 @@ local LEFTOVER_SECONDS = 120  -- ... and a loose drop of that item within LEFTOV
 local LEFTOVER_METRES = 30    -- long after, is what did not fit (quick stack's and sorting chests' drops), no gathering
 local DROP_SECONDS = 1800     -- this mod's own drops (a reward at a full player's feet) are known this long
 
+-- The short words the notices and the wheel show for reward items ("Gather 20 Wood logs (3 runes)").
+local REWARD_NAMES = {[RUNES] = "runes", Material_T1_Animal_Fur = "fur", Weapon_T1_1H_SwordEpic_01 = "sword"}
+
 local DIFFICULTY = {tiny = 0.2, easy = 0.6, normal = 1.0, hard = 1.5}
 local PLAYER_SIDE = {[7] = true, [8] = true, [11] = true}  -- Player, AutomatedPlayer, PlayerAlly (companions, summons)
 local RAW = {"material_", "food_", "build_terrainmaterial_"}
 local NEVER = {"processed", "_dish_", "fishingbait", "_bars", "_bar", "powder", "_dust", "dried", "charcoal"}
 
-local players = {}   -- account -> {key, rerolls, done, list = {{id, need, have, state}}}: state 0 open, 1 done, 2 claimed
-local offset = 0     -- bounty.reset adds 1: everyone's bounties are new
-local dawns = 0      -- dawns seen in this world (reset = game_dawn)
+local players = {}   -- account -> {done, taken = {{id, need, have, state}}, took = {id = true}, took_key, key, rerolls,
+                     -- offers}: taken bounties (state 0 open, 1 done; claimed ones go), the notices taken in period
+                     -- took_key, and with notices of their own the list `offers` drawn for period `key`
+local offset = 0     -- bounty.reset adds 1: new notices for everyone
+local dawns = 0      -- dawns seen in this world (reset = game_dawn, game_days)
+local posted = 0     -- the dawn count when the notices were last posted (reset = game_days)
+local seed = 0       -- this world's draws (kept with the world)
 local play_s = 0     -- seconds this world has run (reset = hours)
 local hits = {}      -- creature id -> {faction, level, max, by = {player -> play_s}, last}
 local gifts = {}     -- "player:item" -> {count, until_s}: rewards on their way (their pickup is no gathering)
@@ -105,6 +117,7 @@ local function pool_entry_ok(e, seen)
   if e.reward ~= nil and type(e.reward) ~= "table" then return false end
   for _, r in ipairs(e.reward or {}) do
     if type(r) ~= "table" or type(r.item) ~= "string" or type(r.count) ~= "number" or r.count < 1 then return false end
+    if r.name ~= nil and type(r.name) ~= "string" then return false end
   end
   return true
 end
@@ -179,22 +192,49 @@ local function reward_text(e)
   return table.concat(parts, ", ")
 end
 
--- ---- deterministic draws: the same account, period and reroll give the same bounties ----
+-- The word a notice shows for a reward item: its name in the pool, REWARD_NAMES, else the last word of its debug name.
+local function item_word(r)
+  if r.name then return r.name end
+  if REWARD_NAMES[r.item] then return REWARD_NAMES[r.item] end
+  local word
+  for part in r.item:gmatch("[^_]+") do
+    if not part:match("^T%d+$") and not part:match("^%d+$") then word = part end
+  end
+  return string.lower(word or r.item)
+end
+
+-- "8 runes", "20 runes, sword": the rewards as a notice shows them.
+local function short_reward(e)
+  local parts = {}
+  for _, r in ipairs(e.reward or {}) do
+    local n = scaled(r)
+    parts[#parts + 1] = n == 1 and item_word(r) or (n .. " " .. item_word(r))
+  end
+  return table.concat(parts, ", ")
+end
+
+-- "Gather 20 Wood logs (3 runes)": a notice, at the size it would have if taken now.
+local function notice_text(e)
+  local rewards = short_reward(e)
+  return text_of(e, need_for(e)) .. (rewards ~= "" and (" (" .. rewards .. ")") or "")
+end
+
+-- ---- deterministic draws: the same world or account, period and reroll give the same notices ----
 local function hash(s)
   local h = 2166136261
   for i = 1, #s do h = ((h ~ s:byte(i)) * 16777619) % 4294967296 end
   return h
 end
 
-local function random_from(seed)
-  local state = seed % 2147483648
+local function random_from(seed_value)
+  local state = seed_value % 2147483648
   return function(n)
     state = (state * 1103515245 + 12345) % 2147483648
     return (state >> 8) % n + 1
   end
 end
 
--- Whether a player who finished `done` bounties draws from the starters (only while there are any in the pool).
+-- Whether a player who finished `done` bounties sees starters (only while there are any in the pool).
 local function starters_for(done)
   if (done or 0) > 0 then return false end
   for _, e in ipairs(POOL) do
@@ -203,10 +243,10 @@ local function starters_for(done)
   return false
 end
 
--- `count` pool entries for `account` (none of `exclude`), weighted; from the starters only when `starter`, else from
--- the rest of the pool.
-local function draw(account, key, salt, count, exclude, starter)
-  local rand = random_from(hash(account .. "|" .. key .. "|" .. salt))
+-- `count` pool ids for `who` (none of `exclude`), weighted; from the starters only when `starter`, else from the rest
+-- of the pool.
+local function draw(who, key, salt, count, exclude, starter)
+  local rand = random_from(hash(who .. "|" .. key .. "|" .. salt))
   local taken = {}
   for id in pairs(exclude or {}) do taken[id] = true end
   for _, e in ipairs(POOL) do
@@ -225,7 +265,7 @@ local function draw(account, key, salt, count, exclude, starter)
         r = r - (e.weight or 3)
         if r <= 0 then
           taken[e.id] = true
-          out[#out + 1] = {id = e.id, need = need_for(e), have = 0, state = 0}
+          out[#out + 1] = e.id
           break
         end
       end
@@ -234,7 +274,22 @@ local function draw(account, key, salt, count, exclude, starter)
   return out
 end
 
+-- A list of `count` notices; a starter list with fewer starters than `count` is filled from the other bounties.
+local function draw_list(who, key, salt, count, starter)
+  local list = draw(who, key, salt, count, nil, starter)
+  if starter and #list < count then
+    local have = {}
+    for _, id in ipairs(list) do have[id] = true end
+    for _, id in ipairs(draw(who, key, salt .. "f", count - #list, have, false)) do list[#list + 1] = id end
+  end
+  return list
+end
+
 -- ---- periods ----
+local function clamp(v, lo, hi) return math.max(lo, math.min(hi, v)) end
+local function notice_count() return clamp(math.floor(tonumber(emf.setting("bounties_per_period")) or 3), 2, 4) end
+local function hold_max() return clamp(math.floor(tonumber(emf.setting("hold_max")) or 1), 1, 4) end
+local function each_player() return emf.setting("offers_for") == "each_player" end
 local function period_len() return math.max(1, emf.setting("reset_hours") or 4) * 3600 end
 
 local function period_key()
@@ -248,7 +303,7 @@ end
 local function until_text()
   local mode = emf.setting("reset")
   local left
-  if mode == "game_dawn" then return "New bounties at dawn" end
+  if mode == "game_dawn" then return "New notices at dawn" end
   if mode == "hours" then
     left = period_len() - (play_s % period_len())
   else
@@ -260,49 +315,111 @@ local function until_text()
     left = next_reset - now
   end
   local minutes = math.ceil(left / 60)
-  return string.format("New bounties in %d h %d min", minutes // 60, minutes % 60)
+  return string.format("New notices in %d h %d min", minutes // 60, minutes % 60)
 end
 
--- The player's board for the running period (a new period draws new bounties).
-local function board_of(account)
+-- ---- notices and the bounties players hold ----
+local function record(account)
   local rec = players[account]
-  local key = period_key()
   if not rec then
-    rec = {done = 0}
+    rec = {done = 0, taken = {}, took = {}, rerolls = 0}
     players[account] = rec
-  end
-  if rec.key ~= key then
-    rec.key, rec.rerolls = key, 0
-    local count = math.max(1, emf.setting("bounties_per_period") or 3)
-    local starter = starters_for(rec.done)
-    rec.list = draw(account, key, "0", count, nil, starter)
-    if starter and #rec.list < count then  -- fewer starters than the board holds: the rest from the other bounties
-      local have = {}
-      for _, b in ipairs(rec.list) do have[b.id] = true end
-      for _, b in ipairs(draw(account, key, "0f", count - #rec.list, have, false)) do rec.list[#rec.list + 1] = b end
-    end
-    dirty = true
   end
   return rec
 end
 
+-- The notices `account` sees in this period: the world's list (a starter list while they finished none), or with
+-- notices of their own the list drawn for them (kept, as rerolls change it).
+local function notices_for(account)
+  local rec = record(account)
+  local key = period_key()
+  local starter = starters_for(rec.done)
+  if not each_player() then
+    return draw_list("w" .. seed, key, starter and "s" or "0", notice_count(), starter)
+  end
+  if rec.key ~= key or not rec.offers then
+    rec.key, rec.rerolls = key, 0
+    rec.offers = draw_list(account, key, "0", notice_count(), starter)
+    dirty = true
+  end
+  return rec.offers
+end
+
+-- The notices `rec` took in this period (each once).
+local function took_of(rec)
+  local key = period_key()
+  if rec.took_key ~= key then rec.took_key, rec.took = key, {} end
+  return rec.took
+end
+
+local function holds(rec, id)
+  for _, b in ipairs(rec.taken) do
+    if b.id == id then return true end
+  end
+  return false
+end
+
+local function take(account, n)
+  local list = notices_for(account)
+  n = tonumber(n or "")
+  if not n or n % 1 ~= 0 or n < 1 or n > #list then return "Usage: /bounty.take <1-" .. #list .. ">" end
+  local id = list[n]
+  local e = entry(id)
+  if not e then return "That notice is gone: look at the board again." end
+  local rec = record(account)
+  local took = took_of(rec)
+  if took[id] then return "You took that one already. " .. until_text() .. "." end
+  if holds(rec, id) then return "You hold that bounty already: " .. text_of(e, need_for(e)) .. "." end
+  if #rec.taken >= hold_max() then
+    return string.format("You hold %d of %d bounties: finish one, or drop one with /bounty.drop <n>.", #rec.taken, hold_max())
+  end
+  local need = need_for(e)
+  rec.taken[#rec.taken + 1] = {id = id, need = need, have = 0, state = 0}
+  took[id] = true
+  dirty = true
+  hud_at = -1
+  return "Taken: " .. text_of(e, need) .. " (reward: " .. short_reward(e) .. ")"
+end
+
+local function drop_bounty(account, n)
+  local rec = record(account)
+  if #rec.taken == 0 then return "You hold no bounty." end
+  n = tonumber(n or "")
+  if not n or n % 1 ~= 0 or n < 1 or n > #rec.taken then return "Usage: /bounty.drop <1-" .. #rec.taken .. ">" end
+  local b = rec.taken[n]
+  if b.state == 1 then return "Bounty " .. n .. " is done: claim it with /bounty.claim." end
+  table.remove(rec.taken, n)
+  dirty = true
+  hud_at = -1
+  local e = entry(b.id)
+  return "Dropped: " .. (e and text_of(e, b.need) or b.id)
+end
+
 -- ---- saving ----
-local function serialize()
-  local lines = {"offset " .. offset, "dawns " .. dawns, "play " .. math.floor(play_s)}
+local function sorted_keys(t)
   local keys = {}
-  for k in pairs(players) do keys[#keys + 1] = k end
+  for k in pairs(t) do keys[#keys + 1] = k end
   table.sort(keys)
-  for _, k in ipairs(keys) do
+  return keys
+end
+
+local function serialize()
+  local lines = {"format 2", "offset " .. offset, "dawns " .. dawns, "posted " .. posted, "play " .. math.floor(play_s),
+                 "seed " .. seed}
+  for _, k in ipairs(sorted_keys(players)) do
     local rec = players[k]
-    lines[#lines + 1] = string.format("p %s %s %d %d", k, rec.key or "-", rec.rerolls or 0, rec.done or 0)
-    for _, b in ipairs(rec.list or {}) do
-      lines[#lines + 1] = string.format("b %s %s %d %d %d", k, b.id, b.need, b.have, b.state)
+    lines[#lines + 1] = string.format("p %s %d", k, rec.done or 0)
+    if rec.offers and rec.key then
+      lines[#lines + 1] = string.format("offers %s %s %d %s", k, rec.key, rec.rerolls or 0, table.concat(rec.offers, " "))
+    end
+    if rec.took_key and next(rec.took) then
+      lines[#lines + 1] = string.format("took %s %s %s", k, rec.took_key, table.concat(sorted_keys(rec.took), " "))
+    end
+    for _, b in ipairs(rec.taken) do
+      lines[#lines + 1] = string.format("t %s %s %d %d %d", k, b.id, b.need, b.have, b.state)
     end
   end
-  keys = {}
-  for k in pairs(owed) do keys[#keys + 1] = k end
-  table.sort(keys)
-  for _, k in ipairs(keys) do
+  for _, k in ipairs(sorted_keys(owed)) do
     for _, o in ipairs(owed[k]) do
       lines[#lines + 1] = string.format("owe %s %s %d %d %s", k, o.item, o.count, o.level or 0, o.rarity or "-")
     end
@@ -314,29 +431,66 @@ local function save()
   if loaded and emf.save_world_data(serialize()) then dirty = false end
 end
 
-emf.on_world_data(function(world, text)
-  load_pool()  -- pool.lua may have changed since
-  players, hits, gifts, moving, owed = {}, {}, {}, {}, {}
-  filled, dropped = {}, {}
-  for account, item, count, level, rarity in text:gmatch("owe (%S+) (%S+) (%d+) (%d+) (%S+)") do
-    owed[account] = owed[account] or {}
-    table.insert(owed[account], {item = item, count = tonumber(count), level = tonumber(level),
-                                 rarity = rarity ~= "-" and rarity or nil})
-  end
-  purge_at, last_tod = 0, nil  -- another world's clocks mean nothing here
-  offset = tonumber(text:match("offset (%d+)")) or 0
-  dawns = tonumber(text:match("dawns (%d+)")) or 0
-  play_s = tonumber(text:match("play (%d+)")) or 0
-  for account, key, rerolls, done in text:gmatch("p (%S+) (%S+) (%d+) (%d+)") do
-    players[account] = {key = key, rerolls = tonumber(rerolls), done = tonumber(done), list = {}}
-  end
-  for account, id, need, have, state in text:gmatch("b (%S+) (%S+) (%d+) (%d+) (%d+)") do
-    local rec = players[account]
-    if rec and entry(id) then
-      table.insert(rec.list, {id = id, need = tonumber(need), have = tonumber(have), state = tonumber(state)})
+local function words(s)
+  local out = {}
+  for w in (s or ""):gmatch("%S+") do out[#out + 1] = w end
+  return out
+end
+
+-- The world's data, read line by line; each kind of line is matched whole (anchored), so one never reads as another.
+local function load_text(text)
+  players, owed = {}, {}
+  offset, dawns, play_s, seed, posted = 0, 0, 0, nil, nil
+  for line in text:gmatch("[^\r\n]+") do
+    local v = line:match("^offset (%d+)$")
+    if v then offset = tonumber(v) end
+    v = line:match("^dawns (%d+)$")
+    if v then dawns = tonumber(v) end
+    v = line:match("^posted (%d+)$")
+    if v then posted = tonumber(v) end
+    v = line:match("^play (%d+)$")
+    if v then play_s = tonumber(v) end
+    v = line:match("^seed (%d+)$")
+    if v then seed = tonumber(v) end
+    local account, done = line:match("^p (%S+) (%d+)$")
+    if account then record(account).done = tonumber(done) end
+    local acc, key, rerolls, ids = line:match("^offers (%S+) (%S+) (%d+) ?(.*)$")
+    if acc then
+      local rec = record(acc)
+      rec.key, rec.rerolls, rec.offers = key, tonumber(rerolls), {}
+      for _, id in ipairs(words(ids)) do
+        if entry(id) then rec.offers[#rec.offers + 1] = id end
+      end
+    end
+    acc, key, ids = line:match("^took (%S+) (%S+) ?(.*)$")
+    if acc then
+      local rec = record(acc)
+      rec.took_key, rec.took = key, {}
+      for _, id in ipairs(words(ids)) do rec.took[id] = true end
+    end
+    local a, id, need, have, state = line:match("^t (%S+) (%S+) (%d+) (%d+) ([01])$")
+    if a and entry(id) then
+      table.insert(record(a).taken, {id = id, need = tonumber(need), have = tonumber(have), state = tonumber(state)})
+    end
+    local oa, item, count, level, rarity = line:match("^owe (%S+) (%S+) (%d+) (%d+) (%S+)$")
+    if oa then
+      owed[oa] = owed[oa] or {}
+      table.insert(owed[oa], {item = item, count = tonumber(count), level = tonumber(level),
+                              rarity = rarity ~= "-" and rarity or nil})
     end
   end
-  loaded, dirty = true, false
+  local fresh = seed == nil or posted == nil
+  seed = seed or math.random(1, 2147483646)
+  posted = posted or dawns
+  return fresh
+end
+
+emf.on_world_data(function(world, text)
+  load_pool()  -- pool.lua may have changed since
+  hits, gifts, moving, filled, dropped = {}, {}, {}, {}, {}
+  purge_at, last_tod = 0, nil  -- another world's clocks mean nothing here
+  local fresh = load_text(text)
+  loaded, dirty = true, fresh  -- a new seed is kept at once
   session = emf.session()
   hud_at = -1
 end)
@@ -549,7 +703,7 @@ local function give_rewards(world, player, account, e)
 end
 
 local function claim_all(world, player, account)
-  local rec = board_of(account)
+  local rec = record(account)
   local parts = {}
   local waiting = owed[account]  -- rewards owed from before come first
   if waiting then
@@ -562,22 +716,31 @@ local function claim_all(world, player, account)
     end
     if #got > 0 then parts[#parts + 1] = table.concat(got, ", ") end
   end
-  for _, b in ipairs(rec.list) do
+  for i = 1, #rec.taken do
+    local b = rec.taken[i]
     if b.state == 1 then
       local e = entry(b.id)
-      b.state = 2
-      dirty = true
       if e then parts[#parts + 1] = give_rewards(world, player, account, e) end
+    end
+  end
+  for i = #rec.taken, 1, -1 do
+    if rec.taken[i].state == 1 then
+      table.remove(rec.taken, i)
+      dirty = true
     end
   end
   return parts
 end
 
+-- The text a player gets when a bounty of theirs is done (the host on screen; Task 8 tells players who joined).
+local function done_note(player, account, text) if player == emf.local_player() then emf.notify(text) end end
+
 local function progress(world, player, kind, match, amount)
   local account = account_of(world, player)
   if not account or not loaded then return end
-  local rec = board_of(account)
-  for _, b in ipairs(rec.list) do
+  local rec = record(account)
+  for i = #rec.taken, 1, -1 do
+    local b = rec.taken[i]
     local e = entry(b.id)
     if b.state == 0 and e and e.kind == kind and match(e) then
       b.have = math.min(b.need, b.have + amount)
@@ -588,13 +751,13 @@ local function progress(world, player, kind, match, amount)
         rec.done = (rec.done or 0) + 1
         local text = "Bounty done: " .. text_of(e, b.need)
         if emf.setting("auto_claim") then
-          b.state = 2
+          table.remove(rec.taken, i)
           text = text .. "! " .. give_rewards(world, player, account, e) .. " are yours"
         else
-          text = text .. "! /bounty.claim for " .. reward_text(e)
+          text = text .. "! /bounty.claim for " .. short_reward(e)
         end
         emf.log(text .. string.format(" (player %d, %s)", player, account))
-        if player == emf.local_player() then emf.notify(text) end
+        done_note(player, account, text)
       end
     end
   end
@@ -676,9 +839,9 @@ local function show(world)
     hud_shown = false
     return
   end
-  local rec = board_of(account)
+  local rec = record(account)
   local parts = {}
-  for _, b in ipairs(rec.list) do
+  for _, b in ipairs(rec.taken) do
     local e = entry(b.id)
     if e then parts[#parts + 1] = string.format("%s %d/%d", short_of(e), b.have, b.need) end
   end
@@ -705,39 +868,78 @@ local function unknown(world)
   emf.reply("Bounty Board: EMF could not tell which player you are; try again in a moment")
 end
 
-emf.command("board", ": your bounties and how far you are", function(world, args)
+local function not_loaded()
+  emf.reply("Bounty Board: this world's data is not loaded yet; try again in a moment")
+end
+
+-- The sender, once the world's data is there (else the reply says why and nil comes back).
+local function ready(world)
   same_session()
   local me = sender(world)
-  if not me then return unknown(world) end
-  if not loaded then
-    emf.reply("Bounty Board: this world's data is not loaded yet; try again in a moment")
-    return
+  if not me then
+    unknown(world)
+    return nil
   end
-  local rec = board_of(me.account)
-  for i, b in ipairs(rec.list) do
+  if not loaded then
+    not_loaded()
+    return nil
+  end
+  return me
+end
+
+-- The notice lines for `account`: "1. Gather 20 Wood logs (3 runes)", " - taken" after the ones they took.
+local function notice_lines(account)
+  local out = {}
+  local took = took_of(record(account))
+  for i, id in ipairs(notices_for(account)) do
+    local e = entry(id)
+    if e then out[#out + 1] = string.format("%d. %s%s", i, notice_text(e), took[id] and " - taken" or "") end
+  end
+  return out
+end
+
+emf.command("board", ": the notices, your bounties and how far you are", function(world, args)
+  local me = ready(world)
+  if not me then return end
+  local rec = record(me.account)
+  emf.reply("Notices (take one with /bounty.take <n>):")
+  for _, l in ipairs(notice_lines(me.account)) do emf.reply(l) end
+  if #rec.taken == 0 then emf.reply("You hold no bounty: take one from the notices.") end
+  for i, b in ipairs(rec.taken) do
     local e = entry(b.id)
     if e then
-      local state = b.state == 2 and "claimed" or b.state == 1 and "done" or (b.have .. "/" .. b.need)
-      local tail = b.state == 2 and "" or (" (reward: " .. reward_text(e) .. (b.state == 1 and "; /bounty.claim)" or ")"))
-      emf.reply(string.format("%d. %s: %s%s", i, text_of(e, b.need), state, tail))
+      local state = b.state == 1 and "done" or (b.have .. "/" .. b.need)
+      local tail = " (reward: " .. short_reward(e) .. (b.state == 1 and "; /bounty.claim)" or ")")
+      emf.reply(string.format("Yours %d. %s: %s%s", i, text_of(e, b.need), state, tail))
     end
   end
-  local left = math.max(0, (emf.setting("rerolls") or 0) - (rec.rerolls or 0))
   if owed[me.account] then
     local n = #owed[me.account]
     emf.reply(string.format("%d reward%s waiting: /bounty.claim", n, n == 1 and "" or "s"))
   end
-  emf.reply(string.format("%s; %d reroll%s left (/bounty.reroll <n>).", until_text(), left, left == 1 and "" or "s"))
+  local last = string.format("%s; you hold %d of %d", until_text(), #rec.taken, hold_max())
+  if each_player() then
+    local left = math.max(0, (emf.setting("rerolls") or 0) - (rec.rerolls or 0))
+    last = last .. string.format("; %d reroll%s left (/bounty.reroll <n>)", left, left == 1 and "" or "s")
+  end
+  emf.reply(last .. ".")
+end, {players = true})
+
+emf.command("take", "<n>: take notice n from the board", function(world, args)
+  local me = ready(world)
+  if not me then return end
+  emf.reply(take(me.account, args[1]))
+end, {players = true})
+
+emf.command("drop", "<n>: give up bounty n of yours", function(world, args)
+  local me = ready(world)
+  if not me then return end
+  emf.reply(drop_bounty(me.account, args[1]))
 end, {players = true})
 
 emf.command("claim", ": the rewards of your finished bounties", function(world, args)
-  same_session()
-  local me = sender(world)
-  if not me then return unknown(world) end
-  if not loaded then
-    emf.reply("Bounty Board: this world's data is not loaded yet; try again in a moment")
-    return
-  end
+  local me = ready(world)
+  if not me then return end
   local parts = claim_all(world, me.id, me.account)
   if #parts == 0 then
     emf.reply("No finished bounty to claim.")
@@ -747,30 +949,27 @@ emf.command("claim", ": the rewards of your finished bounties", function(world, 
   emf.reply("Claimed: " .. table.concat(parts, "; "))
 end, {players = true})
 
-emf.command("reroll", "<n>: swap one of your bounties for another", function(world, args)
-  same_session()
-  local me = sender(world)
-  if not me then return unknown(world) end
-  if not loaded then
-    emf.reply("Bounty Board: this world's data is not loaded yet; try again in a moment")
+emf.command("reroll", "<n>: swap notice n for another (notices of your own)", function(world, args)
+  local me = ready(world)
+  if not me then return end
+  if not each_player() then
+    emf.reply("The notices are the same for everyone: they cannot be rerolled.")
     return
   end
-  local rec = board_of(me.account)
+  local rec = record(me.account)
+  local list = notices_for(me.account)
   local n = tonumber(args[1] or "")
-  if not n or n < 1 or n > #rec.list or n % 1 ~= 0 then
-    emf.reply("Usage: /bounty.reroll <1-" .. #rec.list .. ">")
+  if not n or n < 1 or n > #list or n % 1 ~= 0 then
+    emf.reply("Usage: /bounty.reroll <1-" .. #list .. ">")
     return
   end
   if (rec.rerolls or 0) >= (emf.setting("rerolls") or 0) then
-    emf.reply("No rerolls left until the next bounties.")
-    return
-  end
-  if rec.list[n].state ~= 0 then
-    emf.reply("Bounty " .. n .. " is finished: /bounty.claim")
+    emf.reply("No rerolls left until the next notices.")
     return
   end
   local exclude = {}
-  for _, b in ipairs(rec.list) do exclude[b.id] = true end
+  for _, id in ipairs(list) do exclude[id] = true end
+  for _, b in ipairs(rec.taken) do exclude[b.id] = true end
   local used = (rec.rerolls or 0) + 1
   local salt = "r" .. used .. ":" .. n
   local new = draw(me.account, rec.key, salt, 1, exclude, starters_for(rec.done))[1] or
@@ -780,10 +979,9 @@ emf.command("reroll", "<n>: swap one of your bounties for another", function(wor
     return
   end
   rec.rerolls = used
-  rec.list[n] = new
+  rec.offers[n] = new
   dirty = true
-  hud_at = -1
-  emf.reply("Bounty " .. n .. " is now: " .. text_of(entry(new.id), new.need) .. " (reward: " .. reward_text(entry(new.id)) .. ")")
+  emf.reply("Notice " .. n .. " is now: " .. notice_text(entry(new)))
 end, {players = true})
 
 emf.command("top", ": who finished the most bounties in this world", function(world, args)
@@ -804,7 +1002,7 @@ emf.command("top", ": who finished the most bounties in this world", function(wo
   end
 end, {players = true})
 
-emf.command("give", "<bounty id>: put a bounty from the pool on your board (host, for tests)", function(world, args)
+emf.command("give", "<bounty id>: make a bounty from the pool yours at once (host, for tests)", function(world, args)
   same_session()
   local me = sender(world)
   if not me then return unknown(world) end
@@ -815,34 +1013,29 @@ emf.command("give", "<bounty id>: put a bounty from the pool on your board (host
     emf.reply("Unknown bounty; the pool has: " .. table.concat(ids, ", "))
     return
   end
-  if not loaded then
-    emf.reply("Bounty Board: this world's data is not loaded yet; try again in a moment")
-    return
-  end
-  local rec = board_of(me.account)
+  if not loaded then return not_loaded() end
+  local rec = record(me.account)
   local b = {id = e.id, need = need_for(e), have = 0, state = 0}
   local replaced = false
-  for i, x in ipairs(rec.list) do
+  for i, x in ipairs(rec.taken) do
     if x.id == e.id then
-      rec.list[i] = b
+      rec.taken[i] = b
       replaced = true
     end
   end
-  if not replaced then table.insert(rec.list, b) end
+  if not replaced then table.insert(rec.taken, b) end
   dirty = true
   hud_at = -1
   emf.reply("Given: " .. text_of(e, b.need) .. " (reward: " .. reward_text(e) .. ")")
 end)
 
-emf.command("reset", ": new bounties for everyone now (host)", function(world, args)
-  if not loaded then
-    emf.reply("Bounty Board: this world's data is not loaded yet; try again in a moment")
-    return
-  end
+emf.command("reset", ": new notices for everyone now (host)", function(world, args)
+  if not loaded then return not_loaded() end
   offset = offset + 1
+  posted = dawns
   dirty = true
   hud_at = -1
-  emf.reply("New bounties for everyone.")
+  emf.reply("New notices for everyone.")
 end)
 
 -- ---- every step ----

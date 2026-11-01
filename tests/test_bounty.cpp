@@ -95,6 +95,29 @@ size_t count_of(const std::string& text, const std::string& part) {
     for (size_t at = text.find(part); at != std::string::npos; at = text.find(part, at + 1)) ++n;
     return n;
 }
+// The notice lines of a /bounty.board reply ("1. Gather 20 Wood logs (3 runes)"), one per line.
+std::string notices_of(const std::string& board) {
+    std::string out, line;
+    std::istringstream in(board);
+    while (std::getline(in, line))
+        if (line.size() > 2 && line[0] >= '1' && line[0] <= '9' && line[1] == '.') out += line + "\n";
+    return out;
+}
+// The number of the notice whose line holds `text` ("" when none).
+std::string notice_number(const std::string& board, const std::string& text) {
+    const std::string list = notices_of(board);
+    const size_t at = list.find(text);
+    if (at == std::string::npos) return "";
+    const size_t start = list.rfind('\n', at);
+    return list.substr(start == std::string::npos ? 0 : start + 1, 1);
+}
+const char* const kStarters[] = {"Gather 20 Wood logs", "Gather 20 Stone", "Gather 15 Plant fibre", "Slay 2 Wildlife",
+                                 "Slay 3 Shroud creatures", "Slay 2 Scavengers"};
+size_t starters_in(const std::string& text) {
+    size_t n = 0;
+    for (const char* quick : kStarters) n += count_of(text, quick);
+    return n;
+}
 }  // namespace
 
 TEST_CASE("bounty: mod.json 1.2.0 has the board settings with the approved defaults") {
@@ -140,24 +163,6 @@ TEST_CASE("bounty: mod.json 1.2.0 has the board settings with the approved defau
     CHECK(m.manifest->depends[0].version.describe().find("1.8.0 or newer") == 0);
 }
 
-TEST_CASE("bounty: each player gets 3 bounties from the pool for the period, the same each time they look; others get their own") {
-    BountyRig b;
-    const std::string mine = b.board();
-    CHECK(count_of(mine, "\n") >= 3);
-    CHECK(mine.find("1. ") != std::string::npos);
-    CHECK(mine.find("3. ") != std::string::npos);
-    CHECK(mine.find("4. ") == std::string::npos);
-    CHECK(mine.find("New bounties in ") != std::string::npos);
-    CHECK(b.board() == mine);  // the same list
-    const std::string theirs = b.board(2, 0xBB);
-    CHECK(theirs != mine);
-    CHECK(theirs.find("1. ") != std::string::npos);
-    // kept with the world, by account
-    b.seconds(2);
-    CHECK(slurp(b.data).find("p 0x00000000000000aa ") != std::string::npos);
-    CHECK(slurp(b.data).find("p 0x00000000000000bb ") != std::string::npos);
-}
-
 TEST_CASE("bounty: a kill bounty counts the player's own kills of that faction (last hit); the reward waits for /bounty.claim") {
     BountyRig b({{"bounties_per_period", "1"}, {"share_kills", "0"}});
     CHECK(b.reply("bounty.give kill_vukah").rfind("Given: Slay 6 Vukah", 0) == 0);
@@ -180,7 +185,7 @@ TEST_CASE("bounty: a kill bounty counts the player's own kills of that faction (
     CHECK(b.r.fake.puts[0].entity == 1u);
     CHECK(b.r.fake.puts[0].item == kRunes);
     CHECK(b.r.fake.puts[0].count == 8u);
-    CHECK(b.board().find("Slay 6 Vukah: claimed") != std::string::npos);
+    CHECK(b.board().find("Slay 6 Vukah") == std::string::npos);  // claimed: no longer held
     CHECK(b.reply("bounty.claim") == "No finished bounty to claim.");
     CHECK(b.r.fake.puts.size() == 1u);
 }
@@ -235,10 +240,9 @@ TEST_CASE("bounty: gathering counts what a player picks up from the world, never
     deliver(b.r.fake, "PickupEvent", pickup_event(1, 4003, kLogs, 2));    // the plant
     CHECK(b.board().find("Gather 60 Wood logs: 25/60") != std::string::npos);
     deliver(b.r.fake, "PickupEvent", pickup_event(1, 0, kLogs, 40));
-    CHECK(b.board().find("Gather 60 Wood logs: claimed") != std::string::npos);  // done, and claimed at once
+    CHECK(b.board().find("Gather 60 Wood logs") == std::string::npos);  // done, and claimed at once
     REQUIRE_FALSE(b.r.fake.puts.empty());
-    // the reward arrives as a pickup from nowhere: it never counts for a bounty, also when it is the gathered item (the
-    // first board's starter, done with the same logs, brought runes too)
+    // the reward arrives as a pickup from nowhere: it never counts for a bounty, also when it is the gathered item
     b.reply("bounty.give gather_runes");
     for (const auto& put : b.r.fake.puts)
         if (put.item == kRunes) deliver(b.r.fake, "PickupEvent", pickup_event(1, 0, kRunes, put.count));
@@ -270,23 +274,24 @@ TEST_CASE("bounty: a champion is a strong creature (2+ levels above the player, 
     CHECK(gear);
 }
 
-TEST_CASE("bounty: new bounties come with the period (game dawn, every N hours, bounty.reset); progress is kept across a reload") {
+TEST_CASE("bounty: new notices come with the period (game dawn, every N hours, bounty.reset); a taken bounty stays; progress is kept across a reload") {
     {
         BountyRig b({{"reset", "game_dawn"}});
         b.reply("bounty.give kill_vukah");
         b.creature(3001, 3);
         b.kill(3001, {1});
         CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);
-        CHECK(b.board().find("New bounties at dawn") != std::string::npos);
+        CHECK(b.board().find("New notices at dawn") != std::string::npos);
+        const std::string before = notices_of(b.board());
         set_daytime(b.r.fake, 23.0);
         b.seconds(1);
         set_daytime(b.r.fake, 5.9);
         b.seconds(1);
-        CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);  // still the night
+        CHECK(notices_of(b.board()) == before);  // still the night
         set_daytime(b.r.fake, 6.1);
         b.seconds(1);
-        const std::string fresh = b.board();  // a new day: a new list of 3, nothing done yet
-        CHECK(fresh.find("1/6") == std::string::npos);
+        const std::string fresh = b.board();  // a new day: new notices; the taken bounty stays
+        CHECK(fresh.find("Slay 6 Vukah: 1/6") != std::string::npos);
         CHECK(fresh.find("4. ") == std::string::npos);
     }
     {
@@ -296,9 +301,10 @@ TEST_CASE("bounty: new bounties come with the period (game dawn, every N hours, 
         b.kill(3001, {1});
         b.seconds(3600);
         CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);
-        CHECK(b.board().find("New bounties in 1 h 0 min") != std::string::npos);
+        CHECK(b.board().find("New notices in 1 h 0 min") != std::string::npos);
         b.seconds(3600);
-        CHECK(b.board().find("Slay 6 Vukah: 1/6") == std::string::npos);
+        CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);
+        CHECK(b.board().find("New notices in 2 h 0 min") != std::string::npos);
     }
     {
         BountyRig b;
@@ -311,19 +317,19 @@ TEST_CASE("bounty: new bounties come with the period (game dawn, every N hours, 
         fire_load(1);
         b.seconds(2);
         CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);
-        CHECK(b.reply("bounty.reset") == "New bounties for everyone.");
-        CHECK(b.board().find("Slay 6 Vukah: 1/6") == std::string::npos);
+        CHECK(b.reply("bounty.reset") == "New notices for everyone.");
+        CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);
     }
 }
 
-TEST_CASE("bounty: /bounty.reroll swaps one bounty for another (once a period by default); /bounty.top ranks the players") {
-    BountyRig b;
-    const std::string before = b.board();
-    CHECK(b.reply("bounty.reroll 2").rfind("Bounty 2 is now: ", 0) == 0);
-    const std::string after = b.board();
+TEST_CASE("bounty: /bounty.reroll swaps one of your own notices (once a period by default); /bounty.top ranks the players") {
+    BountyRig b({{"offers_for", "each_player"}});
+    const std::string before = notices_of(b.board());
+    CHECK(b.reply("bounty.reroll 2").rfind("Notice 2 is now: ", 0) == 0);
+    const std::string after = notices_of(b.board());
     CHECK(after != before);
-    CHECK(after.substr(0, after.find('\n')) == before.substr(0, before.find('\n')));  // bounty 1 stays
-    CHECK(b.reply("bounty.reroll 1") == "No rerolls left until the next bounties.");
+    CHECK(after.substr(0, after.find('\n')) == before.substr(0, before.find('\n')));  // notice 1 stays
+    CHECK(b.reply("bounty.reroll 1") == "No rerolls left until the next notices.");
     CHECK(b.reply("bounty.reroll 9", 2, 0xBB) == "Usage: /bounty.reroll <1-3>");
     // two bounties done by player 2, one by player 1
     b.reply("bounty.give kill_vukah", 2, 0xBB);
@@ -337,16 +343,14 @@ TEST_CASE("bounty: /bounty.reroll swaps one bounty for another (once a period by
         b.creature(3300 + i, 3);
         b.kill(3300 + i, {1});
     }
-    const std::string top = b.reply("bounty.top", 2, 0xBB);  // player 2's starters may count the scavengers too
-    // player 2 finished the two given ones, and a starter "Slay 2 Scavengers" too when the day's draw has it
-    const std::string first_line = "1. 0x00000000000000bb: ";
-    const size_t at = top.find(first_line);
-    REQUIRE(at != std::string::npos);
-    const int done = std::atoi(top.c_str() + at + first_line.size());
-    CHECK(done >= 2);
-    CHECK(done <= 3);
-    CHECK(top.find(" (you)") != std::string::npos);
+    const std::string top = b.reply("bounty.top", 2, 0xBB);
+    CHECK(top.find("1. 0x00000000000000bb: 2 (you)") != std::string::npos);  // notices nobody took count for nobody
     CHECK(top.find("2. 0x00000000000000aa: 1") != std::string::npos);
+}
+
+TEST_CASE("bounty: notices that are the same for everyone cannot be rerolled") {
+    BountyRig b;
+    CHECK(b.reply("bounty.reroll 1") == "The notices are the same for everyone: they cannot be rerolled.");
 }
 
 TEST_CASE("bounty: a reward that does not fit is dropped at the player's feet; the host sees the bounties on screen") {
@@ -369,7 +373,7 @@ TEST_CASE("bounty: a reward that does not fit is dropped at the player's feet; t
     int players = 0;
     for (const auto& c : b.r.fake.commands)
         if (c.flags == EMF_COMMAND_PLAYERS) ++players;
-    CHECK(players == 4);  // board, claim, reroll, top
+    CHECK(players == 6);  // board, take, drop, claim, reroll, top
 }
 
 TEST_CASE("bounty: items moving between inventories (a chest takes them, the rest comes back) are no gathering") {
@@ -504,8 +508,8 @@ TEST_CASE("bounty: emf\\config\\bounty\\pool.lua (kept when EMF is installed aga
 }
 
 TEST_CASE("bounty: a reroll that finds no other bounty in the pool is not used up") {
-    BountyRig b;
-    // every bounty of the pool on the board ("bounty.give" with an unknown id lists them): nothing is left to draw
+    BountyRig b({{"offers_for", "each_player"}});
+    // every bounty of the pool held ("bounty.give" with an unknown id lists them): a reroll has nothing left to draw
     const std::string listed = b.reply("bounty.give nothing_like_this");
     const std::string head = "Unknown bounty; the pool has: ";
     REQUIRE(listed.rfind(head, 0) == 0);
@@ -521,7 +525,7 @@ TEST_CASE("bounty: a reroll that finds no other bounty in the pool is not used u
     const std::string before = b.board();
     CHECK(before.find("1 reroll left") != std::string::npos);
     CHECK(b.reply("bounty.reroll 1") == "The pool has no other bounty.");
-    CHECK(b.board() == before);  // the same bounties, and the reroll is still there
+    CHECK(b.board() == before);  // the same notices, and the reroll is still there
     CHECK(b.reply("bounty.reroll 2") == "The pool has no other bounty.");  // not "No rerolls left"
 }
 
@@ -568,38 +572,6 @@ TEST_CASE("bounty: with shared kills, a player whose companion hit the creature 
 }
 
 // ---- smaller first bounties (the pool's own start at Slay 8 and Gather 60) ----
-namespace {
-const char* const kStarters[] = {"Gather 20 Wood logs", "Gather 20 Stone", "Gather 15 Plant fibre", "Slay 2 Wildlife",
-                                 "Slay 3 Shroud creatures", "Slay 2 Scavengers"};
-}  // namespace
-
-TEST_CASE("bounty: until a player finishes their first bounty, their boards are quick starters; then the pool's own") {
-    BountyRig b;
-    const std::string first = b.board();
-    for (const char* big : {"Gather 60", "Gather 40", "Slay 6", "Slay 8", "champion"}) {
-        CAPTURE(big);
-        CHECK(first.find(big) == std::string::npos);
-    }
-    size_t starters = 0;
-    for (const char* quick : kStarters) starters += count_of(first, quick);
-    CHECK(starters == 3);
-    CHECK(b.reply("bounty.reroll 1").find("Bounty 1 is now: ") == 0);  // a reroll gives another starter
-    starters = 0;
-    const std::string rerolled = b.board();
-    for (const char* quick : kStarters) starters += count_of(rerolled, quick);
-    CHECK(starters == 3);
-    CHECK(rerolled != first);
-    b.finish_one();
-    CHECK(b.noted("Bounty done: Gather 20 Wood logs"));
-    b.reply("bounty.reset");  // a new period
-    const std::string later = b.board();
-    for (const char* quick : kStarters) {
-        CAPTURE(quick);
-        CHECK(later.find(quick) == std::string::npos);
-    }
-    CHECK(later.find("3. ") != std::string::npos);
-}
-
 TEST_CASE("bounty: the Tiny size (x0.2) makes every bounty quick to try; a pool without starters draws as before") {
     BountyRig b({{"difficulty", "tiny"}});
     CHECK(b.reply("bounty.give kill_vukah").rfind("Given: Slay 1 Vukah", 0) == 0);
@@ -653,15 +625,112 @@ TEST_CASE("bounty: fur and meat from a kill's loot spot or a corpse turned into 
 }
 
 TEST_CASE("bounty: a pool with fewer starters than bounties per player fills the first board from the rest of the pool") {
-    BountyRig c;
-    c.edit_main("(when first hit)",
-                "\nfor i = #POOL, 1, -1 do if POOL[i].starter and POOL[i].id ~= \"start_wood\" then table.remove(POOL, i) end end");
-    const std::string first = c.board(2, 0xBB);  // a board drawn after the edit (the host's is already drawn)
-    CHECK(first.find("Gather 20 Wood logs") != std::string::npos);  // the one starter
-    CHECK(first.find("3. ") != std::string::npos);                  // and two from the rest of the pool
-    CHECK(first.find("4. ") == std::string::npos);
-    // the reroll of the starter finds no other starter: it takes one from the rest of the pool
-    const size_t line = first.find("Gather 20 Wood logs");
-    const std::string number = first.substr(line - 3, 1);
-    CHECK(c.reply("bounty.reroll " + number, 2, 0xBB).rfind("Bounty " + number + " is now: ", 0) == 0);
+    for (const char* mode : {"everyone", "each_player"}) {
+        CAPTURE(mode);
+        BountyRig c({{"offers_for", mode}});
+        c.edit_main("(when first hit)",
+                    "\nfor i = #POOL, 1, -1 do if POOL[i].starter and POOL[i].id ~= \"start_wood\" then table.remove(POOL, i) end end");
+        const std::string first = notices_of(c.board(2, 0xBB));
+        CHECK(first.find("Gather 20 Wood logs") != std::string::npos);  // the one starter
+        CHECK(first.find("3. ") != std::string::npos);                  // and two from the rest of the pool
+        CHECK(first.find("4. ") == std::string::npos);
+        if (std::string(mode) == "each_player") {
+            // the reroll of the starter finds no other starter: it takes one from the rest of the pool
+            const std::string number = notice_number(first, "Gather 20 Wood logs");
+            CHECK(c.reply("bounty.reroll " + number, 2, 0xBB).rfind("Notice " + number + " is now: ", 0) == 0);
+        }
+    }
+}
+
+// ---- 1.2: notices on the board, bounties a player takes and holds ----
+TEST_CASE("bounty: the board posts shared notices: every player sees the same list; with each_player everyone has their own") {
+    {
+        BountyRig b;
+        const std::string mine = b.board();
+        const std::string list = notices_of(mine);
+        CHECK(count_of(list, "\n") == 3);
+        CHECK(list.rfind("1. ", 0) == 0);
+        CHECK(list.find("4. ") == std::string::npos);
+        CHECK(mine.find("New notices in ") != std::string::npos);
+        CHECK(b.board() == mine);                       // the same each time
+        CHECK(notices_of(b.board(2, 0xBB)) == list);    // and the same for every player
+    }
+    {
+        BountyRig b({{"offers_for", "each_player"}});
+        const std::string theirs = notices_of(b.board(2, 0xBB));
+        CHECK(count_of(theirs, "\n") == 3);
+        CHECK(notices_of(b.board()) != theirs);
+    }
+}
+
+TEST_CASE("bounty: /bounty.take makes a notice yours (hold 1 by default); only taken bounties count; /bounty.drop frees the slot") {
+    BountyRig b;
+    CHECK(b.board().find("You hold no bounty") != std::string::npos);
+    CHECK(b.reply("bounty.take 1").rfind("Taken: ", 0) == 0);
+    CHECK(b.board().find("Yours 1. ") != std::string::npos);
+    CHECK(b.reply("bounty.take 2").find("You hold 1 of 1") != std::string::npos);
+    CHECK(b.reply("bounty.take 9") == "Usage: /bounty.take <1-3>");
+    // what nobody took counts for nobody: player 2 gathers and slays what the starter notices ask for
+    deliver(b.r.fake, "PickupEvent", pickup_event(2, 0, kLogs, 30));
+    b.creature(3001, 5);
+    b.kill(3001, {2});
+    CHECK(b.board(2, 0xBB).find("You hold no bounty") != std::string::npos);
+    CHECK_FALSE(b.noted("Bounty done"));
+    CHECK(b.reply("bounty.drop 1").rfind("Dropped: ", 0) == 0);
+    CHECK(b.board().find("Yours 1. ") == std::string::npos);
+    CHECK(b.reply("bounty.take 1").find("took that one already") != std::string::npos);  // once a period
+    CHECK(b.reply("bounty.take 2").rfind("Taken: ", 0) == 0);
+    BountyRig c({{"hold_max", "2"}});
+    CHECK(c.reply("bounty.take 1").rfind("Taken: ", 0) == 0);
+    CHECK(c.reply("bounty.take 2").rfind("Taken: ", 0) == 0);
+    CHECK(c.reply("bounty.take 3").find("You hold 2 of 2") != std::string::npos);
+    CHECK(c.board().find("you hold 2 of 2") != std::string::npos);
+}
+
+TEST_CASE("bounty: a taken bounty stays across new notices until finished or dropped; a held bounty cannot be taken twice") {
+    BountyRig b;
+    b.reply("bounty.give kill_vukah");
+    b.creature(3001, 3);
+    b.kill(3001, {1});
+    CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);
+    const std::string before = notices_of(b.board());
+    bool changed = false;
+    for (int i = 0; i < 5 && !changed; ++i) {  // new notices (a draw may repeat a list now and then)
+        CHECK(b.reply("bounty.reset") == "New notices for everyone.");
+        changed = notices_of(b.board()) != before;
+    }
+    CHECK(changed);
+    CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);  // still yours
+    // a pool of two bounties and no starters: the board offers Slay 6 Vukah again, which player 1 holds
+    b.seconds(1);
+    b.edit_main("(when first hit)", "\nfor i = #POOL, 1, -1 do if POOL[i].id ~= \"kill_vukah\" and POOL[i].id ~= "
+                                    "\"gather_wood\" then table.remove(POOL, i) end end");
+    const std::string board = b.board();
+    CHECK(board.find("Slay 6 Vukah: 1/6") != std::string::npos);  // kept across the reload
+    const std::string n = notice_number(board, "Slay 6 Vukah");
+    REQUIRE_FALSE(n.empty());
+    CHECK(b.reply("bounty.take " + n).find("You hold that bounty already") != std::string::npos);
+}
+
+TEST_CASE("bounty: players who finished none see the starter notices; after their first, the pool's own") {
+    BountyRig b;
+    const std::string first = notices_of(b.board());
+    for (const char* big : {"Gather 60", "Gather 40", "Slay 6", "Slay 8", "champion"}) {
+        CAPTURE(big);
+        CHECK(first.find(big) == std::string::npos);
+    }
+    CHECK(starters_in(first) == 3);
+    b.finish_one();
+    CHECK(b.noted("Bounty done: Gather 20 Wood logs"));
+    const std::string later = notices_of(b.board());
+    CHECK(starters_in(later) == 0);
+    CHECK(count_of(later, "\n") == 3);
+    CHECK(notices_of(b.board(2, 0xBB)) == first);  // player 2 has finished none yet
+    // with notices of their own, a reroll of a starter gives another starter
+    BountyRig c({{"offers_for", "each_player"}});
+    const std::string mine = notices_of(c.board());
+    CHECK(c.reply("bounty.reroll 1").rfind("Notice 1 is now: ", 0) == 0);
+    const std::string rerolled = notices_of(c.board());
+    CHECK(starters_in(rerolled) == 3);
+    CHECK(rerolled != mine);
 }
