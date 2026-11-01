@@ -57,6 +57,14 @@ class PoseTests(unittest.TestCase):
         for a, b in zip(self.body["joints"], self.body["joints"][1:]):
             self.assertAlmostEqual(math.dist(w[a][1], w[b][1]), 0.1, places=4)
 
+    def test_a_raised_front_stands_mostly_upright(self):
+        """A cobra's rear: the front half of the raised part at the full pitch, the rest bending into the ground; the
+        head well up (an easing over the whole raised part lifted it too little to read in game)."""
+        w = self.world({"rise": 70, "rise_len": 0.4})
+        head = self.body["joints"][0]
+        lift = w[head][1][1] - self.rest[head][1][1]
+        self.assertGreater(lift, 0.6 * 0.4 * 0.9 * math.sin(math.radians(70)))
+
     def test_a_wave_swings_the_body_sideways(self):
         w = self.world({"wave": 25, "phase": 1.0})
         self.assertGreater(max(abs(w[j][1][0]) for j in self.body["joints"]), 0.02)

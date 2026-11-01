@@ -7,7 +7,8 @@ The curve, in game space (x across, y up, z forward), from the head (arc length 
 length L): at arc length s the body points along heading phi (about y, 0 = +z) and pitch theta (up):
   phi(s)   = wave * sin(2 pi s / (wavelength L) - phase) * (1 - w(s)) + coil * sin(2 pi s / (rise_len L)) * w(s)
   theta(s) = rise * w(s) + head where s is within the first joint
-  w(s)     = (1 + cos(pi s / (rise_len L))) / 2 before rise_len L, else 0 (the raised part, easing into the ground)
+  w(s)     = 1 over the first half of rise_len L, then (1 + cos) / 2 down to 0 at rise_len L, else 0 (the raised
+             part: its front half at the full pitch, the rest bending into the ground, as a cobra rears)
 Its back lies on the ground at the resting height of the point anchor L (half way by default; a scan may hold its tail up), which stays where it rests
 sideways: a wave travels along a body that stays in place, as the game moves creatures itself. roll turns the body
 about its length (a death on its back).
@@ -88,7 +89,8 @@ def _curve(length, p, first, extent=1.5):
     ds = length * extent / STEPS
     for k in range(STEPS + 1):
         s = k * ds
-        w = (1 + math.cos(math.pi * s / lr)) / 2 if s < lr else 0.0
+        half = lr / 2
+        w = 1.0 if s < half else ((1 + math.cos(math.pi * (s - half) / half)) / 2 if s < lr else 0.0)
         phi = (math.radians(p["wave"]) * math.sin(2 * math.pi * s / lam - p["phase"]) * (1 - w)
                + math.radians(p["coil"]) * math.sin(2 * math.pi * s / lr) * w)
         theta = math.radians(p["rise"]) * w + (math.radians(p["head"]) if s < first else 0.0)
