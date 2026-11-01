@@ -66,8 +66,12 @@ Server tab instead):
 | Entry | What starts |
 |---|---|
 | **Play** | the game with every mod that is switched on, as the button does |
-| **Play without EMF mods** | the game without EMF and its mods, this one start; the DLL mods started by EMF (`dinput8-chain.ini`) still run, since they are other tools |
-| **Play without any mods** | the game without EMF and without the DLL mods started by EMF, this one start (to join a public game, say). Loaders next to the game that EMF does not start (EML's or Greeneye's proxy DLL) still start by themselves; the message names them |
+| **Play without EMF mods** | the game without EMF and its mods, this one start; the DLL mods started by EMF still run |
+| **Play without any mods** | the game without EMF and without the DLL mods started by EMF, this one start |
+
+The DLL mods started by EMF (`dinput8-chain.ini`) are other tools the player installed, so Play without EMF mods still
+starts them; Play without any mods is for joining a public game, say. Loaders next to the game that EMF does not start
+(EML's or Greeneye's proxy DLL) still start by themselves; its message names them.
 
 Nothing is switched off. EMF.exe writes a one-shot flag, `emf\play_once.txt`, just before it asks Steam to start the
 game:
@@ -335,12 +339,23 @@ anything is never removed.
 ## Uninstall and what is recorded
 
 Each install writes `emf\installed_mods\<key>.json`; the key is `nexus-<id>` when the Nexus mod is known (installed from
-its page, or `nexus_id` in the archive's `mod.json`), else the mod's id, else the archive's name. An archive of several
-separate mods writes one record per mod, keyed by its folder name (`-2`, `-3` when another install has that key for
-another folder), each with the archive's Nexus id. Installing it again updates each mod's own record; one record that
-held several of them (as EMF.exe 0.3.2 made it for the creature packs) is replaced by theirs. It holds the name,
+its page, or `nexus_id` in the archive's `mod.json`), else the mod's id, else the archive's name. It holds the name,
 version, Nexus id, archive name and time, the kinds, the mod folders it installed, every file with its SHA-256, the
-folders it made, the DLLs it listed in `dinput8-chain.ini` and the older copies it switched off, and its backups.
+folders it made, the DLLs it listed in `dinput8-chain.ini` and the older copies it switched off, and its own backups.
+
+Each mod folder belongs to one record. An install replaces every record that holds a folder it installs, whatever key
+that record has, and the record of its own key (its earlier version: what that one installed and this one no longer does
+goes to `emf\backup\` too). A record of several separate mods (how EMF.exe 0.3.2 recorded the creature packs), or
+another install's record that also holds other things (the DLL that came with an EML folder), loses only the folders
+this install brings: the rest stays installed and recorded (under its key, or a free one when this install takes that),
+and the plan says so. A record of the same key that holds other folders and none of this install's (two files of one
+Nexus page, or two mods with one folder name in two loaders' folders) is another mod's: the install gets the next free
+key (`-2`, `-3`), and the plan says so.
+
+An archive of several separate mods writes one record per mod. A mod keeps the key of the record that holds its folder
+alone; otherwise it is keyed by its folder name (`-2`, `-3` when another install has that key for another folder). Each
+record has the archive's Nexus id and lists only its own backup. Installing the archive again updates each mod's own
+record.
 
 A file another install still has, or lists as a shared dependency (a loader's `dbgcore.dll` two Greeneye mods share,
 a file already there with the same bytes), is recorded as a dependency and is kept on uninstall, named as "also used by
@@ -355,9 +370,9 @@ an arbitrary file path. It removes the folders the install made (and the mod's o
 its lines out of `dinput8-chain.ini` (a DLL that was left in place keeps its line) and switches the copies it switched
 off on again. Backups in `emf\backup\` stay. A record of several separate mods (two or more mod folders, every file
 inside one of them, no line in `dinput8-chain.ini`: how EMF.exe 0.3.2 recorded the creature packs) uninstalls one mod
-folder at a time: Uninstall on one of its mods removes that folder's files, and the record keeps the others. Any other
-record with several mods is uninstalled whole, and its question names the mods that go with it. A record is read with the same path check, so a changed record cannot
-reach outside the game folder.
+folder at a time: Uninstall on one of its mods removes that folder's files and says the mod's name, and the record keeps
+the others, named after them. Any other record with several mods is uninstalled whole, and its question names the mods
+that go with it. A record is read with the same path check, so a changed record cannot reach outside the game folder.
 
 ## Nexus account
 
@@ -716,14 +731,14 @@ writes the same format (`package\emf_common.ps1`).
 - **Restore all...** and **Pick files...** on each backup: the whole backup, or chosen files grouped by storage, each
   named by what it is ("Character: Ember (level 8)", "World: Embervale", "Character slot 2" while the name is unknown)
   with its file name, when it was saved, a world's play time and its size. Pick files opens on that list, and a line
-  above the backups says how to bring back one character or one world only. Restore is refused while an `enshrouded.exe` runs (from any folder: saves belong to the Windows user,
-  not to a game folder) or a dedicated server runs from the folder shown, and the host checks again before it writes.
-  It checks the backup's copies against their hashes, makes a **before-restore** backup of the files it will replace,
-  copies each file back through a temporary file next to it (a name longer than 32 characters, which the game's
-  migration scan leaves alone) and checks the result. The backup itself always stays. Choosing a Steam file shows the
-  Steam Cloud warning: Steam keeps a copy online; the restored file gets the current time, so Steam should upload it
-  at the next game start; if Steam reports a conflict, keep the files on this PC. That Steam behaviour has not been
-  checked against Steam itself.
+  above the backups says how to bring back one character or one world only. Restore is refused while an `enshrouded.exe`
+  runs (from any folder: saves belong to the Windows user, not to a game folder) or a dedicated server runs from the
+  folder shown, and the host checks again before it writes. It checks the backup's copies against their hashes, makes a
+  **before-restore** backup of the files it will replace, copies each file back through a temporary file next to it (a
+  name longer than 32 characters, which the game's migration scan leaves alone) and checks the result. The backup itself
+  always stays. Choosing a Steam file shows the Steam Cloud warning: Steam keeps a copy online; the restored file gets
+  the current time, so Steam should upload it at the next game start; if Steam reports a conflict, keep the files on
+  this PC. That Steam behaviour has not been checked against Steam itself.
 - **Delete...** asks first, naming the backup's time and label, with Cancel holding the keyboard. The starter backup's
   question adds "This is your backup from before EMF was installed.", and the host deletes a starter only when the
   dialog's message says so (`starter: true`). Deleting runs on the worker, never following a junction inside the
@@ -948,7 +963,8 @@ player's, and counts only a stand-in game running from the folder shown.
   nothing in them runs, that a `fetch` and a navigation from the page are stopped, that clicking a switch through the
   page changes `dinput8-chain.ini`, that several switches in a row share one note, the Play menu (its entries, and
   Play without EMF mods writing `emf\play_once.txt` without opening Steam), that the same switch is locked while a
-  stand-in `enshrouded.exe` runs from the folder, profiles through the page (Save as, a switch makes the picker say "(changed)", Switch puts it back),
+  stand-in `enshrouded.exe` runs from the folder, profiles through the page (Save as, a switch makes the picker say
+  "(changed)", Switch puts it back),
   the message when WebView2 is missing, and EMF.exe's imports. The runs have the tester switch (an `app.ini` in their
   `EMF_TEST_APPDATA`), except one that is the release build (Off): started on Browse with an Enshrouded link, a stored key and
   the recorded Nexus at hand, it shows no Browse tab, no Check for updates, no account or nxm:// cards and no Download
@@ -961,7 +977,8 @@ player's, and counts only a stand-in game running from the folder shown.
   installed through the page (`install_path`, the test's stand-in for the file dialog, allowed only with `EMF_TEST=1`)
   and uninstalled again, checking the files, the `[Chain]` line, the record, the backup and that the question names the
   other mod of the same install; an archive of two packs is installed as two installs, and uninstalling one through the
-  page leaves the other; one record of two packs as EMF.exe 0.3.2 wrote it is uninstalled one pack at a time. The Nexus account, offline:
+  page leaves the other; one record of two packs as EMF.exe 0.3.2 wrote it is uninstalled one pack at a time. The
+  Nexus account, offline:
   the EMF tab says the key is "not set" and hides Log in with Nexus; the nxm:// setting shows a seeded Vortex, takes the
   links and gives them back (in memory; the real HKCU is read before and after and must not change); a key saved
   through the page shows the account as Premium with its request allowance, is stored encrypted and never stays in the
@@ -978,7 +995,8 @@ player's, and counts only a stand-in game running from the folder shown.
   Ctrl+C; nothing left running), its log with a password stripped, and Install EMF with a package's own `install.ps1`.
   The Saves tab against fake save folders: the starter backup at the first start and the list with its sizes, Back up
   now with a label, Restore all... and Pick files... on each backup with the line that says how to bring back one
-  character, Pick files opening on the named files, one Local file restored (Cancel holds the keyboard; a Steam file shows the Steam Cloud warning; a
+  character, Pick files opening on the named files, one Local file restored (Cancel holds the keyboard; a Steam file
+  shows the Steam Cloud warning; a
   before-restore backup first, the backup stays, no temporary file left, the Steam files untouched), Delete of the
   starter cancelled (with its extra line) then confirmed, and, with a stand-in game running, Back up now and Restore
   locked and a restore sent anyway refused.

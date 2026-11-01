@@ -19,7 +19,8 @@
 // emf\installed_mods\<key>.json records every installed file with its SHA-256; the key is nexus-<id> when the Nexus
 // mod is known, else the mod's id. An archive EMF downloaded from Nexus also records its Nexus file id. An archive of
 // several separate mods (each in its own mod folder, nothing installed outside them: the EMF creature packs) writes one
-// record per mod, keyed by its folder, so each uninstalls by itself.
+// record per mod, keyed by its folder, so each uninstalls by itself. Each mod folder belongs to one record: an install
+// replaces the records that hold its folders (a record that also holds other things keeps those).
 #include <cstdint>
 #include <map>
 #include <optional>

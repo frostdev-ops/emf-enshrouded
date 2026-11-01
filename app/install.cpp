@@ -472,15 +472,51 @@ bool owns_root(const InstallRecord& r, const std::string& root) {
     return std::any_of(r.roots.begin(), r.roots.end(), [&](const std::string& x) { return _stricmp(x.c_str(), root.c_str()) == 0; });
 }
 
+bool under_root(const std::string& path, const std::string& root) {
+    return _stricmp(path.c_str(), root.c_str()) == 0 || iprefix(path, root + "\\");
+}
+
+bool under_roots(const std::vector<std::string>& roots, const std::string& path) {
+    return std::any_of(roots.begin(), roots.end(), [&](const std::string& root) { return under_root(path, root); });
+}
+
+bool shares_root(const InstallRecord& r, const std::vector<std::string>& roots) {
+    return std::any_of(roots.begin(), roots.end(), [&](const std::string& root) { return owns_root(r, root); });
+}
+
 bool one_by_one(const InstallPlan& plan) {
     return std::any_of(plan.parts.begin(), plan.parts.end(), [](const PlanPart& p) { return !p.key.empty(); });
 }
 
+// The mod folders a plan installs ("mods\\foo"): its parts that copy files into a folder of their own.
+std::vector<std::string> plan_roots(const InstallPlan& plan) {
+    std::vector<std::string> out;
+    for (const auto& p : plan.parts)
+        if (p.installs() && !p.root.empty()) out.push_back(p.root);
+    return out;
+}
+
+// What the player calls the mod in a folder: the "name" in its mod.json, else the folder's name.
+std::string folder_mod_name(const std::wstring& game, const std::string& root) {
+    std::string text;
+    if (read_file(game + L"\\" + wide(switched_path(game, root)) + L"\\mod.json", text, core::kMaxManifestBytes + 1))
+        if (const auto v = parse_object(text))
+            if (const std::string name = jstr(*v, "name"); !name.empty()) return name;
+    return base_name(root);
+}
+
+std::string folder_mod_names(const std::wstring& game, const std::vector<std::string>& roots) {
+    std::string out;
+    for (size_t i = 0; i < roots.size(); ++i) out += (i ? ", " : "") + folder_mod_name(game, roots[i]);
+    return out;
+}
+
 // An archive of several separate mods, each in a mod folder of its own with nothing installed outside them (the EMF
 // creature packs: mods\<pack>\ folders and a README.txt that is not copied), records each mod as an install of its own,
-// so that each one uninstalls by itself. Each is keyed by its folder name; a key another install already has for
-// another folder gets -2, -3. An archive that installs anything outside its mod folders (a DLL mod next to the game, a
-// Greeneye loader, files in emf\) stays one install: its parts may need each other.
+// so that each one uninstalls by itself. A mod keeps the key of the record that holds its folder alone (its own install
+// from before, whatever it was named); otherwise it is keyed by its folder name, and a key another install already has
+// for another folder gets -2, -3. An archive that installs anything outside its mod folders (a DLL mod next to the
+// game, a Greeneye loader, files in emf\) stays one install: its parts may need each other.
 void split_installs(InstallPlan& plan, const std::wstring& game) {
     std::vector<PlanPart*> mods;
     for (auto& p : plan.parts) {
@@ -491,17 +527,24 @@ void split_installs(InstallPlan& plan, const std::wstring& game) {
         mods.push_back(&p);
     }
     if (mods.size() < 2) return;
+    const std::vector<InstallRecord> records = read_install_records(game);
+    const auto record = [&](const std::string& key) -> const InstallRecord* {
+        for (const auto& r : records)
+            if (r.key == key) return &r;
+        return nullptr;
+    };
     std::set<std::string> taken;
     std::vector<std::string> keys;
     for (PlanPart* p : mods) {
+        std::string chosen;
+        for (const auto& r : records)  // the mod's own install from before
+            if (chosen.empty() && r.roots.size() == 1 && owns_root(r, p->root) && !taken.count(r.key)) chosen = r.key;
         std::string base = sanitize_key(base_name(p->root));
         if (base.size() > 60) base.resize(60);
-        if (base.empty()) return;
-        std::string chosen;
-        for (int i = 1; i < 100 && chosen.empty(); ++i) {
+        for (int i = 1; i < 100 && chosen.empty() && !base.empty(); ++i) {
             const std::string k = i == 1 ? base : base + "-" + std::to_string(i);
             if (!valid_install_key(k) || taken.count(k)) continue;
-            const auto r = read_install_record(game, k);
+            const InstallRecord* r = record(k);
             if (!r || owns_root(*r, p->root)) chosen = k;
         }
         if (chosen.empty()) return;
@@ -511,26 +554,76 @@ void split_installs(InstallPlan& plan, const std::wstring& game) {
     for (size_t i = 0; i < mods.size(); ++i) mods[i]->key = keys[i];
 }
 
-// The installs a plan replaces: the record of its key. With its mods recorded one by one: each mod's own record, and a
-// record of the plan's key that holds one of their folders (one record for several mods, as EMF.exe 0.3.2 made it).
-std::vector<InstallRecord> replaced_records(const std::wstring& game, const InstallPlan& plan) {
-    std::vector<InstallRecord> out;
-    const auto add = [&](const std::string& key, bool any_root) {
-        if (key.empty() || std::any_of(out.begin(), out.end(), [&](const InstallRecord& r) { return r.key == key; })) return;
-        auto r = read_install_record(game, key);
-        if (!r) return;
-        if (any_root && std::none_of(plan.parts.begin(), plan.parts.end(),
-                                     [&](const PlanPart& p) { return !p.key.empty() && owns_root(*r, p.root); }))
-            return;  // another install that only shares the key's name
-        out.push_back(std::move(*r));
-    };
-    if (!one_by_one(plan)) {
-        add(plan.key, false);
-        return out;
+// An install a plan replaces, whole, or only for the plan's folders: then `rest` is what stays installed. That is a
+// record of several separate mods (how EMF.exe 0.3.2 recorded the creature packs), which keeps the mods the plan does
+// not ship, or another install's record that also holds other things (the DLL that came with an EML folder), which
+// keeps those.
+struct Replaced {
+    InstallRecord rec;
+    std::optional<InstallRecord> rest;
+    bool separable = false;  // separable_install(rec): what stays are mods of their own
+};
+
+// The installs a plan replaces: every record that holds a mod folder the plan installs (so that each folder has one
+// record, whatever key an earlier install gave it), and, when the plan is one install, the record of its key (whose
+// folders the plan shares, or which has none: a DLL mod). The plan's own earlier version (the same key) is replaced
+// whole, as an update: what it no longer ships goes to the backup; a record of several separate mods only ever loses
+// the plan's folders.
+std::vector<Replaced> replaced_installs(const std::wstring& game, const InstallPlan& plan) {
+    const std::vector<std::string> roots = plan_roots(plan);
+    const bool split = one_by_one(plan);
+    std::vector<Replaced> out;
+    for (auto& r : read_install_records(game)) {
+        const bool holds = shares_root(r, roots);
+        if (!holds && (split || r.key != plan.key)) continue;
+        const bool own_key = split ? std::any_of(plan.parts.begin(), plan.parts.end(), [&](const PlanPart& p) { return p.key == r.key; })
+                                   : r.key == plan.key;
+        const bool more = !r.chain.empty() || !r.chain_off.empty() ||
+                          std::any_of(r.roots.begin(), r.roots.end(), [&](const std::string& root) { return !under_roots(roots, root); }) ||
+                          std::any_of(r.files.begin(), r.files.end(), [&](const std::pair<std::string, std::string>& f) {
+                              return !under_roots(roots, f.first);
+                          });
+        Replaced x;
+        x.separable = separable_install(r);
+        if (holds && more && (x.separable || !own_key)) {
+            InstallRecord rest = r;
+            rest.files.clear();
+            rest.folders.clear();
+            rest.roots.clear();
+            for (const auto& f : r.files)
+                if (!under_roots(roots, f.first)) rest.files.push_back(f);
+            for (const auto& d : r.folders)
+                if (!under_roots(roots, d)) rest.folders.push_back(d);
+            for (const auto& root : r.roots)
+                if (!under_roots(roots, root)) rest.roots.push_back(root);
+            x.rest = std::move(rest);
+        }
+        x.rec = std::move(r);
+        out.push_back(std::move(x));
     }
-    for (const auto& p : plan.parts) add(p.key, false);
-    add(plan.key, true);
     return out;
+}
+
+// The plan's key, unless an install with that key holds other mod folders and none of the plan's: it is another mod's
+// (two files of one Nexus page, or two mods with the same folder name in two loaders' folders), so this one gets the
+// next free key and that install stays as it is. Returns the install that had the key ("" when the key stays).
+std::string free_plan_key(InstallPlan& plan, const std::wstring& game) {
+    const std::vector<std::string> roots = plan_roots(plan);
+    if (roots.empty()) return {};  // a plan with no mod folder of its own: the record of its key is its earlier version
+    std::string base = plan.key;
+    if (base.size() > 60) base.resize(60);
+    std::string other;
+    for (int i = 1; i < 100; ++i) {
+        const std::string k = i == 1 ? plan.key : base + "-" + std::to_string(i);
+        if (!valid_install_key(k)) continue;
+        const auto r = read_install_record(game, k);
+        if (!r || r->roots.empty() || shares_root(*r, roots)) {
+            if (k != plan.key) plan.key = k;
+            return other;
+        }
+        if (other.empty()) other = r->name.empty() ? r->key : r->name;
+    }
+    return {};
 }
 
 const char* action_name(Action a) {
@@ -793,11 +886,6 @@ InstallPlan build_plan(const PlanInput& in) {
         if (plan.key.empty() && f.error.empty()) plan.key = sanitize_key(f.folder);
     if (plan.key.empty()) plan.key = sanitize_key(archive_slug(in.archive));
     if (plan.key.empty()) plan.key = "mod";
-    const auto earlier = read_install_record(in.game, plan.key);
-    std::set<std::string> owned;
-    if (earlier)
-        for (const auto& [path, hash] : earlier->files) owned.insert(lower(path));
-
     std::vector<bool> claimed(files.size(), false);
     std::set<std::string> targets;
     for (auto& fi : folders) {
@@ -870,6 +958,14 @@ InstallPlan build_plan(const PlanInput& in) {
         }
         plan.parts.push_back(std::move(part));
     }
+
+    // ---- the installs this one replaces (its earlier versions) ----
+    const std::string key_owner = free_plan_key(plan, in.game);  // an install of other folders had the plan's key
+    if (!key_owner.empty()) linked_note.clear();
+    std::set<std::string> owned;  // files of installs it replaces whole: theirs are replaced, not refused as another mod's
+    for (const auto& x : replaced_installs(in.game, plan))
+        if (!x.rest)
+            for (const auto& [path, hash] : x.rec.files) owned.insert(lower(path));
 
     // ---- the files outside the mod folders ----
     const std::string& strip = c.strip_prefix;
@@ -1130,15 +1226,38 @@ InstallPlan build_plan(const PlanInput& in) {
         plan.notes.push_back("Each mod in this file is recorded on its own, so you can uninstall each one by itself.");
     else if (rows > 1)
         plan.notes.push_back("EMF records everything in this file as one install: Uninstall removes all of it together.");
-    const auto replaced = replaced_records(in.game, plan);
+    const auto replaced = replaced_installs(in.game, plan);
     plan.update = !replaced.empty();
+    if (!key_owner.empty())
+        plan.notes.insert(plan.notes.begin(), "EMF already installed " + key_owner + " under the same name, with other "
+                                              "folders: this one is recorded as an install of its own (" + plan.key +
+                                              "), and " + key_owner + " stays as it is.");
     // the same key can come from two archives with a generic name: say which install this replaces
-    for (auto r = replaced.rbegin(); r != replaced.rend(); ++r)
-        plan.notes.insert(plan.notes.begin(), "This replaces " + (r->name.empty() ? r->key : r->name) +
-                                                  (r->version.empty() ? "" : " " + r->version) + ", which EMF installed" +
-                                                  (r->installed_at.empty() ? "" : " on " + r->installed_at) +
-                                                  (r->archive.empty() ? "" : " from " + r->archive) +
-                                                  ": its files move to emf\\backup\\ first.");
+    const std::vector<std::string> roots = plan_roots(plan);
+    for (auto x = replaced.rbegin(); x != replaced.rend(); ++x) {
+        const InstallRecord& r = x->rec;
+        const std::string when = ", which EMF installed" + (r.installed_at.empty() ? "" : " on " + r.installed_at) +
+                                 (r.archive.empty() ? "" : " from " + r.archive);
+        std::vector<std::string> mine;  // its folders this plan ships
+        for (const auto& root : r.roots)
+            if (under_roots(roots, root)) mine.push_back(root + "\\");
+        std::string stays;  // what stays installed of it
+        if (x->rest && x->separable) {
+            stays = " Its other mods (" + folder_mod_names(in.game, x->rest->roots) + ") stay installed, recorded on their own.";
+        } else if (x->rest) {
+            std::vector<std::string> rest;
+            for (const auto& root : x->rest->roots) rest.push_back(root + "\\");
+            for (const auto& [path, hash] : x->rest->files)
+                if (!under_roots(x->rest->roots, path)) rest.push_back(path);
+            for (const auto& dll : x->rest->chain) rest.push_back(dll);
+            stays = " The rest of it stays installed: " + join(rest) + ".";
+        }
+        plan.notes.insert(plan.notes.begin(),
+                          x->rest ? "This replaces " + join(mine) + " of " + (r.name.empty() ? r.key : r.name) + when +
+                                        ": those files move to emf\\backup\\ first." + stays
+                                  : "This replaces " + (r.name.empty() ? r.key : r.name) + (r.version.empty() ? "" : " " + r.version) +
+                                        when + ": its files move to emf\\backup\\ first.");
+    }
     if (!linked_note.empty()) plan.notes.insert(plan.notes.begin(), linked_note);
 
     // ---- the name shown ----
@@ -1185,6 +1304,8 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
         res.error = "The game folder changed since this plan was made. Choose the file again.";
         return res;
     }
+    const std::string changed = "EMF's install records changed since this plan was made. Choose the file again.";
+    const std::vector<std::string> roots = plan_roots(plan);
     // the install records it writes: the plan's key, or one per mod (several separate mods in one archive)
     const bool split = one_by_one(plan);
     std::vector<std::string> order;  // record keys, in the plan's order
@@ -1197,12 +1318,11 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
             res.error = "The install has no usable name.";
             return res;
         }
-        if (split) {  // a key whose record holds another folder since the plan was made: never written over
-            const auto r = read_install_record(game, k);
-            if ((r && !owns_root(*r, part.root)) || recs.count(k)) {
-                res.error = "EMF's install records changed since this plan was made. Choose the file again.";
-                return res;
-            }
+        // a key whose record holds other folders since the plan was made is never written over
+        const auto r = read_install_record(game, k);
+        if (split ? ((r && !owns_root(*r, part.root)) || recs.count(k)) : (r && !r->roots.empty() && !shares_root(*r, roots) && !roots.empty())) {
+            res.error = changed;
+            return res;
         }
         if (recs.count(k)) continue;
         order.push_back(k);
@@ -1214,14 +1334,13 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
         rec.nexus_file_id = plan.nexus_file_id;
         rec.archive = plan.archive;
     }
-    // the record a file or folder of the install belongs to: the mod folder it is in; anything else (a folder the mods
+    // the records a file or folder of the install belongs to: the mod folder it is in; anything else (a folder the mods
     // share, such as mods\) belongs to every record
     const auto owners_of = [&](const std::string& rel) {
         std::vector<InstallRecord*> out;
         if (split)
             for (const auto& part : plan.parts)
-                if (part.installs() && (iequals(wide(rel), wide(part.root)) || iprefix(rel, part.root + "\\")))
-                    out.push_back(&recs[part.key]);
+                if (part.installs() && under_root(rel, part.root)) out.push_back(&recs[part.key]);
         if (out.empty())
             for (const auto& k : order) out.push_back(&recs[k]);
         return out;
@@ -1234,7 +1353,8 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
     std::set<std::string> emf_mod_dirs;
     for (const auto& part : plan.parts)
         if (part.kind == std::string("emf-mod") && !part.root.empty()) emf_mod_dirs.insert(lower(part.root));
-    const std::vector<InstallRecord> earlier = replaced_records(game, plan);  // the installs this one replaces
+    // the installs this one replaces: whole, or a record of several separate mods only for this plan's folders
+    const std::vector<Replaced> earlier = replaced_installs(game, plan);
     const std::string stamp = now_text("%Y%m%d-%H%M%S");
     const auto backup_dir = [&](const std::string& name) {
         std::string d = "emf\\backup\\" + name + "-" + stamp;
@@ -1248,7 +1368,8 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
     std::string chain_before;
     const bool chain_existed = read_file(game + L"\\dinput8-chain.ini", chain_before, 1u << 20);
     bool chain_changed = false;
-    std::vector<std::string> backups;
+    std::vector<std::string> backups;                       // every backup folder this install made
+    std::map<std::string, std::vector<std::string>> owned_backups;  // record key -> the backup folders of its files
     const auto undo = [&](const std::string& why) {
         // the new files first, then the empty folders they made, so a backup can move back into its old place
         for (auto it = copied.rbegin(); it != copied.rend(); ++it) {
@@ -1275,16 +1396,20 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
         return res;
     };
 
-    // 1. what the new version replaces moves to emf\backup\ first
-    std::string files_backup;
+    // 1. what the new version replaces moves to emf\backup\ first: each record's files into a folder of its own
+    std::map<std::string, std::string> files_backup;  // record key -> its folder for replaced files
     const auto backup_file = [&](const std::string& rel) {
         if (protected_from_removal(rel, own)) return true;  // never move the game's or EMF's own files, however a record names them
         if (!exists(game + L"\\" + wide(rel))) return true;
-        if (files_backup.empty()) {
-            files_backup = backup_dir(plan.key);
-            backups.push_back(files_backup);
+        const std::vector<InstallRecord*> mine = owners_of(rel);
+        const std::string key = mine.size() == 1 ? mine[0]->key : plan.key;
+        std::string& dir = files_backup[key];
+        if (dir.empty()) {
+            dir = backup_dir(key);
+            backups.push_back(dir);
         }
-        const std::string to = files_backup + "\\" + rel;
+        for (InstallRecord* r : mine) add_unique(owned_backups[r->key], dir);
+        const std::string to = dir + "\\" + rel;
         if (!move_into(game, rel, to, made)) return false;
         moved.emplace_back(rel, to);
         return true;
@@ -1305,6 +1430,7 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
                 }
                 moved.emplace_back(part.replace_folder, to);
                 backups.push_back(to);
+                add_unique(owned_backups[key_of(part)], to);
                 res.done.push_back("The old " + part.replace_folder + "\\ is kept in " + to + "\\.");
             } else {
                 // an in-place update: back up only the files the new version ships or the old install put here; the
@@ -1313,8 +1439,8 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
                 std::set<std::string> ships;  // lower-case paths the new version writes under the folder
                 for (const auto& cp : part.copies) ships.insert(lower(cp.to));
                 std::set<std::string> old_installed;
-                for (const auto& r : earlier)
-                    for (const auto& [path, hash] : r.files)
+                for (const auto& x : earlier)
+                    for (const auto& [path, hash] : x.rec.files)
                         if (iprefix(path, folder + "\\")) old_installed.insert(lower(path));
                 std::vector<std::string> here_files;
                 uint64_t ignore_bytes = 0;
@@ -1335,11 +1461,18 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
         for (const auto& f : part.replace_files)
             if (!backup_file(f)) return undo("Could not move " + f + " to the backup: " + windows_error_text(GetLastError()));
     }
-    for (const auto& r : earlier)  // the earlier versions' other files go too (kept in the backup, never deleted)
-        for (const auto& [path, hash] : r.files)
-            if (!backup_file(switched_path(game, path)))
-                return undo("Could not move " + path + " to the backup: " + windows_error_text(GetLastError()));
-    if (!files_backup.empty()) res.done.push_back("The earlier version's files are kept in " + files_backup + "\\.");
+    // the earlier versions' other files go too (kept in the backup, never deleted); a record of several separate mods
+    // keeps the files of the mods this plan does not ship
+    for (const auto& x : earlier)
+        for (const auto& [path, hash] : x.rec.files)
+            if (!x.rest || under_roots(roots, path))
+                if (!backup_file(switched_path(game, path)))
+                    return undo("Could not move " + path + " to the backup: " + windows_error_text(GetLastError()));
+    if (!files_backup.empty()) {
+        std::vector<std::string> dirs;
+        for (const auto& [k, d] : files_backup) dirs.push_back(d + "\\");
+        res.done.push_back("The earlier version's files are kept in " + join(dirs, 8) + ".");
+    }
 
     // 2. the new files: CopyFile never overwrites
     const std::string installed_at = now_text("%Y-%m-%d %H:%M:%S");
@@ -1383,10 +1516,11 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
     // 3. dinput8-chain.ini: the earlier versions' lines out, the new ones in, older copies of the same tool off
     std::vector<std::string> new_chain, chain_drop;
     for (const auto& [k, rec] : recs) new_chain.insert(new_chain.end(), rec.chain.begin(), rec.chain.end());
-    for (const auto& r : earlier)
-        for (const auto& old : r.chain)
-            if (std::none_of(new_chain.begin(), new_chain.end(), [&](const std::string& a) { return _stricmp(a.c_str(), old.c_str()) == 0; }))
-                chain_drop.push_back(old);
+    for (const auto& x : earlier)
+        if (!x.rest)  // what stays of a record keeps its lines
+            for (const auto& old : x.rec.chain)
+                if (std::none_of(new_chain.begin(), new_chain.end(), [&](const std::string& a) { return _stricmp(a.c_str(), old.c_str()) == 0; }))
+                    chain_drop.push_back(old);
     if (!chain_add.empty() || !chain_off.empty() || !chain_drop.empty()) {
         bool created = false;
         const Change c = edit_chain_file(game, [&](const std::string& text) -> std::optional<std::string> {
@@ -1412,23 +1546,58 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
     for (const auto& f : made)
         if (!iprefix(f + "\\", "emf\\backup\\"))
             for (InstallRecord* rec : owners_of(f)) add_unique(rec->folders, f);
-    for (auto& [k, rec] : recs) rec.backups = backups;
-    for (const auto& r : earlier) {
-        for (const auto& b : r.backups)
-            for (auto& [k, rec] : recs) add_unique(rec.backups, b);
-        // folders the earlier version made that the new one still uses stay the install's
-        for (const auto& f : r.folders)
-            if (is_dir(game + L"\\" + wide(f)))
+    for (auto& [k, rec] : recs) rec.backups = owned_backups[k];
+    for (const auto& x : earlier) {
+        // its earlier versions' backups: the record of the same key, else the records of the folders it held
+        std::vector<InstallRecord*> heirs;
+        if (recs.count(x.rec.key) && !x.rest) heirs.push_back(&recs[x.rec.key]);
+        else if (!x.rest)
+            for (const auto& root : x.rec.roots)
+                for (InstallRecord* r : owners_of(root)) heirs.push_back(r);
+        for (const auto& b : x.rec.backups)
+            for (InstallRecord* r : heirs) add_unique(r->backups, b);
+        // folders the earlier version made that the new one still uses stay the install's (a record of several
+        // separate mods keeps those of the mods it still holds)
+        for (const auto& f : x.rec.folders)
+            if ((!x.rest || under_roots(roots, f)) && is_dir(game + L"\\" + wide(f)))
                 for (InstallRecord* rec : owners_of(f)) add_unique(rec->folders, f);
+    }
+    // what stays of a record of several separate mods: under its own key, or a free one when this install takes that
+    std::vector<InstallRecord> rests;
+    std::set<std::string> rest_keys;
+    for (const auto& x : earlier) {
+        if (!x.rest) continue;
+        InstallRecord rest = *x.rest;
+        if (x.separable) rest.name = folder_mod_names(game, rest.roots);  // the mods it still holds
+        if (recs.count(rest.key) || rest_keys.count(rest.key)) {
+            std::string base = sanitize_key(rest.roots.empty() ? rest.key : base_name(rest.roots.front()));
+            if (base.size() > 60) base.resize(60);
+            rest.key.clear();
+            for (int i = 1; i < 100 && rest.key.empty() && !base.empty(); ++i) {
+                const std::string k = i == 1 ? base : base + "-" + std::to_string(i);
+                if (valid_install_key(k) && !recs.count(k) && !rest_keys.count(k) && !read_install_record(game, k)) rest.key = k;
+            }
+            if (rest.key.empty()) return undo(changed);
+        }
+        rest_keys.insert(rest.key);
+        rests.push_back(std::move(rest));
     }
     std::vector<std::string> record_made;
     if (!make_folders(game, kRecords, record_made)) return undo("Could not make " + std::string(kRecords) + ".");
     std::vector<std::pair<std::string, std::optional<std::string>>> wrote;  // a record written, and what it held before
-    for (const auto& k : order) {
-        const std::wstring path = game + L"\\" + wide(record_path(k));
+    const auto write_record = [&](const InstallRecord& r) {
+        const std::wstring path = game + L"\\" + wide(record_path(r.key));
         std::optional<std::string> before;
         if (std::string t; read_file(path, t, kMaxJson)) before = std::move(t);
-        const Change w = write_file_whole(path, record_json(recs[k]), record_path(k));
+        const Change w = write_file_whole(path, record_json(r), record_path(r.key));
+        if (w.ok) wrote.emplace_back(record_path(r.key), before);
+        return w;
+    };
+    std::vector<const InstallRecord*> to_write;
+    for (const auto& k : order) to_write.push_back(&recs[k]);
+    for (const auto& r : rests) to_write.push_back(&r);
+    for (const InstallRecord* r : to_write) {
+        const Change w = write_record(*r);
         if (!w.ok) {
             for (const auto& [rp, old] : wrote) {  // the records written so far go back as they were
                 if (old) write_file_whole(game + L"\\" + wide(rp), *old, rp);
@@ -1437,11 +1606,11 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
             remove_empty(game, record_made);
             return undo(w.error);
         }
-        wrote.emplace_back(record_path(k), before);
     }
-    for (const auto& r : earlier) {
-        if (!recs.count(r.key)) DeleteFileW(lp(game + L"\\" + wide(record_path(r.key))).c_str());  // one record for several mods: replaced by theirs
-        remove_empty(game, r.folders);  // the earlier version's folders that are empty now
+    for (const auto& x : earlier) {
+        if (!recs.count(x.rec.key) && !rest_keys.count(x.rec.key))  // replaced by records under other keys
+            DeleteFileW(lp(game + L"\\" + wide(record_path(x.rec.key))).c_str());
+        remove_empty(game, x.rec.folders);  // the earlier version's folders that are empty now
     }
     res.ok = true;
     res.keys = order;
@@ -1455,6 +1624,8 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
         res.done.insert(res.done.begin(), "Installed " + plan.name + (plan.version.empty() ? "" : " " + plan.version) + ": " +
                                               count_files(n) + " copied. It is loaded at the next game start.");
     }
+    for (const auto& r : rests)
+        res.done.push_back("Still installed, as before: " + r.name + " (recorded as " + r.key + ").");
     return res;
 }
 
@@ -1488,12 +1659,6 @@ std::optional<InstallRecord> read_install_record(const std::wstring& game, const
     return parse_record(text, key);
 }
 
-namespace {
-bool under_root(const std::string& path, const std::string& root) {
-    return _stricmp(path.c_str(), root.c_str()) == 0 || iprefix(path, root + "\\");
-}
-}  // namespace
-
 bool separable_install(const InstallRecord& r) {
     if (r.roots.size() < 2 || !r.chain.empty() || !r.chain_off.empty()) return false;
     return std::all_of(r.files.begin(), r.files.end(), [&](const std::pair<std::string, std::string>& f) {
@@ -1526,7 +1691,7 @@ InstallResult uninstall_mod(const std::wstring& game, const std::string& key, co
                 return res;
             }
             InstallRecord one = *rec;
-            one.name = root;
+            one.name = folder_mod_name(game, root);  // what the player calls it, read before its files go
             one.files.clear();
             one.folders.clear();
             one.roots = {root};
@@ -1539,6 +1704,7 @@ InstallResult uninstall_mod(const std::wstring& game, const std::string& key, co
             for (const auto& d : rec->folders) (under_root(d, root) ? one.folders : rest->folders).push_back(d);
             for (const auto& r : rec->roots)
                 if (_stricmp(r.c_str(), root.c_str()) != 0) rest->roots.push_back(r);
+            rest->name = folder_mod_names(game, rest->roots);  // the record is about the mods it still holds
             rec = std::move(one);
         }
     }
