@@ -435,6 +435,23 @@ TEST_CASE("app chain: ModLoader Proxy as dinput8.dll starts EMF and ShroudForge 
     CHECK(proxy->name == "ModLoader Proxy");
 }
 
+TEST_CASE("app chain: with ModLoader Proxy as dinput8.dll, the Play menu asks EMF's loader it starts, not dinput8.dll") {
+    TempGame g(L"mlproxyplayonce");
+    const std::string wide_ini("c\0h\0a\0i\0n\0l\0o\0a\0d\0e\0r\0.\0i\0n\0i\0", 30);
+    g.write(L"dinput8.dll", "MZ fake " + wide_ini);
+    g.write(L"chainloader.ini", "[Settings]\r\nDeferred = true\r\n[Load]\r\nEMF.dll\r\n");
+    g.write(L"EMF.dll", "MZ EMF-LOADER-7d3c9f EMF-PLAY-ONCE-1 fake");  // a loader that takes Play's one-shot flag
+    g.write(L"emf\\emf_core.dll", std::string("MZ emf_core 0.9.1\0 more", 23));
+    g.write(L"emf\\known_tools.txt", kTools);
+    FolderState s = scan_game_folder(g.dir);
+    REQUIRE(s.emf_installed);
+    CHECK(s.play_once);
+    g.write(L"EMF.dll", "MZ EMF-LOADER-7d3c9f fake, an older loader");  // 0.3.2's: no marker
+    s = scan_game_folder(g.dir);
+    CHECK(s.emf_installed);
+    CHECK_FALSE(s.play_once);
+}
+
 TEST_CASE("app chain: ModLoader Proxy started by EMF starts its own list too") {
     TempGame g(L"mlproxychained");
     install_emf(g);

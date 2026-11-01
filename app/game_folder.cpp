@@ -986,7 +986,16 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
 
     const auto runs = [&](const char* w) { return std::find(words.begin(), words.end(), w) != words.end(); };
     s.emf_installed = runs("emf") && exists(s.game + L"\\emf\\emf_core.dll");
-    s.play_once = s.emf_installed && !c.light && loader_plays_once(s.game + L"\\dinput8.dll");
+    // the loader that reads Play's flag: dinput8.dll when it is EMF's, else EMF's loader that ModLoader Proxy starts
+    std::string emf_loader = "dinput8.dll";
+    for (const auto& d : view.loader_started)
+        if (d.found && !d.outside && d.word == "emf") {
+            emf_loader = d.name;
+            break;
+        }
+    for (const auto& p : view.proxies)
+        if (p.second == "emf") emf_loader = p.first;
+    s.play_once = s.emf_installed && !c.light && loader_plays_once(s.game + L"\\" + wide(emf_loader));
     if (!c.light) s.emf_version = exists(s.game + L"\\emf\\emf_core.dll") ? core_version(s.game + L"\\emf\\emf_core.dll") : "";
     s.shroudforge_active = sf_folder && runs("shroudforge") && !shroudforge_hands_to_eml(s.game);
     c.eml_loader = runs("eml") || runs("shroudforge");
