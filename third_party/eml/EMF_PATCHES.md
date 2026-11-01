@@ -30,6 +30,10 @@ Left out: the programs and the rest of the repository (`crates/mod-manager-cli`,
 Each patch is its own commit, and each changes as little as it can.
 
 1. **P1** `Cargo.toml`: the workspace `members` list names only the eight copied crates.
+2. **P2** `crates/mod-loader-base/Cargo.toml`: `zip` without its `bzip2` feature (the other default features stay).
+   bzip2-sys defines `bz_internal_error` as an exported function, and a Rust DLL exports every such function of its
+   dependencies, so `emf_content.dll` had a third export. Cost: a zipped mod whose files are compressed with bzip2
+   cannot be read (zip tools use deflate by default; folders and deflate zips are not affected).
 
 ## How to update
 
