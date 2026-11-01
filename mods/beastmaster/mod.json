@@ -1,7 +1,7 @@
 {
   "id": "beastmaster",
   "name": "Beastmaster",
-  "version": "1.1.1",
+  "version": "1.2.0",
   "description": "A Beastmaster class: tame wild wolves, boars, sabretooths and hounds (beat them down or feed them bait), and bears and aurochs with the EMF creature packs (which need EML), keep up to 8 in your collection, call up to 2 to fight beside you. They follow you, come back when far away, and are kept with the world. Hold F3 for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
   "authors": ["EMF contributors"],
   "enabled": false,
