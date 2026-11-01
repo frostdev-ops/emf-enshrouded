@@ -12,7 +12,8 @@
     "The GUIDs are fixed forever: mods/beastmaster/species.lua and players' saves refer to them (the template ...2f02; the graph copy ...2f05 tells the bear apart, species.lua).",
     "Credit (CC BY 4.0, required): \"Realistic Animated Bear 3D Model\" by WildMesh 3D (https://sketchfab.com/3d-models/realistic-animated-bear-3d-model-bffc3c87d2d148ff8533e1cc8a11c9f1); changes: its rig and animations on a game skeleton of its own, its three textures in one atlas, clips played in place and at other speeds.",
     "2.0: the bear on its own skeleton (37 joints and the root) from the WildMesh bear, played by a copy of the game wolf's graph; 1.0's was a Meshy bear on the game wolf's skeleton. The file is scaled unevenly above its joints (uneven_scale) and its inverse binds are in world space; its walk and run travel (root motion), played in place.",
-    "Stats against the game wolf (Enemy_Wildbeast_wolf_earlygame): ScaleComponent 1.4 (skeleton 1/1.4: a 2.3 m grizzly); DamageMod multiplier x1.5; Movement walk and patrol x0.7 (1.61 m/s, the walk clip at 1.53x), run as the wolf's (6 m/s, the run clip at 0.73x), sneak, sprint, combat and flee x0.85. Health x2.5 comes from the Beastmaster mod at runtime."
+    "Stats against the game wolf (Enemy_Wildbeast_wolf_earlygame): ScaleComponent 1.4 (skeleton 1/1.4: a 2.3 m grizzly); DamageMod multiplier x1.5; Movement walk and patrol x0.7 (1.61 m/s, the walk clip at 1.53x), run as the wolf's (6 m/s, the run clip at 0.73x), sneak, sprint, combat and flee x0.85. Health x2.5 comes from the Beastmaster mod at runtime.",
+    "Size (EML, 2026-11-01): the built mod is 12 MB of Lua, its biggest file beastmaster_bear_clips.lua 6.0 MB (the albedo at 1024)."
   ],
   "creatures": [
     {
