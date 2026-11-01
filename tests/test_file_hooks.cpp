@@ -196,7 +196,13 @@ TEST_CASE("file hooks: no shadow copy, or an open that writes: the game's own pa
     fh::create_file_w((kGame + L"\\enshrouded.kfc").c_str(), GENERIC_READ | GENERIC_WRITE, 0, nullptr, OPEN_EXISTING, 0,
                       nullptr);
     CHECK(g_opened == kGame + L"\\enshrouded.kfc");
-    CHECK(logged().find("[not redirected: opened to write]") != std::string::npos);
+    CHECK(logged().find("[not redirected: not a read-only open of a file that is there]") != std::string::npos);
+    // OPEN_ALWAYS only reads, but may create the file: the game's own path too, with the same note
+    setup(false, true);
+    g_shadow_files = {kShadow + L"enshrouded.kfc"};
+    fh::create_file_w((kGame + L"\\enshrouded.kfc").c_str(), GENERIC_READ, 0, nullptr, OPEN_ALWAYS, 0, nullptr);
+    CHECK(g_opened == kGame + L"\\enshrouded.kfc");
+    CHECK(logged().find("[not redirected: not a read-only open of a file that is there]") != std::string::npos);
 }
 
 TEST_CASE("file hooks: redirect off: every open goes through unchanged; with log_opens each is logged") {

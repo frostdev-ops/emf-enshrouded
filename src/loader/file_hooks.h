@@ -149,8 +149,8 @@ inline Decision decide(const wchar_t* path, bool open, DWORD access, DWORD dispo
     std::wstring s = shadow_path_in(path, g.game_dir, cwd);  // game_dir: made normal once, in start()
     if (s.empty()) return d;
     d.content = true;
-    if (open && !redirect_allowed(access, disposition, flags)) {
-        d.note = "not redirected: opened to write";
+    if (open && !redirect_allowed(access, disposition, flags)) {  // a write, a create, a delete: the game's own path
+        d.note = "not redirected: not a read-only open of a file that is there";
         return d;
     }
     if (!g.is_file(s.c_str())) {
