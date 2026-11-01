@@ -6,9 +6,12 @@
 
 -- The champions. Edit the table and save: the mod reloads. Only templates seen to wake and fight when spawned away from
 -- their camp belong here: some spawn asleep (the heavy wolf mini-boss did, Enemy_Wildbeast_Wolf_Heavy_BossHealthBar).
--- min_level / max_level: the player levels a champion comes for (the lowest band when none fits).
+-- min_level / max_level: the player levels a champion comes for (the lowest band when none fits). With the setting
+-- "Only creatures you are ready for" (on by default) min_level is also the level a player must have reached: write the
+-- level at which players meet that creature in the game (a dragon from a late zone: its zone's level).
 local CHAMPIONS = {
-  {name = "Vukah Brawler", guid = "9c8e2008-7259-4114-b6fc-615f0f181c04", min_level = 1, max_level = 99},
+  -- a Springlands mini-boss: from level 5 (the level players meet it at; not checked in game)
+  {name = "Vukah Brawler", guid = "9c8e2008-7259-4114-b6fc-615f0f181c04", min_level = 5, max_level = 99},
 }
 
 -- The slayer's bonus on top of the champion's own loot (items by their debug names: `items rune` in the console). The
@@ -173,6 +176,18 @@ local function despawn(world, why)
   forget(world, why)
 end
 
+-- The lowest level any champion comes from.
+local function lowest_level()
+  local low = nil
+  for _, c in ipairs(CHAMPIONS) do
+    if not low or (c.min_level or 1) < low then low = c.min_level or 1 end
+  end
+  return low or 1
+end
+
+-- A champion for a player of `level`: one whose band holds it, else the one with the lowest band. With "Only creatures
+-- you are ready for" never one whose min_level the player has not reached (nil when there is none: the game keeps the
+-- zones you have seen and the bosses you have beaten where EMF cannot read them, so the rule goes by levels).
 local function pick_template(level)
   local fit = {}
   for _, c in ipairs(CHAMPIONS) do
@@ -183,6 +198,7 @@ local function pick_template(level)
   for _, c in ipairs(CHAMPIONS) do
     if (c.min_level or 1) < (low.min_level or 1) then low = c end
   end
+  if low and emf.setting("progression") and (low.min_level or 1) > level then return nil end
   return low
 end
 
@@ -253,8 +269,12 @@ end
 
 -- A champion for `pl` now; false + why when it could not appear.
 local function summon(world, pl, near, far)
+  if #CHAMPIONS == 0 then return false, "the CHAMPIONS table is empty" end
   local t = pick_template(pl.level)
-  if not t then return false, "the CHAMPIONS table is empty" end
+  if not t then
+    return false, string.format("no champion is ready for level %d yet (they come from level %d: Only creatures you are " ..
+      "ready for)", pl.level, lowest_level())
+  end
   local at, walked = spawn_spot(pl.pos, near, far)
   if not at then
     return false, string.format("no place outside the bases (every spot %d-%d m away is within %d m of a flame altar)",
@@ -454,7 +474,16 @@ emf.on_tick(function(world)
     emf.log("no champion this time (chance " .. emf.setting("chance") .. "%)")
     return
   end
-  local ok, why = summon(world, out[math.random(#out)], NEAR, FAR)
+  local ready = {}  -- with "Only creatures you are ready for": only players a champion is for
+  for _, pl in ipairs(out) do
+    if pick_template(pl.level) then ready[#ready + 1] = pl end
+  end
+  if #ready == 0 then
+    emf.log(string.format("no champion: nobody outdoors is ready for one yet (they come from level %d: Only creatures " ..
+      "you are ready for)", lowest_level()))
+    return
+  end
+  local ok, why = summon(world, ready[math.random(#ready)], NEAR, FAR)
   if not ok then emf.log("no champion: " .. why) end
 end)
 

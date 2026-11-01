@@ -17,7 +17,9 @@ It needs the `lua` mod 1.4 or newer (in the EMF zip). It is installed **switched
    Every **A chance every** minutes of it, the **Chance** is rolled.
 2. The champion appears 80-150 m from a player who is outdoors: on a spot some player walked over outdoors this session
    (so it stands on ground), else in a random direction at the player's height + 3 m. Its level is that player's level
-   plus **Levels above the player**. A note: "A champion roams: Vukah Brawler (level 7), 120 m NE of you".
+   plus **Levels above the player**. A note: "A champion roams: Vukah Brawler (level 7), 120 m NE of you". With
+   **Only creatures you are ready for** (on by default) it comes only for a player who has reached the champion's own
+   level: the Vukah brawler, a Springlands mini-boss, from level 5.
 3. It patrols up to four walked spots near where it appeared, a minute at each (it guards a small barrel the mod puts
    there). A player within 30 m is hunted: the champion goes for the nearest one.
 4. Slain: the player whose hit killed it (or the nearest player within 60 m) gets the bonus: 10 weapon upgrade runes
@@ -48,6 +50,7 @@ It needs the `lua` mod 1.4 or newer (in the EMF zip). It is installed **switched
 | Only at night (`night_only`) | on | 18:00-6:00; it fades at dawn |
 | It leaves after (`lifetime_minutes`) | 10 | 2-30 |
 | Levels above the player (`level_bonus`) | 2 | -5..10 |
+| Only creatures you are ready for (`progression`) | on | a champion only for a player who has reached its level (`min_level` in `CHAMPIONS`): the Vukah brawler from level 5. The game keeps the zones you have seen and the bosses you have beaten where EMF cannot read them yet, so the rule goes by levels. Off: any level, as before |
 | Bonus item (`reward_item`) | `Weapon_T1_1H_SwordEpic_01` | a debug name (`items sword` in the console); empty = none |
 | How many (`reward_count`) | 1 | |
 | Its rarity (`reward_rarity`) | rare | the game's choice, common .. legendary |
@@ -57,7 +60,8 @@ It needs the `lua` mod 1.4 or newer (in the EMF zip). It is installed **switched
 
 The top of the file is meant for you:
 
-- `CHAMPIONS`: the templates, with the player levels each comes for. Only templates seen to wake when spawned away from
+- `CHAMPIONS`: the templates, with the player levels each comes for. With **Only creatures you are ready for**,
+  `min_level` is also the level a player must have reached: give a creature from a late zone that zone's level. Only templates seen to wake when spawned away from
   their camp belong here; the **Vukah brawler** (`Enemy_Midboss_Vukah_Bigfoot_BossHealthBar`) did. Some spawn asleep
   (the heavy wolf mini-boss did): try new ones with `champion.summon`.
 - `REWARDS`: the items the slayer gets.

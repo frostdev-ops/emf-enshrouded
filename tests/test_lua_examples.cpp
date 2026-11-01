@@ -1160,6 +1160,35 @@ TEST_CASE("lua example champion: its line on screen goes when no hosted world ru
     CHECK(c.hud().empty());
 }
 
+TEST_CASE("lua example champion: only creatures you are ready for: the brawler waits for level 5 (summon and chance)") {
+    {
+        ChampionRig c;  // the rule is on by default
+        give_level(c.r.fake, 1, 4);
+        const std::string why = c.reply("champion.summon");
+        CHECK(why.rfind("not summoned: ", 0) == 0);
+        CHECK(why.find("level 4") != std::string::npos);
+        CHECK(why.find("level 5") != std::string::npos);
+        CHECK(c.r.fake.spawns.empty());
+        give_level(c.r.fake, 1, 5);
+        CHECK(c.reply("champion.summon").rfind("summoned Vukah Brawler", 0) == 0);
+    }
+    {
+        ChampionRig c({{"interval_minutes", "5"}, {"chance", "100"}});
+        give_level(c.r.fake, 1, 3);
+        c.seconds(305);
+        CHECK(c.r.fake.spawns.empty());  // nobody outdoors is ready for a champion
+        CHECK(logged("nobody outdoors is ready"));
+        give_level(c.r.fake, 1, 5);
+        c.seconds(305);
+        CHECK_FALSE(c.r.fake.spawns.empty());
+    }
+    {
+        ChampionRig c({{"progression", "0"}});  // the rule off: as before
+        give_level(c.r.fake, 1, 1);
+        CHECK(c.reply("champion.summon").rfind("summoned Vukah Brawler", 0) == 0);
+    }
+}
+
 // ---- examples/lua: small example mods for modders, one API area each ----
 namespace {
 std::map<uint32_t, bool> g_ex_keys;
