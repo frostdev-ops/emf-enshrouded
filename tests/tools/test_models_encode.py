@@ -97,6 +97,19 @@ class MakeModTests(unittest.TestCase):
             make_mod.remove_stale(d, {"kept"})
             self.assertEqual(sorted(os.listdir(d)), ["kept_blob.lua", "kept_data.lua", "notes.txt"])
 
+    def test_skeleton_and_clip_files_go_when_a_creature_has_no_skeleton_of_its_own(self):
+        with tempfile.TemporaryDirectory() as d:
+            for n in ("own_skeleton.lua", "own_clips.lua", "plain_skeleton.lua", "plain_clips.lua", "plain_data.lua"):
+                open(os.path.join(d, n), "w").close()
+            make_mod.remove_stale(d, {"own", "plain"}, own={"own"})
+            self.assertEqual(sorted(os.listdir(d)), ["own_clips.lua", "own_skeleton.lua", "plain_data.lua"])
+
+    def test_own_proportions_needs_the_game_skeleton_dump(self):
+        cfg = {k: "x" for k in make_mod.OWN_KEYS}
+        with self.assertRaises(SystemExit):
+            make_mod.listing_entry(dict(BEAR, own_proportions=cfg))  # no "hierarchy"
+        make_mod.listing_entry(dict(BEAR, own_proportions=cfg, hierarchy="wolf.hierarchy.json"))
+
     def test_a_bad_field_path_is_refused(self):
         for bad in ("data storage", "dataStorage[-1]", "dataStorage[x]", ""):
             with self.assertRaises(SystemExit, msg=bad):
@@ -149,7 +162,7 @@ class MakeModTests(unittest.TestCase):
                    "clips": os.path.join(src, "beast_*.json"), "graph": "33333333-3333-4333-8333-333333333333",
                    "graph_guid": "44444444-4444-4444-8444-444444444444"}
             built = own_creature.build(cfg, toc.hierarchy())
-            bear = dict(BEAR, own_proportions=cfg)
+            bear = dict(BEAR, own_proportions=cfg, hierarchy="wolf.hierarchy.json")
             make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(bear)])
             make_mod.write_own(d, bear["name"], built)
             with open(os.path.join(d, "beast_bear_data.lua"), "w", encoding="utf-8") as f:
@@ -190,7 +203,7 @@ class MakeModTests(unittest.TestCase):
                "clips": os.path.join(src, "beast_*.json"), "graph": "33333333-3333-4333-8333-333333333333",
                "graph_guid": "44444444-4444-4444-8444-444444444444"}
         built = own_creature.build(cfg, toc.hierarchy())
-        bear = dict(BEAR, own_proportions=cfg)
+        bear = dict(BEAR, own_proportions=cfg, hierarchy="wolf.hierarchy.json")
         make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(bear)])
         make_mod.write_own(d, bear["name"], built)
         with open(os.path.join(d, "beast_bear_data.lua"), "w", encoding="utf-8") as f:
@@ -251,7 +264,7 @@ class MakeModTests(unittest.TestCase):
                    "clips": os.path.join(src, "beast_*.json"), "graph": "33333333-3333-4333-8333-333333333333",
                    "graph_guid": "44444444-4444-4444-8444-444444444444"}
             built = own_creature.build(cfg, hier)
-            bear = dict(BEAR, own_proportions=cfg)
+            bear = dict(BEAR, own_proportions=cfg, hierarchy="wolf.hierarchy.json")
             make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(bear)])
             make_mod.write_own(d, bear["name"], built)
             with open(os.path.join(d, "beast_bear_data.lua"), "w", encoding="utf-8") as f:

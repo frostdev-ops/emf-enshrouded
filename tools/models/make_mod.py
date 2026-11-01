@@ -19,13 +19,22 @@ pack.json:
         "faction": "PlayerAlly",                      # optional: another Faction
         "texture": {"albedo_dir": "tex/wolf", "slot": 0, "flat_size": 128},  # optional: our albedo (albedo_mipNN.png)
         "template_add": [{"type": "ScaleComponent", "value": {"uniformScale": 1.4}}],  # optional: whole components
-        "template_set": {"DamageMod": {"dataStorage[2]": {"mul": 1.5}}}  # optional: fields (a value or {"mul": n})
+        "template_set": {"DamageMod": {"dataStorage[2]": {"mul": 1.5}}},  # optional: fields (a value or {"mul": n})
+        "own_proportions": {                          # optional: a skeleton of its own (own_creature.py), with
+          "sidecar": "panther_own.json",              #   blender/fit_to_game_skeleton.py --own-proportions's sidecar
+          "skeleton_guid": "...",                     #   the skeleton copy's GUID (FIXED forever)
+          "reference_clip": "<clips>/sabretooth_<guid>.json",  # a game clip whose first frame stands (the idle)
+          "clips": "<clips>/sabretooth_*.json",       #   every game clip the graph plays (EML dumps <owner>_<guid>.json)
+          "graph": "<guid>", "graph_guid": "..."      #   the game's animation graph and its copy's GUID
+        }
       }
     ]
   }
 Relative paths are relative to pack.json. Missing GUIDs are generated and written back into pack.json.
 Component names without "::" are keen::ecs:: ones. template_set field paths are names and 0-based [n] indices
-(dataStorage[2] is the third value). template_add replaces a component the template has already.
+(dataStorage[2] is the third value). template_add replaces a component the template has already. A creature with
+own_proportions needs "hierarchy" (the game skeleton's dump); its clips and graph copy are made at build time from the
+dumps, and a clip or graph a game update removed is skipped (logged) when the mod is applied.
 """
 import json
 import os
@@ -293,11 +302,14 @@ for _, c in ipairs(require("creatures")) do
 		end
 		for _, node in ipairs(g.nodeDefinitions) do
 			local t = tostring(node.type)
+			-- rootMotionAnimation is left alone: it names a keen::RootMotionAnimation (how far a clip moves the
+			-- creature), a resource of its own that shares the clip's GUID
 			if t:find("SampleAnimationClip", 1, true) then
 				for _, f in ipairs({ "animation", "animationGenderAlternative", "additiveReferenceAnimation",
 					"additiveReferenceAnimationGenderAlternative" }) do swap(node.value, f) end
 			elseif t:find("BlendSpace", 1, true) then
 				swap(node.value, "additiveReferenceAnimation")
+				swap(node.value, "additiveReferenceAnimationGenderAlternative")
 				for _, it in ipairs(node.value.items) do
 					swap(it, "animation")
 					swap(it, "animationGenderAlternative")
@@ -325,6 +337,10 @@ for _, c in ipairs(require("creatures")) do
 		local found = false
 		for _, comp in ipairs(tpl.components) do
 			if comp.type == "keen::ecs::AnimationGraphResourceComponent2" then
+				if tostring(comp.value.animationGraph) ~= c.animation.graph then
+					log(string.format("%%s: the source template's graph is %%s, not %%s: it plays the copy anyway", c.name,
+						tostring(comp.value.animationGraph), c.animation.graph))
+				end
 				comp.value.animationGraph = c.animation.graph_guid
 				found = true
 			end
@@ -411,6 +427,8 @@ def listing_entry(c):
         missing = [k for k in OWN_KEYS if not op.get(k)]
         if missing:
             raise SystemExit("%s: own_proportions needs %s" % (c["name"], ", ".join(missing)))
+        if not c.get("hierarchy"):
+            raise SystemExit("%s: own_proportions needs \"hierarchy\" (the game skeleton's dump)" % c["name"])
         entry["skeleton"] = {"guid": op["skeleton_guid"]}
         entry["animation"] = {"graph": op["graph"], "graph_guid": op["graph_guid"]}
     return entry
@@ -466,12 +484,19 @@ def write_scripts(src, pack, listing):
 GENERATED = ("_data.lua", "_blob.lua", "_albedo.lua", "_skeleton.lua", "_clips.lua")
 
 
-def remove_stale(src, names):
+OWN_GENERATED = ("_skeleton.lua", "_clips.lua")
+
+
+def remove_stale(src, names, own=None):
     """Removes the generated files of creatures not in `names` from the mod's src folder (a creature taken out of the
-    pack would otherwise ship its model unused)."""
+    pack would otherwise ship its model unused), and the skeleton and clip files of creatures not in `own` (those
+    without own_proportions now; None: every creature keeps them)."""
     for f in os.listdir(src):
         for suffix in GENERATED:
-            if f.endswith(suffix) and f[: -len(suffix)] not in names:
+            if not f.endswith(suffix):
+                continue
+            name = f[: -len(suffix)]
+            if name not in names or (own is not None and suffix in OWN_GENERATED and name not in own):
                 os.remove(os.path.join(src, f))
 
 
@@ -486,7 +511,8 @@ def main():
 
     out = path(pack["out"])
     os.makedirs(os.path.join(out, "src"), exist_ok=True)
-    remove_stale(os.path.join(out, "src"), {c["name"] for c in pack["creatures"]})
+    remove_stale(os.path.join(out, "src"), {c["name"] for c in pack["creatures"]},
+                 own={c["name"] for c in pack["creatures"] if c.get("own_proportions")})
     changed = False
     listing = []
     for c in pack["creatures"]:
