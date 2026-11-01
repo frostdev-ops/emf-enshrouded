@@ -3,11 +3,13 @@
 #include <doctest.h>
 
 #include <filesystem>
+#include <optional>
 #include <string>
 #include <vector>
 
 #include "content_fixtures.h"
 #include "loader/content_base.h"
+#include "loader/content_owner.h"
 #include "loader/eml_mods.h"
 #include "loader/kfc_header.h"
 #include "test_scratch.h"
@@ -190,4 +192,161 @@ TEST_CASE("eml mods: non-ASCII folder name") {
     CHECK(s.usable[0].folder == folder);
     CHECK(s.usable[0].id == "baer");
     std::filesystem::remove_all(mods);
+}
+
+// ---- Task 3: who applies the EML content at this start ----
+
+namespace {
+using emf::loader::ContentFacts;
+using emf::loader::ContentMode;
+using emf::loader::PlayOnce;
+
+// Everything there: Auto, a normal start, the DLL, one usable mod, a good base, the game client.
+ContentFacts all_there() {
+    ContentFacts f;
+    f.mode = ContentMode::Auto;
+    f.play = PlayOnce::Normal;
+    f.dll_present = true;
+    emf::loader::EmlMod m;
+    m.folder = L"beasts";
+    m.id = "beasts";
+    m.version = "1.0.0";
+    f.mods.usable.push_back(m);
+    f.base.ok = true;
+    f.base.dat_count = 55;
+    f.base.why = "the base is enshrouded.kfc (55 containers)";
+    return f;
+}
+}  // namespace
+
+TEST_CASE("content owner: everything there: EMF builds it, with mode auto or on") {
+    auto f = all_there();
+    auto d = emf::loader::decide_content(f);
+    CHECK(d.emf_owns);
+    CHECK(d.why.find("1 mod") != std::string::npos);
+    f.mode = ContentMode::On;
+    CHECK(emf::loader::decide_content(f).emf_owns);
+}
+
+TEST_CASE("content owner: mode off wins over everything") {
+    auto f = all_there();
+    f.mode = ContentMode::Off;
+    f.play = PlayOnce::NoMods;
+    f.other_tool = "EML (Enshrouded Mod Loader)";
+    const auto d = emf::loader::decide_content(f);
+    CHECK_FALSE(d.emf_owns);
+    CHECK(d.why.find("mode=off") != std::string::npos);
+}
+
+TEST_CASE("content owner: Play without any mods turns it off") {
+    auto f = all_there();
+    f.play = PlayOnce::NoMods;
+    f.other_tool = "EML (Enshrouded Mod Loader)";
+    const auto d = emf::loader::decide_content(f);
+    CHECK_FALSE(d.emf_owns);
+    CHECK(d.why.find("Play without any mods") != std::string::npos);
+}
+
+TEST_CASE("content owner: Play without EMF mods keeps content") {
+    auto f = all_there();
+    f.play = PlayOnce::NoEmf;
+    CHECK(emf::loader::decide_content(f).emf_owns);
+}
+
+TEST_CASE("content owner: EML's dbghelp wins over everything but Off") {
+    auto f = all_there();
+    f.other_tool = "EML (Enshrouded Mod Loader)";
+    f.dll_present = false;
+    f.mods.usable.clear();
+    f.base.ok = false;
+    f.server = true;
+    auto d = emf::loader::decide_content(f);
+    CHECK_FALSE(d.emf_owns);
+    CHECK(d.why.find("applied by EML (Enshrouded Mod Loader)") == 0);
+    f.mode = ContentMode::On;  // On never overrides another tool
+    CHECK(emf::loader::decide_content(f).why.find("applied by EML") == 0);
+    f.mode = ContentMode::Off;
+    CHECK(emf::loader::decide_content(f).why.find("mode=off") != std::string::npos);
+}
+
+TEST_CASE("content owner: no emf_content.dll, then the dedicated server, then no usable mod, then the base") {
+    auto f = all_there();
+    f.dll_present = false;
+    f.server = true;
+    f.mods.usable.clear();
+    f.base.ok = false;
+    auto d = emf::loader::decide_content(f);
+    CHECK_FALSE(d.emf_owns);
+    CHECK(d.why.find("emf_content.dll is not installed") != std::string::npos);
+    f.dll_present = true;
+    d = emf::loader::decide_content(f);
+    CHECK_FALSE(d.emf_owns);
+    CHECK(d.why.find("dedicated server") != std::string::npos);
+    f.server = false;
+    d = emf::loader::decide_content(f);
+    CHECK_FALSE(d.emf_owns);
+    CHECK(d.why.find("no EML mod") != std::string::npos);
+    f.mods = all_there().mods;
+    f.base.why = "enshrouded.kfc's header could not be read";
+    d = emf::loader::decide_content(f);
+    CHECK_FALSE(d.emf_owns);
+    CHECK(d.why.find("enshrouded.kfc's header could not be read") != std::string::npos);
+}
+
+TEST_CASE("content owner: the mode from emf_core.ini") {
+    const auto mode = [](const wchar_t* text) {
+        return emf::loader::content_mode([&](const wchar_t* section, const wchar_t* key) {
+            CHECK(std::wstring(section) == L"content");
+            CHECK(std::wstring(key) == L"mode");
+            return std::wstring(text);
+        });
+    };
+    CHECK(mode(L"") == ContentMode::Auto);
+    CHECK(mode(L"auto") == ContentMode::Auto);
+    CHECK(mode(L"on") == ContentMode::On);
+    CHECK(mode(L" OFF ") == ContentMode::Off);
+    CHECK(mode(L"off ; no EML content from EMF") == ContentMode::Off);
+    CHECK(mode(L"maybe") == ContentMode::Auto);
+}
+
+TEST_CASE("content owner: another tool: a dbghelp.dll in the game folder, or EML's dinput8 in the chain") {
+    emf::loader::ToolLook look;
+    std::vector<std::wstring> read;  // the DLLs whose text was read
+    std::vector<std::wstring> present;
+    look.exists = [&](const std::wstring& name) {
+        for (const auto& p : present)
+            if (p == name) return true;
+        return false;
+    };
+    look.tool_name = [&](const std::wstring& name) -> std::string {
+        read.push_back(name);
+        if (name == L"dbghelp.dll") return "ShroudForge";
+        if (name == L"modloader.dll") return "EML (Enshrouded Mod Loader)";
+        return "";
+    };
+    CHECK_FALSE(emf::loader::other_content_tool(look, true).has_value());
+
+    present = {L"dbghelp.dll"};
+    CHECK(emf::loader::other_content_tool(look, false) == std::optional<std::string>("ShroudForge"));
+    look.tool_name = [&](const std::wstring&) { return std::string(); };  // a dbghelp.dll EMF does not know
+    CHECK(emf::loader::other_content_tool(look, false) == std::optional<std::string>("dbghelp.dll (EML or ShroudForge)"));
+
+    // the installer renames another tool's dinput8.dll to <word>.dll and lists it in dinput8-chain.ini
+    present.clear();
+    look.chain = {L"creative.dll", L"eml.dll"};
+    read.clear();
+    CHECK(emf::loader::other_content_tool(look, false) == std::optional<std::string>("EML (from dinput8-chain.ini: eml.dll)"));
+    CHECK(read.empty());  // known by its name: no DLL read
+    look.chain = {L"ShroudForge.dll"};
+    CHECK(emf::loader::other_content_tool(look, false) == std::optional<std::string>("ShroudForge (from dinput8-chain.ini: ShroudForge.dll)"));
+    // under another name it takes reading the DLLs, which only happens when asked
+    look.chain = {L"creative.dll", L"modloader.dll"};
+    look.tool_name = [&](const std::wstring& name) -> std::string {
+        read.push_back(name);
+        return name == L"modloader.dll" ? "EML (Enshrouded Mod Loader)" : "";
+    };
+    CHECK_FALSE(emf::loader::other_content_tool(look, false).has_value());
+    CHECK(read.empty());
+    CHECK(emf::loader::other_content_tool(look, true) ==
+          std::optional<std::string>("EML (Enshrouded Mod Loader) (from dinput8-chain.ini: modloader.dll)"));
 }
