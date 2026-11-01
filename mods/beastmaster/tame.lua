@@ -147,12 +147,12 @@ function T:tame(world, player)
 		.. self.env.setting("tame_range_m") .. " m)." end
 	local sp = M.species_of(world, id)
 	local other = holder(self, id)
-	if other and other ~= player then return "Someone else is taming the " .. sp.id .. "." end
+	if other and other ~= player then return "Someone else is taming the " .. species.word(sp) .. "." end
 	local cur, max = emf.health(world, id)
 	local pct = self.env.setting("tame_health_pct")
 	if not max or max <= 0 or cur * 100 > max * pct then
 		return string.format("The %s is too strong: bring it under %d %% health, or feed it its bait (%s) with "
-			.. "beastmaster.feed.", sp.id, pct, self.env.setting("bait_" .. sp.id))
+			.. "beastmaster.feed.", species.word(sp), pct, self.env.setting("bait_" .. sp.id))
 	end
 	local secs = self.env.setting("tame_channel_s")
 	local ch = { id = id, sp = sp, mode = "defeat", ends = self.env.now(world) + secs }
@@ -167,7 +167,7 @@ function T:tame(world, player)
 	end
 	self.channels[player] = ch
 	hold(world, ch)
-	return string.format("Taming the %s... stay within %d m for %d s.", sp.id, self.env.setting("tame_range_m"), secs)
+	return string.format("Taming the %s... stay within %d m for %d s.", species.word(sp), self.env.setting("tame_range_m"), secs)
 end
 
 -- beastmaster.feed: one bait into the beast in front of the player. Returns the reply text.
@@ -176,7 +176,7 @@ function T:feed(world, player)
 	if not id then return "There is no beast to feed near you." end
 	local sp = M.species_of(world, id)
 	local other = holder(self, id)
-	if other and other ~= player then return "Someone else is taming the " .. sp.id .. "." end
+	if other and other ~= player then return "Someone else is taming the " .. species.word(sp) .. "." end
 	local now = self.env.now(world)
 	local ch = self.channels[player]
 	local fresh = not ch or ch.mode ~= "bait" or ch.id ~= id
@@ -193,14 +193,14 @@ function T:feed(world, player)
 	local called, ok = pcall(emf.take, world, player, bait, 1, function(w, taken)
 		if self.channels[player] ~= ch then return end  -- broken off meanwhile
 		if (taken or 0) < 1 then
-			self:stop(w, player, "You have no " .. bait .. " to feed the " .. sp.id .. ".")
+			self:stop(w, player, "You have no " .. bait .. " to feed the " .. species.word(sp) .. ".")
 			return
 		end
 		ch.feeds = ch.feeds + 1
 		if ch.feeds >= need then
 			self:succeed(w, player, ch)
 		else
-			self.env.tell(w, player, string.format("The %s eats (%d/%d).", sp.id, ch.feeds, need))
+			self.env.tell(w, player, string.format("The %s eats (%d/%d).", species.word(sp), ch.feeds, need))
 		end
 	end)
 	if not called then
@@ -208,7 +208,7 @@ function T:feed(world, player)
 		return string.format("The game has no item named %s: check the setting bait_%s.", tostring(bait), sp.id)
 	end
 	if not ok then return "Feeding did not work just now; try again." end
-	return string.format("You offer the %s some %s.", sp.id, bait)
+	return string.format("You offer the %s some %s.", species.word(sp), bait)
 end
 
 function T:on_died(id)
@@ -221,7 +221,7 @@ local FAR_GRACE_S = 2
 function T:step(world)
 	local now = self.env.now(world)
 	for player, ch in pairs(self.channels) do
-		local what = ch.sp.id
+		local what = species.word(ch.sp)
 		local bx, by, bz = world:position(ch.id)
 		local spot = ch.spot
 		if spot and bx and math.sqrt((bx - spot[1]) ^ 2 + (by - spot[2]) ^ 2 + (bz - spot[3]) ^ 2) > HOLD_M

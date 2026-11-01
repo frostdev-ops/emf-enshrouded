@@ -104,6 +104,17 @@ class MakeModTests(unittest.TestCase):
             make_mod.remove_stale(d, {"own", "plain"}, own={"own"})
             self.assertEqual(sorted(os.listdir(d)), ["own_clips.lua", "own_skeleton.lua", "plain_data.lua"])
 
+    def test_a_texture_for_a_slot_the_model_does_not_draw_is_refused(self):
+        """The panther's mesh drew with the sabretooth's slot 1 while its texture replaced slot 0: in game it wore
+        the sabretooth's own fur through the panther's UVs."""
+        groups = [{"material": 1, "pos": []}]
+        with self.assertRaises(SystemExit) as e:
+            make_mod.check_texture_slot("panther2", 0, groups)
+        self.assertIn("slot 0", str(e.exception))
+        self.assertIn("1", str(e.exception))
+        make_mod.check_texture_slot("panther2", 1, groups)
+        make_mod.check_texture_slot("bear", 0, [{"material": 0}, {"material": 1}])
+
     def test_own_proportions_needs_the_game_skeleton_dump(self):
         cfg = {k: "x" for k in make_mod.OWN_KEYS}
         with self.assertRaises(SystemExit):

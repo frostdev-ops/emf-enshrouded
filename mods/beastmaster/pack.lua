@@ -130,7 +130,7 @@ function P:call(world, owner, account, beast)
 	if busy then return waits(busy_why, "call again") end
 	for _, b in ipairs(self.env.beasts():list(account)) do
 		if b.out and b.species == beast.species then
-			return string.format("Your %s %s is out already: one of each kind at a time.", b.species, b.name)
+			return string.format("Your %s %s is out already: one of each kind at a time.", species.word(b.species), b.name)
 		end
 	end
 	if beast.rest > 0 then return string.format("%s rests for %s.", beast.name, mmss(beast.rest)) end
@@ -154,7 +154,7 @@ function P:call(world, owner, account, beast)
 	self.last_call[account] = now
 	self.aside:release(account)  -- the beasts that stepped aside come back too
 	self.env.save()
-	return string.format("%s the %s comes.", beast.name, beast.species)
+	return string.format("%s the %s comes.", beast.name, species.word(beast.species))
 end
 
 -- The reply when the command's aside ends: they come at once, or once the building next to them stops.

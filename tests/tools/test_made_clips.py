@@ -80,6 +80,30 @@ class MadeTests(Fixture):
                 mc.make(self.sk, self.sk["rest"], keys)
 
 
+class OffsetTests(Fixture):
+    def test_an_offset_turns_a_joint_about_the_creatures_axis(self):
+        """An offset (for a graph's additive layer: the wolf looking into a turn) holds, per joint, the turn about the
+        creature's axis in the joint's own frame, with no move and scale 0; other joints add nothing."""
+        clip = mc.offset(self.sk, {"Head": ["y", 30]}, hierarchy_hash=5)
+        self.assertEqual((clip["frameCount"], clip["flags"], clip["hierarchyHash"]), (9, 0, 5))
+        head = self.sk["names"].index("Head")
+        for frame in (0, 4):
+            pose = ja.sample(clip, frame, self.sk["rest"])
+            for j, (q, t, s) in enumerate(pose):
+                self.assertEqual(t, (0.0, 0.0, 0.0))
+                self.assertEqual(s, (0.0, 0.0, 0.0))
+                if j != head:
+                    self.assertTrue(rig.same_rotation(q, (0.0, 0.0, 0.0, 1.0), 1e-6), (j, q))
+            w = self.rest_world[head][0]
+            turned = osk.qmul(w, pose[head][0])  # the joint's rest frame with the offset added in its own frame
+            self.assertTrue(rig.same_rotation(turned, osk.qmul(about("y", 30), w), 1e-4))
+
+    def test_offset_mistakes(self):
+        for turn in ({"Wing": ["y", 5]}, {"Head": ["w", 5]}):
+            with self.assertRaises(ValueError, msg=str(turn)):
+                mc.offset(self.sk, turn)
+
+
 class SpeedTests(Fixture):
     def test_faster_is_shorter_and_plays_the_same_poses(self):
         slow = gc.clip(self.gltf, self.binc, self.sk, "Move", 1)
