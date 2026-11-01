@@ -45,6 +45,20 @@ inline ContentLines content_lines(const std::optional<emf::loader::ContentStatus
         l.console = "EML content: " + mods + " (unchanged since the last build)";
     } else if (s->kind == "failed" || s->kind == "failed_again") {
         std::string why = s->message.empty() ? std::string("an unknown error") : s->message;
+        // a Lua error from EML: the mod and its message, not the stack traceback players cannot use (content.log
+        // keeps all of it)
+        if (const size_t tb = why.find("stack traceback"); tb != std::string::npos) why.erase(tb);
+        const std::string runtime = "runtime error: ", chunk = "[string \"mods.";
+        if (why.rfind(runtime, 0) == 0) why.erase(0, runtime.size());
+        if (why.rfind(chunk, 0) == 0) {
+            const size_t end = why.find("\"]:", chunk.size());
+            if (end != std::string::npos) {
+                std::string rest = why.substr(end + 3);  // "<line>: <message>"
+                const size_t colon = rest.find(": ");
+                if (colon != std::string::npos) rest = "line " + rest.substr(0, colon) + ": " + rest.substr(colon + 2);
+                why = "the mod " + why.substr(chunk.size(), end - chunk.size()) + ": " + rest;
+            }
+        }
         while (!why.empty() && (why.back() == '.' || why.back() == ' ')) why.pop_back();
         l.console = "EML content could not be built: " + why + ". The game runs without it.";
         if (s->kind == "failed_again") {

@@ -35,6 +35,16 @@ TEST_CASE("content status: failed build line") {
     CHECK(l.backup);  // asked for all the same: the backup's own setting decides
 }
 
+TEST_CASE("content status: a Lua error says which mod and what, without the stack traceback") {
+    const auto l = content_lines(
+        status("failed", 0, 4000,
+               "runtime error: [string \"mods.emf_broken_test\"]:1: boom: a deliberately broken test mod stack "
+               "traceback: [C]: in ? [C]: in function 'error' [string \"mods.emf_broken_test\"]:1: in main chunk"),
+        true);
+    CHECK(l.console == "EML content could not be built: the mod emf_broken_test: line 1: boom: a deliberately broken "
+                       "test mod. The game runs without it. Your saves were backed up.");
+}
+
 TEST_CASE("content status: built line") {
     const auto l = content_lines(status("built", 3, 28000, ""), true);
     CHECK(l.console == "EML content: 3 mods (built in 28 s)");

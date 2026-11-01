@@ -501,6 +501,13 @@ emf::loader::StartSteps make_start_steps() {
             loader_log(g_dir, "EML content: emf\\content is a junction or link; EMF writes nothing there");
             return;
         }
+        // a first build marks "a build runs" before the shadow copy (and its folders) exist: make them here
+        std::string why;
+        if (!emf::loader::shadow_detail::make_dir(g_dir + L"\\emf\\content", &why) ||
+            !emf::loader::shadow_detail::make_dir(shadow_dir(), &why)) {
+            loader_log(g_dir, ("EML content: could not write emf_content_state.json: " + why).c_str());
+            return;
+        }
         emf::loader::ContentState with = st;
         for (const auto& dll : chain_names(g_dir)) with.chain_checked.push_back(chain_stamp(dll));  // all read: not EML's
         if (!emf::loader::write_state(state_path(), with)) loader_log(g_dir, "EML content: could not write emf_content_state.json");

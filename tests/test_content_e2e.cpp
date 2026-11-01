@@ -75,7 +75,9 @@ struct ContentGame {
         put_file(dir + L"\\mods\\beasts\\mod.json",
                  R"({"id": "beasts", "name": "Beasts", "version": "1.0.0", "capabilities": ["patch"]})");
         put_file(dir + L"\\mods\\beasts\\bear.txt", "bear 1");
-        if (with_dll) put_file(shadow + L"\\standin.txt", std::string(word) + "\r\n");  // what the stand-in DLL does
+        // what the stand-in DLL does; "ok" is its default, so an ok build starts as a real first install does, with no
+        // emf\content folder yet
+        if (with_dll && std::string(word) != "ok") put_file(shadow + L"\\standin.txt", std::string(word) + "\r\n");
         check("wait emf_core.dll\r\nemf_content.dll\r\nchain_standin.dll\r\nemf_core.dll\r\n");
     }
     ~ContentGame() {
@@ -182,6 +184,8 @@ TEST_CASE("e2e content: first start builds, then chain, then core; the stand-in 
     CHECK(before(log, "a build is needed", "EML content: built 1 mod in "));
     CHECK(before(log, "EML content: built 1 mod in ", "chain_standin.dll"));
     CHECK(before(log, "chain_standin.dll", "emf_core.dll has no emf_core_start export"));
+    // the "a build runs" mark goes in before the shadow folder exists on a first build: EMF makes the folder for it
+    CHECK(log.find("could not write emf_content_state.json") == std::string::npos);
     CHECK(file_text(g.dir + L"\\emf\\file_opens.log").find("\\emf\\content\\client\\enshrouded.kfc\"") != std::string::npos);
     CHECK(file_text(g.dir + L"\\emf\\content.log").find("standin: building ") != std::string::npos);
     const auto state = emf::loader::read_state(g.shadow + L"\\emf_content_state.json");
