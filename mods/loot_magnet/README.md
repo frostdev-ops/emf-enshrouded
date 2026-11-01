@@ -33,8 +33,9 @@ The loot of a kill comes to the nearest player whose magnet is on when all of th
   every half second);
 - the player is within **Reach** of the loot;
 - the loot is in the body (dead, its health 0, still the creature that died: the same kind, within 5 m of where it
-  died), or in a loot spot that appeared after the death within 5 m of where it died (a loot spot that was already
-  there, from an earlier kill or a chest, is not this kill's);
+  died), or in a loot spot that appeared within 5 m of where it died, at or after the death by the game's clock (the
+  loot spot's spawn time against the time of the death; a loot spot that was already there, from an earlier kill, is
+  not this kill's);
 - it holds something;
 - with **What comes** = materials: every stack in it is a material or food, by its debug name: starting with
   `Material_`, `Food_` or `_Food_`, or a terrain block (`Build_TerrainMaterial_`); arrows (`Ammo_`) if **Arrows count
@@ -48,12 +49,18 @@ Never:
 - a player's body or grave, an ally's (the companion, summons), a farm animal, anything tame or with an owner, a
   villager, or anything they leave when they die;
 - anything inside a base: within **Never within** metres of a flame altar (raids at your base are looted by hand);
-- chests and props (they are not creatures that die, and a loot spot that was there before the kill is not its loot).
+- chests and props (they are not creatures that die, and a loot spot that was there before the kill is not its loot);
+- a player's grave (the game's tombstone, which is kept with the world): a loot spot is never saved.
 
 The loot moves with the game's own loot event, as when you press "take all": the stacks go into your inventory and
 the game shows them. **A full inventory loses nothing**: the game moves the stacks one slot at a time, each in its own
 inventory transaction (`docs/engine_parts/re_villages.md`, `immediate_loot_action`), so what fits comes and the rest
-stays where it was; the host gets a note "no room in your inventory" (once per session).
+stays where it was; the host gets a note "the loot did not come (is your inventory full?)" (once per session).
+
+Some loot sits in inventories the corpse or loot spot links, not in its own, and the game's loot event does not reach
+those (Grave Keeper found that with tombstones). Plain stacks there are taken out and put into you; what does not fit
+is dropped at your feet. **Gear there stays** (taking it out would lose its gems and perks): the log says so, the host
+gets a note, and you open the loot by hand.
 
 ## Settings (Mods tab, EMF.exe, or `set loot_magnet <key> <value>`)
 
@@ -84,9 +91,13 @@ noticed and for what became of each corpse:
   magnet was 14.2 m away, reach 8 m)`
 - `[loot_magnet] corpse 6938 left: no loot appeared within 15 s of its death (none on it, and no loot container within 5 m
   of where it died)`
+- `[loot_magnet] corpse 6938: loot container 7012 (1.2 m) not taken: it was there before the death (an earlier kill's
+  loot), 3.0 s before it` (or: too far from where it died; the game has not given it a spawn time (yet); taken for
+  another kill): each loot spot near a kill that was not taken for it, once.
 - `[loot_magnet] corpse 6938: nothing came from the loot event yet (try 1 of 5): sent again`: a corpse may become
   lootable a moment after it died, so a loot event nothing came from is sent again, every 2 s, up to 5 times (nothing
   moved, so nothing is taken twice).
+- `[loot_magnet] corpse 6938: 1 gear stack(s) stay in it ...: open it by hand`: gear in a linked inventory.
 
 Switch it off once you trust it: then only the looted lines are written.
 

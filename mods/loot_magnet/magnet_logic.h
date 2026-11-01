@@ -6,7 +6,9 @@
 // Most creatures do not keep their loot: they fade away and the game spawns a loot container where they died (the
 // glowing loot spot, templates LootContainer_Enemy_*: Inventory, DefaultInventory, DestroyOnLoot, an interaction
 // offer, no Health). So a death is looted from the corpse itself when the corpse holds the loot, else from the loot
-// container that appears within reach of where it died after the death (one that was there before is not its loot).
+// container that appeared within reach of where it died at or after the death, by the game's clock: its SpawnTime
+// against the EntityDiedEvent's timeStamp (a spot may spawn in the death's own step; one spawned before is not its
+// loot).
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -49,6 +51,7 @@ struct Body {
     std::vector<std::string> items;  // the debug names of the stacks it holds ("" = not named by the game yet)
     bool container = false;          // a loot container the game left where a creature died (not a creature, not a
                                      // player's grave, not a pickup: see magnet_glue.h read_body)
+    int64_t spawned = 0;             // SpawnTime (the game's clock, ns): when it appeared; 0 = none, or not set yet
 };
 
 struct Death {
@@ -60,7 +63,27 @@ struct Death {
     std::vector<uint32_t> before;  // the loot containers already near when it died: not its loot
     bool guarded = false;          // a player, an ally, a farm animal, owned, tame or a villager when it died: nothing
                                    // it leaves is taken
+    int64_t time = 0;              // EntityDiedEvent.timeStamp (the game's clock, ns); 0 = not given: `before` decides
 };
+
+// A loot spot near a death that was not taken for it, and why: for the decision log, so a game test can tell the cases
+// apart. Each is told once per death and reason.
+struct Skip {
+    enum Why { Before, OutOfReach, NoSpawnTime, Claimed };
+    uint32_t corpse = 0, container = 0;
+    Why why = Before;
+    double distance = 0;  // from where it died (or where its body was last), metres
+    double seconds = 0;   // Before: how long before the death it appeared (0 when the game gave no times)
+};
+inline const char* skip_text(Skip::Why w) {
+    switch (w) {
+        case Skip::Before: return "it was there before the death (an earlier kill's loot)";
+        case Skip::OutOfReach: return "too far from where it died";
+        case Skip::NoSpawnTime: return "the game has not given it a spawn time (yet)";
+        case Skip::Claimed: return "taken for another kill";
+    }
+    return "?";
+}
 
 struct Rules {
     double radius = 8.0;         // metres from the player
@@ -332,9 +355,15 @@ public:
     bool should_tell_full(uint32_t player, uint32_t session) { return told_full_.insert({session, player}).second; }
 
     size_t watched() const { return deaths_.size(); }
+    // The loot spots skipped since the last call (each told once per death and reason).
+    std::vector<Skip> take_skips() {
+        std::vector<Skip> out;
+        out.swap(skips_);
+        return out;
+    }
 
 private:
-    static constexpr uint64_t kClaimMs = 60000;  // a loot container is taken once; its id may be reused after this
+    static constexpr uint64_t kClaimMs = 60000;  // a claim is kept this long (a spot without spawn times: id only)
     struct Sent {
         uint32_t corpse, player;
         uint64_t at_ms;
@@ -346,25 +375,45 @@ private:
         Why waited;      // what it waits for (TooSoon, NoLoot, Empty, Alive, TooFar, Gone, Moved, Reused)
         double nearest;  // TooFar: the nearest player with a magnet on, -1 = none
         Vec3 last;       // where its body was last seen (it may slide a little before it fades)
+        std::set<std::pair<uint32_t, int>> told;  // (loot spot, Skip::Why) already told
     };
 
-    // The loot container `w` left: the nearest one within reach of where it died (or its body was last) that appeared
-    // after the death and nobody took yet. True when the death is decided (looted from it, or the container's lasting
-    // verdict); false while it waits (nothing there yet, empty yet, nobody near).
+    void tell(Watched& w, const Body& c, Skip::Why why, double dist) {
+        if (!w.told.insert({c.id, static_cast<int>(why)}).second) return;
+        const double seconds = why == Skip::Before && w.d.time > 0 && c.spawned > 0 ? (w.d.time - c.spawned) / 1e9 : 0;
+        skips_.push_back({w.d.id, c.id, why, dist, seconds});
+    }
+
+    // The loot container `w` left: the nearest one within reach of where it died (or its body was last) that appeared at
+    // or after the death (by the game's clock; without it, one not in `before`) and nobody took yet. True when the death
+    // is decided (looted from it, or the container's lasting verdict); false while it waits (nothing there yet, empty
+    // yet, nobody near).
     template <class LooterFor, class Decide>
     bool from_container(Watched& w, const std::vector<Body>& containers, const std::vector<Vec3>& bases, const Rules& r,
                         uint64_t now_ms, const LooterFor& looter_for, const Decide& decide, std::vector<Loot>& out) {
         const Body* c = nullptr;
         double c_d = 0;
         for (const auto& candidate : containers) {
-            if (!candidate.container || claimed_.count(candidate.id)) continue;
-            bool before = false;
-            for (uint32_t id : w.d.before) before = before || id == candidate.id;
-            if (before) continue;
+            if (!candidate.container) continue;
             const double dd = (std::min)(horizontal_distance(candidate.pos, w.d.pos), horizontal_distance(candidate.pos, w.last));
-            if (dd > r.container_reach || (c && dd >= c_d)) continue;
-            c = &candidate;
-            c_d = dd;
+            bool before = false;
+            if (w.d.time > 0) {
+                before = candidate.spawned > 0 && candidate.spawned < w.d.time;
+            } else {
+                for (uint32_t id : w.d.before) before = before || id == candidate.id;
+            }
+            if (dd > r.container_reach) {
+                tell(w, candidate, Skip::OutOfReach, dd);
+            } else if (w.d.time > 0 && candidate.spawned <= 0) {
+                tell(w, candidate, Skip::NoSpawnTime, dd);  // it may get one next round: asked again
+            } else if (before) {
+                tell(w, candidate, Skip::Before, dd);
+            } else if (claimed_.count({candidate.id, candidate.spawned})) {
+                tell(w, candidate, Skip::Claimed, dd);
+            } else if (!c || dd < c_d) {
+                c = &candidate;
+                c_d = dd;
+            }
         }
         if (!c) return false;  // nothing there (yet): w.waited says what the corpse waits for
         const Why v = judge_container(*c, c->pos, bases, r);
@@ -373,7 +422,7 @@ private:
             return false;
         }
         if (v != Why::Ok) {  // a container it will never be right to take: the death is decided
-            claimed_[c->id] = now_ms;
+            claimed_[{c->id, c->spawned}] = now_ms;
             decide(w, v, 0, -1, c->has_offer, c->id);
             return true;
         }
@@ -385,7 +434,7 @@ private:
             return false;
         }
         out.push_back({c->id, best->id});
-        claimed_[c->id] = now_ms;
+        claimed_[{c->id, c->spawned}] = now_ms;
         looted_.insert(w.d.id);
         decide(w, Why::Ok, best->id, best_d, c->has_offer, c->id);
         return true;
@@ -393,7 +442,9 @@ private:
 
     std::deque<Watched> deaths_;
     std::set<uint32_t> looted_;
-    std::map<uint32_t, uint64_t> claimed_;  // loot containers taken (or decided), and when
+    // loot containers taken (or decided), by id and spawn time (the game gives a later spot the same id), and when
+    std::map<std::pair<uint32_t, int64_t>, uint64_t> claimed_;
+    std::vector<Skip> skips_;
     std::vector<Sent> pending_;
     std::set<std::pair<uint32_t, uint32_t>> told_full_;
     uint32_t session_ = 0;

@@ -362,7 +362,7 @@ TEST_CASE("loot magnet: only lasting reasons skip a corpse at once (player, owne
     CHECK_FALSE(is_final(Why::TooFar));
 }
 
-// ---- most creatures leave their loot in a loot container where they died (the owner's "fresh corpse") ----
+// ---- most creatures leave their loot in a loot container where they died (a fresh kill's loot) ----
 namespace {
 // What most creatures leave where they die (templates LootContainer_Enemy_*: Inventory, DefaultInventory, DestroyOnLoot,
 // an interaction offer; no Health): the glowing loot spot. The creature itself fades and is removed.
@@ -491,4 +491,77 @@ TEST_CASE("loot magnet: who is guarded at their death: a player, an ally, a farm
     b = corpse(500, kHere);
     b.villager = true;
     CHECK(guarded(b));
+}
+
+// ---- the game's clock decides what appeared after the death: a loot spot may spawn in the death's own step ----
+namespace {
+constexpr int64_t kNs = 1000000000;  // keen::Time counts nanoseconds
+Body spot_at(uint32_t id, Vec3 pos, int64_t spawned, std::vector<std::string> items = {"Material_T1_Animal_Fur"}) {
+    Body b = loot_spot(id, pos, std::move(items));
+    b.spawned = spawned;
+    return b;
+}
+}  // namespace
+
+TEST_CASE("loot magnet: a loot spot spawned in the death's own step is that kill's loot; an older one is not, and why is told") {
+    Magnet m;
+    World w;
+    Death d{6938, kHere, 0, 1};
+    d.time = 500 * kNs;    // EntityDiedEvent.timeStamp
+    d.before = {7100};     // a snapshot taken after the death's step already holds the kill's own spot
+    m.on_death(d);
+    const std::vector<Looter> players = {{1, kHere, true}};
+    const std::vector<Body> spots = {
+        spot_at(7099, {kHere.x + 1, kHere.y, kHere.z}, 497 * kNs),    // an older kill's loot, 3 s before the death
+        spot_at(7098, {kHere.x + 7, kHere.y, kHere.z}, 500 * kNs),    // 7 m away: out of reach
+        spot_at(7101, {kHere.x + 0.5, kHere.y, kHere.z}, 0),          // its spawn time is not set yet
+        spot_at(7100, {kHere.x + 0.2, kHere.y, kHere.z}, 500 * kNs),  // spawned in the same step as the death
+    };
+    std::vector<Decision> out;
+    const auto sent = m.tick(1500, 1, players, w.lookup(), kNoBases, rules(), &out, spots);
+    REQUIRE(sent.size() == 1);
+    CHECK(sent[0].corpse == 7100u);
+    const auto skips = m.take_skips();
+    REQUIRE(skips.size() == 3);
+    CHECK(skips[0].corpse == 6938u);
+    CHECK(skips[0].container == 7099u);
+    CHECK(skips[0].why == Skip::Before);
+    CHECK(skips[0].seconds == doctest::Approx(3.0));
+    CHECK(skips[1].container == 7098u);
+    CHECK(skips[1].why == Skip::OutOfReach);
+    CHECK(skips[1].distance == doctest::Approx(7.0));
+    CHECK(skips[2].container == 7101u);
+    CHECK(skips[2].why == Skip::NoSpawnTime);
+    CHECK(std::string(skip_text(Skip::Before)).find("before") != std::string::npos);
+}
+
+TEST_CASE("loot magnet: each skipped loot spot is told once per kill, not every round") {
+    Magnet m;
+    World w;
+    Death d{6938, kHere, 0, 1};
+    d.time = 500 * kNs;
+    m.on_death(d);
+    const std::vector<Looter> players = {{1, kHere, true}};
+    const std::vector<Body> spots = {spot_at(7099, kHere, 400 * kNs)};
+    m.tick(1500, 1, players, w.lookup(), kNoBases, rules(), nullptr, spots);
+    CHECK(m.take_skips().size() == 1);
+    m.tick(2000, 1, players, w.lookup(), kNoBases, rules(), nullptr, spots);
+    CHECK(m.take_skips().empty());
+}
+
+TEST_CASE("loot magnet: a loot spot id the game gives the next kill's spot again is looted again (claims go by id and spawn time)") {
+    Magnet m;
+    World w;
+    const std::vector<Looter> players = {{1, kHere, true}};
+    Death d1{500, kHere, 0, 1};
+    d1.time = 100 * kNs;
+    m.on_death(d1);
+    REQUIRE(m.tick(2000, 1, players, w.lookup(), kNoBases, rules(), nullptr, {spot_at(7100, kHere, 100 * kNs)}).size() == 1);
+    // the looted spot is gone; 5 s later the next kill there gets a spot with the same id
+    Death d2{501, kHere, 5000, 1};
+    d2.time = 105 * kNs;
+    m.on_death(d2);
+    const auto sent = m.tick(7000, 1, players, w.lookup(), kNoBases, rules(), nullptr, {spot_at(7100, kHere, 105 * kNs)});
+    REQUIRE(sent.size() == 1);
+    CHECK(sent[0].corpse == 7100u);
 }

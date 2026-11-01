@@ -145,6 +145,8 @@ void loot_spot(uint32_t id, double x = 3740) {
     plant<gen::DefaultInventory>(id).applied = true;
     plant<gen::DestroyOnLoot>(id);
     plant<gen::InteractionOfferRuntime>(id);
+    plant<gen::DoNotSave>(id);
+    plant<gen::SpawnTime>(id).spawnTime.value = 777;
 }
 }  // namespace
 
@@ -158,6 +160,7 @@ TEST_CASE("loot magnet glue: the loot container a creature leaves where it died 
     CHECK(b.has_offer);
     CHECK_FALSE(b.has_health);
     CHECK(b.items == std::vector<std::string>{"Material_T1_Animal_Fur"});
+    CHECK(b.spawned == 777);
     CHECK_FALSE(magnet::read_body(emf::World(kW), 6938, names).container);  // nothing there
     brawler_corpse(6938);
     CHECK_FALSE(magnet::read_body(emf::World(kW), 6938, names).container);  // a creature is no loot container
@@ -218,4 +221,99 @@ TEST_CASE("loot magnet glue: the loot containers near the places watched are fou
     CHECK(magnet::containers_near(emf::World(kW), {}, 10.0, names).empty());  // nothing watched: no walk
     const auto ids = magnet::container_ids_near(emf::World(kW), {3739, 0, 0}, 10.0);
     CHECK(ids == std::vector<uint32_t>{7100});
+}
+
+TEST_CASE("loot magnet glue: a grave is never a loot spot: CreateItemLoot (the tombstone mark seen in game), or kept with the world") {
+    Rig r;
+    loot_spot(7400);
+    plant<gen::CreateItemLoot>(7400);  // the tombstone's mark, also without ForceSave
+    CHECK_FALSE(magnet::read_body(emf::World(kW), 7400, names).container);
+    loot_spot(7401);
+    g_comps.erase({gen::DoNotSave::kHash, 7401});  // kept with the world (a grave is saved; a kill's loot spot never)
+    CHECK_FALSE(magnet::read_body(emf::World(kW), 7401, names).container);
+    loot_spot(7402);
+    CHECK(magnet::read_body(emf::World(kW), 7402, names).container);
+}
+
+// ---- loot in linked inventories: the loot event does not reach them (seen in game with Grave Keeper's tombstones) ----
+namespace {
+std::vector<EmfItemsRequest> g_takes, g_puts;
+std::vector<std::pair<uint32_t, uint32_t>> g_drops;  // (item, count) dropped at the player
+uint32_t g_put_room = 1000;                            // how many the player's inventory takes
+bool f_take(EmfWorld* w, const EmfItemsRequest* r) {
+    g_takes.push_back(*r);
+    if (r->cb) r->cb(w, r->entity, r->item, r->count, r->count, r->user);
+    return true;
+}
+bool f_put_ex(EmfWorld* w, const EmfItemsRequest* r) {
+    g_puts.push_back(*r);
+    const uint32_t added = r->count < g_put_room ? r->count : g_put_room;
+    if (r->cb) r->cb(w, r->entity, r->item, r->count, added, r->user);
+    return true;
+}
+uint32_t f_give(EmfWorld*, uint32_t, uint32_t item, uint32_t count) {
+    g_drops.push_back({item, count});
+    return 9000;
+}
+// A corpse the game turned into loot: its stacks in an inventory its InventorySetup links, none of its own.
+void linked_corpse(uint32_t id, uint32_t inv) {
+    brawler_corpse(id);
+    g_comps.erase({gen::Inventory::kHash, id});
+    plant<gen::InventorySetup>(id).linksEntities[0].id = inv;
+    auto& slots = plant<gen::Inventory>(inv);
+    slots.slots[1].id.value = 0x11;  // fur, a plain stack
+    slots.slots[1].data.count = 5;
+    slots.slots[2].id.value = 0x22;  // a sword: gear with its own data entity
+    slots.slots[2].data.count = 1;
+    slots.slots[2].data.pide.id = 8123;
+}
+}  // namespace
+
+TEST_CASE("loot magnet glue: loot only in a linked inventory: no loot event; plain stacks are taken and put, gear stays") {
+    Rig r;
+    linked_corpse(6938, 6990);
+    const auto plan = magnet::plan_loot(emf::World(kW), 6938);
+    CHECK_FALSE(plan.event);  // its own Inventory holds nothing: the event would move nothing
+    REQUIRE(plan.takes.size() == 1);
+    CHECK(plan.takes[0].item == 0x11u);
+    CHECK(plan.takes[0].inventory == 6990u);
+    CHECK(plan.gear_left == 1);
+    CHECK_FALSE(magnet::holds_own(emf::World(kW), 6938));  // "no room" is never said for linked loot
+    loot_spot(7100);  // a loot spot with its loot in its own Inventory: the loot event
+    const auto spot = magnet::plan_loot(emf::World(kW), 7100);
+    CHECK(spot.event);
+    CHECK(spot.takes.empty());
+    CHECK(magnet::holds_own(emf::World(kW), 7100));
+}
+
+TEST_CASE("loot magnet glue: a linked plain stack is taken from that exact slot and put into the player; what does not fit drops") {
+    Rig r;
+    r.api.take_items = f_take;
+    r.api.put_items_ex = f_put_ex;
+    r.api.give_item = f_give;
+    g_takes.clear();
+    g_puts.clear();
+    g_drops.clear();
+    g_put_room = 3;
+    linked_corpse(6938, 6990);
+    const auto plan = magnet::plan_loot(emf::World(kW), 6938);
+    REQUIRE(plan.takes.size() == 1);
+    uint32_t came = 0, dropped = 0;
+    CHECK(magnet::move_linked(emf::World(kW), 6938, 1, plan.takes[0], [&](uint32_t c, uint32_t d) {
+        came = c;
+        dropped = d;
+    }));
+    REQUIRE(g_takes.size() == 1);
+    CHECK(g_takes[0].entity == 6938u);
+    CHECK(g_takes[0].item == 0x11u);
+    CHECK(g_takes[0].count == 5u);
+    CHECK(g_takes[0].slot == emf::slot_id(6990, 1));
+    CHECK((g_takes[0].flags & EMF_ITEMS_EXACT_SLOT) != 0);
+    REQUIRE(g_puts.size() == 1);
+    CHECK(g_puts[0].entity == 1u);
+    CHECK(g_puts[0].count == 5u);
+    REQUIRE(g_drops.size() == 1);  // 3 fit, 2 lie at the player's feet: never lost
+    CHECK(g_drops[0] == std::make_pair(0x11u, 2u));
+    CHECK(came == 3u);
+    CHECK(dropped == 2u);
 }
