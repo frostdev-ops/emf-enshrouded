@@ -137,6 +137,12 @@ function Test-InstallScripts([string]$scripts, [string]$gameTree) {
     Write-File (Join-Path $xe "dbghelp.dll") "EML dbghelp EML_LOG_FILE_PATH"
     & $inst -Game $xe -From $gameTree | Out-Null
     Check ((Get-Content -LiteralPath (Join-Path $xe "dinput8-chain.ini")) -contains "eml.dll") "only a tool marked same-loader is kept aside; another is listed and started"
+    # a tool whose DLL holds its text only as UTF-16 (ModLoader Proxy is built with wide strings: L"chainloader.ini")
+    $mlp = New-TempDir "mlp"
+    Write-File (Join-Path $mlp "enshrouded.exe") "fake"
+    [System.IO.File]::WriteAllBytes((Join-Path $mlp "dinput8.dll"), [System.Text.Encoding]::Unicode.GetBytes("MZ reads chainloader.ini"))
+    & $inst -Game $mlp -From $gameTree | Out-Null
+    Check ((Test-Path -LiteralPath (Join-Path $mlp "modloader-proxy.dll")) -and ((Get-Content -LiteralPath (Join-Path $mlp "dinput8-chain.ini")) -contains "modloader-proxy.dll")) "a DLL with a tool's text in UTF-16 is named after that tool (modloader-proxy.dll) and started"
 
     # a chain file the player already had (XHL-Core's way) keeps its entries; only EMF's line comes and goes
     $own = New-TempDir "ownchain"

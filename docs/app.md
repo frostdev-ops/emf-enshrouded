@@ -28,7 +28,9 @@ account features are switched off, and a tester setting switches them on ("Nexus
     `known_tools.txt`), otherwise "not listed";
   - **other loaders and their mods**: the tool behind each proxy DLL next to the game (`known_tools.txt`), Greeneye
     mods (`greeneye\<mod>\mod.json`), Shroudtopia mods (`shroudtopia.json`, DLLs in `mods\`) and ModLoader Proxy's
-    list (the `[Load]` section of `chainloader.ini`).
+    list (the `[Load]` section of `chainloader.ini`). When ModLoader Proxy runs (as a proxy DLL, or started by EMF),
+    the DLLs it starts count as running: EMF's own loader listed there means EMF is installed, a ShroudForge DLL
+    listed there means ShroudForge is active.
 - **Details** of the chosen mod: name, version, authors, description, who loads it, what it needs, its README, its
   settings (controls from the `mod.json` setting types: switches, number boxes and sliders with their steps, lists,
   colour pickers, key binds that take the next key press, text with its length limit; under their `group` headings,

@@ -73,13 +73,16 @@ function Read-KnownTools([string]$Path) {
 }
 
 # The tool a proxy DLL belongs to, as a short file-name word, or $null when unknown: the first known tool whose text
-# the DLL contains (the table's order matters), then the DLL's own version information.
+# the DLL contains, as plain text or as UTF-16 (a DLL built with wide strings; the table's order matters), then the
+# DLL's own version information.
 function Get-DllToolName([string]$Path, $Tools = @()) {
     $text = [System.Text.Encoding]::ASCII.GetString([System.IO.File]::ReadAllBytes($Path))
     if ($text.Contains("EMF-LOADER-7d3c9f") -or $text.Contains("emf_probe")) { return "emf" }
     foreach ($t in $Tools) {
         foreach ($m in $t.Texts) {
-            if ($text.IndexOf($m, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $t.Word }
+            $wide = -join ($m.ToCharArray() | ForEach-Object { "$_`0" })  # UTF-16LE read as ASCII: a 0 after each letter
+            if ($text.IndexOf($m, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -or
+                $text.IndexOf($wide, [System.StringComparison]::OrdinalIgnoreCase) -ge 0) { return $t.Word }
         }
     }
     $info = (Get-Item -LiteralPath $Path).VersionInfo

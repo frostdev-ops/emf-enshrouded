@@ -20,6 +20,18 @@ std::string lower(std::string s) {
     return s;
 }
 
+// A text as a DLL built with wide strings holds it (UTF-16LE; markers are plain ASCII). Lower-casing the DLL's bytes
+// lowers these letters too, since every second byte is 0.
+std::string utf16(const std::string& s) {
+    std::string out;
+    out.reserve(s.size() * 2);
+    for (const char c : s) {
+        out += c;
+        out += '\0';
+    }
+    return out;
+}
+
 const KnownTool* find_tool(const std::vector<KnownTool>& tools, const std::string& word) {
     for (const auto& t : tools)
         if (t.word == word) return &t;
@@ -86,7 +98,7 @@ std::string tool_for_dll_text(const std::vector<KnownTool>& tools, const std::st
     const std::string low = lower(dll_text);  // once per file: markers are stored in lower case
     for (const auto& t : tools)
         for (const auto& s : t.texts)
-            if (low.find(s) != std::string::npos) return t.word;
+            if (low.find(s) != std::string::npos || low.find(utf16(s)) != std::string::npos) return t.word;
     return {};
 }
 
@@ -122,6 +134,23 @@ std::vector<std::string> installed_report(const std::vector<KnownTool>& tools, c
         lines.push_back(s);
     }
 
+    // what ModLoader Proxy starts (chainloader.ini) runs too: EMF's loader itself, ShroudForge, ...
+    std::string by_proxy, missing;
+    for (const auto& d : view.loader_started) {
+        if (!d.found) {
+            missing += (missing.empty() ? "" : ", ") + d.name;
+            continue;
+        }
+        active.push_back(d.word);
+        by_proxy += (by_proxy.empty() ? "" : ", ") + d.name + " = " + display(tools, d.word);
+    }
+    if (!view.loader_started.empty()) {
+        std::string s = "started by " + display(tools, kModLoaderProxy) +
+                        " (chainloader.ini): " + (by_proxy.empty() ? std::string("none") : by_proxy);
+        if (!missing.empty()) s += "; listed but not found: " + missing;
+        lines.push_back(s);
+    }
+
     for (const auto& t : tools) {
         if (t.texts.empty()) continue;  // its DLLs cannot be told apart: nothing to compare
         std::string here;
@@ -140,6 +169,116 @@ std::vector<std::string> installed_report(const std::vector<KnownTool>& tools, c
         lines.push_back(t.name + " is installed (" + here + ") but none of its DLLs is active: " + why + helper_note);
     }
     return lines;
+}
+
+// ModLoader Proxy's own reading of the file (src/main.cpp LoadConfig): UTF-8 with or without BOM, trimmed lines,
+// ';' or '#' comment lines, "[section]" in any case, " ;" before a comment after a value.
+ChainloaderIni parse_chainloader_ini(const std::string& text) {
+    ChainloaderIni out;
+    size_t from = text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : 0;
+    std::string section;
+    const auto backslashes = [](std::string s) {
+        std::replace(s.begin(), s.end(), '/', '\\');
+        return s;
+    };
+    while (from < text.size()) {
+        size_t to = text.find('\n', from);
+        if (to == std::string::npos) to = text.size();
+        std::string line = trim(text.substr(from, to - from));
+        from = to + 1;
+        if (line.empty() || line[0] == ';' || line[0] == '#') continue;
+        if (line.front() == '[' && line.back() == ']') {
+            section = lower(trim(line.substr(1, line.size() - 2)));
+            continue;
+        }
+        if (const size_t sc = line.find(" ;"); sc != std::string::npos) line = trim(line.substr(0, sc));
+        if (line.empty()) continue;
+        if (section == "settings") {
+            const size_t eq = line.find('=');
+            if (eq == std::string::npos) continue;
+            const std::string key = lower(trim(line.substr(0, eq))), value = trim(line.substr(eq + 1));
+            const std::string v = lower(value);
+            if (key == "loadfromfolder") out.load_from_folder = v == "1" || v == "true" || v == "yes" || v == "on";
+            else if (key == "modsfolder") out.mods_folder = value;
+            else if (key == "forwardto") out.forward_to = backslashes(value);
+        } else if (section == "load") {
+            out.load.push_back(backslashes(line));
+        }
+    }
+    return out;
+}
+
+std::vector<std::string> chainloader_dlls(const std::string& ini_text, const std::string& self,
+                                          const std::function<std::vector<std::string>(const std::string&)>& dlls_in) {
+    const ChainloaderIni ini = parse_chainloader_ini(ini_text);
+    const std::string me = lower(self);
+    std::vector<std::string> out;
+    const auto add = [&](const std::string& path, bool skip_own_name) {
+        const size_t slash = path.find_last_of('\\');
+        const std::string file = lower(slash == std::string::npos ? path : path.substr(slash + 1));
+        if (path.empty() || (skip_own_name && !me.empty() && file == me)) return;
+        for (const auto& o : out)
+            if (lower(o) == lower(path)) return;  // the ForwardTo DLL, or a DLL listed and also in the folder
+        out.push_back(path);
+    };
+    // ForwardTo first (before the game can call the proxy's functions): skipped only when it is the proxy itself
+    if (!ini.forward_to.empty() && lower(ini.forward_to) != me) add(ini.forward_to, false);
+    for (const auto& p : ini.load) add(p, true);  // then [Load] in order: never a DLL with the proxy's own name
+    if (ini.load_from_folder) {
+        std::string folder = trim(ini.mods_folder);
+        std::replace(folder.begin(), folder.end(), '/', '\\');
+        while (!folder.empty() && folder.back() == '\\') folder.pop_back();
+        if (!folder.empty() && folder != ".") {  // a subfolder only, as ModLoader Proxy demands
+            std::vector<std::string> names = dlls_in(folder);
+            std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) { return lower(a) < lower(b); });
+            for (const auto& n : names)
+                if (n.size() > 4 && lower(n.substr(n.size() - 4)) == ".dll") add(folder + "\\" + n, true);
+        }
+    }
+    return out;
+}
+
+bool modloader_proxy_runs(const GameFolderView& view, std::string* self) {
+    for (const auto& [name, word] : view.proxies)
+        if (word == kModLoaderProxy) {
+            if (self) *self = name;
+            return true;
+        }
+    const auto names = started_chain_names(view.chain_status);  // in the order chained_tools was read
+    for (size_t i = 0; i < view.chained_tools.size(); ++i)
+        if (view.chained_tools[i] == kModLoaderProxy) {
+            if (self) *self = names.size() == view.chained_tools.size() ? names[i] : std::string();
+            return true;
+        }
+    return false;
+}
+
+void add_loader_started(GameFolderView& view, const FolderLook& look) {
+    std::string self;
+    if (!modloader_proxy_runs(view, &self)) return;
+    // inside the game folder: no drive, no leading slash, no ".." part (EMF reads nothing else)
+    const auto inside = [](const std::string& p) {
+        if (p.empty() || p[0] == '\\' || p.find(':') != std::string::npos) return false;
+        size_t from = 0;
+        while (from <= p.size()) {
+            size_t to = p.find('\\', from);
+            if (to == std::string::npos) to = p.size();
+            if (p.compare(from, to - from, "..") == 0) return false;
+            from = to + 1;
+        }
+        return true;
+    };
+    const auto names = chainloader_dlls(look.read_text("chainloader.ini"), self, [&](const std::string& folder) {
+        return inside(folder) ? look.dlls_in(folder) : std::vector<std::string>{};
+    });
+    for (const auto& n : names) {
+        StartedDll d{n, {}, true};
+        if (inside(n)) {
+            d.found = look.exists(n);
+            if (d.found) d.word = look.tool(n);
+        }
+        view.loader_started.push_back(std::move(d));
+    }
 }
 
 const std::vector<std::string>& proxy_dll_names() {

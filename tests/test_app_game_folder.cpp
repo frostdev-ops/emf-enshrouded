@@ -349,6 +349,32 @@ TEST_CASE("app chain: chainloader.ini is ModLoader Proxy's list, shown read-only
     CHECK(has_warning(s, "info", "chainloader.ini"));
 }
 
+TEST_CASE("app chain: ModLoader Proxy as dinput8.dll starts EMF and ShroudForge from chainloader.ini") {
+    // a player's setup: ModLoader Proxy (its strings are UTF-16) is dinput8.dll and lists EMF's loader and ShroudForge
+    TempGame g(L"mlproxyfirst");
+    const std::string wide_ini("c\0h\0a\0i\0n\0l\0o\0a\0d\0e\0r\0.\0i\0n\0i\0", 30);
+    g.write(L"dinput8.dll", "MZ fake " + wide_ini);
+    g.write(L"chainloader.ini", "[Settings]\r\nDeferred = true\r\n[Load]\r\nEMF.dll\r\nshroudforge.dll\r\ngone.dll\r\n");
+    g.write(L"EMF.dll", "MZ EMF-LOADER-7d3c9f fake");
+    g.write(L"emf\\emf_core.dll", std::string("MZ emf_core 0.9.1\0 more", 23));
+    g.write(L"emf\\known_tools.txt", kTools);
+    g.write(L"shroudforge.dll", "MZ ShroudForge EML_LOG_FILE_PATH");  // its only DLL: it runs through ModLoader Proxy
+    g.mkdir(L"shroudforge");
+    const FolderState s = scan_game_folder(g.dir);
+    CHECK(s.emf_installed);
+    CHECK(s.shroudforge_active);
+    CHECK_FALSE(has_warning(s, "warn", "none of its DLLs is active"));
+    CHECK_FALSE(has_warning(s, "warn", "EMF is not installed"));
+    CHECK_FALSE(has_warning(s, "warn", "started by"));  // the report's list is not a warning
+    CHECK(std::find(s.report.begin(), s.report.end(),
+                    "started by ModLoader Proxy (chainloader.ini): EMF.dll = EMF, shroudforge.dll = ShroudForge; "
+                    "listed but not found: gone.dll") != s.report.end());
+    CHECK(has_warning(s, "info", "ModLoader Proxy (dinput8.dll) starts the DLLs listed in chainloader.ini"));
+    const ModEntry* proxy = find(s, "other", "loader:dinput8.dll");
+    REQUIRE(proxy);
+    CHECK(proxy->name == "ModLoader Proxy");
+}
+
 TEST_CASE("app chain: switching a line off puts \"; \" in front; on takes it away; every other byte stays") {
     const std::string text = "\xEF\xBB\xBF" "a.dll\r\n[Chain]\r\n  b.dll ; Creative\r\nmod3 = C.DLL\nlast.dll";
     const auto off_a = switch_chain_line(text, L"A.dll", false);
