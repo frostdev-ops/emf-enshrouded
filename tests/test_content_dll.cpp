@@ -41,12 +41,15 @@ std::string utf8(const std::wstring& w) {
     return s;
 }
 
-std::wstring dll_path() {
-    std::wstring p = widen(EMF_CONTENT_DLL);
+// A path CMake wrote (forward slashes) as a Windows path.
+std::wstring native(const char* cmake_path) {
+    std::wstring p = widen(cmake_path);
     for (wchar_t& c : p)
         if (c == L'/') c = L'\\';
     return p;
 }
+
+std::wstring dll_path() { return native(EMF_CONTENT_DLL); }
 
 std::string json_string(const std::string& s) {
     std::string out = "\"";
@@ -162,6 +165,54 @@ int thread_count() {
         if (te.th32OwnerProcessID == pid) ++n;
     CloseHandle(snap);
     return n;
+}
+
+void read_all(HANDLE pipe, std::string& into) {
+    char buf[4096];
+    DWORD got = 0;
+    while (ReadFile(pipe, buf, sizeof buf, &got, nullptr) && got > 0) into.append(buf, got);
+}
+
+struct ProcessResult {
+    DWORD code = 0xFFFFFFFF;  // also when it did not start or did not end within a minute
+    std::string out, err;
+};
+
+// Runs `exe args` without a window; its stdout and stderr come back through pipes (no files to clean up).
+ProcessResult run_capture(const std::wstring& exe, const std::wstring& args) {
+    ProcessResult r;
+    SECURITY_ATTRIBUTES sa{sizeof sa, nullptr, TRUE};
+    HANDLE out_r = nullptr, out_w = nullptr, err_r = nullptr, err_w = nullptr;
+    if (!CreatePipe(&out_r, &out_w, &sa, 0)) return r;
+    if (!CreatePipe(&err_r, &err_w, &sa, 0)) {
+        CloseHandle(out_r);
+        CloseHandle(out_w);
+        return r;
+    }
+    SetHandleInformation(out_r, HANDLE_FLAG_INHERIT, 0);
+    SetHandleInformation(err_r, HANDLE_FLAG_INHERIT, 0);
+    STARTUPINFOW si{};
+    si.cb = sizeof si;
+    si.dwFlags = STARTF_USESTDHANDLES;
+    si.hStdOutput = out_w;
+    si.hStdError = err_w;
+    std::wstring cmd = L"\"" + exe + L"\" " + args;
+    PROCESS_INFORMATION pi{};
+    const BOOL started = CreateProcessW(exe.c_str(), cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr,
+                                        nullptr, &si, &pi);
+    CloseHandle(out_w);
+    CloseHandle(err_w);
+    if (started) {
+        std::thread err_reader([&] { read_all(err_r, r.err); });
+        read_all(out_r, r.out);
+        err_reader.join();
+        if (WaitForSingleObject(pi.hProcess, 60000) == WAIT_OBJECT_0) GetExitCodeProcess(pi.hProcess, &r.code);
+        CloseHandle(pi.hThread);
+        CloseHandle(pi.hProcess);
+    }
+    CloseHandle(out_r);
+    CloseHandle(err_r);
+    return r;
 }
 
 }  // namespace
@@ -300,6 +351,20 @@ TEST_CASE("content dll: log lines arrive") {
         CHECK(line.find('\n') == std::string::npos);
         CHECK(line.find('\r') == std::string::npos);
     }
+}
+
+TEST_CASE("emf_content_run: empty folder gives a non-zero exit and JSON on stdout") {
+    Folder folder(L"emf_content_run_empty");
+    const ProcessResult r = run_capture(native(EMF_CONTENT_RUN_EXE),L"\"" + folder.path + L"\"");
+    INFO("stdout: " << r.out << "\nstderr: " << r.err);
+    CHECK(r.code != 0);
+    CHECK(r.code != 0xFFFFFFFF);
+    const auto parsed = json::parse(r.out);
+    REQUIRE(parsed.value.has_value());
+    REQUIRE(parsed.value->get("code") != nullptr);
+    CHECK(parsed.value->get("code")->n == static_cast<double>(r.code));
+    CHECK(message_of(*parsed.value).find(utf8(folder.path)) != std::string::npos);
+    CHECK(r.err.find("[error] ") != std::string::npos);  // log lines go to stderr as "[level] line"
 }
 
 #endif  // EMF_CONTENT_DLL

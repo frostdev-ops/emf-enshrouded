@@ -566,6 +566,14 @@ if(EMF_CONTENT)
     WORKING_DIRECTORY ${EMF_CONTENT_SRC})
   target_compile_definitions(emf_tests PRIVATE EMF_CONTENT_DLL="${EMF_CONTENT_DLL}")
   add_dependencies(emf_tests emf_content)
+  # emf_content_run.exe: one build from the command line, for tests and checks by hand; never packaged. It finds the
+  # DLL next to itself, else at EMF_CONTENT_DLL.
+  add_executable(emf_content_run tools/content_run/content_run.cpp)
+  target_include_directories(emf_content_run PRIVATE src)
+  target_compile_definitions(emf_content_run PRIVATE EMF_CONTENT_DLL="${EMF_CONTENT_DLL}")
+  add_dependencies(emf_content_run emf_content)
+  target_compile_definitions(emf_tests PRIVATE EMF_CONTENT_RUN_EXE="$<TARGET_FILE:emf_content_run>")
+  add_dependencies(emf_tests emf_content_run)
 endif()
 # The tests load the built DLL; without EMF_CONTENT_DLL the file compiles to nothing.
 target_sources(emf_tests PRIVATE tests/test_content_dll.cpp)
