@@ -366,14 +366,15 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
         const magnet::Rules rules = config().rules;
         magnet::Death d{id, *p, GetTickCount64(), emf::server_session(), magnet::template_of(w, id)};
         d.guarded = magnet::guarded(body_of(w, id));  // a player's, an ally's...: nothing it leaves is taken
-        // what appeared at or after the death is its loot, by the game's clock (a loot spot's SpawnTime); without a
-        // death time, the loot spots near it now are not its loot
-        d.time = e.timeStamp.value;
+        // what appeared at or after the death is its loot, by the game's clock (a loot spot's SpawnTime); without any
+        // time, the loot spots near it now are not its loot
+        d.time = magnet::death_time(e.timeStamp.value, w.ecs_time_ns());
         if (!d.guarded && d.time <= 0) {
             d.before = magnet::container_ids_near(w, *p, scan_radius(rules));
             if (!g_told_no_time) {
                 g_told_no_time = true;
-                EMF_LOG(kMod, "the game gave death %u no time: loot spots near it now are taken as not its loot", id);
+                EMF_LOG(kMod, "death %u has no time and the world's clock is not known on this build: loot spots near "
+                              "it now are taken as not its loot", id);
             }
         }
         if (config().debug_log)

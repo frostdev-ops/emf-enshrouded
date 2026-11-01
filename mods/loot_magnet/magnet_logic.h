@@ -63,8 +63,17 @@ struct Death {
     std::vector<uint32_t> before;  // the loot containers already near when it died: not its loot
     bool guarded = false;          // a player, an ally, a farm animal, owned, tame or a villager when it died: nothing
                                    // it leaves is taken
-    int64_t time = 0;              // EntityDiedEvent.timeStamp (the game's clock, ns); 0 = not given: `before` decides
+    int64_t time = 0;              // the death's time on the game's clock (ns, death_time); 0 = unknown: `before` decides
 };
+
+// The game's EntityDiedEvent carries no time (seen in game), so the death is timed by the world's ECS time at the
+// callback, which runs after the death's step: one step's slack keeps a loot spot spawned in that step (its SpawnTime
+// is that step's time) as this kill's, and an earlier kill's spot from seconds before is still not.
+constexpr int64_t kDeathSlackNs = 100'000'000;
+inline int64_t death_time(int64_t event_ns, int64_t ecs_now_ns) {
+    if (event_ns > 0) return event_ns;
+    return ecs_now_ns > 0 ? ecs_now_ns - kDeathSlackNs : 0;
+}
 
 // A loot spot near a death that was not taken for it, and why: for the decision log, so a game test can tell the cases
 // apart. Each is told once per death and reason.
