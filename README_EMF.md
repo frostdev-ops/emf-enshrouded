@@ -78,7 +78,7 @@ game through Steam's library folders (`scripts\find_game.ps1`); `-Game <folder>`
 (`src/loader/chain_list.h`, `chain_load.h`; results in `emf\emf_loader.log` and `emf\chain_status.txt`).
 Before that the loader takes EMF.exe's one-shot flag `emf\play_once.txt` ("Play without EMF mods" or "without any
 mods", `src/loader/play_once.h`): it deletes the file at once and, for that one start, starts no core (and with "without
-any mods" no chained DLL either). A flag older than five minutes, one it cannot delete and the dedicated server are
+any mods" no chained DLL either). A flag older than ten minutes, one it cannot delete and the dedicated server are
 ignored, so EMF never stays off.
 `docs/modding/other_mods.md` has the details for authors of DLL mods.
 Logs: `<game>\emf\emf_core.log` (framework + mods), `<game>\emf\emf_loader.log` (the loader: chain-loaded DLLs and a

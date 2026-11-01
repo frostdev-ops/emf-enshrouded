@@ -48,8 +48,9 @@ account features are switched off, and a tester setting switches them on ("Nexus
   ("Nexus: not logged in", or the account's name and Premium) opens the account.
 - **Play** starts the game through Steam (`steam://rungameid/1203620`); the arrow next to it also starts it once
   without the mods ("Play" below). Under Wine or Proton (Linux, the Steam Deck; EMF.exe tells by Wine's `ntdll.dll`,
-  which exports `wine_get_version`) a `steam://` link does not reach Linux's Steam, so Play opens nothing and says to
-  start Enshrouded from Steam instead (EMF still loads when the game starts); the button says "start it in Steam" there.
+  which exports `wine_get_version`) a `steam://` link does not reach Linux's Steam. Play still opens it (a Windows
+  Steam in the same prefix, as Lutris or Bottles set up, takes it) and adds: if nothing starts, start Enshrouded from
+  Steam (EMF still loads when the game starts). When the link cannot be opened at all, Play says only that.
 - **Profiles**: the on/off state of every mod under a name, above the list (below).
 - **Browse**: Enshrouded mods on Nexus Mods (with the Nexus features, below).
 - **Server** (a dedicated server's folder only): its config, EMF's chat commands, Start and Stop, EMF in it and its
@@ -81,17 +82,19 @@ EMF's loader (`dinput8.dll`) reads the file and deletes it before it does anythi
 `no-mods` none of the chained DLLs; `emf\chain_status.txt` names them `skipped`), and says so in `emf\emf_loader.log`.
 The next start loads everything again. So that EMF never stays off:
 
-- the loader obeys a flag only within five minutes of `written` (a start that never happened, a crash, a PC switched
+- the loader obeys a flag only within ten minutes of `written` (a start that never happened, a crash, a PC switched
   off), and none that says it was written more than two minutes from now;
 - a flag the loader cannot delete is not obeyed (it would count at every start), and the log says to delete it;
 - the dedicated server ignores it;
 - **Play** deletes a flag that is still waiting, and so does a failed start (Steam did not open);
+- EMF.exe writes or deletes the flag only inside the game folder shown, never without one;
 - it is refused while the game runs, when EMF is not installed in the folder, when Steam's copy of the game is another
   folder than the one shown, and when the folder's EMF is older than this feature (EMF.exe looks for the marker
   `EMF-PLAY-ONCE-1`, which the loader exports as `emf_loader_play_once`; the menu says to install EMF again then).
 
-Under Wine or Proton the flag is written all the same, and the message says to start Enshrouded from Steam within five
-minutes. A test run (`EMF_TEST=1`) never opens the `steam://` link.
+Under Wine or Proton the flag is written all the same and the link opened; the message adds that if nothing starts,
+Enshrouded is started from Steam within ten minutes, and that start is without the mods. The flag stays then also when
+the link could not be opened. A test run (`EMF_TEST=1`) never opens the `steam://` link.
 
 ## What a switch does
 
@@ -839,7 +842,7 @@ player's, and counts only a stand-in game running from the folder shown.
   may open and the bridge's commands (Play under Wine with the host's Wine check injected; the Play menu: the flag
   written for each way, taken back by Play and by a failed start, written under Wine, refused while the game runs, for
   another Steam folder, an old loader and no EMF), all against fake game folders in `%TEMP%`. `test_chain_load.cpp`:
-  the loader's side of the flag (`src/loader/play_once.h`): the five minutes, a flag from the future, anything that is
+  the loader's side of the flag (`src/loader/play_once.h`): the ten minutes, a flag from the future, anything that is
   not the flag, deleted before it is read for what it says and not obeyed when it cannot be deleted, and what starts in
   each way.
 - `test_profiles.cpp`, `test_app_profiles.cpp`, `test_app_profiles_bridge.cpp`: profiles: names and slugs, the file

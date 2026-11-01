@@ -19,7 +19,7 @@ namespace emf::loader {
 
 enum class PlayOnce { Normal, NoEmf, NoMods };
 
-constexpr int64_t kPlayOnceMaxAge = 300;     // five minutes: time enough for Steam to start the game
+constexpr int64_t kPlayOnceMaxAge = 600;     // ten minutes: a cold Steam start with an update can take a while
 constexpr int64_t kPlayOnceClockSlack = 120;  // "written" this far after now still counts (the clock was set back)
 constexpr const wchar_t* kPlayOnceFile = L"emf\\play_once.txt";
 // In EMF's loader (exported, like emf_loader_identity): EMF.exe offers the Play menu only for a loader that has it.
@@ -62,18 +62,17 @@ inline PlayOnceRead parse_play_once(const std::string& text, int64_t now) {
     const PlayOnce wanted = mode == "no-emf" ? PlayOnce::NoEmf : mode == "no-mods" ? PlayOnce::NoMods : PlayOnce::Normal;
     const bool digits = !written.empty() && written.size() <= 15 && written.find_first_not_of("0123456789") == std::string::npos;
     if (version != "1" || wanted == PlayOnce::Normal || !digits) {
-        r.why = "emf\\play_once.txt is not a flag this EMF knows: ignored and deleted";
+        r.why = "emf\\play_once.txt is not a flag this EMF knows: ignored";
         return r;
     }
     const int64_t at = std::stoll(written);
     if (at > now + kPlayOnceClockSlack) {
-        r.why = "emf\\play_once.txt says it was written later than now (did the PC's clock change?): ignored and deleted";
+        r.why = "emf\\play_once.txt says it was written later than now (did the PC's clock change?): ignored";
         return r;
     }
     if (now - at > kPlayOnceMaxAge) {
         r.why = "emf\\play_once.txt was written " + play_once_age(now - at) +
-                " ago, too long ago for this start (EMF.exe's Play asked for a start that did not happen then): ignored "
-                "and deleted";
+                " ago, too long ago for this start (EMF.exe's Play asked for a start that did not happen then): ignored";
         return r;
     }
     r.mode = wanted;
@@ -97,6 +96,8 @@ PlayOnceRead take_play_once(Read read, Remove remove, int64_t now) {
         r.mode = PlayOnce::Normal;
         r.why = "could not delete emf\\play_once.txt, so EMF starts as usual (a flag that stays would count at every "
                 "start): delete the file by hand";
+    } else if (r.mode == PlayOnce::Normal) {
+        r.why += removed ? ", and deleted" : "; EMF could not delete it: delete the file by hand";
     }
     return r;
 }

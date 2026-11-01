@@ -197,6 +197,9 @@ std::string saves_busy_reason(const std::vector<ProcessInfo>& processes, const s
 
 // A JSON string literal: quotes, backslashes and control characters escaped; bytes that are not UTF-8 become U+FFFD.
 std::string json_quote(const std::string& s);
+// <game>\emf\play_once.txt, the one-shot flag of Play's menu (loader/play_once.h); none without a game folder that is
+// there, so that no flag is ever written or deleted outside one ("\emf\play_once.txt" would be on the drive's root).
+std::optional<std::wstring> play_once_path(const std::wstring& game);
 
 // The state message for the page.
 std::string state_json(const FolderState& state, const std::string& running_reason);

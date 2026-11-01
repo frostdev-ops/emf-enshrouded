@@ -59,14 +59,15 @@ constexpr int64_t kT = 1793520000;  // when EMF.exe wrote the flag
 PlayOnce mode_at(const std::string& text, int64_t now) { return emf::loader::parse_play_once(text, now).mode; }
 }  // namespace
 
-TEST_CASE("play once: EMF.exe's flag counts for a start within five minutes of being written, never later") {
+TEST_CASE("play once: EMF.exe's flag counts for a start within ten minutes of being written, never later") {
     CHECK(emf::loader::play_once_text(PlayOnce::NoEmf, kT) == "emf_play_once=1\r\nmode=no-emf\r\nwritten=1793520000\r\n");
     CHECK(emf::loader::play_once_text(PlayOnce::NoMods, kT) == "emf_play_once=1\r\nmode=no-mods\r\nwritten=1793520000\r\n");
     for (const PlayOnce mode : {PlayOnce::NoEmf, PlayOnce::NoMods}) {
         const std::string text = emf::loader::play_once_text(mode, kT);
         CHECK(mode_at(text, kT) == mode);
-        CHECK(mode_at(text, kT + 299) == mode);
-        CHECK(mode_at(text, kT + 301) == PlayOnce::Normal);   // a start that never happened: EMF loads again
+        CHECK(mode_at(text, kT + 450) == mode);   // a cold Steam start with an update can take minutes
+        CHECK(mode_at(text, kT + 599) == mode);
+        CHECK(mode_at(text, kT + 601) == PlayOnce::Normal);   // a start that never happened: EMF loads again
         CHECK(mode_at(text, kT + 86400) == PlayOnce::Normal);
         CHECK(mode_at(text, kT - 60) == mode);                // the clock went back a little since
         CHECK(mode_at(text, kT - 3600) == PlayOnce::Normal);  // "written" an hour from now: not trusted
@@ -112,6 +113,11 @@ TEST_CASE("play once: the loader deletes the flag first, whatever it holds; a fl
     r = take(flag, true, kT + 3600);  // too old: deleted all the same
     CHECK(r.mode == PlayOnce::Normal);
     CHECK(steps == std::vector<std::string>{"read", "remove"});
+    CHECK(r.why.find("deleted") != std::string::npos);
+    r = take(flag, false, kT + 3600);  // the log says what happened: it could not be deleted
+    CHECK(r.mode == PlayOnce::Normal);
+    CHECK(r.why.find("could not delete") != std::string::npos);
+    CHECK(r.why.find("and deleted") == std::string::npos);
     r = take(std::string("not a flag"), true, kT);
     CHECK(r.mode == PlayOnce::Normal);
     CHECK(steps == std::vector<std::string>{"read", "remove"});

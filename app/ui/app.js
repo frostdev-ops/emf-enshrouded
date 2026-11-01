@@ -260,9 +260,9 @@ function renderHeader() {
   play.disabled = s.game_running && !s.server;
   $('play-label').textContent = s.server ? 'Server' : s.game_running ? 'Running' : 'Play';
   $('play-sub').textContent = s.server ? (s.game_running ? 'running: stop it there' : 'start it in the Server tab')
-    : s.game_running ? 'close it to switch mods' : s.wine ? 'start it in Steam' : 'through Steam';
+    : s.game_running ? 'close it to switch mods' : 'through Steam';
   play.title = s.server ? 'A dedicated server folder: the Server tab starts and stops it'
-    : s.wine ? 'Under Wine or Proton, Play cannot reach Steam: start Enshrouded from Steam. EMF still loads with it.' : '';
+    : s.wine ? 'Under Wine or Proton the link may not reach Steam: if nothing starts, start Enshrouded from Steam. EMF still loads with it.' : '';
   // the Play menu (a game folder only): the two starts without mods need EMF's loader here to know the one-shot flag
   const more = $('play-more');
   more.hidden = !!s.server || !s.game_found;
