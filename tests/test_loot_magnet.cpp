@@ -565,3 +565,14 @@ TEST_CASE("loot magnet: a loot spot id the game gives the next kill's spot again
     REQUIRE(sent.size() == 1);
     CHECK(sent[0].corpse == 7100u);
 }
+
+TEST_CASE("loot magnet: a death the game gives no time is timed by the world's clock, a little early; no clock: none") {
+    CHECK(magnet::death_time(5'000'000'000, 9'000'000'000) == 5'000'000'000);  // the event's own time wins
+    // the game's EntityDiedEvent carries no time: the world's ECS time at the callback, less one step's slack, so a loot
+    // spot spawned in the death's own step (SpawnTime = that step's time) still counts
+    CHECK(magnet::death_time(0, 9'000'000'000) == 9'000'000'000 - magnet::kDeathSlackNs);
+    CHECK(magnet::kDeathSlackNs >= 50'000'000);   // at least a few server steps
+    CHECK(magnet::kDeathSlackNs <= 250'000'000);  // never an earlier kill's spot from seconds before
+    CHECK(magnet::death_time(0, 0) == 0);  // no clock on this build: the before-snapshot decides
+    CHECK(magnet::death_time(-1, 0) == 0);
+}
