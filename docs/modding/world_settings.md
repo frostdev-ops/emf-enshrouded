@@ -49,13 +49,17 @@ games get the new values within a second or two; a player who joins later gets t
 settings marked "players' games read it" below are also used by each player's own game (their stamina, the day length
 they see, glider turbulence): they are right for a player once that resync arrives.
 
-On a game build EMF does not know yet, the flag may not be found: the write on the server still happens and
-`emf_core.log` says so, but players' games may keep the old values of the settings they read until they reconnect.
+On a game build EMF does not know yet, the flag may not be found: the write on the server still happens, and the
+reply and `emf_core.log` say that players' games keep the old values of the settings they read until they reconnect.
+There EMF also checks first that the world's settings look as it knows them (factors 0-10, durations 1-240 minutes,
+valid choices); if they do not, changes are off for that world and the reply says why: EMF needs an update for that
+game version.
 
 Kept values are stored per world save slot in `<game>\emf\config\world_settings\<slot>.txt` (on a dedicated server in
 the server folder's `emf\config\world_settings\`), one `key=value` line each (durations in minutes, choices as numbers).
 A line with an unknown setting or a value the setting does not allow is skipped with a log line; the rest apply. A new
-world started in the same slot gets the kept values too: `world.reset all persist` clears them.
+world started in the same slot gets the kept values too: `world.reset all persist` clears them. Until EMF has seen
+the world's save load, `persist` is refused (the change itself works without it).
 
 ## The settings
 
