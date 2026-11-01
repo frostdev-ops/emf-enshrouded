@@ -36,6 +36,7 @@
 #include "teleport.h"
 #include "world_settings_glue.h"
 #include "world_settings_service.h"
+#include "world_commands.h"
 #include "emf/storage.hpp"
 #include "known_tools.h"
 #include "overlay/input_hook.h"
@@ -869,6 +870,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_builtin.registry = &g_state->mods;
     g_builtin.settings = g_state->settings.get();
     if (!emf::core::add_builtin_commands(g_builtin)) emf::logf("commands: a built-in command could not be added");
+    if (g_ws && g_builtin.center && !emf::core::add_world_commands(*g_builtin.center, *g_ws->service))
+        emf::logf("commands: a world settings command could not be added");
     // Mod profiles: the same files and rules as EMF.exe's Mods tab; settings go through the live store
     g_profiles.game = dir;
     g_profiles.settings = g_state->settings.get();

@@ -33,6 +33,7 @@ public:
         bool changed;
     };
     std::vector<Row> rows() const;  // empty without a world
+    bool snapshot(uint8_t (&out)[kStructSize]) const;  // the live struct, read guarded (false without a world)
 
     void on_changed(std::function<void(const std::string& key, double value)> cb);
     void notify(const State::Step& step);  // after the server step's write

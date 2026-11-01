@@ -117,6 +117,7 @@ add_library(emf_core_lib STATIC
   src/core/world_settings_file.cpp
   src/core/world_settings_glue.cpp
   src/core/world_settings_service.cpp
+  src/core/world_commands.cpp
   src/core/hook_table.cpp
   src/core/api.cpp
   src/core/world_tracker.cpp
@@ -426,6 +427,7 @@ add_executable(emf_tests
   tests/test_world_settings_state.cpp
   tests/test_world_settings_file.cpp
   tests/test_world_settings_glue.cpp
+  tests/test_world_commands.cpp
   tests/test_mod_loading.cpp
   tests/test_api_settings.cpp
   tests/test_mods_ui.cpp

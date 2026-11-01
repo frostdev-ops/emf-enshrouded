@@ -15,7 +15,7 @@ bool unknown(std::string_view key, std::string* why) {
 }
 
 // The live struct is game memory: read it guarded.
-bool snapshot(const uint8_t* live, uint8_t (&out)[kStructSize]) { return live && emf::seh_read(live, out, kStructSize); }
+bool read_live(const uint8_t* live, uint8_t (&out)[kStructSize]) { return live && emf::seh_read(live, out, kStructSize); }
 
 }  // namespace
 
@@ -25,7 +25,7 @@ bool Service::get(std::string_view key, double* value, std::string* why) const {
     const Field* f = find(key);
     if (!f) return unknown(key, why);
     uint8_t copy[kStructSize];
-    if (!snapshot(deps_.live ? deps_.live() : nullptr, copy)) {
+    if (!read_live(deps_.live ? deps_.live() : nullptr, copy)) {
         if (why) *why = kNoWorld;
         return false;
     }
@@ -82,7 +82,7 @@ bool Service::reset(std::string_view key, bool persist, std::string* why) {
 std::vector<Service::Row> Service::rows() const {
     std::vector<Row> out;
     uint8_t copy[kStructSize];
-    if (!snapshot(deps_.live ? deps_.live() : nullptr, copy)) return out;
+    if (!read_live(deps_.live ? deps_.live() : nullptr, copy)) return out;
     const bool base = state_.has_base();
     for (const auto& f : fields()) {
         const double now = read(copy, f);
@@ -91,6 +91,8 @@ std::vector<Service::Row> Service::rows() const {
     }
     return out;
 }
+
+bool Service::snapshot(uint8_t (&out)[kStructSize]) const { return read_live(deps_.live ? deps_.live() : nullptr, out); }
 
 void Service::on_changed(std::function<void(const std::string&, double)> cb) {
     std::lock_guard<std::mutex> l(cb_m_);
