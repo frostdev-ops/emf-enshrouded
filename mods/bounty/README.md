@@ -22,8 +22,8 @@ under Esc) or in EMF.exe, then restart the game (or the server).
   be within (m) of a flame altar**; an abandoned altar makes no base). In a game you host it becomes a Bounty Board
   within a minute of the host coming near it, and stays one, also while the host is far away and after a reload. The
   notice boards in the world's villages are no Bounty Boards (unless a base is that close to them).
-- **A dedicated server** cannot see which prop is a Notice Board (the game shows that only to a game with a screen):
-  there an admin marks the board with `/bounty.mark`, as below.
+- **On a dedicated server** an admin marks the board with `/bounty.mark`, as below: Notice Boards are recognised
+  through the host's own game, which a server does not have.
 - **Any prop:** before you have a Notice Board, the host looks at a prop within 8 m (a sign, a post, a table) and
   types `bounty.mark`: it is a Bounty Board now. When the server does not know where the sender looks, `bounty.mark`
   takes the prop nearest to them within 3 m and says which. `bounty.unmark` near it takes the mark off.
