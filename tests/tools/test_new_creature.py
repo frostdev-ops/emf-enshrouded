@@ -76,6 +76,37 @@ class BuildTests(Fixture):
                 self.assertEqual(t, (0.0, 0.0, 0.0))
                 self.assertEqual(s, (0.0, 0.0, 0.0))
 
+    def test_a_snake_clip_mistake_is_a_pack_mistake(self):
+        """snake: a snake's clip from its body curve (snake_clips.py); a spine of fewer than three joints or an unknown
+        parameter is refused with the creature's and the clip's names."""
+        for spec, why in (({"head": "Hips", "keys": [{"t": 0}], "length": 1.0}, "fewer than three joints"),
+                          ({"head": "Nope", "keys": [{"t": 0}], "length": 1.0}, "no joint 'Nope'")):
+            with self.assertRaises(SystemExit) as e:
+                nc.build(config(clips={"move": {"snake": spec}, "stand": {"animation": "Move"}}), self.glb, "viper")
+            self.assertIn("viper: clip move", str(e.exception))
+            self.assertIn(why, str(e.exception))
+
+    def test_a_clip_played_in_place(self):
+        """in_place: the joint that carries a walk forward; a joint the skeleton has not is a pack mistake."""
+        built = nc.build(config(clips={"move": {"animation": "Move", "in_place": "Hips"}, "stand": {"animation": "Move"}}),
+                         self.glb)
+        self.assertEqual([c["name"] for c in built["clips"]], ["move", "stand"])
+        with self.assertRaises(SystemExit) as e:
+            nc.build(config(clips={"move": {"animation": "Move", "in_place": "Pelvis"}, "stand": {"animation": "Move"}}),
+                     self.glb)
+        self.assertIn("Pelvis", str(e.exception))
+
+    def test_a_file_scaled_unevenly_needs_uneven_scale(self):
+        """uneven_scale: true lets new_skeleton fold a file's uneven scale above its joints into positions."""
+        nodes = [dict(n) for n in rig.NODES]
+        nodes[6] = dict(nodes[6], scale=[100.0, 50.0, 100.0])
+        glb = rig.small_rig(os.path.join(self.tmp.name, "squashed.glb"), nodes)
+        tclips.add_animation(glb, tclips.Fixture.CHANNELS)
+        with self.assertRaises(ValueError):
+            nc.build(config(), glb)
+        built = nc.build(config(uneven_scale=True), glb)
+        self.assertEqual([c["name"] for c in built["clips"]], ["move", "stand"])
+
     def test_made_and_faster_clips(self):
         """A clip may play its animation faster (speed) or be made from key turns on a pose of an animation (made:
         a death or a flinch the file does not have)."""

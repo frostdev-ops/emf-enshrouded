@@ -60,8 +60,8 @@ never within 40 m of a flame altar. Beat it down or feed it its bait to tame it.
 - **Bear** (bear pack): 1.4x a wolf's size, 2.5x its health, 1.5x its damage, a little slower.
 - **Aurochs** (beasts pack): a huge horned wild bull on the boar's skeleton, it charges like a boar: 1.3x a boar's
   size, 3x its health, 1.4x its damage, a little slower.
-- **Snake** (beasts pack): a big snake (about 2.4 m when it rears up) on a skeleton and animations of its own: it
-  slithers, strikes and lunges; 2x a wolf's health, 1.3x its damage.
+- **Snake** (beasts pack): a 5 m snake from a 3D scan of a pit viper, on a spine and animations of its own: it
+  slithers, rears up like a cobra and strikes; 2x a wolf's health, 1.3x its damage, a little slower.
 - **Rare snakes** (beasts pack): now and then a wild snake is a rare one, bigger and tougher. Whoever slays it (the
   last player to hit it, else the nearest player within 60 m) gets a bonus in their bag: runes, by chance a tier-2
   rune, and by chance a weapon of that rarity at their level.
@@ -88,7 +88,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
 | `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while someone builds next to them |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
-| `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear is the wolf's graph at 1.4x, the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
+| `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
 
 ## Settings (Mods tab, EMF.exe, or `set beastmaster <key> <value>`)
 
@@ -113,12 +113,16 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 
 ## The bear pack (`emf_beastmaster_bear`)
 
-An EML data patch that adds one new creature, `Beastmaster_Bear` (template `b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02`). Its
-model was made with Meshy and fitted to the game wolf's skeleton, so it moves with the wolf's animations and AI. It is in
+An EML data patch that adds one new creature, `Beastmaster_Bear` (template `b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02`): a
+realistic grizzly on a skeleton and animations of its own (it walks, runs, rears up to swipe, flinches and rolls over
+when it dies), played by a copy of the game wolf's animation graph and AI. Bear model and animations: "Realistic Animated
+Bear 3D Model" by WildMesh 3D, licensed under CC BY 4.0 (used in the game with changes). Pack 1.0's bear, made with
+Meshy on the game wolf's skeleton, is still known to Beastmaster. It is in
 the **EMF creature packs** download on EMF's Nexus page. It needs **EML (or ShroudForge) installed first**, which loads
 it when the game starts; then install the pack with EMF.exe ("Install a downloaded file") or like any EML mod (the
 `mods` folder next to the game, run through EML's `emm.exe`). The template sets the size
-(`ScaleComponent` 1.4), the damage (DamageMod multiplier x1.5) and the speeds (x0.85). The health (x2.5) comes from
+(`ScaleComponent` 1.4), the damage (DamageMod multiplier x1.5) and the speeds (walk 1.6 m/s, run 6 m/s as a wolf's,
+the rest x0.85). The health (x2.5) comes from
 Beastmaster when it spawns a bear: the game's template has no base health of its own.
 
 To rebuild it from its sources (for modders; the sources are not in the repository): `python -I
@@ -131,11 +135,12 @@ An EML data patch with new beasts:
 - the Aurochs, `Beastmaster_Aurochs` (template `d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02`), made with Meshy and fitted to
   the boar's skeleton (its animations and AI): size (`ScaleComponent`) 1.3, damage x1.4, speeds x0.9; the health (x3)
   comes from Beastmaster. Its tail follows its hips.
-- the Snake, `Beastmaster_Snake` (template `d4c87337-8c53-41df-8488-8079046e1502`), on a skeleton and animations of
-  its own: the snake by Quaternius (CC0) with a Meshy-made realistic skin, played by a copy of the wolf's animation
-  graph (the wolf's AI); damage x1.3; the health (x2) comes from Beastmaster.
+- the Snake, `Beastmaster_Snake` (template `d4c87337-8c53-41df-8488-8079046e1502`), on a spine and animations of
+  its own: "CC0 Japanese Pit Viper" by ffish.asia / floraZia.com (CC0), a 3D scan scaled to 5 m, its slither, rearing,
+  strikes and death made for it, played by a copy of the wolf's animation graph (the wolf's AI); damage x1.3, walk
+  1.6 and run 4.5 m/s; the health (x2) comes from Beastmaster. Pack 1.0's snake was a cartoon snake.
 - the rare snakes, `Beastmaster_CrimsonSnake`, `Beastmaster_GoldenKingSnake` and `Beastmaster_AlbinoSnake` (templates
-  `d4c87337-8c53-41df-8488-8079046e1512`, `...1522`, `...1532`): the snake with Meshy-made skins of their own, each
+  `d4c87337-8c53-41df-8488-8079046e1512`, `...1522`, `...1532`): the snake with the scan's skin recoloured, each
   its own copy of the skeleton and graph; sizes 1.15, 1.25 and 1.35, damage x1.6, x1.8 and x2.0; the health (x3, x4,
   x5) comes from Beastmaster. With an older beasts pack that lacks them, a wild snake is always a plain one.
 

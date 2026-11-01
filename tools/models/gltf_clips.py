@@ -45,11 +45,71 @@ def _step(channels):
     return max(steps, key=lambda k: (steps[k], k)) if steps else 0.0
 
 
-def _channels(gltf, binc, name, loop=False):
-    """[(node, path, interpolation, times, values)] of the animation called name. For a loop exported without its
-    closing frame (its last key is not its first again), every channel gets one more key a key step after the last,
-    with its first value: the loop then wraps over that step."""
+def _travel(gltf, channels, node):
+    """The node's travel along the ground over the animation (glTF world, y up: x and z only), from its first key to
+    its last."""
+    start, end = _span(channels)
+    w0 = ns.node_worlds(gltf, _frame(channels, start))
+    w1 = ns.node_worlds(gltf, _frame(channels, end))
+    return (w1[node][0][3] - w0[node][0][3], 0.0, w1[node][2][3] - w0[node][2][3]), w0
+
+
+def _take_travel_out(gltf, channels, node):
+    """The channels with the node's travel along the ground taken out of its translation keys, evenly over the
+    animation (in its parent's space at the first key: a parent that holds still); its bobbing and swaying stay."""
+    d, w0 = _travel(gltf, channels, node)
+    start, end = _span(channels)
+    length = end - start
+    parent = ns.parents_of(gltf).get(node)
+    inv = gltf_in.mat_inv_affine(w0[parent]) if parent is not None else [[float(r == c) for c in range(4)]
+                                                                         for r in range(4)]
+    local = tuple(sum(inv[r][c] * d[c] for c in range(3)) for r in range(3))
+    out, found = [], False
+    for nd, path, interp, times, values in channels:
+        if nd == node and path == "translation" and length > 0:
+            found = True
+            values = [tuple(v) for v in values]
+            if interp == "CUBICSPLINE":
+                new = []
+                for k, t in enumerate(times):
+                    a, v, b = values[3 * k:3 * k + 3]
+                    f = (t - start) / length
+                    new += [tuple(x - y / length for x, y in zip(a, local)),
+                            tuple(x - y * f for x, y in zip(v, local)),
+                            tuple(x - y / length for x, y in zip(b, local))]
+                values = new
+            else:
+                values = [tuple(x - y * (t - start) / length for x, y in zip(v, local)) for t, v in zip(times, values)]
+        out.append((nd, path, interp, times, values))
+    if not found and any(abs(c) > 1e-9 for c in d):
+        raise ValueError("node %s travels but has no translation keys of its own: name the joint that carries the "
+                         "travel" % gltf["nodes"][node].get("name", node))
+    return out
+
+
+def _node_of(sk, joint):
+    if joint not in sk["names"]:
+        raise KeyError("no joint %r in the skeleton" % joint)
+    return sk["nodes"][sk["names"].index(joint)]
+
+
+def travel_speed(gltf, binc, sk, name, joint):
+    """How fast the joint travels along the ground in the animation (metres a second, times the skeleton's scale):
+    the speed the game must move the creature at for its feet not to slide, once the travel is taken out."""
+    channels = _read(gltf, binc, name)
+    start, end = _span(channels)
+    d, _ = _travel(gltf, channels, _node_of(sk, joint))
+    return math.hypot(d[0], d[2]) * sk["scale"] / (end - start) if end > start else 0.0
+
+
+def _channels(gltf, binc, name, loop=False, in_place=None):
+    """[(node, path, interpolation, times, values)] of the animation called name; in_place: a node whose travel
+    along the ground is taken out (_take_travel_out). For a loop exported without its closing frame (its last key is
+    not its first again), every channel gets one more key a key step after the last, with its first value: the loop
+    then wraps over that step."""
     out = _read(gltf, binc, name)
+    if in_place is not None:
+        out = _take_travel_out(gltf, out, in_place)
     if loop and not _closed(out):
         start, end = _span(out)
         end += _step(out)
@@ -144,17 +204,20 @@ def _frame(channels, t):
     return pose
 
 
-def pose_at(gltf, binc, sk, name, t, loop=False):
-    """The skeleton's pose (per joint local rotation, position, scale, game space) t seconds into the animation."""
-    channels = _channels(gltf, binc, name, loop)
+def pose_at(gltf, binc, sk, name, t, loop=False, in_place=None):
+    """The skeleton's pose (per joint local rotation, position, scale, game space) t seconds into the animation;
+    in_place: a joint whose travel along the ground is taken out (clip)."""
+    channels = _channels(gltf, binc, name, loop, _node_of(sk, in_place) if in_place else None)
     start, _ = _span(channels)
     return ns.pose(sk, ns.node_worlds(gltf, _frame(channels, start + t)), gltf)
 
 
-def clip(gltf, binc, sk, name, hierarchy_hash, loop=False, fps=60, speed=1.0):
+def clip(gltf, binc, sk, name, hierarchy_hash, loop=False, fps=60, speed=1.0, in_place=None):
     """The animation as a game clip for the skeleton (hierarchy_hash: new_skeleton.clip_hash of its hierarchy); a
-    loop ends on its first pose; speed above 1 plays it faster (the same poses in fewer frames)."""
-    channels = _channels(gltf, binc, name, loop)
+    loop ends on its first pose; speed above 1 plays it faster (the same poses in fewer frames). in_place: the joint
+    that carries the creature forward in an animation with root motion (a walk that travels): its travel along the
+    ground is taken out, the game moving creatures itself (travel_speed: how fast it went)."""
+    channels = _channels(gltf, binc, name, loop, _node_of(sk, in_place) if in_place else None)
     start, end = _span(channels)
     n = max(1, int(round((end - start) / float(speed) * fps)))
     poses = [ns.pose(sk, ns.node_worlds(gltf, _frame(channels, start + (end - start) * f / n)), gltf)

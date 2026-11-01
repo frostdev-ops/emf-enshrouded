@@ -123,6 +123,32 @@ def ja_mirror(q):
     return (q[0], -q[1], -q[2], q[3])
 
 
+class InPlaceTests(Fixture):
+    """A walk that carries its creature forward (root motion: the hips travel 1 m and rise 0.2 m) played in place:
+    the game moves creatures itself, and a loop that travels would jump back at every turn."""
+    CHANNELS = [(2, "translation", "LINEAR", [0.0, 1.0], [(0.0, 0.0, 0.01), (0.0, 0.01, 0.012)])]
+
+    def hips(self, c, frame):
+        return osk.world(ja.sample(c, frame, self.sk["rest"]), self.sk["parents"])[1][1]
+
+    def test_the_travel_is_taken_out_and_the_rest_kept(self):
+        moving = gc.clip(self.gltf, self.binc, self.sk, "Move", HASH)
+        self.assertAlmostEqual(self.hips(moving, 60)[2] - self.hips(moving, 0)[2], -1.0, delta=1e-3)
+        c = gc.clip(self.gltf, self.binc, self.sk, "Move", HASH, in_place="Hips")
+        for frame in (0, 30, 60):
+            x, y, z = self.hips(c, frame)
+            self.assertAlmostEqual(x, 0.0, delta=1e-3)
+            self.assertAlmostEqual(z, 0.0, delta=1e-3)          # no travel along the ground
+            self.assertAlmostEqual(y, 1.0 + 0.2 * frame / 60, delta=1e-3)  # the rise is kept
+
+    def test_the_joint_must_be_ours(self):
+        with self.assertRaises(KeyError):
+            gc.clip(self.gltf, self.binc, self.sk, "Move", HASH, in_place="Pelvis")
+
+    def test_the_speed_of_the_travel(self):
+        self.assertAlmostEqual(gc.travel_speed(self.gltf, self.binc, self.sk, "Move", "Hips"), 1.0, places=3)
+
+
 class ClipTests(Fixture):
     def test_clip_header(self):
         c = gc.clip(self.gltf, self.binc, self.sk, "Move", HASH)

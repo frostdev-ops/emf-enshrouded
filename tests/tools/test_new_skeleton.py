@@ -105,6 +105,23 @@ def small_rig(path, nodes=None):
     return path
 
 
+def world_space_rig(path):
+    """The small rig with its inverse binds and vertices in world space, as glTF's spec has them (the skinned mesh
+    node's own transform, the armature's turn and scale 100, is to be ignored)."""
+    gltf, binc = gltf_in.read_glb(small_rig(path))
+    binc = bytearray(binc)
+    ibm = b"".join(struct.pack("<16f", *colmajor(gltf_in.mat_inv_affine(node_world(j)))) for j in SKIN_NODES)
+    pos = b"".join(struct.pack("<3f", *p) for p in WORLD_POINTS)
+    for view, data in ((gltf["bufferViews"][0], ibm), (gltf["bufferViews"][1], pos)):
+        assert view["byteLength"] == len(data)
+        binc[view.get("byteOffset", 0):view.get("byteOffset", 0) + len(data)] = data
+    acc = gltf["accessors"][1]
+    acc["min"] = [min(p[k] for p in WORLD_POINTS) for k in range(3)]
+    acc["max"] = [max(p[k] for p in WORLD_POINTS) for k in range(3)]
+    write_glb(path, gltf, bytes(binc))
+    return path
+
+
 def same_rotation(a, b, tol=1e-6):
     return abs(abs(sum(x * y for x, y in zip(a, b))) - 1.0) < tol
 
@@ -150,12 +167,92 @@ class BuildTests(Fixture):
             self.assertAlmostEqual(a, b, places=6)
         self.assertTrue(same_rotation(world[2][0], (0.0, -H, 0.0, H)))
 
+    def test_yaw_turns_a_creature_that_faces_sideways(self):
+        """yaw: degrees about the vertical (glTF's, counter-clockwise seen from above): a scan lying along +x faces
+        the game's forward (+z) with yaw -90. Positions and rotations turn; the frames of clips turn alike."""
+        sk = ns.build(self.gltf, self.binc, yaw=-90)
+        world = osk.world(sk["rest"], sk["parents"])
+        # glTF head (0, 1.5, 0.3) turned -90 about y: (-0.3, 1.5, 0); game space mirrors x: (0.3, 1.5, 0)
+        for a, b in zip(world[2][1], (0.3, 1.5, 0.0)):
+            self.assertAlmostEqual(a, b, places=6)
+        frame = osk.world(ns.pose(sk, ns.bind_worlds(self.gltf, self.binc), self.gltf), sk["parents"])
+        for j in range(len(world)):
+            for a, b in zip(world[j][1], frame[j][1]):
+                self.assertAlmostEqual(a, b, places=6)
+        copy = os.path.join(self.tmp.name, "turned.glb")
+        ns.write_glb(self.gltf, self.binc, sk, copy)
+        _, report = gltf_in.load_groups(copy, ns.hierarchy(sk, "22222222-2222-4222-8222-222222222222"),
+                                        warn=self.fail)
+        self.assertLess(report["max_rest_difference"], 1e-3)
+
     def test_non_uniform_scale_is_refused(self):
         nodes = json.loads(json.dumps(NODES))
         nodes[6]["scale"] = [100.0, 50.0, 100.0]
         gltf, binc = gltf_in.read_glb(small_rig(os.path.join(self.tmp.name, "squashed.glb"), nodes))
         with self.assertRaises(ValueError):
             ns.build(gltf, binc)
+
+    def test_uneven_scale_folds_into_the_positions_on_request(self):
+        """A file scaled unevenly above its joints (an FBX export's 1.2 x 1.2 x 1.1): with uneven=True every joint
+        stands exactly where the file puts it (times the scale), with the nearest rotation and unit scale."""
+        nodes = json.loads(json.dumps(NODES))
+        nodes[6]["scale"] = [100.0, 50.0, 100.0]
+        gltf, binc = gltf_in.read_glb(small_rig(os.path.join(self.tmp.name, "squashed.glb"), nodes))
+        sk = ns.build(gltf, binc, scale=0.5, uneven=True)
+        world = osk.world(sk["rest"], sk["parents"])
+        binds = ns.bind_worlds(gltf, binc)
+        for j in range(1, len(sk["nodes"])):
+            m = binds[sk["nodes"][j]]
+            want = (-m[0][3] * 0.5, m[1][3] * 0.5, m[2][3] * 0.5)  # game space mirrors x
+            for a, b in zip(world[j][1], want):
+                self.assertAlmostEqual(a, b, places=6, msg=sk["names"][j])
+            for a in world[j][2]:
+                self.assertAlmostEqual(a, 1.0, places=6, msg=sk["names"][j])
+            self.assertAlmostEqual(sum(c * c for c in world[j][0]), 1.0, places=6)
+
+    def test_the_rotation_of_a_stretched_matrix_is_its_own(self):
+        """A rotation stretched afterwards along the world's axes (S x R) keeps R: the polar factor."""
+        r = trs(q=(0.0, math.sin(0.35), 0.0, math.cos(0.35)))  # 40 degrees about y
+        stretched = gltf_in.mat_mul([[1.2, 0, 0, 0], [0, 1.2, 0, 0], [0, 0, 1.1, 0], [0, 0, 0, 1]], r)
+        with self.assertRaises(ValueError):
+            ns.decompose(stretched)
+        q, p, s = ns.decompose(stretched, uneven=True)
+        self.assertTrue(same_rotation(q, (0.0, math.sin(0.35), 0.0, math.cos(0.35))), q)
+        self.assertAlmostEqual(s, (1.2 * 1.2 * 1.1) ** (1 / 3), places=6)  # the even scale of the same volume
+
+    def test_inverse_binds_in_world_space_as_the_spec_has_them(self):
+        """glTF's spec ignores a skinned mesh node's transform: inverse binds in world space and vertices in world
+        space at the bind pose (Sketchfab's files, their mesh node under a scaled FBX node). The rest still stands
+        where the joint nodes stand, not scaled again by the mesh node's transform."""
+        gltf, binc = gltf_in.read_glb(world_space_rig(os.path.join(self.tmp.name, "spec.glb")))
+        sk = ns.build(gltf, binc)
+        world = osk.world(sk["rest"], sk["parents"])
+        want = [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 1.5, 0.3), (0.0, 1.0, -0.4), (-0.2, 0.0, 0.0)]
+        for j, p in enumerate(want):
+            for a, b in zip(world[j][1], p):
+                self.assertAlmostEqual(a, b, places=5, msg=sk["names"][j])
+        self.assertTrue(same_rotation(world[2][0], (0.0, -H, 0.0, H), tol=1e-5))
+
+    def test_a_helper_joint_with_a_meaningless_inverse_bind_stands_where_its_node_does(self):
+        """Sketchfab's '_rootJoint': a joint no vertex follows, its inverse bind the identity, 100 times off its
+        node's scale. It rests where its node stands, so a frame scales it by 1, not by 1/100 (which the clip's
+        children could not hold)."""
+        path = world_space_rig(os.path.join(self.tmp.name, "spec.glb"))
+        gltf, binc = gltf_in.read_glb(path)
+        binc = bytearray(binc)
+        k = SKIN_NODES.index(4)  # the tail: no vertex follows it
+        off = gltf["bufferViews"][0].get("byteOffset", 0) + 64 * k
+        binc[off:off + 64] = struct.pack("<16f", *colmajor(trs()))
+        gltf, binc = gltf, bytes(binc)
+        sk = ns.build(gltf, binc)
+        tail = sk["names"].index("Tail")
+        world = osk.world(sk["rest"], sk["parents"])
+        for a, b in zip(world[tail][1], (0.0, 1.0, -0.4)):
+            self.assertAlmostEqual(a, b, places=5)
+        frame = ns.pose(sk, ns.node_worlds(gltf), gltf)
+        for j in range(1, len(frame)):
+            for v in frame[j][2]:
+                self.assertAlmostEqual(v, 1.0, places=5, msg=sk["names"][j])
 
     def test_rest_is_the_bind_pose_when_the_nodes_hold_another(self):
         nodes = json.loads(json.dumps(NODES))

@@ -2,6 +2,8 @@
 --   template:   the game template a call spawns (it runs the enemy AI, which follows StartGuardingEvent)
 --   graph:      the animation graph a wild creature of that kind runs (its template data on the server world:
 --               world:template("AnimationGraphResourceComponent2", id).animationGraph; render models are client-side)
+--   also:       another graph that is this kind too (the bear pack 2's bear runs its own graph copy, the older
+--               pack's ran the wolf's)
 --   factions:   when several kinds share a graph: the factions that make it this kind (the wolf's graph is also the
 --               scavengers' hound's)
 --               a beast on a skeleton of its own (the beasts pack's snake) runs its own copy of a game graph: its
@@ -32,11 +34,13 @@ M.list = {
 		graph = "9c1b120e-4901-495c-9cc0-5de134fbe140" },
 	{ id = "hound", name = "Hound", template = "87575915-bc75-4611-ab71-0cd4e79535b1",
 		graph = WOLF_GRAPH, factions = { [SCAVENGER] = true } },
-	-- the bear pack (tools/models/packs/beastmaster_bear.json); GUIDs fixed forever
+	-- the bear pack (tools/models/packs/beastmaster_bear.json); GUIDs fixed forever. Pack 2.0: a bear on a skeleton
+	-- of its own with its own graph copy; 1.0's bear ran the wolf's graph (both at 1.4x)
 	{ id = "bear", name = "Bear", template = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02",
 		model = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f01", pack = "the bear pack (emf_beastmaster_bear)", health_mul = 2.5,
 		plural = "bears",
-		graph = WOLF_GRAPH, factions = { [WILDBEAST] = true }, min_scale = BEAR_SCALE },
+		graph = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f05", also = WOLF_GRAPH,
+		factions = { [WILDBEAST] = true }, min_scale = BEAR_SCALE },
 	-- the beasts pack (tools/models/packs/beastmaster_beasts.json); GUIDs fixed forever
 	{ id = "aurochs", name = "Aurochs", template = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02",
 		model = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f01", pack = PACK, health_mul = 3,
@@ -104,7 +108,7 @@ function M.of(graph, faction, scale)
 	graph = tostring(graph):lower()
 	scale = scale or 1
 	for _, s in ipairs(M.list) do
-		if s.graph == graph and (not s.factions or s.factions[faction])
+		if (s.graph == graph or s.also == graph) and (not s.factions or s.factions[faction])
 			and (not s.min_scale or scale >= s.min_scale) and (not s.max_scale or scale < s.max_scale) then
 			return s
 		end
