@@ -1,5 +1,5 @@
 // The generated header is itself the test: every struct carries static_asserts for its size and
-// every field offset (from types.json). These cases check a few known values on top of that.
+// every field offset (from the game's reflection data). These cases check a few known values on top of that.
 // windows.h first, so a generated name that clashes with a Windows macro breaks the build here.
 #include <windows.h>
 

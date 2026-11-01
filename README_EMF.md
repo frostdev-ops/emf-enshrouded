@@ -46,7 +46,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `mods/event_log/` | logs gameplay events on the host (deaths, hits, pickups, crafts, xp, building) with `on_event` |
 | `mods/guid_dump/` | EML (Lua) export mod: writes every template name → GUID to `export/template_guids.csv` (12,266 templates) |
 | `tools/sigcheck/` | offline check that every signature matches the installed exe |
-| `tools/gen_headers.py` | regenerates `components.hpp` from EML's `types.json` |
+| `tools/gen_headers.py` | regenerates `components.hpp` and `reflection.hpp` from the game's own reflection data in `enshrouded.exe` (`tools/re/exe_types.py`; EML's `types.json` still works) |
 | `tools/re/` | the static-analysis scripts used to build the engine map |
 | `tools/bridge/` | the debug bridge's Python client, the scenario runner (`emf_scenario.py`) and the fake game for tests ([docs/modding/ai_agents.md](docs/modding/ai_agents.md)) |
 | `tools/mcp/`, `.mcp.json` | the MCP server over the debug bridge, for AI coding assistants and other MCP clients |
@@ -708,8 +708,10 @@ Rules:
   1. `build\msvc\emf_sigcheck.exe <enshrouded.exe>` prints every signature's RVA and every code offset it read (exit
      code 0: a known build and all OK, 1: something did not match, 2: a build EMF does not know, 3: the check itself
      failed (bad path); `verify.sh` fails on anything but 0).
-  2. Regenerate EML's `types.json` (`emm.exe run -g <game> --export --export-directory <dir>`, read-only) and compare it
-     with the old one (component layouts); regenerate `sdk/include/emf/generated/components.hpp` with `tools/gen_headers.py`.
+  2. Regenerate the headers from the new exe: `python tools/gen_headers.py <game>\enshrouded.exe` reads the game's own
+     reflection data ([docs/engine_parts/re_reflection.md](docs/engine_parts/re_reflection.md)) and rewrites
+     `sdk/include/emf/generated/components.hpp` and `reflection.hpp`; the diff shows every component layout that changed.
+     `python tools/re/exe_types.py --exe <exe> -o types.emf.json` writes all types (not committed) for a closer look.
   3. Check the engine offsets the type registry does not describe. They live in `src/common/offsets.h` (world, events,
      items, program job, Keen map), `src/core/daytime.h` (Daytime / Weather, written by `time`), `src/core/programs.h`,
      `src/core/system_programs.h` (ProgramDesc), `src/core/spawn.h`, `src/core/events.h`, and the sample mod's

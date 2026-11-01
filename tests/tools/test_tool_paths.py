@@ -21,16 +21,16 @@ def without_game_dir():
     return env
 
 
-class GenHeadersTypes(unittest.TestCase):
-    def test_types_json_in_emf_game_dir(self):
+class GenHeadersSource(unittest.TestCase):
+    def test_the_exe_in_emf_game_dir(self):
         with mock.patch.dict(os.environ, {"EMF_GAME_DIR": r"D:\Games\Enshrouded"}):
-            self.assertEqual(gen_headers.default_types(), os.path.join(r"D:\Games\Enshrouded", ".cache", "types.json"))
+            self.assertEqual(gen_headers.default_source(), os.path.join(r"D:\Games\Enshrouded", "enshrouded.exe"))
 
     def test_no_path_and_no_emf_game_dir_says_what_to_pass(self):
         with mock.patch.dict(os.environ, without_game_dir(), clear=True):
             with self.assertRaises(SystemExit) as e:
-                gen_headers.default_types()
-        self.assertIn("types.json", str(e.exception.code))
+                gen_headers.default_source()
+        self.assertIn("enshrouded.exe", str(e.exception.code))
         self.assertIn("EMF_GAME_DIR", str(e.exception.code))
 
 

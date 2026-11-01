@@ -6,7 +6,7 @@ and the value types they use, as byte-exact packed structs with static_asserts o
 
 Usage: python tools/gen_headers.py [source] [out.hpp]
 source: the game's enshrouded.exe (read with tools/re/exe_types.py), the types file exe_types.py writes, or EML's
-types.json. Without a source: EML's .cache/types.json in the game folder EMF_GAME_DIR names, else a plain error.
+types.json. Without a source: enshrouded.exe in the game folder EMF_GAME_DIR names, else a plain error.
 The generator works on EMF's types format (see tools/re/exe_types.py); EML's types.json is converted to it on load.
 """
 import json
@@ -413,18 +413,18 @@ def generate(doc, out_path):
           f"{len(gen.emitted)} types; and {refl_path.name}")
 
 
-def default_types():
-    """EML's types.json in the game folder EMF_GAME_DIR names; stops with what to pass when it is not set."""
+def default_source():
+    """The game's enshrouded.exe in the folder EMF_GAME_DIR names; stops with what to pass when it is not set."""
     game = os.environ.get("EMF_GAME_DIR")
     if not game:
-        sys.exit("gen_headers.py: where is EML's types.json? Pass it (python tools/gen_headers.py <types.json> "
-                 "[out.hpp]), or set EMF_GAME_DIR to the game folder (its .cache\\types.json is read).")
-    return os.path.join(game, ".cache", "types.json")
+        sys.exit("gen_headers.py: where is the game? Pass its exe (python tools/gen_headers.py <enshrouded.exe> "
+                 "[out.hpp]), or set EMF_GAME_DIR to the game folder (its enshrouded.exe is read).")
+    return os.path.join(game, "enshrouded.exe")
 
 
 def main(argv=None):
     args = sys.argv[1:] if argv is None else list(argv)
-    source = args[0] if args else default_types()
+    source = args[0] if args else default_source()
     out_path = Path(args[1]) if len(args) > 1 else DEFAULT_OUT
     generate(load(source), out_path)
 
