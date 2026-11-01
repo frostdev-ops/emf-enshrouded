@@ -9,6 +9,8 @@ FOR PLAYERS
    Game somewhere Steam does not know? Drag the game folder (the one with enshrouded.exe) onto install.cmd.
    With the mod manager (EMF.exe), it asks once whether to put a shortcut to EMF.exe on your desktop (Enter = yes).
 4. Start the game normally. The key under Esc opens the EMF console; type  help  to see every command.
+   Nothing happens, or Discord's overlay opens too? Discord's overlay lock is often Shift and the key under Esc:
+   give it another key in Discord's settings (Game Overlay).
 5. Optional: emf\EMF.exe in the game folder is EMF's mod manager: every installed mod with switches and settings,
    clash warnings, installing mods you downloaded and save backups. Windows may say "Windows protected your PC" the
    first time (EMF.exe is not signed): click "More info", then "Run anyway". You can also do without it: switches and
@@ -19,8 +21,12 @@ mod to switch it on or off (from the next game start) and to change its settings
 in the console ( settings <mod>  lists the keys;  set big_stacks enabled 1  switches a mod on). No settings files
 come with EMF: every mod starts with its defaults, and your changes are saved in <game>\emf\config\<mod>.ini.
 
+Keys: the console is the key under Esc; Necromancer F2, Beastmaster F3, Companion F6, Hand-over F7, Bulk Craft F8,
+Quick Stack L, Villager Jobs K. Change any mod's key in the Mods tab or EMF.exe (click the key, then press the new
+one); a key you chose yourself stays when a mod's default changes.
+
 Included mods:
-  companion      G: a companion that follows you, fights, takes orders (stay, attack) and wears gear you give it
+  companion      F6: a companion that follows you, fights, takes orders (stay, attack) and wears gear you give it
   villager_jobs  K: villagers farm, tend animals, haul between chests, craft at a chest and gather around it
   quick_stack    L: put what you carry into nearby chests that already hold it
   clock          the time of day in a corner of the screen
@@ -38,7 +44,7 @@ Included mods:
                  countdown, chat log, playtime, Discord webhook (OFF by default; see mods\herald\README.md)
   teleports      Waypoint Teleports: /unstuck and /home for every player, tp and bring for admins (OFF by default;
                  switch it on in the Mods tab and restart the game)
-  bulk_craft     craft one by hand, then U at the station (or /craft 25) crafts many through the game's own
+  bulk_craft     craft one by hand, then F8 at the station (or /craft 25) crafts many through the game's own
                  crafting, at the recipe's pace, from what you carry (OFF by default; see mods\bulk_craft\README.md)
   beastmaster    tame wild beasts and call them to fight beside you; hold F3 for the beast wheel, /beastmaster for
                  every player (a Lua mod; OFF by default; the bear and the aurochs are in the EMF creature packs
@@ -81,7 +87,7 @@ your mod profiles (emf\profiles). Save backups always stay, also with -All.
 It also removes the desktop shortcut that install.cmd made (none other).
 To remove the settings too, run  uninstall.cmd -All  in a command prompt in this folder.
 Gear you gave the companion exists only in its settings files (emf\config\companion): take it back in game
-(G, Gear) before  uninstall.cmd -All  (it refuses while the companion holds gear; -All -Force deletes it anyway).
+(F6, Gear) before  uninstall.cmd -All  (it refuses while the companion holds gear; -All -Force deletes it anyway).
 Installing a newer EMF over an older one keeps your settings.
 
 FOR MODDERS

@@ -1,10 +1,12 @@
 // sample_mod: the first EMF mod. Built only against sdk/include.
 //  - client world: logs the local player's position every 5 s
 //  - server world (host only): logs how many villagers exist and their AI state every 10 s
-//  - optional write test (emf/config/sample_mod.ini: [sample_mod] enable_write=1):
-//    F8 on the host moves the time of day forward by 3 hours via the game's own setTimeOfDay,
-//    F9/F11 spawn templates, F10 destroys the last one, F7 makes the nearest villager walk to the player,
-//    F12 gives the player `give_item` x `give_count` (item debug names: emf/items.csv, written with dump_items=1)
+//  - optional write test (emf/config/sample_mod.ini: [sample_mod] enable_write=1), on keys set in the same ini (no key
+//    by default, so a developer install never takes Hand-over's F7 or Bulk Craft's F8; test_keys.h):
+//    key_time on the host moves the time of day forward by 3 hours via the game's own setTimeOfDay,
+//    key_spawn / key_spawn2 spawn templates, key_destroy destroys the last one, key_villager makes the nearest
+//    villager walk to the player, key_give gives the player `give_item` x `give_count` (item debug names:
+//    emf/items.csv, written with dump_items=1)
 #include <windows.h>
 
 #include <atomic>
@@ -18,6 +20,7 @@
 #include "item_dump.h"
 #include "npc_command.h"
 #include "spawn_track.h"
+#include "test_keys.h"
 #include "time_skip.h"
 
 namespace gen = emf::gen;
@@ -30,7 +33,10 @@ constexpr int64_t kHourNs = 3600ll * 1000000000ll;
 uint64_t g_last_client_ms = 0;
 uint64_t g_last_server_ms = 0;
 bool g_enable_write = false;
-bool g_f8_was_down = false;
+sample::TestKeys g_keys;  // read at load (no key by default)
+bool g_time_was_down = false;
+const char* key_name(sample::TestKey t) { return g_keys[t].name.c_str(); }
+bool edge(uint32_t vk, bool& was_down);
 std::atomic<uint32_t> g_program_calls{0};
 std::atomic<uint32_t> g_own_program_calls{0};
 
@@ -91,42 +97,40 @@ void server_report(emf::World w) {
 }
 
 void server_write_test(emf::World w) {
-    const bool down = (GetAsyncKeyState(VK_F8) & 0x8000) != 0;
-    const bool pressed = down && !g_f8_was_down;
-    g_f8_was_down = down;
-    if (!pressed) return;
+    if (!edge(g_keys[sample::kKeyTime].vk, g_time_was_down)) return;
+    const char* key = key_name(sample::kKeyTime);
     auto set_tod = emf::resolve<sample::SetTimeOfDayFn>("SetTimeOfDay");
     auto* daytime = static_cast<uint8_t*>(w.singleton("g38_daytime::Daytime"));
     auto* weather = static_cast<uint8_t*>(w.singleton("WeatherSystem"));
     if (!set_tod || !daytime) {
-        EMF_LOG(kMod, "F8: SetTimeOfDay or Daytime not available");
+        EMF_LOG(kMod, "%s: SetTimeOfDay or Daytime not available", key);
         return;
     }
     const int64_t now = w.ecs_time_ns();
     if (now == 0) {  // an unknown game build whose tick fields are not confirmed: setTimeOfDay needs the real time
-        EMF_LOG(kMod, "F8: the world's time is not confirmed on this game build: the time stays as it is");
+        EMF_LOG(kMod, "%s: the world's time is not confirmed on this game build: the time stays as it is", key);
         return;
     }
     const auto r = sample::time_skip(daytime, weather, set_tod, now, 3 * kHourNs);
-    EMF_LOG(kMod, "F8: time of day %.2f h -> %.2f h (weather layers reset: %d)", r.old_tod / double(kHourNs),
+    EMF_LOG(kMod, "%s: time of day %.2f h -> %.2f h (weather layers reset: %d)", key, r.old_tod / double(kHourNs),
             r.new_tod / double(kHourNs), r.layers_reset);
 }
 
-// ---- F9 spawn / F10 destroy test (server world) ----
-// slot 0: spawn_guid (F9), slot 1: spawn_guid2 (F11)
+// ---- spawn / destroy test (server world) ----
+// slot 0: spawn_guid (key_spawn), slot 1: spawn_guid2 (key_spawn2)
 uint8_t g_spawn_guid[2][16] = {};
 bool g_have_spawn_guid[2] = {false, false};
-bool g_f9_was_down = false;
-bool g_f11_was_down = false;
-bool g_f10_was_down = false;
+bool g_spawn_was_down = false;
+bool g_spawn2_was_down = false;
+bool g_destroy_was_down = false;
 double g_spawn_target[3] = {};
 int g_track_ticks = 0;        // > 0 while waiting for the spawned entity's transform
-const char* g_track_key = "F9";  // key of the spawn being tracked
+const char* g_track_key = "spawn";  // key of the spawn being tracked
 uint32_t g_spawned_id = 0;
 uint32_t g_destroyed_id = 0;  // waiting to confirm it is gone
 
-bool edge(int vk, bool& was_down) {
-    const bool down = (GetAsyncKeyState(vk) & 0x8000) != 0;
+bool edge(uint32_t vk, bool& was_down) {  // vk 0 (no key): never
+    const bool down = vk != 0 && (GetAsyncKeyState(static_cast<int>(vk)) & 0x8000) != 0;
     const bool pressed = down && !was_down;
     was_down = down;
     return pressed;
@@ -142,7 +146,7 @@ bool entity_pos(emf::World w, uint32_t id, double out[3]) {
 }
 
 void spawn_slot(emf::World w, int slot) {
-    const char* key = sample::spawn_key(slot);
+    const char* key = key_name(sample::spawn_key(slot));
     const uint32_t player = emf::local_player();
     double p[3];
     if (!player || !entity_pos(w, player, p)) {
@@ -167,8 +171,8 @@ void spawn_slot(emf::World w, int slot) {
 }
 
 void server_spawn_test(emf::World w) {
-    if (edge(VK_F9, g_f9_was_down)) spawn_slot(w, 0);
-    if (edge(VK_F11, g_f11_was_down)) spawn_slot(w, 1);
+    if (edge(g_keys[sample::kKeySpawn].vk, g_spawn_was_down)) spawn_slot(w, 0);
+    if (edge(g_keys[sample::kKeySpawn2].vk, g_spawn2_was_down)) spawn_slot(w, 1);
     if (g_track_ticks > 0 && g_spawned_id) {
         --g_track_ticks;
         double q[3];
@@ -181,21 +185,22 @@ void server_spawn_test(emf::World w) {
             EMF_LOG(kMod, "%s: entity %u has no transform after 2 s", g_track_key, g_spawned_id);
         }
     }
-    if (edge(VK_F10, g_f10_was_down) && g_spawned_id) {
+    if (edge(g_keys[sample::kKeyDestroy].vk, g_destroy_was_down) && g_spawned_id) {
         const bool ok = emf::api()->destroy(w.raw(), g_spawned_id);
-        EMF_LOG(kMod, "F10: destroy entity %u: %s", g_spawned_id, ok ? "requested" : "FAILED");
+        EMF_LOG(kMod, "%s: destroy entity %u: %s", key_name(sample::kKeyDestroy), g_spawned_id,
+                ok ? "requested" : "FAILED");
         if (ok) g_destroyed_id = g_spawned_id;
         g_spawned_id = 0;
     } else if (g_destroyed_id) {
         double p[3];
         if (!entity_pos(w, g_destroyed_id, p)) {
-            EMF_LOG(kMod, "F10: entity %u is gone", g_destroyed_id);
+            EMF_LOG(kMod, "destroy: entity %u is gone", g_destroyed_id);
             g_destroyed_id = 0;
         }
     }
 }
 
-// ---- F7 villager "come here" (server world; applied inside the villager's AI worker) ----
+// ---- villager "come here" (key_villager; server world; applied inside the villager's AI worker) ----
 using NpcWorkerFn = void (*)(void* ctx);
 using CurrentEntityIdFn = uint32_t* (*)(void* program_context, uint32_t* out);
 NpcWorkerFn o_npc_worker = nullptr;
@@ -203,7 +208,7 @@ sample::NpcSetStateFn g_npc_set_state = nullptr;
 sample::MarkWrittenFn g_mark_written = nullptr;
 CurrentEntityIdFn g_current_entity = nullptr;
 sample::PendingCommand g_come_here;
-bool g_f7_was_down = false;
+bool g_villager_was_down = false;
 
 // Runs on a game worker thread for one villager. No C++ objects here: the body is SEH-guarded.
 void come_here_step(void* ctx, uint32_t id) {
@@ -211,9 +216,10 @@ void come_here_step(void* ctx, uint32_t id) {
     if (!g_come_here.take_if(id, GetTickCount64(), target)) return;
     __try {
         const bool ok = sample::apply_go_to_position(static_cast<uint8_t*>(ctx), target, g_npc_set_state, g_mark_written);
-        EMF_LOG(kMod, "F7: villager %u %s", id, ok ? "is walking to the player" : "ignored the command (state Start)");
+        EMF_LOG(kMod, "come here: villager %u %s", id,
+                ok ? "is walking to the player" : "ignored the command (state Start)");
     } __except (EXCEPTION_EXECUTE_HANDLER) {
-        EMF_LOG(kMod, "F7: villager %u: applying the command faulted", id);
+        EMF_LOG(kMod, "come here: villager %u: applying the command faulted", id);
     }
 }
 
@@ -241,20 +247,21 @@ void install_come_here() {
                     emf::api()->hook("NpcWorker", reinterpret_cast<void*>(&npc_worker_detour),
                                      reinterpret_cast<void**>(&o_npc_worker));
     if (!ok) o_npc_worker = nullptr;
-    EMF_LOG(kMod, "F7 villager command: %s", ok ? "ready (NpcWorker hooked)" : "unavailable (signature or hook missing)");
+    EMF_LOG(kMod, "villager command: %s", ok ? "ready (NpcWorker hooked)" : "unavailable (signature or hook missing)");
 }
 
 void server_command_test(emf::World w) {
     g_come_here.expire(GetTickCount64());  // the target villager may never run its worker again
-    if (!edge(VK_F7, g_f7_was_down)) return;
+    if (!edge(g_keys[sample::kKeyVillager].vk, g_villager_was_down)) return;
+    const char* key = key_name(sample::kKeyVillager);
     if (!o_npc_worker) {
-        EMF_LOG(kMod, "F7: villager command unavailable");
+        EMF_LOG(kMod, "%s: villager command unavailable", key);
         return;
     }
     double player[3];
     const uint32_t pid = emf::local_player();
     if (!pid || !entity_pos(w, pid, player)) {
-        EMF_LOG(kMod, "F7: player position unknown");
+        EMF_LOG(kMod, "%s: player position unknown", key);
         return;
     }
     struct Best {
@@ -274,11 +281,11 @@ void server_command_test(emf::World w) {
         }
     });
     if (!best.id) {
-        EMF_LOG(kMod, "F7: no villager in this world");
+        EMF_LOG(kMod, "%s: no villager in this world", key);
         return;
     }
     g_come_here.post(best.id, player, GetTickCount64());
-    EMF_LOG(kMod, "F7: villager %u (%.1f m away) told to come to the player at (%.2f, %.2f, %.2f)", best.id,
+    EMF_LOG(kMod, "%s: villager %u (%.1f m away) told to come to the player at (%.2f, %.2f, %.2f)", key, best.id,
             std::sqrt(best.dist2), player[0], player[1], player[2]);
 }
 
@@ -297,10 +304,10 @@ void villagers_command(emf::World w, const std::vector<std::string>&) {
     EMF_REPLY("%d villager(s)", n);
 }
 
-// ---- items: dump_items=1 writes emf/items.csv once; F12 gives an item ----
+// ---- items: dump_items=1 writes emf/items.csv once; key_give gives an item ----
 bool g_dump_items = false;
 bool g_items_dumped = false;
-bool g_f12_was_down = false;
+bool g_give_was_down = false;
 std::wstring ini_path();
 std::wstring game_dir();
 
@@ -321,7 +328,8 @@ void server_items(emf::World w) {
             EMF_LOG(kMod, "wrote %zu items to emf\\items.csv%s", items.size(), f ? "" : " (FAILED to open the file)");
         }
     }
-    if (!edge(VK_F12, g_f12_was_down)) return;
+    if (!edge(g_keys[sample::kKeyGive].vk, g_give_was_down)) return;
+    const char* key = key_name(sample::kKeyGive);
     wchar_t wide[96] = {};
     GetPrivateProfileStringW(L"sample_mod", L"give_item", L"", wide, 96, ini_path().c_str());
     std::string name;
@@ -329,11 +337,11 @@ void server_items(emf::World w) {
     const UINT count = GetPrivateProfileIntW(L"sample_mod", L"give_count", 1, ini_path().c_str());
     const uint32_t player = emf::local_player();
     if (name.empty() || !player) {
-        EMF_LOG(kMod, "F12: set give_item=<debug name> in emf\\config\\sample_mod.ini (see emf\\items.csv)");
+        EMF_LOG(kMod, "%s: set give_item=<debug name> in emf\\config\\sample_mod.ini (see emf\\items.csv)", key);
         return;
     }
     const uint32_t pickup = emf::give_item(w, player, name.c_str(), count);
-    EMF_LOG(kMod, "F12: give %u x '%s' to player %u: %s (pickup entity %u)", count, name.c_str(), player,
+    EMF_LOG(kMod, "%s: give %u x '%s' to player %u: %s (pickup entity %u)", key, count, name.c_str(), player,
             pickup ? "dropped at the player" : "FAILED (unknown name or refused, see the core log)", pickup);
 }
 
@@ -391,8 +399,19 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
     if (!emf::init(api)) return false;
     g_enable_write = read_enable_write();
     g_dump_items = GetPrivateProfileIntW(L"sample_mod", L"dump_items", 0, ini_path().c_str()) != 0;
-    EMF_LOG(kMod, "loaded (write test %s)",
-            g_enable_write ? "ON: F8 = +3 h, F9/F11 spawn, F10 destroy, F7 villager come here, F12 give item" : "off");
+    g_keys = sample::read_test_keys([](const wchar_t* setting) {
+        wchar_t text[32] = {};
+        GetPrivateProfileStringW(L"sample_mod", setting, L"", text, 32, ini_path().c_str());
+        return std::wstring(text);
+    });
+    const std::string keys = sample::test_keys_text(g_keys);
+    if (!g_enable_write)
+        EMF_LOG(kMod, "loaded (write test off)");
+    else if (keys.empty())
+        EMF_LOG(kMod, "loaded (write test on, but no test keys: set key_time, key_spawn, key_spawn2, key_destroy, "
+                      "key_villager or key_give in emf\\config\\sample_mod.ini)");
+    else
+        EMF_LOG(kMod, "loaded (write test ON: %s)", keys.c_str());
     if (g_enable_write) {
         read_spawn_guids();
         install_come_here();

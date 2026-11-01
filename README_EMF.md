@@ -24,7 +24,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `src/saves/` | save backups: the engine shared by EMF.exe's Saves tab and the core's automatic backups and `saves.*` commands, and `save-info.json` ([docs/saves.md](docs/saves.md)) |
 | `sdk/include/emf/` | mod SDK: `emf_api.h` (C API v20), `emf.hpp` (C++ helpers), `generated/components.hpp` (661 components, 65 dynamic halves, 129 events) |
 | `mods/sample_mod/` | example EMF mod (see below) |
-| `mods/companion/` | G: a companion that follows you, fights at your side, takes orders (stay, attack) and wears gear you give it; saved per world (see below) |
+| `mods/companion/` | F6: a companion that follows you, fights at your side, takes orders (stay, attack) and wears gear you give it; saved per world (see below) |
 | `mods/clock/` | the time of day on screen (read-only, on by default) |
 | `mods/quick_stack/` | Quick Stack and Chest Machines: tap L to put what you carry into nearby chests that already hold it; hold L at a chest for sorting chests, recyclers and overflow chests; `/qs` for every player (see below) |
 | `mods/villager_jobs/` | K: villagers farm, tend animals, haul between chests, craft (or trade) at a chest and gather wild pickables around it, assigned with a radial wheel; saved per world (see below) |
@@ -38,7 +38,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `mods/herald/` | Server Herald (server side, off by default): a message of the day, join/leave/death lines, announcements, a restart countdown, a chat log, playtime, `/players`, an opt-in Discord webhook (see below) |
 | `mods/handover/` | Hand-over (Lua, off by default): `/handover wood 20` gives items to the nearest other player; nothing is ever lost; `/handover.block` refuses them (see below) |
 | `mods/teleports/` | Waypoint Teleports: `/unstuck` and `/home` for every player, `tp`, `bring`, `tp.pos`, `tp.back` for admins (see below) |
-| `mods/bulk_craft/` | Bulk Craft (off by default): craft one by hand, then U at the station (or `/craft 25`, every player) crafts many through the game's own crafting, at the recipe's pace (see below) |
+| `mods/bulk_craft/` | Bulk Craft (off by default): craft one by hand, then F8 at the station (or `/craft 25`, every player) crafts many through the game's own crafting, at the recipe's pace (see below) |
 | `mods/beastmaster/` | Beastmaster (Lua, off by default): tame wolves, boars, sabretooths and hounds (bears and aurochs with the EMF creature packs: EML content, install EML or ShroudForge first), keep 8, call 2 to fight beside you; hold F3 for the beast wheel, `/beastmaster` for every player; rare wild pack beasts (see below) |
 | `mods/necromancer/` | Necromancer (Lua, off by default): raise up to 3 skeleton warriors that stay and follow you (a lich and a bone golem with the EMF creature packs: EML content, install EML or ShroudForge first), cast raging spirits (flaming skulls, 6 s); hold F2 for the summoning wheel, shared with Beastmaster; `/necromancer` for every player (see below) |
 | `mods/loot_scale/` | more materials per loot stack (x2 by default, off by default) by hooking the game's loot amount getter by its bytes; plants picked with E, chopping and mining (which never read that setting) get the difference after the game's PickupEvent, each with its own factor (0 = the same, so from 1.1.0 they follow the main factor); switching it off takes effect at the next start; factor 1 is the world's amounts at once for everything that follows it |
@@ -130,6 +130,30 @@ How it draws: the console is a Vulkan layer (`VK_LAYER_EMF_console`, manifest `<
 enables it for the game process only; nothing is written to the registry and other games do not see it. It works next
 to RivaTuner/RTSS, the Steam overlay and the Discord overlay.
 
+**The console does not open, or Discord's overlay opens with it?** Discord's overlay lock is often Shift+\` (Shift
+and the key under Esc). EMF's console opens on that key with or without Shift, so the two can clash: give
+Discord's overlay lock another key in Discord's settings (Game Overlay), or give the console another key with `key=`
+above (a scan code, from the next game start).
+
+### Keys
+EMF's keys by default:
+
+| Key | What it does |
+|---|---|
+| the key under Esc | the console (`key=` under `[overlay]` above) |
+| F2 | Necromancer: the summoning wheel |
+| F3 | Beastmaster: the beast wheel |
+| F6 | Companion: calls it, then opens its order wheel |
+| F7 | Hand-over: the host's wheel |
+| F8 | Bulk Craft: the wheel at a crafting station |
+| L | Quick Stack: tap to put things into nearby chests, hold at a chest for its wheel |
+| K | Villager Jobs: a job for the villager you look at |
+| E | Bounty Board (from 1.2): reads the board you look at |
+
+The game's own default keys take every letter except K, so EMF's wheels sit on the free F-keys. Every mod's key can
+be changed in the console's Mods tab or in EMF.exe (click the key, then press the new one). When a mod's default key
+changes, a key you chose yourself stays.
+
 ### Commands in the game's chat
 You can also type a command into the game's own text chat with a `/` in front: `/give Material_T1_Wood_Logs 5`,
 `/time 12`, `/help`. EMF runs it and does not send it, so other players never see it. The reply shows for a few
@@ -205,16 +229,17 @@ Example reply (from a test run):
   with their AI state and position.
 - Logs `world loaded` / `world saved` from the load and autosave events.
 - Adds the command `sample.villagers`: the villagers of your world with their AI state and position.
-- With `enable_write=1` (host only):
-  - **F8** moves the time of day forward 3 hours (the game's own `setTimeOfDay`).
-  - **F9** spawns the template in `spawn_guid` (default: a barrel prop) 2 m from the player; **F11** spawns
-    `spawn_guid2` (default: a test townsfolk).
-  - **F10** destroys the last spawned entity.
-  - **F12** gives the player `give_item` × `give_count` (an item's debug name, e.g. `Material_T1_Wood_Logs`) as a
+- With `enable_write=1` (host only), on test keys set in the same ini (none by default, so they never take a key a
+  mod uses: Hand-over has F7, Bulk Craft F8; for example `key_spawn=F10`, `key_destroy=F11`):
+  - **`key_time`** moves the time of day forward 3 hours (the game's own `setTimeOfDay`).
+  - **`key_spawn`** spawns the template in `spawn_guid` (default: a barrel prop) 2 m from the player;
+    **`key_spawn2`** spawns `spawn_guid2` (default: a test townsfolk).
+  - **`key_destroy`** destroys the last spawned entity.
+  - **`key_give`** gives the player `give_item` × `give_count` (an item's debug name, e.g. `Material_T1_Wood_Logs`) as a
     pickup dropped 1 m above them; the game's loot code collects it into the backpack (with the default
     auto-collect setting). `dump_items=1` writes every item (name, id, GUID,
     stack size) to `emf\items.csv` when the world loads (build 1269579 has 4207 items).
-  - **F7** makes the villager nearest to the player walk to the player (the engine's own "go to position"
+  - **`key_villager`** makes the villager nearest to the player walk to the player (the engine's own "go to position"
     command). It waits next to you briefly, then wanders back to its home area.
 
 ## The big_stacks mod
@@ -235,8 +260,8 @@ died or was hit (player, villager, enemy), then a count per kind every 10 s. Exa
 ```
 
 ## The companion mod
-With `-EnableWrite` (`emf\config\companion.ini`: `enabled=1`), **G** (or F6) on the host spawns a Vukah warrior
-(`Enemy_Vukah_Melee`) 2 m from you, turns it into an ally and makes it guard you through the game's own
+With `-EnableWrite` (`emf\config\companion.ini`: `enabled=1`), **F6** (the order wheel key) on the host spawns a
+Vukah warrior (`Enemy_Vukah_Melee`) 2 m from you, turns it into an ally and makes it guard you through the game's own
 `StartGuardingEvent`, sent from the mod's ECS program. It follows you (when you walk away it catches up and stays 1-3 m
 from you; while you stand still it may wander a few metres), never attacks you, and **fights at your side at full
 damage**: in the test it hit a hostile Vukah three times for 48 and killed it, and the game credited you with the kill
@@ -253,13 +278,13 @@ player within a second. So:
   comes back to you when you stand still". The new one appears on the spot where you stand.
 - Gone while it stays (you went far away): it is not brought to you. "it waits at its stay spot; it shows up again when
   you come back there": it appears at its spot once you are within 50 m of it.
-- It comes back by itself 3 times within 2 minutes; at the 4th loss it stays away until you call it (G or F6), which
+- It comes back by itself 3 times within 2 minutes; at the 4th loss it stays away until you call it (F6), which
   starts the count over.
 
 The catch-up and the return to you wait until you have stood still for 2 s and aim at the ground you stand on, not a
 spot beside you (over a ledge, or beyond a wall). Gear, order and level stay the same.
 
-**Orders.** With the companion out, hold **G**: a wheel titled "Companion (level N)" offers
+**Orders.** With the companion out, hold **F6**: a wheel titled "Companion (level N)" offers
 
 | Entry | What happens |
 |---|---|
@@ -269,7 +294,7 @@ spot beside you (over a ledge, or beyond a wall). Gear, order and level stay the
 | Gear | a second wheel: give it a weapon or armour from your backpack / action bar, or take all of it back (below) |
 | Dismiss | it leaves (`StopGuardingEvent`, then removed) |
 
-Release G over an entry, or tap G and click. Each order can also have its own key (`key_follow`, `key_stay`,
+Release F6 over an entry, or tap F6 and click. Each order can also have its own key (`key_follow`, `key_stay`,
 `key_attack`, `key_dismiss`; off by default). For Attack, aim with the crosshair; a fast animal can outrun it (in the
 test it chased a rabbit for 30 s and gave up).
 
@@ -298,16 +323,20 @@ being handed over is never lost: a piece that was being given back is given back
 in the 2 minutes after "Take all gear back" can return it twice), and a piece the game had not confirmed taking stays
 yours.
 
+**New in 1.7:** the order wheel key is F6 by default (it was G, which the game uses in build mode and to sort the
+backpack); a key you chose yourself stays. F6 no longer dismisses at once: pick Dismiss on the wheel, or set
+`key_dismiss`.
+
 | companion.ini | What it does |
 |---|---|
-| `key=G` | the order wheel key (with no companion out it summons one): a letter, a digit or a keyboard key's virtual-key code (`0x71` = F2; mouse buttons are refused); counts only while the game window is in front |
+| `key=F6` | the order wheel key (with no companion out it calls one; every companion key is a setting): a letter, a digit or a keyboard key's virtual-key code (`0x71` = F2; mouse buttons are refused); counts only while the game window is in front |
 | `key_follow=` `key_stay=` `key_attack=` `key_dismiss=` | optional one-key orders, same format; empty = off |
 | `gear_bonus_max=10` | the most levels gear can add |
 | `marker_guid=` | what "Stay here" puts down for it to guard (default `0ce28db1-522f-4455-b358-3888fb5e089b`, a small barrel). It must be a template the game can spawn standing still |
 | `faction=11` | the faction number written on the companion right after it spawns (and again if the game changes it). 11 = `PlayerAlly`, the faction of the game's own summons: full damage. 7 = `Player` follows too but every hit does 0. -1 keeps the template's faction: **with the default enemy body that leaves a hostile Vukah next to you**, and other non-ally numbers can too. Anything that is not a number from -1 to 15 falls back to 11 (logged). Level and gear need 11 |
 | `guid=` | the body (default `d5d05217-52dc-467a-9192-26b4f661d8d9`, `Enemy_Vukah_Melee`). Plain enemy-AI actors without `PlayerInput` work; the old default `FakePlayer_Vukah_Melee` (`9543cfb0-...`) follows but does no damage. Tested ones: `docs/engine_parts/re_companions.md` |
 | `auto_summon=1` | summons one by itself once a world you host is running |
-| `respawn_seconds=N` | after the companion dies, a new one comes N seconds later; 0 (default): press G. One the game removed (left far behind) did not die: it always comes back (above) |
+| `respawn_seconds=N` | after the companion dies, a new one comes N seconds later; 0 (default): press the order wheel key. One the game removed (left far behind) did not die: it always comes back (above) |
 | `follow_distance=<m>` | changes the template's guard distances (start following at d + 2 m, stop at d m). Template data: with an enemy body it changes **every wild Vukah of that template** too, until the game restarts. Not set by default |
 
 Console: `companion.gear` (what it wears, its level, and pieces still on their way back to you), `companion.aim` (your camera ray and the creatures near it, with
@@ -513,7 +542,7 @@ Installed switched off (it lets players put items into other players' bags): swi
 first, each stack exactly from its slot (worn equipment never); what does not fit goes back to the giver, and what
 does not fit back is dropped beside them (or the receiver, or the nearest player, if the giver left): nothing is lost.
 Gear is refused (it would lose its gems and perks) unless `allow_gear` is on. `/handover.block` refuses hand-overs (kept
-per world). Players who joined need nothing; the host also has a wheel on a key (H). Details: `mods/handover/README.md`.
+per world). Players who joined need nothing; the host also has a wheel on a key (F7). Details: `mods/handover/README.md`.
 
 ## The teleports mod (Waypoint Teleports)
 Installed switched off: switch it on in the Mods tab or EMF.exe. Every player may type `/unstuck` (a short hop with the
@@ -525,7 +554,7 @@ cancels). Admins get `tp <#k>`, `tp <#k> <#m>`, `bring <#k>`, `tp.pos [#k] x y z
 
 ## The bulk_craft mod (Bulk Craft)
 Installed switched off: switch it on in the Mods tab or EMF.exe. Craft one by hand, then craft many: look at a
-crafting station and press **U** for a wheel with the recipes you crafted there by hand, then x5 / x10 / x25 / max;
+crafting station and press **F8** for a wheel with the recipes you crafted there by hand, then x5 / x10 / x25 / max;
 or `/craft <n|max> [part of the name]` (every player, also from the chat), `/craft.stop`, `/craft.list`. The game
 crafts each one through its own craft request with you as the crafter, from what you carry, all or nothing per craft:
 the mod never moves an item. Because the game's request does not check unlocks, the mod repeats only recipes you

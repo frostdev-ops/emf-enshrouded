@@ -4,13 +4,16 @@
 
 #include <cstdarg>
 #include <cstdio>
+#include <fstream>
 #include <map>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "../mods/companion/companion_logic.h"
 #include "emf/emf_api.h"
+#include "game_bindings.h"
 #include "test_scratch.h"
 
 using companion::Companion;
@@ -328,10 +331,11 @@ TEST_CASE("companion: a failing spawn backs off 5 s, doubling to at most 60 s; a
     CHECK(p.due(t + 86000));  // back to 5 s after the success
 }
 
-TEST_CASE("companion: the death message says what happens next") {
-    CHECK(companion::death_message(false, 0).find("F6 summons a new one") != std::string::npos);
-    CHECK(companion::death_message(true, 10).find("a new one comes in 10 s") != std::string::npos);
-    CHECK(companion::death_message(true, 10).find("F6") == std::string::npos);
+TEST_CASE("companion: the death message says what happens next, naming the order wheel key") {
+    CHECK(companion::death_message(false, 0, "F6").find("F6 summons a new one") != std::string::npos);
+    CHECK(companion::death_message(false, 0, "G").find("G summons a new one") != std::string::npos);  // the player's key
+    CHECK(companion::death_message(true, 10, "F6").find("a new one comes in 10 s") != std::string::npos);
+    CHECK(companion::death_message(true, 10, "F6").find("F6") == std::string::npos);
 }
 
 // ---- orders ----
@@ -1105,4 +1109,54 @@ TEST_CASE("companion: an id that now holds another creature is never adopted; ou
     CHECK(presence({true, vukah, 11, false, -1}, vukah, 11) == Presence::Body);
     CHECK(presence({true, vukah, 3, true, 300}, vukah, -1) == Presence::Ours);   // faction=-1 keeps the template's
     CHECK(presence({true, wolf, 11, true, 300}, 0, 11) == Presence::Ours);       // its template was not readable
+}
+
+// ---- keys ----
+namespace {
+std::string companion_source() {
+    std::ifstream f(std::string(EMF_SOURCE_DIR) + "/mods/companion/companion.cpp", std::ios::binary);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+}  // namespace
+
+TEST_CASE("companion: the order wheel key is F6 by default, a key the game leaves free; the order keys start empty") {
+    const std::string wheel = game_bindings::manifest_default("mods/companion/mod.json", "key");
+    CHECK(wheel == "F6");  // G tilts in build mode and sorts the backpack in menus
+    CHECK_FALSE(game_bindings::is_game_key(wheel));
+    for (const char* k : {"key_follow", "key_stay", "key_attack", "key_dismiss"}) {
+        CAPTURE(k);
+        CHECK(game_bindings::manifest_default("mods/companion/mod.json", k).empty());
+    }
+}
+
+TEST_CASE("companion: the code's default wheel key is mod.json's") {
+    CHECK(std::string(companion::kWheelKeyDefault) == "F6");
+    CHECK(game_bindings::manifest_default("mods/companion/mod.json", "key") == companion::kWheelKeyDefault);
+}
+
+TEST_CASE("companion: one press of the wheel key does one thing: summons with none out, opens the wheel with one out") {
+    using companion::WheelPress;
+    using companion::wheel_press;
+    CHECK(wheel_press(Phase::None) == WheelPress::Summon);
+    CHECK(wheel_press(Phase::Active) == WheelPress::OpenWheel);  // Dismiss is on the wheel
+    CHECK(wheel_press(Phase::Stopping) == WheelPress::Nothing);  // a dismissal is under way
+    CHECK(wheel_press(Phase::StopSent) == WheelPress::Nothing);
+}
+
+TEST_CASE("companion: notes name the wheel key, or where to set one when the player cleared it") {
+    CHECK(companion::call_key_text("F6") == "F6");
+    CHECK(companion::call_key_text("G") == "G");
+    CHECK(companion::call_key_text("") == "the order wheel key (set one in the Mods tab)");
+    CHECK(companion::lost_notice(companion::LostNotice::Lost, false, false, companion::call_key_text("")) ==
+          "Companion: it keeps getting lost; press the order wheel key (set one in the Mods tab) to call it again");
+}
+
+TEST_CASE("companion: every key is a setting (no key of its own in the code, so F6 does one thing)") {
+    const std::string src = companion_source();
+    REQUIRE_FALSE(src.empty());
+    CHECK(src.find("VK_F") == std::string::npos);
+    CHECK(src.find("GetAsyncKeyState") == std::string::npos);
+    CHECK(src.find("g_f6") == std::string::npos);
 }

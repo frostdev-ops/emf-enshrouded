@@ -1,14 +1,14 @@
 {
   "id": "bulk_craft",
   "name": "Bulk Craft",
-  "version": "1.0.0",
-  "description": "Craft one by hand, then craft many: look at a crafting station and press U for x5 / x10 / x25 / max of a recipe you crafted there by hand, or type /craft <n> in the chat (every player on your server). Crafted by the game itself from your own materials, one at a time at the recipe's own pace. Host or dedicated server; players who join need nothing. Installed switched off.",
+  "version": "1.0.1",
+  "description": "Craft one by hand, then craft many: look at a crafting station and press F8 for x5 / x10 / x25 / max of a recipe you crafted there by hand, or type /craft <n> in the chat (every player on your server). Crafted by the game itself from your own materials, one at a time at the recipe's own pace. Host or dedicated server; players who join need nothing. Installed switched off.",
   "authors": ["EMF"],
   "enabled": false,
   "emf": 17,
   "side": "server",
   "settings": [
-    {"key": "key", "type": "keybind", "default": "U", "label": "Bulk craft key (host)", "live": true, "group": "Bulk craft",
+    {"key": "key", "type": "keybind", "default": "F8", "label": "Bulk craft key (host)", "live": true, "group": "Bulk craft",
      "help": "Look at a crafting station (or at nothing, for hand crafting) and press it: the wheel offers what you crafted there by hand."},
     {"key": "pace", "type": "select", "default": "paced", "label": "Pace", "live": true, "group": "Bulk craft",
      "options": [{"value": "paced", "label": "One at a time (the recipe's crafting time, at least the time below)"},

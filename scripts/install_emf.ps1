@@ -42,16 +42,18 @@ Get-ChildItem (Join-Path $Dist "emf\mods") -Directory -ErrorAction SilentlyConti
 }
 $ini = Join-Path $Game "emf\config\sample_mod.ini"
 $value = if ($EnableWrite) { 1 } else { 0 }
-# Test spawns: F9 = a decorative barrel prop, F11 = a test villager (template GUIDs from export/template_guids.csv)
+# Test spawns: spawn_guid = a decorative barrel prop, spawn_guid2 = a test villager (template GUIDs from
+# export/template_guids.csv). The test keys (key_spawn, key_give, ...) stay unset: add them to the ini by hand, on
+# keys no installed mod uses (F7 and F8 belong to Hand-over and Bulk Craft).
 Set-Content -Encoding ascii $ini ("[sample_mod]`r`nenable_write=$value`r`nguid_layout=ms`r`n" +
     "spawn_guid=0ce28db1-522f-4455-b358-3888fb5e089b`r`n" +
     "spawn_guid2=8bd1dac4-91a5-4287-93c1-7481a4211fce`r`n" +
-    "dump_items=1`r`ngive_item=Material_T1_Wood_Logs`r`ngive_count=5`r`n")  # F12 gives 5 wood logs; emf\items.csv lists the names
-# Companion mod (F6): spawns Enemy_Vukah_Melee as an ally (faction 11 = PlayerAlly), which follows, guards the player
-# and fights at full damage. Only with -EnableWrite. No follow_distance: with an enemy body it would change every wild
-# Vukah of that template too.
+    "dump_items=1`r`ngive_item=Material_T1_Wood_Logs`r`ngive_count=5`r`n")  # key_give gives 5 wood logs; emf\items.csv lists the names
+# Companion mod (F6, its order wheel key): spawns Enemy_Vukah_Melee as an ally (faction 11 = PlayerAlly), which
+# follows, guards the player and fights at full damage. Only with -EnableWrite. No follow_distance: with an enemy body
+# it would change every wild Vukah of that template too.
 Set-Content -Encoding ascii (Join-Path $Game "emf\config\companion.ini") ("[companion]`r`nenabled=$value`r`n" +
-    "guid=d5d05217-52dc-467a-9192-26b4f661d8d9`r`nfaction=11`r`nauto_summon=0`r`nrespawn_seconds=0`r`nkey=G`r`n")
+    "guid=d5d05217-52dc-467a-9192-26b4f661d8d9`r`nfaction=11`r`nauto_summon=0`r`nrespawn_seconds=0`r`nkey=F6`r`n")
 # villager_jobs mod: villagers craft from a chest (K on a villager, then on a chest). Only with -EnableWrite.
 Set-Content -Encoding ascii (Join-Path $Game "emf\config\villager_jobs.ini") ("[villager_jobs]`r`nenabled=$value`r`n" +
     "key=K`r`nseconds_per_item=30`r`nfarm_radius=20`r`ntend_radius=20`r`nhaul_per_trip=20`r`n")

@@ -1,4 +1,4 @@
--- hotkey_wheel: a key opens a radial wheel (an EMF example mod in Lua). Hold F3 (or the key you bind in the Mods tab),
+-- hotkey_wheel: a key opens a radial wheel (an EMF example mod in Lua). Hold F9 (or the key you bind in the Mods tab),
 -- move the mouse to a time of day and let go: the world's clock jumps there. Only the host can change the time.
 --
 -- How it sets the time: Lua has no call for that. EMF's console command "time <hours>" does it through the game's own

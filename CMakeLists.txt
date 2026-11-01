@@ -402,6 +402,7 @@ add_executable(emf_tests
   tests/test_wheel_gate.cpp
   tests/test_aim.cpp
   tests/test_keys.cpp
+  tests/test_mod_keys.cpp
   tests/test_sdk_helpers.cpp
   tests/test_quick_stack.cpp
   tests/test_quick_stack_glue.cpp

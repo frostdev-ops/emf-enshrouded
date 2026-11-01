@@ -39,6 +39,9 @@ constexpr uint32_t kAltarWorkshops[] = {0xb326e042u, 0x6f7d5d2fu};  // flame alt
 
 // ---- settings ----
 enum class Pace { Paced, Instant };
+// The bulk craft key's default (mod.json "key"): F8, which the game leaves free (U is its slow walk).
+constexpr const char* kDefaultKey = "F8";
+
 struct Settings {
     Pace pace = Pace::Paced;
     double floor_s = 0.5;       // paced: seconds per craft for recipes without a crafting time

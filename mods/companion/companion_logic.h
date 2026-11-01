@@ -148,6 +148,25 @@ private:
     uint64_t last_start_ms_ = 0;
 };
 
+// The order wheel key's default (mod.json "key"): F6, which the game leaves free (G tilts in build mode and sorts the
+// backpack in menus). It is the one key that calls the companion by hand; the order keys start empty.
+constexpr const char* kWheelKeyDefault = "F6";
+
+// What a press of the order wheel key does: with no companion out it summons one, with one out it opens the order
+// wheel (Dismiss is on it), while one is being dismissed nothing. One press, one thing.
+enum class WheelPress { Nothing, Summon, OpenWheel };
+inline WheelPress wheel_press(Companion::Phase phase) {
+    if (phase == Companion::Phase::Active) return WheelPress::OpenWheel;
+    if (phase == Companion::Phase::None) return WheelPress::Summon;
+    return WheelPress::Nothing;
+}
+
+// The key notes tell the player to press to call the companion: the order wheel key's name, or where to set one when
+// the player cleared it.
+inline std::string call_key_text(const std::string& wheel_key_name) {
+    return wheel_key_name.empty() ? "the order wheel key (set one in the Mods tab)" : wheel_key_name;
+}
+
 // Turns "key is down" samples into single presses.
 struct KeyEdge {
     bool was_down = false;
@@ -186,13 +205,13 @@ inline std::optional<uint8_t> faction_to_write(int configured, uint8_t current) 
 
 constexpr uint64_t kSettleMs = 5000;  // after a world appears, wait this long before summoning on our own
 
-// When to summon a companion without F6 (server tick only, not thread-safe).
+// When to summon a companion without the order wheel key (server tick only, not thread-safe).
 // - A new session (emf::server_session) wants a summon when auto_summon is on or a companion was active when the
 //   previous session ended (it comes back after a reload); it is due kSettleMs after that session's save has loaded
 //   (on_loaded), or kLoadFallbackMs into the session if no load notice comes.
-// - A death of a companion that was out arms one respawn_ms later when respawn_ms is set (a death read after an F6
+// - A death of a companion that was out arms one respawn_ms later when respawn_ms is set (a death read after a
 //   dismissal does not).
-// - An F6 dismissal disarms until the next session.
+// - A dismissal (the wheel's Dismiss, or the dismiss key) disarms until the next session.
 // - A summon that could not spawn is tried again after a back-off: 5 s, doubling to 60 s (a success resets it).
 class SummonPolicy {
 public:
@@ -227,7 +246,7 @@ public:
         armed_ = true;
         due_ms_ = now_ms + kSettleMs;
     }
-    // A companion is out. `by_hand`: the player called it (G, F6), which starts the lost count over.
+    // A companion is out. `by_hand`: the player called it (the order wheel key), which starts the lost count over.
     void on_summoned(bool by_hand = false) {
         active_ = true;
         armed_ = false;
@@ -444,10 +463,10 @@ private:
     uint64_t cooldown_until_ms_ = 0;
 };
 
-// What the log says after the companion died.
-inline std::string death_message(bool respawns, uint64_t respawn_seconds) {
+// What the log says after the companion died; `key`: what calls a new one (call_key_text).
+inline std::string death_message(bool respawns, uint64_t respawn_seconds, const std::string& key) {
     if (respawns) return "a new one comes in " + std::to_string(respawn_seconds) + " s";
-    return "F6 summons a new one";
+    return key + " summons a new one";
 }
 
 // The level to write on the companion: `target` when it differs from the current one (0 = unreadable: never) and its

@@ -3,6 +3,7 @@
 #include <string>
 
 #include "../mods/sample_mod/spawn_track.h"
+#include "../mods/sample_mod/test_keys.h"
 
 TEST_CASE("parse_guid: textual byte order") {
     uint8_t g[16];
@@ -34,9 +35,10 @@ TEST_CASE("parse_guid rejects malformed text") {
     CHECK_FALSE(sample::parse_guid("e284b901-c3dd-4282-8a4e-0a618e5763fZ", g, false));
 }
 
-TEST_CASE("spawn_key names the key that triggered each spawn slot") {
-    CHECK(std::string(sample::spawn_key(0)) == "F9");
-    CHECK(std::string(sample::spawn_key(1)) == "F11");
+TEST_CASE("spawn_key names the test key setting of each spawn slot") {
+    CHECK(sample::spawn_key(0) == sample::kKeySpawn);   // spawn_guid
+    CHECK(sample::spawn_key(1) == sample::kKeySpawn2);  // spawn_guid2
+    CHECK(std::wstring(sample::TestKeys{}[sample::spawn_key(1)].setting) == L"key_spawn2");
 }
 
 TEST_CASE("sample_mod: guid_layout is the manifest's choice (stored as its index), older ini text still reads") {

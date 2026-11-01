@@ -1,5 +1,5 @@
 #pragma once
-// Helpers for the sample mod's spawn test (F9/F11 spawn, F10 destroy).
+// Helpers for the sample mod's spawn test (key_spawn / key_spawn2 spawn, key_destroy destroys).
 #include <cstdint>
 #include <string_view>
 
@@ -16,8 +16,5 @@ inline bool guid_layout_ms(std::wstring_view v) {
     if (v == L"1") return false;
     return v.empty() || !(v[0] == L'r' || v[0] == L'R' || v[0] == L't' || v[0] == L'T');
 }
-
-// The key that triggers each spawn slot (slot 0 = spawn_guid, slot 1 = spawn_guid2).
-inline const char* spawn_key(int slot) { return slot == 0 ? "F9" : "F11"; }
 
 }  // namespace sample
