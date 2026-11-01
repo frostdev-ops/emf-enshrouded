@@ -128,7 +128,20 @@ TEST_CASE("redirect: only opens that read an existing file are redirected") {
     CHECK(redirect_allowed(GENERIC_READ, OPEN_EXISTING, FILE_FLAG_OVERLAPPED | FILE_FLAG_NO_BUFFERING));
     CHECK(redirect_allowed(FILE_READ_ATTRIBUTES | SYNCHRONIZE, OPEN_EXISTING, 0));
     CHECK(redirect_allowed(0, OPEN_EXISTING, 0));  // a query of the attributes
-    CHECK(redirect_allowed(GENERIC_READ, OPEN_ALWAYS, 0));
+    // what the game passes (the live run): GENERIC_READ, share READ|DELETE, OPEN_EXISTING
+    CHECK(redirect_allowed(GENERIC_READ, OPEN_EXISTING, 0));
+    CHECK(redirect_allowed(GENERIC_READ | GENERIC_EXECUTE | READ_CONTROL | SYNCHRONIZE, OPEN_EXISTING, 0));
+    CHECK(redirect_allowed(FILE_READ_DATA | FILE_READ_EA | FILE_READ_ATTRIBUTES | FILE_EXECUTE, OPEN_EXISTING, 0));
+    // only OPEN_EXISTING: any other disposition goes to the game's own path
+    CHECK_FALSE(redirect_allowed(GENERIC_READ, OPEN_ALWAYS, 0));
+    CHECK_FALSE(redirect_allowed(GENERIC_READ, 0, 0));
+    CHECK_FALSE(redirect_allowed(GENERIC_READ, 99, 0));
+    // an allowlist of the read rights: anything else (known or not) is not redirected
+    CHECK_FALSE(redirect_allowed(GENERIC_READ | ACCESS_SYSTEM_SECURITY, OPEN_EXISTING, 0));
+    CHECK_FALSE(redirect_allowed(FILE_WRITE_EA, OPEN_EXISTING, 0));
+    CHECK_FALSE(redirect_allowed(WRITE_DAC, OPEN_EXISTING, 0));
+    CHECK_FALSE(redirect_allowed(WRITE_OWNER, OPEN_EXISTING, 0));
+    CHECK_FALSE(redirect_allowed(GENERIC_READ | 0x00000200, OPEN_EXISTING, 0));  // a bit Windows gives no name here
     CHECK_FALSE(redirect_allowed(GENERIC_READ | GENERIC_WRITE, OPEN_EXISTING, 0));
     CHECK_FALSE(redirect_allowed(FILE_WRITE_DATA, OPEN_EXISTING, 0));
     CHECK_FALSE(redirect_allowed(FILE_APPEND_DATA, OPEN_EXISTING, 0));

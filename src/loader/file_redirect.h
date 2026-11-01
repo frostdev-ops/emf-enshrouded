@@ -193,14 +193,17 @@ inline std::wstring shadow_path(std::wstring_view opened, std::wstring_view game
     return out;
 }
 
-// Only an open that reads a file that is there goes to the shadow copy: no write, append, delete or attribute change,
-// no create or truncate, no delete-on-close. The shadow's .dat files are hard links to the game's own: a write through
+// The access rights an open may ask for and still go to the shadow copy: reading only.
+constexpr DWORD kReadOnlyAccess = GENERIC_READ | GENERIC_EXECUTE | FILE_READ_DATA | FILE_READ_EA | FILE_READ_ATTRIBUTES |
+                                  FILE_EXECUTE | READ_CONTROL | SYNCHRONIZE;
+
+// Only an open that reads a file that is there goes to the shadow copy: every right it asks for is a read right (an
+// allowlist, so a right not named here never passes), the file must exist (OPEN_EXISTING; any other disposition goes to
+// the game's own path), no delete-on-close. The shadow's .dat files are hard links to the game's own: a write through
 // one would change the game's file.
 inline bool redirect_allowed(DWORD access, DWORD disposition, DWORD flags) {
-    constexpr DWORD kWrites = GENERIC_WRITE | GENERIC_ALL | MAXIMUM_ALLOWED | FILE_WRITE_DATA | FILE_APPEND_DATA |
-                              FILE_WRITE_EA | FILE_WRITE_ATTRIBUTES | DELETE | WRITE_DAC | WRITE_OWNER;
-    if (access & kWrites) return false;
-    if (disposition != OPEN_EXISTING && disposition != OPEN_ALWAYS) return false;
+    if ((access & ~kReadOnlyAccess) != 0) return false;
+    if (disposition != OPEN_EXISTING) return false;
     return (flags & FILE_FLAG_DELETE_ON_CLOSE) == 0;
 }
 
