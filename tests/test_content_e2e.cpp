@@ -224,3 +224,15 @@ TEST_CASE("e2e content: no emf_content.dll: today's behaviour") {
         if (e.is_regular_file()) content.push_back(e.path().filename());
     CHECK(content == std::vector<std::wstring>{L"standin.txt"});
 }
+
+TEST_CASE("e2e content: a shadow copy whose record is gone is built again, never used half-checked") {
+    ContentGame g(L"emf_e2e_record");
+    g.run();
+    wait_unlocked(g.shadow + L"\\shadow.txt");
+    REQUIRE(DeleteFileW((g.shadow + L"\\shadow.txt").c_str()));
+    const std::string out = g.run();
+    CHECK(file_text(g.shadow + L"\\built.txt").find("seq=2 ") == 0);
+    CHECK(out.find("kfc=built kfc 2\n") != std::string::npos);
+    CHECK(out.find("status=built\t1\t") != std::string::npos);
+    CHECK(g.loader_log().find("the shadow copy's record, shadow.txt, is missing") != std::string::npos);
+}

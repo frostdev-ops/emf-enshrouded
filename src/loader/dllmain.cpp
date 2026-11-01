@@ -353,6 +353,10 @@ emf::loader::ContentPlan plan_this_start(emf::loader::PlayOnce play) {
                 g_dir, "enshrouded", g_facts.base, g_facts.mods.usable, content_dll(), EMF_VERSION));
         };
         p.read_state = [] { return emf::loader::read_state(state_path()); };
+        p.record_ok = [] {
+            const auto game = emf::loader::normal_game_dir(g_dir);
+            return game && emf::loader::shadow_problem(emf::loader::file_hooks::shadow_facts(*game)).empty();
+        };
         p.log = [](const std::string& line) { loader_log(g_dir, line.c_str()); };
         return emf::loader::plan_content(p);
     } catch (...) {

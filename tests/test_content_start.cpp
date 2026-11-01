@@ -335,3 +335,17 @@ TEST_CASE("content splash: a window while the work runs on another thread, with 
     // a work that does not come back in time: false, and the work keeps what it needs
     CHECK_FALSE(emf::loader::run_with_splash(nullptr, [] { Sleep(1500); }, 100));
 }
+
+TEST_CASE("content start: a current state but a shadow whose record does not match the game builds again") {
+    Recorder r;
+    auto steps = plan_steps(r, owned_facts(), good_state("sha256:now"));
+    steps.record_ok = [&r] { return r.add("record"), false; };  // shadow.txt gone, or the game's files changed
+    const auto plan = emf::loader::plan_content(steps);
+    CHECK(plan.path == ContentPath::BuildHeld);
+    CHECK(r.joined() == "facts, fingerprint, read_state, record");
+    CHECK(r.logged("the shadow copy's record"));
+    Recorder ok;
+    auto good = plan_steps(ok, owned_facts(), good_state("sha256:now"));
+    good.record_ok = [&ok] { return ok.add("record"), true; };
+    CHECK(emf::loader::plan_content(good).path == ContentPath::UseCurrent);
+}

@@ -77,6 +77,9 @@ struct PlanSteps {
     std::function<ContentFacts()> facts;
     std::function<std::string()> fingerprint;  // asked only when EMF owns the content
     std::function<std::optional<ContentState>()> read_state;
+    // the redirect's own check of shadow.txt against the game's files (file_redirect.h) passes; asked only for a
+    // current state, so a "current" start is one the redirect will really take (null: not asked)
+    std::function<bool()> record_ok;
     std::function<void(const std::string&)> log;
 };
 
@@ -107,7 +110,14 @@ inline ContentPlan plan_content(const PlanSteps& s) {
     plan.emf_owns = true;
     plan.fingerprint = s.fingerprint();
     const std::optional<ContentState> state = s.read_state();
-    if (state_current(state, plan.fingerprint)) {
+    const bool current = state_current(state, plan.fingerprint);
+    if (current && s.record_ok && !s.record_ok()) {
+        plan.path = ContentPath::BuildHeld;
+        s.log("EML content: " + d.why + "; a build is needed at this start (the shadow copy's record, shadow.txt, is "
+              "missing or does not match the game's files)");
+        return plan;
+    }
+    if (current) {
         plan.path = ContentPath::UseCurrent;
         plan.state_mods = state->mods.size();
         plan.state_ms = state->ms;
