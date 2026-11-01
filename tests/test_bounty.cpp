@@ -792,3 +792,66 @@ TEST_CASE("bounty: a 1.1.0 world file migrates: open and finished bounties becom
     b.seconds(1);
     CHECK(b.board() == before);
 }
+
+// ---- 1.2: new notices every few in-game days ----
+namespace {
+// One in-game night: evening, midnight, dawn, noon (one server step each).
+void night(BountyRig& b) {
+    for (double h : {23.0, 2.0, 6.5, 12.0}) {
+        set_daytime(b.r.fake, h);
+        b.seconds(1);
+    }
+}
+// A number line of the saved world file ("dawns 3" -> 3; -1 when there is none).
+int saved_number(BountyRig& b, const std::string& name) {
+    b.seconds(1);
+    const std::string f = slurp(b.data);
+    const size_t at = f.find("\n" + name + " ");
+    return at == std::string::npos ? -1 : std::atoi(f.c_str() + at + name.size() + 2);
+}
+}  // namespace
+
+TEST_CASE("bounty: new notices every reset_days in-game days at dawn; the board says how many days are left") {
+    BountyRig b({{"reset_days", "2"}});
+    CHECK(b.board().find("New notices in 2 days") != std::string::npos);
+    const std::string first = notices_of(b.board());
+    night(b);
+    CHECK(b.board().find("New notices at the next dawn") != std::string::npos);
+    CHECK(notices_of(b.board()) == first);
+    CHECK(saved_number(b, "posted") == 0);
+    night(b);
+    CHECK(saved_number(b, "dawns") == 2);
+    CHECK(saved_number(b, "posted") == 2);  // posted at the second dawn
+    CHECK(b.board().find("New notices in 2 days") != std::string::npos);
+    bool changed = notices_of(b.board()) != first;
+    for (int i = 0; i < 4 && !changed; ++i) {  // a draw may repeat a list now and then
+        night(b);
+        night(b);
+        changed = notices_of(b.board()) != first;
+    }
+    CHECK(changed);
+}
+
+TEST_CASE("bounty: a dawn counts once when the clock jumps past midnight to 6:00 or later") {
+    BountyRig b({{"reset_days", "1"}});
+    CHECK(saved_number(b, "dawns") == 0);
+    set_daytime(b.r.fake, 22.0);
+    b.seconds(1);
+    set_daytime(b.r.fake, 8.0);  // the host sets the morning, or everyone slept through the night
+    b.seconds(1);
+    CHECK(saved_number(b, "dawns") == 1);
+    CHECK(saved_number(b, "posted") == 1);
+    set_daytime(b.r.fake, 23.9);  // a night as it runs: midnight, then 6:00
+    b.seconds(1);
+    set_daytime(b.r.fake, 0.1);
+    b.seconds(1);
+    set_daytime(b.r.fake, 6.1);
+    b.seconds(1);
+    CHECK(saved_number(b, "dawns") == 2);
+    set_daytime(b.r.fake, 10.0);  // later the same day
+    b.seconds(1);
+    set_daytime(b.r.fake, 12.0);
+    b.seconds(1);
+    CHECK(saved_number(b, "dawns") == 2);
+    CHECK(saved_number(b, "posted") == 2);
+}

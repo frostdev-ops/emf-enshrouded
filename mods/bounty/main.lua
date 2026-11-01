@@ -292,8 +292,11 @@ local function hold_max() return clamp(math.floor(tonumber(emf.setting("hold_max
 local function each_player() return emf.setting("offers_for") == "each_player" end
 local function period_len() return math.max(1, emf.setting("reset_hours") or 4) * 3600 end
 
+local function reset_days() return clamp(math.floor(tonumber(emf.setting("reset_days")) or 4), 1, 10) end
+
 local function period_key()
   local mode = emf.setting("reset")
+  if mode == "game_days" then return "n" .. posted .. "." .. offset end
   if mode == "game_dawn" then return "g" .. dawns .. "." .. offset end
   if mode == "hours" then return "h" .. math.floor(play_s / period_len()) .. "." .. offset end
   local t = os.date("*t", os.time() - (emf.setting("reset_hour") or 6) * 3600)
@@ -303,6 +306,11 @@ end
 local function until_text()
   local mode = emf.setting("reset")
   local left
+  if mode == "game_days" then
+    local days = reset_days() - (dawns - posted)
+    if days <= 1 then return "New notices at the next dawn" end
+    return string.format("New notices in %d days", days)
+  end
   if mode == "game_dawn" then return "New notices at dawn" end
   if mode == "hours" then
     left = period_len() - (play_s % period_len())
@@ -1056,6 +1064,13 @@ emf.command("reset", ": new notices for everyone now (host)", function(world, ar
 end)
 
 -- ---- every step ----
+-- A dawn between two readings of the clock: it passed 6:00, or it went back (past midnight: the host set the time, or
+-- the players slept through the night) to 6:00 or later. The game keeps no day number, so the mod counts dawns.
+local function is_dawn(before, now)
+  if before < 6 and now >= 6 then return true end
+  return now < before and now >= 6
+end
+
 emf.on_tick(function(world)
   if world:is_client() then  -- in someone else's game: the line goes
     client_steps = client_steps + 1
@@ -1074,8 +1089,9 @@ emf.on_tick(function(world)
   if not loaded then return end
   local tod = emf.time_of_day()
   if tod then
-    if last_tod and last_tod < 6 and tod >= 6 then
+    if last_tod and is_dawn(last_tod, tod) then
       dawns = dawns + 1
+      if emf.setting("reset") == "game_days" and dawns - posted >= reset_days() then posted = dawns end  -- new notices
       dirty = true
       hud_at = -1
     end
