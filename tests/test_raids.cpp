@@ -3,10 +3,14 @@
 
 #include <algorithm>
 #include <cmath>
+#include <fstream>
+#include <map>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "../mods/raids/raid_logic.h"
+#include "core/manifest.h"
 
 using namespace raids;
 
@@ -503,6 +507,88 @@ TEST_CASE("raids: whom a raider fights: the nearest living player, or with allie
     CHECK(targets_mode("players") == Targets::Players);
     CHECK(targets_mode("allies") == Targets::Allies);
     CHECK(targets_mode("") == Targets::Allies);  // the default
+}
+
+TEST_CASE("raids: presets: gentle, standard and hard set how often and how hard; custom keeps the settings one by one") {
+    Settings s = settings();
+    RewardKind reward = RewardKind::Rare;
+    CHECK_FALSE(apply_preset("custom", s, reward));  // the settings as they are
+    CHECK_FALSE(apply_preset("nonsense", s, reward));
+    CHECK(s.chance == 100);
+    CHECK(reward == RewardKind::Rare);
+    REQUIRE(apply_preset("standard", s, reward));  // the mod's defaults
+    const Settings def;
+    CHECK(s.chance == def.chance);
+    CHECK(s.waves == def.waves);
+    CHECK(s.per_wave == def.per_wave);
+    CHECK(s.wave_gap_s == def.wave_gap_s);
+    CHECK(s.warning_s == def.warning_s);
+    CHECK(s.level_offset == def.level_offset);
+    CHECK(s.cooldown_nights == def.cooldown_nights);
+    CHECK(s.boss == def.boss);
+    CHECK(reward == RewardKind::Materials);
+    CHECK(s.start_hour == 20.0);  // what a preset does not set stays
+    CHECK(s.base_radius == 30);
+    Settings g = settings(), h = settings();
+    RewardKind gr, hr;
+    REQUIRE(apply_preset("gentle", g, gr));
+    REQUIRE(apply_preset("hard", h, hr));
+    CHECK(g.chance < s.chance);
+    CHECK(h.chance > s.chance);
+    CHECK(g.waves * g.per_wave < s.waves * s.per_wave);
+    CHECK(h.waves * h.per_wave > s.waves * s.per_wave);
+    CHECK(g.level_offset < 0);
+    CHECK(h.level_offset > 0);
+    CHECK(g.warning_s > s.warning_s);
+    CHECK_FALSE(g.boss);
+    CHECK(h.boss);
+    CHECK(hr == RewardKind::Rare);
+    for (const char* name : {"gentle", "standard", "hard"}) {
+        const auto p = preset(name);
+        REQUIRE(p);
+        CHECK(p->waves * p->per_wave + (p->boss ? 1 : 0) <= s.max_alive);  // a whole raid fits under the cap
+    }
+}
+
+TEST_CASE("raids: mod.json: a preset's settings are greyed out unless it is custom, and their defaults are the standard preset") {
+    std::ifstream f(std::string(EMF_SOURCE_DIR) + "/mods/raids/mod.json", std::ios::binary);
+    REQUIRE(f.good());
+    std::stringstream ss;
+    ss << f.rdbuf();
+    const auto r = emf::core::parse_manifest(ss.str());
+    REQUIRE_MESSAGE(r.manifest, r.error);
+    const auto def = [&](const std::string& key) -> const emf::core::SettingDef* {
+        for (const auto& d : r.manifest->settings)
+            if (d.key == key) return &d;
+        return nullptr;
+    };
+    const auto* p = def("preset");
+    REQUIRE(p);
+    CHECK(p->default_value == "custom");  // an update never overrides settings a player chose
+    std::vector<std::string> values;
+    for (const auto& o : p->options) values.push_back(o.value);
+    CHECK(values == std::vector<std::string>{"custom", "gentle", "standard", "hard"});
+    const auto standard = preset("standard");
+    REQUIRE(standard);
+    const std::map<std::string, std::string> want = {
+        {"chance", std::to_string(standard->chance)},
+        {"warning_seconds", std::to_string(standard->warning_s)},
+        {"cooldown_nights", std::to_string(standard->cooldown_nights)},
+        {"waves", std::to_string(standard->waves)},
+        {"per_wave", std::to_string(standard->per_wave)},
+        {"wave_gap_seconds", std::to_string(standard->wave_gap_s)},
+        {"difficulty", standard->difficulty},
+        {"boss", standard->boss ? "1" : "0"},
+        {"reward", standard->reward}};
+    CHECK(want.size() == preset_keys().size());
+    for (const auto& key : preset_keys()) {
+        CAPTURE(key);
+        const auto* d = def(key);
+        REQUIRE(d);
+        CHECK(d->when_key == "preset");
+        CHECK(d->when_value == "custom");
+        CHECK(d->default_value == want.at(key));
+    }
 }
 
 TEST_CASE("raids: the per-world switch is kept in the world's file as on=1 / on=0 (off when missing)") {

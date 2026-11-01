@@ -39,6 +39,7 @@ struct Config {
     std::vector<raids::Template> custom_pool;
     raids::RewardKind reward = raids::RewardKind::Materials;
     raids::Targets targets = raids::Targets::Allies;
+    std::string preset = "custom";  // the "Raid strength" setting
     uint32_t corner = EMF_HUD_TOP_RIGHT;
     uint32_t rgba = 0;
 };
@@ -78,6 +79,8 @@ void read_settings() {
     c.s.base_radius = emf::setting_float(kMod, "base_radius", 30.0);
     c.reward = raids::reward_kind(emf::setting_text(kMod, "reward", "materials"));
     c.targets = raids::targets_mode(emf::setting_text(kMod, "targets", "allies"));
+    c.preset = emf::setting_text(kMod, "preset", "custom");
+    if (!raids::apply_preset(c.preset, c.s, c.reward)) c.preset = "custom";  // a preset replaces its settings
     c.custom = emf::setting_text(kMod, "templates", "verified") == "custom";
     std::vector<std::string> bad;
     c.custom_pool = raids::parse_custom_templates(emf::setting_text(kMod, "custom_templates", ""), &bad);
@@ -427,8 +430,9 @@ void cmd_status(emf::World w, const std::vector<std::string>&) {
         EMF_REPLY("Night Raids: no world loaded that this game hosts");
         return;
     }
-    EMF_REPLY("Night Raids is %s in this world; %d%% chance each night at %.1f h (now %s); %d wave(s) of %d", g_world_on ? "on" : "off",
-              c.s.chance, c.s.start_hour, time, c.s.waves, c.s.per_wave);
+    const std::string strength = c.preset == "custom" ? "own settings" : c.preset + " raids";
+    EMF_REPLY("Night Raids is %s in this world (%s); %d%% chance each night at %.1f h (now %s); %d wave(s) of %d",
+              g_world_on ? "on" : "off", strength.c_str(), c.s.chance, c.s.start_hour, time, c.s.waves, c.s.per_wave);
     EMF_REPLY("%s", g_director.status().c_str());
 }
 

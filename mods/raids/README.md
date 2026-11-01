@@ -41,6 +41,7 @@ raid comes when you sleep through nightfall.
 | Setting | Default | What it does |
 |---|---|---|
 | Raids in the world you are in (`this_world`) | off | the world's switch (as `raids.world`) |
+| Raid strength (`preset`) | my own settings | a preset (below), or the settings one by one |
 | Chance each night (`chance`) | 35 % | 0-100, rolled once per night |
 | Raids come at (`start_hour`) | 20:00 | 18:00-23:30 |
 | Warning before they attack (`warning_seconds`) | 60 s | 10-300 |
@@ -60,11 +61,28 @@ raid comes when you sleep through nightfall.
 
 Every setting applies at once.
 
+### Raid strength: the presets
+
+A preset sets how often and how hard raids come in one choice. While one is chosen, the settings it sets are greyed
+out (their own values are kept for when you go back to **My own settings**). The other settings work as always.
+
+| | Gentle | Standard | Hard |
+|---|---|---|---|
+| For | the early game | most of the game (the defaults) | a real fight |
+| Chance each night | 25 % | 35 % | 50 % |
+| Warning | 120 s | 60 s | 45 s |
+| Quiet nights after a raid | 1 | 0 | 0 |
+| Waves x raiders | 1 x 3 | 2 x 4 | 3 x 6 |
+| Seconds between waves | 90 | 60 | 45 |
+| Difficulty | easy (5 levels below) | normal | hard (+3) |
+| Boss wave | no | no | yes |
+| Reward | runes and furs | runes and furs | also a rare weapon |
+
 ## Commands
 
 | Command | Who | What |
 |---|---|---|
-| `raids.status` | **any player** | whether raids are on in this world, the chance, and the raid going on |
+| `raids.status` | **any player** | whether raids are on in this world, the raid strength, the chance, and the raid going on |
 | `raids.world on\|off` | host / admins | the world's switch |
 | `raids.start [seconds]` | host / admins | a raid now at the base with the most players, after a 10 s warning (for tests; by day too) |
 | `raids.stop` | host / admins | ends the raid; its living raiders are removed |

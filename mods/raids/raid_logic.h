@@ -370,6 +370,47 @@ struct Settings {
     BasePick bases = BasePick::Busiest;
 };
 
+// ---- presets (the "Raid strength" setting) ----
+// How often and how hard raids come, in one choice. "custom" (the default, so an update never overrides what a player
+// chose) uses the settings one by one; a preset replaces exactly the settings in preset_keys(), which mod.json greys out
+// meanwhile. Standard is the mod's defaults.
+struct Preset {
+    int chance, warning_s, cooldown_nights, waves, per_wave, wave_gap_s;
+    std::string difficulty;  // the difficulty setting's value
+    bool boss;
+    std::string reward;  // the reward setting's value
+};
+inline const std::vector<std::string>& preset_keys() {
+    static const std::vector<std::string> k = {"chance",   "warning_seconds",  "cooldown_nights", "waves", "per_wave",
+                                               "wave_gap_seconds", "difficulty", "boss",            "reward"};
+    return k;
+}
+// The preset by its setting value; nothing for "custom" or an unknown value.
+inline std::optional<Preset> preset(const std::string& name) {
+    // gentle: for the early game: now and then one small wave, 5 levels below the players, a long warning, a quiet night
+    // after each raid
+    if (name == "gentle") return Preset{25, 120, 1, 1, 3, 90, "easy", false, "materials"};
+    if (name == "standard") return Preset{35, 60, 0, 2, 4, 60, "normal", false, "materials"};
+    // hard: often, three waves of 6 three levels above the players, the boss wave, a rare weapon when repelled
+    if (name == "hard") return Preset{50, 45, 0, 3, 6, 45, "hard", true, "rare"};
+    return std::nullopt;
+}
+// The preset's values put into the raid's settings and the reward; false and nothing changed for "custom".
+inline bool apply_preset(const std::string& name, Settings& s, RewardKind& reward) {
+    const auto p = preset(name);
+    if (!p) return false;
+    s.chance = p->chance;
+    s.warning_s = p->warning_s;
+    s.cooldown_nights = p->cooldown_nights;
+    s.waves = p->waves;
+    s.per_wave = p->per_wave;
+    s.wave_gap_s = p->wave_gap_s;
+    s.level_offset = difficulty_offset(p->difficulty);
+    s.boss = p->boss;
+    reward = reward_kind(p->reward);
+    return true;
+}
+
 enum class Phase { Idle, Warning, Fighting };
 
 struct Action {
