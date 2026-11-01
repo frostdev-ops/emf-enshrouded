@@ -544,6 +544,7 @@ add_executable(emf_tests
   tests/test_module_threads.cpp
   tests/test_content_build.cpp
   tests/test_content_state.cpp
+  tests/test_content_shadow.cpp
   tests/test_known_tools.cpp
   tests/test_vk_overlay_device.cpp
   tests/test_app_game_folder.cpp
