@@ -70,6 +70,19 @@ local LEFTOVER_SECONDS = 120  -- ... and a loose drop of that item within LEFTOV
 local LEFTOVER_METRES = 30    -- long after, is what did not fit (quick stack's and sorting chests' drops), no gathering
 local DROP_SECONDS = 1800     -- this mod's own drops (a reward at a full player's feet) are known this long
 
+-- The render models that make a placed prop a Notice Board (world:template("ModelResource", id).model). The Notice
+-- Board players build (Prop_Decoration_T2_NoticeBoard) and very likely the villages' notice boards
+-- (Prop_Deco_Villageprops_NoticeBoard_01) show villageprops_noticeboard_01: base_radius keeps the villages' out.
+local BOARD_MODELS = {["0bee6531-ef51-4925-9cd3-a40d11561165"] = "Notice Board"}
+local SCAN_PER_STEP = 250   -- entities looked at per server step while the world is searched for boards
+local BOARD_RESCAN = 30     -- s between two searches (a new board counts within a minute)
+local MARK_SAME_M = 1       -- m: a marked prop is found again at its place within this
+local MARK_REACH_M = 8      -- m: bounty.mark and bounty.unmark reach this far
+local MARK_GONE_M = 40      -- m: missed by a search with a player this close to its place, a marked prop is gone ...
+local LOAD_GRACE = 30       -- s: ... but never this soon after a load (places may still be streaming in)
+local PROP_HEIGHT = 1       -- m: the point of a prop the crosshair aims at, above its position
+local FIX = 4294967296.0    -- 1 m in the game's fixed-point positions
+
 -- The short words the notices and the wheel show for reward items ("Gather 20 Wood logs (3 runes)").
 local REWARD_NAMES = {[RUNES] = "runes", Material_T1_Animal_Fur = "fur", Weapon_T1_1H_SwordEpic_01 = "sword"}
 
@@ -98,6 +111,13 @@ local last_tick, last_tod = nil, nil
 local session = emf.session()
 local hud_at, hud_shown, client_steps = -1, false, 0
 local purge_at = 0
+local boards = {}         -- the Bounty Boards: {id (0: a marked place not found yet), x, y, z, kind "notice" / "mark"}
+local found, altars = {}, {}  -- the last search: Notice Boards {id, x, y, z} and flame altars {x, z}
+local marks = {}          -- props the host marked: {x, y, z, model ("-": unknown), id (this session, when found)}
+local walk, walk_after = nil, 0    -- the search of the server world under way, and the play second of the next
+local cwalk, cwalk_after = nil, 0  -- the same on the host's client world
+local client_models = {}  -- entity id -> board model the host's client world showed
+local loaded_at = 0       -- play second when this world's data came
 
 -- ---- the pool ----
 -- emf\config\bounty\pool.lua, when it is there, replaces POOL (that folder stays when EMF is installed again). It runs
@@ -432,6 +452,7 @@ local function serialize()
       lines[#lines + 1] = string.format("owe %s %s %d %d %s", k, o.item, o.count, o.level or 0, o.rarity or "-")
     end
   end
+  for _, m in ipairs(marks) do lines[#lines + 1] = string.format("mark %.2f %.2f %.2f %s", m.x, m.y, m.z, m.model) end
   return table.concat(lines, "\n") .. "\n"
 end
 
@@ -459,7 +480,7 @@ end
 
 -- The world's data, read line by line; each kind of line is matched whole (anchored), so one never reads as another.
 local function load_text(text)
-  players, owed = {}, {}
+  players, owed, marks = {}, {}, {}
   offset, dawns, play_s, seed, posted = 0, 0, 0, nil, nil
   local old = true
   for line in text:gmatch("[^\r\n]+") do
@@ -497,6 +518,10 @@ local function load_text(text)
     if a and entry(id) then
       table.insert(record(a).taken, {id = id, need = tonumber(need), have = tonumber(have), state = tonumber(state)})
     end
+    local mx, my, mz, model = line:match("^mark (%S+) (%S+) (%S+) (%S+)$")
+    if mx and tonumber(mx) and tonumber(my) and tonumber(mz) then
+      marks[#marks + 1] = {x = tonumber(mx), y = tonumber(my), z = tonumber(mz), model = model}
+    end
     local oa, item, count, level, rarity = line:match("^owe (%S+) (%S+) (%d+) (%d+) (%S+)$")
     if oa then
       owed[oa] = owed[oa] or {}
@@ -510,21 +535,13 @@ local function load_text(text)
   return fresh
 end
 
-emf.on_world_data(function(world, text)
-  load_pool()  -- pool.lua may have changed since
-  hits, gifts, moving, filled, dropped = {}, {}, {}, {}, {}
-  purge_at, last_tod = 0, nil  -- another world's clocks mean nothing here
-  local fresh = load_text(text)
-  loaded, dirty = true, fresh  -- a new seed is kept at once
-  session = emf.session()
-  hud_at = -1
-end)
 
 -- A new hosted session (another world, a reload): creature ids of the old one mean other things now.
 local function same_session()
   if session == emf.session() then return end
   session = emf.session()
   hits, gifts, moving, filled, dropped = {}, {}, {}, {}, {}
+  boards, found, altars, client_models, walk, cwalk = {}, {}, {}, {}, nil, nil
   loaded = false  -- the old world's data is not this one's: commands wait for on_world_data
   emf.hud("board", "")
   hud_shown = false
@@ -655,6 +672,210 @@ local function raw_name(item)
   end
   return n
 end
+
+-- ---- Bounty Boards: Notice Boards in a base, and props the host marked ----
+-- The world is searched a slice at a time (SCAN_PER_STEP entities per server step, a new search every BOARD_RESCAN
+-- seconds): flame altars (BaseIdComponent), props whose model is in BOARD_MODELS, and the props at marked places.
+-- Render models are client-side: on the host the client world is searched for the models too (entity ids are shared
+-- between the host's two worlds); a dedicated server has no client world, so there only marked props count unless its
+-- server world has the model.
+local function horizontal2(a, x, z) return (a.x - x) ^ 2 + (a.z - z) ^ 2 end
+local function dist(a, x, y, z) return math.sqrt((a.x - x) ^ 2 + (a.y - y) ^ 2 + (a.z - z) ^ 2) end
+local function round(v) return math.floor(v + 0.5) end
+local function base_radius() return clamp(tonumber(emf.setting("base_radius")) or 40, 10, 100) end
+
+-- The model of an entity's template: on this world, else what the host's client world showed.
+local function model_of(world, id)
+  local ok, t = pcall(world.template, world, "ModelResource", id)
+  if ok and t then return t.model end
+  return client_models[id]
+end
+
+-- Every player of this world with a position: the entities 1..1023 with PlayerState.
+local function players_now(world)
+  local out = {}
+  for id = 1, 1023 do
+    if has(world, "PlayerState", id) == true then
+      local x, y, z = world:position(id)
+      if x then out[#out + 1] = {id = id, x = x, y = y, z = z} end
+    end
+  end
+  return out
+end
+
+-- The boards from the last search and the marks: Notice Boards within base_radius of an altar (with notice_boards
+-- on), and every marked place (the prop found there, or the place alone until a search finds it).
+local function rebuild_boards()
+  boards = {}
+  if emf.setting("notice_boards") then
+    local r2 = base_radius() ^ 2
+    for _, f in ipairs(found) do
+      for _, a in ipairs(altars) do
+        if horizontal2(a, f.x, f.z) <= r2 then
+          boards[#boards + 1] = {id = f.id, x = f.x, y = f.y, z = f.z, kind = "notice"}
+          break
+        end
+      end
+    end
+  end
+  for _, m in ipairs(marks) do
+    local twice = false
+    for _, b in ipairs(boards) do
+      if dist(b, m.x, m.y, m.z) <= MARK_SAME_M then twice = true end
+    end
+    if not twice then boards[#boards + 1] = {id = m.id or 0, x = m.x, y = m.y, z = m.z, kind = "mark"} end
+  end
+end
+
+-- A new search at the next step (after a mark, an unmark, a load).
+local function search_soon()
+  walk, walk_after = nil, 0
+end
+
+local function finish_walk(world)
+  found, altars = walk.found, walk.altars
+  local everyone = nil
+  for i = #marks, 1, -1 do
+    local m = marks[i]
+    local hit = walk.hit[i]
+    if hit then
+      m.id = hit
+    else
+      m.id = nil
+      -- missed with a player near its place, the world loaded a while ago: taken down
+      if play_s - loaded_at >= LOAD_GRACE then
+        everyone = everyone or players_now(world)
+        for _, p in ipairs(everyone) do
+          if dist(m, p.x, p.y, p.z) <= MARK_GONE_M then
+            emf.log(string.format("the marked prop at %d, %d, %d is gone: no Bounty Board there now", round(m.x), round(m.y), round(m.z)))
+            table.remove(marks, i)
+            dirty = true
+            break
+          end
+        end
+      end
+    end
+  end
+  walk = nil
+  walk_after = play_s + BOARD_RESCAN
+  rebuild_boards()
+end
+
+local function walk_step(world)
+  if not walk then walk = {ids = world:entities(), i = 1, found = {}, altars = {}, hit = {}} end
+  local last = math.min(#walk.ids, walk.i + SCAN_PER_STEP - 1)
+  for k = walk.i, last do
+    local id = walk.ids[k]
+    if has(world, "BaseIdComponent", id) == true then
+      local x, _, z = world:position(id)
+      if x then walk.altars[#walk.altars + 1] = {x = x, z = z} end
+    end
+    local model = model_of(world, id)
+    if model and BOARD_MODELS[model] then
+      local x, y, z = world:position(id)
+      if x then walk.found[#walk.found + 1] = {id = id, x = x, y = y, z = z} end
+    end
+    if #marks > 0 and id > 1023 then
+      local x, y, z = world:position(id)
+      if x then
+        for i, m in ipairs(marks) do
+          if not walk.hit[i] and dist(m, x, y, z) <= MARK_SAME_M and (m.model == "-" or not model or model == m.model) then
+            walk.hit[i] = id
+          end
+        end
+      end
+    end
+  end
+  walk.i = last + 1
+  if walk.i > #walk.ids then finish_walk(world) end
+end
+
+-- The host's client world: which entities have a board's model (render models are only there).
+local function client_walk_step(world)
+  if not cwalk then cwalk = {ids = world:entities(), i = 1, seen = {}} end
+  local last = math.min(#cwalk.ids, cwalk.i + SCAN_PER_STEP - 1)
+  for k = cwalk.i, last do
+    local id = cwalk.ids[k]
+    local ok, t = pcall(world.template, world, "ModelResource", id)
+    if ok and t and BOARD_MODELS[t.model] then
+      cwalk.seen[id] = t.model
+      client_models[id] = t.model
+    end
+  end
+  cwalk.i = last + 1
+  if cwalk.i > #cwalk.ids then
+    client_models, cwalk = cwalk.seen, nil
+    cwalk_after = play_s + BOARD_RESCAN
+  end
+end
+
+-- The board nearest to `player` within `range` metres, or nil.
+local function board_near(world, player, range)
+  local x, y, z = world:position(player)
+  if not x then return nil end
+  local best, best_d = nil, range
+  for _, b in ipairs(boards) do
+    local d = dist(b, x, y, z)
+    if d <= best_d then best, best_d = b, d end
+  end
+  return best
+end
+
+-- The camera ray of `player` (PlayerInput.fromClient.camera on the server world), or nil when there is none.
+local function camera_ray(world, player)
+  local ok, input = pcall(world.get, world, "PlayerInput", player)
+  if not ok or not input then return nil end
+  local cam = input.fromClient.camera
+  local q = cam.orientation
+  local fx = 2 * (q.x * q.z + q.w * q.y)  -- the camera's +z axis
+  local fy = 2 * (q.y * q.z - q.w * q.x)
+  local fz = 1 - 2 * (q.x * q.x + q.y * q.y)
+  local len = math.sqrt(fx * fx + fy * fy + fz * fz)
+  if len < 1e-9 or (q.x == 0 and q.y == 0 and q.z == 0 and q.w == 0) then return nil end
+  return {ox = cam.position.x / FIX, oy = cam.position.y / FIX, oz = cam.position.z / FIX,
+          dx = fx / len, dy = fy / len, dz = fz / len}
+end
+
+-- The prop under `player`'s crosshair within `range` metres (not a player; with a collider or a model), or nil.
+local function prop_in_front(world, player, range)
+  local ray = camera_ray(world, player)
+  local px, py, pz = world:position(player)
+  if not ray or not px then return nil end
+  local best, best_perp, best_t
+  for _, id in ipairs(world:entities()) do
+    if id ~= player and not is_player(world, id) then
+      local x, y, z = world:position(id)
+      if x and math.sqrt((x - px) ^ 2 + (y - py) ^ 2 + (z - pz) ^ 2) <= range then
+        local vx, vy, vz = x - ray.ox, y + PROP_HEIGHT - ray.oy, z - ray.oz
+        local t = vx * ray.dx + vy * ray.dy + vz * ray.dz
+        if t > 0 then
+          local ex, ey, ez = vx - ray.dx * t, vy - ray.dy * t, vz - ray.dz * t
+          local perp = math.sqrt(ex * ex + ey * ey + ez * ez)
+          if perp <= 1.5 and (has(world, "StaticCollider", id) == true or model_of(world, id)) and
+             (not best or perp < best_perp - 0.25 or (math.abs(perp - best_perp) <= 0.25 and t < best_t)) then
+            best, best_perp, best_t = id, perp, t
+          end
+        end
+      end
+    end
+  end
+  return best
+end
+
+-- The world's data: after the world loaded (and after a reload of this mod).
+emf.on_world_data(function(world, text)
+  load_pool()  -- pool.lua may have changed since
+  hits, gifts, moving, filled, dropped = {}, {}, {}, {}, {}
+  purge_at, last_tod = 0, nil  -- another world's clocks mean nothing here
+  local fresh = load_text(text)
+  loaded, dirty = true, fresh  -- a new seed is kept at once
+  loaded_at = play_s
+  found, altars, client_models, cwalk, cwalk_after = {}, {}, {}, nil, 0
+  search_soon()
+  rebuild_boards()
+  session = emf.session()
+  hud_at = -1
+end)
 
 -- ---- progress and rewards ----
 local function account_of(world, player) return world:account(player) end
@@ -1063,6 +1284,65 @@ emf.command("reset", ": new notices for everyone now (host)", function(world, ar
   emf.reply("New notices for everyone.")
 end)
 
+emf.command("mark", ": the prop you look at becomes a Bounty Board (host, admins)", function(world, args)
+  local me = ready(world)
+  if not me then return end
+  local id = prop_in_front(world, me.id, MARK_REACH_M)
+  if not id then
+    emf.reply("Look at a prop within 8 m (a sign, a post, a table) and try again.")
+    return
+  end
+  local x, y, z = world:position(id)
+  for _, b in ipairs(boards) do
+    if dist(b, x, y, z) <= MARK_SAME_M then
+      emf.reply("That is a Bounty Board already.")
+      return
+    end
+  end
+  local model = model_of(world, id) or "-"
+  marks[#marks + 1] = {x = x, y = y, z = z, model = model, id = id}
+  dirty = true
+  search_soon()
+  rebuild_boards()
+  emf.log(string.format("prop %d at %d, %d, %d (model %s) marked as a Bounty Board", id, round(x), round(y), round(z), model))
+  emf.reply(string.format("Marked: this prop is a Bounty Board now (at %d, %d, %d).", round(x), round(y), round(z)))
+end)
+
+emf.command("unmark", ": the marked prop nearest to you is no Bounty Board now (host, admins)", function(world, args)
+  local me = ready(world)
+  if not me then return end
+  local x, y, z = world:position(me.id)
+  local best, best_d = nil, MARK_REACH_M
+  for i, m in ipairs(marks) do
+    local d = x and dist(m, x, y, z) or math.huge
+    if d <= best_d then best, best_d = i, d end
+  end
+  if not best then
+    emf.reply("No marked prop within 8 m.")
+    return
+  end
+  local m = table.remove(marks, best)
+  dirty = true
+  search_soon()
+  rebuild_boards()
+  emf.reply(string.format("Unmarked: the prop at %d, %d, %d is no Bounty Board now.", round(m.x), round(m.y), round(m.z)))
+end)
+
+emf.command("boards", ": the Bounty Boards of this world (host)", function(world, args)
+  local me = ready(world)
+  if not me then return end
+  if #boards == 0 then
+    emf.reply(string.format("No Bounty Board in this world yet: build a Notice Board within %d m of a flame altar, or " ..
+      "mark a prop with bounty.mark (a new board counts within a minute).", round(base_radius())))
+    return
+  end
+  local x, y, z = world:position(me.id)
+  for i, b in ipairs(boards) do
+    emf.reply(string.format("%d. %s at %d, %d, %d%s", i, b.kind == "notice" and "Notice Board" or "marked prop",
+      round(b.x), round(b.y), round(b.z), x and string.format(" (%d m from you)", round(dist(b, x, y, z))) or ""))
+  end
+end)
+
 -- ---- every step ----
 -- A dawn between two readings of the clock: it passed 6:00, or it went back (past midnight: the host set the time, or
 -- the players slept through the night) to 6:00 or later. The game keeps no day number, so the mod counts dawns.
@@ -1077,6 +1357,10 @@ emf.on_tick(function(world)
     if client_steps > 180 and hud_shown then
       emf.hud("board", "")
       hud_shown = false
+    end
+    -- the host's own client world (its server world steps too): the board models are searched here
+    if loaded and client_steps <= 180 and session == emf.session() and (cwalk or play_s >= cwalk_after) then
+      client_walk_step(world)
     end
     return
   end
@@ -1120,6 +1404,7 @@ emf.on_tick(function(world)
       if play_s > d.until_s then dropped[k] = nil end
     end
   end
+  if walk or play_s >= walk_after then walk_step(world) end
   if dirty then save() end
   local s = math.floor(play_s)
   if s ~= hud_at then
@@ -1128,4 +1413,7 @@ emf.on_tick(function(world)
   end
 end)
 
-emf.on_setting_changed(function(key) hud_at = -1 end)
+emf.on_setting_changed(function(key)
+  hud_at = -1
+  if key == "base_radius" or key == "notice_boards" then rebuild_boards() end
+end)

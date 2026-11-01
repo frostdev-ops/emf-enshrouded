@@ -103,6 +103,14 @@ std::string notices_of(const std::string& board) {
         if (line.size() > 2 && line[0] >= '1' && line[0] <= '9' && line[1] == '.') out += line + "\n";
     return out;
 }
+// The "Yours n. ..." lines of a /bounty.board reply: the bounties a player holds.
+std::string yours_of(const std::string& board) {
+    std::string out, line;
+    std::istringstream in(board);
+    while (std::getline(in, line))
+        if (line.rfind("Yours", 0) == 0) out += line + "\n";
+    return out;
+}
 // The number of the notice whose line holds `text` ("" when none).
 std::string notice_number(const std::string& board, const std::string& text) {
     const std::string list = notices_of(board);
@@ -185,7 +193,7 @@ TEST_CASE("bounty: a kill bounty counts the player's own kills of that faction (
     CHECK(b.r.fake.puts[0].entity == 1u);
     CHECK(b.r.fake.puts[0].item == kRunes);
     CHECK(b.r.fake.puts[0].count == 8u);
-    CHECK(b.board().find("Slay 6 Vukah") == std::string::npos);  // claimed: no longer held
+    CHECK(yours_of(b.board()).find("Slay 6 Vukah") == std::string::npos);  // claimed: no longer held
     CHECK(b.reply("bounty.claim") == "No finished bounty to claim.");
     CHECK(b.r.fake.puts.size() == 1u);
 }
@@ -240,7 +248,7 @@ TEST_CASE("bounty: gathering counts what a player picks up from the world, never
     deliver(b.r.fake, "PickupEvent", pickup_event(1, 4003, kLogs, 2));    // the plant
     CHECK(b.board().find("Gather 60 Wood logs: 25/60") != std::string::npos);
     deliver(b.r.fake, "PickupEvent", pickup_event(1, 0, kLogs, 40));
-    CHECK(b.board().find("Gather 60 Wood logs") == std::string::npos);  // done, and claimed at once
+    CHECK(yours_of(b.board()).find("Gather 60 Wood logs") == std::string::npos);  // done, and claimed at once
     REQUIRE_FALSE(b.r.fake.puts.empty());
     // the reward arrives as a pickup from nowhere: it never counts for a bounty, also when it is the gathered item
     b.reply("bounty.give gather_runes");
@@ -736,16 +744,6 @@ TEST_CASE("bounty: players who finished none see the starter notices; after thei
 }
 
 // ---- 1.2: the world file ----
-namespace {
-// The "Yours n. ..." lines of a /bounty.board reply: the bounties a player holds.
-std::string yours_of(const std::string& board) {
-    std::string out, line;
-    std::istringstream in(board);
-    while (std::getline(in, line))
-        if (line.rfind("Yours", 0) == 0) out += line + "\n";
-    return out;
-}
-}  // namespace
 
 TEST_CASE("bounty: a 1.1.0 world file migrates: open and finished bounties become yours, nothing earned is lost") {
     BountyRig b({{"reset", "game_dawn"}});
@@ -854,4 +852,105 @@ TEST_CASE("bounty: a dawn counts once when the clock jumps past midnight to 6:00
     b.seconds(1);
     CHECK(saved_number(b, "dawns") == 2);
     CHECK(saved_number(b, "posted") == 2);
+}
+
+// ---- 1.2: which props are Bounty Boards ----
+namespace {
+// A flame altar (BaseIdComponent) at (x, 10, z).
+void altar(BountyRig& b, uint32_t id, double x, double z) {
+    place(b.r.fake, id, x, 10, z);
+    component<ecs::BaseIdComponent>(b.r.fake, id);
+    add_entity(b.r.fake, id);
+}
+// A placed prop with a render model (its template's ModelResource; the notice board's by default) at (x, y, z).
+void prop(BountyRig& b, uint32_t id, double x, double y, double z, const char* model = kBoardModel) {
+    place(b.r.fake, id, x, y, z);
+    if (model) b.r.fake.templates[{ecs::ModelResource::kHash, id}] = guid_bytes(model);
+    component<ecs::StaticCollider>(b.r.fake, id);
+    add_entity(b.r.fake, id);
+}
+// Long enough for a new search of the world for boards (one every 30 s).
+void search(BountyRig& b) { b.seconds(32); }
+}  // namespace
+
+TEST_CASE("bounty: a Notice Board within base_radius of a flame altar is a Bounty Board; one outside every base is not") {
+    BountyRig b;
+    altar(b, 900, 0, 0);
+    prop(b, 950, 15, 10, 0);
+    prop(b, 951, 300, 10, 0);                                         // a village's board, far from every base
+    prop(b, 952, 12, 10, 0, "91e2d4cc-01c9-4203-a92e-b08769364522");  // another prop in the base
+    CHECK(b.reply("bounty.boards").find("No Bounty Board in this world yet") != std::string::npos);  // not searched yet
+    search(b);
+    const std::string boards = b.reply("bounty.boards");
+    CHECK(boards.find("1. Notice Board at 15, 10, 0 (15 m from you)") != std::string::npos);
+    CHECK(boards.find("300") == std::string::npos);
+    CHECK(boards.find("2. ") == std::string::npos);
+    b.r.fake.settings["bounty.base_radius"] = "10";
+    search(b);
+    CHECK(b.reply("bounty.boards").find("No Bounty Board") != std::string::npos);
+    b.r.fake.settings["bounty.base_radius"] = "40";
+    b.r.fake.settings["bounty.notice_boards"] = "0";
+    search(b);
+    CHECK(b.reply("bounty.boards").find("No Bounty Board") != std::string::npos);
+}
+
+TEST_CASE("bounty: on the host, a board whose model only the client world has is found") {
+    BountyRig b;
+    altar(b, 900, 0, 0);
+    prop(b, 950, 10, 10, 0);
+    // render models are client-side: the model is there while the host's client world steps, not on the server's
+    const auto model = b.r.fake.templates[{ecs::ModelResource::kHash, 950}];
+    for (int i = 0; i < 32; ++i) {
+        b.r.fake.templates[{ecs::ModelResource::kHash, 950}] = model;
+        b.host->tick(kClient);
+        b.r.fake.templates.erase({ecs::ModelResource::kHash, 950});
+        b.seconds(1);
+    }
+    CHECK(b.reply("bounty.boards").find("1. Notice Board at 10, 10, 0") != std::string::npos);
+}
+
+TEST_CASE("bounty: bounty.mark makes the prop the host looks at a Bounty Board, kept with the world by its place") {
+    BountyRig b;
+    prop(b, 960, 0, 10, 5, nullptr);  // a sign post, say: no notice board, its model unknown here
+    b.look(1, 0, 11.5, 0, 0);          // looking along +z at it
+    CHECK(b.reply("bounty.mark").rfind("Marked: ", 0) == 0);
+    b.seconds(1);
+    CHECK(slurp(b.data).find("\nmark 0.00 10.00 5.00 -\n") != std::string::npos);
+    CHECK(b.reply("bounty.boards").find("1. marked prop at 0, 10, 5") != std::string::npos);
+    b.r.fake.session = 2;  // a reload: the mark comes back with the world's data, by its place
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.reply("bounty.boards").find("1. marked prop at 0, 10, 5") != std::string::npos);
+    CHECK(b.reply("bounty.mark") == "That is a Bounty Board already.");
+    CHECK(b.reply("bounty.unmark").rfind("Unmarked: ", 0) == 0);
+    CHECK(b.reply("bounty.boards").find("No Bounty Board") != std::string::npos);
+    CHECK(b.reply("bounty.unmark").rfind("No marked prop within 8 m", 0) == 0);
+    b.look(1, 0, 11.5, 0, 180);  // looking away
+    CHECK(b.reply("bounty.mark").rfind("Look at a prop", 0) == 0);
+    for (const auto& c : b.r.fake.commands)  // the host's and admins' commands, not every player's
+        if (c.name == "bounty.mark" || c.name == "bounty.unmark" || c.name == "bounty.boards") CHECK(c.flags == 0u);
+}
+
+TEST_CASE("bounty: a marked prop that is gone loses its mark when a player was near its place, not right after a load") {
+    BountyRig b;
+    prop(b, 960, 0, 10, 5, nullptr);
+    b.look(1, 0, 11.5, 0, 0);
+    REQUIRE(b.reply("bounty.mark").rfind("Marked: ", 0) == 0);
+    b.seconds(1);
+    remove_entity(b.r.fake, 960);  // taken down
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(20);  // the world may still be streaming in: kept
+    CHECK(b.reply("bounty.boards").find("1. marked prop at 0, 10, 5") != std::string::npos);
+    b.seconds(15);  // a search after that, with player 1 beside its place: gone
+    CHECK(b.reply("bounty.boards").find("No Bounty Board") != std::string::npos);
+    CHECK(slurp(b.data).find("\nmark ") == std::string::npos);
+    // far from every player a missing prop may just not be loaded: kept
+    prop(b, 961, 0, 10, 5, nullptr);
+    REQUIRE(b.reply("bounty.mark").rfind("Marked: ", 0) == 0);
+    remove_entity(b.r.fake, 961);
+    place(b.r.fake, 1, 500, 10, 0);
+    place(b.r.fake, 2, 520, 10, 0);
+    b.seconds(70);
+    CHECK(b.reply("bounty.boards").find("1. marked prop at 0, 10, 5") != std::string::npos);
 }
