@@ -308,6 +308,50 @@ TEST_CASE("console UI: after Esc hid the list, Tab completes as before (the comm
     CHECK(r.ui.input == "loot.");  // what loot.status and loot.toggle share, not the hidden top row
 }
 
+TEST_CASE("console UI: one list at a time: Tab's own cycle while the suggestions are hidden, the suggestions once you type") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.frame();
+    r.frame();
+    r.type("lo");
+    r.ui.escape = true;  // Esc hid the suggestions
+    r.frame();
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "loot.");
+    CHECK(drawn("##emf_completions"));      // Tab's list: loot.status, loot.toggle
+    CHECK_FALSE(r.ui.suggester.showing());  // and not the suggestions over it
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "loot.status");  // the cycle goes on
+    CHECK_FALSE(r.ui.suggester.showing());
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "loot.toggle");
+    CHECK(drawn("##emf_completions"));
+    r.type(" ");  // typing: the suggestions show again and Tab's list goes
+    CHECK(r.ui.suggester.showing());  // [on|off]
+    CHECK_FALSE(drawn("##emf_completions"));
+}
+
+TEST_CASE("console UI: with no suggestion for the line, Tab cycles through its matches without a second list over them") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.src.items = {"Material_T1_Wood_Logs", "Material_T1_Wood_Logs_Dead"};
+    r.frame();
+    r.frame();
+    r.type("give ");  // nothing typed for the item name yet: no suggestions
+    REQUIRE_FALSE(r.ui.suggester.showing());
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "give Material_T1_Wood_Logs");  // what both names share (also the first)
+    CHECK(drawn("##emf_completions"));
+    CHECK_FALSE(r.ui.suggester.showing());  // the two names would be suggested for it too: not a second list
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "give Material_T1_Wood_Logs_Dead");  // the cycle goes on
+    CHECK_FALSE(r.ui.suggester.showing());
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "give Material_T1_Wood_Logs");
+}
+
 TEST_CASE("console UI: with suggestions off nothing shows as you type and Tab cycles through the matches as before") {
     Headless h;
     Rig r;

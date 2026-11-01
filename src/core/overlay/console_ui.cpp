@@ -153,27 +153,33 @@ int input_callback(ImGuiInputTextCallbackData* d) {
             // no list shows (nothing suggested, hidden by Esc or a line from the history, or suggestions off):
             // complete and cycle through the matches
             const std::string current(d->Buf, d->BufTextLen);
+            // a line from the cycle is not the player's edit: the suggestions stay hidden, so the cycle's list is the
+            // only one and the next Tab goes on cycling
+            const auto cycle_to = [&](const std::string& line) {
+                set_buffer(d, line);
+                ui.suggester.replaced(line, line.size());
+            };
             const bool cycling = !ui.completions.empty() && ui.completion_index < ui.completions.size() &&
                                  current == ui.completions[ui.completion_index];
             if (cycling) {
                 ui.completion_index = (ui.completion_index + 1) % ui.completions.size();
-                set_buffer(d, ui.completions[ui.completion_index]);
+                cycle_to(ui.completions[ui.completion_index]);
                 break;
             }
             ui.completions = complete(current, *c->sources);
             ui.completion_index = 0;
             if (ui.completions.empty()) break;
-            if (ui.completions.size() == 1) {
+            if (ui.completions.size() == 1) {  // done: the next argument's suggestions may show
                 set_buffer(d, ui.completions[0] + " ");
                 ui.completions.clear();
                 break;
             }
             const std::string prefix = common_prefix(ui.completions);
             if (prefix.size() > current.size()) {
-                set_buffer(d, prefix);  // extend to what all candidates share; the list stays shown and the next
-                                        // Tab (prefix != completions[0]) starts cycling at the first candidate
+                cycle_to(prefix);  // extend to what all candidates share; the list stays shown and the next
+                                   // Tab (prefix != completions[0]) starts cycling at the first candidate
             } else {
-                set_buffer(d, ui.completions[0]);
+                cycle_to(ui.completions[0]);
             }
             break;
         }
@@ -344,8 +350,9 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
     if (ui.suggest) {
         below = draw_suggestions(ui.suggester, under, display);
         ui.wants_escape = ui.suggester.showing();
+        if (ui.wants_escape) ui.completions.clear();  // one list at a time: rows that show end a Tab cycle
     }
-    // The Tab cycle's list under the panel (and under the suggestions).
+    // The Tab cycle's list under the panel (under the suggestions' hint line).
     if (ui.completions.size() > 1) {
         ImGui::SetNextWindowPos(ImVec2(under.x, below > under.y ? below + 2.0f : under.y));
         ImGui::SetNextWindowBgAlpha(0.92f);
