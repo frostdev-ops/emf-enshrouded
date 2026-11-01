@@ -56,7 +56,8 @@ A mod whose `mod.json` cannot be read is still listed, with the error.
 
 ## What a switch does
 
-Every switch takes effect at the next game start, and nothing is ever deleted.
+Every switch takes effect at the next game start, and nothing is ever deleted. Switches made one after another share
+one note that counts them ("3 changes take effect at the next game start."), not one note per mod.
 
 | Mod | Off means |
 |---|---|
@@ -878,7 +879,7 @@ player's, and counts only a stand-in game running from the folder shown.
 - `scripts/app_smoke.ps1` (run by `scripts/verify.sh`): builds a fake game folder and runs `EMF.exe --smoke` on it. It
   checks the rows the page drew (read back from the page), that a canary mod's HTML and script texts stay text and
   nothing in them runs, that a `fetch` and a navigation from the page are stopped, that clicking a switch through the
-  page changes `dinput8-chain.ini`, that the same switch is locked while a stand-in `enshrouded.exe` runs from the
+  page changes `dinput8-chain.ini`, that several switches in a row share one note, that the same switch is locked while a stand-in `enshrouded.exe` runs from the
   folder, profiles through the page (Save as, a switch makes the picker say "(changed)", Switch puts it back),
   the message when WebView2 is missing, and EMF.exe's imports. The runs have the tester switch (an `app.ini` in their
   `EMF_TEST_APPDATA`), except one that is the release build (Off): started on Browse with an Enshrouded link, a stored key and

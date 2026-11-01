@@ -9,6 +9,7 @@
 # - the canary's texts show as text, and nothing in them runs;
 # - the page cannot reach the network or leave https://emf.app/ (a fetch and a navigation from the page);
 # - clicking the chained DLL's switch comments out its line in dinput8-chain.ini (page script -> host -> file);
+# - several switches in a row share one note ("2 changes take effect at the next game start."), not one each;
 # - with a stand-in enshrouded.exe running from the folder, that switch is locked and the file stays as it is;
 # - mod profiles through the page: Save as writes emf\profiles\<name>.json and the picker shows it; a switch makes
 #   it say "(changed)"; Switch puts the switch back (dinput8-chain.ini as it was);
@@ -268,6 +269,17 @@ try {
     Check ($run.Code -eq 0 -and $null -ne $p3 -and $p3.found -and -not $p3.disabled) "the page script found creative.dll's switch, unlocked ($($run.Code))"
     $chain = Get-Content -LiteralPath (Join-Path $game "dinput8-chain.ini") -Raw
     Check ($chain -eq "[Chain]`r`n; creative.dll`r`n") "clicking the switch of creative.dll comments out its line in dinput8-chain.ini ($($chain.Trim() -replace "`r`n", ' | '))"
+
+    # 3b. several switches in a row share one note ("2 changes take effect at the next game start."), not one each:
+    # the Clock and Life Skills off, then on again (still two mods)
+    $notesJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; var p={}; window.emfProbe=p; var sw=function(n){var r=[...document.querySelectorAll('.mod-row')].find(function(x){return x.querySelector('.mod-name')&&x.querySelector('.mod-name').textContent===n;}); return r&&r.querySelector('.switch');}; var flip=function(n,next){var s=sw(n); var b=s.getAttribute('aria-checked'); s.click(); W(function(){var t=sw(n); return t&&!t.disabled&&t.getAttribute('aria-checked')!==b;},next);}; var notes=function(){return [...document.querySelectorAll('#toasts .toast')].filter(function(t){return /next game start/.test(t.textContent);}).map(function(t){return t.textContent;});}; var st=function(){return sw('Clock').getAttribute('aria-checked')+','+sw('Life Skills').getAttribute('aria-checked');}; W(function(){return sw('Clock')&&sw('Life Skills');},function(){ p.start=st(); flip('Clock',function(){ p.one=notes(); flip('Life Skills',function(){ p.two=notes(); flip('Clock',function(){ flip('Life Skills',function(){ p.back=notes(); p.end=st(); window.emfDone=true; }); }); }); }); });"
+    $run = Invoke-Smoke -Eval $notesJs -More @("--probe-wait", "9000")
+    $pn = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+    $pnText = if ($pn) { $pn | ConvertTo-Json -Compress } else { "the page script did not run" }
+    Check ($run.Code -eq 0 -and $null -ne $pn -and (@($pn.one) -join "|") -eq "Takes effect at the next game start.") "one switch: one note, Takes effect at the next game start. ($pnText)"
+    Check ($null -ne $pn -and (@($pn.two) -join "|") -eq "2 changes take effect at the next game start.") "a second switch changes that note into 2 changes take effect at the next game start., no second note"
+    Check ($null -ne $pn -and (@($pn.back) -join "|") -eq "2 changes take effect at the next game start.") "switching the same two mods back keeps one note for 2 changes"
+    Check ($null -ne $pn -and $pn.start -eq $pn.end -and (Test-Path -LiteralPath (Join-Path $game "emf\config\life_skills.ini"))) "and both are as they were, saved in emf\config ($(if ($pn) { $pn.start + ' -> ' + $pn.end }))"
 
     # 4. a process called enshrouded.exe running from the folder (a copy of ping.exe standing in for the game): the
     # switch is locked, so the same click changes nothing. The page script must have run (else this proves nothing).

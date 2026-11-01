@@ -30,6 +30,7 @@ let detailsShown = '';
 let forceDetails = false;  // a save was refused: draw the details again even if a control has focus
 const settingErrors = {};  // "source:id:key" (the save's ref) -> why the last value was refused
 let pending = false;       // a switch is waiting for the host
+let pendingKey = '';       // the row of that switch (the note counts the mods switched)
 let account = null;        // the host's account message: whether a key is set, the account's name and Premium (never the key)
 // The host's Nexus mode (bridge.h nexus_mode; state.nexus, account.mode): "off" in the release build (no Browse,
 // no Check for updates, no account, no nxm:// setting: nothing asks Nexus, and the host refuses those commands too),
@@ -141,7 +142,14 @@ function onMessage(m) {
 }
 
 function onResult(m) {
-  if (m.cmd === 'set_enabled') pending = false;
+  if (m.cmd === 'set_enabled') {
+    pending = false;
+    if (m.ok) {  // one note for switches made one after another, not one each
+      switchNote(pendingKey);
+      if (state) render();
+      return;
+    }
+  }
   if (m.cmd === 'updates_check' || m.cmd === 'nexus_link') updatesOnResult(m);
   if (m.cmd === 'set_setting' && m.ref) {  // the host echoes the ref the save was sent with
     if (m.ok) delete settingErrors[m.ref];
@@ -159,6 +167,26 @@ function toast(text, bad) {
   const t = el('div', { class: 'toast' + (bad ? ' bad' : ''), role: bad ? 'alert' : 'status' }, text);
   $('toasts').append(t);
   setTimeout(() => t.remove(), bad ? 9000 : 4500);
+}
+
+// Switches made one after another share one note that counts the mods: "3 changes take effect at the next game
+// start." It stays while the player keeps switching and goes a few seconds after the last switch.
+const switched = { note: null, keys: new Set(), timer: 0 };
+function switchNote(key) {
+  switched.keys.add(key || '');
+  const n = switched.keys.size;
+  const text = n === 1 ? 'Takes effect at the next game start.' : n + ' changes take effect at the next game start.';
+  if (switched.note && switched.note.isConnected) switched.note.textContent = text;
+  else {
+    switched.note = el('div', { class: 'toast', role: 'status', id: 'switch-note' }, text);
+    $('toasts').append(switched.note);
+  }
+  clearTimeout(switched.timer);
+  switched.timer = setTimeout(() => {
+    if (switched.note) switched.note.remove();
+    switched.note = null;
+    switched.keys.clear();
+  }, 6000);
 }
 
 // ---- drawing ----
@@ -281,6 +309,7 @@ function toggle(m) {
     onclick: (e) => {
       e.stopPropagation();
       pending = true;
+      pendingKey = keyOf(m);
       send({ cmd: 'set_enabled', source: m.source, id: m.id, on: !m.enabled });
       render();
     },
