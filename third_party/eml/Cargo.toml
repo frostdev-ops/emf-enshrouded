@@ -10,14 +10,6 @@ members = [
     "crates/mod-loader-base",
     "crates/mod-loader-lua",
     "crates/mod-loader-runtime",
-
-    "crates/mod-manager-cli",
-    "crates/mod-manager-gui",
-
-    "crates/dinput8-proxy",
-    "crates/dbghelp-proxy",
-
-    "crates/cli-legacy",
 ]
 
 [workspace.package]
