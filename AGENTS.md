@@ -68,6 +68,7 @@ From Git Bash: `cmd //c "scripts\\dev.cmd cmake --build --preset msvc"`. Other c
 | The bridge clients against `emf_bridge_fake.exe` | `powershell -ExecutionPolicy Bypass -File scripts\bridge_clients_test.ps1` |
 | The release package | `powershell -ExecutionPolicy Bypass -File scripts\test_package.ps1` |
 | EMF.exe against a fake game folder | `powershell -ExecutionPolicy Bypass -File scripts\app_smoke.ps1` |
+| content_shadow.ps1 (the content redirect spike) against fake game folders | `powershell -ExecutionPolicy Bypass -File scripts\content_shadow_test.ps1` |
 | Python tools only | `python -m unittest discover -s tests\tools` |
 | Regenerate `docs/modding/llms.txt` (after changing the API, lua.md, reference.md, commands or the bridge) | `python tools\gen_llms_txt.py` |
 

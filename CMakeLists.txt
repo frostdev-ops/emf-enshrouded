@@ -372,6 +372,14 @@ set_target_properties(emf_standin_server PROPERTIES OUTPUT_NAME enshrouded_serve
 add_executable(emf_standin_tar tools/standin_tar/main.cpp)
 set_target_properties(emf_standin_tar PROPERTIES OUTPUT_NAME tar RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin_tar)
 
+# --- Stand-in for the game (the content redirect spike's test only; not shipped): an exe that imports EMF's
+# dinput8.dll statically, as enshrouded.exe does, and opens content files through its import table
+# (tools/standin_game/main.cpp) ---
+add_executable(emf_standin_game tools/standin_game/main.cpp)
+target_link_libraries(emf_standin_game PRIVATE emf_loader)
+set_target_properties(emf_standin_game PROPERTIES OUTPUT_NAME standin_game
+  RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin_game)
+
 # --- Tests ---
 enable_testing()
 add_executable(emf_tests
@@ -511,6 +519,8 @@ add_executable(emf_tests
   tests/test_entry_hold.cpp
   tests/test_chain_list.cpp
   tests/test_chain_load.cpp
+  tests/test_file_redirect.cpp
+  tests/test_file_hooks.cpp
   tests/test_known_tools.cpp
   tests/test_vk_overlay_device.cpp
   tests/test_app_game_folder.cpp
@@ -531,7 +541,7 @@ target_include_directories(emf_tests PRIVATE tests sdk/include)
 target_compile_definitions(emf_tests PRIVATE EMF_SOURCE_DIR="${CMAKE_SOURCE_DIR}" EMF_BINARY_DIR="${CMAKE_BINARY_DIR}")
 target_link_libraries(emf_tests PRIVATE emf_common emf_core_lib emf_lua_lib emf_app_lib)
 target_link_libraries(emf_tests PRIVATE emf_nexus_lib)
-add_dependencies(emf_tests emf_app emf_standin_server emf_standin_tar emf_test_folder_mod emf_test_needs_helper sim_rate loot_scale emf_test_mod emf_test_mod_crash emf_test_mod_reject sample_mod companion event_log big_stacks villager_jobs quick_stack clock raids loot_magnet sleep teleports bulk_craft)
+add_dependencies(emf_tests emf_app emf_standin_server emf_standin_tar emf_standin_game emf_loader emf_test_folder_mod emf_test_needs_helper sim_rate loot_scale emf_test_mod emf_test_mod_crash emf_test_mod_reject sample_mod companion event_log big_stacks villager_jobs quick_stack clock raids loot_magnet sleep teleports bulk_craft)
 target_include_directories(emf_tests PRIVATE third_party/doctest src)
 add_test(NAME emf_tests COMMAND emf_tests)
 
