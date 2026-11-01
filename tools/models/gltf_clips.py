@@ -151,12 +151,12 @@ def pose_at(gltf, binc, sk, name, t, loop=False):
     return ns.pose(sk, ns.node_worlds(gltf, _frame(channels, start + t)), gltf)
 
 
-def clip(gltf, binc, sk, name, hierarchy_hash, loop=False, fps=60):
+def clip(gltf, binc, sk, name, hierarchy_hash, loop=False, fps=60, speed=1.0):
     """The animation as a game clip for the skeleton (hierarchy_hash: new_skeleton.clip_hash of its hierarchy); a
-    loop ends on its first pose."""
+    loop ends on its first pose; speed above 1 plays it faster (the same poses in fewer frames)."""
     channels = _channels(gltf, binc, name, loop)
     start, end = _span(channels)
-    n = max(1, int(round((end - start) * fps)))
+    n = max(1, int(round((end - start) / float(speed) * fps)))
     poses = [ns.pose(sk, ns.node_worlds(gltf, _frame(channels, start + (end - start) * f / n)), gltf)
              for f in range(n + 1)]
     return ja.encode(poses, sk["rest"], fps=fps, loop=loop, hierarchy_hash=hierarchy_hash)

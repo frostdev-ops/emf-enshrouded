@@ -211,6 +211,17 @@ class HierarchyTests(Fixture):
         with self.assertRaises(ValueError):
             ns.hierarchy(sk, "22222222-2222-4222-8222-222222222222")
 
+    def test_a_rig_with_its_own_root_joint(self):
+        """Many rigs have a joint called Root: the skeleton's own root keeps the name root, the rig's is hashed as
+        root.1 (its name stays, for slots and the copy's bones)."""
+        nodes = json.loads(json.dumps(NODES))
+        nodes[2]["name"] = "Root"
+        gltf, binc = gltf_in.read_glb(small_rig(os.path.join(self.tmp.name, "root.glb"), nodes))
+        sk = ns.build(gltf, binc)
+        self.assertEqual(sk["names"][:2], ["root", "Root"])
+        h = ns.hierarchy(sk, "22222222-2222-4222-8222-222222222222")
+        self.assertEqual(h["jointNames"][:2], [zlib.crc32(b"root"), zlib.crc32(b"root.1")])
+
 
 class GlbCopyTests(Fixture):
     def copy(self, scale=1.0):
