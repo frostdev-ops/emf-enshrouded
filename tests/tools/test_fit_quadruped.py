@@ -76,8 +76,10 @@ class FitQuadrupedTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as d:
             fig, fitted, side = (os.path.join(d, n) for n in ("animal.glb", "fitted.glb", "own.json"))
             self.assertEqual(blender("make_test_quadruped.py", fig)[0], 0)
-            code, log = blender("fit_to_game_skeleton.py", BOAR, fig, fitted, "--own-proportions", side)
+            code, log = blender("fit_to_game_skeleton.py", BOAR, fig, fitted, "--own-proportions", side, "--keep-head")
             self.assertEqual(code, 0, log[-2000:])
+            # --keep-head would keep the game's head bones out of the creature's head: dropped, with a note
+            self.assertIn("--keep-head is not used with --own-proportions", log)
             src, out = bbox(fig), bbox(fitted)
             for i in (0, 1):  # width and length against height: the animal's own, not the boar's
                 self.assertAlmostEqual(out[i] / out[2], src[i] / src[2], delta=0.01 * src[i] / src[2])

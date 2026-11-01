@@ -72,6 +72,10 @@ rigid = {b for b in rigid.split(",") if b}
 own_path = opt("--own-proportions", None)  # a sidecar .json: the creature keeps its own shape (see the docstring)
 if own_path is True:
     raise SystemExit("fit_to_game_skeleton: --own-proportions needs the sidecar .json to write")
+if own_path and keep_head:  # the mesh returns to its own shape anyway; the head must line up for the weights
+    keep_head = False
+    print("FIT note: --keep-head is not used with --own-proportions (the head lines up with the game's head for the "
+          "weights, and the game's neck and head bones move into the creature's head)")
 width_mode = opt("--width", "fit")  # fit (the game body's width), keep (the creature's proportions) or a scale
 if width_mode is True:
     raise SystemExit("fit_to_game_skeleton: --width needs fit, keep or a number")
