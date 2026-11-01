@@ -9,6 +9,7 @@
 // Imports by ordinal and delay-loaded imports are not covered.
 #include <windows.h>
 
+#include <cstdint>
 #include <cstring>
 
 namespace emf::loader {
@@ -46,10 +47,19 @@ void for_each_import(HMODULE module, F f) {
     }
 }
 
+// The protection that makes a page writable and keeps what else it allows: a page that may run code (an import table
+// the linker put next to code) stays executable, since another thread may be running code on it at that moment.
+inline DWORD writable_protection(DWORD current) {
+    constexpr DWORD kExecute = PAGE_EXECUTE | PAGE_EXECUTE_READ | PAGE_EXECUTE_READWRITE | PAGE_EXECUTE_WRITECOPY;
+    return (current & kExecute) ? PAGE_EXECUTE_READWRITE : PAGE_READWRITE;
+}
+
 // Puts `hook` into `slot` (writable for the moment) and returns what was there before; nullptr when it could not.
 inline void* patch_import_slot(void** slot, void* hook) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!slot || !VirtualQuery(slot, &mbi, sizeof mbi)) return nullptr;
     DWORD old = 0;
-    if (!slot || !VirtualProtect(slot, sizeof(void*), PAGE_READWRITE, &old)) return nullptr;
+    if (!VirtualProtect(slot, sizeof(void*), writable_protection(mbi.Protect), &old)) return nullptr;
     void* before = InterlockedExchangePointer(slot, hook);
     DWORD ignored = 0;
     VirtualProtect(slot, sizeof(void*), old, &ignored);

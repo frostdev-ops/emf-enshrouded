@@ -343,6 +343,10 @@ inline Installed install(HMODULE exe) {
             found[i] = true;
             void* before = *slot;
             if (before == specs[i].hook) return;  // already ours
+            // One original per function: an exe that imported the same function through two descriptors (KERNEL32 and
+            // an api-ms-win-core set, say) would have both slots' calls go to the first slot's original. Keeping one
+            // per slot needs a hook per slot (one function cannot tell which slot called it), and the game imports
+            // each file function once, from KERNEL32 only (docs/engine_parts/file_redirect_spike.md).
             if (!*specs[i].real) *specs[i].real = before;
             if (patch_import_slot(slot, specs[i].hook)) {
                 g.patched.emplace_back(slot, before);

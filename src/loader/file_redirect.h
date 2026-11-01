@@ -9,6 +9,7 @@
 // same name>. Whether that file exists is the caller's check.
 #include <windows.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <optional>
 #include <string>

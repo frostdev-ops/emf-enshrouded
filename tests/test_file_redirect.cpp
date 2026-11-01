@@ -1,5 +1,7 @@
 // The content redirect spike (docs/engine_parts/file_redirect_spike.md): which paths the loader sends to the shadow copy
 // <game>\emf\content\client\, the lines of emf\file_opens.log, and the [content] switches in emf\emf_core.ini.
+#include "loader/file_redirect.h"  // first: the header compiles on its own
+
 #include <doctest.h>
 
 #include <windows.h>

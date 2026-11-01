@@ -1,6 +1,8 @@
 // The content redirect spike's hooks (src/loader/file_hooks.h): the loader puts them into enshrouded.exe's import table
 // in DllMain. Here they run against fake originals (what they pass on, the error they leave, the lines they log), and
 // once for real in emf_tests.exe's own import table.
+#include "loader/iat_patch.h"  // first: the header compiles on its own
+
 #include <doctest.h>
 
 #include <windows.h>
@@ -303,6 +305,35 @@ TEST_CASE("file hooks: the exe's file functions come from kernel32 or its API se
     CHECK_FALSE(is_kernel_dll("kernel32x.dll"));
     CHECK_FALSE(is_kernel_dll("api-ms-win-crt-stdio-l1-1-0.dll"));
     CHECK_FALSE(is_kernel_dll(""));
+}
+
+TEST_CASE("file hooks: an import slot is made writable for the moment with its execute right kept") {
+    using emf::loader::writable_protection;
+    // a slot on a page that also holds code stays executable while it is written (another thread may run that code)
+    CHECK(writable_protection(PAGE_EXECUTE_READ) == PAGE_EXECUTE_READWRITE);
+    CHECK(writable_protection(PAGE_EXECUTE) == PAGE_EXECUTE_READWRITE);
+    CHECK(writable_protection(PAGE_EXECUTE_WRITECOPY) == PAGE_EXECUTE_READWRITE);
+    CHECK(writable_protection(PAGE_EXECUTE_READWRITE) == PAGE_EXECUTE_READWRITE);
+    CHECK(writable_protection(PAGE_READONLY) == PAGE_READWRITE);
+    CHECK(writable_protection(PAGE_READWRITE) == PAGE_READWRITE);
+    CHECK(writable_protection(PAGE_WRITECOPY) == PAGE_READWRITE);
+    CHECK(writable_protection(PAGE_EXECUTE_READ | PAGE_GUARD) == PAGE_EXECUTE_READWRITE);
+
+    // a slot on an executable page: written, and the page is as it was afterwards
+    SYSTEM_INFO si{};
+    GetSystemInfo(&si);
+    auto* page = static_cast<void**>(VirtualAlloc(nullptr, si.dwPageSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE));
+    REQUIRE(page);
+    int a = 0, b = 0;
+    page[3] = &a;
+    DWORD old = 0;
+    REQUIRE(VirtualProtect(page, si.dwPageSize, PAGE_EXECUTE_READ, &old));
+    CHECK(emf::loader::patch_import_slot(&page[3], &b) == &a);
+    CHECK(page[3] == &b);
+    MEMORY_BASIC_INFORMATION mbi{};
+    REQUIRE(VirtualQuery(&page[3], &mbi, sizeof mbi));
+    CHECK(mbi.Protect == PAGE_EXECUTE_READ);
+    VirtualFree(page, 0, MEM_RELEASE);
 }
 
 TEST_CASE("file hooks: emf_tests.exe's own import table: GetFileAttributesW is found under KERNEL32.dll") {
