@@ -297,8 +297,9 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
     ImGuiInputTextFlags in_flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackCompletion |
                                    ImGuiInputTextFlags_CallbackHistory | ImGuiInputTextFlags_CallbackEdit;
     if (ui.suggest) in_flags |= ImGuiInputTextFlags_CallbackAlways;  // the caret, every frame the line is active
-    // Right with the caret at the end of the line (last frame's caret: the press cannot move it further)
-    ui.accept_right = ui.suggest && ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !io.KeyCtrl && !io.KeyShift &&
+    // A new press of Right with the caret at the end of the line (last frame's caret: the press cannot move it
+    // further). Not its auto-repeats: holding Right to walk to the end of the line must not take a row there.
+    ui.accept_right = ui.suggest && ImGui::IsKeyPressed(ImGuiKey_RightArrow, false) && !io.KeyCtrl && !io.KeyShift &&
                       !io.KeyAlt && ui.caret == ui.input.size();
     const bool entered = ImGui::InputText("##input", buf, kInputCap, in_flags, input_callback, &ctx);
     ui.accept_right = false;

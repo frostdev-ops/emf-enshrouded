@@ -173,6 +173,31 @@ TEST_CASE("console UI: Right takes the suggestion only at the end of the line; e
     CHECK(r.ui.input == "loot.status ");
 }
 
+TEST_CASE("console UI: holding Right walks to the end of the line and takes nothing; a new press there takes the row") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.frame();
+    r.frame();
+    r.type("loot.t");
+    r.press(ImGuiKey_Home);
+    REQUIRE(r.ui.caret == 0);
+    ImGuiIO& io = ImGui::GetIO();
+    const auto hold_right = [&] {
+        io.AddKeyEvent(ImGuiKey_RightArrow, true);
+        for (int i = 0; i < 60; ++i) r.frame();  // a second: well past KeyRepeatDelay, so the press repeats
+        io.AddKeyEvent(ImGuiKey_RightArrow, false);
+        r.frame();
+    };
+    hold_right();
+    CHECK(r.ui.input == "loot.t");
+    CHECK(r.ui.caret == 6);
+    CHECK(r.ui.suggester.showing());
+    hold_right();  // a new press at the end takes the highlighted row once; its repeats do not take "on" after it
+    CHECK(r.ui.input == "loot.toggle ");
+    CHECK(r.ui.suggester.showing());  // [on|off]
+}
+
 TEST_CASE("console UI: Up/Down move in the list and leave the history alone; Esc hides it, then Up is the history's") {
     Headless h;
     Rig r;
