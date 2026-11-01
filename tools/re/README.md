@@ -8,7 +8,7 @@ Run them from this folder (they import each other). Some write caches (`calls.pk
 
 | Script | Use |
 |---|---|
-| `exe_types.py --exe <exe> -o types.emf.json` | EMF's own reader of the game's reflection data: every reflected type (kind, size, alignment, hashes, base, fields, enum values, attributes, defaults, groups) straight from the exe, no types.json and no build addresses ([docs/engine_parts/re_reflection.md](../../docs/engine_parts/re_reflection.md)). Runs alone with `python -I`; `tools/gen_headers.py` uses it. |
+| `exe_types.py --exe <exe>` | EMF's own reader of the game's reflection data: every reflected type (kind, size, alignment, hashes, base, fields, enum values, attributes, defaults, groups) straight from the exe, no types.json and no build addresses; writes `%LOCALAPPDATA%\EMF\types\<exe>_<build>.emf.json` (game data, never commit it) ([docs/engine_parts/re_reflection.md](../../docs/engine_parts/re_reflection.md)). Runs alone with `python -I`; `tools/gen_headers.py` uses it. |
 | `pe.py` | PE sections, VA/file-offset mapping, `ptr_refs(va)`, `rip_refs(va)` (RIP-relative code refs). |
 | `funcs.py` | `.pdata` function table: `containing(va)`, `callers(func)` (direct calls). |
 | `allstrs.py` | Builds `rdata_strs.pkl` (all .rdata strings). Run once per game build. |

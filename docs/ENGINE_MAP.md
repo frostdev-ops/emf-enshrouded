@@ -6,7 +6,7 @@ This map covers the engine pieces a general modding framework needs (BepInEx + J
 - Analysis: REA + Ghidra 12.1.4 (static). What was checked in the running game is in the "Confirmed in game" sections.
 - Addresses are virtual addresses at the default image base. At runtime: `real = moduleBase + (addr - 0x140000000)`.
 - Signatures are hex with `??` wildcards. Each one was checked for a unique match in `.text` unless marked otherwise.
-- Type layouts come from the game's own reflection data in the exe, read by `tools/re/exe_types.py` ([`engine_parts/re_reflection.md`](engine_parts/re_reflection.md)). Older parts of this map cite EML's `.cache/types.json` (version `1269579|^/game38/branches/release_1.0`), which has the same types, layouts and hashes.
+- Type layouts come from the game's own reflection data in the exe, read by `tools/re/exe_types.py` ([`engine_parts/re_reflection.md`](engine_parts/re_reflection.md)). Older parts of this map cite EML's `.cache/types.json` (version `1269579|^/game38/branches/release_1.0`); on build 1273043 the reader's output was checked to equal EML's export of that build type for type (1269579's was not compared).
 
 Confidence levels:
 - **High**: seen directly in code (string reference, decompiled logic, matching struct offsets).

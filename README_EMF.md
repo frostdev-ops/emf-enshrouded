@@ -711,7 +711,8 @@ Rules:
   2. Regenerate the headers from the new exe: `python tools/gen_headers.py <game>\enshrouded.exe` reads the game's own
      reflection data ([docs/engine_parts/re_reflection.md](docs/engine_parts/re_reflection.md)) and rewrites
      `sdk/include/emf/generated/components.hpp` and `reflection.hpp`; the diff shows every component layout that changed.
-     `python tools/re/exe_types.py --exe <exe> -o types.emf.json` writes all types (not committed) for a closer look.
+     `python tools/re/exe_types.py --exe <exe>` writes all types to `%LOCALAPPDATA%\EMF\types\` for a closer look
+     (game data: keep it out of the repository; `.gitignore` has `*.emf.json`).
   3. Check the engine offsets the type registry does not describe. They live in `src/common/offsets.h` (world, events,
      items, program job, Keen map), `src/core/daytime.h` (Daytime / Weather, written by `time`), `src/core/programs.h`,
      `src/core/system_programs.h` (ProgramDesc), `src/core/spawn.h`, `src/core/events.h`, and the sample mod's

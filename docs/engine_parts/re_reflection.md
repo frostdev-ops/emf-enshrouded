@@ -10,8 +10,8 @@ the module's real base).
 Found by static analysis of `enshrouded.exe` 1273043 (sha256 `d64966e2...`). Confidence High: the reader's output
 equals EML's `types.json` export of the same build for all 12,646 types (names, namespaces, kinds, sizes, alignments,
 both hashes, base and element types, counts, every field's name, type and offset in order, enum values, attribute
-names), and the headers generated from it are byte for byte the committed ones. Not checked on the dedicated server's
-exe (none on the analysis PC); its types come from the same code, so the same layout is expected.
+names), and the headers generated from it are byte for byte the committed ones. Not checked yet on the dedicated
+server's exe; its types come from the same code, so the same layout is expected.
 
 ## Conventions
 - All offsets are in bytes. Every pointer is an absolute 64-bit address at the image base `0x140000000`; every one of
@@ -23,14 +23,19 @@ exe (none on the analysis PC); its types come from the same code, so the same la
 ## Finding the type table (no addresses needed)
 The master list is the longest list of type descriptor pointers stored as `{data, count}` in `.rdata`/`.data`.
 `exe_types.find_type_table` scans both sections as 64-bit words for a pointer into the image followed by a count, keeps
-the candidates whose first and last entries look like descriptors (below), checks every entry of those, and takes the
-longest. The other lists of descriptors (the groups, 687 and 131 entries) are shorter, so there is no doubt.
+the candidates whose first and last entries look like descriptors (below), checks every entry of those (each must be a
+descriptor, and none may appear twice: the game lists every type once), and takes the longest. The other lists of
+descriptors (the groups, 687 and 131 entries) are shorter, so there is no doubt in 1273043. For safety: among lists of
+the longest length the one a registry root holds wins; two different ones with no root to choose between them stop the
+reader ("ambiguous"); a single list with no root is read, with a warning (no groups), and `gen_headers.py` refuses it,
+since that means the layout has changed.
 
 A descriptor "looks like" one when, at an 8-aligned address with 0x98 readable bytes: the qualified name (`+0x20`) and
 the name (`+0x00`) are slices of text (non-empty, NUL right after them), the kind byte (`+0x4C`) is not 0 and the
 alignment (`+0x44`) is a power of two.
 
-The list is held in two places. One is the **registry root**, four lists in a row:
+The list is held in two places: the first entry of the group table (the unnamed group below, its list at RVA
+`0x171ade0`) and the **registry root**, four lists in a row:
 
 | Root offset | List | 1273043 |
 |---|---|---|
@@ -136,13 +141,16 @@ Seen, not traced in code; EMF does not use them yet.
 The exe also has a record of its own build in `.data` (RVA `0x1fc6018` in 1273043): a pointer to the git commit text
 (40 hex digits, `f68140a3...`), then 0x10 bytes later pointers to the version (`0.0.15.0`) and the branch (`master`).
 The game prints them at start (`[GameFramework] enshrouded(detached HEAD) - version <commit> (master)`). The Steam
-build number (1273043) is not in the exe; `exe_types.py` names it from the exe's sha256 with the same table as
-`src/common/signatures.cpp`.
+build number (1273043) is not in the exe; `exe_types.py` names it, and whether the exe is the dedicated server's,
+from the exe's sha256 with the same table as `src/common/signatures.cpp`. A 40-digit text counts as the commit only
+with a version next to it.
 
 ## EMF's types file
-`python -I tools/re/exe_types.py --exe <enshrouded.exe> -o types.emf.json` (about 1 s, 8 MB; game data, so it is not
-committed). One JSON document: `format` (`emf-types`), `format_version`, `source` (file, sha256, size, PE timestamp,
-image base, build, version, git commit, branch), `type_table` (address, count, root), `groups` (name to type indices)
+`python -I tools/re/exe_types.py --exe <enshrouded.exe>` (about 1 s, 8 MB) writes it to
+`%LOCALAPPDATA%\EMF\types\<exe>_<build>.emf.json`. It is game data (default values included): never commit it
+(`.gitignore` has `*.emf.json` and `types.json`), and the reader never writes it into the current folder. One JSON
+document: `format` (`emf-types`), `format_version`, `source` (file, sha256, size, PE timestamp, image base, build,
+server, version, git commit, branch), `type_table` (address, count, root), `groups` (name to type indices)
 and `types`, one per line:
 
 ```json
@@ -163,8 +171,9 @@ The Python reader is written to port line by line:
   PE headers in memory, the same "inside an initialized section" check before every read (a wild pointer must never
   be followed). No address of any build is needed, and nothing has to be relocated: the loader already did that.
 - **Finding.** The same scan of `.rdata` and `.data` for `{pointer, count}` (about 1.6 million words, a few
-  milliseconds in C++), the same descriptor check, the longest list, then the root by its group list. It can run at
-  any time after the exe is mapped (the data is static), before the first world exists.
+  milliseconds in C++), the same descriptor check (no entry twice), the longest list, the one a root holds when
+  lists tie, an error when two still tie, and the root by its group list. It can run at any time after the exe is
+  mapped (the data is static), before the first world exists.
 - **Decoding.** Plain structs with these offsets and `static_assert`s on them (`Slice`, `TypeDesc`, `FieldDesc`,
   `EnumValueDesc`, `AttributeEntry`, `NamespaceDesc`, `GroupEntry`, `Root`), reading names by length.
 - **Lookups.** By index (the master list), by hash (the hash is FNV-1a-32 of the qualified name, the same hash the
