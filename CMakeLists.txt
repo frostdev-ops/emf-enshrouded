@@ -196,7 +196,9 @@ add_library(emf_loader SHARED
   src/loader/dllmain.cpp
   src/proxy/dinput8_proxy.cpp
   src/proxy/dinput8.def
-  src/loader/loader.rc)
+  src/loader/loader.rc
+  src/core/json.cpp)  # the content loader reads EML mods' mod.json and its own state file
+target_include_directories(emf_loader PRIVATE src)
 # Version information in the file's properties (the resource compiler gets these definitions too)
 target_compile_definitions(emf_loader PRIVATE EMF_VERSION="${EMF_VERSION}" EMF_VER_MAJOR=${PROJECT_VERSION_MAJOR}
   EMF_VER_MINOR=${PROJECT_VERSION_MINOR} EMF_VER_PATCH=${PROJECT_VERSION_PATCH})
