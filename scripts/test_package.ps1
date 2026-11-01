@@ -763,6 +763,7 @@ try {
             Check (($names -contains "EMF-creature-packs-1.2.3/mods/emf_fake_pack/mod.json") -and ($names -contains "EMF-creature-packs-1.2.3/mods/emf_fake_pack/src/mod.lua")) "the packs zip has mods\<pack>\ with mod.json and src\mod.lua"
             Check (-not @($names | Where-Object { $_ -match "emf_other_pack" }).Count) "the packs zip has only the named packs"
             Check (($readme -match "emf_fake_pack") -and ($readme -match "EML")) "its README.txt names the pack and says it needs EML"
+            Check (($readme -match "CC BY 4\.0") -and ($readme -match "made with Meshy") -and ($readme -match "creativecommons\.org/licenses/by/4\.0")) "its README.txt gives the art licence (CC BY 4.0) and the credit line"
             Check (-not @($names | Where-Object { $_.Contains("\") }).Count) "its entry names use '/'"
         } else { Check $false "$ppZip was written" }
         $msg = ""
