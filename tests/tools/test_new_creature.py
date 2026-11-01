@@ -76,6 +76,16 @@ class BuildTests(Fixture):
                 self.assertEqual(t, (0.0, 0.0, 0.0))
                 self.assertEqual(s, (0.0, 0.0, 0.0))
 
+    def test_a_snake_clip_mistake_is_a_pack_mistake(self):
+        """snake: a snake's clip from its body curve (snake_clips.py); a spine of fewer than three joints or an unknown
+        parameter is refused with the creature's and the clip's names."""
+        for spec, why in (({"head": "Hips", "keys": [{"t": 0}], "length": 1.0}, "fewer than three joints"),
+                          ({"head": "Nope", "keys": [{"t": 0}], "length": 1.0}, "no joint 'Nope'")):
+            with self.assertRaises(SystemExit) as e:
+                nc.build(config(clips={"move": {"snake": spec}, "stand": {"animation": "Move"}}), self.glb, "viper")
+            self.assertIn("viper: clip move", str(e.exception))
+            self.assertIn(why, str(e.exception))
+
     def test_a_clip_played_in_place(self):
         """in_place: the joint that carries a walk forward; a joint the skeleton has not is a pack mistake."""
         built = nc.build(config(clips={"move": {"animation": "Move", "in_place": "Hips"}, "stand": {"animation": "Move"}}),

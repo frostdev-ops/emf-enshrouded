@@ -14,7 +14,10 @@ The pack names, per creature:
                  unmoved, scale 0: an additive layer adds scales, as the game's offset clips show), for the graph's
                  additive layers whose game clips are offsets (the wolf's leaning), or {name: {"offset": {joint:
                  [axis, degrees]}}}: an offset that turns those joints (made_clips.offset; the game wolf's lean turns
-                 its neck and head about 50 degrees into a turn)
+                 its neck and head about 50 degrees into a turn), or {name: {"snake": {"head": the first joint of
+                 a snake's spine chain, "keys": snake_clips.py's keys, "length": seconds, "travel": waves along the
+                 body over the clip, "loop": ...}}}: a snake's clip from its body curve (slither, rear, strike,
+                 roll)
   model_glb      optional: the model from this glb instead (a copy on the skeleton, new_skeleton.write_glb, then
                  retextured; its bones named jNNN_<name>)
   roles          {game clip GUID: our clip name}: which of our clips plays where the graph plays that game clip
@@ -42,6 +45,7 @@ import gltf_in  # noqa: E402
 import joint_animation  # noqa: E402
 import made_clips  # noqa: E402
 import new_skeleton  # noqa: E402
+import snake_clips  # noqa: E402
 
 GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 ZERO = "_additive_zero"  # the built-in offset that adds nothing
@@ -122,6 +126,16 @@ def build(cfg, glb_path, creature="creature"):
                 clip = made_clips.offset(sk, spec["offset"], hierarchy_hash=new_skeleton.clip_hash(hier))
             except ValueError as e:
                 raise SystemExit("%s: clip %s: %s" % (creature, name, e))
+            out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
+            continue
+        if spec.get("snake"):
+            sn = spec["snake"]
+            try:
+                clip = snake_clips.clip(sk, sn.get("head", ""), sn.get("keys", []), float(sn.get("length", 1.0)),
+                                        travel=float(sn.get("travel", 0.0)), loop=bool(sn.get("loop")),
+                                        hierarchy_hash=new_skeleton.clip_hash(hier))
+            except (KeyError, ValueError) as e:
+                raise SystemExit("%s: clip %s: %s" % (creature, name, e.args[0] if e.args else e))
             out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
             continue
         if spec.get("made"):
