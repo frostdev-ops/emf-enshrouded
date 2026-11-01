@@ -31,6 +31,8 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_tools.ps1 | gre
 # install_emf.ps1's install stamp, uninstall_probe.ps1's archiving of logs and crash dumps, and how the developer scripts
 # find the game without -Game, in %TEMP% (no game).
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/uninstall_probe_test.ps1 | grep -v "^ok "
+# content_shadow.ps1 (the content redirect spike's shadow copy) against fake game folders in %TEMP%.
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/content_shadow_test.ps1 | grep -v "^ok "
 # The byte signatures against the installed game's exe (scripts/find_game.ps1: EMF_GAME_DIR, else Steam's libraries).
 if game=$(powershell -NoProfile -ExecutionPolicy Bypass -File scripts/find_game.ps1 2>/dev/null | tr -d '\r') && [ -n "$game" ]; then
     exe="$game\\enshrouded.exe"
