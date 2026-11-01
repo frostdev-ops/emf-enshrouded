@@ -6,7 +6,7 @@ This map covers the engine pieces a general modding framework needs (BepInEx + J
 - Analysis: REA + Ghidra 12.1.4 (static). What was checked in the running game is in the "Confirmed in game" sections.
 - Addresses are virtual addresses at the default image base. At runtime: `real = moduleBase + (addr - 0x140000000)`.
 - Signatures are hex with `??` wildcards. Each one was checked for a unique match in `.text` unless marked otherwise.
-- Type layouts come from EML `.cache/types.json` (version `1269579|^/game38/branches/release_1.0`).
+- Type layouts come from the game's own reflection data in the exe, read by `tools/re/exe_types.py` ([`engine_parts/re_reflection.md`](engine_parts/re_reflection.md)). Older parts of this map cite EML's `.cache/types.json` (version `1269579|^/game38/branches/release_1.0`), which has the same types, layouts and hashes.
 
 Confidence levels:
 - **High**: seen directly in code (string reference, decompiled logic, matching struct offsets).
@@ -17,6 +17,7 @@ Confidence levels:
 
 ## Deep dives
 - `engine_parts/re_companions.md`: the guard system (StartGuarding interaction → `enemy01` guards `guardEntityId`), companion candidates, and the in-game result (a spawned companion follows the player).
+- [`engine_parts/re_reflection.md`](engine_parts/re_reflection.md) (build 1273043): the type descriptors in the exe (master list, registry root with namespaces, attributes and the `ecs.component` / `ecs.event` groups; type, field, enum value and attribute layouts; kinds and flags), how `tools/re/exe_types.py` finds them without addresses, EMF's types file, and what a C++ reader inside the game needs.
 - [`engine_parts/re_events.md`](engine_parts/re_events.md): how programs send (`emitEvent` `0x140955400`) and read (paged queues) engine events.
 - [`engine_parts/re_time_spawn_weather.md`](engine_parts/re_time_spawn_weather.md): ECS time outside programs (`ecsNow = *(i64*)(world+0xE16280) * *(u32*)(world+0xE1629C)`, 60 Hz), how the `SpawnEntity` native spawns with a transform (queued, created in the sim-step flush), weather layer reset.
 - [`engine_parts/re_custom_programs.md`](engine_parts/re_custom_programs.md): mods can very likely register their own ECS programs (hook `0x1404a5a30`, register before the first tick, names resolved by FNV-1a, `+0x184 = 1`, flag rules).
@@ -172,12 +173,12 @@ These hold regardless of where the code lives.
 
 ### Reflection data
 - **The reflected field offsets match memory (confirmed).** Example: program `fog_of_war` (`0x140307040`) tests `*(u32*)(PlayerState + 0x34) & 0x40000`, and types.json puts `PlayerState.playerStateMask` at `+0x34`.
-- The reflection data is also in the exe at runtime. Descriptor layout: `+0x00` name, `+0x10` impact name, `+0x20` qualified name (each ptr,len), `+0x30` namespace, `+0x38` base type, `+0x40` u32 size + u16 align + u16 elemAlign, `+0x48` u32 fieldCount, `+0x50` u32 qualifiedHash + u32 internalHash, `+0x58` fields, `+0x70` default value (ptr,size), `+0x80` attributes (ptr,count).
-  Master list of 12,646 descriptor pointers at `0x1416fd950` (holder struct `0x14171a230` = {list, 0x3166}); group "ecs.component" (687) at `0x141716cb0`, "ecs.event" (131) at `0x141718430` (group table `0x141718aa0`). A framework can build its type database from this at runtime instead of shipping types.json.
+- The reflection data is also in the exe at runtime (static data in `.rdata`; full layout and the reader in [`engine_parts/re_reflection.md`](engine_parts/re_reflection.md)). Descriptor layout: `+0x00` name, `+0x10` impact name, `+0x20` qualified name (each ptr,len), `+0x30` namespace, `+0x38` base type, `+0x40` u32 size + u16 align + u16 elemAlign, `+0x48` u32 fieldCount, `+0x4C` u32 kind (low byte) and flags, `+0x50` u32 qualifiedHash + u32 internalHash, `+0x58` fields, `+0x60` enum values, `+0x68` variant types, `+0x70` default value (ptr,size), `+0x80` attributes (ptr,count).
+  Master list of 12,646 descriptor pointers at `0x1416fd950` (holder struct `0x14171a230` = {list, 0x3166}); group "ecs.component" (687) at `0x141716cb0`, "ecs.event" (131) at `0x141718430` (group table `0x141718aa0`). A framework can build its type database from this at runtime instead of shipping types.json. On 1273043 the master list is at `0x1416ffca0` and its root (types, namespaces, attributes, groups) at `0x14171c580`; `tools/re/exe_types.py` finds both by their shape, so it needs no address of any build.
 - 12,646 reflected types. 8,652 are runtime types; the `keen::ds::*` copies are the serialized (save/network) form and can have different sizes.
   Example: `keen::ecs::ActiveNpcState` is 456 bytes, `keen::ds::ecs::ActiveNpcState` is 552. **Use the non-`ds` sizes for memory.**
 - 553 types derive from `keen::ecs::Component` (index 136, `innerType == 136`). Full list: see `docs/components.txt`.
-- Each type has `qualifiedHash` (looks like a hash of the qualified name) and `internalHash` (looks like a layout hash: every empty component shares `0x6c36572e`).
+- Each type has `qualifiedHash` (FNV-1a-32 of the qualified name: true for all 12,646 types on 1273043) and `internalHash` (looks like a layout hash: every empty component shares `0x6c36572e`).
 - Component attributes we can use: `server_only`, `client_only`, `is_dynamic`, `do_not_save`, `savegame_relevant`, `persistent`, `hidden`.
 
 ### Core value types
