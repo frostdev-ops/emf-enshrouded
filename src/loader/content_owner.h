@@ -87,6 +87,17 @@ struct ToolLook {
     std::vector<std::wstring> chain;                            // the DLLs dinput8-chain.ini lists
 };
 
+// A chained DLL whose text names EML or ShroudForge (read with look.tool_name), or nullopt.
+inline std::optional<std::string> chained_tool_by_text(const ToolLook& look) {
+    if (!look.tool_name) return std::nullopt;
+    for (const auto& dll : look.chain) {
+        const std::string name = look.tool_name(dll);
+        if (name.rfind("EML", 0) == 0 || name.rfind("ShroudForge", 0) == 0)
+            return name + " (from dinput8-chain.ini: " + cio::to_utf8(dll) + ")";
+    }
+    return std::nullopt;
+}
+
 // The tool that applies EML content at this start, or nullopt. A dbghelp.dll in the game folder is EML's or
 // ShroudForge's proxy (Windows' own lives in System32). A chained DLL is known by the name EMF's installer gives it
 // (<word>.dll: eml.dll, shroudforge.dll); under another name only by reading it, which `read_chain` allows (the loader
@@ -104,13 +115,7 @@ inline std::optional<std::string> other_content_tool(const ToolLook& look, bool 
                                                                                : nullptr;
         if (known) return std::string(known) + " (from dinput8-chain.ini: " + cio::to_utf8(dll) + ")";
     }
-    if (!read_chain || !look.tool_name) return std::nullopt;
-    for (const auto& dll : look.chain) {
-        const std::string name = look.tool_name(dll);
-        if (name.rfind("EML", 0) == 0 || name.rfind("ShroudForge", 0) == 0)
-            return name + " (from dinput8-chain.ini: " + cio::to_utf8(dll) + ")";
-    }
-    return std::nullopt;
+    return read_chain ? chained_tool_by_text(look) : std::nullopt;
 }
 
 }  // namespace emf::loader
