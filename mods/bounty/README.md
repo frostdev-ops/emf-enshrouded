@@ -39,7 +39,8 @@ board is `/bounty.board` rather than a bare `/bounty`.)
   guard a spot does not follow you then, so its kills count for nobody until it follows you again. A creature killed
   without a hit (a test command) counts for nobody.
 - **Gather:** raw materials a player picks up in the world (from a tree, a plant, a rock, a loose drop, a creature's
-  corpse) whose name holds the bounty's word. Never items taken out of a chest, a crafting station or a death bag, nor
+  corpse, or the glowing loot spot a kill leaves, also when Loot Magnet takes it for you) whose name holds the bounty's
+  word. Never items taken out of a chest, a crafting station or a death bag, nor
   out of a tombstone, nor a bounty's own reward, nor items coming back from a chest a mod was filling (quick stack,
   sorting chests). Loose drops a mod made do not count either: a reward this mod dropped at a full player's feet
   (picked up within 30 minutes of play), and a loose drop of an item that a chest within 30 m got from a mod in the
@@ -80,7 +81,8 @@ draw for the same period, so asking again never changes them); progress and uncl
 The bounties are the `POOL` table at the top of `emf\mods\bounty\main.lua`: kind, faction or item word, how many,
 reward items, how often it is drawn, and `starter = true` for the quick first ones. Change it while the game runs and
 save: the mod reloads. **How many to slay or gather** scales the counts (tiny x0.2, easy x0.6, hard x1.5). A pool
-without starters draws everyone's boards from the whole pool.
+without starters draws everyone's boards from the whole pool; a pool with fewer starters than **Bounties per player**
+fills the rest of a first board from its other bounties.
 
 Installing EMF again replaces `main.lua`, and your changes to `POOL` with it. To keep your own bounties, put them in
 `emf\config\bounty\pool.lua` instead: that folder stays when EMF is installed again or removed. The file returns a

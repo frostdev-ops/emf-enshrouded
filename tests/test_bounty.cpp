@@ -253,7 +253,13 @@ TEST_CASE("bounty: /bounty.reroll swaps one bounty for another (once a period by
         b.kill(3300 + i, {1});
     }
     const std::string top = b.reply("bounty.top", 2, 0xBB);  // player 2's starters may count the scavengers too
-    CHECK(top.find("1. 0x00000000000000bb: ") != std::string::npos);
+    // player 2 finished the two given ones, and a starter "Slay 2 Scavengers" too when the day's draw has it
+    const std::string first_line = "1. 0x00000000000000bb: ";
+    const size_t at = top.find(first_line);
+    REQUIRE(at != std::string::npos);
+    const int done = std::atoi(top.c_str() + at + first_line.size());
+    CHECK(done >= 2);
+    CHECK(done <= 3);
     CHECK(top.find(" (you)") != std::string::npos);
     CHECK(top.find("2. 0x00000000000000aa: 1") != std::string::npos);
 }
@@ -435,7 +441,7 @@ TEST_CASE("bounty: a reroll that finds no other bounty in the pool is not used u
 }
 
 
-// ---- kills by a player's companion and summons (the owner: "killed by the companion did not count") ----
+// ---- kills by a player's companion and summons (an ally's hit names the ally as its source, not the player) ----
 TEST_CASE("bounty: a kill by a player's companion, Beastmaster beast or Necromancer undead counts for that player") {
     BountyRig b({{"share_kills", "0"}});
     b.reply("bounty.give kill_vukah");
@@ -476,7 +482,7 @@ TEST_CASE("bounty: with shared kills, a player whose companion hit the creature 
     CHECK(b.board(2, 0xBB).find("Slay 6 Vukah: 1/6") != std::string::npos);
 }
 
-// ---- smaller first bounties (the owner: "the first bounty was too big to try") ----
+// ---- smaller first bounties (the pool's own start at Slay 8 and Gather 60) ----
 namespace {
 const char* const kStarters[] = {"Gather 20 Wood logs", "Gather 20 Stone", "Gather 15 Plant fibre", "Slay 2 Wildlife",
                                  "Slay 3 Shroud creatures", "Slay 2 Scavengers"};
@@ -522,4 +528,55 @@ TEST_CASE("bounty: the Tiny size (x0.2) makes every bounty quick to try; a pool 
         CHECK(first.find(quick) == std::string::npos);
     }
     CHECK(first.find("3. ") != std::string::npos);
+}
+
+// ---- what a kill leaves counts as gathered: its loot spot, or a corpse turned into loot ----
+TEST_CASE("bounty: fur and meat from a kill's loot spot or a corpse turned into loot count as gathered; chests and graves never") {
+    BountyRig b({{"bounties_per_period", "1"}});
+    b.reply("bounty.give gather_fur");
+    const uint32_t kFur = 0x3aaa39a7;
+    // 4100: the loot spot a kill leaves (LootContainer_Enemy_*), whether its loot is taken by hand or by Loot Magnet
+    component<ecs::InventorySetup>(b.r.fake, 4100);
+    component<ecs::Inventory>(b.r.fake, 4100);
+    component<ecs::DefaultInventory>(b.r.fake, 4100);
+    component<ecs::DestroyOnLoot>(b.r.fake, 4100);
+    component<ecs::DoNotSave>(b.r.fake, 4100);
+    // 4101: a corpse the game turned into loot (transform_to_loot: Health stays, InventorySetup and DestroyOnLoot come)
+    component<ecs::Health>(b.r.fake, 4101);
+    component<ecs::InventorySetup>(b.r.fake, 4101);
+    component<ecs::DestroyOnLoot>(b.r.fake, 4101);
+    // 4102: a loot chest of the world (saved: no DestroyOnLoot, no DoNotSave)
+    component<ecs::InventorySetup>(b.r.fake, 4102);
+    component<ecs::DefaultInventory>(b.r.fake, 4102);
+    // 4103: a loot spot that carries the tombstone mark: a grave
+    for (uint32_t id : {4103u}) {
+        component<ecs::InventorySetup>(b.r.fake, id);
+        component<ecs::Inventory>(b.r.fake, id);
+        component<ecs::DefaultInventory>(b.r.fake, id);
+        component<ecs::DestroyOnLoot>(b.r.fake, id);
+        component<ecs::DoNotSave>(b.r.fake, id);
+        component<ecs::CreateItemLoot>(b.r.fake, id);
+    }
+    // 4104: a player's storage chest
+    component<ecs::InventorySetup>(b.r.fake, 4104);
+    deliver(b.r.fake, "PickupEvent", pickup_event(1, 4100, kFur, 3));
+    deliver(b.r.fake, "PickupEvent", pickup_event(1, 4101, kFur, 2));
+    deliver(b.r.fake, "PickupEvent", pickup_event(1, 4102, kFur, 10));
+    deliver(b.r.fake, "PickupEvent", pickup_event(1, 4103, kFur, 10));
+    deliver(b.r.fake, "PickupEvent", pickup_event(1, 4104, kFur, 10));
+    CHECK(b.board().find("Gather 10 Fur: 5/10") != std::string::npos);
+}
+
+TEST_CASE("bounty: a pool with fewer starters than bounties per player fills the first board from the rest of the pool") {
+    BountyRig c;
+    c.edit_main("(when first hit)",
+                "\nfor i = #POOL, 1, -1 do if POOL[i].starter and POOL[i].id ~= \"start_wood\" then table.remove(POOL, i) end end");
+    const std::string first = c.board(2, 0xBB);  // a board drawn after the edit (the host's is already drawn)
+    CHECK(first.find("Gather 20 Wood logs") != std::string::npos);  // the one starter
+    CHECK(first.find("3. ") != std::string::npos);                  // and two from the rest of the pool
+    CHECK(first.find("4. ") == std::string::npos);
+    // the reroll of the starter finds no other starter: it takes one from the rest of the pool
+    const size_t line = first.find("Gather 20 Wood logs");
+    const std::string number = first.substr(line - 3, 1);
+    CHECK(c.reply("bounty.reroll " + number, 2, 0xBB).rfind("Bounty " + number + " is now: ", 0) == 0);
 }

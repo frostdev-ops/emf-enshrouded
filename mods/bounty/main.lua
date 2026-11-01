@@ -21,8 +21,8 @@
 -- items by their debug name (`items rune` in the console); gear = true comes at the player's level and the
 -- reward_rarity setting; counts are scaled by the reward_scale setting.
 -- starter = true: a quick one for players who have not finished a bounty yet. Their boards (and rerolls) are drawn
---   from the starters only, until they finish their first bounty; later boards never have starters. A pool without
---   starters draws everyone's boards from the whole pool.
+--   from the starters, until they finish their first bounty (with fewer starters than a board holds, the rest comes
+--   from the other bounties); later boards never have starters. A pool without starters draws as before.
 -- A kill counts for the player who hit, and for the player whose ally hit (the companion, a Beastmaster beast, a
 -- Necromancer undead: a creature of the players' side that guards that player).
 local RUNES = "Material_T1_Token_WeaponUpgrade_Rune01"
@@ -273,7 +273,14 @@ local function board_of(account)
   end
   if rec.key ~= key then
     rec.key, rec.rerolls = key, 0
-    rec.list = draw(account, key, "0", math.max(1, emf.setting("bounties_per_period") or 3), nil, starters_for(rec.done))
+    local count = math.max(1, emf.setting("bounties_per_period") or 3)
+    local starter = starters_for(rec.done)
+    rec.list = draw(account, key, "0", count, nil, starter)
+    if starter and #rec.list < count then  -- fewer starters than the board holds: the rest from the other bounties
+      local have = {}
+      for _, b in ipairs(rec.list) do have[b.id] = true end
+      for _, b in ipairs(draw(account, key, "0f", count - #rec.list, have, false)) do rec.list[#rec.list + 1] = b end
+    end
     dirty = true
   end
   return rec
@@ -383,11 +390,27 @@ local function player_of_hit(world, source)
   return nil
 end
 
--- Picked up in the world: from nothing (a tree), a loose drop (PickupItem), a plant or rock, or a creature's corpse;
--- never out of a chest, a station or a death bag (InventorySetup), nor out of a tombstone (seen in game: an Inventory,
--- CreateItemLoot and DestroyOnLoot, no Health). A component that cannot be read counts against (fails closed).
+-- What a kill leaves: the loot spot the game spawns where a creature died (templates LootContainer_Enemy_*:
+-- InventorySetup, DefaultInventory, DestroyOnLoot, DoNotSave), or a corpse the game turned into loot (Health stays,
+-- InventorySetup and DestroyOnLoot come). Never a tombstone (CreateItemLoot), anything kept with the world (ForceSave;
+-- chests and storage have neither DestroyOnLoot nor DoNotSave) or a player. Unreadable counts against.
+local function kill_loot(world, from)
+  if has(world, "DestroyOnLoot", from) ~= true or has(world, "InventorySetup", from) ~= true then return false end
+  if has(world, "CreateItemLoot", from) ~= false or has(world, "ForceSave", from) ~= false or
+     has(world, "PlayerState", from) ~= false then
+    return false
+  end
+  if has(world, "Health", from) == true then return true end
+  return has(world, "DefaultInventory", from) == true and has(world, "DoNotSave", from) == true
+end
+
+-- Picked up in the world: from nothing (a tree), a loose drop (PickupItem), a plant or rock, a creature's corpse, or
+-- what a kill leaves (its loot spot); never out of a chest, a station or a death bag (InventorySetup), nor out of a
+-- tombstone (seen in game: an Inventory, CreateItemLoot and DestroyOnLoot, no Health). A component that cannot be read
+-- counts against (fails closed).
 local function from_the_world(world, from)
   if from == 0 then return true end
+  if kill_loot(world, from) then return true end
   if has(world, "InventorySetup", from) ~= false then return false end
   if has(world, "PickupItem", from) == true then return true end
   if has(world, "Inventory", from) ~= false and has(world, "CreateItemLoot", from) ~= false and
@@ -749,7 +772,9 @@ emf.command("reroll", "<n>: swap one of your bounties for another", function(wor
   local exclude = {}
   for _, b in ipairs(rec.list) do exclude[b.id] = true end
   local used = (rec.rerolls or 0) + 1
-  local new = draw(me.account, rec.key, "r" .. used .. ":" .. n, 1, exclude, starters_for(rec.done))[1]
+  local salt = "r" .. used .. ":" .. n
+  local new = draw(me.account, rec.key, salt, 1, exclude, starters_for(rec.done))[1] or
+              draw(me.account, rec.key, salt, 1, exclude, false)[1]  -- no other starter: one of the other bounties
   if not new then  -- nothing to swap to: the reroll is not used up
     emf.reply("The pool has no other bounty.")
     return
