@@ -9,8 +9,43 @@
 
 #include "emf/emf.hpp"
 #include "emf/generated/components.hpp"
+#include "raid_logic.h"
 
 namespace raids {
+
+// Health left (the replicated health, else the first Health slot: the current health in game tests).
+inline bool has_health(emf::World w, uint32_t id) {
+    if (auto* n = w.get<emf::gen::ecs::NetworkHealth>(id)) return n->health > 0;
+    auto* h = w.get<emf::gen::ecs::Health>(id);
+    return h && h->dataStorage[0] > 0;
+}
+
+// A fighter on the players' side that is not a player: the companion, a summon, a tamed beast. Its faction is the
+// players' side (Player, AutomatedPlayer, PlayerAlly) and it runs the enemy AI that fights (they all guard their owner
+// through it). Baby farm animals are PlayerAlly too, but have no such AI.
+inline bool is_ally(emf::World w, uint32_t id) {
+    namespace ecs = emf::gen::ecs;
+    using F = emf::gen::FactionType;
+    if (w.get<ecs::PlayerState>(id)) return false;
+    auto* f = w.get<ecs::Faction>(id);
+    if (!f || (f->faction != F::Player && f->faction != F::AutomatedPlayer && f->faction != F::PlayerAlly)) return false;
+    return w.get<ecs::DynamicEnemy01BehaviorState>(id) != nullptr;
+}
+
+// The allies within `radius` metres of `center` (horizontally), in the world's order. Walks every entity: a few times a
+// minute, not every step.
+inline std::vector<Foe> allies_near(emf::World w, const Vec3& center, double radius) {
+    std::vector<Foe> out;
+    w.for_each_entity([&](uint32_t id) {
+        auto* t = w.get<emf::gen::ecs::CurrentTransform>(id);
+        if (!t) return;
+        constexpr double kFixed = 4294967296.0;
+        const Vec3 p{t->transform.position.x / kFixed, t->transform.position.y / kFixed, t->transform.position.z / kFixed};
+        if (horizontal_distance(p, center) > radius || !is_ally(w, id)) return;
+        out.push_back({id, p, false, has_health(w, id)});
+    });
+    return out;
+}
 
 struct RaiderId {
     uintptr_t tpl = 0;   // its template's Enemy01BehaviorState data (every entity of a template shares it); 0 = unknown

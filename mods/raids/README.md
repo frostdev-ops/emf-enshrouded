@@ -21,8 +21,9 @@ The switch is kept with the world (`emf\config\raids\<world slot>.txt`). `raids.
    base: within **Base radius** of a flame altar.
 2. A warning: "The Shroud stirs: raiders gather outside your base and attack in 60 s!", and a countdown on screen.
 3. The waves: the raiders appear 40-60 m from the altar (always 5 m or more beyond the base radius, never inside a base),
-   at the level of the strongest player at the base plus the difficulty, and march on the altar. Near a living player
-   they fight that player. The next wave comes after **Seconds between waves**, or 5 s after a whole wave is dead. At
+   at the level of the strongest player at the base plus the difficulty, and march on the altar. Within 25 m of a living
+   player, companion or summon they fight the nearest one (with **Raiders attack** on "Players only", players alone).
+   The next wave comes after **Seconds between waves**, or 5 s after a whole wave is dead. At
    most 24 raiders are alive at once.
 4. Every raider dead: "Raid repelled!", and every player near the base (within 20 m of the raiders' ring, about 80 m
    from the altar with the default radius) gets the reward: one rune and one fur per raider slain, or also a rare
@@ -49,6 +50,7 @@ raid comes when you sleep through nightfall.
 | Seconds between waves (`wave_gap_seconds`) | 60 | 20-300 |
 | Difficulty (`difficulty`) | normal | easy (5 levels below the strongest player at the base), normal, hard (+3), deadly (+6) |
 | Boss wave (`boss`) | off | the last wave brings a Vukah brawler, a mini-boss with a boss bar |
+| Raiders attack (`targets`) | players, companions and summons | or players only. Allies are the fighters on the players' side: the companion, Necromancer's minions, Beastmaster's beasts, the game's own summons (never farm animals) |
 | Who raids (`templates`) | Vukah warriors | or your own templates (below) |
 | My own templates (`custom_templates`) | | template GUIDs separated by commas |
 | Which base (`bases`) | the busiest | or any base with players, at random |

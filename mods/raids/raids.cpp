@@ -30,7 +30,7 @@ constexpr const char* kMod = "raids";
 constexpr const char* kHudLine = "raids.status";
 constexpr double kFixed = 4294967296.0;
 constexpr uint64_t kGuardEveryMs = 3000;
-constexpr double kThreatRange = 25.0;  // a raider this close to a living player is told to fight that player
+constexpr double kThreatRange = 25.0;  // a raider this close to a living player (or ally) is told to fight it
 
 // ---- settings (written by the change callback, any world's thread; read by the server tick) ----
 struct Config {
@@ -38,6 +38,7 @@ struct Config {
     bool custom = false;
     std::vector<raids::Template> custom_pool;
     raids::RewardKind reward = raids::RewardKind::Materials;
+    raids::Targets targets = raids::Targets::Allies;
     uint32_t corner = EMF_HUD_TOP_RIGHT;
     uint32_t rgba = 0;
 };
@@ -76,6 +77,7 @@ void read_settings() {
     c.s.bases = raids::base_pick(emf::setting_text(kMod, "bases", "busiest"));
     c.s.base_radius = emf::setting_float(kMod, "base_radius", 30.0);
     c.reward = raids::reward_kind(emf::setting_text(kMod, "reward", "materials"));
+    c.targets = raids::targets_mode(emf::setting_text(kMod, "targets", "allies"));
     c.custom = emf::setting_text(kMod, "templates", "verified") == "custom";
     std::vector<std::string> bad;
     c.custom_pool = raids::parse_custom_templates(emf::setting_text(kMod, "custom_templates", ""), &bad);
@@ -157,13 +159,6 @@ std::optional<raids::Vec3> pos_of(emf::World w, uint32_t id) {
 uint32_t level_of(emf::World w, uint32_t id) {
     auto* l = w.get<gen::Level>(id);
     return l ? l->dataStorage[0] : 0;
-}
-
-// A player with health left (the replicated health, else the first Health slot: the current health in game tests).
-bool alive(emf::World w, uint32_t id) {
-    if (auto* n = w.get<gen::NetworkHealth>(id)) return n->health > 0;
-    auto* h = w.get<gen::Health>(id);
-    return h && h->dataStorage[0] > 0;
 }
 
 void refresh_bases(emf::World w) {
@@ -308,8 +303,9 @@ raids::Tick make_tick(emf::World w, uint64_t now, const std::vector<raids::Playe
     return t;
 }
 
-// Raiders: gone ones noted; the others kept marching on the altar and fighting living players near them.
-void upkeep(emf::World w, uint64_t now, const std::vector<raids::Player>& players) {
+// Raiders: gone ones noted; the others kept marching on the altar and fighting the living players (and, with the
+// "Raiders attack" setting on allies, the companion and summons) near them.
+void upkeep(emf::World w, uint64_t now, const std::vector<raids::Player>& players, const Config& c) {
     for (uint32_t id : g_director.living()) {
         if (!ours(w, id)) {  // gone (or its id is someone else's now)
             g_director.on_gone(id);
@@ -328,21 +324,18 @@ void upkeep(emf::World w, uint64_t now, const std::vector<raids::Player>& player
     if (now - g_guard_ms < kGuardEveryMs || g_director.phase() != raids::Phase::Fighting) return;
     g_guard_ms = now;
     const uint32_t altar = g_director.base().altar;
+    std::vector<raids::Foe> foes;  // never a dead one (seen in game: a raider told to fight a dead player wandered off)
+    for (const auto& pl : players) foes.push_back({pl.id, pl.pos, true, raids::has_health(w, pl.id)});
+    if (c.targets == raids::Targets::Allies)
+        for (const auto& a : raids::allies_near(w, g_director.base().pos,
+                                                raids::ring_for(c.s.base_radius).max + 20 + kThreatRange))
+            foes.push_back(a);
     for (uint32_t id : g_director.living()) {
         auto* ai = w.get<gen::DynamicEnemy01BehaviorState>(id);
         if (ai && ai->guardEntityId.id != altar) order(g_guards, id, altar);
         const auto p = pos_of(w, id);
         if (!p) continue;
-        uint32_t target = 0;
-        double best = kThreatRange;
-        for (const auto& pl : players) {
-            const double d = raids::horizontal_distance(pl.pos, *p);
-            if (d <= best && alive(w, pl.id)) {  // never a dead player (seen in game: the raider then wandered off)
-                best = d;
-                target = pl.id;
-            }
-        }
-        if (target) order(g_threats, id, target);
+        if (const uint32_t target = raids::pick_target(*p, foes, kThreatRange, c.targets)) order(g_threats, id, target);
     }
 }
 
@@ -419,7 +412,7 @@ void on_tick(emf::World w) {
         for (const auto& p : players)
             if (!raids::inside_any_base(p.pos, g_bases, c.s.base_radius)) g_crumbs.add(p.pos, now);
     }
-    upkeep(w, now, players);
+    upkeep(w, now, players, c);
     run(w, g_director.tick(make_tick(w, now, players, c)), c);
 }
 

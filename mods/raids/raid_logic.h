@@ -218,6 +218,32 @@ private:
     std::map<uint32_t, Track> map_;
 };
 
+// ---- whom they fight ----
+// The "Raiders attack" setting: players only, or players and their allies (the companion, summons, tamed beasts).
+enum class Targets { Players, Allies };
+inline Targets targets_mode(const std::string& v) { return v == "players" ? Targets::Players : Targets::Allies; }
+struct Foe {
+    uint32_t id = 0;
+    Vec3 pos;
+    bool player = false;  // a player; else an ally of the players
+    bool alive = true;    // health left
+};
+// The one a raider at `at` is told to fight: the nearest living foe within `range` metres (horizontally); allies count
+// only with Targets::Allies. 0 when there is none: the raider keeps marching on the altar.
+inline uint32_t pick_target(const Vec3& at, const std::vector<Foe>& foes, double range, Targets mode) {
+    uint32_t best = 0;
+    double best_d = range;
+    for (const auto& f : foes) {
+        if (!f.alive || (!f.player && mode != Targets::Allies)) continue;
+        const double d = horizontal_distance(f.pos, at);
+        if (d <= best_d) {
+            best_d = d;
+            best = f.id;
+        }
+    }
+    return best;
+}
+
 // ---- who comes ----
 struct Template {
     std::string name;

@@ -484,6 +484,27 @@ TEST_CASE("raids: occupied bases are the altars with players within the base rad
     CHECK(players_near(kAltar, players, 80) == 1);
 }
 
+TEST_CASE("raids: whom a raider fights: the nearest living player, or with allies on also a companion or summon") {
+    const Vec3 r{0, 0, 0};
+    const std::vector<Foe> foes = {
+        {1, {12, 0, 0}, true, true},      // a player 12 m away
+        {5000, {4, 0, 3}, false, true},   // the companion 5 m away
+        {2, {3, 0, 0}, true, false},      // a dead player, nearer: never (seen in game: the raider then wandered off)
+        {5001, {2, 0, 0}, false, false},  // a dead summon
+    };
+    CHECK(pick_target(r, foes, 25, Targets::Players) == 1u);
+    CHECK(pick_target(r, foes, 25, Targets::Allies) == 5000u);
+    CHECK(pick_target(r, foes, 10, Targets::Players) == 0u);  // the only living player is out of reach
+    CHECK(pick_target(r, foes, 10, Targets::Allies) == 5000u);
+    CHECK(pick_target(r, foes, 4, Targets::Allies) == 0u);
+    CHECK(pick_target(r, {}, 25, Targets::Allies) == 0u);
+    const std::vector<Foe> close = {{1, {3, 0, 0}, true, true}, {5000, {6, 0, 0}, false, true}};
+    CHECK(pick_target(r, close, 25, Targets::Allies) == 1u);  // the player is nearer
+    CHECK(targets_mode("players") == Targets::Players);
+    CHECK(targets_mode("allies") == Targets::Allies);
+    CHECK(targets_mode("") == Targets::Allies);  // the default
+}
+
 TEST_CASE("raids: the per-world switch is kept in the world's file as on=1 / on=0 (off when missing)") {
     CHECK_FALSE(parse_world_on(""));
     CHECK(parse_world_on("on=1\n"));
