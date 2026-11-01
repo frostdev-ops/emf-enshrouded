@@ -582,6 +582,21 @@ std::string dll_tool(const Context& c, const std::wstring& file) {
 // The same for names shown and statuses: the light scan reads no DLL for those (the names stay the file names).
 std::string tool_of(const Context& c, const std::wstring& file) { return c.light ? std::string() : dll_tool(c, file); }
 
+// The DLLs emf\chain_status.txt says the last start skipped ("<name>\tskipped": a start without any mods).
+std::vector<std::string> skipped_chain_names(const std::string& chain_status) {
+    std::vector<std::string> out;
+    size_t from = 0;
+    while (from < chain_status.size()) {
+        size_t to = chain_status.find('\n', from);
+        if (to == std::string::npos) to = chain_status.size();
+        const std::string line = loader::trim_chain(chain_status.substr(from, to - from));
+        from = to + 1;
+        const size_t tab = line.find('\t');
+        if (tab != std::string::npos && line.substr(tab + 1) == "skipped") out.push_back(line.substr(0, tab));
+    }
+    return out;
+}
+
 // ---- DLL mods EMF starts: dinput8-chain.ini, with emf\chain_status.txt from the last game start ----
 void scan_chain(FolderState& s, const Context& c) {
     std::map<std::wstring, std::string> status;  // lower-case name -> started / missing / failed N
@@ -893,7 +908,11 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
         words.push_back(word);
     }
     view.chain_status = c.light ? std::string() : read_text(s.game + L"\\emf\\chain_status.txt");
-    for (const auto& name : core::started_chain_names(view.chain_status)) {
+    // a DLL the last start skipped (Play without any mods, loader/play_once.h) runs again at the next normal start: its
+    // tool counts as running, so the report does not say another tool took its file name
+    std::vector<std::string> running = core::started_chain_names(view.chain_status);
+    for (const auto& name : skipped_chain_names(view.chain_status)) running.push_back(name);
+    for (const auto& name : running) {
         const std::wstring file = loader::widen_chain(name);
         if (loader::inside_game_folder(file)) view.chained_tools.push_back(tool_of(c, file));
     }
