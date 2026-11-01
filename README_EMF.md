@@ -241,8 +241,8 @@ player within a second. So:
 - It comes back by itself 3 times within 2 minutes; at the 4th loss it stays away until you call it (G or F6), which
   starts the count over.
 
-Both wait until you have stood still for 2 s and aim at the ground you stand on, not a spot beside you (over a ledge,
-or beyond a wall). Gear, order and level stay the same.
+The catch-up and the return to you wait until you have stood still for 2 s and aim at the ground you stand on, not a
+spot beside you (over a ledge, or beyond a wall). Gear, order and level stay the same.
 
 **Orders.** With the companion out, hold **G**: a wheel titled "Companion (level N)" offers
 
