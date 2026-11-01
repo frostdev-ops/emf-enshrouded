@@ -404,10 +404,13 @@ difficulty. A warning first ("raiders gather outside your base and attack in 60 
 raiders left, "Raid repelled!" and a reward for every player at the base when all are dead (runes and furs, or also a
 rare weapon); survivors flee at dawn. Off in every world until you switch it on there: `raids.world on` (or the setting
 "Raids in the world you are in"); kept per world in `emf\config\raids\<slot>.txt`. Commands: `raids.status` (every
-player), `raids.world on|off`, `raids.start [seconds]`, `raids.stop`, `raids.kill` (host). Settings: chance, hour,
-warning, quiet nights, waves, raiders per wave, gap, difficulty, boss wave, who raids (the tested Vukah, or your own
-template GUIDs), which base, base radius, reward, corner and colour. Spawned raiders are not saved: a reload ends the
-raid. Details: `mods/raids/README.md`.
+player), `raids.world on|off`, `raids.start [seconds]`, `raids.stop`, `raids.kill` (host). Settings: **Raid strength**
+(a preset: gentle, standard or hard, or your own settings below), chance, hour, warning, quiet nights, waves, raiders
+per wave, gap, difficulty, boss wave, **Raiders attack** (players, companions and summons, or players only), **Only
+creatures you are ready for** (on: the boss wave's brawler waits until the strongest player at the base is level 5,
+your own templates for their `GUID@level`), who raids (the tested Vukah, or your own template GUIDs), which base, base
+radius, reward, corner and colour. Spawned raiders are not saved: a reload ends the raid. Details:
+`mods/raids/README.md`.
 
 ## The loot_magnet mod (Loot Magnet)
 Installed switched off: switch it on in the Mods tab or EMF.exe. The corpses of creatures killed near a player are looted into that player a moment later, with the game's own loot
@@ -422,7 +425,8 @@ default for new players, the host's key, base radius. Details: `mods/loot_magnet
 Installed switched off: switch it on in the Mods tab or EMF.exe. Every so often, while a player is outdoors at night, a champion (the Vukah brawler mini-boss, with its boss bar)
 appears 80-150 m away at that player's level + 2, patrols spots players walked, and hunts a player who comes within
 30 m. The line on screen shows its distance and direction; the slayer gets 10 runes and a rare weapon at their level;
-it leaves after 10 minutes, at dawn or when everyone is far away. Commands: `champion.where`, `champion.stats` (every
+it leaves after 10 minutes, at dawn or when everyone is far away. With **Only creatures you are ready for** (on by
+default) it comes only for a player of level 5 or more (the brawler's `min_level`). Commands: `champion.where`, `champion.stats` (every
 player), `champion.summon`, `champion.dismiss`, `champion.kill` (host). The template table and the rewards are at the
 top of `emf\mods\champion\main.lua`: change them while the game runs. Details: `mods/champion/README.md`.
 
