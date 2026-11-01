@@ -1488,12 +1488,59 @@ std::optional<InstallRecord> read_install_record(const std::wstring& game, const
     return parse_record(text, key);
 }
 
-InstallResult uninstall_mod(const std::wstring& game, const std::string& key) {
+namespace {
+bool under_root(const std::string& path, const std::string& root) {
+    return _stricmp(path.c_str(), root.c_str()) == 0 || iprefix(path, root + "\\");
+}
+}  // namespace
+
+bool separable_install(const InstallRecord& r) {
+    if (r.roots.size() < 2 || !r.chain.empty() || !r.chain_off.empty()) return false;
+    return std::all_of(r.files.begin(), r.files.end(), [&](const std::pair<std::string, std::string>& f) {
+        return std::any_of(r.roots.begin(), r.roots.end(), [&](const std::string& root) { return iprefix(f.first, root + "\\"); });
+    });
+}
+
+InstallResult uninstall_mod(const std::wstring& game, const std::string& key, const std::string& root) {
     InstallResult res;
-    const auto rec = read_install_record(game, key);
+    auto rec = read_install_record(game, key);
     if (!rec) {
         res.error = "EMF has no record of installing \"" + key + "\", so it cannot uninstall it.";
         return res;
+    }
+    // one mod folder of a record that holds several separate mods: only its files go, the record keeps the others
+    std::optional<InstallRecord> rest;
+    if (!root.empty()) {
+        if (!owns_root(*rec, root)) {
+            res.error = "EMF's record of " + (rec->name.empty() ? key : rec->name) + " does not hold " + root + ".";
+            return res;
+        }
+        const bool only_this = rec->roots.size() == 1 && rec->chain.empty() && rec->chain_off.empty() &&
+                               std::all_of(rec->files.begin(), rec->files.end(), [&](const std::pair<std::string, std::string>& f) {
+                                   return under_root(f.first, root);
+                               });
+        if (!only_this) {
+            if (!separable_install(*rec)) {
+                res.error = "EMF installed " + root + " and the rest of " + (rec->name.empty() ? key : rec->name) +
+                            " as one install, so they are uninstalled together.";
+                return res;
+            }
+            InstallRecord one = *rec;
+            one.name = root;
+            one.files.clear();
+            one.folders.clear();
+            one.roots = {root};
+            one.backups.clear();
+            rest = *rec;
+            rest->files.clear();
+            rest->folders.clear();
+            rest->roots.clear();
+            for (const auto& f : rec->files) (under_root(f.first, root) ? one.files : rest->files).push_back(f);
+            for (const auto& d : rec->folders) (under_root(d, root) ? one.folders : rest->folders).push_back(d);
+            for (const auto& r : rec->roots)
+                if (_stricmp(r.c_str(), root.c_str()) != 0) rest->roots.push_back(r);
+            rec = std::move(one);
+        }
     }
     // files the game or EMF owns (a forged record may name them), and files another install still needs (shared)
     const std::set<std::string> own = emf_own_files(game);
@@ -1570,11 +1617,17 @@ InstallResult uninstall_mod(const std::wstring& game, const std::string& key) {
                 if (auto r = switch_chain_line(t, wide(n), true)) t = *r, any = true;
         return any ? std::optional<std::string>(t) : std::nullopt;
     });
-    DeleteFileW(lp(game + L"\\" + wide(record_path(key))).c_str());  // EMF's own record
-    RemoveDirectoryW(lp(game + L"\\" + wide(kRecords)).c_str());     // when it was the last one
+    if (rest) {  // the record's other mods stay installed
+        const Change w = write_file_whole(game + L"\\" + wide(record_path(key)), record_json(*rest), record_path(key));
+        if (!w.ok) res.done.push_back("EMF could not update its record of the other mods: " + w.error);
+    } else {
+        DeleteFileW(lp(game + L"\\" + wide(record_path(key))).c_str());  // EMF's own record
+        RemoveDirectoryW(lp(game + L"\\" + wide(kRecords)).c_str());     // when it was the last one
+    }
 
     res.ok = true;
-    res.done.push_back("Uninstalled " + rec->name + ": " + count_files(removed) + " removed.");
+    res.done.insert(res.done.begin(), "Uninstalled " + rec->name + ": " + count_files(removed) + " removed.");
+    if (rest) res.done.push_back("The other mods EMF installed from the same file stay: " + join(rest->roots, 8) + ".");
     if (!shared.empty()) res.done.push_back("Kept, also used by another mod: " + join(shared, 8) + ".");
     if (!protectedf.empty()) res.done.push_back("Kept (the game's or EMF's own file): " + join(protectedf, 8) + ".");
     if (!left.empty())

@@ -733,6 +733,10 @@ bool notes_say(const InstallPlan& p, const std::string& text) {
     return std::any_of(p.notes.begin(), p.notes.end(), [&](const std::string& n) { return n.find(text) != std::string::npos; });
 }
 
+bool has_root(const InstallRecord& r, const std::string& root) {
+    return std::find(r.roots.begin(), r.roots.end(), root) != r.roots.end();
+}
+
 std::string row_key(const FolderState& s, const std::string& id) {
     for (const auto& m : s.mods)
         if (m.id == id) return m.install_key;
@@ -896,4 +900,64 @@ TEST_CASE("app install: mods that install files outside their folders stay one i
     REQUIRE(uninstall_mod(h.dir, "moda").ok);
     CHECK(h.has(L"greeneye\\modb\\b.dll"));
     CHECK(h.has(L"dbgcore.dll"));
+}
+
+TEST_CASE("app install: one record of several separate mods (EMF.exe 0.3.2's creature packs) uninstalls one mod's folder alone") {
+    TempGame g(L"inst_packs_legacy");
+    Archive a(L"inst_packs_legacy_a");
+    add_packs(a);
+    InstallPlan old = build_plan(a.input(g, "EMF-creature-packs-0.3.2.zip"));
+    for (auto& part : old.parts) part.key.clear();  // as EMF.exe 0.3.2 did: one record for every pack
+    REQUIRE(apply_plan(g.dir, old).ok);
+    const std::string key = "emf_beastmaster_bear";
+    const auto rec = read_install_record(g.dir, key);
+    REQUIRE(rec);
+    REQUIRE(rec->roots.size() == 3);
+    CHECK(separable_install(*rec));
+    const FolderState s = scan_game_folder(g.dir);
+    for (const auto& m : s.mods)  // each row binds through its own folder: the page offers to uninstall that one
+        if (m.source == "eml") CHECK(m.install_root == "mods\\" + m.id);
+    REQUIRE(s.installed.size() == 1);
+    CHECK(s.installed[0].separable);
+    CHECK(s.installed[0].root_files == std::vector<size_t>{3, 3, 3});
+
+    g.write(L"mods\\emf_beastmaster_bear\\player.txt", "mine");
+    const InstallResult u = uninstall_mod(g.dir, key, "mods\\emf_beastmaster_bear");
+    REQUIRE_MESSAGE(u.ok, u.error);
+    CHECK_FALSE(g.has(L"mods\\emf_beastmaster_bear\\src"));
+    CHECK_FALSE(g.has(L"mods\\emf_beastmaster_bear\\models"));
+    CHECK(g.read(L"mods\\emf_beastmaster_bear\\player.txt") == "mine");  // not the install's
+    CHECK(g.has(L"mods\\emf_necromancer_undead\\src\\mod.lua"));
+    CHECK(g.has(L"mods\\emf_beastmaster_beasts\\models\\creature.bin"));
+    const auto rest = read_install_record(g.dir, key);
+    REQUIRE(rest);  // the record keeps the other two packs
+    CHECK(rest->roots.size() == 2);
+    CHECK_FALSE(has_root(*rest, "mods\\emf_beastmaster_bear"));
+    CHECK(rest->files.size() == 6);
+    for (const auto& [path, hash] : rest->files) CHECK(path.rfind("mods\\emf_beastmaster_bear\\", 0) != 0);
+
+    CHECK_FALSE(uninstall_mod(g.dir, key, "mods\\emf_beastmaster_bear").ok);  // no longer the record's
+    CHECK_FALSE(uninstall_mod(g.dir, key, "mods\\somewhere_else").ok);
+    REQUIRE(uninstall_mod(g.dir, key, "mods\\emf_necromancer_undead").ok);
+    CHECK_FALSE(g.has(L"mods\\emf_necromancer_undead"));
+    REQUIRE(uninstall_mod(g.dir, key, "mods\\emf_beastmaster_beasts").ok);  // the last folder: the whole record goes
+    CHECK_FALSE(g.has(L"mods\\emf_beastmaster_beasts"));
+    CHECK_FALSE(read_install_record(g.dir, key));
+
+    // Auto Loot Plus's DLL and EML folder go together: one folder alone is refused and nothing changes
+    emf_game(g);
+    Archive alp(L"inst_packs_legacy_alp");
+    alp.add(L"dinput8.dll", "MZ unknown dll");
+    alp.add(L"mods\\auto-loot-plus\\mod.json", R"({"id":"auto-loot-plus","name":"Auto Loot Plus","version":"1.1.8"})");
+    alp.add(L"mods\\auto-loot-plus\\src\\mod.lua");
+    const InstallPlan p = build_plan(alp.input(g, "AutoLootPlus.zip"));
+    REQUIRE(apply_plan(g.dir, p).ok);
+    const auto both = read_install_record(g.dir, p.key);
+    REQUIRE(both);
+    CHECK_FALSE(separable_install(*both));
+    const InstallResult r = uninstall_mod(g.dir, p.key, "mods\\auto-loot-plus");
+    CHECK_FALSE(r.ok);
+    CHECK(r.error.find("together") != std::string::npos);
+    CHECK(g.has(L"mods\\auto-loot-plus\\src\\mod.lua"));
+    CHECK(g.has(L"autolootplus.dll"));
 }

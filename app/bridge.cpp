@@ -67,7 +67,7 @@ std::string mod_json(const ModEntry& m) {
     o.boolean("can_toggle", m.can_toggle).str("toggle_note", m.toggle_note).str("path", utf8(m.path));
     o.str("readme", m.readme).str("error", m.error).str("status", m.status).str("note", m.note);
     o.str("nexus_id", m.nexus_id).str("game_build", m.game_build).strs("depends", m.depends).boolean("is_loader", m.is_loader);
-    o.str("install_key", m.install_key);
+    o.str("install_key", m.install_key).str("install_root", m.install_root);
     o.str("side", m.side).boolean("side_declared", m.side_declared).str("server_note", m.server_note).str("server_level", m.server_level);
     std::string settings = "[";
     for (size_t i = 0; i < m.settings.size(); ++i) settings += (i ? "," : "") + setting_json(m.settings[i]);
@@ -80,6 +80,12 @@ std::string installed_json(const InstalledMod& m) {
         .str("key", m.key).str("name", m.name).str("version", m.version).str("nexus_id", m.nexus_id)
         .str("archive", m.archive).str("installed_at", m.installed_at).num("files", static_cast<double>(m.files))
         .strs("roots", m.roots).strs("chain", m.chain).strs("outside", m.outside)
+        .raw("root_files", [&] {
+            std::vector<std::string> n;
+            for (size_t c : m.root_files) n.push_back(std::to_string(c));
+            return json_list(n);
+        }())
+        .boolean("separable", m.separable)
         .text();
 }
 
@@ -980,6 +986,7 @@ std::vector<std::string> Bridge::handle(const std::string& message) {
         const bool install = cmd == "install_apply";
         const char* type = install ? "install_done" : "uninstall_done";
         const std::string key = install ? (pending_ ? pending_->plan.key : "") : text_of(m, "key");
+        const std::string root = install ? std::string() : text_of(m, "root");  // one mod folder of a record of several
         const auto refuse = [&](const std::string& why) {
             InstallResult r;
             r.error = why;
@@ -1002,10 +1009,10 @@ std::vector<std::string> Bridge::handle(const std::string& message) {
             pending_.reset();
         }
         auto alive = alive_;
-        host_.run_async([this, alive, install, type, key, game, plan]() -> BridgeHost::Done {
+        host_.run_async([this, alive, install, type, key, root, game, plan]() -> BridgeHost::Done {
             InstallResult r;
             try {  // whatever happens, the page hears back (and busy_ is reset)
-                r = install ? apply_plan(game, *plan) : uninstall_mod(game, key);
+                r = install ? apply_plan(game, *plan) : uninstall_mod(game, key, root);
             } catch (const std::exception& e) {
                 r.ok = false;
                 r.error = std::string("EMF stopped with an error: ") + e.what();

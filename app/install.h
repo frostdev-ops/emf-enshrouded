@@ -127,7 +127,13 @@ std::optional<InstallRecord> read_install_record(const std::wstring& game, const
 
 // Removes what install `key` recorded: the files whose SHA-256 still matches (others are left and named), the folders
 // it made once they are empty, and its lines in dinput8-chain.ini (copies it switched off are switched on again).
-InstallResult uninstall_mod(const std::wstring& game, const std::string& key);
+// With `root` (one of its mod folders, "mods\\foo"): only that folder's files, when the record's mods can go one by one
+// (separable_install); the record keeps the others. Refused for a record whose mods go together.
+InstallResult uninstall_mod(const std::wstring& game, const std::string& key, const std::string& root = {});
+// A record of several separate mods that can be uninstalled one by one: two or more mod folders, every file inside one
+// of them and no line in dinput8-chain.ini (as EMF.exe 0.3.2 recorded the EMF creature packs, before it recorded each
+// such mod on its own).
+bool separable_install(const InstallRecord& r);
 
 // The plan as the page shows it.
 std::string plan_json(const InstallPlan& plan, const std::string& id, const std::string& blocked);

@@ -31,18 +31,29 @@ void link_installs(FolderState& s) {
     };
     for (const auto& r : read_install_records(s.game)) {
         std::vector<std::string> outside;
-        for (const auto& [path, hash] : r.files)
+        std::vector<size_t> root_files(r.roots.size(), 0);
+        for (const auto& [path, hash] : r.files) {
             if (!under_a_root(r.roots, path)) outside.push_back(path);
-        s.installed.push_back({r.key, r.name, r.version, r.nexus_id, r.archive, r.installed_at, r.files.size(), r.roots, r.chain, outside});
+            for (size_t i = 0; i < r.roots.size(); ++i)
+                if (under_a_root({r.roots[i]}, path)) ++root_files[i];
+        }
+        InstalledMod im{r.key, r.name, r.version, r.nexus_id, r.archive, r.installed_at, r.files.size(), r.roots, r.chain, outside};
+        im.root_files = root_files;
+        im.separable = separable_install(r);
+        s.installed.push_back(std::move(im));
         for (auto& m : s.mods) {
             if (!m.install_key.empty()) continue;
             bool mine = false;
             for (const auto& root : r.roots) {
-                if (iequals(m.path, s.game + L"\\" + wide(root))) mine = true;
+                bool here = iequals(m.path, s.game + L"\\" + wide(root));
                 const size_t slash = root.find_last_of('\\');
                 if (slash != std::string::npos && root.rfind("mods\\", 0) == 0 &&
                     iequals(m.path, s.game + L"\\" + wide(root.substr(0, slash + 1) + "." + root.substr(slash + 1))))
+                    here = true;
+                if (here) {
                     mine = true;
+                    m.install_root = root;
+                }
             }
             if (m.source == "chain")
                 for (const auto& n : r.chain) mine = mine || loader::same_name(wide(m.id), wide(n));

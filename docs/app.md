@@ -311,7 +311,10 @@ game's and EMF's own files are never removed however a record names them (so a f
 `enshrouded.exe`). A record binds to a mod row only through the mod folder or the chain DLL it installed, never through
 an arbitrary file path. It removes the folders the install made (and the mod's own folder) once they are empty, takes
 its lines out of `dinput8-chain.ini` (a DLL that was left in place keeps its line) and switches the copies it switched
-off on again. Backups in `emf\backup\` stay. A record is read with the same path check, so a changed record cannot
+off on again. Backups in `emf\backup\` stay. A record of several separate mods (two or more mod folders, every file
+inside one of them, no line in `dinput8-chain.ini`: how EMF.exe 0.3.2 recorded the creature packs) uninstalls one mod
+folder at a time: Uninstall on one of its mods removes that folder's files, and the record keeps the others. Any other
+record with several mods is uninstalled whole, and its question names the mods that go with it. A record is read with the same path check, so a changed record cannot
 reach outside the game folder.
 
 ## Nexus account
@@ -823,7 +826,8 @@ player's, and counts only a stand-in game running from the folder shown.
   and several separate mods in one archive (the creature packs: one record each, each uninstalled alone; installed
   again, each record updated and one record of them all split; a key another install has for another folder; mods
   with files outside their folders kept as one install, and Greeneye mods with the loader already there split, each
-  depending on it).
+  depending on it; one record of them all uninstalled one folder at a time, and a folder of Auto Loot Plus's record
+  refused alone).
 - `test_app_browse.cpp`: the picture hosts, description links, file order, the recorded replies, the page's JSON.
 - `test_app_account.cpp`: the DPAPI round trip and the stored account (the file holds neither key nor name), the
   nxm:// setting against a registry in memory (taking the links from Vortex and giving them back exactly, nothing there
@@ -906,7 +910,7 @@ player's, and counts only a stand-in game running from the folder shown.
   installed through the page (`install_path`, the test's stand-in for the file dialog, allowed only with `EMF_TEST=1`)
   and uninstalled again, checking the files, the `[Chain]` line, the record, the backup and that the question names the
   other mod of the same install; an archive of two packs is installed as two installs, and uninstalling one through the
-  page leaves the other. The Nexus account, offline:
+  page leaves the other; one record of two packs as EMF.exe 0.3.2 wrote it is uninstalled one pack at a time. The Nexus account, offline:
   the EMF tab says the key is "not set" and hides Log in with Nexus; the nxm:// setting shows a seeded Vortex, takes the
   links and gives them back (in memory; the real HKCU is read before and after and must not change); a key saved
   through the page shows the account as Premium with its request allowance, is stored encrypted and never stays in the

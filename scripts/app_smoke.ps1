@@ -25,7 +25,7 @@
 # - "Install a downloaded file" through the page (a zip made here; install_path is the test's stand-in for the file
 #   dialog): the plan, Install, the files and the dinput8-chain.ini line; then Uninstall takes them out again, its
 #   question naming the other mod of the same install; a zip of two packs installs as two installs, and uninstalling
-#   one leaves the other;
+#   one leaves the other; one record of two packs (as EMF.exe 0.3.2 wrote it) uninstalls one pack at a time;
 # - the Nexus account (offline, recorded replies): the EMF tab's account card says the key is "not set"; the nxm://
 #   setting shows the current handler and switches in a registry in memory (the real HKCU is never written); a key
 #   saved through the page is checked, stored encrypted (never in the page) and shows the account as Premium; "Download
@@ -429,11 +429,33 @@ try {
         $p6c = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
         Check ($null -ne $p6c -and $p6c.found -and $p6c.title -eq "Uninstalled" -and -not ((@($p6c.lines) -join " ") -like "*Also uninstalls*")) "Uninstall on one pack names no other mod and reports Uninstalled ($(if ($p6c) { $p6c | ConvertTo-Json -Compress }))"
         Check (-not (Test-Path -LiteralPath (Join-Path $game "mods\emf_pack_one")) -and (Test-Path -LiteralPath (Join-Path $game "mods\emf_pack_two\src\mod.lua")) -and (Test-Path -LiteralPath (Join-Path $game "emf\installed_mods\emf_pack_two.json"))) "it removed that pack only; the other pack and its record stay"
+
+        # one record of two packs, as EMF.exe 0.3.2 wrote it for the creature packs: Uninstall on one pack removes
+        # that pack only, and the record keeps the other
+        $entries = @()
+        foreach ($pack in @("emf_old_one", "emf_old_two")) {
+            Write-File "mods\$pack\mod.json" "{""id"": ""$pack"", ""name"": ""$pack"", ""version"": ""1.0""}"
+            Write-File "mods\$pack\src\mod.lua" "-- $pack"
+            foreach ($f in @("mod.json", "src\mod.lua")) {
+                $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath (Join-Path $game "mods\$pack\$f")).Hash.ToLowerInvariant()
+                $entries += "{""path"": ""mods\\$pack\\$($f.Replace('\', '\\'))"", ""sha256"": ""$hash""}"
+            }
+        }
+        Write-File "emf\installed_mods\emf_old_one.json" ("{""key"": ""emf_old_one"", ""name"": ""emf_old_one"", ""version"": ""1.0"", ""archive"": ""EMF-creature-packs-0.3.2.zip"", ""installed_at"": ""2026-10-28 12:00:00"", ""kinds"": [""eml-mod""], ""roots"": [""mods\\emf_old_one"", ""mods\\emf_old_two""], ""chain"": [], ""chain_off"": [], ""folders"": [""mods\\emf_old_one"", ""mods\\emf_old_one\\src"", ""mods\\emf_old_two"", ""mods\\emf_old_two\\src""], ""backups"": [], ""deps"": [], ""files"": [" + ($entries -join ", ") + "]}")
+        $run = Invoke-Smoke -Eval $uninstallJs -SelectMod "eml:emf_old_one" -More @("--probe-wait", "9000")
+        $p6d = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+        $p6dLines = if ($p6d) { @($p6d.lines) -join " " } else { "" }
+        Check ($null -ne $p6d -and $p6d.title -eq "Uninstalled" -and $p6dLines -like "*Removes the 2 files EMF installed in mods\emf_old_one,*" -and $p6dLines -like "*other mods EMF installed from the same file*stay*") "one record of two packs (EMF.exe 0.3.2): Uninstall on one asks about that pack only ($(if ($p6d) { $p6d | ConvertTo-Json -Compress }))"
+        $oldRecord = Join-Path $game "emf\installed_mods\emf_old_one.json"
+        $oldText = if (Test-Path -LiteralPath $oldRecord) { Get-Content -LiteralPath $oldRecord -Raw } else { "" }
+        Check (-not (Test-Path -LiteralPath (Join-Path $game "mods\emf_old_one")) -and (Test-Path -LiteralPath (Join-Path $game "mods\emf_old_two\src\mod.lua")) -and $oldText -like "*emf_old_two*" -and $oldText -notlike "*emf_old_one\\*") "and removes that pack only; the record keeps the other"
     } finally {
         Remove-Item -LiteralPath $src -Recurse -Force -ErrorAction SilentlyContinue
         Remove-Item -LiteralPath $zipDir -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath (Join-Path $game "mods\emf_pack_one"), (Join-Path $game "mods\emf_pack_two") -Recurse -Force -ErrorAction SilentlyContinue
-        Remove-Item -LiteralPath (Join-Path $game "emf\installed_mods\emf_pack_one.json"), (Join-Path $game "emf\installed_mods\emf_pack_two.json") -Force -ErrorAction SilentlyContinue
+        foreach ($pack in @("emf_pack_one", "emf_pack_two", "emf_old_one", "emf_old_two")) {
+            Remove-Item -LiteralPath (Join-Path $game "mods\$pack") -Recurse -Force -ErrorAction SilentlyContinue
+            Remove-Item -LiteralPath (Join-Path $game "emf\installed_mods\$pack.json") -Force -ErrorAction SilentlyContinue
+        }
     }
 
     # 8. the Nexus account, offline. The real nxm:// handler (HKCU) is read before and after: the smoke runs use a

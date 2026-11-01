@@ -598,9 +598,9 @@ function renderDetails(force) {
       m.install_key ? withFocus(el('button', {
         class: 'ghost danger', type: 'button', disabled: state.game_running,
         title: state.game_running ? 'Close the game first' : 'Remove the files EMF installed for it',
-        onclick: () => confirmUninstall(m.install_key, keyOf(m)),
+        onclick: () => confirmUninstall(m.install_key, keyOf(m), m.install_root, m.name),
       }, 'Uninstall'), 'uninstall') : null),
-    m.install_key ? el('p', { class: 'd-note' }, installedText(m.install_key, keyOf(m))) : null,
+    m.install_key ? el('p', { class: 'd-note' }, installedText(m.install_key, keyOf(m), m.install_root)) : null,
     updateSection(m),
     m.depends.length ? el('div', { class: 'd-section' }, el('h3', {}, 'Needs'), el('ul', { class: 'd-list' }, m.depends.map((x) => el('li', {}, x)))) : null,
     m.game_build ? el('p', { class: 'd-note' }, 'Made for game build ' + m.game_build + '.') : null,
@@ -1254,26 +1254,39 @@ function recordOf(key) {
   return state && (state.installed || []).find((i) => i.key === key);
 }
 
-// The other rows of one install (an EML folder and its DLL, or mods EMF.exe 0.3.2 recorded together): Uninstall
-// removes them too, so the details and the question name them.
+// The other rows of one install (an EML folder and its DLL): Uninstall removes them too, so the details and the
+// question name them. A record of several separate mods (EMF.exe 0.3.2 recorded the creature packs as one) uninstalls
+// one mod folder at a time instead: none go with it.
 function sameInstall(key, rowKey) {
-  return state ? state.mods.filter((x) => x.install_key === key && keyOf(x) !== rowKey).map((x) => x.name) : [];
+  const r = recordOf(key);
+  if (!state || (r && r.separable)) return [];
+  return state.mods.filter((x) => x.install_key === key && keyOf(x) !== rowKey).map((x) => x.name);
+}
+
+// How many files of a record are in one of its mod folders (a record of several separate mods), else all of them.
+function filesOf(r, root) {
+  const i = root && r.separable && r.roots ? r.roots.indexOf(root) : -1;
+  return i >= 0 && r.root_files ? r.root_files[i] : r.files;
 }
 
 function namesText(names) {
   return names.length < 2 ? names.join('') : names.slice(0, -1).join(', ') + ' and ' + names[names.length - 1];
 }
 
-function installedText(key, rowKey) {
+function installedText(key, rowKey, root) {
   const r = recordOf(key);
   if (!r) return '';
   const others = sameInstall(key, rowKey);
-  return 'Installed by EMF on ' + r.installed_at + ' from ' + r.archive + ' (' + r.files + (r.files === 1 ? ' file' : ' files') + ').' +
+  const n = filesOf(r, root);
+  return 'Installed by EMF on ' + r.installed_at + ' from ' + r.archive + ' (' + n + (n === 1 ? ' file' : ' files') + ').' +
     (others.length ? ' Together with ' + namesText(others) + ', as one install: Uninstall removes them together.' : '');
 }
 
-function confirmUninstall(key, rowKey) {
-  showModal({ mode: 'confirm', key, rowKey });
+// rowRoot: the row's mod folder, sent along when the record holds several separate mods (only that folder goes)
+function confirmUninstall(key, rowKey, rowRoot, rowName) {
+  const r = recordOf(key);
+  const root = r && r.separable && rowRoot ? rowRoot : '';
+  showModal({ mode: 'confirm', key, rowKey, root, rowName: root ? rowName : '' });
 }
 
 const ACTION = { install: 'Install', update: 'Update', skip: 'Not installed', refused: 'Not installed' };
@@ -1348,27 +1361,31 @@ function renderModal() {
       el('div', { class: 'sheet-foot' }, close('OK')));
   } else if (modal.mode === 'confirm') {
     const r = recordOf(modal.key) || { name: modal.key, files: 0, chain: [] };
+    const one = !!modal.root;  // one mod folder of a record of several separate mods
+    const title = one ? modal.rowName || modal.root : r.name;
+    const n = filesOf(r, modal.root);
     const go = el('button', {
       class: 'primary danger', type: 'button', disabled: running,
       onclick: () => {
         const k = modal.key;
-        send({ cmd: 'uninstall_mod', key: k });
-        showModal({ mode: 'busy', title: 'Uninstalling ' + r.name, text: 'Removing the files EMF installed.' });
+        send(one ? { cmd: 'uninstall_mod', key: k, root: modal.root } : { cmd: 'uninstall_mod', key: k });
+        showModal({ mode: 'busy', title: 'Uninstalling ' + title, text: 'Removing the files EMF installed.' });
       },
     }, 'Uninstall');
     focus = running ? null : go;
     fill(sheet,
       el('div', { class: 'sheet-head' },
         el('div', { class: 'd-eyebrow' }, 'Uninstall'),
-        el('h2', { id: 'sheet-title', class: 'sheet-title' }, r.name + (r.version ? ' ' + r.version : ''))),
+        el('h2', { id: 'sheet-title', class: 'sheet-title' }, one ? title : r.name + (r.version ? ' ' + r.version : ''))),
       el('div', { class: 'sheet-body' },
         running ? el('div', { class: 'sheet-warn', role: 'status' }, 'Close the game first: mods are uninstalled while the game is closed.') : null,
         el('ul', { class: 'part-lines' },
-          el('li', {}, 'Removes the ' + r.files + (r.files === 1 ? ' file' : ' files') + ' EMF installed, where they are unchanged. A file that changed since is left in place and named.'),
+          el('li', {}, 'Removes the ' + n + (n === 1 ? ' file' : ' files') + ' EMF installed' + (one ? ' in ' + modal.root : '') + ', where they are unchanged. A file that changed since is left in place and named.'),
+          one ? el('li', {}, 'The other mods EMF installed from the same file (' + r.archive + ') stay.') : null,
           sameInstall(modal.key, modal.rowKey).length ? el('li', { class: 'also' }, 'Also uninstalls ' + namesText(sameInstall(modal.key, modal.rowKey)) +
             ': EMF installed them from the same file as one install.') : null,
-          r.outside && r.outside.length ? el('li', {}, 'Including files outside the mod’s own folder: ' + r.outside.join(', ') + '.') : null,
-          r.chain && r.chain.length ? el('li', {}, 'Takes ' + r.chain.join(', ') + ' out of dinput8-chain.ini.') : null,
+          !one && r.outside && r.outside.length ? el('li', {}, 'Including files outside the mod’s own folder: ' + r.outside.join(', ') + '.') : null,
+          !one && r.chain && r.chain.length ? el('li', {}, 'Takes ' + r.chain.join(', ') + ' out of dinput8-chain.ini.') : null,
           el('li', {}, 'Removes the folders it made once they are empty; a file another mod still uses is kept. Earlier versions in emf\\backup stay.'))),
       el('div', { class: 'sheet-foot' }, close('Cancel'), go));
   }
