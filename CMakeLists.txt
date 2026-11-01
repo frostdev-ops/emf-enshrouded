@@ -214,7 +214,8 @@ add_library(emf_loader SHARED
   src/proxy/dinput8.def
   src/loader/loader.rc
   src/core/json.cpp  # the content loader reads EML mods' mod.json and its own state file
-  src/common/sha256.cpp)  # its fingerprint (EMF's own SHA-256: no Windows crypto in the game's process)
+  src/common/sha256.cpp  # its fingerprint (EMF's own SHA-256: no Windows crypto in the game's process)
+  src/core/known_tools.cpp)  # which tool a dbghelp.dll or a chained DLL belongs to (another tool may apply EML content)
 target_include_directories(emf_loader PRIVATE src)
 # Version information in the file's properties (the resource compiler gets these definitions too)
 target_compile_definitions(emf_loader PRIVATE EMF_VERSION="${EMF_VERSION}" EMF_VER_MAJOR=${PROJECT_VERSION_MAJOR}
