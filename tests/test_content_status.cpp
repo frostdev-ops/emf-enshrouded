@@ -2,6 +2,8 @@
 // told it (EMF_CONTENT_STATUS, src/loader/content_status_env.h).
 #include <doctest.h>
 
+#include <windows.h>
+
 #include <optional>
 #include <string>
 
@@ -65,4 +67,34 @@ TEST_CASE("content status: read from the variable's text") {
     CHECK(emf::core::content_status_from(std::wstring(L"built\t2\t30000\t")).has_value());
     CHECK_FALSE(emf::core::content_status_from(std::wstring()).has_value());
     CHECK(emf::core::content_status_from(std::wstring(L"failed\t0\t1\tBär")).value().message == "B\xC3\xA4r");
+}
+
+TEST_CASE("content status: the same failure again: the warning, without a second backup") {
+    const auto l = content_lines(status("failed_again", 0, 0, "EML could not patch the bear"), true);
+    CHECK(l.console.find("EML content could not be built: EML could not patch the bear. The game runs without it.") == 0);
+    CHECK(l.console.find("backed up") == std::string::npos);
+    CHECK(l.console.find("changes") != std::string::npos);  // when EMF tries again
+    CHECK(l.notice == l.console);
+    CHECK_FALSE(l.backup);
+}
+
+TEST_CASE("content status: a long message is cut when the loader writes it, read whole, and the variable cleared") {
+    emf::loader::ContentStatus st;
+    st.kind = "failed";
+    st.message = std::string(3000, 'x') + "\xC3\xA4";
+    const std::string text = emf::loader::content_status_text(st);
+    CHECK(text.size() < 600);  // at most 512 bytes of message
+    const auto back = emf::loader::parse_content_status(text);
+    REQUIRE(back.has_value());
+    CHECK(back->message.size() <= 512);
+    // a message near the limit ending in a two-byte letter is never cut inside it
+    st.message = std::string(511, 'y') + "\xC3\xA4";
+    CHECK(emf::loader::parse_content_status(emf::loader::content_status_text(st))->message == std::string(511, 'y'));
+    // read whole, whatever its length, and cleared so nothing started later sees it
+    const std::wstring big = L"failed\t0\t0\t" + std::wstring(6000, L'z');
+    REQUIRE(SetEnvironmentVariableW(L"EMF_CONTENT_STATUS", big.c_str()));
+    const auto read = emf::core::read_content_status();
+    REQUIRE(read.has_value());
+    CHECK(read->message.size() == 6000);
+    CHECK(GetEnvironmentVariableW(L"EMF_CONTENT_STATUS", nullptr, 0) == 0);
 }

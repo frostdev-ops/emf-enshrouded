@@ -43,13 +43,17 @@ inline ContentLines content_lines(const std::optional<emf::loader::ContentStatus
         l.console = "EML content: " + mods + " (built in " + content_seconds(s->ms) + ")";
     } else if (s->kind == "current") {
         l.console = "EML content: " + mods + " (unchanged since the last build)";
-    } else if (s->kind == "failed") {
+    } else if (s->kind == "failed" || s->kind == "failed_again") {
         std::string why = s->message.empty() ? std::string("an unknown error") : s->message;
         while (!why.empty() && (why.back() == '.' || why.back() == ' ')) why.pop_back();
         l.console = "EML content could not be built: " + why + ". The game runs without it.";
-        if (backups_on) l.console += " Your saves were backed up.";
+        if (s->kind == "failed_again") {
+            l.console += " EMF tries again when a mod, the game or emf_content.dll changes.";
+        } else {
+            if (backups_on) l.console += " Your saves were backed up.";
+            l.backup = true;
+        }
         l.notice = l.console;
-        l.backup = true;
     } else if (s->kind == "off") {
         std::string why = s->message;
         if (why.rfind("off ", 0) == 0) why = why.substr(4);  // "off (...)": the decision's own words
@@ -67,12 +71,18 @@ inline std::optional<emf::loader::ContentStatus> content_status_from(const std::
     return emf::loader::parse_content_status(s);
 }
 
-// This process's EMF_CONTENT_STATUS, set by the loader before the core started; nullopt when it set none.
+// This process's EMF_CONTENT_STATUS, set by the loader before the core started; nullopt when it set none. Read whole
+// (a long "failed" message carries the save backup), then cleared, so nothing the game starts later inherits it.
 inline std::optional<emf::loader::ContentStatus> read_content_status() {
-    wchar_t buf[4096];
-    const DWORD n = GetEnvironmentVariableW(emf::loader::kContentStatusVariable, buf, 4096);
-    if (n == 0 || n >= 4096) return std::nullopt;
-    return content_status_from(std::wstring(buf, n));
+    const wchar_t* name = emf::loader::kContentStatusVariable;
+    const DWORD need = GetEnvironmentVariableW(name, nullptr, 0);
+    if (need == 0) return std::nullopt;
+    std::wstring text(need, L'\0');
+    const DWORD n = GetEnvironmentVariableW(name, text.data(), need);
+    SetEnvironmentVariableW(name, nullptr);
+    if (n == 0 || n >= need) return std::nullopt;
+    text.resize(n);
+    return content_status_from(text);
 }
 
 }  // namespace emf::core

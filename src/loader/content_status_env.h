@@ -5,7 +5,11 @@
 //   kind  off       content is off ([content] mode=on only: the core shows why)
 //         current   the shadow copy from an earlier build is used (mods and ms are that build's)
 //         built     built at this start
-//         failed    EMF owns the content but it could not be built (or held): the game runs without it
+//         failed    EMF owns the content but it could not be built (or held): the game runs without it (and the
+//                   core backs up the saves)
+//         failed_again  the same failure as at an earlier start with the same files: the warning, no second backup
+// The message is cut to 512 bytes (on a UTF-8 letter's boundary). The loader sets or clears the variable at every
+// start, so a value a parent process passed on is never taken; the core clears it once read.
 // The core turns it into the player's lines (src/core/content_status.h).
 #include <cstdint>
 #include <optional>
@@ -15,6 +19,7 @@
 namespace emf::loader {
 
 constexpr const wchar_t* kContentStatusVariable = L"EMF_CONTENT_STATUS";
+constexpr size_t kContentStatusMaxMessage = 512;
 
 struct ContentStatus {
     std::string kind;
@@ -34,6 +39,11 @@ inline std::string content_status_text(const ContentStatus& s) {
             msg += c;
             space = false;
         }
+    }
+    if (msg.size() > kContentStatusMaxMessage) {
+        size_t n = kContentStatusMaxMessage;
+        while (n > 0 && (static_cast<unsigned char>(msg[n]) & 0xC0) == 0x80) --n;  // not inside a UTF-8 letter
+        msg.resize(n);
     }
     return s.kind + "\t" + std::to_string(s.mods) + "\t" + std::to_string(s.ms) + "\t" + msg;
 }
