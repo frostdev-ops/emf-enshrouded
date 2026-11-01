@@ -10,7 +10,7 @@
 --   bounty.give <id>, bounty.reset (host / admins)
 -- Runs where the world runs (the host or a dedicated server); players who join need nothing.
 
--- The bounties. Edit the table and save: the mod reloads (bounties already on players' boards keep what they were).
+-- The bounties. Edit the table and save: the mod reloads (bounties players hold keep what they were).
 -- Installing EMF again replaces this file and your edits with it: keep your own pool in emf\config\bounty\pool.lua
 -- instead (a file that returns a table like POOL; read when the mod starts and at each world load).
 --   kind "kill": a kill credited to the player of a creature whose Faction is `faction` (FactionType in
@@ -890,22 +890,6 @@ local function prop_in_front(world, player, range)
   return best
 end
 
--- The world's data: after the world loaded (and after a reload of this mod).
-emf.on_world_data(function(world, text)
-  load_pool()  -- pool.lua may have changed since
-  hits, gifts, moving, filled, dropped = {}, {}, {}, {}, {}
-  purge_at, last_tod = 0, nil  -- another world's clocks mean nothing here
-  local fresh = load_text(text)
-  loaded, dirty = true, fresh  -- a new seed is kept at once
-  loaded_at = play_s
-  found, altars, client_models, cwalk, cwalk_after = {}, {}, {}, nil, 0
-  told, outbox, sent_lines, walk_up_at = {}, {}, {}, 0
-  search_soon()
-  rebuild_boards()
-  session = emf.session()
-  hud_at = -1
-end)
-
 -- The board `player` faces within `range` metres: horizontally within the cone `min_cos` of the camera's view (no
 -- camera, or one looking straight down: the nearest board within range), the nearest such; nil when none.
 local function board_in_front(world, player, range, min_cos)
@@ -927,6 +911,22 @@ local function board_in_front(world, player, range, min_cos)
   end
   return best
 end
+
+-- The world's data: after the world loaded (and after a reload of this mod).
+emf.on_world_data(function(world, text)
+  load_pool()  -- pool.lua may have changed since
+  hits, gifts, moving, filled, dropped = {}, {}, {}, {}, {}
+  purge_at, last_tod = 0, nil  -- another world's clocks mean nothing here
+  local fresh = load_text(text)
+  loaded, dirty = true, fresh  -- a new seed is kept at once
+  loaded_at = play_s
+  found, altars, client_models, cwalk, cwalk_after = {}, {}, {}, nil, 0
+  told, outbox, sent_lines, walk_up_at = {}, {}, {}, 0
+  search_soon()
+  rebuild_boards()
+  session = emf.session()
+  hud_at = -1
+end)
 
 -- ---- progress and rewards ----
 local function account_of(world, player) return world:account(player) end
