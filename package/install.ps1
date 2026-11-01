@@ -101,7 +101,8 @@ function Install-Emf([string]$Dir, [string]$Source) {
         }
     }
     $notes
-    Set-DesktopShortcut $Dir
+    # EMF is installed now: a problem with the shortcut is said, never an install failure
+    try { Set-DesktopShortcut $Dir } catch { "EMF could not set up the desktop shortcut: $($_.Exception.Message)" }
     if (Test-Path -LiteralPath (Join-Path $Dir "enshrouded_server.exe")) {
         "Start the server normally. Its window and emf\emf_core.log show what loaded; players' chat commands need " +
             "[chat] admins in emf\emf_core.ini (docs\modding\server.md)."
@@ -111,7 +112,9 @@ function Install-Emf([string]$Dir, [string]$Source) {
 }
 
 # The desktop shortcut to emf\EMF.exe: asked once by install.cmd, or -DesktopShortcut / -NoDesktopShortcut. The answer
-# is remembered in emf\desktop_shortcut.txt; a shortcut of the same name that EMF did not make is never replaced.
+# is remembered in emf\desktop_shortcut.txt; a shortcut of the same name that EMF did not make is never replaced. When
+# the recorded one is gone (the desktop moved, OneDrive), the one of that name on the current desktop that opens this
+# EMF.exe is EMF's.
 function Set-DesktopShortcut([string]$Dir) {
     $exe = Join-Path $Dir "emf\EMF.exe"
     if (-not (Test-Path -LiteralPath $exe)) { return }  # the manual download has no EMF.exe
@@ -132,7 +135,9 @@ function Set-DesktopShortcut([string]$Dir) {
     }
     $name = if (Test-Path -LiteralPath (Join-Path $Dir "enshrouded.exe")) { "EMF" } else { "EMF (server)" }
     $lnk = Join-Path $desk "$name.lnk"
-    $ours = $record -like "made`t*" -and $record.Substring(5) -ieq $lnk
+    $recorded = if ($record -like "made`t*") { $record.Substring(5) } else { "" }
+    $ours = $recorded -and (($recorded -ieq $lnk) -or (-not (Test-Path -LiteralPath $recorded) -and
+                                                       (Test-Path -LiteralPath $lnk) -and (Get-ShortcutTarget $lnk) -ieq $exe))
     if ((Test-Path -LiteralPath $lnk) -and -not $ours) {
         "There is already a shortcut called $name on your desktop, so EMF left it as it is and added none."
         return

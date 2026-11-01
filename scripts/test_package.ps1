@@ -509,6 +509,36 @@ function Test-InstallScripts([string]$scripts, [string]$gameTree) {
         Resolve-DesktopShortcut "" $false $false $true { param($text) $script:q = $text; "y" } | Out-Null
         Check ($script:q -eq "Add an EMF shortcut to the desktop? [Y/n]") "the question's words ($($script:q))"
         Check ((Get-Content -LiteralPath (Join-Path $scripts "install.cmd") -Raw) -match "-AskDesktopShortcut") "install.cmd asks the question (-AskDesktopShortcut)"
+
+        # a shortcut problem never breaks the install or the uninstall: it is said, and the rest goes on
+        $bad = New-TempDir "shortcut broken"
+        Write-File (Join-Path $bad "enshrouded.exe") "fake"
+        Write-File (Join-Path $bad "dinput8.dll") "someone else's proxy"
+        Write-File (Join-Path $bad "emf\EMF.exe") "fake manager"
+        New-Item -ItemType Directory -Force (Join-Path $bad "emf\desktop_shortcut.txt") | Out-Null  # the record cannot be written
+        $threw = $null
+        try { $out = (& $inst -Game $bad -From $gameTree -DesktopShortcut) -join "`n" } catch { $threw = $_.Exception.Message }
+        Check ($null -eq $threw -and (Test-EmfLoader (Join-Path $bad "dinput8.dll")) -and $out -match "shortcut") "a record that cannot be written does not fail the install ($threw | $out)"
+        Remove-Item -LiteralPath (Join-Path $bad "emf\desktop_shortcut.txt") -Recurse -Force
+        if (Test-Path -LiteralPath $lnk) { Remove-Item -LiteralPath $lnk -Force }
+        & $inst -Game $bad -From $gameTree -DesktopShortcut | Out-Null
+        $hold = [System.IO.File]::Open($lnk, "Open", "Read", "Read")  # readable, but it cannot be deleted
+        $threw = $null
+        try { $out = (& $uninst -Game $bad) -join "`n" } catch { $threw = $_.Exception.Message } finally { $hold.Close() }
+        Check ($null -eq $threw -and (Get-Content -LiteralPath (Join-Path $bad "dinput8.dll") -Raw) -eq "someone else's proxy" -and $out -match "could not remove") "a shortcut that cannot be removed does not stop the uninstall: the other mod's dinput8.dll is back ($threw | $out)"
+        if (Test-Path -LiteralPath $lnk) { Remove-Item -LiteralPath $lnk -Force }
+
+        # the desktop moved since (OneDrive): the shortcut on the current desktop that opens this EMF.exe is EMF's
+        $moved = New-TempDir "shortcut moved"
+        Write-File (Join-Path $moved "enshrouded.exe") "fake"
+        Write-File (Join-Path $moved "emf\EMF.exe") "fake manager"
+        & $inst -Game $moved -From $gameTree -DesktopShortcut | Out-Null
+        Write-File (Join-Path $moved "emf\desktop_shortcut.txt") ("made`t" + (Join-Path $bad "old desktop\EMF.lnk"))
+        & $inst -Game $moved -From $gameTree -DesktopShortcut | Out-Null
+        Check (@(Get-ChildItem -LiteralPath $desk -Filter "EMF*.lnk").Count -eq 1 -and ((Get-Content -LiteralPath (Join-Path $moved "emf\desktop_shortcut.txt") -Raw) -match [regex]::Escape($lnk))) "after the desktop moved, -DesktopShortcut takes its shortcut back on the new desktop (no second one)"
+        Write-File (Join-Path $moved "emf\desktop_shortcut.txt") ("made`t" + (Join-Path $bad "old desktop\EMF.lnk"))
+        $out = (& $uninst -Game $moved) -join "`n"
+        Check (-not (Test-Path -LiteralPath $lnk)) "after the desktop moved, uninstall finds its shortcut on the new desktop ($out)"
     } finally {
         Remove-Item Env:\EMF_TEST_DESKTOP -ErrorAction SilentlyContinue
     }
