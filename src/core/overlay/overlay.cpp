@@ -258,30 +258,41 @@ void log_line(const char* s) {
 
 }  // namespace
 
+namespace {
+// An [overlay] value as text, without a "; comment" after it on the same line (Windows keeps those in the value) and
+// the spaces and tabs around it; "" when it is not set.
+std::wstring overlay_value(const wchar_t* key, const std::wstring& ini_path) {
+    wchar_t buf[256] = {};
+    GetPrivateProfileStringW(L"overlay", key, L"", buf, 256, ini_path.c_str());
+    std::wstring v(buf);
+    v = v.substr(0, v.find(L';'));
+    const size_t first = v.find_first_not_of(L" \t");
+    if (first == std::wstring::npos) return {};
+    return v.substr(first, v.find_last_not_of(L" \t") - first + 1);
+}
+}  // namespace
+
 OverlayConfig read_overlay_config(const std::wstring& ini_path) {
     OverlayConfig c;
     c.enabled = GetPrivateProfileIntW(L"overlay", L"enabled", 1, ini_path.c_str()) != 0;
     c.chat_commands = GetPrivateProfileIntW(L"overlay", L"chat", 1, ini_path.c_str()) != 0;
-    wchar_t speed[32] = {};
-    GetPrivateProfileStringW(L"overlay", L"mouse_speed", L"", speed, 32, ini_path.c_str());
-    if (speed[0]) {
+    const std::wstring speed = overlay_value(L"mouse_speed", ini_path);
+    if (!speed.empty()) {
         wchar_t* end = nullptr;
-        const double v = std::wcstod(speed, &end);
+        const double v = std::wcstod(speed.c_str(), &end);
         if (end && !*end && v >= 0.1 && v <= 10.0) c.mouse_speed = static_cast<float>(v);
     }
-    wchar_t text[32] = {};
-    GetPrivateProfileStringW(L"overlay", L"key", L"", text, 32, ini_path.c_str());
-    if (text[0]) {
+    const std::wstring key = overlay_value(L"key", ini_path);
+    if (!key.empty()) {
         wchar_t* end = nullptr;
-        const unsigned long v = std::wcstoul(text, &end, 0);
+        const unsigned long v = std::wcstoul(key.c_str(), &end, 0);
         if (end && !*end && v >= 1 && v <= 0x7F) c.toggle_scan = static_cast<uint16_t>(v);
     }
     c.suggest = GetPrivateProfileIntW(L"overlay", L"suggest", 1, ini_path.c_str()) != 0;
-    wchar_t rows[32] = {};
-    GetPrivateProfileStringW(L"overlay", L"suggest_rows", L"", rows, 32, ini_path.c_str());
-    if (rows[0]) {
+    const std::wstring rows = overlay_value(L"suggest_rows", ini_path);
+    if (!rows.empty()) {
         wchar_t* end = nullptr;
-        const unsigned long v = std::wcstoul(rows, &end, 10);
+        const unsigned long v = std::wcstoul(rows.c_str(), &end, 10);
         if (end && !*end) c.suggest_rows = std::clamp<size_t>(v, Suggester::kMinRows, Suggester::kMaxRows);
     }
     return c;

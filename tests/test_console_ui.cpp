@@ -496,6 +496,33 @@ TEST_CASE("read_overlay_config: suggestions as you type are on with 8 rows; sugg
     DeleteFileW(ini.c_str());
 }
 
+TEST_CASE("read_overlay_config: a '; comment' after a value on the same line is not part of it (as in README_EMF.md)") {
+    wchar_t dir[MAX_PATH];
+    GetTempPathW(MAX_PATH, dir);
+    const std::wstring ini = std::wstring(dir) + L"emf_test_comments_" + std::to_wstring(GetCurrentProcessId()) + L".ini";
+    DeleteFileW(ini.c_str());
+    WritePrivateProfileStringW(L"overlay", L"enabled", L"0      ; 0 turns the console off", ini.c_str());
+    WritePrivateProfileStringW(L"overlay", L"key", L"0x44       ; the key's scan code", ini.c_str());
+    WritePrivateProfileStringW(L"overlay", L"chat", L"0         ; 0 turns chat commands off", ini.c_str());
+    WritePrivateProfileStringW(L"overlay", L"mouse_speed", L"2.5\t; faster", ini.c_str());
+    WritePrivateProfileStringW(L"overlay", L"suggest", L"0      ; 0: no suggestions as you type", ini.c_str());
+    WritePrivateProfileStringW(L"overlay", L"suggest_rows", L"5 ; at most this many suggestions (3 to 12)",
+                               ini.c_str());
+    const OverlayConfig c = read_overlay_config(ini);
+    CHECK_FALSE(c.enabled);
+    CHECK(c.toggle_scan == 0x44);
+    CHECK_FALSE(c.chat_commands);
+    CHECK(c.mouse_speed == doctest::Approx(2.5f));
+    CHECK_FALSE(c.suggest);
+    CHECK(c.suggest_rows == 5);
+    WritePrivateProfileStringW(L"overlay", L"suggest_rows", L"; only a comment", ini.c_str());  // no value: default
+    WritePrivateProfileStringW(L"overlay", L"key", L"0x44x ; not a number", ini.c_str());
+    const OverlayConfig d = read_overlay_config(ini);
+    CHECK(d.suggest_rows == 8);
+    CHECK(d.toggle_scan == 0x29);
+    DeleteFileW(ini.c_str());
+}
+
 TEST_CASE("toast: shows the lines added since it started, newest last, until it ends") {
     ConsoleModel m;
     m.add_line("old 1");
