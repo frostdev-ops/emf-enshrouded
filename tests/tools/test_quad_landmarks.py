@@ -247,6 +247,39 @@ class TailFitTests(unittest.TestCase):
         # the tube is 1 + pi * 0.2 = 1.63 m long; the hook's tip is that far along, though only 0.4 m from y = 1
         self.assertAlmostEqual(last, 1.0 + math.pi * 0.2, delta=0.08)
 
+    def test_a_tail_split_at_a_uv_seam_is_measured_across_it(self):
+        # meshes with their own UVs have a copy of each vertex on a UV seam: the tail beyond ring 30 (in the hook) is
+        # joined only to copies of ring 30's vertices, at the same places; measured along the mesh, not as the crow
+        # flies, the tip is as far as on the whole tube
+        rings, around = 40, 6
+        pts, edges, in_tail, _ = hooked_tail(rings=rings, around=around)
+        whole = ql.tail_distances(pts, edges, in_tail)
+        ring = lambda r, k: 1 + r * around + k
+        copy = {}
+        for k in range(around):
+            copy[ring(30, k)] = len(pts)
+            pts.append(pts[ring(30, k)])
+            in_tail.append(True)
+        split = []
+        for a, b in edges:
+            if a >= ring(31, 0) and a < ring(32, 0) and b in copy:  # ring 31 to ring 30: to the copies instead
+                split.append((a, copy[b]))
+            else:
+                split.append((a, b))
+        for k in range(around):  # the copies form a ring of their own
+            split.append((copy[ring(30, k)], copy[ring(30, (k + 1) % around)]))
+        d = ql.tail_distances(pts, split, in_tail)
+        tip = ring(rings, 0)
+        self.assertAlmostEqual(d[tip], whole[tip], delta=0.02)
+
+    def test_a_separate_piece_of_the_tail_takes_its_neighbours_distance(self):
+        pts, edges, in_tail, _ = hooked_tail(rings=10, around=4)
+        pts.append(P(pts[-1].x + 0.01, pts[-1].y, pts[-1].z))  # a loose vertex next to the tip, joined to nothing
+        in_tail.append(True)
+        d = ql.tail_distances(pts, edges, in_tail)
+        self.assertIn(len(pts) - 1, d)
+        self.assertAlmostEqual(d[len(pts) - 1], d[len(pts) - 2], delta=0.05)
+
     def test_the_curve_follows_the_hook_and_the_bones_go_along_it(self):
         pts, edges, in_tail, centre = hooked_tail()
         d = ql.tail_distances(pts, edges, in_tail)

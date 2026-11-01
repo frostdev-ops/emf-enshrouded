@@ -321,8 +321,8 @@ if head_b is not None:
                 if n not in body.vertex_groups:
                     body.vertex_groups.new(name=n)
                 body.vertex_groups[n].add([vi], w, "REPLACE")
-        print("FIT tail fit: %d game tail bones (%s..%s) along the creature's tail, %d vertices"
-              % (len(chain), chain[0].name, chain[-1].name, len(dist)))
+        print("FIT tail fit: %d game tail bones (%s..%s) along the creature's tail, %d of %d tail vertices reached"
+              % (len(chain), chain[0].name, chain[-1].name, len(dist), sum(in_tail)))
 
 # --rigid: everything below the named bones moves onto them (a paw follows the wrist, not the game creature's fingers)
 if rigid:

@@ -198,15 +198,24 @@ def kept_head_bones(use, total):
     return {b for b, w in use.items() if w >= HEAD_SHARE * total}
 
 
-def tail_distances(points, edges, in_tail):
+def tail_distances(points, edges, in_tail, weld=1e-5):
     """Per tail vertex, its distance along the mesh's edges (within the tail) from where the tail leaves the body
     (tail vertices joined to a body vertex start at 0). A curled or hooked tail is measured along its length, not as
-    the crow flies. `edges`: vertex index pairs; `in_tail`: per vertex."""
+    the crow flies. `edges`: vertex index pairs; `in_tail`: per vertex. Vertices at the same place (within `weld`:
+    the copies a mesh with its own UVs has on every UV seam) count as joined; a tail vertex the edges still do not
+    reach (a loose piece) takes the distance of the nearest one they do, plus the gap."""
     import heapq
     near = {}
     for a, b in edges:
         near.setdefault(a, []).append(b)
         near.setdefault(b, []).append(a)
+    cells = {}
+    for v, p in enumerate(points):
+        cells.setdefault((round(p.x / weld), round(p.y / weld), round(p.z / weld)), []).append(v)
+    for same in cells.values():
+        for a in same[1:]:
+            near.setdefault(a, []).append(same[0])
+            near.setdefault(same[0], []).append(a)
     dist = {}
     heap = []
     for v, tail in enumerate(in_tail):
@@ -223,6 +232,14 @@ def tail_distances(points, edges, in_tail):
                 p, q = points[v], points[u]
                 step = ((p.x - q.x) ** 2 + (p.y - q.y) ** 2 + (p.z - q.z) ** 2) ** 0.5
                 heapq.heappush(heap, (d + step, u))
+    reached = list(dist)
+    if reached:
+        for v, tail in enumerate(in_tail):
+            if tail and v not in dist:
+                p = points[v]
+                gap, u = min((((p.x - points[u].x) ** 2 + (p.y - points[u].y) ** 2 + (p.z - points[u].z) ** 2) ** 0.5, u)
+                             for u in reached)
+                dist[v] = dist[u] + gap
     return dist
 
 
