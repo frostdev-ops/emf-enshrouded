@@ -21,7 +21,7 @@ come with EMF: every mod starts with its defaults, and your changes are saved in
 
 Included mods:
   companion      G: a companion that follows you, fights, takes orders (stay, attack) and wears gear you give it
-  villager_jobs  K: villagers farm, tend animals, haul between chests and craft at a chest
+  villager_jobs  K: villagers farm, tend animals, haul between chests, craft at a chest and gather around it
   quick_stack    L: put what you carry into nearby chests that already hold it
   clock          the time of day in a corner of the screen
   kill_counter   counts the creatures you kill (a Lua mod; to change it, copy its folder under a new id first:
