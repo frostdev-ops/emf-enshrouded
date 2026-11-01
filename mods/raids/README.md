@@ -64,8 +64,9 @@ Every setting applies at once.
 
 ### Raid strength: the presets
 
-A preset sets how often and how hard raids come in one choice. While one is chosen, the settings it sets are greyed
-out (their own values are kept for when you go back to **My own settings**). The other settings work as always.
+A preset sets how often and how hard raids come in one choice. While one is chosen, it decides the settings it greys
+out; those keep showing your own values (used again when you go back to **My own settings**), so each preset's name in
+the list spells out its numbers. The other settings work as always.
 
 | | Gentle | Standard | Hard |
 |---|---|---|---|

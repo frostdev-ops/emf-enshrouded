@@ -637,6 +637,25 @@ TEST_CASE("raids: mod.json: a preset's settings are greyed out unless it is cust
     std::vector<std::string> values;
     for (const auto& o : p->options) values.push_back(o.value);
     CHECK(values == std::vector<std::string>{"custom", "gentle", "standard", "hard"});
+    // the greyed-out settings keep showing the player's own values, so each preset's label spells out its numbers
+    CHECK(p->help.find("decides") != std::string::npos);
+    for (const auto& o : p->options) {
+        const auto pr = preset(o.value);
+        if (!pr) continue;
+        CAPTURE(o.label);
+        CHECK(o.label.find(std::to_string(pr->chance) + "%") != std::string::npos);
+        CHECK(o.label.find(std::to_string(pr->waves) + (pr->waves == 1 ? " wave of " : " waves of ") +
+                           std::to_string(pr->per_wave)) != std::string::npos);
+        CHECK(o.label.find(std::to_string(pr->warning_s) + " s") != std::string::npos);
+        if (pr->waves > 1) CHECK(o.label.find(std::to_string(pr->wave_gap_s) + " s apart") != std::string::npos);
+        const int off = difficulty_offset(pr->difficulty);
+        const std::string level = off == 0 ? "your level"
+                                           : std::to_string(off < 0 ? -off : off) + (off < 0 ? " levels below" : " levels above");
+        CHECK(o.label.find(level) != std::string::npos);
+        CHECK((o.label.find("boss") != std::string::npos) == pr->boss);
+        CHECK((o.label.find("rare") != std::string::npos) == (pr->reward == "rare"));
+        CHECK((o.label.find("quiet night") != std::string::npos) == (pr->cooldown_nights > 0));
+    }
     const auto standard = preset("standard");
     REQUIRE(standard);
     const std::map<std::string, std::string> want = {
