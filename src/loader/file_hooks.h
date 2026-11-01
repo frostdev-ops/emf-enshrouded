@@ -1,0 +1,473 @@
+#pragma once
+// The content redirect spike's hooks (docs/engine_parts/file_redirect_spike.md). With [content] log_opens=1 or
+// redirect_test=1 in emf\emf_core.ini the loader puts them into enshrouded.exe's import table in DllMain (iat_patch.h)
+// and leaves them there for the life of the process:
+//   CreateFileW, CreateFileA, GetFileAttributesW, GetFileAttributesA, GetFileAttributesExW   logged; with
+//       redirect_test=1 the content files (file_redirect.h) go to <game>\emf\content\client\<name> when that file is there
+//   FindFirstFileW, FindFirstFileExW, FindNextFileW, SetCurrentDirectoryW                    logged only
+// The lines go to emf\file_opens.log: every call for the first log_seconds, the content files' (with redirect_test=1)
+// and the current-folder changes for as long as the game runs, up to max_lines lines.
+//
+// Each hook calls the function that was in the slot before (kernel32, or another tool's hook) and leaves the caller
+// the Windows error that function left, whatever the logging did in between.
+#include <windows.h>
+
+#include <atomic>
+#include <cstdio>
+#include <cstring>
+#include <string>
+#include <utility>
+#include <vector>
+
+#include "file_redirect.h"
+#include "iat_patch.h"
+
+namespace emf::loader::file_hooks {
+
+using CreateFileW_t = HANDLE(WINAPI*)(LPCWSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+using CreateFileA_t = HANDLE(WINAPI*)(LPCSTR, DWORD, DWORD, LPSECURITY_ATTRIBUTES, DWORD, DWORD, HANDLE);
+using GetFileAttributesW_t = DWORD(WINAPI*)(LPCWSTR);
+using GetFileAttributesA_t = DWORD(WINAPI*)(LPCSTR);
+using GetFileAttributesExW_t = BOOL(WINAPI*)(LPCWSTR, GET_FILEEX_INFO_LEVELS, LPVOID);
+using FindFirstFileW_t = HANDLE(WINAPI*)(LPCWSTR, LPWIN32_FIND_DATAW);
+using FindFirstFileExW_t = HANDLE(WINAPI*)(LPCWSTR, FINDEX_INFO_LEVELS, LPVOID, FINDEX_SEARCH_OPS, LPVOID, DWORD);
+using FindNextFileW_t = BOOL(WINAPI*)(HANDLE, LPWIN32_FIND_DATAW);
+using SetCurrentDirectoryW_t = BOOL(WINAPI*)(LPCWSTR);
+
+// What was in the exe's slots before the hooks (null for a function the exe does not import).
+struct Real {
+    CreateFileW_t CreateFileW = nullptr;
+    CreateFileA_t CreateFileA = nullptr;
+    GetFileAttributesW_t GetFileAttributesW = nullptr;
+    GetFileAttributesA_t GetFileAttributesA = nullptr;
+    GetFileAttributesExW_t GetFileAttributesExW = nullptr;
+    FindFirstFileW_t FindFirstFileW = nullptr;
+    FindFirstFileExW_t FindFirstFileExW = nullptr;
+    FindNextFileW_t FindNextFileW = nullptr;
+    SetCurrentDirectoryW_t SetCurrentDirectoryW = nullptr;
+};
+
+constexpr unsigned kMaxLines = 50000;  // about 10 MB
+
+inline unsigned long long default_now() { return GetTickCount64(); }
+inline std::wstring default_cwd() {
+    wchar_t buf[MAX_PATH * 2];
+    const DWORD n = GetCurrentDirectoryW(static_cast<DWORD>(sizeof buf / sizeof buf[0]), buf);
+    return n > 0 && n < sizeof buf / sizeof buf[0] ? std::wstring(buf, n) : std::wstring();
+}
+// The loader's own import of GetFileAttributesW, not the exe's hooked one.
+inline bool default_is_file(const wchar_t* path) {
+    const DWORD a = GetFileAttributesW(path);
+    return a != INVALID_FILE_ATTRIBUTES && (a & FILE_ATTRIBUTE_DIRECTORY) == 0;
+}
+
+struct State {
+    Real real;
+    std::wstring game_dir;
+    ContentSwitches sw;
+    unsigned long long start_ms = 0;  // when the hooks went in
+    unsigned max_lines = kMaxLines;
+    std::atomic<unsigned> lines{0};
+    std::atomic<bool> window_said{false}, cap_said{false};
+    void (*write)(const char* data, size_t n) = nullptr;  // where the lines go; null: nothing is logged
+    bool (*is_file)(const wchar_t* path) = default_is_file;
+    unsigned long long (*now_ms)() = default_now;
+    std::wstring (*cwd)() = default_cwd;
+    std::vector<std::pair<void**, void*>> patched;  // slot, what was there (for the tests' uninstall)
+};
+
+// Never destroyed: the hooks stay in the exe's table until the process is gone, so a call that comes late at exit must
+// not find a destroyed state.
+inline State& g_state = *new State;
+inline State& state() { return g_state; }
+
+inline unsigned long long elapsed() { return g_state.now_ms() - g_state.start_ms; }
+
+inline LineHead head(const char* fn) { return {elapsed(), GetCurrentThreadId(), fn}; }
+
+inline void write_raw(const std::string& s) {
+    if (g_state.write) g_state.write(s.data(), s.size());
+}
+
+// One line into the log, up to max_lines; then one line that says the log stops.
+inline void emit(const std::string& line) {
+    auto& g = g_state;
+    if (!g.write) return;
+    if (g.lines.load(std::memory_order_relaxed) < g.max_lines && g.lines.fetch_add(1) < g.max_lines) {
+        g.write(line.data(), line.size());
+        return;
+    }
+    if (!g.cap_said.exchange(true))
+        write_raw("# the log stops here: " + std::to_string(g.max_lines) + " lines (the limit)\r\n");
+}
+
+// True while every call is logged (log_opens=1, within log_seconds); says once when that time is over.
+inline bool in_window() {
+    auto& g = g_state;
+    if (!g.sw.log_opens || !g.write) return false;
+    const unsigned long long ms = elapsed();
+    if (ms < g.sw.log_seconds * 1000ull) return true;
+    if (!g.window_said.exchange(true))
+        write_raw("# the logging window (" + std::to_string(g.sw.log_seconds) + " s, [content] log_seconds) is over at +" +
+                  std::to_string(ms) + "ms: from here only the content files (with redirect_test=1) are logged\r\n");
+    return false;
+}
+
+// What happens to one call: `content` = redirect_test is on and it names a content file in the game folder; `use` = it
+// goes to `shadow`; `note` = why not.
+struct Decision {
+    std::wstring shadow;
+    const char* note = "";
+    bool content = false;
+    bool use = false;
+};
+
+// `open`: a CreateFile (only reads are redirected); else an attribute query.
+inline Decision decide(const wchar_t* path, bool open, DWORD access, DWORD disposition, DWORD flags) {
+    auto& g = g_state;
+    Decision d;
+    if (!g.sw.redirect_test || !path || g.game_dir.empty()) return d;
+    const std::wstring cwd = path_needs_cwd(path) ? g.cwd() : std::wstring();
+    std::wstring s = shadow_path(path, g.game_dir, cwd);
+    if (s.empty()) return d;
+    d.content = true;
+    if (open && !redirect_allowed(access, disposition, flags)) {
+        d.note = "not redirected: opened to write";
+        return d;
+    }
+    if (!g.is_file(s.c_str())) {
+        d.note = "not redirected: no shadow copy";
+        return d;
+    }
+    d.shadow = std::move(s);
+    d.use = true;
+    return d;
+}
+
+// An ANSI path as the A functions read it (the ANSI code page, or the OEM one after SetFileApisToOEM).
+inline std::wstring from_ansi(const char* s) {
+    if (!s || !*s) return {};
+    const UINT cp = AreFileApisANSI() ? CP_ACP : CP_OEMCP;
+    const int n = MultiByteToWideChar(cp, 0, s, -1, nullptr, 0);
+    if (n <= 1) return {};
+    std::wstring w(static_cast<size_t>(n), L'\0');
+    MultiByteToWideChar(cp, 0, s, -1, w.data(), n);
+    w.resize(static_cast<size_t>(n - 1));
+    return w;
+}
+
+// The originals, or the loader's own imports for one the exe does not import (the A hooks redirect through W).
+inline CreateFileW_t real_create_w() { return g_state.real.CreateFileW ? g_state.real.CreateFileW : &::CreateFileW; }
+inline GetFileAttributesW_t real_attrs_w() {
+    return g_state.real.GetFileAttributesW ? g_state.real.GetFileAttributesW : &::GetFileAttributesW;
+}
+
+inline HANDLE WINAPI create_file_w(LPCWSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disposition,
+                                   DWORD flags, HANDLE template_file) {
+    const DWORD entry_error = GetLastError();
+    const Decision d = decide(name, true, access, disposition, flags);
+    SetLastError(entry_error);
+    const HANDLE h = real_create_w()(d.use ? d.shadow.c_str() : name, access, share, sa, disposition, flags, template_file);
+    const DWORD error = GetLastError();
+    if (d.content || in_window())
+        emit(open_line(head("CreateFileW"), name ? name : L"", d.shadow, d.note, access, share, disposition, flags, h,
+                       error));
+    SetLastError(error);
+    return h;
+}
+
+inline HANDLE WINAPI create_file_a(LPCSTR name, DWORD access, DWORD share, LPSECURITY_ATTRIBUTES sa, DWORD disposition,
+                                   DWORD flags, HANDLE template_file) {
+    const DWORD entry_error = GetLastError();
+    const std::wstring wide = from_ansi(name);
+    const Decision d = name ? decide(wide.c_str(), true, access, disposition, flags) : Decision{};
+    SetLastError(entry_error);
+    const HANDLE h = d.use ? real_create_w()(d.shadow.c_str(), access, share, sa, disposition, flags, template_file)
+                     : g_state.real.CreateFileA
+                         ? g_state.real.CreateFileA(name, access, share, sa, disposition, flags, template_file)
+                         : ::CreateFileA(name, access, share, sa, disposition, flags, template_file);
+    const DWORD error = GetLastError();
+    if (d.content || in_window())
+        emit(open_line(head("CreateFileA"), wide, d.shadow, d.note, access, share, disposition, flags, h, error));
+    SetLastError(error);
+    return h;
+}
+
+inline DWORD WINAPI get_file_attributes_w(LPCWSTR name) {
+    const DWORD entry_error = GetLastError();
+    const Decision d = decide(name, false, 0, 0, 0);
+    SetLastError(entry_error);
+    const DWORD a = real_attrs_w()(d.use ? d.shadow.c_str() : name);
+    const DWORD error = GetLastError();
+    if (d.content || in_window())
+        emit(attributes_line(head("GetFileAttributesW"), name ? name : L"", d.shadow, d.note, a, error));
+    SetLastError(error);
+    return a;
+}
+
+inline DWORD WINAPI get_file_attributes_a(LPCSTR name) {
+    const DWORD entry_error = GetLastError();
+    const std::wstring wide = from_ansi(name);
+    const Decision d = name ? decide(wide.c_str(), false, 0, 0, 0) : Decision{};
+    SetLastError(entry_error);
+    const DWORD a = d.use                            ? real_attrs_w()(d.shadow.c_str())
+                    : g_state.real.GetFileAttributesA ? g_state.real.GetFileAttributesA(name)
+                                                      : ::GetFileAttributesA(name);
+    const DWORD error = GetLastError();
+    if (d.content || in_window()) emit(attributes_line(head("GetFileAttributesA"), wide, d.shadow, d.note, a, error));
+    SetLastError(error);
+    return a;
+}
+
+inline BOOL WINAPI get_file_attributes_ex_w(LPCWSTR name, GET_FILEEX_INFO_LEVELS level, LPVOID info) {
+    const DWORD entry_error = GetLastError();
+    const Decision d = decide(name, false, 0, 0, 0);
+    SetLastError(entry_error);
+    const auto real = g_state.real.GetFileAttributesExW ? g_state.real.GetFileAttributesExW : &::GetFileAttributesExW;
+    const BOOL ok = real(d.use ? d.shadow.c_str() : name, level, info);
+    const DWORD error = GetLastError();
+    if (d.content || in_window())
+        emit(attributes_ex_line(head("GetFileAttributesExW"), name ? name : L"", d.shadow, d.note, static_cast<int>(level),
+                                ok != FALSE, static_cast<const WIN32_FILE_ATTRIBUTE_DATA*>(info), error));
+    SetLastError(error);
+    return ok;
+}
+
+inline HANDLE WINAPI find_first_file_w(LPCWSTR pattern, LPWIN32_FIND_DATAW data) {
+    const auto real = g_state.real.FindFirstFileW ? g_state.real.FindFirstFileW : &::FindFirstFileW;
+    const HANDLE h = real(pattern, data);
+    const DWORD error = GetLastError();
+    if (in_window())
+        emit(find_first_line(head("FindFirstFileW"), pattern ? pattern : L"", "", h,
+                             h != INVALID_HANDLE_VALUE && data ? data->cFileName : L"", error));
+    SetLastError(error);
+    return h;
+}
+
+inline HANDLE WINAPI find_first_file_ex_w(LPCWSTR pattern, FINDEX_INFO_LEVELS level, LPVOID data,
+                                          FINDEX_SEARCH_OPS search, LPVOID filter, DWORD flags) {
+    const auto real = g_state.real.FindFirstFileExW ? g_state.real.FindFirstFileExW : &::FindFirstFileExW;
+    const HANDLE h = real(pattern, level, data, search, filter, flags);
+    const DWORD error = GetLastError();
+    if (in_window()) {
+        char extra[64];
+        std::snprintf(extra, sizeof extra, "level=%d search=%d flags=0x%lx", static_cast<int>(level),
+                      static_cast<int>(search), static_cast<unsigned long>(flags));
+        const auto* found = static_cast<const WIN32_FIND_DATAW*>(data);
+        emit(find_first_line(head("FindFirstFileExW"), pattern ? pattern : L"", extra, h,
+                             h != INVALID_HANDLE_VALUE && found ? found->cFileName : L"", error));
+    }
+    SetLastError(error);
+    return h;
+}
+
+inline BOOL WINAPI find_next_file_w(HANDLE find, LPWIN32_FIND_DATAW data) {
+    const auto real = g_state.real.FindNextFileW ? g_state.real.FindNextFileW : &::FindNextFileW;
+    const BOOL ok = real(find, data);
+    const DWORD error = GetLastError();
+    if (in_window())
+        emit(find_next_line(head("FindNextFileW"), find, ok != FALSE, ok && data ? data->cFileName : L"", error));
+    SetLastError(error);
+    return ok;
+}
+
+inline BOOL WINAPI set_current_directory_w(LPCWSTR path) {
+    const auto real = g_state.real.SetCurrentDirectoryW ? g_state.real.SetCurrentDirectoryW : &::SetCurrentDirectoryW;
+    const BOOL ok = real(path);
+    const DWORD error = GetLastError();
+    // relative content paths depend on it: logged for as long as content files are
+    if (in_window() || g_state.sw.redirect_test)
+        emit(set_dir_line(head("SetCurrentDirectoryW"), path ? path : L"", ok != FALSE, error));
+    SetLastError(error);
+    return ok;
+}
+
+struct HookSpec {
+    const char* name;
+    void* hook;
+    void** real;
+};
+
+inline std::vector<HookSpec> hook_specs() {
+    auto& r = g_state.real;
+    return {
+        {"CreateFileW", reinterpret_cast<void*>(&create_file_w), reinterpret_cast<void**>(&r.CreateFileW)},
+        {"CreateFileA", reinterpret_cast<void*>(&create_file_a), reinterpret_cast<void**>(&r.CreateFileA)},
+        {"GetFileAttributesW", reinterpret_cast<void*>(&get_file_attributes_w),
+         reinterpret_cast<void**>(&r.GetFileAttributesW)},
+        {"GetFileAttributesA", reinterpret_cast<void*>(&get_file_attributes_a),
+         reinterpret_cast<void**>(&r.GetFileAttributesA)},
+        {"GetFileAttributesExW", reinterpret_cast<void*>(&get_file_attributes_ex_w),
+         reinterpret_cast<void**>(&r.GetFileAttributesExW)},
+        {"FindFirstFileW", reinterpret_cast<void*>(&find_first_file_w), reinterpret_cast<void**>(&r.FindFirstFileW)},
+        {"FindFirstFileExW", reinterpret_cast<void*>(&find_first_file_ex_w), reinterpret_cast<void**>(&r.FindFirstFileExW)},
+        {"FindNextFileW", reinterpret_cast<void*>(&find_next_file_w), reinterpret_cast<void**>(&r.FindNextFileW)},
+        {"SetCurrentDirectoryW", reinterpret_cast<void*>(&set_current_directory_w),
+         reinterpret_cast<void**>(&r.SetCurrentDirectoryW)},
+    };
+}
+
+// Other file functions in the exe's imports, named in the log's header (reads, sizes, mappings, I/O completion).
+inline bool is_other_file_function(const char* name) {
+    const std::string n = name;
+    for (const char* skip : {"Time", "Module", "PcToFileHeader"})
+        if (n.find(skip) != std::string::npos) return false;
+    for (const char* hit : {"File", "Directory", "IoRing", "IoCompletion", "Overlapped", "MapViewOf"})
+        if (n.find(hit) != std::string::npos) return true;
+    return false;
+}
+
+struct Installed {
+    std::vector<std::string> hooked;      // "CreateFileW (KERNEL32.dll)"
+    std::vector<std::string> missing;     // not imported by the exe, so not hooked
+    std::vector<std::string> failed;      // imported, but the slot could not be written
+    std::vector<std::string> dlls;        // every DLL the exe imports from
+    std::vector<std::string> other_file;  // other file functions it imports (not hooked)
+};
+
+// Puts the hooks into `exe`'s import table (kernel32 and its API sets only); `state()` must be set up first. Each
+// original is kept before its slot changes.
+inline Installed install(HMODULE exe) {
+    auto& g = g_state;
+    Installed out;
+    if (!g.start_ms) g.start_ms = g.now_ms();
+    const auto specs = hook_specs();
+    std::vector<bool> found(specs.size(), false);
+    for_each_import(exe, [&](const char* dll, const char* name, void** slot) {
+        bool known = false;
+        for (const auto& d : out.dlls) known = known || _stricmp(d.c_str(), dll) == 0;
+        if (!known) out.dlls.emplace_back(dll);
+        if (!is_kernel_dll(dll)) return;
+        for (size_t i = 0; i < specs.size(); ++i) {
+            if (std::strcmp(name, specs[i].name) != 0) continue;
+            found[i] = true;
+            void* before = *slot;
+            if (before == specs[i].hook) return;  // already ours
+            if (!*specs[i].real) *specs[i].real = before;
+            if (patch_import_slot(slot, specs[i].hook)) {
+                g.patched.emplace_back(slot, before);
+                out.hooked.push_back(std::string(name) + " (" + dll + ")");
+            } else {
+                out.failed.push_back(std::string(name) + " (" + dll + ")");
+            }
+            return;
+        }
+        if (is_other_file_function(name)) out.other_file.emplace_back(name);
+    });
+    for (size_t i = 0; i < specs.size(); ++i)
+        if (!found[i]) out.missing.emplace_back(specs[i].name);
+    return out;
+}
+
+// Puts back what install() replaced. Only the tests do this: the loader keeps its hooks for the life of the game.
+inline void uninstall_for_test(HMODULE) {
+    for (const auto& [slot, before] : g_state.patched) patch_import_slot(slot, before);
+    g_state.patched.clear();
+}
+
+inline void reset_for_test() {
+    auto& g = g_state;
+    g.real = {};
+    g.game_dir.clear();
+    g.sw = {};
+    g.start_ms = 0;
+    g.max_lines = kMaxLines;
+    g.lines = 0;
+    g.window_said = false;
+    g.cap_said = false;
+    g.write = nullptr;
+    g.is_file = default_is_file;
+    g.now_ms = default_now;
+    g.cwd = default_cwd;
+    g.patched.clear();
+}
+
+inline std::string joined(const std::vector<std::string>& v) {
+    std::string s;
+    for (const auto& x : v) s += (s.empty() ? "" : ", ") + x;
+    return s.empty() ? "(none)" : s;
+}
+
+// The first lines of emf\file_opens.log: when, which exe, the switches, the shadow folder, what was hooked.
+inline std::string header_text(const Installed& inst, const std::wstring& exe_path, unsigned long pe_stamp,
+                               const std::wstring& game_dir, bool shadow_there, const ContentSwitches& sw,
+                               const std::string& started_at) {
+    char stamp[16];
+    std::snprintf(stamp, sizeof stamp, "0x%08lx", pe_stamp);
+    std::string s = "# EMF file-open log: the content redirect spike (docs/engine_parts/file_redirect_spike.md)\r\n";
+    s += "# started " + started_at + " local time; exe \"" + utf8(exe_path) + "\" (PE time stamp " + stamp + ")\r\n";
+    s += "# switches ([content] in emf\\emf_core.ini): log_opens=" + std::to_string(sw.log_opens ? 1 : 0) +
+         " log_seconds=" + std::to_string(sw.log_seconds) + " redirect_test=" + std::to_string(sw.redirect_test ? 1 : 0) +
+         "\r\n";
+    s += "# shadow folder \"" + utf8(shadow_folder(game_dir)) + "\": " + (shadow_there ? "there" : "not there") + "\r\n";
+    s += "# the exe imports from: " + joined(inst.dlls) + "\r\n";
+    s += "# hooked in the exe's import table: " + joined(inst.hooked) + "\r\n";
+    s += "# not imported by the exe, so not hooked: " + joined(inst.missing) + "\r\n";
+    if (!inst.failed.empty()) s += "# could not be hooked (the slot could not be written): " + joined(inst.failed) + "\r\n";
+    s += "# other file functions the exe imports (not hooked): " + joined(inst.other_file) + "\r\n";
+    s += "# each line: +<ms since the hooks went in>ms t<thread id> <function> \"<path>\" [=> \"<shadow path>\"] "
+         "<arguments> -> <result>\r\n";
+    return s;
+}
+
+// ---- the loader's log file ----
+
+inline SRWLOCK g_log_lock = SRWLOCK_INIT;
+inline HANDLE g_log_file = INVALID_HANDLE_VALUE;
+
+// Opens (and empties) the log; false when it cannot (no emf folder): the hooks then redirect without logging.
+inline bool open_log(const std::wstring& path) {
+    g_log_file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                             nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    return g_log_file != INVALID_HANDLE_VALUE;
+}
+
+// Called from any game thread: one line at a time, written through at once (nothing is lost if the game stops).
+inline void write_log(const char* data, size_t n) {
+    if (g_log_file == INVALID_HANDLE_VALUE) return;
+    AcquireSRWLockExclusive(&g_log_lock);
+    DWORD written = 0;
+    WriteFile(g_log_file, data, static_cast<DWORD>(n), &written, nullptr);
+    ReleaseSRWLockExclusive(&g_log_lock);
+}
+
+inline void close_log_for_test() {
+    if (g_log_file != INVALID_HANDLE_VALUE) CloseHandle(g_log_file);
+    g_log_file = INVALID_HANDLE_VALUE;
+}
+
+// The loader's whole step (DllMain, the game only, once the switches said yes): log file, hooks, header. Returns the
+// line for emf_loader.log.
+inline std::string start(HMODULE exe, const std::wstring& game_dir, const ContentSwitches& sw) {
+    auto& g = g_state;
+    const auto normal = normalize_path(game_dir, L"");
+    g.game_dir = normal ? normal->path : game_dir;
+    g.sw = sw;
+    const bool logging = open_log(g.game_dir + L"\\emf\\file_opens.log");
+    g.write = logging ? &write_log : nullptr;
+    // before the hooks: in a module whose own imports are hooked (the tests) these calls would be logged
+    const DWORD shadow = GetFileAttributesW(shadow_folder(g.game_dir).c_str());
+    g.start_ms = g.now_ms();
+    const Installed inst = install(exe);
+    if (logging) {
+        wchar_t exe_path[MAX_PATH] = {};
+        GetModuleFileNameW(exe, exe_path, MAX_PATH);
+        const auto* base = reinterpret_cast<const uint8_t*>(exe);
+        const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(
+            base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+        SYSTEMTIME t{};
+        GetLocalTime(&t);
+        char when[32];
+        std::snprintf(when, sizeof when, "%04u-%02u-%02u %02u:%02u:%02u", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
+                      t.wSecond);
+        write_raw(header_text(inst, exe_path, nt->FileHeader.TimeDateStamp, g.game_dir,
+                              shadow != INVALID_FILE_ATTRIBUTES && (shadow & FILE_ATTRIBUTE_DIRECTORY), sw, when));
+    }
+    std::string line = "content spike: hooked " + std::to_string(inst.hooked.size()) +
+                       " file functions in the exe's import table (log_opens=" + std::to_string(sw.log_opens ? 1 : 0) +
+                       ", redirect_test=" + std::to_string(sw.redirect_test ? 1 : 0) + "); ";
+    line += logging ? "the log is emf\\file_opens.log" : "could not create emf\\file_opens.log, so nothing is logged";
+    return line;
+}
+
+}  // namespace emf::loader::file_hooks

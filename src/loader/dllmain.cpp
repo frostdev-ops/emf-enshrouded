@@ -10,6 +10,9 @@
 // Before all that, in the game (not the dedicated server), it takes EMF.exe's one-shot flag for "Play without EMF
 // mods" (play_once.h): emf\play_once.txt is read and deleted at once, and for this one start EMF's core (and with
 // "Play without any mods" the chained DLLs too) does not start.
+//
+// In the game, with [content] log_opens=1 or redirect_test=1 in emf\emf_core.ini (both off by default), it also puts
+// the content redirect spike's hooks into the exe's file functions (file_hooks.h).
 #include <windows.h>
 
 #include <share.h>
@@ -23,6 +26,7 @@
 #include "chain_list.h"
 #include "chain_load.h"
 #include "entry_hold.h"
+#include "file_hooks.h"
 #include "layer_env.h"
 #include "loader_id.h"
 #include "play_once.h"
@@ -178,6 +182,16 @@ void enable_vulkan_layer() {
     put_first(L"VK_ADD_LAYER_PATH", vk);
     put_first(L"VK_INSTANCE_LAYERS", L"VK_LAYER_EMF_console");
 }
+
+// The content redirect spike (file_hooks.h, docs/engine_parts/file_redirect_spike.md): only with [content] log_opens=1
+// or redirect_test=1 in emf\emf_core.ini, in the game. The hooks go into the exe's import table here, before the exe's
+// own code runs (its entry point comes after every DllMain), so no hold of the entry point is needed; they stay for the
+// life of the game. After the chained DLLs: a hook one of them put into the same table is called through.
+void start_file_hooks(const std::wstring& dir) {
+    const auto sw = emf::loader::read_content_switches(dir + L"\\emf\\emf_core.ini");
+    if (!sw.hooks()) return;
+    loader_log(dir, emf::loader::file_hooks::start(GetModuleHandleW(nullptr), dir, sw).c_str());
+}
 }  // namespace
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
@@ -202,6 +216,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
         run_chain(game_dir(), plan.chain);
         if (!plan.core) return TRUE;  // no core, and no Vulkan layer either (the layer is emf_core.dll)
         enable_vulkan_layer();  // after the chained DLLs: it puts EMF's layer first even if one of them set the list
+        if (!emf::loader::is_server_exe(exe)) start_file_hooks(game_dir());
         uint8_t* entry = nullptr;
         bool want_hold = false;
         if (emf::loader::is_server_exe(exe)) {
