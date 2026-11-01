@@ -150,7 +150,8 @@ int input_callback(ImGuiInputTextCallbackData* d) {
                     break;
                 }
             }
-            // no suggestion (or suggestions off): complete and cycle through the matches
+            // no list shows (nothing suggested, hidden by Esc or a line from the history, or suggestions off):
+            // complete and cycle through the matches
             const std::string current(d->Buf, d->BufTextLen);
             const bool cycling = !ui.completions.empty() && ui.completion_index < ui.completions.size() &&
                                  current == ui.completions[ui.completion_index];

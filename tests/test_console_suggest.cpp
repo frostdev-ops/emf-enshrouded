@@ -394,7 +394,7 @@ TEST_CASE("Suggester: a line from the history hides the list until the next edit
     CHECK(g.showing());
 }
 
-TEST_CASE("Suggester: Tab takes the selected row (also while hidden), Right only while it shows at the line's end") {
+TEST_CASE("Suggester: Tab takes the selected row while the list shows, Right only while it shows at the line's end") {
     const auto src = sources();
     Suggester g;
     g.update("loot.t", 6, src);
@@ -419,7 +419,12 @@ TEST_CASE("Suggester: Tab takes the selected row (also while hidden), Right only
     g.update("lo", 2, src);
     g.escape();
     CHECK_FALSE(g.accept_right(src));  // hidden: Right just moves the caret
-    e = g.accept(src);                 // Tab still completes
+    CHECK_FALSE(g.accept(src));        // and Tab is the old completion's: no row the player cannot see
+    g.replaced("lo", 2);               // a line from the history
+    g.update("lo", 2, src);
+    CHECK_FALSE(g.accept(src));
+    g.update("loo", 3, src);  // typing shows the list again: Tab takes its row
+    e = g.accept(src);
     REQUIRE(e);
     CHECK(e->text == "loot.status ");
 

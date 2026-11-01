@@ -99,7 +99,8 @@ under it (green when it worked, red when it did not).
   `items`), mod ids and setting keys for `settings` and `set` (then the setting's values, such as `on`/`off` or a
   list's choices), component names for `tpl` and `tplset`, and choices such as `[on|off]`.
 - **Tab** or **Right** (at the end of the line) takes the highlighted suggestion; grey text after the cursor shows what
-  it adds. With nothing suggested, Tab completes and cycles through the matches as before.
+  it adds. While no list shows (nothing suggested, or hidden by Esc), Tab completes and cycles through the matches as
+  before.
 - **Up / Down** move in the list while it shows; otherwise they go through the commands you typed before (kept in
   `<game>\emf\console_history.txt`). A command brought back from there shows no list until you type.
 - **Page Up / Page Down** and the mouse wheel scroll back; the console keeps the last 2000 lines.

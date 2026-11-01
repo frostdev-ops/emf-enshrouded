@@ -278,6 +278,36 @@ TEST_CASE("console UI: a line from the history shows no list, so Up and Down kee
     CHECK(r.ui.suggester.showing());
 }
 
+TEST_CASE("console UI: Tab on a line from the history completes as before, it does not take a row the player never saw") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.model.push_history("give wood log");
+    r.frame();
+    r.frame();
+    r.press(ImGuiKey_UpArrow);
+    REQUIRE(r.ui.input == "give wood log");
+    REQUIRE_FALSE(r.ui.suggester.showing());
+    REQUIRE_FALSE(r.ui.suggester.current().rows.empty());  // a hidden row: Material_T1_Wood_Logs
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "give wood log");  // Tab completion has nothing for a third word
+}
+
+TEST_CASE("console UI: after Esc hid the list, Tab completes as before (the common start of the matches)") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.frame();
+    r.frame();
+    r.type("lo");
+    REQUIRE(r.ui.suggester.showing());
+    r.ui.escape = true;  // Esc reached the console
+    r.frame();
+    REQUIRE_FALSE(r.ui.suggester.showing());
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "loot.");  // what loot.status and loot.toggle share, not the hidden top row
+}
+
 TEST_CASE("console UI: with suggestions off nothing shows as you type and Tab cycles through the matches as before") {
     Headless h;
     Rig r;
