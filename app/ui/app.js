@@ -269,7 +269,8 @@ function renderHeader() {
   more.disabled = !!s.game_running;
   const why = !s.emf_installed ? 'EMF is not installed in this folder: Play starts the game without EMF anyway.'
     : !s.play_once ? 'The EMF in this folder is older and cannot do this. Install EMF again from its package.' : '';
-  $('play-no-emf').disabled = $('play-no-mods').disabled = !!why;
+  // aria-disabled, not disabled: the entries stay focusable, so keyboard and screen-reader users hear why
+  for (const id of ['play-no-emf', 'play-no-mods']) $(id).setAttribute('aria-disabled', why ? 'true' : 'false');
   $('play-no-emf-sub').textContent = why || 'This start only. The DLL mods started by EMF still run.';
   $('play-no-mods-sub').textContent = why || 'This start only. Neither EMF mods nor the DLL mods started by EMF.';
   if (more.hidden || more.disabled) playMenu(false);
@@ -2091,12 +2092,11 @@ function playMenu(open) {
   if (menu.hidden === !open) return;
   menu.hidden = !open;
   $('play-more').setAttribute('aria-expanded', String(open));
-  if (open) {
-    const first = [...menu.querySelectorAll('[role=menuitem]')].find((b) => !b.disabled);
-    if (first) first.focus();
-  }
+  if (open) menu.querySelector('[role=menuitem]').focus();
 }
 function playWith(mode) {
+  const item = $(mode === 'no-emf' ? 'play-no-emf' : mode === 'no-mods' ? 'play-no-mods' : 'play-normal');
+  if (item.getAttribute('aria-disabled') === 'true') return;  // its line under it says why
   playMenu(false);
   $('play-more').focus();
   send(mode ? { cmd: 'play', mode } : { cmd: 'play' });
@@ -2107,15 +2107,18 @@ $('play-no-emf').addEventListener('click', () => playWith('no-emf'));
 $('play-no-mods').addEventListener('click', () => playWith('no-mods'));
 document.addEventListener('click', (e) => { if (!$('play-group').contains(e.target)) playMenu(false); });
 $('play-menu').addEventListener('keydown', (e) => {
-  const items = [...$('play-menu').querySelectorAll('[role=menuitem]')].filter((b) => !b.disabled);
+  const items = [...$('play-menu').querySelectorAll('[role=menuitem]')];  // the disabled ones too: they say why
   const i = items.indexOf(document.activeElement);
   if (e.key === 'Escape') {
     e.preventDefault();
     playMenu(false);
     $('play-more').focus();
-  } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && items.length) {
+  } else if (e.key === 'ArrowDown' || e.key === 'ArrowUp') {
     e.preventDefault();
     items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+  } else if (e.key === 'Home' || e.key === 'End') {
+    e.preventDefault();
+    items[e.key === 'Home' ? 0 : items.length - 1].focus();
   } else if (e.key === 'Tab') {
     playMenu(false);
   }

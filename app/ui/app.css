@@ -115,8 +115,9 @@ button { cursor: pointer; }
   box-shadow: 0 18px 40px -12px rgba(0, 0, 0, 0.75);
 }
 .play-item { display: flex; flex-direction: column; gap: 2px; padding: 9px 12px; border: 0; border-radius: 8px; background: none; text-align: left; }
-.play-item:hover:not(:disabled), .play-item:focus-visible { background: var(--dusk); }
-.play-item:disabled { cursor: default; opacity: 0.55; }
+.play-item:hover:not([aria-disabled="true"]), .play-item:focus-visible { background: var(--dusk); }
+.play-item[aria-disabled="true"] { cursor: default; }
+.play-item[aria-disabled="true"] .play-item-label { opacity: 0.55; }
 .play-item-label { font-weight: 600; }
 .play-item-sub { color: var(--haze); font-size: 12px; line-height: 1.4; }
 

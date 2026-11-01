@@ -95,6 +95,8 @@ The next start loads everything again. So that EMF never stays off:
 - it is refused while the game runs, when EMF is not installed in the folder, when Steam's copy of the game is another
   folder than the one shown, and when the folder's EMF is older than this feature (EMF.exe looks for the marker
   `EMF-PLAY-ONCE-1`, which the loader exports as `emf_loader_play_once`; the menu says to install EMF again then).
+  Such an entry stays in the menu with the reason under it (`aria-disabled`, so the keyboard and a screen reader reach
+  it), and choosing it does nothing. The arrow keys, Home and End move through the entries, Escape closes the menu.
 
 Under Wine or Proton the flag is written all the same and the link opened; the message adds that if nothing starts,
 Enshrouded is started from Steam within ten minutes, and that start is without the mods. The flag stays then also when
@@ -961,7 +963,8 @@ player's, and counts only a stand-in game running from the folder shown.
 - `scripts/app_smoke.ps1` (run by `scripts/verify.sh`): builds a fake game folder and runs `EMF.exe --smoke` on it. It
   checks the rows the page drew (read back from the page), that a canary mod's HTML and script texts stay text and
   nothing in them runs, that a `fetch` and a navigation from the page are stopped, that clicking a switch through the
-  page changes `dinput8-chain.ini`, that several switches in a row share one note, the Play menu (its entries, and
+  page changes `dinput8-chain.ini`, that several switches in a row share one note, the Play menu (its entries, the
+  keys, an older loader's entries reachable and doing nothing, and
   Play without EMF mods writing `emf\play_once.txt` without opening Steam), that the same switch is locked while a
   stand-in `enshrouded.exe` runs from the folder, profiles through the page (Save as, a switch makes the picker say
   "(changed)", Switch puts it back),

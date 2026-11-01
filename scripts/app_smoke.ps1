@@ -11,7 +11,8 @@
 # - clicking the chained DLL's switch comments out its line in dinput8-chain.ini (page script -> host -> file);
 # - several switches in a row share one note ("2 changes take effect at the next game start."), not one each;
 # - the Play menu: Play, Play without EMF mods (it writes the loader's one-shot flag emf\play_once.txt; a test run never
-#   opens the steam:// link) and Play without any mods;
+#   opens the steam:// link) and Play without any mods; with an older loader those two stay reachable (aria-disabled,
+#   with the reason) and do nothing; the arrow keys, Home and End reach every entry;
 # - with a stand-in enshrouded.exe running from the folder, that switch is locked and the file stays as it is;
 # - mod profiles through the page: Save as writes emf\profiles\<name>.json and the picker shows it; a switch makes
 #   it say "(changed)"; Switch puts the switch back (dinput8-chain.ini as it was);
@@ -296,6 +297,22 @@ try {
     Check ($null -ne $pp3 -and $pp3.toast -like "*without EMF mods, this time only*" -and $pp3.closed) "Play without EMF mods says it is for this start only, and the menu closes"
     Check ($flagText -match "(?m)^emf_play_once=1" -and $flagText -match "(?m)^mode=no-emf" -and $flagText -match "(?m)^written=\d+") "and writes the loader's one-shot flag emf\play_once.txt ($($flagText.Trim() -replace "`r`n", ' | '))"
     Remove-Item -LiteralPath $flagFile -Force -ErrorAction SilentlyContinue
+
+    # 3d. with EMF 0.3.2's loader (no marker) the two starts without mods cannot work: they stay in the menu, focusable
+    # and read out with the reason (aria-disabled), do nothing when chosen; the keys move through all three (Home, End)
+    $loaderFile = Join-Path $game "dinput8.dll"
+    $loaderText = Get-Content -LiteralPath $loaderFile -Raw
+    [System.IO.File]::WriteAllText($loaderFile, "EMF-LOADER-7d3c9f fake")
+    try {
+        $menuJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; var p={}; window.emfProbe=p; var more=function(){return document.getElementById('play-more');}; var key=function(k){document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:k,bubbles:true}));}; var at=function(){return document.activeElement&&document.activeElement.id;}; W(function(){return more()&&!more().hidden&&state&&state.emf_installed;},function(){ more().click(); W(function(){return !document.getElementById('play-menu').hidden;},function(){ var it=document.getElementById('play-no-emf'); p.aria=it.getAttribute('aria-disabled'); p.disabled=it.disabled; p.sub=document.getElementById('play-no-emf-sub').textContent; p.first=at(); key('End'); p.end=at(); key('Home'); p.home=at(); key('ArrowDown'); p.down=at(); it.click(); setTimeout(function(){ p.open=!document.getElementById('play-menu').hidden; p.toasts=[...document.querySelectorAll('#toasts .toast')].filter(function(t){return /without|Steam|older/.test(t.textContent);}).length; window.emfDone=true; }, 600); }); });"
+        $run = Invoke-Smoke -Eval $menuJs -More @("--probe-wait", "9000")
+    } finally {
+        [System.IO.File]::WriteAllText($loaderFile, $loaderText)
+    }
+    $pm = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+    Check ($run.Code -eq 0 -and $null -ne $pm -and $pm.aria -eq "true" -and -not $pm.disabled -and $pm.sub -like "*older*") "with an older loader, Play without EMF mods is aria-disabled but focusable, and says why ($(if ($pm) { $pm | ConvertTo-Json -Compress }))"
+    Check ($null -ne $pm -and $pm.first -eq "play-normal" -and $pm.end -eq "play-no-mods" -and $pm.home -eq "play-normal" -and $pm.down -eq "play-no-emf") "the menu's keys reach every entry: End, Home, Arrow down"
+    Check ($null -ne $pm -and $pm.open -and $pm.toasts -eq 0 -and -not (Test-Path -LiteralPath $flagFile)) "choosing a disabled entry does nothing: no flag, no message, the menu stays open"
 
     # 4. a process called enshrouded.exe running from the folder (a copy of ping.exe standing in for the game): the
     # switch is locked, so the same click changes nothing. The page script must have run (else this proves nothing).
