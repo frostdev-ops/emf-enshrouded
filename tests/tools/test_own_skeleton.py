@@ -75,6 +75,96 @@ class SpaceTests(unittest.TestCase):
         self.assertEqual(osk.blender_to_game((1.0, 2.0, 3.0)), (-1.0, 3.0, -2.0))
 
 
+def angle(a, b):
+    d = abs(sum(x * y for x, y in zip(a, b)))
+    return 2 * math.acos(min(1.0, d))
+
+
+class AlignTests(unittest.TestCase):
+    """A chain whose joints move to other places: each bone of the chain turns to point at its child's new place, so
+    a clip's rotations bend the new limb the way they bent the old one."""
+    # root, a bone 1 m up (y), its child 1 m further up; the copy's child stands 1 m along +x instead
+    PARENTS = [None, 0, 1]
+    REST = [(I, (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)), (I, (0.0, 1.0, 0.0), (1.0, 1.0, 1.0)),
+            (I, (0.0, 1.0, 0.0), (1.0, 1.0, 1.0))]
+    MOVED = [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (1.0, 1.0, 0.0)]
+
+    def test_a_bone_turns_to_its_childs_new_place(self):
+        new = osk.align_rest(self.REST, self.PARENTS, self.MOVED, main={0, 1, 2})
+        w = osk.world(new, self.PARENTS)
+        for a, b in zip(w[2][1], self.MOVED[2]):
+            self.assertAlmostEqual(a, b, places=9)
+        # joint 1's frame turned -90 degrees about z: its +y now points along world +x
+        for a, b in zip(osk.qrot(w[1][0], (0.0, 1.0, 0.0)), (1.0, 0.0, 0.0)):
+            self.assertAlmostEqual(a, b, places=9)
+        # and the child's offset in it is along +y as before (only the length may change)
+        for a, b in zip(new[2][1], (0.0, 1.0, 0.0)):
+            self.assertAlmostEqual(a, b, places=9)
+
+    def test_the_same_places_keep_the_rest(self):
+        same = [w[1] for w in osk.world(self.REST, self.PARENTS)]
+        new = osk.align_rest(self.REST, self.PARENTS, same, main={0, 1, 2})
+        for (q, t, _), (q0, t0, _) in zip(new, self.REST):
+            self.assertLess(angle(q, q0), 1e-7)  # acos near 1: one rounding step is 3e-8 rad
+            for a, b in zip(t, t0):
+                self.assertAlmostEqual(a, b, places=9)
+
+
+class RetargetTests(unittest.TestCase):
+    PARENTS = AlignTests.PARENTS
+    REST = AlignTests.REST
+
+    def test_the_same_rest_gives_the_same_pose(self):
+        pose = [(I, (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)), (turn((0, 0, 1), 0.4), (0.0, 1.0, 0.0), (1.0, 1.0, 1.0)),
+                (turn((1, 0, 0), 0.3), (0.0, 1.0, 0.0), (1.0, 1.0, 1.0))]
+        out = osk.retarget(pose, self.REST, self.REST, self.PARENTS)
+        for (q, t, _), (q0, t0, _) in zip(out, pose):
+            self.assertLess(angle(q, q0), 1e-7)  # acos near 1: one rounding step is 3e-8 rad
+
+    def test_a_bend_turns_the_new_bone_the_same_way_in_the_world(self):
+        moved = osk.align_rest(self.REST, self.PARENTS, AlignTests.MOVED, main={0, 1, 2})
+        # the clip turns joint 1 by 90 degrees about x: on the old chain the tip goes from +y to +z
+        pose = [self.REST[0], (turn((1, 0, 0), math.pi / 2), (0.0, 1.0, 0.0), (1.0, 1.0, 1.0)), self.REST[2]]
+        out = osk.retarget(pose, self.REST, moved, self.PARENTS)
+        w_old = osk.world(pose, self.PARENTS)
+        w_new = osk.world(out, self.PARENTS)
+        d_old = [b - a for a, b in zip(w_old[1][1], w_old[2][1])]
+        d_new = [b - a for a, b in zip(w_new[1][1], w_new[2][1])]
+        # the same turn in the world (90 degrees about x) applied to the new bone, which pointed along +x: it stays
+        # along +x; the old bone, along +y, now points along +z
+        for a, b in zip(d_old, (0.0, 0.0, 1.0)):
+            self.assertAlmostEqual(a, b, places=9)
+        for a, b in zip(d_new, (1.0, 0.0, 0.0)):
+            self.assertAlmostEqual(a, b, places=9)
+        for a, b in zip(osk.qrot(w_new[1][0], (0.0, 0.0, 1.0)), (0.0, -1.0, 0.0)):
+            self.assertAlmostEqual(a, b, places=9)
+
+
+class LengthTests(unittest.TestCase):
+    """The default pose of the copy: the game creature's posture (bone directions) with the creature's bone
+    lengths; clips keep their rotations and scale the positions they set by the bone's length ratio."""
+    PARENTS = AlignTests.PARENTS
+    REST = AlignTests.REST
+
+    def test_bones_keep_their_direction_and_take_the_new_length(self):
+        moved = [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (2.0, 1.0, 0.0)]  # the child 2 m from its parent, elsewhere
+        new = osk.lengths_rest(self.REST, self.PARENTS, moved)
+        self.assertEqual([q for q, _, _ in new], [q for q, _, _ in self.REST])
+        for a, b in zip(new[2][1], (0.0, 2.0, 0.0)):
+            self.assertAlmostEqual(a, b, places=9)
+        for a, b in zip(new[1][1], (0.0, 1.0, 0.0)):
+            self.assertAlmostEqual(a, b, places=9)
+
+    def test_clip_positions_scale_with_the_bone(self):
+        old = [(I, (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)), (I, (0.0, 1.0, 0.0), (1.0, 1.0, 1.0))]
+        new = [(I, (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)), (I, (0.0, 0.5, 0.0), (1.0, 1.0, 1.0))]
+        pose = [old[0], (turn((1, 0, 0), 0.2), (0.1, 1.2, 0.0), (1.0, 1.0, 1.0))]
+        out = osk.scale_positions(pose, old, new)
+        self.assertEqual(out[1][0], pose[1][0])
+        for a, b in zip(out[1][1], (0.05, 0.6, 0.0)):
+            self.assertAlmostEqual(a, b, places=9)
+
+
 class ReproportionTests(unittest.TestCase):
     def test_positions_move_with_the_rest_and_rotations_stay(self):
         old = [(I, (0.0, 1.0, 0.0), (1.0, 1.0, 1.0))]
