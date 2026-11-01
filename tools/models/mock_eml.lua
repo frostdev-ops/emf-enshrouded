@@ -24,7 +24,9 @@ local resources = {
 	["keen::ModelHierarchyResource"] = {}, ["keen::JointAnimation"] = {}, [GRAPH] = {},
 }
 -- a creature on a skeleton of its own: the game skeleton, the game clips and the game graph it copies (the graph: a
--- clip node per clip, and a blend space naming every clip and one more)
+-- clip node per clip, and a blend space naming every clip and one more); MOCK_MISSING=<guid> leaves one out (a game
+-- update that removed it)
+local missing = os.getenv("MOCK_MISSING") or ""
 for _, c in ipairs(require("creatures")) do
 	if c.skeleton then
 		local sk = require(c.name .. "_skeleton")
@@ -41,7 +43,9 @@ for _, c in ipairs(require("creatures")) do
 			skinToJointMatrices = binds } }
 		local nodes, items = {}, {}
 		for _, cl in ipairs(require(c.name .. "_clips")) do
-			resources["keen::JointAnimation"][cl.source] = { guid = cl.source, data = { headers = {}, data = {} } }
+			if cl.source ~= missing then
+				resources["keen::JointAnimation"][cl.source] = { guid = cl.source, data = { headers = {}, data = {} } }
+			end
 			nodes[#nodes + 1] = { type = "keen::anim_graph::runtime_graph::SampleAnimationClipNodeDefinition",
 				value = { animation = cl.source, additiveReferenceAnimation = NONE } }
 			items[#items + 1] = { animation = cl.source }
@@ -49,7 +53,9 @@ for _, c in ipairs(require("creatures")) do
 		items[#items + 1] = { animation = "99999999-9999-4999-8999-999999999999" }
 		nodes[#nodes + 1] = { type = "keen::anim_graph::runtime_graph::BlendSpace_1DNodeDefinition",
 			value = { items = items, additiveReferenceAnimation = NONE } }
-		resources[GRAPH][c.animation.graph] = { guid = c.animation.graph, data = { hierarchy = sk.source, nodeDefinitions = nodes } }
+		if c.animation.graph ~= missing then
+			resources[GRAPH][c.animation.graph] = { guid = c.animation.graph, data = { hierarchy = sk.source, nodeDefinitions = nodes } }
+		end
 	end
 end
 local function model(guid)

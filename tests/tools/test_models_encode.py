@@ -174,6 +174,57 @@ class MakeModTests(unittest.TestCase):
             self.assertIn("pose 4 %.4f %.4f %.4f %.4f" % q, text)
             self.assertIn("position 12 %.4f %.4f %.4f" % built["bind"][11][1], text)
 
+    def own_mod(self, d, src):
+        """A pack with one creature on a skeleton of its own (two game clips) written into d; returns the mock's run."""
+        import own_creature
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import test_own_creature as toc
+        with open(os.path.join(src, "own.json"), "w", encoding="utf-8") as f:
+            json.dump(toc.sidecar(), f)
+        for g, loop in (("aaaaaaaa-0000-4000-8000-000000000001", True), ("bbbbbbbb-0000-4000-8000-000000000002", False)):
+            with open(os.path.join(src, "beast_%s.json" % g), "w", encoding="utf-8") as f:
+                json.dump(toc.clip([toc.REST] * 11, loop=loop), f)
+        cfg = {"sidecar": os.path.join(src, "own.json"), "skeleton_guid": "22222222-2222-4222-8222-222222222222",
+               "reference_clip": os.path.join(src, "beast_aaaaaaaa-0000-4000-8000-000000000001.json"),
+               "clips": os.path.join(src, "beast_*.json"), "graph": "33333333-3333-4333-8333-333333333333",
+               "graph_guid": "44444444-4444-4444-8444-444444444444"}
+        built = own_creature.build(cfg, toc.hierarchy())
+        bear = dict(BEAR, own_proportions=cfg)
+        make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(bear)])
+        make_mod.write_own(d, bear["name"], built)
+        with open(os.path.join(d, "beast_bear_data.lua"), "w", encoding="utf-8") as f:
+            f.write(STUB_DATA)
+        with open(os.path.join(d, "beast_bear_blob.lua"), "w", encoding="utf-8") as f:
+            f.write('return "blob"' + chr(10))
+
+    def run_mock(self, d, missing=""):
+        mock = os.path.join(HERE, "..", "..", "tools", "models", "mock_eml.lua")
+        return subprocess.run(["lua", mock, d], capture_output=True, text=True, timeout=60,
+                              env=dict(os.environ, MOCK_MISSING=missing))
+
+    @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
+    def test_a_game_clip_that_is_gone_is_skipped(self):
+        """After a game update removed a clip: that clip stays the game's in the graph copy (it plays on the copy:
+        the same skeleton hash); the creature and the other clips are still added."""
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as src:
+            self.own_mod(d, src)
+            out = self.run_mock(d, "bbbbbbbb-0000-4000-8000-000000000002")
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("the game clip bbbbbbbb-0000-4000-8000-000000000002 is gone: it stays the game's", out.stdout)
+            self.assertEqual(out.stdout.count("clip copy "), 1)
+            self.assertIn("template Beast_Bear keen::ecs::AnimationGraphResourceComponent2 animationGraph "
+                          "44444444-4444-4444-8444-444444444444", out.stdout)
+
+    @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
+    def test_a_game_graph_that_is_gone_skips_only_that_creature(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as src:
+            self.own_mod(d, src)
+            out = self.run_mock(d, "33333333-3333-4333-8333-333333333333")
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("beast_bear: not added:", out.stdout)
+            self.assertNotIn("template Beast_Bear", out.stdout)
+
     @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
     def test_a_skeleton_whose_joint_count_is_not_a_multiple_of_four(self):
         """The game pads the default pose's rotation vectors to a multiple of 4 joints (the boar: 58 joints, 60

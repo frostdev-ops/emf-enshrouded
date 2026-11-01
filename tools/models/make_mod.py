@@ -192,6 +192,8 @@ if registry then
 end
 
 for _, c in ipairs(require("creatures")) do
+	-- one creature that cannot be added (a game update) does not stop the others
+	local ok, err = pcall(function()
 	local data = require(c.name .. "_data")
 
 	-- 1) the model: a copy of the source model's record, then our geometry
@@ -232,6 +234,10 @@ for _, c in ipairs(require("creatures")) do
 	-- 1b) a skeleton of its own (own_proportions): a copy of the game skeleton fitted to the creature, the game
 	-- creature's clips retargeted to it, and a copy of its animation graph that plays them
 	if c.skeleton then
+		-- the graph first: without it nothing of this creature is changed (the creature is not added)
+		local GRAPH = "keen::anim_graph::runtime_graph::AnimationGraphResource2_0"
+		local src_g = game.assets.get_resource(c.animation.graph, GRAPH)
+		assert(src_g, "the game graph " .. c.animation.graph .. " was not found (the game changed?)")
 		local sk = require(c.name .. "_skeleton")
 		local src_h = game.assets.get_resource(sk.source, "keen::ModelHierarchyResource")
 		assert(src_h, c.name .. ": the game skeleton " .. sk.source .. " was not found (the game changed?)")
@@ -254,22 +260,25 @@ for _, c in ipairs(require("creatures")) do
 			b.pos.x, b.pos.y, b.pos.z = j.ibm.pos.x, j.ibm.pos.y, j.ibm.pos.z
 		end
 		m.hierarchy = sk.guid
-		local map = {}
+		local map, made = {}, 0
 		for _, cl in ipairs(require(c.name .. "_clips")) do
 			local src_c = game.assets.get_resource(cl.source, "keen::JointAnimation")
-			assert(src_c, c.name .. ": the game clip " .. cl.source .. " was not found (the game changed?)")
-			local a = game.assets.create_resource(src_c.data, "keen::JointAnimation", cl.guid, 0).data
-			a.positionFactor, a.positionTangent, a.scaleFactor = cl.positionFactor, cl.positionTangent, cl.scaleFactor
-			a.fps, a.frameCount, a.flags = cl.fps, cl.frameCount, cl.flags
-			fill(a.headers, cl.headers)
-			local units = {}
-			for i = 1, #cl.bytes, 16 do units[#units + 1] = { data = { cl.bytes:byte(i, i + 15) } } end
-			fill(a.data, units)
-			map[cl.source] = cl.guid
+			if not src_c then  -- a game update removed it: the graph copy keeps the game's (same skeleton hash)
+				log(string.format("%%s: the game clip %%s is gone: it stays the game's", c.name, cl.source))
+			else
+				local anim = game.assets.create_resource(src_c.data, "keen::JointAnimation", cl.guid, 0).data
+				anim.positionFactor, anim.positionTangent, anim.scaleFactor = cl.positionFactor, cl.positionTangent,
+					cl.scaleFactor
+				anim.fps, anim.frameCount, anim.flags = cl.fps, cl.frameCount, cl.flags
+				fill(anim.headers, cl.headers)
+				local units = {}
+				for i = 1, #cl.bytes, 16 do units[#units + 1] = { data = { cl.bytes:byte(i, i + 15) } } end
+				fill(anim.data, units)
+				map[cl.source] = cl.guid
+				made = made + 1
+			end
 		end
-		local GRAPH = "keen::anim_graph::runtime_graph::AnimationGraphResource2_0"
-		local src_g = game.assets.get_resource(c.animation.graph, GRAPH)
-		assert(src_g, c.name .. ": the game graph " .. c.animation.graph .. " was not found (the game changed?)")
+		package.loaded[c.name .. "_clips"] = nil  -- the clips' bytes are copied: let Lua free them
 		local g = game.assets.create_resource(src_g.data, GRAPH, c.animation.graph_guid, 0).data
 		g.hierarchy = sk.guid
 		local ours, left = 0, 0
@@ -296,7 +305,7 @@ for _, c in ipairs(require("creatures")) do
 			end
 		end
 		log(string.format("%%s: skeleton %%s (%%d joints), %%d clips, graph %%s: %%d clip references ours, %%d left as the game's",
-			c.name, sk.guid, n, #require(c.name .. "_clips"), c.animation.graph_guid, ours, left))
+			c.name, sk.guid, n, made, c.animation.graph_guid, ours, left))
 	end
 
 	-- 2) the creature: a copy of the source template, pointing at the new model
@@ -359,6 +368,8 @@ for _, c in ipairs(require("creatures")) do
 	end
 	log(string.format("added %%s: model %%s (%%d meshes), template %%s %%s", c.name, c.model_guid, #data.meshes,
 		c.template_name, c.template_guid))
+	end)
+	if not ok then log(c.name .. ": not added: " .. tostring(err)) end
 end
 '''
 
