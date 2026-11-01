@@ -1,0 +1,3 @@
+# A static C runtime, as EMF's own DLLs use: emf_content.dll brings its own and never frees the caller's memory.
+[target.x86_64-pc-windows-msvc]
+rustflags = ["-C", "target-feature=+crt-static"]
