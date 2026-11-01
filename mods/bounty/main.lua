@@ -437,11 +437,28 @@ local function words(s)
   return out
 end
 
+-- A line of a 1.1 world file (no "format 2" line): a player's board ("p <account> <key> <rerolls> <done>") and its
+-- bounties ("b <account> <id> <need> <have> <state>"). Open and finished ones become the player's taken bounties, also
+-- beyond the hold limit; claimed ones (state 2) and ids no longer in the pool are left out, as 1.1 did.
+local function load_old_line(line)
+  local account, done = line:match("^p (%S+) %S+ %d+ (%d+)$")
+  if account then record(account).done = tonumber(done) end
+  local a, id, need, have, state = line:match("^b (%S+) (%S+) (%d+) (%d+) ([012])$")
+  if a and state ~= "2" and entry(id) then
+    table.insert(record(a).taken, {id = id, need = tonumber(need), have = tonumber(have), state = tonumber(state)})
+  end
+end
+
 -- The world's data, read line by line; each kind of line is matched whole (anchored), so one never reads as another.
 local function load_text(text)
   players, owed = {}, {}
   offset, dawns, play_s, seed, posted = 0, 0, 0, nil, nil
+  local old = true
   for line in text:gmatch("[^\r\n]+") do
+    if line == "format 2" then old = false end
+  end
+  for line in text:gmatch("[^\r\n]+") do
+    if old then load_old_line(line) end
     local v = line:match("^offset (%d+)$")
     if v then offset = tonumber(v) end
     v = line:match("^dawns (%d+)$")

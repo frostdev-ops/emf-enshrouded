@@ -734,3 +734,61 @@ TEST_CASE("bounty: players who finished none see the starter notices; after thei
     CHECK(starters_in(rerolled) == 3);
     CHECK(rerolled != mine);
 }
+
+// ---- 1.2: the world file ----
+namespace {
+// The "Yours n. ..." lines of a /bounty.board reply: the bounties a player holds.
+std::string yours_of(const std::string& board) {
+    std::string out, line;
+    std::istringstream in(board);
+    while (std::getline(in, line))
+        if (line.rfind("Yours", 0) == 0) out += line + "\n";
+    return out;
+}
+}  // namespace
+
+TEST_CASE("bounty: a 1.1.0 world file migrates: open and finished bounties become yours, nothing earned is lost") {
+    BountyRig b({{"reset", "game_dawn"}});
+    b.edit_main("local POOL = {", "\n  {id = \"gather_hemp\", kind = \"gather\", match = \"hemp\", name = \"Hemp\", n = 40, "
+                                  "reward = {{item = \"Material_T1_Animal_Fur\", count = 2}}},");
+    write(b.data, "offset 2\ndawns 7\nplay 900\n"
+                  "p 0x00000000000000aa d2026300.2 1 4\n"
+                  "b 0x00000000000000aa kill_vukah 6 2 0\n"
+                  "b 0x00000000000000aa gather_wood 60 60 1\n"
+                  "b 0x00000000000000aa kill_drak 4 4 2\n"
+                  "b 0x00000000000000aa gone_id 5 1 0\n"
+                  "p 0x00000000000000bb d2026300.2 0 0\n"
+                  "b 0x00000000000000bb gather_hemp 40 3 0\n"
+                  "owe 0x00000000000000aa Material_T1_Animal_Fur 6 0 -\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    const std::string held = yours_of(b.board());
+    CHECK(held.find("Slay 6 Vukah: 2/6") != std::string::npos);        // open: yours, with its progress
+    CHECK(held.find("Gather 60 Wood logs: done") != std::string::npos);  // finished, not claimed: still to claim
+    CHECK(held.find("Drak") == std::string::npos);                       // claimed in 1.1: nothing left to keep
+    CHECK(count_of(held, "\n") == 2);                                    // (an id no longer in the pool is left out)
+    CHECK(b.board().find("you hold 2 of 1") != std::string::npos);       // more than the hold limit: kept
+    CHECK(b.board().find("1 reward waiting") != std::string::npos);
+    const std::string claimed = b.reply("bounty.claim");
+    CHECK(claimed.find("6 x Material_T1_Animal_Fur") != std::string::npos);
+    CHECK(claimed.find("5 x Material_T1_Token_WeaponUpgrade_Rune01") != std::string::npos);
+    CHECK(b.reply("bounty.top").find("1. 0x00000000000000aa: 4 (you)") != std::string::npos);
+    CHECK(yours_of(b.board(2, 0xBB)).find("Gather 40 Hemp: 3/40") != std::string::npos);
+    b.seconds(1);
+    const std::string file = slurp(b.data);
+    CHECK(file.rfind("format 2\n", 0) == 0);
+    CHECK(file.find("\noffset 2\n") != std::string::npos);
+    CHECK(file.find("\ndawns 7\n") != std::string::npos);
+    CHECK(file.find("\nplay 90") != std::string::npos);
+    CHECK(file.find("\nt 0x00000000000000aa kill_vukah 6 2 0\n") != std::string::npos);
+    CHECK(file.find("\nt 0x00000000000000bb gather_hemp 40 3 0\n") != std::string::npos);
+    CHECK(file.find("\nb ") == std::string::npos);
+    CHECK(file.find("\nowe ") == std::string::npos);  // claimed now
+    // the rewritten file loads the same
+    const std::string before = b.board();
+    b.r.fake.session = 3;
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.board() == before);
+}
