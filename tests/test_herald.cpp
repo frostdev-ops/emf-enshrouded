@@ -113,6 +113,17 @@ TEST_CASE("herald: the MOTD fills in {name} and {online}; lines get the prefix")
     CHECK(player_label(std::string("A\nB"), 7) == "A?B");
 }
 
+TEST_CASE("herald: the host of a game it hosts is \"Host\" when EMF cannot read their name, never \"player #1\"") {
+    // in a game you host EMF reads names from the players' connections ([chat] players=1); the host's own name was not
+    // found there in the owner's game, and no API gives the character's name
+    CHECK(player_label(std::nullopt, 1, 1) == "Host");
+    CHECK(player_label(std::string(""), 1, 1) == "Host");
+    CHECK(player_label(std::string("Ember"), 1, 1) == "Ember");  // a name the game gives wins
+    CHECK(player_label(std::nullopt, 2, 1) == "player #2");      // a guest without a name
+    CHECK(player_label(std::nullopt, 1, 0) == "player #1");      // a dedicated server has no host player
+    CHECK(expand_motd("Welcome {name}!", player_label(std::nullopt, 1, 1), 1) == "Welcome Host!");
+}
+
 TEST_CASE("herald: /players numbers the players and wraps long lists") {
     Roster r;
     r.update({seen(1, kA, true, "Ember"), seen(2, kB, true, "Ash")}, 0, 0);

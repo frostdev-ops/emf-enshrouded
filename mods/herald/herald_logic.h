@@ -66,8 +66,13 @@ inline std::string expand_motd(std::string motd, const std::string& name, size_t
     replace("{online}", std::to_string(online));
     return motd;
 }
-inline std::string player_label(const std::optional<std::string>& name, uint32_t entity) {
-    return name && !name->empty() ? printable(*name) : "player #" + std::to_string(entity);
+// A player's name in the herald's lines: the name the game gives (emf::player_name), else "Host" for the host of a game
+// it hosts (`host`: emf::local_player(), 0 on a dedicated server; their own name is not in the connection records EMF
+// reads there), else "player #<entity>".
+inline std::string player_label(const std::optional<std::string>& name, uint32_t entity, uint32_t host = 0) {
+    if (name && !name->empty()) return printable(*name);
+    if (host && entity == host) return "Host";
+    return "player #" + std::to_string(entity);
 }
 
 // ---- who is online ----

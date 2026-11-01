@@ -48,6 +48,7 @@ struct Config {
 std::mutex g_config_lock;
 Config g_config;
 std::atomic<bool> g_switched_off{false};  // switched off in the Mods tab (the DLL stays until the next start)
+std::atomic<bool> g_chat_on{false};       // players' chat lines reach mods here (on_chat was accepted)
 
 std::wstring game_dir() {
     wchar_t exe[MAX_PATH];
@@ -222,7 +223,23 @@ void say(const std::string& text, herald::Hook what) {
     hook_line(what, text);
 }
 
-std::string name_of(emf::World w, uint32_t entity) { return herald::player_label(emf::player_name(w, entity), entity); }
+// The game's name for a player, else "Host" (the host of a game it hosts), else "player #<entity>". The names come from
+// the server's connection records, which EMF reads only with players' chat on; the character's name is not readable.
+std::string name_of(emf::World w, uint32_t entity) {
+    const auto name = emf::player_name(w, entity);
+    static bool said = false;
+    if (!name && !said) {
+        said = true;
+        if (g_chat_on)
+            EMF_LOG(kMod, "the game gave no name for player %u (their connection holds none): they are \"%s\"", entity,
+                    herald::player_label(name, entity, emf::local_player()).c_str());
+        else
+            EMF_LOG(kMod, "no names: EMF reads players' names from their connections, which needs players' chat "
+                          "([chat] players=1 in emf\\emf_core.ini of a game you host); meanwhile the host is \"Host\" and "
+                          "the others \"player #<entity>\"");
+    }
+    return herald::player_label(name, entity, emf::local_player());
+}
 
 int64_t unix_now() { return static_cast<int64_t>(std::time(nullptr)); }
 
@@ -505,6 +522,7 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
         }
         hook_line(herald::Hook::Chat, herald::printable(name) + ": " + herald::printable(text));
     });
+    g_chat_on = chat;
     if (!chat)
         EMF_LOG(kMod, "players' chat lines do not reach mods here (players' chat is off: [chat] players=1 in "
                       "emf\\emf_core.ini of a game you host): the chat log has joins, leaves and the herald's lines only");
