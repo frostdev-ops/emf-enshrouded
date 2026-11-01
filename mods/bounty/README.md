@@ -1,36 +1,94 @@
 # Bounty Board (`bounty`, Lua)
 
-Every day each player gets three bounties: slay creatures of a faction ("Slay 6 Vukah"), gather a material ("Gather 60
-Wood logs"), or slay a champion. Finish one and claim its reward. Your first bounties are quick ones ("Gather 20 Wood
-logs", "Slay 2 Wildlife") until you finish one. Daily and repeatable quests (164 votes) and a kill
+Build the game's Notice Board in your base and it becomes a Bounty Board. It posts notices: slay creatures of a
+faction ("Slay 6 Vukah"), gather a material ("Gather 60 Wood logs"), or slay a champion. Take one, finish it
+anywhere, and claim its reward at the board. New notices come every 4 in-game days. Your first bounties are quick ones
+("Gather 20 Wood logs", "Slay 2 Wildlife") until you finish one. Daily and repeatable quests (164 votes) and a kill
 tracker (65) are open requests on the official board; no Nexus mod has them.
 
 It runs where the world runs, so on the host or a dedicated server it works for every player, also those who joined
-without EMF. Each player's bounties and progress are kept with the world, by account
-(`emf\config\bounty\<world slot>.txt`).
+without EMF. The notices, each player's bounties and progress, and the boards' places are kept with the world, by
+account (`emf\config\bounty\<world slot>.txt`). Nothing is written into the game's save: without the mod a Bounty
+Board is an ordinary Notice Board again.
 
 ## Switch it on
 
 Bounty Board is installed **switched off**: it hands out items to every player. Switch it on in the Mods tab (the key
 under Esc) or in EMF.exe, then restart the game (or the server).
 
+## The board
+
+- **A Notice Board in a base:** build a Notice Board (Decoration Workbench) within 40 m of a flame altar (**Board must
+  be within (m) of a flame altar**; an abandoned altar makes no base). In a game you host it becomes a Bounty Board
+  within a minute of the host coming near it, and stays one, also while the host is far away and after a reload. The
+  notice boards in the world's villages are no Bounty Boards (unless a base is that close to them).
+- **On a dedicated server** an admin marks the board with `/bounty.mark`, as below: Notice Boards are recognised
+  through the host's own game, which a server does not have.
+- **Any prop:** before you have a Notice Board, the host looks at a prop within 8 m (a sign, a post, a table) and
+  types `bounty.mark`: it is a Bounty Board now. When the server does not know where the sender looks, `bounty.mark`
+  takes the prop nearest to them within 3 m and says which. `bounty.unmark` near it takes the mark off.
+- Boards are kept with the world by their place. A board that was taken down is forgotten once two searches in a row
+  (one every 30 seconds) missed it while a player was near its place.
+- `bounty.boards` lists the world's Bounty Boards (also from a dedicated server's console).
+- **Until the world's first Bounty Board**, bounties are taken and claimed anywhere, so a new world (or one from 1.1)
+  has bounties before anyone can build a Notice Board. Once a board was found or marked, they are taken and claimed at
+  a board, also after a reload.
+
+## Reading the board
+
+- **The host:** look at the board within 4 m: a note says "Bounty Board: press E to read" (at most every 10 minutes).
+  With the crosshair on the board, press **E**: a wheel shows the notices (click one to take it), "Drop" for each
+  bounty you hold, and "Claim" when one is done. E is also the game's key for using things; with the crosshair on a
+  chest or a station beside the board, E opens only that. **Read the board (host)** changes the key.
+- **Players who joined, and everyone on a dedicated server:** walking up to the board, facing it, sends you a private
+  chat line with the notices ("1. Gather 20 Wood logs (3 runes) ... Type /bounty.take 1-3 here"). After you went 8 m
+  away you get it again when there is something new (new notices, a bounty to claim), else after 10 minutes. Take one
+  with `/bounty.take <n>`; claim with `/bounty.claim` at the board. This needs players' chat:
+  always on on a dedicated server, `[chat] players=1` in `emf\emf_core.ini` in a game you host (see
+  `docs/modding/server.md`).
+- `/bounty.board` lists the notices when you are within 8 m of a Bounty Board, and your bounties anywhere.
+
+## Notices and your bounties
+
+- The notices are the same for everyone (with **Notices** set to "Each player their own", everyone gets their own);
+  each player keeps their own progress. A player can take each notice once until new notices come.
+- You hold one bounty at a time (**Bounties a player can hold**, up to 4): finish it, or give it up with
+  `/bounty.drop <n>`.
+- A bounty you hold stays when new notices come, until you finish and claim it, or drop it.
+- New notices come every 4 in-game days at dawn (**Every (in-game days)**, 1-10); the board says how long it is to
+  them. The game keeps no day number, so the mod counts dawns while the world runs: a dawn counts when the clock passes
+  6:00, also when the host sets the time from the evening to the morning or the players sleep through the night.
+  **New notices** can also be every real day at an hour on the host's clock, every dawn, or every few hours of play.
+
+## Take and claim anywhere
+
+Switch off **Take and claim at a Bounty Board** (`need_board`): in the Mods tab, in EMF.exe, or with
+`set bounty need_board 0` in the console. Then `/bounty.board` shows the notices anywhere and `/bounty.take` and
+`/bounty.claim` work anywhere, as `/bounty.board` and `/bounty.claim` did in 1.1. The boards still work as above.
+
 ## Commands
 
 | Command | Who | What |
 |---|---|---|
-| `/bounty.board` | every player | your bounties, progress, rewards, the time to new ones and your rerolls |
-| `/bounty.claim` | every player | the rewards of your finished bounties |
-| `/bounty.reroll <n>` | every player | swap bounty n for another one (1 per period by default) |
+| `/bounty.board` | every player | the notices (at a board), your bounties and progress, rewards waiting, the time to new notices |
+| `/bounty.take <n>` | every player | take notice n (at a board) |
+| `/bounty.drop <n>` | every player | give up your bounty n |
+| `/bounty.claim` | every player | the rewards of your finished bounties (at a board) |
+| `/bounty.reroll <n>` | every player | with notices of your own: swap notice n for another one (1 per period by default) |
 | `/bounty.top` | every player | who finished the most bounties in this world |
-| `bounty.give <id>` | host, admins | put a bounty from the pool on your board (for tests) |
-| `bounty.reset` | host, admins | new bounties for everyone now |
+| `bounty.mark`, `bounty.unmark` | host, admins | the prop you look at (or the one beside you) becomes a Bounty Board / the marked prop nearest to you is none again |
+| `bounty.boards` | host, admins | the world's Bounty Boards |
+| `bounty.give <id>` | host, admins | hold a bounty from the pool at once (for tests) |
+| `bounty.reset` | host, admins | new notices for everyone now |
 
 The commands for every player work from the chat on a dedicated server, and in a game you host with
 `[chat] players=1` in `emf\emf_core.ini` (see `docs/modding/server.md`). The host also sees their bounties on screen
-("Bounty: Vukah 2/6 | Wood logs 20/60 | Champion 0/1"). (Lua mods put their id in front of every command, so the
-board is `/bounty.board` rather than a bare `/bounty`.)
+("Bounty: Vukah 2/6"). (Lua mods put their id in front of every command, so the board is `/bounty.board` rather than
+a bare `/bounty`.)
 
 ## What counts
+
+Only bounties you hold count.
 
 - **Slay:** a kill of a creature of the bounty's faction (read from the creature when first hit). With **Shared
   kills** (on) it counts for every player who hit it in its last 10 seconds; off, only for the last player who hit it.
@@ -54,35 +112,41 @@ board is `/bounty.board` rather than a bare `/bounty`.)
 
 ## Rewards
 
-Rewards wait for `/bounty.claim` (or come at once with **Rewards come at once**). They go straight into your
-inventory; what does not fit is dropped at your feet, never lost. A reward that could not even be dropped (you left
-the game before it landed) is kept for you: `/bounty.board` says "1 reward waiting" and your next `/bounty.claim`
-brings it. Gear comes at your level with **Gear rewards'
-rarity** (uncommon by default). **Reward amounts** scales the counts.
+Rewards wait for `/bounty.claim` at a Bounty Board (or come at once, wherever you are, with **Rewards come at once**).
+They go straight into your inventory; what does not fit is dropped at your feet, never lost. A reward that could not
+even be dropped (you left the game before it landed) is kept for you: `/bounty.board` says "1 reward waiting" and your
+next `/bounty.claim` brings it. Gear comes at your level with **Gear rewards' rarity** (uncommon by default).
+**Reward amounts** scales the counts. A player who joined gets a chat line when a bounty is done; the host gets a note
+on screen.
 
 ## Your first bounties
 
-Until you finish your first bounty, your boards (and your rerolls) are drawn from quick **starters**: gather 20 wood
-logs, 20 stone or 15 plant fibre, slay 2 wildlife, 3 shroud creatures or 2 scavengers, for a small reward. Once you
-have finished one, the next boards come from the whole pool. A board you already have stays until the next period
-(the host can draw new ones for everyone now with `bounty.reset`).
+Until you finish your first bounty, the board shows you quick **starter** notices, named so (and your rerolls draw
+starters):
+gather 20 wood logs, 20 stone or 15 plant fibre, slay 2 wildlife, 3 shroud creatures or 2 scavengers, for a small
+reward. Once you have finished one, you see the board's other notices.
 
 To try the bounties quickly, set **How many to slay or gather** to **Tiny** (x0.2: "Slay 1 Vukah", "Gather 12 Wood
-logs") and run `bounty.reset`; the size counts for bounties drawn from then on.
+logs"); the size counts for bounties taken from then on.
 
-## New bounties
+## Updating from 1.1
 
-**New bounties** comes every real day at **At (hour)** on the host's clock (6:00 by default), at every dawn in the
-game, or every few hours of play. A new period draws new bounties for each player (the same player gets the same
-draw for the same period, so asking again never changes them); progress and unclaimed rewards of the old period go.
+The bounties you had started or finished become bounties you hold, with their progress (also more than the hold
+limit); finished ones wait for `/bounty.claim` (anywhere, until the world has a Bounty Board), rewards waiting stay,
+and the count of finished bounties (`/bounty.top`) stays. Nothing earned is lost. Bounties not started yet (0 done)
+and bounties already claimed are not kept.
+
+Going back to 1.1 keeps the finished counts and the rewards waiting; it forgets the bounties players hold, the
+notices taken and the boards. A world file written by a newer Bounty Board is read, but never written over, by this
+version.
 
 ## The pool
 
 The bounties are the `POOL` table at the top of `emf\mods\bounty\main.lua`: kind, faction or item word, how many,
-reward items, how often it is drawn, and `starter = true` for the quick first ones. Change it while the game runs and
-save: the mod reloads. **How many to slay or gather** scales the counts (tiny x0.2, easy x0.6, hard x1.5). A pool
-without starters draws everyone's boards from the whole pool; a pool with fewer starters than **Bounties per player**
-fills the rest of a first board from its other bounties.
+reward items (with an optional `name`, the word the notices show), how often it is drawn, and `starter = true` for the
+quick first ones. Change it while the game runs and save: the mod reloads. **How many to slay or gather** scales the
+counts (tiny x0.2, easy x0.6, hard x1.5). A pool without starters shows everyone the same kind of notices; a pool with
+fewer starters than **Notices on the board** fills the rest of a starter board from its other bounties.
 
 Installing EMF again replaces `main.lua`, and your changes to `POOL` with it. To keep your own bounties, put them in
 `emf\config\bounty\pool.lua` instead: that folder stays when EMF is installed again or removed. The file returns a
@@ -91,14 +155,14 @@ table like `POOL`:
 ```lua
 return {
   {id = "gather_flint", kind = "gather", match = "flint", name = "Flint", n = 30,
-   reward = {{item = "Material_T1_Token_WeaponUpgrade_Rune01", count = 5}}},
+   reward = {{item = "Material_T1_Token_WeaponUpgrade_Rune01", count = 5, name = "runes"}}},
   {id = "kill_vukah", kind = "kill", faction = 3, name = "Vukah", n = 10, weight = 5,
    reward = {{item = "Material_T1_Token_WeaponUpgrade_Rune01", count = 10}}},
 }
 ```
 
 When it is there, it is the whole pool: `main.lua`'s `POOL` is not used. It is read when the mod starts and at each
-world load. An entry that does not fit (no id, an unknown kind, no `n`, a kill without `faction`, a gather without
+world load. An entry that does not fit (no id, an unknown kind, no whole number `n`, a kill without `faction`, a gather without
 `match`) is skipped and named in the log; a file that does not run, or holds no entry that fits, leaves `main.lua`'s
 pool in use, and the log says so. The file can only build the table: it cannot reach the game, files or other
 programs.
@@ -107,13 +171,22 @@ programs.
 
 | Setting | Default | What it does |
 |---|---|---|
-| Bounties per player (`bounties_per_period`) | 3 | 1-5 |
+| Take and claim at a Bounty Board (`need_board`) | on | off: take and claim anywhere |
+| Every Notice Board in a base is a Bounty Board (`notice_boards`) | on | off: only marked props |
+| Board must be within (m) of a flame altar (`base_radius`) | 40 | 10-100 |
+| Read the board (host) (`read_key`) | E | |
+| Reading distance (m) (`read_range`) | 4 | 2-8 |
+| Tell players the notices when they walk up (`chat_notices`) | on | |
+| Notices on the board (`bounties_per_period`) | 3 | 2-4 |
+| Notices (`offers_for`) | the same for everyone | `everyone`, `each_player` |
+| Bounties a player can hold (`hold_max`) | 1 | 1-4 |
 | How many to slay or gather (`difficulty`) | normal | tiny (to try it out), easy, normal, hard |
 | Shared kills (`share_kills`) | on | |
-| New bounties (`reset`) | every day | `real_day`, `game_dawn`, `hours` |
+| New notices (`reset`) | every few days in the game | `game_days`, `real_day`, `game_dawn`, `hours` |
+| Every (in-game days) (`reset_days`) | 4 | 1-10 |
 | At (hour) (`reset_hour`) | 6 | 0-23, the host's clock |
 | Every (hours of play) (`reset_hours`) | 4 | 1-24 |
-| Rerolls per period (`rerolls`) | 1 | 0-3 |
+| Rerolls per period (`rerolls`) | 1 | 0-3, with notices of your own |
 | Rewards come at once (`auto_claim`) | off | |
 | Reward amounts (x) (`reward_scale`) | 1 | 0.5-3 |
 | Gear rewards' rarity (`reward_rarity`) | uncommon | |
@@ -121,6 +194,6 @@ programs.
 
 ## Good to know
 
-- Players who joined get no note when a bounty is done (EMF has no way to send one player a chat line outside a
-  command): they see it with `/bounty.board`. The host gets a note on screen.
-- The log (`emf\emf_core.log`, lines `[bounty]`) names every bounty finished and every reward.
+- The chat lines go out at most 30 in 10 seconds (EMF's limit for a Lua mod): when many players walk up at once, some
+  get theirs a few seconds later.
+- The log (`emf\emf_core.log`, lines `[bounty]`) names every bounty finished, every reward and every marked prop.

@@ -71,7 +71,7 @@ account hash (EMF API v19).
 **Commands for every player** (EMF API v17): mods can mark commands that any player may run, without being in
 `admins`: `/help` (it lists only what that player may run), `/raids.status`, `/loot.toggle`, `/loot.status`,
 `/champion.where`, `/champion.stats`, `/life_skills.skills`, `/qs`, `/quick_stack`, `/qs.chests`, `/bounty.board`,
-`/bounty.claim`, `/bounty.reroll`, `/bounty.top`, `/grave.where`, `/grave.claim`, `/sleep.status`, and with
+`/bounty.take`, `/bounty.drop`, `/bounty.claim`, `/bounty.reroll`, `/bounty.top`, `/grave.where`, `/grave.claim`, `/sleep.status`, and with
 Hand-over on `/handover`, `/handover.who`, `/handover.to`, `/handover.block`, with Server Herald on `/players`,
 `/playtime`, `/motd`, with Waypoint Teleports on `/unstuck`, `/home`, with Bulk Craft on `/craft`, `/craft.stop`,
 `/craft.list`, with Beastmaster on `/beastmaster` (`list`, `tame`, `feed`, `call`, `dismiss`, `attack`), with Necromancer
