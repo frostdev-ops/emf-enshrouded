@@ -21,6 +21,10 @@ serde_json = "1.0"
 tracing = "0.1.41"
 tracing-subscriber = { version = "0.3.19", default-features = false, features = ["fmt", "std"] }
 
+[dev-dependencies]
+# tests/eml_writer.rs drives EML's container writer directly
+kfc-base = { path = "../../third_party/eml/crates/kfc-base" }
+
 [workspace]
 
 [profile.release]

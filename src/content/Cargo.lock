@@ -363,6 +363,7 @@ name = "emf-content"
 version = "0.1.0"
 dependencies = [
  "camino",
+ "kfc-base",
  "mod-loader",
  "serde",
  "serde_json",
