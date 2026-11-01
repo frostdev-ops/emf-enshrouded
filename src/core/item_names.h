@@ -50,6 +50,11 @@ ItemMatch match_item(const std::vector<NamedItem>& items, std::string_view typed
 // For "items": every item that matches what was typed (every item for ""), best first.
 std::vector<size_t> search_items(const std::vector<NamedItem>& items, std::string_view typed);
 
+// The same over plain debug names (the console's suggestions keep only names); an ItemMatch's id is then the name's
+// index + 1.
+ItemMatch match_item(const std::vector<std::string>& names, std::string_view typed);
+std::vector<size_t> search_items(const std::vector<std::string>& names, std::string_view typed);
+
 // A command's words after the command name ("fishing bait 4", "tool torch 01 5"): the item and the numbers after it.
 // Up to max_numbers plain numbers at the end may be the command's numbers; one with a leading zero (01) always belongs
 // to the name. Every way to split is read: a split whose name is an item's debug name or has exactly its words wins
