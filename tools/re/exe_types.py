@@ -80,6 +80,7 @@ class Image:
     def __init__(self, image_base, sections):
         """sections: [(name, va, bytes)]."""
         self.image_base = image_base
+        self.timestamp = None  # the PE header's, when read from a file
         self.sections = sorted(((name, va, bytes(raw)) for name, va, raw in sections), key=lambda s: s[1])
 
     @classmethod
@@ -397,7 +398,6 @@ def read_types(img):
     }
 
 
-HEX40 = re.compile(r"^[0-9a-f]{40}$")
 VERSION = re.compile(r"^\d+(\.\d+)+$")
 BRANCH = re.compile(r"^[\w./-]{1,64}$")
 
@@ -412,9 +412,7 @@ def find_build_info(img):
             strings[va + m.start()] = raw[m.start():m.start() + 40].decode()
     if not strings:
         return info
-    for name, va, raw in img.sections:
-        if name not in (".data", ".rdata"):
-            continue
+    for name, va, raw in sorted((s for s in img.sections if s[0] in (".data", ".rdata")), key=lambda s: s[0]):
         n = len(raw) // 8
         words = memoryview(raw[:n * 8]).cast("Q")
         for i in range(n):
@@ -439,7 +437,7 @@ def read_exe(path):
     sha = hashlib.sha256(blob).hexdigest()
     doc = {"format": FORMAT, "format_version": FORMAT_VERSION}
     source = {"file": os.path.basename(path), "sha256": sha, "size": len(blob),
-              "pe_timestamp": getattr(img, "timestamp", None), "image_base": img.image_base,
+              "pe_timestamp": img.timestamp, "image_base": img.image_base,
               "build": KNOWN_BUILDS.get(sha)}
     source.update(find_build_info(img))
     doc["source"] = source
