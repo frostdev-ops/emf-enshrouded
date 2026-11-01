@@ -39,9 +39,10 @@ everything else works and those beasts are simply not there.
 
 **The wheel (hold F3):** Tame, Feed, Attack, **Dismiss <name>** for each beast that is out (and **Dismiss all** with
 two or more out), then **Call <name>** for up to 6 beasts that are at home or resting; a resting one shows its time
-left. With **Necromancer** installed too, F3 and F2 open one "Summons" wheel with
-"Beasts: ..." and "Undead: ..." items; turn **One wheel** (`shared_wheel`) off to keep Beastmaster's own wheel. A line at the bottom left lists your beasts that are out or resting:
-"Beasts: Wolf (out), Bear (rests 1:20)".
+left. The labels are short so they fit the wheel; the mouse wheel turns the page when there are more than 8 items.
+With **Necromancer** installed too, F3 and F2 open one "Summons" wheel with "Beasts: ..." and "Undead: ..." items;
+turn **One wheel** (`shared_wheel`) off to keep Beastmaster's own wheel. A line at the bottom left lists your beasts
+that are out or resting: "Beasts: Wolf (out), Bear (rests 1:20)".
 
 **Wild bears and aurochs (with their packs):** about every 30 minutes of play, when there is no wild one yet, one of
 them (at random, from the packs you have) appears 50-70 m from a player who is out in the open, at that player's level;

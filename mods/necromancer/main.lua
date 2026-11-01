@@ -206,6 +206,7 @@ local function picked_own(world, choice)
 	pending = choice and own_entries[choice] or nil
 end
 
+-- Short labels: a name of at most 20 characters, a detail in brackets of at most 14 (the wheel's slices are narrow).
 local function wheel_items(world)
 	local account = world:account(emf.local_player())
 	local labels, entries = {}, {}
@@ -219,8 +220,8 @@ local function wheel_items(world)
 	end
 	local rest = {
 		{ string.format("Raging Spirits (%d %% mana)", setting("spirit_mana_pct")), "spirits" },
-		{ "Gather (your undead come)", "gather" },
-		{ "Attack (what you look at)", "attack" },
+		{ "Gather", "gather" },
+		{ "Attack", "attack" },
 	}
 	for _, r in ipairs(rest) do
 		labels[#labels + 1] = r[1]

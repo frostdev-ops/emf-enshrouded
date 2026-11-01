@@ -245,9 +245,10 @@ local function wheel_items(world)
 		labels[#labels + 1] = label
 		entries[#entries + 1] = entry
 	end
-	add("Tame (look at a weakened beast)", { action = "tame" })
-	add("Feed (its bait, 3 times)", { action = "feed" })
-	add("Attack (what you look at)", { action = "attack" })
+	-- short labels: a name of at most 20 characters, a detail in brackets of at most 14 (the wheel's slices are narrow)
+	add("Tame (weakened)", { action = "tame" })
+	add("Feed (bait)", { action = "feed" })
+	add("Attack", { action = "attack" })
 	local list = account and beasts:list(account) or {}
 	local out = 0
 	for _, b in ipairs(list) do
@@ -261,8 +262,15 @@ local function wheel_items(world)
 	for _, b in ipairs(list) do
 		if not b.out and shown < WHEEL_CALLS then
 			shown = shown + 1
-			add(b.rest > 0 and string.format("Call %s (rests %d:%02d)", b.name, math.floor(b.rest / 60), math.floor(b.rest % 60))
-				or string.format("Call %s (%s)", b.name, b.species), { action = "call", key = b.name })
+			local label
+			if b.rest > 0 then
+				label = string.format("Call %s (rests %d:%02d)", b.name, math.floor(b.rest / 60), math.floor(b.rest % 60))
+			elseif b.name:lower():find(b.species, 1, true) == 1 then
+				label = "Call " .. b.name  -- "Wolf 2" says it is a wolf
+			else
+				label = string.format("Call %s (%s)", b.name, b.species)
+			end
+			add(label, { action = "call", key = b.name })
 		end
 	end
 	return labels, entries

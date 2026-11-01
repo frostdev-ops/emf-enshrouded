@@ -35,9 +35,11 @@ download, which is EML content: **install EML (or ShroudForge) first** (below).
 7. **They stay close:** a minion more than 40 m from you comes back after 3 s; more than 80 m at once.
 
 **The wheel (hold F2):** Raise Skeleton (n/3), Raise Lich (n/1), Raise Bone Golem (n/1), Raging Spirits, Gather,
-Attack, then **Dismiss <kind>** for each kind you have (and **Dismiss all** with two or more). With Beastmaster installed and **One wheel** on in both mods, F2 and F3 open the same "Summons"
-wheel: "Undead: ..." and "Beasts: ..." items. Turn **One wheel** off in a mod to give it its own wheel again. A line
-at the bottom left: "Undead: Skeletons 2/3, Liches 1/1, Spirits 2".
+Attack, then **Dismiss <kind>** for each kind you have (and **Dismiss all** with two or more). The labels are short so
+they fit the wheel; the mouse wheel turns the page when there are more than 8 items. With Beastmaster installed and
+**One wheel** on in both mods, F2 and F3 open the same "Summons" wheel: "Undead: ..." and "Beasts: ..." items. Turn
+**One wheel** off in a mod to give it its own wheel again. A line at the bottom left: "Undead: Skeletons 2/3, Liches
+1/1, Spirits 2".
 
 ## Commands
 

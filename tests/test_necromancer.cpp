@@ -331,6 +331,33 @@ TEST_CASE("beastmaster + necromancer: one wheel with both sections; a pick in ei
     CHECK(item_at(n.r.fake.wheels[3].items, "Tame") >= 0);
 }
 
+TEST_CASE("beastmaster + necromancer: the wheel's labels are short (a name of at most 20 characters, a detail of at most 14)") {
+    NecroRig n({}, {"beastmaster"});
+    for (const char* s : {"wolf", "boar", "sabretooth", "sabretooth", "hound", "aurochs"})
+        n.reply(std::string("beastmaster.give ") + s);
+    n.spawnable(3);
+    const std::string wolf = n.reply("beastmaster.call Wolf");
+    CHECK_MESSAGE(wolf.find("comes") != std::string::npos, wolf);
+    n.seconds(11);
+    CHECK(n.reply("beastmaster.call Sabretooth 2").find("comes") != std::string::npos);
+    deliver(n.r.fake, "EntityDiedEvent", died_event(1234));  // the wolf falls: it rests
+    CHECK(n.reply("necromancer.raise").find("rises") != std::string::npos);
+    n.seconds(2);
+    press_key(n, VK_F2);
+    REQUIRE(n.r.fake.wheels.size() == 1);
+    CHECK(item_at(n.r.fake.wheels[0].items, "Beasts: Call Wolf (rests") >= 0);
+    CHECK(item_at(n.r.fake.wheels[0].items, "Beasts: Dismiss Sabretooth 2") >= 0);
+    for (std::string label : n.r.fake.wheels[0].items) {
+        const size_t colon = label.find(": ");
+        if (colon != std::string::npos && colon <= 6) label = label.substr(colon + 2);  // "Beasts: ", "Undead: "
+        const size_t cut = label.find(" (");
+        const std::string name = label.substr(0, cut);
+        const std::string detail = cut == std::string::npos ? "" : label.substr(cut + 1);
+        CHECK_MESSAGE(name.size() <= 20, label);
+        CHECK_MESSAGE(detail.size() <= 14, label);
+    }
+}
+
 namespace {
 // Enshrouded's own keyboard keys (Preset A, game 1.0): every letter (WASD, C sneak, E, F, Q, R, T, G, X, Y, Z, U, L, P,
 // and I, V crafting, B backpack, N, M, H, J, O, K for its screens), the digits (action bar 1-8, building shapes 9 and
