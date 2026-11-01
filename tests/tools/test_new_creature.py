@@ -12,6 +12,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 sys.path.insert(0, os.path.join(HERE, "..", "..", "tools", "models"))
 import gamegltf  # noqa: E402
+import gltf_in  # noqa: E402
+import joint_animation as ja  # noqa: E402
 import make_mod  # noqa: E402
 import new_creature as nc  # noqa: E402
 import new_skeleton as ns  # noqa: E402
@@ -59,6 +61,30 @@ class BuildTests(Fixture):
         move, stand = built["clips"]
         self.assertEqual((move["clip"]["frameCount"], move["clip"]["flags"]), (60, 0))
         self.assertEqual((stand["clip"]["frameCount"], stand["clip"]["flags"]), (120, 1))  # a loop closes
+
+    def test_an_additive_clip_that_adds_nothing(self):
+        """The graph's additive layers (the wolf's leaning) play offsets: our clip for them turns and moves no joint."""
+        built = nc.build(config(clips={"move": {"animation": "Move"}, "stand": {"additive_zero": True}}), self.glb)
+        stand = built["clips"][1]["clip"]
+        self.assertEqual((stand["frameCount"], stand["flags"]), (9, 0))
+        rest = built["sk"]["rest"]
+        for frame in (0, 4):
+            for q, t, s in ja.sample(stand, frame, rest):
+                self.assertTrue(rig.same_rotation(q, (0.0, 0.0, 0.0, 1.0), 1e-6), q)
+                self.assertEqual(t, (0.0, 0.0, 0.0))
+                self.assertEqual(s, (1.0, 1.0, 1.0))
+
+    def test_model_from_a_retextured_copy(self):
+        """model_glb: the model from a copy on the skeleton (new_skeleton.write_glb, then retextured): bones named
+        jNNN_<name>."""
+        built = nc.build(config(), self.glb)
+        copy = os.path.join(self.tmp.name, "copy.glb")
+        gltf, binc = gltf_in.read_glb(self.glb)
+        ns.write_glb(gltf, binc, built["sk"], copy)
+        groups, report = nc.model_groups(self.glb, built, model_glb=copy, warn=self.fail)
+        self.assertEqual(report["unmapped_bones"], [])
+        for a, b in zip(groups[0]["pos"][1], (0.0, 1.5, 0.3)):
+            self.assertAlmostEqual(a, b, places=5)
 
     def test_slots_name_our_joints(self):
         slots = nc.build(config(), self.glb)["slots"]

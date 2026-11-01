@@ -6,7 +6,11 @@ The pack names, per creature:
   scale          the size: the file's metres times this
   skeleton_guid  the skeleton's GUID (fixed forever; the clips' GUIDs follow from it and their names)
   graph, graph_guid   the game's animation graph and its copy's GUID
-  clips          our clips: {name: {"animation": the glb's animation, "loop": true for a looping clip}}
+  clips          our clips: {name: {"animation": the glb's animation, "loop": true for a looping clip}}, or
+                 {name: {"additive_zero": true}}: an additive clip that adds nothing (every joint unturned and
+                 unmoved), for the graph's additive layers whose game clips are offsets (the wolf's leaning)
+  model_glb      optional: the model from this glb instead (a copy on the skeleton, new_skeleton.write_glb, then
+                 retextured; its bones named jNNN_<name>)
   roles          {game clip GUID: our clip name}: which of our clips plays where the graph plays that game clip
   default_role   our clip for every other game clip the graph plays: every clip reference of the copy is ours (a
                  game clip carries the game skeleton's hash and cannot play on ours)
@@ -22,8 +26,10 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import gamegltf  # noqa: E402
 import gltf_clips  # noqa: E402
 import gltf_in  # noqa: E402
+import joint_animation  # noqa: E402
 import new_skeleton  # noqa: E402
 
+ADDITIVE_FRAMES = 9  # as long as the game wolf's leaning offsets
 KEYS = ("scale", "skeleton_guid", "graph", "graph_guid", "clips", "roles", "default_role", "slots")
 
 
@@ -66,6 +72,12 @@ def build(cfg, glb_path, creature="creature"):
     out = []
     for name in sorted(cfg["clips"]):
         spec = cfg["clips"][name]
+        if spec.get("additive_zero"):
+            zero = [((0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0), (1.0, 1.0, 1.0))] * len(sk["rest"])
+            clip = joint_animation.encode([zero] * (ADDITIVE_FRAMES + 1), sk["rest"],
+                                          hierarchy_hash=new_skeleton.clip_hash(hier))
+            out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
+            continue
         if spec.get("animation") not in have:
             raise SystemExit("%s: clip %s plays %r, which the glb does not have (%s)"
                              % (creature, name, spec.get("animation"), ", ".join(have)))
@@ -75,8 +87,11 @@ def build(cfg, glb_path, creature="creature"):
     return {"sk": sk, "hierarchy": hier, "clips": out, "slots": slots}
 
 
-def model_groups(glb_path, built, material_count=None, warn=print):
-    """The model on the skeleton, as gltf_in.load_groups gives it (game space, our joint indices)."""
+def model_groups(glb_path, built, material_count=None, warn=print, model_glb=None):
+    """The model on the skeleton, as gltf_in.load_groups gives it (game space, our joint indices): from model_glb
+    when given (a copy on the skeleton), else from the glb."""
+    if model_glb:
+        return gltf_in.load_groups(model_glb, built["hierarchy"], material_count=material_count, warn=warn)
     gltf, binc = gltf_in.read_glb(glb_path)
     with tempfile.TemporaryDirectory() as tmp:
         path = os.path.join(tmp, "model.glb")

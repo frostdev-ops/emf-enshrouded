@@ -34,7 +34,8 @@ pack.json:
           "clips": {"walk": {"animation": "Walk", "loop": true}},   # our clips: the glb's animations
           "roles": {"<game clip guid>": "walk"},      #   our clip wherever the graph plays that game clip
           "default_role": "walk",                     #   our clip for every other game clip of the graph
-          "slots": {"Head": "Head", "Pelvis": "Hips"} #   the graph's slots: our joints (others: the root)
+          "slots": {"Head": "Head", "Pelvis": "Hips"},#   the graph's slots: our joints (others: the root)
+          "model_glb": "wolf_palette.glb"             #   optional: the model from a retextured copy (new_creature.py)
         }
       }
     ]
@@ -693,7 +694,11 @@ def main():
             palette = model["skinningMap"]
         elif c.get("new_skeleton"):
             built_new = new_creature.build(c["new_skeleton"], path(c["glb"]), c["name"])
-            groups, _ = new_creature.model_groups(path(c["glb"]), built_new, material_count=len(source["materials"]))
+            model_glb = c["new_skeleton"].get("model_glb")
+            groups, report = new_creature.model_groups(path(c["glb"]), built_new,
+                                                       material_count=len(source["materials"]),
+                                                       model_glb=path(model_glb) if model_glb else None)
+            print("%s: model on the new skeleton, rest difference %.2g" % (c["name"], report["max_rest_difference"]))
             palette = None
         else:
             groups, _ = gltf_in.load_groups(path(c["glb"]), rm.load_record(path(c["hierarchy"])),
