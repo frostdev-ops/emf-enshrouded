@@ -30,6 +30,12 @@ constexpr CodeOffsetDef kCodeOffsets[] = {
      {0x4C0u, 0x4C0u, 0x4C0u}},
     {CodeOffset::StorageTick, "StorageTick", Sig::SimStep, "48 8D 9E ?? ?? ?? ?? 4C 8B BC 24", 3, 0x1000,
      {0x4DCu, 0x4DCu, 0x4DCu}},
+    // In sendServerInfo (+0x3ab on both exes of 1273043): `cmp byte ptr [rbx+flag], 0; je; mov rax, [rbx+settings]`.
+    // 1269579 is not checked; its instance layout matches 1273043's (InstWorldSlotFlag), so the same values.
+    {CodeOffset::InstSendSettingsFlag, "InstSendSettingsFlag", Sig::SendServerInfo,
+     "80 BB ?? ?? ?? ?? 00 74 ?? 48 8B 83 ?? ?? ?? ??", 2, 0x1000, {0x18E0u, 0x18E0u, 0x18E0u}},
+    {CodeOffset::InstSettingsPtr, "InstSettingsPtr", Sig::SendServerInfo, "80 BB ?? ?? ?? ?? 00 74 ?? 48 8B 83 ?? ?? ?? ??",
+     12, 0x1000, {0x1758u, 0x1758u, 0x1758u}},
 };
 static_assert(off::kTickPeriodNs - off::kStorage == 0x4C0 && off::kTick - off::kStorage == 0x4DC,
               "the SimStep code offsets confirm offsets.h");

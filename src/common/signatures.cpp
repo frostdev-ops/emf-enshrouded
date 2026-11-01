@@ -129,6 +129,9 @@ constexpr SigDef kSignatures[] = {
     // pushes the game's own add-Teleport record with it (docs/engine_parts/re_teleport.md 1.2; 215 callers; checked on
     // both exes of 1273043 and live; the 1269579 exe was not at hand).
     {Sig::QueuePush, "QueuePush", "48 89 74 24 10 57 48 83 EC 20 44 8B 52 10 48 8B FA 41 8B C2 83 E0 0F 74 07 44 2B D0 41 83 C2 10", {kRvaUnchecked, 0x953670u, 0x5f3bb0u}, false},
+    // GameServer_sendServerInfo (live_world_settings research): each frame; with the instance's send-settings flag set it
+    // copies the session's ecs::GameSettings into the ServerInfo every client gets, then clears the flag.
+    {Sig::SendServerInfo, "SendServerInfo", "48 8B C4 55 53 41 54 41 55 41 57 48", {kRvaUnchecked, 0xe4f110u, 0x7b9060u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

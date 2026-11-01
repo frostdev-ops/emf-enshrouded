@@ -21,6 +21,8 @@ enum class CodeOffset : size_t {
     InstWorldSlotFlag,  // GameServer instance: u8 "local world slot set"; the u16 slot id sits 2 bytes before it
     StorageTickPeriod,  // entity storage: i64 ns per tick (world + kStorage + this = kTickPeriodNs)
     StorageTick,        // entity storage: u32 current tick (world + kStorage + this = kTick)
+    InstSendSettingsFlag,  // GameServer instance: u8 "send the settings with the next ServerInfo" (cleared after)
+    InstSettingsPtr,       // GameServer instance: pointer to the session's ecs::GameSettings (the server world's own)
     _Count
 };
 constexpr size_t kCodeOffsetCount = static_cast<size_t>(CodeOffset::_Count);

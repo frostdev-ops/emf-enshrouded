@@ -197,7 +197,17 @@ TEST_CASE("signature table has the inventory transaction and readOther, optional
         CHECK(d->rva[1] == w.rva_1273043);
         CHECK_FALSE(d->required);
     }
-    CHECK(kSigCount == 50);
+    CHECK(kSigCount == 51);
+}
+
+TEST_CASE("signature table has sendServerInfo (API v21 world settings: the game's resync), on both exes of 1273043") {
+    const SigDef* d = find_signature("SendServerInfo");
+    REQUIRE(d != nullptr);
+    CHECK(d->id == Sig::SendServerInfo);
+    CHECK(d->rva[0] == kRvaUnchecked);  // 1269579: not checked
+    CHECK(d->rva[1] == 0xe4f110u);      // live_world_settings.md: GameServer_sendServerInfo
+    CHECK(d->rva[2] == 0x7b9060u);      // its dedicated server
+    CHECK_FALSE(d->required);
 }
 
 TEST_CASE("signature table has requestServerSave (API v19 request_save), on every exe") {

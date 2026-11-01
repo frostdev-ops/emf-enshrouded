@@ -28,6 +28,8 @@ enum class Sig : size_t {
     RequestServerSave,
     // teleport (docs/engine_parts/re_teleport.md)
     QueuePush,
+    // world settings: the GameServer's ServerInfo, which carries the settings when the instance's flag asks (API v21)
+    SendServerInfo,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

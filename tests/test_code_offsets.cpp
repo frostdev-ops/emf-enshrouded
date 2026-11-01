@@ -110,6 +110,23 @@ TEST_CASE("code offsets: the load hook's slot flag comes from loadSavegameStep's
     CHECK(r[kResult].count == 0);  // the save function is not located here
 }
 
+TEST_CASE("code offsets: the send-settings flag and the settings pointer come from sendServerInfo's own code") {
+    std::vector<uint8_t> text(0x800, 0xCC);
+    // cmp byte ptr [rbx+0x18E0], 0 ; je +x ; mov rax, qword ptr [rbx+0x1758]   (sendServerInfo + 0x3ab on 1273043)
+    put(text, 0x20 + 0x3ab, {0x80, 0xBB, 0xE0, 0x18, 0x00, 0x00, 0x00, 0x74, 0x10, 0x48, 0x8B, 0x83, 0x58, 0x17, 0x00, 0x00});
+    std::array<Resolved, kSigCount> sigs{};
+    sigs[static_cast<size_t>(Sig::SendServerInfo)] = Resolved{kTextBase + 0x20, 1, true};
+    const auto r = resolve_code_offsets(text, kTextBase, sigs, known_build_index(1273043));
+    const auto& flag = r[static_cast<size_t>(CodeOffset::InstSendSettingsFlag)];
+    const auto& ptr = r[static_cast<size_t>(CodeOffset::InstSettingsPtr)];
+    CHECK(flag.count == 1);
+    CHECK(flag.value == 0x18E0u);
+    CHECK(is_usable(flag, true));
+    CHECK(ptr.count == 1);
+    CHECK(ptr.value == 0x1758u);
+    CHECK(is_usable(ptr, true));
+}
+
 TEST_CASE("code offset table: one entry per CodeOffset, in order, unique names, a value on every known build") {
     auto all = all_code_offsets();
     REQUIRE(all.size() == kCodeOffsetCount);
@@ -141,6 +158,14 @@ TEST_CASE("code offset table: one entry per CodeOffset, in order, unique names, 
     CHECK(all[kLoadFlag].value[2] == 0x1756u);
     CHECK(period.value[2] == 0x4C0u);
     CHECK(tick.value[2] == 0x4DCu);
+    const auto& flag = all[static_cast<size_t>(CodeOffset::InstSendSettingsFlag)];
+    const auto& ptr = all[static_cast<size_t>(CodeOffset::InstSettingsPtr)];
+    CHECK(flag.function == Sig::SendServerInfo);
+    CHECK(ptr.function == Sig::SendServerInfo);
+    for (size_t b = 0; b < kKnownBuildCount; ++b) {
+        CHECK(flag.value[b] == 0x18E0u);  // GameServer instance: u8 "send the settings with the next ServerInfo"
+        CHECK(ptr.value[b] == 0x1758u);   // GameServer instance: the session's ecs::GameSettings
+    }
 }
 
 TEST_CASE("code offsets: the server reads the world slot through rdi (the client through rsi)") {
