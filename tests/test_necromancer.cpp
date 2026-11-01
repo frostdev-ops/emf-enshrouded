@@ -2,6 +2,8 @@
 // components and commands (tests/lua_mod_rig.h).
 #include "lua_mod_rig.h"
 
+#include "emf/keys.hpp"
+
 namespace {
 constexpr const char* kSkeleton = "b3e66f3b-7b13-4fa0-a68c-d2a41d8c84d9";  // Enemy_Skeleton_Melee01
 constexpr const char* kSpirit = "442ac9a3-ea47-4129-878d-73659f94f9d4";    // Player_Companion_FlyingSkull
@@ -275,13 +277,13 @@ int item_at(const std::vector<std::string>& items, const std::string& start) {
 constexpr const char* kWolfTemplate = "478381c5-585f-4264-b373-dbb1ea596eca";
 }  // namespace
 
-TEST_CASE("necromancer: V opens the summons wheel with the Undead section; Raise Skeleton picked raises one; the HUD counts them") {
+TEST_CASE("necromancer: F2 opens the summons wheel with the Undead section; Raise Skeleton picked raises one; the HUD counts them") {
     NecroRig n;
     n.spawnable(1);
-    press_key(n, 'V');
+    press_key(n, VK_F2);
     REQUIRE(n.r.fake.wheels.size() == 1);
     const auto w = n.r.fake.wheels[0];
-    CHECK(w.hold == 'V');
+    CHECK(w.hold == VK_F2);
     for (const char* a : {"Raise Skeleton (0/3)", "Raging Spirits", "Gather", "Attack", "Dismiss all"})
         CHECK_MESSAGE(item_at(w.items, a) >= 0, a);
     w.cb(kClient, item_at(w.items, "Raise Skeleton"), w.user);  // the wheel answers on the client world
@@ -298,7 +300,7 @@ TEST_CASE("beastmaster + necromancer: one wheel with both sections; a pick in ei
     n.reply("beastmaster.give wolf");
     n.spawnable(2);
     n.seconds(2);
-    press_key(n, 'V');
+    press_key(n, VK_F2);
     REQUIRE(n.r.fake.wheels.size() == 1);
     const auto w = n.r.fake.wheels[0];
     CHECK(item_at(w.items, "Undead: Raise Skeleton") >= 0);
@@ -308,9 +310,9 @@ TEST_CASE("beastmaster + necromancer: one wheel with both sections; a pick in ei
     n.seconds(1);
     REQUIRE(n.r.fake.spawns.size() == 1);
     CHECK(guid_of(n.r.fake.spawns[0].guid) == kWolfTemplate);  // Beastmaster ran it
-    press_key(n, 'B');
+    press_key(n, VK_F3);
     REQUIRE(n.r.fake.wheels.size() == 2);
-    CHECK(n.r.fake.wheels[1].hold == 'B');
+    CHECK(n.r.fake.wheels[1].hold == VK_F3);
     CHECK(item_at(n.r.fake.wheels[1].items, "Undead: Raise Skeleton") >= 0);
     n.r.fake.wheels[1].cb(kClient, item_at(n.r.fake.wheels[1].items, "Undead: Raise Skeleton"), n.r.fake.wheels[1].user);
     n.seconds(1);
@@ -318,14 +320,49 @@ TEST_CASE("beastmaster + necromancer: one wheel with both sections; a pick in ei
     // Necromancer's own wheel: its key shows only its section, and Beastmaster's wheel no longer shows it
     n.r.fake.settings["necromancer.shared_wheel"] = "false";
     n.seconds(2);
-    press_key(n, 'V');
+    press_key(n, VK_F2);
     REQUIRE(n.r.fake.wheels.size() == 3);
     CHECK(item_at(n.r.fake.wheels[2].items, "Raise Skeleton") >= 0);
     CHECK(item_at(n.r.fake.wheels[2].items, "Beasts:") < 0);
-    press_key(n, 'B');
+    press_key(n, VK_F3);
     REQUIRE(n.r.fake.wheels.size() == 4);
     CHECK(item_at(n.r.fake.wheels[3].items, "Undead:") < 0);
     CHECK(item_at(n.r.fake.wheels[3].items, "Tame") >= 0);
+}
+
+namespace {
+// Enshrouded's own keyboard keys (Preset A, game 1.0): every letter (WASD, C sneak, E, F, Q, R, T, G, X, Y, Z, U, L, P,
+// and I, V crafting, B backpack, N, M, H, J, O, K for its screens), the digits (action bar 1-8, building shapes 9 and
+// 0), Tab, Space, Shift, Ctrl, Alt, Enter, Esc, F1, PageUp, PageDown and Delete; plus the key under Esc (EMF's console).
+bool game_key(uint32_t vk) {
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) return true;
+    for (uint32_t k : {VK_TAB, VK_SPACE, VK_SHIFT, VK_CONTROL, VK_MENU, VK_RETURN, VK_ESCAPE, VK_F1, VK_PRIOR, VK_NEXT,
+                       VK_DELETE, VK_OEM_3})
+        if (vk == k) return true;
+    return false;
+}
+}  // namespace
+
+TEST_CASE("beastmaster + necromancer: the wheel keys are not the game's own keys (B was its backpack, V its crafting)") {
+    std::vector<uint32_t> keys;
+    for (const char* mod : {"beastmaster", "necromancer"}) {
+        const auto m = emf::core::parse_manifest(
+            slurp((std::filesystem::path(EMF_SOURCE_DIR) / "mods" / mod / "mod.json").wstring()));
+        REQUIRE_MESSAGE(m.manifest, m.error);
+        std::string def;
+        for (const auto& d : m.manifest->settings)
+            if (d.key == "wheel_key") def = d.default_value;
+        const uint32_t vk = emf::keys::parse_key(std::wstring(def.begin(), def.end()));
+        CHECK_MESSAGE(vk != 0, mod);
+        CHECK_MESSAGE(!game_key(vk), mod << ": " << def);
+        keys.push_back(vk);
+    }
+    CHECK(keys[0] != keys[1]);  // each mod's key (one wheel or two)
+    // the old keys open nothing now
+    NecroRig n({}, {"beastmaster"});
+    press_key(n, 'B');
+    press_key(n, 'V');
+    CHECK(n.r.fake.wheels.empty());
 }
 
 TEST_CASE("necromancer: /necromancer <word> for guests acts on their own skeletons") {
@@ -345,7 +382,7 @@ TEST_CASE("necromancer: /necromancer <word> for guests acts on their own skeleto
 TEST_CASE("necromancer: a wheel pick runs the item that was shown, though its label changed meanwhile") {
     NecroRig n;
     n.spawnable(2);
-    press_key(n, 'V');
+    press_key(n, VK_F2);
     REQUIRE(n.r.fake.wheels.size() == 1);
     const auto w = n.r.fake.wheels[0];
     const int raise = item_at(w.items, "Raise Skeleton (0/3)");
@@ -512,7 +549,7 @@ TEST_CASE("necromancer: a bone golem is its own kind (cap 1, 60 % mana), raised 
     CHECK(n.reply("necromancer.list").find("Bone Golems 1/1") != std::string::npos);
     n.seconds(2);
     CHECK(n.saved().find("k 0x00000000000000aa golem 1") != std::string::npos);
-    press_key(n, 'V');
+    press_key(n, VK_F2);
     REQUIRE(n.r.fake.wheels.size() == 1);
     CHECK(item_at(n.r.fake.wheels[0].items, "Raise Bone Golem (1/1)") >= 0);  // its own section only: no "Undead: " prefix
     CHECK(n.reply("necromancer.raise dragon").find("Raise what?") != std::string::npos);

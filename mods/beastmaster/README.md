@@ -34,8 +34,8 @@ everything else works and those beasts are simply not there.
 7. **Dismiss** a beast (`/beastmaster dismiss <name>` or **Dismiss all**) to send it home. Beasts that are out stay out
    when you reload the world, and they come back beside you, free of mana.
 
-**The wheel (hold B):** Tame, Feed, Attack, Dismiss all, then **Call <name>** for up to 6 beasts that are at home or
-resting; a resting one shows its time left. With **Necromancer** installed too, B and V open one "Summons" wheel with
+**The wheel (hold F3):** Tame, Feed, Attack, Dismiss all, then **Call <name>** for up to 6 beasts that are at home or
+resting; a resting one shows its time left. With **Necromancer** installed too, F3 and F2 open one "Summons" wheel with
 "Beasts: ..." and "Undead: ..." items; turn **One wheel** (`shared_wheel`) off to keep Beastmaster's own wheel. A line at the bottom left lists your beasts that are out or resting:
 "Beasts: Wolf (out), Bear (rests 1:20)".
 
@@ -66,7 +66,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 
 | Setting | Default | What it does |
 |---|---|---|
-| Beast wheel (`wheel_key`) | B | hold it for the wheel |
+| Beast wheel (`wheel_key`) | F3 | hold it for the wheel (any key the game does not use; B is its backpack key) |
 | One wheel with Necromancer's undead (`shared_wheel`) | on | off: Beastmaster's own wheel |
 | Mana to call a beast (`call_mana_pct`) | 15 % | of your maximum mana; 0 = free |
 | Seconds between calls (`call_cooldown_s`) | 10 | |

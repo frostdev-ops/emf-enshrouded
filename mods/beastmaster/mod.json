@@ -2,7 +2,7 @@
   "id": "beastmaster",
   "name": "Beastmaster",
   "version": "1.1.1",
-  "description": "A Beastmaster class: tame wild wolves, boars, sabretooths, hounds, and with the content packs bears and aurochs (beat them down or feed them bait), keep up to 8 in your collection, call up to 2 to fight beside you. They follow you, come back when far away, and are kept with the world. Hold B for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
+  "description": "A Beastmaster class: tame wild wolves, boars, sabretooths, hounds, and with the content packs bears and aurochs (beat them down or feed them bait), keep up to 8 in your collection, call up to 2 to fight beside you. They follow you, come back when far away, and are kept with the world. Hold F3 for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
   "authors": ["EMF contributors"],
   "enabled": false,
   "emf": 14,
@@ -10,7 +10,7 @@
   "main": "main.lua",
   "depends": {"lua": ">=1.9"},
   "settings": [
-    {"key": "wheel_key", "type": "keybind", "default": "B", "label": "Beast wheel (hold)", "live": true, "group": "Controls"},
+    {"key": "wheel_key", "type": "keybind", "default": "F3", "label": "Beast wheel (hold)", "live": true, "group": "Controls"},
     {"key": "shared_wheel", "type": "bool", "default": true, "label": "One wheel with Necromancer's undead (when both are installed)", "live": true, "group": "Controls"},
     {"key": "call_mana_pct", "type": "slider", "min": 0, "max": 50, "step": 1, "default": 15, "label": "Mana to call a beast (% of max)", "live": true, "group": "Calling"},
     {"key": "call_cooldown_s", "type": "slider", "min": 0, "max": 60, "step": 1, "default": 10, "label": "Seconds between calls", "live": true, "group": "Calling"},

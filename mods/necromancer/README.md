@@ -30,8 +30,8 @@ summoning wheel holds your undead and your beasts.
    loot are yours). Never on bosses, mini-bosses or players.
 6. **They stay close:** a minion more than 40 m from you comes back after 3 s; more than 80 m at once.
 
-**The wheel (hold V):** Raise Skeleton (n/3), Raise Lich (n/1), Raise Bone Golem (n/1), Raging Spirits, Gather,
-Attack, Dismiss all. With Beastmaster installed and **One wheel** on in both mods, V and B open the same "Summons"
+**The wheel (hold F2):** Raise Skeleton (n/3), Raise Lich (n/1), Raise Bone Golem (n/1), Raging Spirits, Gather,
+Attack, Dismiss all. With Beastmaster installed and **One wheel** on in both mods, F2 and F3 open the same "Summons"
 wheel: "Undead: ..." and "Beasts: ..." items. Turn **One wheel** off in a mod to give it its own wheel again. A line
 at the bottom left: "Undead: Skeletons 2/3, Liches 1/1, Spirits 2".
 
@@ -55,7 +55,7 @@ All of these work from the game's chat for every player (`/necromancer <word>`) 
 
 | Setting | Default | What it does |
 |---|---|---|
-| Summoning wheel (`wheel_key`) | V | hold it for the wheel |
+| Summoning wheel (`wheel_key`) | F2 | hold it for the wheel (any key the game does not use; V is its crafting key) |
 | One wheel with Beastmaster's beasts (`shared_wheel`) | on | off: this mod's own wheel |
 | Mana to raise a skeleton (`raise_mana_pct`) | 25 % | of your maximum mana; 0 = free |
 | Skeletons at once (`skeleton_cap`) | 3 | 1-8 |

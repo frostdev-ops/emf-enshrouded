@@ -2,7 +2,7 @@
   "id": "necromancer",
   "name": "Necromancer",
   "version": "1.1.0",
-  "description": "A Necromancer class: raise skeleton warriors that stay, follow you and fight (3 at a time), a lich and a bone golem with the undead pack, and cast raging spirits, flaming skulls that rush your foe for a few seconds. Hold V for the summoning wheel (shared with Beastmaster when both are installed); /necromancer in the chat for players who join. Host or dedicated server. Installed switched off.",
+  "description": "A Necromancer class: raise skeleton warriors that stay, follow you and fight (3 at a time), a lich and a bone golem with the undead pack, and cast raging spirits, flaming skulls that rush your foe for a few seconds. Hold F2 for the summoning wheel (shared with Beastmaster when both are installed); /necromancer in the chat for players who join. Host or dedicated server. Installed switched off.",
   "authors": ["EMF contributors"],
   "enabled": false,
   "emf": 14,
@@ -10,7 +10,7 @@
   "main": "main.lua",
   "depends": {"lua": ">=1.9"},
   "settings": [
-    {"key": "wheel_key", "type": "keybind", "default": "V", "label": "Summoning wheel (hold)", "live": true, "group": "Controls"},
+    {"key": "wheel_key", "type": "keybind", "default": "F2", "label": "Summoning wheel (hold)", "live": true, "group": "Controls"},
     {"key": "shared_wheel", "type": "bool", "default": true, "label": "One wheel with Beastmaster's beasts (when both are installed)", "live": true, "group": "Controls"},
     {"key": "raise_mana_pct", "type": "slider", "min": 0, "max": 60, "step": 1, "default": 25, "label": "Mana to raise a skeleton (% of max)", "live": true, "group": "Skeletons"},
     {"key": "skeleton_cap", "type": "slider", "min": 1, "max": 8, "step": 1, "default": 3, "label": "Skeletons at once", "live": true, "group": "Skeletons"},
