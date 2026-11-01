@@ -124,14 +124,22 @@ struct CallbackCtx {
     const CompletionSources* sources;
 };
 
-void set_buffer(ImGuiInputTextCallbackData* d, const std::string& text) {
+// The input line's room in bytes (its buffer also holds the closing '\0').
+size_t room(const ImGuiInputTextCallbackData* d) { return d->BufSize > 0 ? static_cast<size_t>(d->BufSize - 1) : 0; }
+
+// Puts `text` in the input line; false, the line unchanged, when it does not fit (ImGui's InsertChars would drop a
+// text too long after the old line was deleted, and leave the line empty).
+bool set_buffer(ImGuiInputTextCallbackData* d, const std::string& text) {
+    if (text.size() > room(d)) return false;
     d->DeleteChars(0, d->BufTextLen);
     d->InsertChars(0, text.c_str());
+    return true;
 }
 
 void set_line(ImGuiInputTextCallbackData* d, const LineEdit& e) {
-    set_buffer(d, e.text);
-    d->CursorPos = d->SelectionStart = d->SelectionEnd = static_cast<int>((std::min)(e.caret, e.text.size()));
+    if (!set_buffer(d, e.text)) return;
+    d->CursorPos = d->SelectionStart = d->SelectionEnd =
+        static_cast<int>((std::min)(e.caret, static_cast<size_t>(d->BufTextLen)));
 }
 
 // Called every frame the input line is active (CallbackAlways), or for the frame's one event (Tab, Up/Down, an edit).
@@ -143,12 +151,10 @@ int input_callback(ImGuiInputTextCallbackData* d) {
                             static_cast<size_t>(d->CursorPos), *c->sources);
     switch (d->EventFlag) {
         case ImGuiInputTextFlags_CallbackCompletion: {
-            if (ui.suggest) {
-                if (const auto e = ui.suggester.accept(*c->sources)) {  // Tab takes the highlighted suggestion
-                    set_line(d, *e);
-                    ui.completions.clear();
-                    break;
-                }
+            if (ui.suggest && ui.suggester.showing()) {  // Tab takes the highlighted suggestion
+                if (const auto e = ui.suggester.accept(*c->sources, room(d))) set_line(d, *e);  // (not when it
+                ui.completions.clear();                                                         // would not fit)
+                break;
             }
             // no list shows (nothing suggested, hidden by Esc or a line from the history, or suggestions off):
             // complete and cycle through the matches
@@ -156,8 +162,7 @@ int input_callback(ImGuiInputTextCallbackData* d) {
             // a line from the cycle is not the player's edit: the suggestions stay hidden, so the cycle's list is the
             // only one and the next Tab goes on cycling
             const auto cycle_to = [&](const std::string& line) {
-                set_buffer(d, line);
-                ui.suggester.replaced(line, line.size());
+                if (set_buffer(d, line)) ui.suggester.replaced(line, line.size());
             };
             const bool cycling = !ui.completions.empty() && ui.completion_index < ui.completions.size() &&
                                  current == ui.completions[ui.completion_index];
@@ -197,7 +202,7 @@ int input_callback(ImGuiInputTextCallbackData* d) {
             break;
         default:
             if (ui.suggest && ui.accept_right)  // Right at the end of the line takes the suggestion
-                if (const auto e = ui.suggester.accept_right(*c->sources)) set_line(d, *e);
+                if (const auto e = ui.suggester.accept_right(*c->sources, room(d))) set_line(d, *e);
             break;
     }
     ui.caret = static_cast<size_t>(d->CursorPos);

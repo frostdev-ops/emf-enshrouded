@@ -108,11 +108,12 @@ public:
     void replaced(std::string_view line, size_t caret);
     // True when it hid the list; false when none showed (Esc closes the console then).
     bool escape();
-    // Tab and Right: the line with the selected row taken; nothing while no list shows. The suggestions for that line
-    // are worked out at once (from `src`), so the list, the ghost and showing() fit the new line in the same frame.
-    std::optional<LineEdit> accept(const CompletionSources& src);        // Tab
-    std::optional<LineEdit> accept_right(const CompletionSources& src);  // Right
-    void clear();                                                        // the line was sent
+    // Tab and Right: the line with the selected row taken; nothing while no list shows, or when that line would be
+    // longer than max_size bytes (the input line's room; nothing changes then). The suggestions for that line are
+    // worked out at once (from `src`), so the list, the ghost and showing() fit the new line in the same frame.
+    std::optional<LineEdit> accept(const CompletionSources& src, size_t max_size = SIZE_MAX);        // Tab
+    std::optional<LineEdit> accept_right(const CompletionSources& src, size_t max_size = SIZE_MAX);  // Right
+    void clear();  // the line was sent
     uint64_t computed() const { return computed_; }  // how often the suggestions were worked out (tests)
 
 private:

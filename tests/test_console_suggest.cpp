@@ -458,6 +458,19 @@ TEST_CASE("Suggester: taking a row works out the new line's suggestions at once,
     CHECK(g.ghost() == "on");
 }
 
+TEST_CASE("Suggester: a row whose line would not fit the input line's room is not taken, and nothing changes") {
+    const auto src = sources();
+    Suggester g;
+    g.update("lo", 2, src);
+    CHECK_FALSE(g.accept(src, 11));  // "loot.status " is 12 bytes
+    CHECK_FALSE(g.accept_right(src, 11));
+    CHECK(g.showing());
+    CHECK(g.ghost() == "ot.status");
+    const auto e = g.accept(src, 12);
+    REQUIRE(e);
+    CHECK(e->text == "loot.status ");
+}
+
 TEST_CASE("Suggester: works out the suggestions only when the line, the caret or the sources change") {
     auto src = sources();
     Suggester g;

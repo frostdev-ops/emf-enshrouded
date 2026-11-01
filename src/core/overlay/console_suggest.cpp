@@ -418,9 +418,10 @@ bool Suggester::escape() {
     return true;
 }
 
-std::optional<LineEdit> Suggester::accept(const CompletionSources& src) {
+std::optional<LineEdit> Suggester::accept(const CompletionSources& src, size_t max_size) {
     if (!showing()) return std::nullopt;  // hidden: a row the player cannot see is never taken
     LineEdit e = take_row(text_, now_, (std::min)(selected_, now_.rows.size() - 1));
+    if (e.text.size() > max_size) return std::nullopt;  // it would not fit the input line: nothing changes
     text_ = e.text;  // the input gets this line: not an edit of the player's, the list stays
     caret_ = e.caret;
     hidden_ = false;
@@ -428,9 +429,9 @@ std::optional<LineEdit> Suggester::accept(const CompletionSources& src) {
     return e;
 }
 
-std::optional<LineEdit> Suggester::accept_right(const CompletionSources& src) {
+std::optional<LineEdit> Suggester::accept_right(const CompletionSources& src, size_t max_size) {
     if (caret_ != text_.size()) return std::nullopt;
-    return accept(src);
+    return accept(src, max_size);
 }
 
 void Suggester::clear() {

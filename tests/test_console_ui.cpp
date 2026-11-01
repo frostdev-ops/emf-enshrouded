@@ -189,6 +189,26 @@ TEST_CASE("console UI: the frame Tab takes a row already has the new line's sugg
     r.frame();
 }
 
+TEST_CASE("console UI: a suggestion that would not fit the input line is not taken; the line stays as typed") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.frame();
+    r.frame();
+    const std::string line = std::string(1018, ' ') + "lo";  // the input holds 1023 bytes; "loot.status " needs 1030
+    r.type(line.c_str());
+    REQUIRE(r.ui.input == line);
+    REQUIRE(r.ui.suggester.showing());
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == line);
+    CHECK(r.ui.caret == line.size());
+    r.press(ImGuiKey_RightArrow);
+    CHECK(r.ui.input == line);
+    CHECK(r.ui.caret == line.size());
+    r.press(ImGuiKey_Backspace);  // still a working line
+    CHECK(r.ui.input == line.substr(0, line.size() - 1));
+}
+
 TEST_CASE("console UI: Right takes the suggestion only at the end of the line; elsewhere it moves the caret") {
     Headless h;
     Rig r;
