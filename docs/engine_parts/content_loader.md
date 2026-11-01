@@ -40,8 +40,9 @@ or ShroudForge)". The chained DLLs' text is read only just before a build would 
 build read and that has not changed since (its size and time are in the state) is not read again.
 
 **Usable EML mods:** a folder in `<game>\mods\` whose name does not start with `.`, with a `mod.json` that parses and
-has `id`, `name` and `version`, an id no earlier folder has, and `capabilities` of only `patch` and/or `export`. A mod
-that needs EML's runtime loader (`runtime`, `runtime-register-dll`) is left out, and so are `.zip` mods and junctions.
+has `id`, `name` and `version`, an id no earlier folder has, and `capabilities` that include `patch` and otherwise
+only `export`. A mod without `patch` (a tool that only exports game data) is left out: EML runs it only for exports,
+which EMF's build turns off, so it would never change anything. A mod that needs EML's runtime loader (`runtime`, `runtime-register-dll`) is left out, and so are `.zip` mods and junctions.
 Each one left out gets a line (`EML content: left out <folder>: <why>`) when `emf_content.dll` is there.
 
 **The base** (never patch on top of patched data). The KFC4 header of `enshrouded.kfc` (and of `enshrouded.kfc.bak`,

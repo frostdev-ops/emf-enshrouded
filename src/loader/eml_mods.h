@@ -1,7 +1,8 @@
 #pragma once
 // The EML mods in <game>\mods\ (one folder each, with an EML mod.json) that EMF can build: the folder name does not
 // start with a dot (EML skips those), mod.json parses and has "id", "name" and "version" (EML needs all three), the id
-// is not taken by an earlier folder, and "capabilities" asks only for "patch" and/or "export". A mod that needs EML's
+// is not taken by an earlier folder, and "capabilities" holds "patch" (plus "export" at most: a mod without "patch"
+// only exports, which EMF's build turns off, so it never runs there). A mod that needs EML's
 // runtime loader ("runtime", "runtime-register-dll") is left out: EMF does not run that part of EML. Every folder left
 // out is named with the reason; plain files (another tool's DLLs, a readme) are passed over, a .zip mod is named.
 #include <windows.h>
@@ -87,6 +88,10 @@ inline std::string read_manifest(const std::wstring& folder_path, EmlMod& m) {
             m.capabilities.push_back(c.s);
         }
     }
+    // EML runs a mod only for a feature it asks for; EMF builds with patching on and exporting off, so a mod without
+    // "patch" would never run: it is no reason to hold a start and build.
+    if (std::find(m.capabilities.begin(), m.capabilities.end(), "patch") == m.capabilities.end())
+        return "only exports game data (no \"patch\"): nothing for EMF to build";
     return {};
 }
 }  // namespace detail

@@ -181,6 +181,22 @@ TEST_CASE("eml mods: no mod.json, no name, a zip, the same id twice, no folder")
     std::filesystem::remove_all(mods);
 }
 
+TEST_CASE("eml mods: a mod that only exports (no \"patch\") changes nothing in the game: left out") {
+    const std::wstring mods = test_scratch::temp_path(L"emf_eml_mods_export");
+    test_scratch::remove_at_exit(mods);
+    put_file(mods + L"\\explorer\\mod.json",
+             R"({"id": "npc_explorer", "name": "NPC Explorer", "version": "0.1.0", "capabilities": ["export"]})");
+    put_file(mods + L"\\none\\mod.json", R"({"id": "none", "name": "None", "version": "1.0.0"})");
+    put_file(mods + L"\\both\\mod.json",
+             R"({"id": "both", "name": "Both", "version": "1.0.0", "capabilities": ["export", "patch"]})");
+    const auto s = emf::loader::scan_eml_mods(mods);
+    REQUIRE(s.usable.size() == 1);
+    CHECK(s.usable[0].id == "both");
+    CHECK(reason_for(s, L"explorer") == "only exports game data (no \"patch\"): nothing for EMF to build");
+    CHECK(reason_for(s, L"none") == "only exports game data (no \"patch\"): nothing for EMF to build");
+    std::filesystem::remove_all(mods);
+}
+
 TEST_CASE("eml mods: non-ASCII folder name") {
     const std::wstring mods = test_scratch::temp_path(L"emf_eml_mods_utf");
     test_scratch::remove_at_exit(mods);

@@ -56,9 +56,9 @@ struct FakeGame {
         put_file(dir + L"\\enshrouded.kfc", kfc_bytes("1|g|t", dats));
         put_file(dir + L"\\enshrouded.kfc_resources", "the game's resources");
         for (uint32_t i = 0; i < dats; ++i) put_file(dat(i), "the game's dat " + std::to_string(i));
-        put_file(dir + L"\\mods\\beasts\\mod.json", R"({"id": "beasts", "name": "Beasts", "version": "1.0.0"})");
+        put_file(dir + L"\\mods\\beasts\\mod.json", R"({"id": "beasts", "name": "Beasts", "version": "1.0.0", "capabilities": ["patch"]})");
         put_file(dir + L"\\mods\\beasts\\sub\\bear.lua", "-- the bear");
-        put_file(dir + L"\\mods\\" + kUtfMod + L"\\mod.json", R"({"id": "baer", "name": "B", "version": "0.2.0"})");
+        put_file(dir + L"\\mods\\" + kUtfMod + L"\\mod.json", R"({"id": "baer", "name": "B", "version": "0.2.0", "capabilities": ["patch"]})");
     }
     ~FakeGame() {
         std::error_code ec;
