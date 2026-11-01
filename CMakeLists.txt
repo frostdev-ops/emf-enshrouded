@@ -575,8 +575,9 @@ if(EMF_CONTENT)
   target_compile_definitions(emf_tests PRIVATE EMF_CONTENT_RUN_EXE="$<TARGET_FILE:emf_content_run>")
   add_dependencies(emf_tests emf_content_run)
 endif()
-# The tests load the built DLL; without EMF_CONTENT_DLL the file compiles to nothing.
-target_sources(emf_tests PRIVATE tests/test_content_dll.cpp)
+# The tests load the built DLL; without EMF_CONTENT_DLL the file compiles to nothing. src/loader/module_threads.h
+# (threads started inside a module) is header-only, for the tests, emf_content_run and the loader.
+target_sources(emf_tests PRIVATE tests/test_content_dll.cpp tests/test_module_threads.cpp)
 
 # --- Mod profiles (docs/app.md "Profiles"): src/core/profiles.cpp is the file format, the store and the
 # rules, in EMF.exe and in the core (the console's "profile" command). ---
