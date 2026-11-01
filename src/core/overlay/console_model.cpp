@@ -146,12 +146,13 @@ std::vector<std::string> complete(std::string_view input, const CompletionSource
             picks = match_word(partial, src.components, true);
         else if ((cmd == "settings" || cmd == "set") && index == 1) {
             std::vector<std::string> ids;
-            for (const auto& [id, keys] : src.mod_settings) ids.push_back(id);
+            for (const auto& m : src.mod_settings) ids.push_back(m.id);
             picks = match_word(partial, ids, false);
         } else if (cmd == "set" && index == 2) {
-            for (const auto& [id, keys] : src.mod_settings)
-                if (id == words[1]) {
-                    std::vector<std::string> all = keys;
+            for (const auto& m : src.mod_settings)
+                if (m.id == words[1]) {
+                    std::vector<std::string> all;
+                    for (const auto& s : m.settings) all.push_back(s.key);
                     all.push_back("enabled");
                     picks = match_word(partial, all, false);
                 }

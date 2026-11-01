@@ -126,6 +126,35 @@ TEST_CASE("InputRouter: Esc held after it closed the console stays away from the
     CHECK(r.key(down(kEsc)) == Route::Game);  // a new press is the game's
 }
 
+TEST_CASE("InputRouter: while the console's suggestions show, Esc goes to the console (it hides them) and stays open") {
+    InputRouter r;
+    r.set_open(true);
+    r.set_esc_to_console(true);
+    CHECK(r.key(down(kEsc)) == Route::Console);
+    CHECK(r.open());
+    CHECK(r.legacy_key(down(kEsc)) == Route::Swallow);  // its key message does not reach the game either
+    r.set_esc_to_console(false);                         // the list hid
+    CHECK(r.key(down(kEsc)) == Route::Swallow);          // auto-repeat of the same press: not a second Esc
+    CHECK(r.open());
+    CHECK(r.key(up(kEsc)) == Route::Swallow);  // the game never saw it go down
+    CHECK(r.key(down(kEsc)) == Route::Toggle);  // the next Esc closes the console as before
+    CHECK_FALSE(r.open());
+}
+
+TEST_CASE("InputRouter: opening or closing the console forgets that Esc was the suggestions'") {
+    InputRouter r;
+    r.set_open(true);
+    r.set_esc_to_console(true);
+    CHECK(r.key(down(kTilde)) == Route::Toggle);  // closed with the list still showing
+    CHECK(r.key(up(kTilde)) == Route::Swallow);
+    CHECK(r.key(down(kEsc)) == Route::Game);  // closed: Esc is the game's
+    CHECK(r.key(up(kEsc)) == Route::Game);
+    CHECK(r.key(down(kTilde)) == Route::Toggle);  // open again: no list has shown yet
+    CHECK(r.key(up(kTilde)) == Route::Swallow);
+    CHECK(r.key(down(kEsc)) == Route::Toggle);
+    CHECK_FALSE(r.open());
+}
+
 TEST_CASE("InputRouter: key messages that follow raw input copy its decision") {
     InputRouter r;
     CHECK(r.legacy_key(down(kA)) == Route::Game);  // a key raw input never decided: the game's

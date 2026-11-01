@@ -321,6 +321,23 @@ TEST_CASE("item names (real names): search lists every match, best first; nothin
     CHECK(search_items(items, "nothing like it").empty());
 }
 
+TEST_CASE("item names (real names): plain names (the console's list) give the same answers; the id is the index + 1") {
+    const auto items = real_items();
+    std::vector<std::string> names;
+    for (const auto& i : items) names.push_back(i.name);
+    for (const char* typed : {"wood logs", "wood log", "torch", "hardwood", "wolf", "logs", "Material_T1_Wood_Logs",
+                              "material t1 wood logs dead", "fishing bait", "tombstone 10", "", "nothing like it"}) {
+        CAPTURE(typed);
+        const ItemMatch a = match_item(items, typed);
+        const ItemMatch b = match_item(names, typed);
+        CHECK(b.matches == a.matches);
+        CHECK(b.how == a.how);
+        CHECK(b.own_words_typed == a.own_words_typed);
+        CHECK((b.id ? items[b.id - 1].id : 0u) == a.id);
+        CHECK(search_items(names, typed) == search_items(items, typed));
+    }
+}
+
 TEST_CASE("item names (real names): a command's numbers are the plain numbers at the end; a name may end in a number") {
     const auto items = real_items();
     const auto read = [&](const char* line, size_t max_numbers) {

@@ -153,6 +153,7 @@ add_library(emf_core_lib STATIC
   src/core/server_chat.cpp
   src/core/server_chat_hooks.cpp
   src/core/overlay/console_model.cpp
+  src/core/overlay/console_suggest.cpp
   src/core/overlay/wheel_model.cpp
   src/core/overlay/hud_model.cpp
   src/core/overlay/cursor_model.cpp
@@ -493,6 +494,7 @@ add_executable(emf_tests
   tests/test_bridge_swapchain.cpp
   tests/test_big_stacks.cpp
   tests/test_console_model.cpp
+  tests/test_console_suggest.cpp
   tests/test_overlay_submit.cpp
   tests/test_input_router.cpp
   tests/test_console_ui.cpp
