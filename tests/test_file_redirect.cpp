@@ -298,6 +298,19 @@ TEST_CASE("redirect: the lines of emf\\file_opens.log") {
           "+9ms t1 SetCurrentDirectoryW \"C:\\nope\" -> error 3\r\n");
 }
 
+TEST_CASE("redirect: the hooks are for the game client only: an exe named enshrouded.exe") {
+    using emf::loader::is_game_client_exe;
+    CHECK(is_game_client_exe(L"C:\\Games\\Enshrouded\\enshrouded.exe"));
+    CHECK(is_game_client_exe(L"C:\\Games\\Enshrouded\\ENSHROUDED.EXE"));
+    CHECK(is_game_client_exe(L"C:/Games/Enshrouded/enshrouded.exe"));
+    CHECK(is_game_client_exe(L"enshrouded.exe"));
+    CHECK_FALSE(is_game_client_exe(L"C:\\Games\\Enshrouded\\enshrouded_server.exe"));
+    CHECK_FALSE(is_game_client_exe(L"C:\\Games\\Enshrouded\\standin_game.exe"));
+    CHECK_FALSE(is_game_client_exe(L"C:\\Games\\Enshrouded\\enshrouded.exe.bak"));
+    CHECK_FALSE(is_game_client_exe(L"C:\\Games\\enshrouded.exe\\other.exe"));
+    CHECK_FALSE(is_game_client_exe(L""));
+}
+
 TEST_CASE("redirect: the [content] switches are off by default; only 1 turns one on") {
     using emf::loader::content_switches;
     std::map<std::wstring, int> ini;

@@ -1,4 +1,5 @@
 // A stand-in for enshrouded.exe, for the content redirect spike's test only (tests/test_file_hooks.cpp); never shipped.
+// The test copies it into a temp game folder as enshrouded.exe (the loader hooks only an exe of that name).
 // Like the game it imports dinput8.dll statically, so EMF's loader copied next to it runs its DllMain before this
 // program's own code, and the program's file calls go through its own import table, as the game's do. It writes what
 // it read to standin_out.txt:

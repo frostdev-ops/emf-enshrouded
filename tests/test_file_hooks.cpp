@@ -570,13 +570,16 @@ std::string file_text(const std::wstring& path) {
     return text;
 }
 
-// A temp game folder with the stand-in game (tools/standin_game), EMF's built dinput8.dll and fake content files.
+// A temp game folder with the stand-in game (tools/standin_game) under the game's name (or `exe_name`), EMF's built
+// dinput8.dll and fake content files.
 struct StandinGame {
     std::wstring dir;
-    explicit StandinGame(const wchar_t* name) : dir(test_scratch::temp_path(name)) {
+    std::wstring exe;
+    explicit StandinGame(const wchar_t* name, const wchar_t* exe_name = L"enshrouded.exe")
+        : dir(test_scratch::temp_path(name)), exe(exe_name) {
         test_scratch::remove_at_exit(dir);
         std::filesystem::create_directories(dir + L"\\emf");
-        std::filesystem::copy_file(build_dir() + L"\\standin_game\\standin_game.exe", dir + L"\\standin_game.exe");
+        std::filesystem::copy_file(build_dir() + L"\\standin_game\\standin_game.exe", dir + L"\\" + exe);
         std::filesystem::copy_file(build_dir() + L"\\dist\\dinput8.dll", dir + L"\\dinput8.dll");
         put_file(dir + L"\\enshrouded.kfc", "vanilla kfc\r\n");
         put_file(dir + L"\\enshrouded.kfc_resources", "vanilla resources\r\n");
@@ -589,7 +592,7 @@ struct StandinGame {
     }
     // runs the stand-in and returns its standin_out.txt
     std::string run() {
-        std::wstring cmd = L"\"" + dir + L"\\standin_game.exe\"";
+        std::wstring cmd = L"\"" + dir + L"\\" + exe + L"\"";
         STARTUPINFOW si{sizeof si};
         PROCESS_INFORMATION pi{};
         REQUIRE(CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, dir.c_str(), &si,
@@ -635,6 +638,17 @@ TEST_CASE("file hooks: end to end: without the [content] switches the loader hoo
     REQUIRE(std::filesystem::exists(build_dir() + L"\\standin_game\\standin_game.exe"));
     StandinGame g(L"emf_standin_game_off");
     put_file(g.dir + L"\\emf\\emf_core.ini", "[overlay]\r\nenabled=1\r\n");
+    put_file(g.dir + L"\\emf\\content\\client\\enshrouded.kfc", "shadow kfc\r\n");
+    const std::string out = g.run();
+    CHECK(out.find("kfc=vanilla kfc\n") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(g.dir + L"\\emf\\file_opens.log"));
+    CHECK(file_text(g.dir + L"\\emf\\emf_loader.log").find("content spike") == std::string::npos);
+}
+
+TEST_CASE("file hooks: end to end: an exe with another name than enshrouded.exe gets no hooks, even with the switches") {
+    REQUIRE(std::filesystem::exists(build_dir() + L"\\standin_game\\standin_game.exe"));
+    StandinGame g(L"emf_standin_game_other", L"standin_game.exe");
+    put_file(g.dir + L"\\emf\\emf_core.ini", "[content]\r\nlog_opens=1\r\nredirect_test=1\r\n");
     put_file(g.dir + L"\\emf\\content\\client\\enshrouded.kfc", "shadow kfc\r\n");
     const std::string out = g.run();
     CHECK(out.find("kfc=vanilla kfc\n") != std::string::npos);

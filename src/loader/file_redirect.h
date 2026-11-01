@@ -261,6 +261,13 @@ inline bool redirect_allowed(DWORD access, DWORD disposition, DWORD flags) {
 
 // ---- [content] in emf\emf_core.ini ----
 
+// The hooks go only into the game client, an exe named enshrouded.exe (any case): not the dedicated server, not another
+// program that loads the DLL. The tests run their stand-in game under that name.
+inline bool is_game_client_exe(std::wstring_view path) {
+    const size_t slash = path.find_last_of(L"\\/");
+    return iequals_ascii(slash == std::wstring_view::npos ? path : path.substr(slash + 1), L"enshrouded.exe");
+}
+
 constexpr unsigned kDefaultLogSeconds = 300;
 
 struct ContentSwitches {

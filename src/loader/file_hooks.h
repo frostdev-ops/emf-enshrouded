@@ -5,8 +5,9 @@
 //   CreateFileW, CreateFileA, GetFileAttributesW, GetFileAttributesA, GetFileAttributesExW   logged; with
 //       redirect_test=1 the content files (file_redirect.h) go to <game>\emf\content\client\<name> when that file is there
 //   FindFirstFileW, FindFirstFileExW, FindNextFileW, SetCurrentDirectoryW                    logged only
-// The lines go to emf\file_opens.log: every call for the first log_seconds, the content files' (with redirect_test=1)
-// and the current-folder changes for as long as the game runs, up to max_lines lines.
+// The lines go to emf\file_opens.log, up to max_lines lines: with log_opens=1 every call for the first log_seconds; with
+// redirect_test=1 the content files' calls and the current-folder changes (relative paths depend on them) for as long
+// as the game runs. With log_opens=1 alone nothing is logged after log_seconds.
 //
 // Each hook calls the function that was in the slot before (kernel32, or another tool's hook) and leaves the caller
 // the Windows error that function left, whatever the logging did in between.
