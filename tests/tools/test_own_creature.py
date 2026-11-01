@@ -48,6 +48,10 @@ def sidecar(stretch=1.3):
                                                      for n, w, o in zip(NAMES, world, own)]}
 
 
+STAND = "aaaaaaaa-0000-4000-8000-000000000001"  # the clip whose first frame is the standing reference
+WALK = "bbbbbbbb-0000-4000-8000-000000000002"
+
+
 def turn(axis, rad):
     s = math.sin(rad / 2)
     return tuple(c * s for c in axis) + (math.cos(rad / 2),)
@@ -57,7 +61,8 @@ def clip(poses, loop=True):
     return ja.encode(poses, REST, fps=60, loop=loop, hierarchy_hash=ja.hierarchy_hash(list(range(100, 112))))
 
 
-class BuildTests(unittest.TestCase):
+class Fixture(unittest.TestCase):
+    """A sidecar and two clips (standing, walking) in a temporary folder."""
     def setUp(self):
         self.dir = tempfile.TemporaryDirectory()
         d = self.dir.name
@@ -67,17 +72,19 @@ class BuildTests(unittest.TestCase):
         stand = [REST[j] for j in range(len(REST))]
         walk = [[(turn((1, 0, 0), 0.3 * math.sin(f / 3)) if j in (4, 8) else q, t, s) for j, (q, t, s) in enumerate(REST)]
                 for f in range(21)]
-        for name, poses in (("stand", [stand] * 11), ("walk", walk)):
-            with open(os.path.join(d, "beast_%s-0000-4000-8000-000000000000.json" % name), "w", encoding="utf-8") as f:
+        for name, poses in ((STAND, [stand] * 11), (WALK, walk)):
+            with open(os.path.join(d, "beast_%s.json" % name), "w", encoding="utf-8") as f:
                 json.dump(clip(poses), f)
         self.cfg = {"sidecar": self.side, "skeleton_guid": "22222222-2222-4222-8222-222222222222",
-                    "reference_clip": os.path.join(d, "beast_stand-0000-4000-8000-000000000000.json"),
+                    "reference_clip": os.path.join(d, "beast_%s.json" % STAND),
                     "clips": os.path.join(d, "beast_*.json"), "graph": "33333333-3333-4333-8333-333333333333",
                     "graph_guid": "44444444-4444-4444-8444-444444444444"}
 
     def tearDown(self):
         self.dir.cleanup()
 
+
+class BuildTests(Fixture):
     def test_the_bind_pose_stands_where_the_sidecar_says(self):
         built = oc.build(self.cfg, hierarchy())
         bind = built["bind"]
@@ -106,19 +113,54 @@ class BuildTests(unittest.TestCase):
         a = oc.build(self.cfg, hierarchy())
         b = oc.build(self.cfg, hierarchy())
         self.assertEqual([c["guid"] for c in a["clips"]], [c["guid"] for c in b["clips"]])
-        self.assertEqual(sorted(c["source"] for c in a["clips"]), ["beast_stand-0000-4000-8000-000000000000"[6:],
-                                                                    "beast_walk-0000-4000-8000-000000000000"[6:]])
+        self.assertEqual(sorted(c["source"] for c in a["clips"]), [STAND, WALK])
         other = oc.build(dict(self.cfg, skeleton_guid="55555555-5555-4555-8555-555555555555"), hierarchy())
         self.assertNotEqual(a["clips"][0]["guid"], other["clips"][0]["guid"])
 
     def test_the_standing_reference_becomes_the_creatures_own_pose(self):
         built = oc.build(self.cfg, hierarchy())
-        stand = next(c for c in built["clips"] if c["source"].startswith("stand"))
+        stand = next(c for c in built["clips"] if c["source"] == STAND)
         pose = ja.sample(stand["clip"], 0, built["bind"])
         for (q, t, _), (q0, t0, _) in zip(pose, built["bind"]):
             self.assertLess(2 * math.acos(min(1.0, abs(sum(a * b for a, b in zip(q, q0))))), 1e-3)
             for a, b in zip(t, t0):
                 self.assertAlmostEqual(a, b, delta=1e-4)
+
+
+class CheckTests(Fixture):
+    """Clips and the sidecar are checked against the skeleton before anything is built."""
+
+    def test_the_clip_guid_is_the_end_of_the_file_name(self):
+        d = self.dir.name
+        os.rename(os.path.join(d, "beast_%s.json" % WALK), os.path.join(d, "wild_beast_cccccccc-0000-4000-8000-000000000000.json"))
+        built = oc.build(dict(self.cfg, clips=os.path.join(d, "*_*.json")), hierarchy())
+        self.assertIn("cccccccc-0000-4000-8000-000000000000", [c["source"] for c in built["clips"]])
+
+    def test_a_file_name_without_a_guid_is_refused(self):
+        d = self.dir.name
+        os.rename(os.path.join(d, "beast_%s.json" % WALK), os.path.join(d, "beast_walk.json"))
+        with self.assertRaises(SystemExit):
+            oc.build(dict(self.cfg, clips=os.path.join(d, "beast_*.json")), hierarchy())
+
+    def test_a_clip_of_another_skeleton_is_refused(self):
+        d = self.dir.name
+        other = clip([REST] * 11)
+        other["hierarchyHash"] = 12345
+        with open(os.path.join(d, "beast_dddddddd-0000-4000-8000-000000000000.json"), "w", encoding="utf-8") as f:
+            json.dump(other, f)
+        with self.assertRaises(SystemExit):
+            oc.build(self.cfg, hierarchy())
+
+    def test_sidecar_joints_are_matched_by_name(self):
+        side = sidecar()
+        side["joints"].reverse()  # any order: j004 is joint 4 by its name
+        with open(self.side, "w", encoding="utf-8") as f:
+            json.dump(side, f)
+        a = oc.build(self.cfg, hierarchy())
+        with open(self.side, "w", encoding="utf-8") as f:
+            json.dump(sidecar(), f)
+        b = oc.build(self.cfg, hierarchy())
+        self.assertEqual(a["bind"], b["bind"])
 
 
 ANALYSIS = os.path.join(HERE, "..", "..", "analysis")

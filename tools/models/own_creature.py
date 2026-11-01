@@ -22,36 +22,56 @@ panther upright).
 import glob
 import json
 import os
+import re
 import uuid
 
 import joint_animation as ja
 import own_skeleton as osk
+
+GUID = re.compile(r"([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})$")
+JOINT = re.compile(r"^j(\d+)")
 
 
 def build(cfg, hier):
     """{"bind": rest pose, "skeleton": {source, guid, rest, skinToJointMatrices}, "clips": [{source, guid, clip}]}.
     cfg: the pack entry's own_proportions (paths already resolved); hier: the game skeleton as EML shows it."""
     rest, parents = osk.rest_of(hier)
+    n = len(rest)
     with open(cfg["sidecar"], encoding="utf-8") as f:
         joints = json.load(f)["joints"]
-    if len(joints) != len(rest):
-        raise SystemExit("own_proportions: the sidecar has %d joints, the skeleton %d" % (len(joints), len(rest)))
+    by_index = {}
+    for j in joints:  # joint k is "jNNN..." (gamegltf.py's names), whatever the order
+        m = JOINT.match(j["name"])
+        if not m:
+            raise SystemExit("own_proportions: the sidecar joint %r is not named jNNN" % j["name"])
+        by_index[int(m.group(1))] = j
+    if sorted(by_index) != list(range(n)):
+        raise SystemExit("own_proportions: the sidecar's joints are not the skeleton's %d" % n)
+    joints = [by_index[k] for k in range(n)]
+    want = ja.hierarchy_hash(hier["jointNames"][:n])
+
+    def load_clip(path):
+        with open(path, encoding="utf-8") as f:
+            clip = json.load(f)
+        if clip["jointCount"] != n or clip["hierarchyHash"] & 0xFFFFFFFFFFFFFFFF != want:
+            raise SystemExit("own_proportions: %s is a clip of another skeleton" % path)
+        return clip
+
     # only the joints move: every bone keeps the game skeleton's frame, so the game graph's own nodes (foot IK,
     # leaning, aiming) turn bones about the axes they expect; the motion does not depend on the frames (retarget
     # works in the world)
     bind = osk.rest_from_world(rest, parents, [osk.blender_to_game(j["own"]) for j in joints])
-    with open(cfg["reference_clip"], encoding="utf-8") as f:
-        ref = ja.sample(json.load(f), 0, rest)
+    ref = ja.sample(load_clip(cfg["reference_clip"]), 0, rest)
     clips = []
     for path in sorted(glob.glob(cfg["clips"])):
-        with open(path, encoding="utf-8") as f:
-            clip = json.load(f)
-        if clip["jointCount"] != len(rest):
-            raise SystemExit("own_proportions: %s has %d joints, the skeleton %d" % (path, clip["jointCount"], len(rest)))
-        source = os.path.splitext(os.path.basename(path))[0].split("_", 1)[-1]
-        n = clip["frameCount"]
-        poses = [ja.sample(clip, f, rest) for f in range(n)]
-        poses.append(ja.sample(clip, n, rest) if clip["flags"] == 1 else ja.sample_end(clip, rest))
+        clip = load_clip(path)
+        m = GUID.search(os.path.splitext(os.path.basename(path))[0])
+        if not m:
+            raise SystemExit("own_proportions: %s: the file name does not end in the clip's GUID" % path)
+        source = m.group(1)
+        frames = clip["frameCount"]
+        poses = [ja.sample(clip, f, rest) for f in range(frames)]
+        poses.append(ja.sample(clip, frames, rest) if clip["flags"] == 1 else ja.sample_end(clip, rest))
         poses = [osk.retarget(p, ref, bind, parents) for p in poses]
         enc = ja.encode(poses, bind, fps=clip["fps"], loop=clip["flags"] == 1, hierarchy_hash=clip["hierarchyHash"])
         clips.append({"source": source, "guid": str(uuid.uuid5(uuid.UUID(cfg["skeleton_guid"]), source)), "clip": enc})
