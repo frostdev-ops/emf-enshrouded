@@ -143,6 +143,15 @@ Players allowed to run commands can also run `profile load <name>` (mod profiles
 it switches the mods of this folder for the next start, as `set <mod> enabled 0` already can. With `everyone=1` that
 is every player.
 
+## World settings while the server runs
+
+`world.set <setting> <value>` changes a setting of `enshrouded_server.json`'s `"gameSettings"` (day length, loot,
+XP, enemy damage, weather...) while the server runs, from the server console, `emf\commands.txt` or the chat of a
+`[chat] admins` account (`/world.set night_minutes 5`). Every player gets the new value within a second or two, and
+players who join later get it too. It lasts until the server restarts; `world.set ... persist` keeps it for this
+world. `world.export` prints a `gameSettings` block to paste into `enshrouded_server.json`; EMF never edits that
+file. The settings, their ranges and the other `world.*` commands: [world_settings.md](world_settings.md).
+
 ## Keeping a test server private
 
 The server registers in Steam's public server list when it starts; there is no unlisted mode. For a private server:

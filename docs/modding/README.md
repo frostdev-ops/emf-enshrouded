@@ -22,6 +22,7 @@ This folder is the modder's documentation:
 | [reference.md](reference.md) | every API function, its rules and failure modes; the SDK headers; the console commands |
 | [content.md](content.md) | **new items** with an EML data patch (the Emberbrand example), what works and what does not |
 | [server.md](server.md) | **dedicated server**: install EMF there, players' `/commands` from chat, who may |
+| [world_settings.md](world_settings.md) | **world settings while the world runs**: day length, loot, XP, enemies, weather (`world.set`, API v21, Lua 1.10) |
 | [other_mods.md](other_mods.md) | EMF next to **other mods and loaders**: renamed `dinput8.dll` mods, the chain files, notes for DLL mod authors |
 | [updating.md](updating.md) | what happens when the game updates, and how to check your mod still works |
 | [debug_bridge.md](debug_bridge.md) | **test from a script**: run commands, read the state, wait, take screenshots (off by default) |

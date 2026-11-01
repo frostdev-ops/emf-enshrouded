@@ -689,9 +689,9 @@ typedef struct EmfApi {
      * sends the new settings to every player (at most once a second). Changes last until the world is left, unless
      * EMF_WS_PERSIST keeps them for this world. EMF never edits enshrouded_server.json. */
     bool (*world_setting_get)(const char* key, double* value); /* now; false: unknown key or no server world */
-    bool (*world_setting_set)(const char* key, double value, uint32_t flags); /* flags: EMF_WS_PERSIST. True =
-        queued; false (logged, with the allowed range): unknown key, out of range (never clamped), other flag bits,
-        no server world */
+    bool (*world_setting_set)(const char* key, double value, uint32_t flags); /* true: queued for the next server
+        step, flags EMF_WS_PERSIST or 0; false (logged, with the allowed range): unknown key, out of range (never
+        clamped), other flag bits, no server world */
     bool (*world_setting_reset)(const char* key, uint32_t flags); /* back to the world's own value; key NULL or
         "all": every setting. With EMF_WS_PERSIST the kept value is forgotten too */
     bool (*on_world_setting_changed)(EmfWorldSettingCallback cb, void* user); /* cb runs once per changed setting

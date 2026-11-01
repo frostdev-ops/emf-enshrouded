@@ -432,6 +432,26 @@ already under way, then still sent it to its spawn point. On a dedicated server 
 from the server's console and from a player's chat command; the joined game showed the server's position each time.
 [re_teleport.md](../engine_parts/re_teleport.md) section 8 has every kind of move, tested in game in both setups.
 
+## v21: world settings
+
+The running world's settings (the game's `ecs::GameSettings`: `enshrouded_server.json`'s `"gameSettings"` or the
+world's preset), changed while it runs: [world_settings.md](world_settings.md) has the settings, their ranges and the
+`world.*` commands. Server world only (the host or a dedicated server); any thread.
+
+| C++ (`emf/emf.hpp`) | C | Rules |
+|---|---|---|
+| `emf::world_setting(key)` | `world_setting_get(key, &value)` | the value now: factors as they are, durations in minutes, choices by number, on/off as 1/0. Nothing / false for an unknown key or without a hosted world (a joined client, the menu). |
+| `emf::set_world_setting(key, value, persist)` | `world_setting_set(key, value, flags)` | queued and written on the next server step; several changes in one step are one write, and the game then sends the settings to every player (at most once a second). False (logged, with the allowed range) for an unknown key, a value outside the setting's range (never cut to fit), other flag bits, or no hosted world. `EMF_WS_PERSIST`: keep it for this world (applied again after each load). |
+| `emf::reset_world_setting(key, persist)` | `world_setting_reset(key, flags)` | back to the world's own value (as it loaded); `nullptr` / `NULL` or `"all"`: every setting. With `EMF_WS_PERSIST` the kept value is forgotten too. |
+| — | `on_world_setting_changed(cb, user)` | `cb(key, value, user)` once per setting the server step wrote, whoever changed it (a command, a mod, a kept value applied after a load), on the server world's thread; `key` as `enshrouded_server.json` names it. A callback that faults is logged and skipped. False: `cb` NULL or no world settings on this core. |
+| — | `world_setting_info(index, &info)` | the settings one by one from index 0 (`EmfWorldSettingInfo`, set `size`): `key`, `alias` (`""` when none), `group`, `type` (`EMF_WS_FLOAT`, `_BOOL`, `_ENUM`, `_MINUTES`, `_WHOLE`), `min`, `max`, `value` (now), `world` (the world's own), `flags` (`EMF_WS_CHANGED`, `EMF_WS_NEEDS_CLIENT`: players' games read it too). False past the last one, without a hosted world, or when `size` is too small. The strings stay valid. |
+| `emf::has_v21()` | — | true when the core has them. |
+
+A key is the setting's name as `enshrouded_server.json` has it (`playerStaminaFactor`, any case) or its short name
+(`loot`, `day_minutes`). The game never saves a live change into the world; EMF never edits `enshrouded_server.json`.
+On a game build where EMF does not find the game's resync flag, the write still happens and the log says so; players'
+games may then keep the old values of the settings they read until they reconnect.
+
 ## Lua
 
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
@@ -459,6 +479,8 @@ every mod under a name, as in EMF.exe; a load applies at the next start), `items
 (v20: teleports you, or the k-th player, there or beside that entity; the result follows a few steps later), `entities`, `near [radius]`, `inv <entity>`,
 `inspect <entity>`, `tpl <entity> <component> [bytes] [offset]`, `tplset <entity> <component> <offset> <type> <value>`,
 `stack <item> <max>`, `destroy <entity>`, `chat.players` (v19: the players of the world you host or of the
-dedicated server, with their account hashes for `[chat] admins`, their connection and name). Commands go into the in-game console (the key under Esc), the optional
+dedicated server, with their account hashes for `[chat] admins`, their connection and name), `world.get [setting]`,
+`world.set <setting> <value> [persist]`, `world.reset [setting|all] [persist]`, `world.list`, `world.export` (v21: the
+running world's settings, [world_settings.md](world_settings.md)). Commands go into the in-game console (the key under Esc), the optional
 console window (`[console] window=1` in `emf\emf_core.ini`), or `<game>\emf\commands.txt` (one per line; EMF runs the
 file about once a second). Replies are `[cmd]` lines in the log.

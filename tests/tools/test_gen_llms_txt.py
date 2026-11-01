@@ -176,7 +176,7 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(text, g.generate())  # deterministic
         size = len(text.encode("utf-8"))
         self.assertGreater(size, 15 * 1024)
-        self.assertLess(size, 46 * 1024)
+        self.assertLess(size, 50 * 1024)
         for heading in ("## C API", "## Lua", "## mod.json", "## Console commands", "## Debug bridge",
                         "## Tools for agents"):
             self.assertIn(heading, text)

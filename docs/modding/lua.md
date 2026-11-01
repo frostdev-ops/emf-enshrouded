@@ -34,7 +34,8 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    `emf.health`, `emf.attribute`, `emf.attribute_add` and `emf.damage` (the host needs EMF API v18): depend on
    `">=1.5"`. 1.6 adds `emf.tell`, `emf.broadcast`, `world:name`, `emf.on_chat` and `emf.request_save` (EMF API
    v19), and `emf.command(emf.id, ...)` makes the bare command `/<id>`: depend on `">=1.6"`. 1.7 adds `emf.teleport`
-   (EMF API v20): depend on `">=1.7"`. 1.8 adds `world:template`: depend on `">=1.8"`. 1.9 adds wheel groups (`emf.wheel_section`, `emf.wheel_group`): depend on `">=1.9"`. Ranges are explained in [guide.md](guide.md), "Dependencies
+   (EMF API v20): depend on `">=1.7"`. 1.8 adds `world:template`: depend on `">=1.8"`. 1.9 adds wheel groups (`emf.wheel_section`, `emf.wheel_group`): depend on `">=1.9"`. 1.10 adds
+   `emf.world_settings` and `emf.on_world_setting_changed` (EMF API v21): depend on `">=1.10"`. Ranges are explained in [guide.md](guide.md), "Dependencies
    and version ranges".)
 
 3. Put `main.lua` next to it:
@@ -117,6 +118,8 @@ right away.
 | `emf.on_chat(fn)` | (1.6) `fn(world, account, entity, text)` for every chat line a player sends that is not an EMF command, on the server world after its next step; `account` as text ("0x" + 16 hex digits), `entity` 0 when unknown. Read-only: the line is shown as usual. false where players' chat is off |
 | `emf.request_save()` | (1.6) asks the game to save the world now (the save its 30 s timer makes). Host or dedicated server. true when asked |
 | `emf.teleport(world, id, x, y, z [, opts] [, fn])` | (1.7) moves an entity as fast travel does (see "Teleport" below) |
+| `emf.world_settings.get(key)`, `.set(key, value [, persist])`, `.reset([key] [, persist])`, `.list()` | (1.10) the running world's settings: day length, loot, XP, enemy damage... (see "World settings" below). Host or dedicated server |
+| `emf.on_world_setting_changed(fn)` | (1.10) `fn(key, value)` once per world setting the server wrote, whoever changed it, on the server world after that step. false on an older core |
 | `emf.time_of_day([world])` | (1.4) the time of day in hours (`19.5` = 19:30) from the world's clock, or nil when it is not known. Inside callbacks only (it needs a world: the callback's, or the one you pass); at the top of `main.lua` it is an error, as `emf.item` is |
 | `emf.session_token()` | (1.4) a text that names this run of the game and its hosted session. Save it with entity ids: `emf.session()` restarts at 1 every time the game starts and the ids are renumbered, so only a matching token means the ids still name the same entities |
 | `emf.on_key(key, fn [, "server"/"client"])` | `fn(world)` once per press of `key`: one of your `keybind` settings (the player's choice counts, also when changed while the game runs) or a key name (`"F7"`, `"G"`). It runs after the next step of the server world when your game hosts one, else of your client world (or of the kind given). Keys only count while the game window is in front and the console is closed |
@@ -154,6 +157,25 @@ way the game's fast travel does. It returns true when queued, false when refused
   not called.
 
 The rules (what is refused, waits, NPCs) are those of `teleport` in [reference.md](reference.md) (v20).
+
+### World settings
+
+`emf.world_settings` (1.10, EMF API v21) reads and changes the running world's settings, the values of
+`enshrouded_server.json`'s `"gameSettings"`. Only where a world is hosted (the host or a dedicated server).
+
+- `get(key)`: the value now, or nil. A key is the setting's name as `enshrouded_server.json` has it
+  (`"playerStaminaFactor"`) or its short name (`"loot"`, `"day_minutes"`); durations are in minutes, choices by
+  number, on/off as 1/0.
+- `set(key, value [, persist])`: true when queued for the next server step (every player gets it); `false, why` when
+  refused (`"loot: allowed 0.25 to 2"`, `"unknown setting: x"`, `"no world is hosted here"`). `persist = true`
+  keeps it for this world (applied again after each load). A boolean value counts as 1 or 0.
+- `reset([key] [, persist])`: back to the world's own value; no key: every setting. `persist` also forgets the kept
+  value (`reset(true)` for all).
+- `list()`: `{{key, alias, group, type, min, max, value, world, changed, needs_client}, ...}`, empty without a hosted
+  world. `type` is `"float"`, `"bool"`, `"enum"`, `"minutes"` or `"whole"`; `world` is the world's own value.
+
+The settings and their ranges are in [world_settings.md](world_settings.md). A mod that changes them should say so
+in its README: players expect the world to keep the settings they chose.
 
 ## Worlds and components
 

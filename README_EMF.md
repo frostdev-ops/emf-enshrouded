@@ -136,6 +136,14 @@ for players (API v17), such as `/raids.status`, `/loot.toggle`, `/champion.where
 `/grave.claim`, `/unstuck`, `/home` and `/help` (which lists what they
 may run). See `docs/modding/server.md`.
 
+### World settings while you play
+In a game you host or on a dedicated server, `world.set <setting> <value>` changes a world setting while the world
+runs: `world.set loot 2`, `world.set night_minutes 5`, `world.set weather Rare`. Every player gets the new value
+within a second or two. Values outside the game's ranges are refused. A change lasts until the world is loaded again;
+add `persist` to keep it for this world. `world.list` shows every setting, `world.get <setting>` its range,
+`world.reset` goes back to the world's own values, and `world.export` prints a block for `enshrouded_server.json`
+(EMF never edits that file). See `docs/modding/world_settings.md`.
+
 ## Developer commands
 Type commands into the in-game console (above), or into `<game>\emf\commands.txt` (one per line, `#` starts a comment)
 while you are in a world you host.
