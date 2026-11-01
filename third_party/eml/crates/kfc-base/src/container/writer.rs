@@ -390,6 +390,7 @@ where
             let path = self.dat_path(containers.len());
 
             if !path.exists() || self.options.truncate_containers {
+                remove_existing(&path)?; // EMF patch P4
                 File::create(path)?;
             }
 
@@ -465,6 +466,7 @@ where
             ));
         }
 
+        remove_existing(&path)?; // EMF patch P4
         let writer = BufWriter::new(File::create(&path)?);
         let writer = ContainerWriter::new(next_index, writer);
 
@@ -473,6 +475,15 @@ where
         Ok(self.container_writers.last_mut().unwrap())
     }
 
+}
+
+/// EMF patch P4: removes a file before it is made again, so a hard link (EMF's shadow folder links the game's own
+/// .dat files) is broken instead of written through.
+fn remove_existing(path: &Path) -> std::io::Result<()> {
+    match std::fs::remove_file(path) {
+        Err(e) if e.kind() != std::io::ErrorKind::NotFound => Err(e),
+        _ => Ok(()),
+    }
 }
 
 struct ContainerWriter {

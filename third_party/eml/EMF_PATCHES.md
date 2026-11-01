@@ -38,6 +38,9 @@ Each patch is its own commit, and each changes as little as it can.
    stay). Decoding a compressed EXR builds a rayon thread pool, and rayon starts worker threads for AVIF encoding;
    those threads outlive the call, and unloading the DLL would pull the code out from under them. Cost: a mod's
    `image.decode`/`image.encode` with `"openexr"` fails, and AVIF encoding runs on one thread.
+4. **P4** `crates/kfc-base/src/container/writer.rs`: before the writer makes a `.dat` file (a new container, or the
+   padding to a power of two), it removes a file already at that name. `File::create` would truncate and write
+   through a hard link, and EMF's shadow folder links the game's own `.dat` files. Cost: none.
 
 ## How to update
 
