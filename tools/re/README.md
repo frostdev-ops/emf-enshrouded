@@ -8,6 +8,7 @@ Run them from this folder (they import each other). Some write caches (`calls.pk
 
 | Script | Use |
 |---|---|
+| `exe_types.py --exe <exe>` | EMF's own reader of the game's reflection data: every reflected type (kind, size, alignment, hashes, base, fields, enum values, attributes, defaults, groups) straight from the exe, no types.json and no build addresses; writes `%LOCALAPPDATA%\EMF\types\<exe>_<build>.emf.json` (game data, never commit it) ([docs/engine_parts/re_reflection.md](../../docs/engine_parts/re_reflection.md)). Runs alone with `python -I`; `tools/gen_headers.py` uses it. |
 | `pe.py` | PE sections, VA/file-offset mapping, `ptr_refs(va)`, `rip_refs(va)` (RIP-relative code refs). |
 | `funcs.py` | `.pdata` function table: `containing(va)`, `callers(func)` (direct calls). |
 | `allstrs.py` | Builds `rdata_strs.pkl` (all .rdata strings). Run once per game build. |
@@ -15,7 +16,7 @@ Run them from this folder (they import each other). Some write caches (`calls.pk
 | `func_strings.py 0x...` | All strings a function references. |
 | `sig.py 0x...` | Unique byte signature for a function start; `sig.verify(pattern)`. |
 | `dump.py 0xVA 0x100` | Annotated qword dump. |
-| `show2.py <type>` / `ktypes.py grep <regex>` | Struct layouts / type search in types.json. |
+| `show2.py <type>` / `ktypes.py grep <regex>` | Struct layouts / type search in EML's types.json (`exe_types.py` writes the same facts from the exe). |
 | `tables.py` | Finds the runtime reflection type lists. |
 | `imports.py` | Import table → IAT slot addresses. |
 | `programs.py`, `programs2.py` | Rebuild the ECS program catalog (`programs2.json`) from the 817 `registerProgram` calls (`programs.py` has 1269579's registerProgram address built in). |
