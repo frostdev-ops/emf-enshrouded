@@ -24,6 +24,24 @@ function Write-File([string]$path, [string]$text) {
     New-Item -ItemType Directory -Force (Split-Path $path) | Out-Null
     [System.IO.File]::WriteAllText($path, $text)
 }
+# Runs a command line with cmd and adds its output to $log (-New: starts the log). Each step writes a file of its own
+# first: on some PCs a file stays locked for a moment after the program that wrote it ends (a virus scan), and a
+# ">>" right after the step before then fails with "used by another process", so the step never ran.
+function Invoke-Logged([string]$line, [string]$log, [switch]$New) {
+    $part = "$log.part"
+    cmd /c "$line > `"$part`" 2>&1"
+    $text = $null
+    for ($i = 0; $i -lt 50 -and $null -eq $text; $i++) {
+        try {
+            $text = [System.IO.File]::ReadAllText($part)
+            if ($New) { [System.IO.File]::WriteAllText($log, $text) } else { [System.IO.File]::AppendAllText($log, $text) }
+        } catch [System.IO.IOException] { $text = $null; Start-Sleep -Milliseconds 200 }
+    }
+    if ($null -eq $text) { throw "could not add the output of '$line' to $log" }
+    for ($i = 0; $i -lt 50 -and (Test-Path -LiteralPath $part); $i++) {
+        try { Remove-Item -LiteralPath $part -Force } catch { Start-Sleep -Milliseconds 200 }
+    }
+}
 
 # ---- install / uninstall against a fake game and a fake package ----
 # The game folder's name has brackets, which PowerShell's -Path reads as a wildcard: the scripts must take it literally.
@@ -922,8 +940,8 @@ try {
         $preset = $presets.configurePresets | Where-Object { $_.name -eq "release" }
         Check (($null -ne $preset) -and (@($presets.buildPresets | Where-Object { $_.name -eq "release" }).Count -eq 1)) "the template ships the configure and build preset 'release' its README names"
         $bld = Join-Path $tpl "build\release"
-        cmd /c "cd /d `"$tpl`" && `"$dev`" cmake --preset release > `"$log`" 2>&1"
-        cmd /c "cd /d `"$tpl`" && `"$dev`" cmake --build --preset release >> `"$log`" 2>&1"
+        Invoke-Logged "cd /d `"$tpl`" && `"$dev`" cmake --preset release" $log -New
+        Invoke-Logged "cd /d `"$tpl`" && `"$dev`" cmake --build --preset release" $log
         $dll = Join-Path $bld "mymod\mymod.dll"
         Check (Test-Path $dll) "the template builds with its preset from the package, with only the packaged SDK (log: $log)"
         Check (Test-Path (Join-Path $bld "mymod\mod.json")) "the built mod folder has its mod.json"
@@ -937,8 +955,8 @@ try {
         # the C++ example builds the same way from the package: its own preset, only the packaged SDK (three folders up)
         $wp = Join-Path $pkg "examples\cpp\waypoints"
         $wlog = Join-Path $logs "waypoints_build.log"
-        cmd /c "cd /d `"$wp`" && `"$dev`" cmake --preset release > `"$wlog`" 2>&1"
-        cmd /c "cd /d `"$wp`" && `"$dev`" cmake --build --preset release >> `"$wlog`" 2>&1"
+        Invoke-Logged "cd /d `"$wp`" && `"$dev`" cmake --preset release" $wlog -New
+        Invoke-Logged "cd /d `"$wp`" && `"$dev`" cmake --build --preset release" $wlog
         $wdll = Join-Path $wp "build\release\waypoints\waypoints.dll"
         Check (Test-Path $wdll) "the waypoints example builds with its preset from the package, with only the packaged SDK (log: $wlog)"
         Check (Test-Path (Join-Path $wp "build\release\waypoints\mod.json")) "the built waypoints folder has its mod.json"
@@ -957,8 +975,8 @@ try {
         (Get-Content -LiteralPath $cm -Raw).Replace("project(mymod ", "project(coolmod ") | Set-Content -LiteralPath $cm -Encoding ascii -NoNewline
         $rbld = Join-Path $ren "build\release"
         $sdk = (Join-Path $pkg "sdk\include").Replace("\", "/")
-        cmd /c "`"$dev`" cmake -S `"$ren`" -B `"$rbld`" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=cl `"-DEMF_SDK_DIR=$sdk`" >> `"$log`" 2>&1"
-        cmd /c "`"$dev`" cmake --build `"$rbld`" >> `"$log`" 2>&1"
+        Invoke-Logged "`"$dev`" cmake -S `"$ren`" -B `"$rbld`" -G Ninja -DCMAKE_BUILD_TYPE=RelWithDebInfo -DCMAKE_CXX_COMPILER=cl `"-DEMF_SDK_DIR=$sdk`"" $log
+        Invoke-Logged "`"$dev`" cmake --build `"$rbld`"" $log
         Check (Test-Path (Join-Path $rbld "coolmod\coolmod.dll")) "renaming project() in CMakeLists.txt renames the mod (coolmod\coolmod.dll)"
         $rjson = Join-Path $rbld "coolmod\mod.json"
         Check ((Test-Path $rjson) -and ((Get-Content -LiteralPath $rjson -Raw) -match '"id"\s*:\s*"coolmod"')) "the built mod.json carries the new id"
