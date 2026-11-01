@@ -12,11 +12,32 @@
 // that one first) also:
 //   loaded <name>=<yes|no>   for each module named there, when this program's own code ran
 //   status=<EMF_CONTENT_STATUS: what the loader tells EMF's core about EML content>
+//   at_tls <name>=<yes|no>   for chain_standin.dll, emf_core.dll and emf_content.dll, when this exe's TLS callback ran:
+//                            after every DllMain of its static imports, before its entry point (so a DLL loaded
+//                            there was loaded in a DllMain, not on a held entry point)
 #include <windows.h>
 
 #include <string>
 
 extern "C" __declspec(dllimport) HRESULT WINAPI DirectInput8Create(HINSTANCE, DWORD, REFIID, LPVOID*, LPUNKNOWN);
+
+namespace {
+const wchar_t* const kTlsNames[3] = {L"chain_standin.dll", L"emf_core.dll", L"emf_content.dll"};
+bool g_tls_ran = false;
+bool g_at_tls[3] = {};
+
+void NTAPI on_tls(PVOID, DWORD reason, PVOID) {
+    if (reason != DLL_PROCESS_ATTACH || g_tls_ran) return;
+    g_tls_ran = true;
+    for (int i = 0; i < 3; ++i) g_at_tls[i] = GetModuleHandleW(kTlsNames[i]) != nullptr;
+}
+}  // namespace
+
+#pragma comment(linker, "/INCLUDE:_tls_used")
+#pragma comment(linker, "/INCLUDE:standin_tls_callback")
+#pragma const_seg(".CRT$XLB")
+extern "C" const PIMAGE_TLS_CALLBACK standin_tls_callback = on_tls;
+#pragma const_seg()
 
 namespace {
 std::string first_line(HANDLE h) {
@@ -85,6 +106,11 @@ int wmain() {
         std::string st;
         for (DWORD i = 0; i < sn && i < 1024; ++i) st += static_cast<char>(status[i] < 128 ? status[i] : '?');
         out += "status=" + st + "\n";
+        for (int i = 0; i < 3; ++i) {
+            std::string name;
+            for (const wchar_t* ch = kTlsNames[i]; *ch; ++ch) name += static_cast<char>(*ch);
+            out += "at_tls " + name + "=" + (g_at_tls[i] ? "yes" : "no") + "\n";
+        }
     }
     const HANDLE o = CreateFileW((dir + L"\\standin_out.txt").c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
                                  FILE_ATTRIBUTE_NORMAL, nullptr);

@@ -159,8 +159,14 @@ void build_ok(const std::wstring& dir, Reply& r) {
     std::sort(r.mods.begin(), r.mods.end());
     const bool chain = GetModuleHandleW(L"chain_standin.dll") != nullptr;
     const bool core = GetModuleHandleW(L"emf_core.dll") != nullptr;
+    // EMF's hold writes "mov rax, imm64; jmp rax" (48 B8 ...) over the exe's entry point
+    const auto* exe = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(exe + reinterpret_cast<const IMAGE_DOS_HEADER*>(exe)->e_lfanew);
+    const uint8_t* entry = exe + nt->OptionalHeader.AddressOfEntryPoint;
+    const bool held = entry[0] == 0x48 && entry[1] == 0xB8;
     write_file(cio::join(dir, L"built.txt"), "seq=" + std::to_string(seq) + " chain_loaded=" + (chain ? "yes" : "no") +
-                                                 " core_loaded=" + (core ? "yes" : "no") + "\n");
+                                                 " core_loaded=" + (core ? "yes" : "no") +
+                                                 " entry_held=" + (held ? "yes" : "no") + "\n");
     r.message = "standin: built " + std::to_string(r.mods.size()) + " mods";
 }
 }  // namespace
@@ -225,6 +231,15 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
     if (reason == DLL_PROCESS_ATTACH) {
         g_self = inst;
         DisableThreadLibraryCalls(inst);
+        // installed in a (test) game's emf folder: one file per process that loads it, so a test can count the loads
+        wchar_t path[MAX_PATH];
+        const std::wstring self(path, GetModuleFileNameW(inst, path, MAX_PATH));
+        const std::wstring folder = self.substr(0, self.find_last_of(L'\\'));
+        if (folder.size() >= 4 && _wcsicmp(folder.c_str() + folder.size() - 4, L"\\emf") == 0) {
+            const std::wstring mark = folder + L"\\standin_attach_" + std::to_wstring(GetCurrentProcessId()) + L".txt";
+            const HANDLE f = CreateFileW(mark.c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+            if (f != INVALID_HANDLE_VALUE) CloseHandle(f);
+        }
     }
     return TRUE;
 }

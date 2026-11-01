@@ -476,24 +476,28 @@ emf::loader::StartSteps& steps() {
 }
 
 // The game client's entry point lands here first when EML content is built at this start (main thread, loader lock
-// free, no game code has run): the build, then the chained DLLs and EMF's core (content_start.h); then the entry
-// point's bytes go back and it runs.
+// free, no game code has run): its bytes go back, then the build, the chained DLLs and EMF's core (content_start.h),
+// then it runs.
 DWORD WINAPI held_content_entry(void* arg) {
+    // The entry point's bytes go back first: a chained DLL that patches the entry itself (ASI loaders do) must find the
+    // game's own bytes, and nothing else may race EMF's change of that page's protection. The game's code still runs
+    // only when this function calls it below.
+    if (!emf::loader::release_entry(g_content_hold)) {
+        loader_log(g_dir, "could not restore the game's entry point; stopping");
+        ExitProcess(1);
+    }
     try {
         emf::loader::run_held_content(g_content, steps());
     } catch (...) {
         loader_log(g_dir, "EML content: the build stopped on an error in the loader; the game starts without it");
         if (!GetModuleHandleW(content_dll().c_str())) {
             try {
+                steps().set_status({"failed", 0, 0, "the build stopped on an error in EMF's loader"});
                 if (!g_chain_ran) run_chain(g_dir, g_start.chain);
                 if (!g_core_ran) start_core_today();
             } catch (...) {
             }
         }
-    }
-    if (!emf::loader::release_entry(g_content_hold)) {
-        loader_log(g_dir, "could not restore the game's entry point; stopping");
-        ExitProcess(1);
     }
     using EntryFn = DWORD(WINAPI*)(void*);
     return reinterpret_cast<EntryFn>(g_content_hold.entry)(arg);

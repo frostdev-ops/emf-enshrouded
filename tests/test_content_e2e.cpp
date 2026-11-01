@@ -84,6 +84,13 @@ struct ContentGame {
     // the modules the stand-in game reports (and waits for, with "wait <name>")
     void check(const std::string& lines) { put_file(dir + L"\\standin_check.txt", lines); }
     std::string loader_log() const { return file_text(dir + L"\\emf\\emf_loader.log"); }
+    // how many processes loaded the stand-in DLL (its DllMain writes emf\standin_attach_<pid>.txt)
+    size_t dll_attaches() const {
+        size_t n = 0;
+        for (const auto& e : std::filesystem::directory_iterator(dir + L"\\emf"))
+            if (e.path().filename().wstring().rfind(L"standin_attach_", 0) == 0) ++n;
+        return n;
+    }
     // runs the stand-in game and returns its standin_out.txt
     std::string run() {
         for (const wchar_t* f : {L"\\emf\\emf_loader.log", L"\\emf\\chain_status.txt", L"\\emf\\file_opens.log",
@@ -128,8 +135,11 @@ TEST_CASE("e2e content: first start builds, then chain, then core; the stand-in 
     CHECK(out.find("loaded chain_standin.dll=yes\n") != std::string::npos);
     CHECK(out.find("loaded emf_core.dll=yes\n") != std::string::npos);
     CHECK(out.find("status=built\t1\t") != std::string::npos);  // what the core learns
-    // the build ran before the chained DLL and the core were loaded
-    CHECK(file_text(g.shadow + L"\\built.txt") == "seq=1 chain_loaded=no core_loaded=no\n");
+    // the build ran before the chained DLL and the core were loaded, and after the entry's bytes went back (a chained
+    // DLL that patches the entry itself is never overwritten by EMF's release)
+    CHECK(file_text(g.shadow + L"\\built.txt") == "seq=1 chain_loaded=no core_loaded=no entry_held=no\n");
+    CHECK(out.find("at_tls chain_standin.dll=no\n") != std::string::npos);  // not in DllMain: on the held entry
+    CHECK(g.dll_attaches() == 1);
     const std::string log = g.loader_log();
     INFO(log);
     CHECK(before(log, "EML content: EMF builds it from 1 mod", "a build is needed at this start (no earlier build)"));
@@ -161,6 +171,8 @@ TEST_CASE("e2e content: second start does not load the dll") {
     CHECK(count_of(log, "EML content: the shadow copy is current (1 mod, built ") == 1);
     CHECK(count_of(log, "standin: building") == 0);  // the DLL's lines go to content.log only, which a build empties
     CHECK(count_of(file_text(g.dir + L"\\emf\\content.log"), "standin: building ") == 1);
+    CHECK(g.dll_attaches() == 1);  // the stand-in DLL's DllMain ran in the first start only
+    CHECK(out.find("at_tls chain_standin.dll=yes\n") != std::string::npos);  // chained in DllMain: no hold
 }
 
 TEST_CASE("e2e content: a changed mod file rebuilds, and so does a game update") {
@@ -212,6 +224,8 @@ TEST_CASE("e2e content: no emf_content.dll: today's behaviour") {
     CHECK(out.find("loaded chain_standin.dll=yes\n") != std::string::npos);
     CHECK(out.find("loaded emf_core.dll=yes\n") != std::string::npos);
     CHECK(out.find("status=\n") != std::string::npos);  // nothing for the core
+    // the chained DLL was there before the exe's TLS callbacks ran: loaded in DllMain, as today, so no hold
+    CHECK(out.find("at_tls chain_standin.dll=yes\n") != std::string::npos);
     const std::string log = g.loader_log();
     INFO(log);
     CHECK(count_of(log, "EML content") == 1);  // one line, and it says why
