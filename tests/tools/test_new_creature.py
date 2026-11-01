@@ -76,6 +76,20 @@ class BuildTests(Fixture):
                 self.assertEqual(t, (0.0, 0.0, 0.0))
                 self.assertEqual(s, (0.0, 0.0, 0.0))
 
+    def test_made_and_faster_clips(self):
+        """A clip may play its animation faster (speed) or be made from key turns on a pose of an animation (made:
+        a death or a flinch the file does not have)."""
+        cfg = config(clips={"move": {"animation": "Move", "speed": 2.0}, "stand": {"animation": "Move"},
+                            "die": {"made": {"from": "Move", "at": 0.0,
+                                             "keys": [{"t": 0.0}, {"t": 1.0, "turn": {"Hips": ["z", 90]}}]}}})
+        clips = {c["name"]: c["clip"] for c in nc.build(cfg, self.glb)["clips"]}
+        self.assertEqual(clips["move"]["frameCount"], 30)
+        self.assertEqual((clips["die"]["frameCount"], clips["die"]["flags"]), (60, 0))
+        bad = config(clips={"move": {"animation": "Move"}, "stand": {"animation": "Move"},
+                            "die": {"made": {"keys": [{"t": 0.0}, {"t": 1.0, "turn": {"Wing": ["z", 9]}}]}}})
+        with self.assertRaises(SystemExit):
+            nc.build(bad, self.glb)
+
     def test_model_from_a_retextured_copy(self):
         """model_glb: the model from a copy on the skeleton (new_skeleton.write_glb, then retextured): bones named
         jNNN_<name>."""

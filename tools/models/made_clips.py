@@ -1,0 +1,85 @@
+"""Clips made from a few key turns on top of a pose: a death, a flinch or a lean for a creature whose own animations
+lack one.
+
+Keys: [{"t": seconds, "turn": {joint name: [axis, degrees]}}, ...], the first at 0 s, times rising. A key's turns
+are where those joints stand turned at that time (a joint a key does not name is not turned then); between two keys
+every joint's turn eases (smoothstep, slerp) from the one to the other, and the clip ends on the last key. An axis is
+"x", "y", "z" or a vector in the creature's own frame (game space: x across, y up, z forward), carried along by the
+turns of the joint's parents: a neck turned about x after the body rolled onto its side still nods along the body.
+"""
+import math
+import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import gltf_clips  # noqa: E402
+import joint_animation  # noqa: E402
+import own_skeleton as osk  # noqa: E402
+
+AXES = {"x": (1.0, 0.0, 0.0), "y": (0.0, 1.0, 0.0), "z": (0.0, 0.0, 1.0)}
+IDENTITY = (0.0, 0.0, 0.0, 1.0)
+
+
+def _turn(axis, degrees):
+    v = AXES.get(axis) if isinstance(axis, str) else tuple(float(c) for c in axis)
+    if v is None or len(v) != 3 or not any(v):
+        raise ValueError("a turn's axis is x, y, z or a vector of three numbers, not %r" % (axis,))
+    n = math.sqrt(sum(c * c for c in v))
+    a = math.radians(float(degrees)) / 2
+    return tuple(c / n * math.sin(a) for c in v) + (math.cos(a),)
+
+
+def _keys(sk, keys):
+    if not keys or keys[0].get("t") != 0:
+        raise ValueError("the first key is at t = 0")
+    out, last = [], -1.0
+    for k in keys:
+        t = float(k["t"])
+        if t <= last:
+            raise ValueError("key times must rise (%s after %s)" % (t, last))
+        last = t
+        turns = {}
+        for name, (axis, degrees) in k.get("turn", {}).items():
+            if name not in sk["names"]:
+                raise ValueError("no joint %r in the skeleton" % name)
+            turns[sk["names"].index(name)] = _turn(axis, degrees)
+        out.append((t, turns))
+    return out
+
+
+def turned(sk, base, turns):
+    """The pose base with the turns {joint index: quaternion} added (each about the creature's axes as the joint's
+    parents' turns carried them; children follow)."""
+    parents = sk["parents"]
+    world = osk.world(base, parents)
+    new_q, delta, out = [None] * len(base), [None] * len(base), []
+    for j, (q, t, s) in enumerate(base):
+        p = parents[j]
+        dp = delta[p] if p is not None else IDENTITY
+        wq = osk.qmul(osk.qmul(dp, turns.get(j, IDENTITY)), world[j][0])
+        new_q[j] = wq
+        delta[j] = osk.qmul(wq, osk.qconj(world[j][0]))
+        out.append((wq if p is None else osk.qmul(osk.qconj(new_q[p]), wq), t, s))
+    return out
+
+
+def make(sk, base, keys, fps=60, loop=False, hierarchy_hash=0):
+    """A clip of the keys on top of the pose base (per joint rotation, position, scale), a key every frame."""
+    ks = _keys(sk, keys)
+    length = ks[-1][0]
+    if length <= 0:
+        raise ValueError("a made clip needs a key after t = 0")
+    n = max(1, int(round(length * fps)))
+    poses = []
+    for f in range(n + 1):
+        t = length * f / n
+        i = max(i for i in range(len(ks)) if ks[i][0] <= t)
+        if i == len(ks) - 1:
+            turns = ks[i][1]
+        else:
+            (t0, a), (t1, b) = ks[i], ks[i + 1]
+            x = (t - t0) / (t1 - t0)
+            s = x * x * (3 - 2 * x)
+            turns = {j: gltf_clips._slerp(a.get(j, IDENTITY), b.get(j, IDENTITY), s) for j in set(a) | set(b)}
+        poses.append(turned(sk, base, turns))
+    return joint_animation.encode(poses, sk["rest"], fps=fps, loop=loop, hierarchy_hash=hierarchy_hash)
