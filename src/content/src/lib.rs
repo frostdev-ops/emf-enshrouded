@@ -460,7 +460,8 @@ pub unsafe extern "C" fn emf_content_build(
                     match unsafe { CStr::from_ptr(request_json) }.to_str() {
                         Ok(text) => build_json(text, logger),
                         Err(e) => {
-                            (BAD_REQUEST, Reply::failed(BAD_REQUEST, format!("The request is not UTF-8: {e}")).to_json())
+                            let message = format!("The request is not UTF-8: {e}");
+                            (BAD_REQUEST, Reply::failed(BAD_REQUEST, message).to_json())
                         }
                     }
                 });
@@ -646,7 +647,8 @@ mod tests {
 
     #[test]
     fn eml_runs_and_its_errors_reach_the_callback() {
-        // Not a game: an exe EML cannot read its types from. EML's own code runs (it makes mods\ and .cache\) and fails.
+        // Not a game: an exe EML cannot read its types from. EML's own code runs (it makes mods\ and .cache\)
+        // and fails.
         let dir = TempDir::new("fake_game");
         std::fs::write(dir.0.join("enshrouded.exe"), b"MZ but not a game").unwrap();
         let mut lines: Vec<(i32, String)> = Vec::new();

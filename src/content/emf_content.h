@@ -19,6 +19,10 @@ typedef void (*emf_content_log_fn)(void* ctx, int level, const char* line);
 uint32_t emf_content_abi(void);
 int32_t emf_content_build(const char* request_json, emf_content_log_fn log, void* log_ctx,
                           char* reply, size_t reply_cap, size_t* reply_len);
+/* The two exports as GetProcAddress gives them */
+typedef uint32_t (*emf_content_abi_fn)(void);
+typedef int32_t (*emf_content_build_fn)(const char* request_json, emf_content_log_fn log, void* log_ctx,
+                                        char* reply, size_t reply_cap, size_t* reply_len);
 
 /* request_json (UTF-8):
      {"game_dir": "<folder holding enshrouded.kfc and mods\\>", "file_name": "enshrouded", "force": false,

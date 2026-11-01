@@ -19,6 +19,7 @@
 #include "common/pe_image.h"
 #include "content/emf_content.h"
 #include "core/json.h"
+#include "loader/module_threads.h"
 #include "test_scratch.h"
 
 namespace {
@@ -96,14 +97,13 @@ struct Result {
     size_t len = 0;
 };
 
-using AbiFn = uint32_t (*)();
-using BuildFn = int32_t (*)(const char*, emf_content_log_fn, void*, char*, size_t, size_t*);
-
 // The DLL, loaded for the life of the object.
 struct ContentDll {
     HMODULE module = LoadLibraryW(dll_path().c_str());
-    AbiFn abi = module ? reinterpret_cast<AbiFn>(GetProcAddress(module, "emf_content_abi")) : nullptr;
-    BuildFn build_fn = module ? reinterpret_cast<BuildFn>(GetProcAddress(module, "emf_content_build")) : nullptr;
+    emf_content_abi_fn abi =
+        module ? reinterpret_cast<emf_content_abi_fn>(GetProcAddress(module, "emf_content_abi")) : nullptr;
+    emf_content_build_fn build_fn =
+        module ? reinterpret_cast<emf_content_build_fn>(GetProcAddress(module, "emf_content_build")) : nullptr;
 
     ContentDll() = default;
     ContentDll(const ContentDll&) = delete;
@@ -139,19 +139,46 @@ std::string message_of(const json::Value& reply) {
     return m && m->is(json::Value::Type::String) ? m->s : std::string();
 }
 
-// The names in the export directory of a DLL file (mapped as an image apart from any loaded copy).
-std::set<std::string> export_names(const std::wstring& path) {
-    std::set<std::string> names;
+// What a DLL file's export and import directories hold. The file is mapped as an image apart from any loaded copy,
+// and unmapped again.
+struct PeTables {
+    bool mapped = false;
+    std::set<std::string> exports;  // names
+    DWORD export_functions = 0;     // NumberOfFunctions: named and ordinal-only exports
+    std::set<std::string> imports;  // DLL names in lower case, delay-loaded ones too
+};
+
+std::string lower(std::string s) {
+    for (char& c : s) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+    return s;
+}
+
+PeTables pe_tables(const std::wstring& path) {
+    PeTables t;
     const uintptr_t base = emf::map_image_file(path.c_str());
-    if (!base) return names;
+    if (!base) return t;
+    t.mapped = true;
     const auto* dos = reinterpret_cast<const IMAGE_DOS_HEADER*>(base);
     const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-    const IMAGE_DATA_DIRECTORY& dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
-    if (dir.VirtualAddress == 0) return names;
-    const auto* exp = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(base + dir.VirtualAddress);
-    const auto* name_rvas = reinterpret_cast<const DWORD*>(base + exp->AddressOfNames);
-    for (DWORD i = 0; i < exp->NumberOfNames; ++i) names.insert(reinterpret_cast<const char*>(base + name_rvas[i]));
-    return names;
+    const IMAGE_DATA_DIRECTORY& exp_dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+    if (exp_dir.VirtualAddress != 0) {
+        const auto* exp = reinterpret_cast<const IMAGE_EXPORT_DIRECTORY*>(base + exp_dir.VirtualAddress);
+        t.export_functions = exp->NumberOfFunctions;
+        const auto* name_rvas = reinterpret_cast<const DWORD*>(base + exp->AddressOfNames);
+        for (DWORD i = 0; i < exp->NumberOfNames; ++i)
+            t.exports.insert(reinterpret_cast<const char*>(base + name_rvas[i]));
+    }
+    const IMAGE_DATA_DIRECTORY& imp_dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_IMPORT];
+    if (imp_dir.VirtualAddress != 0)
+        for (auto* d = reinterpret_cast<const IMAGE_IMPORT_DESCRIPTOR*>(base + imp_dir.VirtualAddress); d->Name; ++d)
+            t.imports.insert(lower(reinterpret_cast<const char*>(base + d->Name)));
+    const IMAGE_DATA_DIRECTORY& delay_dir = nt->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_DELAY_IMPORT];
+    if (delay_dir.VirtualAddress != 0)
+        for (auto* d = reinterpret_cast<const IMAGE_DELAYLOAD_DESCRIPTOR*>(base + delay_dir.VirtualAddress);
+             d->DllNameRVA; ++d)
+            t.imports.insert(lower(reinterpret_cast<const char*>(base + d->DllNameRVA)));
+    UnmapViewOfFile(reinterpret_cast<void*>(base));
+    return t;
 }
 
 int thread_count() {
@@ -219,11 +246,26 @@ ProcessResult run_capture(const std::wstring& exe, const std::wstring& args) {
 
 TEST_CASE("content dll: exports only the two functions") {
     const std::set<std::string> expected{"emf_content_abi", "emf_content_build"};
-    const std::set<std::string> names = export_names(dll_path());
+    const PeTables pe = pe_tables(dll_path());
+    REQUIRE(pe.mapped);
     std::string listed;
-    for (const auto& n : names) listed += n + " ";
+    for (const auto& n : pe.exports) listed += n + " ";
     INFO("exports: " << listed);
-    CHECK(names == expected);
+    CHECK(pe.exports == expected);
+    CHECK(pe.export_functions == 2);  // no export by ordinal only either
+}
+
+TEST_CASE("content dll: imports only Windows' own DLLs") {
+    // A static CRT and no other DLL: nothing to install, and nothing that stays loaded after FreeLibrary.
+    const std::set<std::string> allowed{"kernel32.dll", "ntdll.dll", "bcryptprimitives.dll",
+                                        "api-ms-win-core-synch-l1-2-0.dll"};
+    const PeTables pe = pe_tables(dll_path());
+    REQUIRE(pe.mapped);
+    CHECK_FALSE(pe.imports.empty());
+    for (const auto& name : pe.imports) {
+        INFO("import: " << name);
+        CHECK(allowed.count(name) == 1);
+    }
 }
 
 TEST_CASE("content dll: abi is 1") {
@@ -303,7 +345,9 @@ TEST_CASE("content dll: two builds in one load") {
     REQUIRE(dll.build_fn != nullptr);
     LogLines first, second;
     const Result a = dll.build(request_for(folder.path), 64 * 1024, &first);
+    CHECK(emf::loader::threads_started_in(dll.module).empty());
     const Result b = dll.build(request_for(folder.path), 64 * 1024, &second);
+    CHECK(emf::loader::threads_started_in(dll.module).empty());
     CHECK(a.code == EMF_CONTENT_RUN_FAILED);
     CHECK(b.code == a.code);
     CHECK(message_of(parse_reply(b)) == message_of(parse_reply(a)));
@@ -326,6 +370,7 @@ TEST_CASE("content dll: 50 load-build-unload cycles leave no threads") {
         ContentDll dll;
         REQUIRE(dll.build_fn != nullptr);
         CHECK(dll.build(request).code == EMF_CONTENT_RUN_FAILED);
+        CHECK(emf::loader::threads_started_in(dll.module).empty());  // nothing left running in the DLL's code
         CHECK(dll.unload());
         CHECK(GetModuleHandleW(L"emf_content.dll") == nullptr);
     }
@@ -336,6 +381,41 @@ TEST_CASE("content dll: 50 load-build-unload cycles leave no threads") {
         after = thread_count();
     }
     CHECK(after <= before);
+}
+
+TEST_CASE("content dll: a panic gives PANIC, and its message and place reach the log") {
+    ContentDll dll;
+    REQUIRE(dll.build_fn != nullptr);
+    LogLines log;
+    const Result r = dll.build("{\"game_dir\": \"unused\", \"test_panic\": \"boom for the test\"}", 64 * 1024, &log);
+    CHECK(r.code == EMF_CONTENT_PANIC);
+    CHECK(message_of(parse_reply(r)).find("boom for the test") != std::string::npos);
+    bool logged = false;
+    for (const auto& [level, line] : log.lines) {
+        const bool names_it = line.find("boom for the test") != std::string::npos;
+        if (level == 0 && names_it && line.find("lib.rs:") != std::string::npos) logged = true;
+    }
+    CHECK(logged);
+    // and the DLL goes on working
+    Folder folder(L"emf_content_after_panic");
+    CHECK(dll.build(request_for(folder.path)).code == EMF_CONTENT_RUN_FAILED);
+}
+
+TEST_CASE("content dll: a reply cut to fit the buffer keeps the real code") {
+    Folder folder(L"emf_content_cut");
+    ContentDll dll;
+    REQUIRE(dll.build_fn != nullptr);
+    std::vector<char> buf(120, '#');
+    size_t len = 0;
+    const std::string request = request_for(folder.path);
+    const int32_t code = dll.build_fn(request.c_str(), nullptr, nullptr, buf.data(), buf.size(), &len);
+    CHECK(code == EMF_CONTENT_RUN_FAILED);
+    CHECK(len > buf.size());
+    const auto parsed = json::parse(std::string(buf.data()));
+    REQUIRE(parsed.value.has_value());
+    CHECK(parsed.value->get("code")->n == EMF_CONTENT_RUN_FAILED);
+    REQUIRE(parsed.value->get("truncated") != nullptr);
+    CHECK(parsed.value->get("truncated")->b);
 }
 
 TEST_CASE("content dll: log lines arrive") {
@@ -365,6 +445,24 @@ TEST_CASE("emf_content_run: empty folder gives a non-zero exit and JSON on stdou
     CHECK(parsed.value->get("code")->n == static_cast<double>(r.code));
     CHECK(message_of(*parsed.value).find(utf8(folder.path)) != std::string::npos);
     CHECK(r.err.find("[error] ") != std::string::npos);  // log lines go to stderr as "[level] line"
+}
+
+TEST_CASE("emf_content_run: --repeat loads, builds and unloads N times") {
+    Folder folder(L"emf_content_run_repeat");
+    folder.add_fake_exe();
+    const ProcessResult r = run_capture(native(EMF_CONTENT_RUN_EXE), L"\"" + folder.path + L"\" --repeat 3");
+    INFO("stdout: " << r.out << "\nstderr: " << r.err);
+    CHECK(r.code == static_cast<DWORD>(EMF_CONTENT_RUN_FAILED));
+    int replies = 0;
+    size_t at = 0;
+    for (size_t nl; (nl = r.out.find('\n', at)) != std::string::npos; at = nl + 1) {
+        const auto parsed = json::parse(r.out.substr(at, nl - at));
+        REQUIRE(parsed.value.has_value());
+        CHECK(parsed.value->get("code")->n == EMF_CONTENT_RUN_FAILED);
+        ++replies;
+    }
+    CHECK(replies == 3);
+    CHECK(r.err.find("still running") == std::string::npos);
 }
 
 #endif  // EMF_CONTENT_DLL

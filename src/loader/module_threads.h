@@ -23,7 +23,8 @@ inline std::vector<DWORD> threads_started_in(HMODULE module) {
 
     using QueryThread = LONG(NTAPI*)(HANDLE, ULONG, PVOID, ULONG, PULONG);
     const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
-    const auto query = ntdll ? reinterpret_cast<QueryThread>(GetProcAddress(ntdll, "NtQueryInformationThread")) : nullptr;
+    const auto query =
+        ntdll ? reinterpret_cast<QueryThread>(GetProcAddress(ntdll, "NtQueryInformationThread")) : nullptr;
     if (!query) return ids;
     constexpr ULONG kThreadQuerySetWin32StartAddress = 9;
 
