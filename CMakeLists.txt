@@ -567,6 +567,8 @@ if(EMF_CONTENT)
   target_compile_definitions(emf_tests PRIVATE EMF_CONTENT_DLL="${EMF_CONTENT_DLL}")
   add_dependencies(emf_tests emf_content)
 endif()
+# The tests load the built DLL; without EMF_CONTENT_DLL the file compiles to nothing.
+target_sources(emf_tests PRIVATE tests/test_content_dll.cpp)
 
 # --- Mod profiles (docs/app.md "Profiles"): src/core/profiles.cpp is the file format, the store and the
 # rules, in EMF.exe and in the core (the console's "profile" command). ---
