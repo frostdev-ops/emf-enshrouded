@@ -9,6 +9,8 @@ FOR PLAYERS
    Game somewhere Steam does not know? Drag the game folder (the one with enshrouded.exe) onto install.cmd.
    With the mod manager (EMF.exe), it asks once whether to put a shortcut to EMF.exe on your desktop (Enter = yes).
 4. Start the game normally. The key under Esc opens the EMF console; type  help  to see every command.
+   Nothing happens, or Discord's overlay opens too? Discord's overlay lock is often Shift and the key under Esc:
+   give it another key in Discord's settings (Game Overlay).
 5. Optional: emf\EMF.exe in the game folder is EMF's mod manager: every installed mod with switches and settings,
    clash warnings, installing mods you downloaded and save backups. Windows may say "Windows protected your PC" the
    first time (EMF.exe is not signed): click "More info", then "Run anyway". You can also do without it: switches and
@@ -18,6 +20,10 @@ Switching mods on or off, and their settings: open the console and click its Mod
 mod to switch it on or off (from the next game start) and to change its settings. Or type  set <mod> <key> <value>
 in the console ( settings <mod>  lists the keys;  set big_stacks enabled 1  switches a mod on). No settings files
 come with EMF: every mod starts with its defaults, and your changes are saved in <game>\emf\config\<mod>.ini.
+
+Keys: the console is the key under Esc; Necromancer F2, Beastmaster F3, Companion F6, Hand-over F7, Bulk Craft F8,
+Quick Stack L, Villager Jobs K. Change any mod's key in the Mods tab or EMF.exe (click the key, then press the new
+one); a key you chose yourself stays when a mod's default changes.
 
 Included mods:
   companion      F6: a companion that follows you, fights, takes orders (stay, attack) and wears gear you give it

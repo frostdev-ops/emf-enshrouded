@@ -130,6 +130,30 @@ How it draws: the console is a Vulkan layer (`VK_LAYER_EMF_console`, manifest `<
 enables it for the game process only; nothing is written to the registry and other games do not see it. It works next
 to RivaTuner/RTSS, the Steam overlay and the Discord overlay.
 
+**The console does not open, or Discord's overlay opens with it?** Discord's overlay lock is often Shift+\` (Shift
+and the key under Esc). EMF's console opens on that key with or without Shift, so the two can clash: give
+Discord's overlay lock another key in Discord's settings (Game Overlay), or give the console another key with `key=`
+above (a scan code, from the next game start).
+
+### Keys
+EMF's keys by default:
+
+| Key | What it does |
+|---|---|
+| the key under Esc | the console (`key=` under `[overlay]` above) |
+| F2 | Necromancer: the summoning wheel |
+| F3 | Beastmaster: the beast wheel |
+| F6 | Companion: calls it, then opens its order wheel |
+| F7 | Hand-over: the host's wheel |
+| F8 | Bulk Craft: the wheel at a crafting station |
+| L | Quick Stack: tap to put things into nearby chests, hold at a chest for its wheel |
+| K | Villager Jobs: a job for the villager you look at |
+| E | Bounty Board (from 1.2): reads the board you look at |
+
+The game's own default keys take every letter except K, so EMF's wheels sit on the free F-keys. Every mod's key can
+be changed in the console's Mods tab or in EMF.exe (click the key, then press the new one). When a mod's default key
+changes, a key you chose yourself stays.
+
 ### Commands in the game's chat
 You can also type a command into the game's own text chat with a `/` in front: `/give Material_T1_Wood_Logs 5`,
 `/time 12`, `/help`. EMF runs it and does not send it, so other players never see it. The reply shows for a few
