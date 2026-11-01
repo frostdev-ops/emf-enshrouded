@@ -2,6 +2,9 @@
 // components and commands (tests/lua_mod_rig.h).
 #include "lua_mod_rig.h"
 
+#include "core/overlay/wheel_ui.h"
+#include "emf/keys.hpp"
+
 namespace {
 constexpr const char* kSkeleton = "b3e66f3b-7b13-4fa0-a68c-d2a41d8c84d9";  // Enemy_Skeleton_Melee01
 constexpr const char* kSpirit = "442ac9a3-ea47-4129-878d-73659f94f9d4";    // Player_Companion_FlyingSkull
@@ -275,15 +278,16 @@ int item_at(const std::vector<std::string>& items, const std::string& start) {
 constexpr const char* kWolfTemplate = "478381c5-585f-4264-b373-dbb1ea596eca";
 }  // namespace
 
-TEST_CASE("necromancer: V opens the summons wheel with the Undead section; Raise Skeleton picked raises one; the HUD counts them") {
+TEST_CASE("necromancer: F2 opens the summons wheel with the Undead section; Raise Skeleton picked raises one; the HUD counts them") {
     NecroRig n;
     n.spawnable(1);
-    press_key(n, 'V');
+    press_key(n, VK_F2);
     REQUIRE(n.r.fake.wheels.size() == 1);
     const auto w = n.r.fake.wheels[0];
-    CHECK(w.hold == 'V');
-    for (const char* a : {"Raise Skeleton (0/3)", "Raging Spirits", "Gather", "Attack", "Dismiss all"})
+    CHECK(w.hold == VK_F2);
+    for (const char* a : {"Raise Skeleton (0/3)", "Raging Spirits", "Gather", "Attack"})
         CHECK_MESSAGE(item_at(w.items, a) >= 0, a);
+    CHECK(item_at(w.items, "Dismiss") < 0);  // no undead: nothing to dismiss
     w.cb(kClient, item_at(w.items, "Raise Skeleton"), w.user);  // the wheel answers on the client world
     n.seconds(1);                                               // the raise runs on the server's next step
     CHECK(n.spawned(kSkeleton) == 1);
@@ -298,7 +302,7 @@ TEST_CASE("beastmaster + necromancer: one wheel with both sections; a pick in ei
     n.reply("beastmaster.give wolf");
     n.spawnable(2);
     n.seconds(2);
-    press_key(n, 'V');
+    press_key(n, VK_F2);
     REQUIRE(n.r.fake.wheels.size() == 1);
     const auto w = n.r.fake.wheels[0];
     CHECK(item_at(w.items, "Undead: Raise Skeleton") >= 0);
@@ -308,9 +312,9 @@ TEST_CASE("beastmaster + necromancer: one wheel with both sections; a pick in ei
     n.seconds(1);
     REQUIRE(n.r.fake.spawns.size() == 1);
     CHECK(guid_of(n.r.fake.spawns[0].guid) == kWolfTemplate);  // Beastmaster ran it
-    press_key(n, 'B');
+    press_key(n, VK_F3);
     REQUIRE(n.r.fake.wheels.size() == 2);
-    CHECK(n.r.fake.wheels[1].hold == 'B');
+    CHECK(n.r.fake.wheels[1].hold == VK_F3);
     CHECK(item_at(n.r.fake.wheels[1].items, "Undead: Raise Skeleton") >= 0);
     n.r.fake.wheels[1].cb(kClient, item_at(n.r.fake.wheels[1].items, "Undead: Raise Skeleton"), n.r.fake.wheels[1].user);
     n.seconds(1);
@@ -318,14 +322,96 @@ TEST_CASE("beastmaster + necromancer: one wheel with both sections; a pick in ei
     // Necromancer's own wheel: its key shows only its section, and Beastmaster's wheel no longer shows it
     n.r.fake.settings["necromancer.shared_wheel"] = "false";
     n.seconds(2);
-    press_key(n, 'V');
+    press_key(n, VK_F2);
     REQUIRE(n.r.fake.wheels.size() == 3);
     CHECK(item_at(n.r.fake.wheels[2].items, "Raise Skeleton") >= 0);
     CHECK(item_at(n.r.fake.wheels[2].items, "Beasts:") < 0);
-    press_key(n, 'B');
+    press_key(n, VK_F3);
     REQUIRE(n.r.fake.wheels.size() == 4);
     CHECK(item_at(n.r.fake.wheels[3].items, "Undead:") < 0);
     CHECK(item_at(n.r.fake.wheels[3].items, "Tame") >= 0);
+}
+
+TEST_CASE("beastmaster + necromancer: the wheel's labels are short and every line fits its slice (a page of 8, the overlay's font)") {
+    NecroRig n({}, {"beastmaster"});
+    for (const char* s : {"wolf", "boar", "sabretooth", "sabretooth", "hound", "aurochs"})
+        n.reply(std::string("beastmaster.give ") + s);
+    n.spawnable(3);
+    const std::string wolf = n.reply("beastmaster.call Wolf");
+    CHECK_MESSAGE(wolf.find("comes") != std::string::npos, wolf);
+    n.seconds(11);
+    CHECK(n.reply("beastmaster.call Sabretooth 2").find("comes") != std::string::npos);
+    deliver(n.r.fake, "EntityDiedEvent", died_event(1234));  // the wolf falls: it rests
+    CHECK(n.reply("necromancer.raise").find("rises") != std::string::npos);
+    n.seconds(2);
+    press_key(n, VK_F2);
+    REQUIRE(n.r.fake.wheels.size() == 1);
+    CHECK(item_at(n.r.fake.wheels[0].items, "Beasts: Call Wolf (rests") >= 0);
+    CHECK(item_at(n.r.fake.wheels[0].items, "Beasts: Dismiss Sabretooth 2") >= 0);
+    for (std::string label : n.r.fake.wheels[0].items) {
+        const size_t colon = label.find(": ");
+        if (colon != std::string::npos && colon <= 6) label = label.substr(colon + 2);  // "Beasts: ", "Undead: "
+        const size_t cut = label.find(" (");
+        const std::string name = label.substr(0, cut);
+        const std::string detail = cut == std::string::npos ? "" : label.substr(cut + 1);
+        CHECK_MESSAGE(name.size() <= 20, label);
+        CHECK_MESSAGE(detail.size() <= 13, label);
+    }
+    // as the overlay draws them: Consolas at height / 54 pixels (0.55 of that a character), wrapped by the wheel's code
+    for (float h : {1080.0f, 2160.0f}) {
+        const float width = emf::core::wheel_label_width(ImVec2(h * 16.0f / 9.0f, h), 8);
+        const auto measure = [h](const std::string& s) { return 0.55f * (h / 54.0f) * static_cast<float>(s.size()); };
+        for (const auto& label : n.r.fake.wheels[0].items) {
+            const auto lines = emf::core::wheel_label_layout(label, width, measure);
+            CHECK_MESSAGE(lines.size() <= 4, label);
+            for (const auto& l : lines) CHECK_MESSAGE(measure(l.text) <= width, label << ": " << l.text);
+        }
+    }
+}
+
+namespace {
+// Enshrouded's own keyboard keys (Preset A, game 1.0): every letter (WASD, C sneak, E, F, Q, R, T, G, X, Y, Z, U, L, P,
+// and I, V crafting, B backpack, N, M, H, J, O, K for its screens), the digits (action bar 1-8, building shapes 9 and
+// 0), Tab, Space, Shift, Ctrl, Alt, Enter, Esc, F1, PageUp, PageDown and Delete; plus the key under Esc (EMF's console).
+bool game_key(uint32_t vk) {
+    if ((vk >= 'A' && vk <= 'Z') || (vk >= '0' && vk <= '9')) return true;
+    for (uint32_t k : {VK_TAB, VK_SPACE, VK_SHIFT, VK_CONTROL, VK_MENU, VK_RETURN, VK_ESCAPE, VK_F1, VK_PRIOR, VK_NEXT,
+                       VK_DELETE, VK_OEM_3})
+        if (vk == k) return true;
+    return false;
+}
+}  // namespace
+
+TEST_CASE("beastmaster + necromancer: the wheel keys are not the game's own keys (B was its backpack, V its crafting)") {
+    std::vector<uint32_t> keys;
+    for (const char* mod : {"beastmaster", "necromancer"}) {
+        const auto m = emf::core::parse_manifest(
+            slurp((std::filesystem::path(EMF_SOURCE_DIR) / "mods" / mod / "mod.json").wstring()));
+        REQUIRE_MESSAGE(m.manifest, m.error);
+        std::string def;
+        for (const auto& d : m.manifest->settings)
+            if (d.key == "wheel_key") def = d.default_value;
+        const uint32_t vk = emf::keys::parse_key(std::wstring(def.begin(), def.end()));
+        CHECK_MESSAGE(vk != 0, mod);
+        CHECK_MESSAGE(!game_key(vk), mod << ": " << def);
+        keys.push_back(vk);
+    }
+    CHECK(keys[0] != keys[1]);  // each mod's key (one wheel or two)
+    // the player docs (the zip's README.txt too) name the new keys, and that the packs need EML first
+    for (const char* doc : {"README_EMF.md", "package/README.txt", "mods/beastmaster/README.md", "mods/necromancer/README.md"}) {
+        std::string text = slurp((std::filesystem::path(EMF_SOURCE_DIR) / doc).wstring());
+        std::transform(text.begin(), text.end(), text.begin(), [](char c) { return static_cast<char>(std::tolower(c)); });
+        for (const char* old : {"hold b ", "hold v ", "hold b)", "hold v)", "hold **b**", "hold **v**", "b and v", "v and b"})
+            CHECK_MESSAGE(text.find(old) == std::string::npos, (std::string(doc) + ": " + old));
+        CHECK_MESSAGE(text.find("f3") != std::string::npos, std::string(doc));
+        CHECK_MESSAGE(text.find("f2") != std::string::npos, std::string(doc));
+        CHECK_MESSAGE(text.find("install eml") != std::string::npos, std::string(doc));
+    }
+    // the old keys open nothing now
+    NecroRig n({}, {"beastmaster"});
+    press_key(n, 'B');
+    press_key(n, 'V');
+    CHECK(n.r.fake.wheels.empty());
 }
 
 TEST_CASE("necromancer: /necromancer <word> for guests acts on their own skeletons") {
@@ -342,10 +428,68 @@ TEST_CASE("necromancer: /necromancer <word> for guests acts on their own skeleto
         CHECK_MESSAGE(help.find(word) != std::string::npos, word);
 }
 
+TEST_CASE("necromancer: dismiss one kind or all: /necromancer dismiss skeleton sends the newest skeleton back, no word or all every one; the wheel has both") {
+    NecroRig n;
+    n.spawnable(3);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(1);
+    CHECK(n.reply("necromancer.raise").find("rises (2/3)") != std::string::npos);
+    n.seconds(1);
+    CHECK(n.reply("necromancer.raise lich").find("rises (1/1)") != std::string::npos);
+    n.seconds(1);
+    press_key(n, VK_F2);
+    REQUIRE(n.r.fake.wheels.size() == 1);
+    const auto w = n.r.fake.wheels[0];
+    for (const char* a : {"Dismiss Skeleton", "Dismiss Lich", "Dismiss all"}) CHECK_MESSAGE(item_at(w.items, a) >= 0, a);
+    CHECK(item_at(w.items, "Dismiss Bone Golem") < 0);  // none to dismiss
+    CHECK(n.reply("necromancer.dismiss skeleton").find("A skeleton returns to the ground (1/3)") != std::string::npos);
+    CHECK(has(n.r.fake.destroyed, 1235));  // the newest skeleton
+    CHECK(!has(n.r.fake.destroyed, 1234));
+    CHECK(n.reply("necromancer.list").find("Skeletons 1/3, Liches 1/1") != std::string::npos);
+    CHECK(n.reply("necromancer.dismiss golem").find("You have no bone golems") != std::string::npos);
+    CHECK(n.reply("necromancer.dismiss dragon").find("Dismiss what?") != std::string::npos);
+    w.cb(kClient, item_at(w.items, "Dismiss Lich"), w.user);
+    n.seconds(1);
+    CHECK(n.noted("A lich returns to the ground (0/1)"));
+    CHECK(has(n.r.fake.destroyed, 1236));
+    n.seconds(2);
+    CHECK(n.reply("necromancer.list").find("Skeletons 1/3, Liches 0/1") != std::string::npos);  // not raised again
+    CHECK(n.reply("necromancer.dismiss").find("1 undead returns to the ground") != std::string::npos);  // no word: all
+    CHECK(n.reply("necromancer.dismiss all").find("You have no undead") != std::string::npos);
+    bool told = false;
+    for (const auto& c : n.r.fake.commands)
+        if (c.name == "necromancer.dismiss") told = c.help.find("all") != std::string::npos && c.help.find("skeleton") != std::string::npos;
+    CHECK(told);
+    // a guest dismisses their own
+    n.spawnable(1);
+    CHECK(n.reply("necromancer raise", 2, 0xBB).find("rises (1/3)") != std::string::npos);
+    CHECK(n.reply("necromancer dismiss skeleton", 2, 0xBB).find("returns to the ground (0/3)") != std::string::npos);
+}
+
+TEST_CASE("necromancer: a wheel pick dismisses what was shown, though new undead moved the items meanwhile (shared and own wheel)") {
+    for (const char* shared : {"true", "false"}) {
+        NecroRig n({{"shared_wheel", shared}});
+        n.spawnable(2);
+        CHECK(n.reply("necromancer.raise lich").find("rises (1/1)") != std::string::npos);
+        n.seconds(2);
+        press_key(n, VK_F2);
+        REQUIRE(n.r.fake.wheels.size() == 1);
+        const auto w = n.r.fake.wheels[0];
+        const int lich = item_at(w.items, "Dismiss Lich");
+        REQUIRE(lich >= 0);
+        CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);  // "Dismiss Skeleton" comes first now
+        n.seconds(2);
+        w.cb(kClient, lich, w.user);
+        n.seconds(1);
+        const std::string list = n.reply("necromancer.list");
+        CHECK_MESSAGE(list.find("Skeletons 1/3, Liches 0/1") != std::string::npos, shared << ": " << list);
+    }
+}
+
 TEST_CASE("necromancer: a wheel pick runs the item that was shown, though its label changed meanwhile") {
     NecroRig n;
     n.spawnable(2);
-    press_key(n, 'V');
+    press_key(n, VK_F2);
     REQUIRE(n.r.fake.wheels.size() == 1);
     const auto w = n.r.fake.wheels[0];
     const int raise = item_at(w.items, "Raise Skeleton (0/3)");
@@ -480,7 +624,7 @@ TEST_CASE("necromancer: old saves (s lines) load as skeleton warriors; kinds are
 TEST_CASE("necromancer: without the undead pack the lich is refused with a note, and a saved lich does not loop") {
     NecroRig n;
     n.r.fake.spawn_fails = true;
-    CHECK(n.reply("necromancer.raise lich").find("undead pack") != std::string::npos);
+    CHECK(n.reply("necromancer.raise lich").find("creature packs") != std::string::npos);
     CHECK(n.reply("necromancer.list").find("Liches 0/1") != std::string::npos);
     CHECK(!n.added(1, EMF_ATTR_MANA, -40));
     write(n.data, "s 0x00000000000000aa 0\nk 0x00000000000000aa lich 1\n");
@@ -489,9 +633,31 @@ TEST_CASE("necromancer: without the undead pack the lich is refused with a note,
     n.r.fake.log.clear();
     n.seconds(5);
     size_t notes = 0;
-    for (const auto& x : n.r.fake.notes) notes += x.find("Lich") != std::string::npos;
+    for (const auto& x : n.r.fake.notes) notes += x.find("lich") != std::string::npos;
     CHECK(notes == 1);
     CHECK(n.reply("necromancer.list").find("Liches 1/1") != std::string::npos);  // kept: it comes back with the pack
+}
+
+TEST_CASE("necromancer: a lich or golem that cannot rise says it needs the EMF creature packs, which load through EML or ShroudForge") {
+    NecroRig n;
+    n.r.fake.spawn_fails = true;  // no lich in this game: no pack, or no EML to load it (the mod cannot tell which)
+    for (const char* kind : {"lich", "golem"}) {
+        const std::string raise = n.reply(std::string("necromancer.raise ") + kind);
+        CHECK_MESSAGE(raise.find("EMF creature packs") != std::string::npos, raise);
+        CHECK_MESSAGE(raise.find("EML or ShroudForge") != std::string::npos, raise);
+        CHECK_MESSAGE(raise.find("Install EML first") != std::string::npos, raise);
+        CHECK_MESSAGE(raise.find("emf_necromancer") == std::string::npos, raise);  // no folder names
+    }
+    write(n.data, "k 0x00000000000000aa lich 1\n");
+    n.r.fake.session = 2;
+    fire_load(1);
+    n.seconds(5);
+    std::string note;
+    for (const auto& x : n.r.fake.notes)
+        if (x.find("ich") != std::string::npos) note = x;
+    CHECK(note.find("stays saved") != std::string::npos);
+    CHECK(note.find("EMF creature packs") != std::string::npos);
+    CHECK(note.find("EML or ShroudForge") != std::string::npos);
 }
 
 // ---- kinds (the undead pack): the Bone Golem ----
@@ -512,7 +678,7 @@ TEST_CASE("necromancer: a bone golem is its own kind (cap 1, 60 % mana), raised 
     CHECK(n.reply("necromancer.list").find("Bone Golems 1/1") != std::string::npos);
     n.seconds(2);
     CHECK(n.saved().find("k 0x00000000000000aa golem 1") != std::string::npos);
-    press_key(n, 'V');
+    press_key(n, VK_F2);
     REQUIRE(n.r.fake.wheels.size() == 1);
     CHECK(item_at(n.r.fake.wheels[0].items, "Raise Bone Golem (1/1)") >= 0);  // its own section only: no "Undead: " prefix
     CHECK(n.reply("necromancer.raise dragon").find("Raise what?") != std::string::npos);
@@ -533,7 +699,7 @@ TEST_CASE("necromancer: a saved lich whose first restores fail for a moment (no 
     n.seconds(2);
     CHECK(n.spawned(kLich) == 1);
     size_t notes = 0;
-    for (const auto& x : n.r.fake.notes) notes += x.find("Lich") != std::string::npos;
+    for (const auto& x : n.r.fake.notes) notes += x.find("lich") != std::string::npos;
     CHECK(notes == 0);
     CHECK(n.reply("necromancer.list").find("Liches 1/1") != std::string::npos);
 }
@@ -546,4 +712,113 @@ TEST_CASE("necromancer: a bone golem keeps 2x the game's base health") {
     h.dataStorage[2] = 120;
     n.seconds(1);
     CHECK(h.dataStorage[3] == 120);  // 120 + 120 = 2 x 120
+}
+
+// ---- stepping aside: the game keeps a no-build zone around every creature with the enemy AI (add_no_buildzones_enemy),
+// so a skeleton at your side blocks building and placing there ----
+TEST_CASE("necromancer: the undead step aside while their owner builds and come back after, free; a raise meanwhile waits") {
+    NecroRig n;
+    n.spawnable(6);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(1);
+    CHECK(n.reply("necromancer.raise").find("rises (2/3)") != std::string::npos);
+    CHECK(n.reply("necromancer raise", 2, 0xBB).find("rises (1/3)") != std::string::npos);  // a guest's, 1236
+    n.seconds(2);
+    component<ecs::NetworkCursor>(n.r.fake, 1).currentBuildingItemId.value = 0x77;  // the host builds (the replicated copy)
+    n.seconds(2);
+    CHECK(has(n.r.fake.destroyed, 1234));
+    CHECK(has(n.r.fake.destroyed, 1235));
+    CHECK(!has(n.r.fake.destroyed, 1236));  // the guest does not build
+    size_t told = 0;
+    for (const auto& x : n.r.fake.notes) told += x.find("step aside while you build") != std::string::npos;
+    CHECK(told == 1);
+    CHECK(n.reply("necromancer.list").find("Skeletons 2/3") != std::string::npos);  // kept: they come back
+    CHECK(n.hud("out").find("aside") != std::string::npos);
+    CHECK(n.reply("necromancer.raise").find("while you build") != std::string::npos);
+    CHECK(n.reply("necromancer.gather").find("while you build") != std::string::npos);
+    n.seconds(5);
+    CHECK(n.spawned(kSkeleton) == 3);
+    component<ecs::NetworkCursor>(n.r.fake, 1).currentBuildingItemId.value = 0;
+    n.seconds(5);
+    CHECK(n.spawned(kSkeleton) == 5);  // both back, free
+    size_t paid = 0;
+    for (const auto& [e, a, d] : n.r.fake.attr_adds) paid += e == 1 && a == EMF_ATTR_MANA && d == -25;
+    CHECK(paid == 2);
+    CHECK(n.hud("out").find("aside") == std::string::npos);
+}
+
+TEST_CASE("necromancer: /necromancer aside sends the undead away until typed again; Gather or a raise brings them back") {
+    NecroRig n;
+    n.spawnable(6);
+    CHECK(n.reply("necromancer.aside").find("You have no undead") != std::string::npos);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.reply("necromancer.aside").find("step aside") != std::string::npos);
+    n.seconds(2);
+    CHECK(has(n.r.fake.destroyed, 1234));
+    n.seconds(5);
+    CHECK(n.spawned(kSkeleton) == 1);
+    CHECK(n.reply("necromancer.gather").find("come back (1)") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.spawned(kSkeleton) == 2);
+    CHECK(n.reply("necromancer.aside").find("step aside") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.reply("necromancer.aside").find("come back") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.spawned(kSkeleton) == 3);
+    CHECK(n.reply("necromancer.aside").find("step aside") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.reply("necromancer.raise").find("rises (2/3)") != std::string::npos);  // a raise ends it
+    n.seconds(2);
+    CHECK(n.spawned(kSkeleton) == 5);
+    CHECK(n.reply("necromancer").find("aside") != std::string::npos);
+}
+
+TEST_CASE("necromancer: while aside by the command the wheel's Gather says Come back and the list says how; dismissing all ends the aside") {
+    NecroRig n;
+    n.spawnable(4);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.reply("necromancer.aside").find("step aside") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.hud("out").rfind("Undead (aside): Skeletons 1/3", 0) == 0);  // "(aside)" goes with "Undead"
+    CHECK(n.reply("necromancer.list").find("Gather") != std::string::npos);
+    press_key(n, VK_F2);
+    REQUIRE(n.r.fake.wheels.size() == 1);
+    CHECK(item_at(n.r.fake.wheels[0].items, "Come back") >= 0);
+    CHECK(item_at(n.r.fake.wheels[0].items, "Gather") < 0);
+    CHECK(n.reply("necromancer.dismiss").find("returns to the ground") != std::string::npos);
+    n.seconds(1);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(2);
+    CHECK(!has(n.r.fake.destroyed, 1235));  // the new one stays: no aside left over
+    CHECK(n.hud("out").rfind("Undead: Skeletons 1/3", 0) == 0);
+}
+
+TEST_CASE("necromancer: the undead also step aside while another player builds within 20 m of them; aside off while building says when") {
+    NecroRig n;
+    n.spawnable(4);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(2);
+    component<ecs::ServerCursor>(n.r.fake, 2).currentBuildingItemInstance.itemId.value = 0x55;  // the guest, 30 m away
+    n.seconds(3);
+    CHECK(!has(n.r.fake.destroyed, 1234));
+    component<ecs::ServerCursor>(n.r.fake, 2).currentBuildingItemInstance.itemId.value = 0;
+    n.seconds(4);
+    place(n.r.fake, 2, 10, 10, 0);  // 10 m away, and builds again
+    component<ecs::ServerCursor>(n.r.fake, 2).currentBuildingItemInstance.itemId.value = 0x55;
+    n.r.fake.tick += 1;  // noticed in the next game step
+    n.host->tick(kServer);
+    CHECK(has(n.r.fake.destroyed, 1234));
+    size_t told = 0;
+    for (const auto& x : n.r.fake.notes) told += x.find("a player builds near them") != std::string::npos;
+    CHECK(told == 1);
+    CHECK(n.reply("necromancer.raise").find("while a player builds near you") != std::string::npos);
+    CHECK(n.reply("necromancer.aside").find("step aside") != std::string::npos);
+    const std::string off = n.reply("necromancer.aside");
+    CHECK(off.find("a few seconds after") != std::string::npos);
+    CHECK(off != "Your undead come back.");
+    component<ecs::ServerCursor>(n.r.fake, 2).currentBuildingItemInstance.itemId.value = 0;
+    n.seconds(5);
+    CHECK(n.spawned(kSkeleton) == 2);  // back
 }

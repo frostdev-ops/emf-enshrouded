@@ -133,6 +133,7 @@ struct ModRig {
     Rig r;
     std::unique_ptr<Host> host;
     std::wstring folder, data;
+    std::vector<std::wstring> others_data;  // the world data files of the mods loaded beside it
     std::string id;
     // `also`: more shipped mods loaded beside it, at their default settings (e.g. two class mods sharing a wheel).
     ModRig(const char* mod, const wchar_t* name, const std::map<std::string, std::string>& settings,
@@ -149,13 +150,20 @@ struct ModRig {
         std::error_code ec;
         std::filesystem::create_directories(std::filesystem::path(data).parent_path().lexically_normal(), ec);
         DeleteFileW(data.c_str());
+        for (const auto& other : also) {  // the other mods' world data from an earlier test must not load either
+            others_data.push_back(r.dir + L"\\..\\config\\" + std::wstring(other.begin(), other.end()) + L"\\0001.txt");
+            DeleteFileW(others_data.back().c_str());
+        }
         host = std::make_unique<Host>(&r.api, r.dir);
         host->load_all();
         REQUIRE_MESSAGE(host->status(id) == "running", host->status(id));
         fire_load(1);
         seconds(1);
     }
-    ~ModRig() { DeleteFileW(data.c_str()); }
+    ~ModRig() {
+        DeleteFileW(data.c_str());
+        for (const auto& d : others_data) DeleteFileW(d.c_str());
+    }
     // Copies the shipped mod `mid` into the mods folder and lists it as a script mod, its settings at their defaults.
     void add_mod(const std::string& mid) {
         const std::wstring w(mid.begin(), mid.end());

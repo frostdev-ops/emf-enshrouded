@@ -79,8 +79,8 @@ local function command(word, help, fn)
 	word_list[#word_list + 1] = word
 end
 
-local function state_text(b)
-	if b.out then return "out" end
+local function state_text(b, aside)
+	if b.out then return aside and "aside" or "out" end
 	if b.rest > 0 then return string.format("rests %d:%02d", math.floor(b.rest / 60), math.floor(b.rest % 60)) end
 	return "at home"
 end
@@ -93,8 +93,12 @@ command("list", ": your beasts", function(world, args)
 		return
 	end
 	local lines = { string.format("Your beasts (%d/%d):", #list, setting("collection_max")) }
+	local aside = pack:is_aside(account)
 	for i, b in ipairs(list) do
-		lines[#lines + 1] = string.format("%d. %s - %s, %s", i, b.name, b.species, state_text(b))
+		lines[#lines + 1] = string.format("%d. %s - %s, %s", i, b.name, b.species, state_text(b, aside))
+	end
+	if pack:aside_by_command(account) then
+		lines[#lines + 1] = "They stepped aside: Come back on the wheel or /beastmaster aside brings them back."
 	end
 	emf.reply(table.concat(lines, "\n"))
 end)
@@ -163,6 +167,11 @@ end
 
 local ATTACK_RANGE_M, HIT_MEMORY_S = 40, 10
 
+function actions.come_back(world, player, account)
+	if not account then return "Your account is not known yet." end
+	return pack:come_back(world, account, player)
+end
+
 function actions.attack(world, player, account)
 	if not account then return "Your account is not known yet." end
 	local function foe(id)
@@ -196,7 +205,7 @@ command("call", "<name or number>: call a beast of your collection to your side"
 	emf.reply(actions.call(world, player, account, table.concat(args, " ")))
 end)
 
-command("dismiss", "<name or number | all>: send a beast home", function(world, args)
+command("dismiss", "[name, number or all]: send a beast home; nothing or all: every beast that is out", function(world, args)
 	local player, account = who(world)
 	emf.reply(actions.dismiss(world, player, account, table.concat(args, " ")))
 end)
@@ -206,12 +215,19 @@ command("attack", ": your beasts out attack the creature you look at", function(
 	emf.reply(actions.attack(world, player, account))
 end)
 
-emf.command(emf.id, "<word>: " .. table.concat(word_list, ", ") .. " (call and dismiss take a name or number)",
+command("aside", ": your beasts out step aside (leave for now) or come back; while you build they do it on their own",
+	function(world, args)
+		local player, account = who(world)
+		emf.reply(account and pack:toggle_aside(world, account, player) or "Your account is not known yet.")
+	end)
+
+local WORDS_HELP = " (call takes a name or number; dismiss a name, a number, or nothing for all)"
+emf.command(emf.id, "<word>: " .. table.concat(word_list, ", ") .. WORDS_HELP,
 	function(world, args)
 		local word = args[1] and args[1]:lower()
 		local fn = word and words[word]
 		if not fn then
-			emf.reply("/beastmaster " .. table.concat(word_list, " | ") .. " (call and dismiss take a name or number)")
+			emf.reply("/beastmaster " .. table.concat(word_list, " | ") .. WORDS_HELP)
 			return
 		end
 		fn(world, { table.unpack(args, 2) })
@@ -244,16 +260,33 @@ local function wheel_items(world)
 		labels[#labels + 1] = label
 		entries[#entries + 1] = entry
 	end
-	add("Tame (look at a weakened beast)", { action = "tame" })
-	add("Feed (its bait, 3 times)", { action = "feed" })
-	add("Attack (what you look at)", { action = "attack" })
-	add("Dismiss all", { action = "dismiss", key = "all" })
+	-- short labels: a name of at most 20 characters, a detail in brackets of at most 13 (the wheel's slices are narrow)
+	add("Tame (weakened)", { action = "tame" })
+	add("Feed (bait)", { action = "feed" })
+	add("Attack", { action = "attack" })
+	if account and pack:aside_by_command(account) then add("Come back", { action = "come_back" }) end
+	local list = account and beasts:list(account) or {}
+	local out = 0
+	for _, b in ipairs(list) do
+		if b.out then
+			out = out + 1
+			add("Dismiss " .. b.name, { action = "dismiss", key = b.name })
+		end
+	end
+	if out > 1 then add("Dismiss all", { action = "dismiss", key = "all" }) end
 	local shown = 0
-	for _, b in ipairs(account and beasts:list(account) or {}) do
+	for _, b in ipairs(list) do
 		if not b.out and shown < WHEEL_CALLS then
 			shown = shown + 1
-			add(b.rest > 0 and string.format("Call %s (rests %d:%02d)", b.name, math.floor(b.rest / 60), math.floor(b.rest % 60))
-				or string.format("Call %s (%s)", b.name, b.species), { action = "call", key = b.name })
+			local label
+			if b.rest > 0 then
+				label = string.format("Call %s (rests %d:%02d)", b.name, math.floor(b.rest / 60), math.floor(b.rest % 60))
+			elseif b.name:lower():find(b.species, 1, true) == 1 then
+				label = "Call " .. b.name  -- "Wolf 2" says it is a wolf
+			else
+				label = string.format("Call %s (%s)", b.name, b.species)
+			end
+			add(label, { action = "call", key = b.name })
 		end
 	end
 	return labels, entries
@@ -299,9 +332,10 @@ local function update_hud(world)
 	next_hud = now_s + 1
 	local account = world:account(emf.local_player())
 	local parts = {}
+	local away = account and pack:is_aside(account)
 	for _, b in ipairs(account and beasts:list(account) or {}) do
 		if b.out then
-			parts[#parts + 1] = b.name .. " (out)"
+			parts[#parts + 1] = b.name .. (away and " (aside)" or " (out)")
 		elseif b.rest > 0 then
 			parts[#parts + 1] = string.format("%s (rests %d:%02d)", b.name, math.floor(b.rest / 60), math.floor(b.rest % 60))
 		end
@@ -347,7 +381,9 @@ emf.command("give", "<species>: add a beast to your collection (admin)", functio
 	end
 	local s = species.by_id(args[1])
 	if not s then
-		emf.reply("no species " .. tostring(args[1]) .. " (wolf, boar, sabretooth, hound, bear)")
+		local ids = {}
+		for _, sp in ipairs(species.list) do ids[#ids + 1] = sp.id end
+		emf.reply("no species " .. tostring(args[1]) .. " (" .. table.concat(ids, ", ") .. ")")
 		return
 	end
 	local _, account = who(world)

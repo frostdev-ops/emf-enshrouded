@@ -6,7 +6,8 @@ Their kills are yours: XP and loot.
 
 It needs the `lua` mod 1.9 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
 (the key under Esc) or in EMF.exe, then restart the game. It works next to **Beastmaster**: with both installed, one
-summoning wheel holds your undead and your beasts.
+summoning wheel holds your undead and your beasts. The lich and the bone golem come in the **EMF creature packs**
+download, which is EML content: **install EML (or ShroudForge) first** (below).
 
 ## How it goes
 
@@ -25,15 +26,28 @@ summoning wheel holds your undead and your beasts.
    monsters and wild animals only: never players, allies, farm animals, or your base's dummies and mines. Each lasts
    6 s, at most 10 at a time (the oldest go first). Spirits are never saved.
 4. **Attack** sends your undead at the creature you look at (within 40 m), or at what hit you in the last 10 s.
-   **Gather** calls them to you. **Dismiss all** returns them to the ground.
-5. **Kills:** when a minion's or a spirit's hit leaves a foe at 25 % health or less, you land the killing blow (XP and
+   **Gather** calls them to you.
+5. **Dismiss:** **Dismiss Skeleton** (or Lich, Bone Golem) on the wheel returns one of that kind to the ground, the
+   newest; **Dismiss all** (with two or more) returns every one. In the chat: `/necromancer dismiss skeleton` (or
+   `lich`, `golem`) and `/necromancer dismiss` for all. A dismissed one is gone: raise a new one when you need it.
+6. **Kills:** when a minion's or a spirit's hit leaves a foe at 25 % health or less, you land the killing blow (XP and
    loot are yours). Never on bosses, mini-bosses or players.
-6. **They stay close:** a minion more than 40 m from you comes back after 3 s; more than 80 m at once.
+7. **They stay close:** a minion more than 40 m from you comes back after 3 s; more than 80 m at once.
+8. **Building:** the game most likely does not let you build or place things next to a creature that runs the enemy
+   AI (that is what its code suggests; not yet seen in game), and your undead are such creatures. So while you, or
+   another player within 20 m of them, hold something to build or place, your undead **step aside**: they leave for a
+   moment and come back beside you, free, a few seconds after the building stops (the first time a note says so).
+   **Undead step aside while someone builds next to them** (`make_room`) turns this off. `/necromancer aside` sends
+   them away by hand, for example when they stand where you want to work; **Come back** on the wheel (it takes Gather's
+   place meanwhile), Gather, `/necromancer aside` again, raising one, or dismissing them all ends it.
 
-**The wheel (hold V):** Raise Skeleton (n/3), Raise Lich (n/1), Raise Bone Golem (n/1), Raging Spirits, Gather,
-Attack, Dismiss all. With Beastmaster installed and **One wheel** on in both mods, V and B open the same "Summons"
-wheel: "Undead: ..." and "Beasts: ..." items. Turn **One wheel** off in a mod to give it its own wheel again. A line
-at the bottom left: "Undead: Skeletons 2/3, Liches 1/1, Spirits 2".
+**The wheel (hold F2):** Raise Skeleton (n/3), Raise Lich (n/1), Raise Bone Golem (n/1), Raging Spirits, Gather
+(**Come back** while they stepped aside by `/necromancer aside`), Attack, then **Dismiss <kind>** for each kind you
+have (and **Dismiss all** with two or more). The labels are short so they fit the wheel; the mouse wheel turns the
+page when there are more than 8 items. With Beastmaster installed and **One wheel** on in both mods, F2 and F3 open
+the same "Summons" wheel: "Undead: ..." and "Beasts: ..." items. Turn **One wheel** off in a mod to give it its own
+wheel again. A line at the bottom left: "Undead: Skeletons 2/3, Liches 1/1, Spirits 2", and "Undead (aside): ..."
+while they step aside.
 
 ## Commands
 
@@ -48,14 +62,16 @@ All of these work from the game's chat for every player (`/necromancer <word>`) 
 | `/necromancer spirits` | raging spirits at what you look at (else the nearest foe) |
 | `/necromancer attack` | your undead attack what you look at (else what hit you) |
 | `/necromancer gather` | your undead come to you |
-| `/necromancer dismiss` | your undead return to the ground |
+| `/necromancer dismiss skeleton` (or `lich`, `golem`) | one undead of that kind returns to the ground (the newest) |
+| `/necromancer dismiss` (or `dismiss all`) | all your undead return to the ground |
 | `/necromancer list` | how many undead of each kind you have |
+| `/necromancer aside` | your undead step aside (leave for now), or come back; they do it on their own while someone builds next to them |
 
 ## Settings (Mods tab, EMF.exe, or `set necromancer <key> <value>`)
 
 | Setting | Default | What it does |
 |---|---|---|
-| Summoning wheel (`wheel_key`) | V | hold it for the wheel |
+| Summoning wheel (`wheel_key`) | F2 | hold it for the wheel (any key the game does not use; V is its crafting key) |
 | One wheel with Beastmaster's beasts (`shared_wheel`) | on | off: this mod's own wheel |
 | Mana to raise a skeleton (`raise_mana_pct`) | 25 % | of your maximum mana; 0 = free |
 | Skeletons at once (`skeleton_cap`) | 3 | 1-8 |
@@ -69,6 +85,7 @@ All of these work from the game's chat for every player (`/necromancer <word>`) 
 | Spirits at once (`spirit_cap`) | 10 | the oldest go first |
 | Minions come back from (`leash_m`), At once from (`leash_far_m`) | 40 m, 80 m | |
 | You get your minions' kills (`xp_credit`) | on | |
+| Undead step aside while someone builds next to them (`make_room`) | on | while you, or a player within 20 m of them, hold something to build or place, your undead leave and come back after |
 
 ## The undead pack (`emf_necromancer_undead`)
 
@@ -78,14 +95,16 @@ those creatures' animations and AI:
 - the Bone Golem, `Necromancer_BoneGolem` (template `e7b3c9d1-2a4f-4e6b-8c15-9d2f4a6b8e02`), on the Vukah elite
   (`Enemy_Vukah_Melee_Elite_Armored`), as tall as it (3 m).
 
-It is in the **EMF creature packs** download on EMF's Nexus page: install it with EMF.exe ("Install a downloaded file")
-or like any EML mod (the `mods` folder next to the game, run through EML's `emm.exe`). The lich's template sets
+It is in the **EMF creature packs** download on EMF's Nexus page. It needs **EML (or ShroudForge) installed first**,
+which loads it when the game starts; copying the pack folder alone does nothing. Then install the pack with EMF.exe
+("Install a downloaded file") or like any EML mod (the `mods` folder next to the game, run through EML's `emm.exe`).
+The lich's template sets
 the damage (DamageMod multiplier x1.3); its health (x1.5) comes from Necromancer when it raises a lich, and the golem's
 (x2) when it raises a golem.
 
-Without the pack, Raise Lich and Raise Bone Golem answer that the pack is not installed, and nothing else changes.
-Undead saved in a world stay saved while the pack is missing (one note when you load) and come back once the pack is
-installed.
+Without the pack, or without EML to load it, Raise Lich and Raise Bone Golem say that they need the EMF creature
+packs and EML (or ShroudForge), and nothing else changes. Undead saved in a world stay saved while the pack is missing
+(one note when you load) and come back once it loads.
 
 To rebuild it from its sources (for modders; the sources are not in the repository): `python -I
 tools/models/make_mod.py tools/models/packs/necromancer_undead.json`. The pack holds the new model and its texture, plus

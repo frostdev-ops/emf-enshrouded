@@ -39,11 +39,13 @@ Included mods:
                  switch it on in the Mods tab and restart the game)
   bulk_craft     craft one by hand, then U at the station (or /craft 25) crafts many through the game's own
                  crafting, at the recipe's pace, from what you carry (OFF by default; see mods\bulk_craft\README.md)
-  beastmaster    tame wild beasts and call them to fight beside you; hold B for the beast wheel, /beastmaster for
-                 every player (a Lua mod; OFF by default; the bear is an EML pack, content\emf_beastmaster_bear, when
-                 this download has it; see game\emf\mods\beastmaster\README.md)
-  necromancer    raise skeleton warriors and cast raging spirits; hold V for the summoning wheel (shared with
-                 Beastmaster), /necromancer for every player (a Lua mod; OFF by default; see
+  beastmaster    tame wild beasts and call them to fight beside you; hold F3 for the beast wheel, /beastmaster for
+                 every player (a Lua mod; OFF by default; the bear and the aurochs are in the EMF creature packs
+                 download, which is EML content: install EML or ShroudForge first; see
+                 game\emf\mods\beastmaster\README.md)
+  necromancer    raise skeleton warriors and cast raging spirits; hold F2 for the summoning wheel (shared with
+                 Beastmaster), /necromancer for every player (a Lua mod; OFF by default; the lich and the bone golem
+                 are in the EMF creature packs download: install EML or ShroudForge first; see
                  game\emf\mods\necromancer\README.md)
 
 Other mods and loaders (Creative Mode, Auto Loot Plus, XHL mods, EML, ShroudForge, Shroudweave, ...) keep working:

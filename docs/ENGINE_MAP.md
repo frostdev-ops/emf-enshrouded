@@ -509,6 +509,17 @@ Full details and 52 verified signatures: [`engine_parts/world_building_daytime.m
 
 - `PlayerBasesSystemServer` (0x2070 B): 16 base records at `+0xC0`, stride 0x130, each with an AABB; lookups `0x140468ce0`, `0x140469f70`. Bed, comfort and crafting-prop counts are rebuilt every tick (Medium). Relevant for villagers.
 - `BuildZoneSystem` is rebuilt every tick; `addZone` `0x140e557e0` (list 0 build zones, 1 no-build, 2 creature no-build) (Medium).
+- **Ally summons most likely get a no-build zone too (Medium; from the program table, not seen in game).** Program
+  #59 `add_no_buildzones_enemy` `0x140329c80` runs over every entity with `Enemy01BehaviorState` and reads only
+  `CurrentTransform` (and optionally `UnitTransformer`, `DynamicWildlife`): no `Faction`. It writes `ClientNoBuildZone
+  {range, isStrict, owner}` and adds a list-2 zone (ownerKind 2). So a creature spawned from an enemy template and made
+  an ally by setting its Faction to PlayerAlly (11), as Beastmaster's beasts and Necromancer's skeletons are, keeps its
+  zone, and the placement check (`server_cursor_no_prediction` `0x140292bd0`, which reads `BuildZoneSystem` and other
+  entities' `Faction` and colliders) would refuse building next to it. A player of 0.3.2 reported "with a skeleton
+  following, I could not build or place a bed". The zone's range and whether the placement check uses list 2 were not
+  traced. Both mods make their summons step aside while a player within 20 m builds (`mods/beastmaster/aside.lua`). A
+  player holds something to build or place while `ServerCursor.currentBuildingItemInstance.itemId` (written by the
+  building programs) or `NetworkCursor.currentBuildingItemId` (its copy) is non-zero (Medium, from the program table).
 - Not found: the "may I build here" check, the exact arguments for calling `VoxelWorld_placeBlueprint` without a building context, where the flame-altar level is stored.
 
 ### 2.6 Day/night and weather

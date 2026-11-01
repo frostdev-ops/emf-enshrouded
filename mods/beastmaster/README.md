@@ -5,8 +5,9 @@ your collection, and call up to 2 at a time to fight beside you. They follow you
 they fall, and are kept with the world. Their kills are yours: XP and loot.
 
 It needs the `lua` mod 1.9 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
-(the key under Esc) or in EMF.exe, then restart the game. The bear and the aurochs come in separate downloads, the
-**bear pack** (`emf_beastmaster_bear`) and the **beasts pack** (`emf_beastmaster_beasts`), below; without them
+(the key under Esc) or in EMF.exe, then restart the game. The bear and the aurochs come in the **EMF creature packs**
+download (the **bear pack** and the **beasts pack**, below). The packs are EML content: **install EML (or ShroudForge)
+first**, because it loads them when the game starts; copying the pack folders alone does nothing. Without them
 everything else works and those beasts are simply not there.
 
 ## How it goes
@@ -31,13 +32,26 @@ everything else works and those beasts are simply not there.
    once.
 6. **A beast that falls** rests for 2 minutes at home, and then you can call it again. Its body is gone a second after,
    so our own beasts never drop loot.
-7. **Dismiss** a beast (`/beastmaster dismiss <name>` or **Dismiss all**) to send it home. Beasts that are out stay out
-   when you reload the world, and they come back beside you, free of mana.
+7. **Dismiss** a beast to send it home: **Dismiss <name>** on the wheel (one for each beast that is out), **Dismiss
+   all** (with two or more out), or `/beastmaster dismiss <name or number>`; `/beastmaster dismiss` alone sends every
+   beast home. A dismissed beast waits at home: call it again whenever you like. Beasts that are out stay out when you
+   reload the world, and they come back beside you, free of mana.
+8. **Building:** the game most likely does not let you build or place things next to a creature that runs the enemy
+   AI (that is what its code suggests; not yet seen in game), and your beasts are such creatures. So while you, or
+   another player within 20 m of them, hold something to build or place, your beasts that are out **step aside**:
+   they leave for a moment and come back beside you, free, a few seconds after the building stops (the first time a
+   note says so). **Beasts step aside while someone builds next to them** (`make_room`) turns this off.
+   `/beastmaster aside` sends them away by hand, for example when they stand where you want to work; **Come back** on
+   the wheel, `/beastmaster aside` again, calling or taming a beast, or sending the last one home ends it.
+   `/beastmaster list` shows them as "aside".
 
-**The wheel (hold B):** Tame, Feed, Attack, Dismiss all, then **Call <name>** for up to 6 beasts that are at home or
-resting; a resting one shows its time left. With **Necromancer** installed too, B and V open one "Summons" wheel with
-"Beasts: ..." and "Undead: ..." items; turn **One wheel** (`shared_wheel`) off to keep Beastmaster's own wheel. A line at the bottom left lists your beasts that are out or resting:
-"Beasts: Wolf (out), Bear (rests 1:20)".
+**The wheel (hold F3):** Tame, Feed, Attack, **Come back** while your beasts stepped aside by `/beastmaster aside`,
+**Dismiss <name>** for each beast that is out (and **Dismiss all** with two or more out), then **Call <name>** for up
+to 6 beasts that are at home or resting; a resting one shows its time left. The labels are short so they fit the
+wheel; the mouse wheel turns the page when there are more than 8 items. With **Necromancer** installed too, F3 and F2
+open one "Summons" wheel with "Beasts: ..." and "Undead: ..." items; turn **One wheel** (`shared_wheel`) off to keep
+Beastmaster's own wheel. A line at the bottom left lists your beasts that are out, aside or resting: "Beasts: Wolf
+(out), Bear (rests 1:20)".
 
 **Wild bears and aurochs (with their packs):** about every 30 minutes of play, when there is no wild one yet, one of
 them (at random, from the packs you have) appears 50-70 m from a player who is out in the open, at that player's level;
@@ -57,8 +71,10 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster tame` | tame the beast you look at, else the nearest beaten-down one (under 25 % health, within 8 m) |
 | `/beastmaster feed` | feed the beast you look at (else the nearest) its bait: 3 times to tame it |
 | `/beastmaster call <name or number>` | call a beast from your collection |
-| `/beastmaster dismiss <name, number or all>` | send a beast home |
+| `/beastmaster dismiss <name or number>` | send that beast home |
+| `/beastmaster dismiss` (or `dismiss all`) | send every beast that is out home |
 | `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
+| `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while someone builds next to them |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs) |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear is the wolf's graph at 1.4x, the aurochs the boar's at 1.3x) |
 
@@ -66,7 +82,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 
 | Setting | Default | What it does |
 |---|---|---|
-| Beast wheel (`wheel_key`) | B | hold it for the wheel |
+| Beast wheel (`wheel_key`) | F3 | hold it for the wheel (any key the game does not use; B is its backpack key) |
 | One wheel with Necromancer's undead (`shared_wheel`) | on | off: Beastmaster's own wheel |
 | Mana to call a beast (`call_mana_pct`) | 15 % | of your maximum mana; 0 = free |
 | Seconds between calls (`call_cooldown_s`) | 10 | |
@@ -80,14 +96,16 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Bait for wolves, hounds, boars, sabretooths, bears, aurochs (`bait_<kind>`) | see above | an item's debug name (`items meat` in the console) |
 | Beasts come back from (`leash_m`), At once from (`leash_far_m`) | 40 m, 80 m | |
 | You get your beasts' kills (`xp_credit`) | on | XP and loot for the owner |
+| Beasts step aside while someone builds next to them (`make_room`) | on | while you, or a player within 20 m of them, hold something to build or place, your beasts leave and come back after |
 | Rare wild bears and aurochs (`wild_bears`), About every (`wild_bear_minutes`) | on, 30 min | needs their pack |
 
 ## The bear pack (`emf_beastmaster_bear`)
 
 An EML data patch that adds one new creature, `Beastmaster_Bear` (template `b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02`). Its
 model was made with Meshy and fitted to the game wolf's skeleton, so it moves with the wolf's animations and AI. It is in
-the **EMF creature packs** download on EMF's Nexus page: install it with EMF.exe ("Install a downloaded file") or like
-any EML mod (the `mods` folder next to the game, run through EML's `emm.exe`). The template sets the size
+the **EMF creature packs** download on EMF's Nexus page. It needs **EML (or ShroudForge) installed first**, which loads
+it when the game starts; then install the pack with EMF.exe ("Install a downloaded file") or like any EML mod (the
+`mods` folder next to the game, run through EML's `emm.exe`). The template sets the size
 (`ScaleComponent` 1.4), the damage (DamageMod multiplier x1.5) and the speeds (x0.85). The health (x2.5) comes from
 Beastmaster when it spawns a bear: the game's template has no base health of its own.
 
@@ -101,9 +119,9 @@ An EML data patch with a new beast, made with Meshy and fitted to a game skeleto
 `Beastmaster_Aurochs` (template `d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02`), on the boar: size (`ScaleComponent`) 1.3,
 damage x1.4, speeds x0.9; the health (x3) comes from Beastmaster. Its tail follows its hips.
 
-Installed and rebuilt like the bear pack (`tools/models/packs/beastmaster_beasts.json`). Without the pack, an aurochs
-in your collection stays at home: calling it answers that the pack is not installed, and one that was out when you
-saved goes home with one note when you load.
+Installed (EML first) and rebuilt like the bear pack (`tools/models/packs/beastmaster_beasts.json`). Without the pack,
+or without EML to load it, an aurochs in your collection stays at home: calling it says that it needs the EMF creature
+packs and EML (or ShroudForge), and one that was out when you saved goes home with one note when you load.
 
 ## Good to know
 
@@ -117,5 +135,5 @@ saved goes home with one note when you load.
   their own path to a foe.
 - The bear's and the aurochs' health boost needs Beastmaster to spawn them: one made another way (the `spawn` console
   command) has a wolf's or a boar's health.
-- Beasts are called with the wheel or the chat command; there are no spell items for it. The species are the seven
+- Beasts are called with the wheel or the chat command; there are no spell items for it. The species are the six
   above.
