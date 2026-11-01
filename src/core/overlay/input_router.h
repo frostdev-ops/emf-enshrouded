@@ -35,13 +35,20 @@ public:
         for (bool& d : game_down_) d = false;
     }
     bool open() const { return open_.load(); }  // the console is open (read from any thread)
-    void set_open(bool open) { open_ = open; }
+    void set_open(bool open) {
+        open_ = open;
+        esc_to_console_ = false;
+    }
     // A mod's radial wheel captures the input (the console stays closed): keys go to the overlay, releases of keys
     // the game saw go down reach the game too, the mouse is kept from the game.
     bool wheel() const { return wheel_.load(); }
     void set_wheel(bool on) { wheel_ = on; }
     // The console or a wheel holds the input (the game gets no presses and no mouse movement).
     bool capturing() const { return open_.load() || wheel_.load(); }
+    // While the console's suggestions show, Esc goes to the console (which hides them) instead of closing it. Set by
+    // the render thread each frame the console draws; opening or closing the console clears it.
+    void set_esc_to_console(bool on) { esc_to_console_ = on; }
+    bool esc_to_console() const { return esc_to_console_.load(); }
     // A key from raw input (WM_INPUT), or from key messages when the window gets no raw keyboard input.
     Route key(const KeyEvent& e);
     // A key message (WM_KEYDOWN/UP) that follows the same key's raw input: it copies the raw decision (Game or
@@ -64,6 +71,7 @@ private:
     uint16_t toggle_;
     std::atomic<bool> open_{false};
     std::atomic<bool> wheel_{false};
+    std::atomic<bool> esc_to_console_{false};
     std::atomic<uint16_t> hidden_vk_{0};
     bool swallow_char_ = false;  // the character right after a toggle belongs to the toggle key
     uint16_t held_ = 0;          // the key that toggled, until it is released (its auto-repeats are swallowed)
