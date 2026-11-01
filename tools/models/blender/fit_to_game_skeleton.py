@@ -310,7 +310,10 @@ if head_b is not None:
             fractions.append(fractions[-1] + s_ / (sum(seg) or 1.0))
         curve = tail_curve(world, dist, 16)
         tail_pos = {b_.name: Vector(p) for b_, p in zip(chain, along(curve, fractions))}
-        for vi, new in tail_chain_weights(dist, fractions, [b_.name for b_ in chain]).items():
+        # the first part of the tail blends from the hips (the bone the tail hangs from) into the tail bones
+        ramp = min(0.15, fractions[1] if len(fractions) > 1 else 0.15)
+        for vi, new in tail_chain_weights(dist, fractions, [b_.name for b_ in chain], parent=root.parent.name,
+                                          ramp=ramp).items():
             v = body.data.vertices[vi]
             for g_ in list(v.groups):
                 body.vertex_groups[g_.group].remove([vi])

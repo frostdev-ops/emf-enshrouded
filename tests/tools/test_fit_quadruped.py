@@ -139,7 +139,7 @@ class FitQuadrupedTests(unittest.TestCase):
             self.assertEqual(code, 0, log[-2000:])
             _, rump, tail = next(l for l in log.splitlines() if l.startswith("TAILW ")).split()
             self.assertLess(float(rump), 0.05)
-            self.assertGreater(float(tail), 0.9)
+            self.assertGreater(float(tail), 0.8)  # the tail's first 15% blends from the hips
 
 
 def bbox(path):

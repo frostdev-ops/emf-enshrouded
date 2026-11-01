@@ -264,6 +264,16 @@ class TailFitTests(unittest.TestCase):
         self.assertAlmostEqual(w[9]["t2"], 0.5)
         self.assertEqual(w[10], {"t2": 1.0})
 
+    def test_the_tail_root_blends_from_its_parent(self):
+        # within the ramp (a share of the tail's length), the hips' share falls from 1 to 0: no seam at the rump
+        w = ql.tail_chain_weights({1: 0.0, 2: 0.1, 3: 0.2, 4: 0.5, 5: 1.0}, [0.0, 0.5, 1.0], ["t0", "t1", "t2"],
+                                  parent="hips", ramp=0.2)
+        self.assertEqual(w[1], {"hips": 1.0})
+        self.assertAlmostEqual(w[2]["hips"], 0.5)
+        self.assertAlmostEqual(sum(w[2].values()), 1.0)
+        self.assertNotIn("hips", w[3])
+        self.assertEqual(w[4], {"t1": 1.0})
+
 
 class RigidTests(unittest.TestCase):
     """--rigid: a part (a paw) follows one bone; the game creature's finger bones below it give it their weight."""

@@ -256,20 +256,26 @@ def along(curve, fractions):
     return out
 
 
-def tail_chain_weights(dist, fractions, chain):
+def tail_chain_weights(dist, fractions, chain, parent=None, ramp=0.0):
     """Per tail vertex, its weights on a chain of tail bones placed at `fractions` (0..1) of the tail's length: shared
-    between the two bones around its own fraction (its distance along the tail over the tail's length)."""
+    between the two bones around its own fraction (its distance along the tail over the tail's length). With
+    `parent` (the bone the tail hangs from, the hips), the first `ramp` of the tail blends from it into the chain, so
+    the rump and the tail's root do not tear apart when the tail turns."""
     top = max(dist.values()) or 1.0
     out = {}
     for v, d in dist.items():
         s = d / top
         if s >= fractions[-1]:
-            out[v] = {chain[-1]: 1.0}
-            continue
-        k = max(i for i, f in enumerate(fractions) if f <= s) if s > fractions[0] else 0
-        span = fractions[k + 1] - fractions[k]
-        t = (s - fractions[k]) / span if span > 0 else 0.0
-        w = {chain[k]: 1.0 - t, chain[k + 1]: t}
+            w = {chain[-1]: 1.0}
+        else:
+            k = max(i for i, f in enumerate(fractions) if f <= s) if s > fractions[0] else 0
+            span = fractions[k + 1] - fractions[k]
+            t = (s - fractions[k]) / span if span > 0 else 0.0
+            w = {chain[k]: 1.0 - t, chain[k + 1]: t}
+        if parent is not None and s < ramp:
+            share = 1.0 - s / ramp
+            w = {b: x * (1.0 - share) for b, x in w.items()}
+            w[parent] = w.get(parent, 0.0) + share
         out[v] = {b: x for b, x in w.items() if x > 0}
     return out
 
