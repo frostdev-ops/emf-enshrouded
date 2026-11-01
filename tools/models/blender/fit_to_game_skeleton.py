@@ -2,7 +2,7 @@
 
   blender --background --factory-startup --python fit_to_game_skeleton.py -- \
       <game.glb> <creature.glb> <out.glb> [--uv-from 1] [--material 1] [--size 1.0] [--vertex-colors]
-      [--width fit|keep|<scale>] [--tail own|hips] [--own-proportions <sidecar.json>] [--rigid <bone>,...]
+      [--width fit|keep|<scale>] [--tail own|hips|fit] [--own-proportions <sidecar.json>] [--rigid <bone>,...]
 
 Steps:
  1. Import the game model (armature with jNNN bones + its body meshes) and the creature (any rig; it is dropped).
@@ -19,7 +19,9 @@ Steps:
     their weights (the legs: the four branches off the spine that reach lowest, named or not; the fit stops when the
     skeleton has no four); bones under the head keep theirs when the game animal itself uses them on its head (the jaw).
     --tail hips gives the creature's own tail to the hips too (a long tail driven by a short tail's animation moves
-    strangely); the default, own, keeps the game animal's tail bones on the creature's tail. --rigid <bone>,... puts
+    strangely); the default, own, keeps the game animal's tail bones on the creature's tail; fit (with
+    --own-proportions) moves the game's tail bones along the creature's own tail, keeping their spacing, and weights
+    the tail along its length (a long or curled tail on a short tail's bones). --rigid <bone>,... puts
     everything below those bones on them (a cat's paw on the wrist, not on the game creature's clawed fingers).
  4. --own-proportions <sidecar.json>: the creature keeps its own shape. After the weights it goes back to its
     original proportions (uniformly scaled to the game body's height, times --size), and the sidecar lists every game
@@ -40,6 +42,7 @@ from mathutils import Vector
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from quad_landmarks import (clean_detail_weights, fit_z, kept_head_bones, landmarks, main_bones,  # noqa: E402
                             own_space, rigid_weights, tail_slices, unwarp, warp_y, width_scale)
+from quad_landmarks import along, tail_chain_weights, tail_curve, tail_distances  # noqa: E402
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 game_glb, creature_glb, out_glb = (os.path.abspath(p) for p in argv[:3])
@@ -60,8 +63,8 @@ vertex_colors = bool(opt("--vertex-colors", False))
 keep_uvs = bool(opt("--keep-uvs", False))  # a textured creature (e.g. from Meshy) keeps its own UVs and material
 keep_head = bool(opt("--keep-head", False))  # don't stretch the head to the game creature's nose
 tail_mode = opt("--tail", "own")
-if tail_mode not in ("own", "hips"):
-    raise SystemExit("fit_to_game_skeleton: --tail needs own or hips")
+if tail_mode not in ("own", "hips", "fit"):
+    raise SystemExit("fit_to_game_skeleton: --tail needs own, hips or fit")
 rigid = opt("--rigid", "")  # bones whose parts follow them as one piece: "j010_HandL,j054_HandR" (paws on wrists)
 if rigid is True:
     raise SystemExit("fit_to_game_skeleton: --rigid needs bone names, comma-separated")
@@ -240,6 +243,9 @@ def subtree(b):
 
 
 head_b = slot("_Head")
+tail_pos = {}  # --tail fit: the game's tail bones' new places (this script's space, on the creature's tail)
+if tail_mode == "fit" and not own_path:
+    raise SystemExit("fit_to_game_skeleton: --tail fit needs --own-proportions (the game skeleton itself cannot move)")
 if head_b is not None:
     try:
         main = main_bones({b.name: (b.parent.name if b.parent else None) for b in bones},
@@ -260,7 +266,7 @@ if head_b is not None:
     keep = kept_head_bones(use, total)
     names = {g_.index: g_.name for g_ in body.vertex_groups}
     world = [body.matrix_world @ v.co for v in body.data.vertices]
-    tail = tail_slices(world, g) if tail_mode == "own" else set()
+    tail = tail_slices(world, g) if tail_mode in ("own", "fit") else set()
     weights = [{names[g_.group]: g_.weight for g_ in v.groups if g_.weight > 0} for v in body.data.vertices]
     cleaned = clean_detail_weights(weights, [round(p.y / 0.05) in tail for p in world],
                                    {b.name: (b.parent.name if b.parent else None) for b in bones}, main, keep,
@@ -278,6 +284,42 @@ if head_b is not None:
             body.vertex_groups[n].add([v.index], w, "REPLACE")
     print("FIT detail bones: kept under the head %s, tail slices %d, vertices changed %d"
           % (sorted(keep), len(tail), changed))
+
+    # --tail fit: the game's tail bones go along the creature's own tail (its centre line, by distance along the mesh
+    # from the rump), keeping their spacing, and the tail is weighted along its length
+    if tail_mode == "fit":
+        in_tail = [round(p.y / 0.05) in tail for p in world]
+        dist = tail_distances(world, [tuple(e.vertices) for e in body.data.edges], in_tail)
+        spine = set()
+        b = head_b
+        while b is not None:
+            spine.add(b.name)
+            b = b.parent
+        branches = [c_ for b_ in bones if b_.name in spine and b_ is not head_b
+                    for c_ in b_.children if c_.name not in spine and c_.name not in main]
+        if not dist or not branches:
+            raise SystemExit("fit_to_game_skeleton: --tail fit: no tail on the creature or on the game skeleton")
+        root = max(branches, key=lambda r: max((arm.matrix_world @ bones[n].head_local).y for n in subtree(r)))
+        chain = [root]
+        while chain[-1].children:
+            chain.append(max(chain[-1].children, key=lambda c_: len(subtree(c_))))
+        heads = [arm.matrix_world @ b_.head_local for b_ in chain]
+        seg = [(q - p).length for p, q in zip(heads, heads[1:])]
+        fractions = [0.0]
+        for s_ in seg:
+            fractions.append(fractions[-1] + s_ / (sum(seg) or 1.0))
+        curve = tail_curve(world, dist, 16)
+        tail_pos = {b_.name: Vector(p) for b_, p in zip(chain, along(curve, fractions))}
+        for vi, new in tail_chain_weights(dist, fractions, [b_.name for b_ in chain]).items():
+            v = body.data.vertices[vi]
+            for g_ in list(v.groups):
+                body.vertex_groups[g_.group].remove([vi])
+            for n, w in new.items():
+                if n not in body.vertex_groups:
+                    body.vertex_groups.new(name=n)
+                body.vertex_groups[n].add([vi], w, "REPLACE")
+        print("FIT tail fit: %d game tail bones (%s..%s) along the creature's tail, %d vertices"
+              % (len(chain), chain[0].name, chain[-1].name, len(dist)))
 
 # --rigid: everything below the named bones moves onto them (a paw follows the wrist, not the game creature's fingers)
 if rigid:
@@ -312,7 +354,8 @@ if own_path:
     joints = []
     for b in arm.data.bones:
         w = arm.matrix_world @ b.head_local
-        joints.append({"name": b.name, "game": list(w), "own": list(own_space(Vector(unwarp(w, c, g, sx, keep_head)),
+        at = tail_pos.get(b.name, w)  # a fitted tail bone: its place on the creature's tail
+        joints.append({"name": b.name, "game": list(w), "own": list(own_space(Vector(unwarp(at, c, g, sx, keep_head)),
                                                                               c, g, size))})
     base = max(g["ground_front"], g["ground_back"])
     with open(os.path.abspath(own_path), "w", encoding="utf-8") as f:

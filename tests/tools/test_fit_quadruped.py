@@ -116,6 +116,31 @@ class FitQuadrupedTests(unittest.TestCase):
             self.assertGreater(w["j034"], 1.0)
             self.assertGreater(w["j039"], 1.0)
 
+    def test_tail_fit_puts_the_tail_bones_along_the_animals_own_tail(self):
+        """--tail fit (with --own-proportions): the boar's short tail bones move along the animal's long tail, and the
+        tail is weighted along its length (its tip on the last tail bone)."""
+        with tempfile.TemporaryDirectory() as d:
+            fig, fitted, side = (os.path.join(d, n) for n in ("animal.glb", "fitted.glb", "own.json"))
+            self.assertEqual(blender("make_test_quadruped.py", fig)[0], 0)
+            code, log = blender("fit_to_game_skeleton.py", BOAR, fig, fitted, "--tail", "fit", "--own-proportions", side)
+            self.assertEqual(code, 0, log[-2000:])
+            with open(side, encoding="utf-8") as f:
+                own = json.load(f)
+            joints = {j["name"]: j["own"] for j in own["joints"]}
+            k = own["scale"]
+            # the animal's tail: 0.7 m from the rump (y 1.2) to y 1.9 at z 1.0 (Blender axes, before the scale k)
+            base, tip = joints["j044"], joints["j047"]
+            self.assertAlmostEqual((tip[1] - base[1]) / k, 0.7, delta=0.12)
+            for name in ("j044", "j045", "j046", "j047"):
+                self.assertAlmostEqual((joints[name][2] - own["ground"]) / k, 1.0, delta=0.08, msg=name)
+            ys = [joints[n][1] for n in ("j044", "j045", "j046", "j047")]
+            self.assertEqual(ys, sorted(ys))
+            code, log = blender(os.path.join(HERE, "blender_tail_weights.py"), fitted, TAIL_ROOT)
+            self.assertEqual(code, 0, log[-2000:])
+            _, rump, tail = next(l for l in log.splitlines() if l.startswith("TAILW ")).split()
+            self.assertLess(float(rump), 0.05)
+            self.assertGreater(float(tail), 0.9)
+
 
 def bbox(path):
     code, log = blender(os.path.join(HERE, "blender_bbox.py"), path)
