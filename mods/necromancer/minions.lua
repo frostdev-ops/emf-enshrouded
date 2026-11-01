@@ -1,6 +1,6 @@
 -- Undead minions of several kinds (skeleton warriors; a lich from the undead pack): each kind is raised for mana up to
 -- its own cap. They stay until they fall, follow and guard their owner, come back beside them when they stray, leave
--- the world while their owner is away or they step aside (aside.lua: while their owner builds, or after
+-- the world while their owner is away or they step aside (aside.lua: while a player builds next to them, or after
 -- necromancer.aside) and come back after; after a load the saved counts come back (no mana).
 -- Bodies are removed while dead (no loot from our own minions). Their hits hand the killing blow (XP, loot) to the
 -- owner, never on bosses or the player side.
@@ -201,21 +201,37 @@ function P:total(account)
 	return n
 end
 
--- Their owner builds (or stopped a moment ago): the undead wait aside.
+-- A player builds next to them (their owner, or another player near): the undead wait aside. Returns true and why
+-- ("build" or "near").
 function P:building(world, account, owner)
-	return self.aside:building(world, account, owner, self.env.now(world))
+	return self.aside:building(world, account, owner, self.env.now(world), self.out[account] or {})
+end
+
+-- What a player hears while building keeps the undead aside ("build": their own, "near": another player's).
+function P:waits(why, what)
+	if why == "near" then return "Your undead wait while a player builds near you: " .. what .. " a few seconds after that." end
+	return "Your undead wait while you build: " .. what .. " a few seconds after you stop building."
+end
+
+-- The reply when the command's aside ends: they come at once, or once the building next to them stops.
+function P:coming_back(world, account, owner)
+	local busy, why = self:building(world, account, owner)
+	if not busy then return string.format("Your undead come back (%d).", self:total(account)) end
+	if why == "near" then return "Your undead come back a few seconds after the player near you stops building." end
+	return "Your undead come back a few seconds after you stop building."
 end
 
 -- necromancer.aside: the undead step aside (leave the world, still counted) or come back. Returns the reply.
-function P:toggle_aside(account)
+function P:toggle_aside(world, account, owner)
 	if self:total(account) == 0 then
 		self.aside:release(account)
 		return "You have no undead."
 	end
 	if self.aside:toggle(account) then
-		return "Your undead step aside. Type /necromancer aside again, or Gather, to bring them back."
+		return "Your undead step aside. Choose Come back on the wheel, Gather, or type /necromancer aside again, to "
+			.. "bring them back."
 	end
-	return "Your undead come back."
+	return self:coming_back(world, account, owner)
 end
 
 -- necromancer.raise [kind]: returns the reply text.
@@ -227,7 +243,8 @@ function P:raise(world, owner, account, word)
 		for _, k in ipairs(self.kinds) do names[#names + 1] = k.id end
 		return "Raise what? " .. table.concat(names, " | ")
 	end
-	if self:building(world, account, owner) then return "Your undead wait while you build: stop building, then raise." end
+	local busy, why = self:building(world, account, owner)
+	if busy then return self:waits(why, "raise again") end
 	local n, cap = self:count(account, kind.id), s(kind.cap)
 	if cap <= 0 then return string.format("%s are switched off in the settings.", kind.plural) end
 	if n >= cap then
@@ -271,6 +288,7 @@ function P:dismiss_all(world, account)
 	for _, c in pairs(self.counts[account] or {}) do counted = counted + c end
 	n = math.max(n, counted)
 	self.counts[account] = nil
+	self.aside:release(account)  -- none left to step aside
 	self.env.save()
 	if n == 0 then return "You have no undead." end
 	return string.format("%d undead return%s to the ground.", n, n == 1 and "s" or "")
@@ -291,6 +309,7 @@ function P:dismiss_one(world, account, kind)
 		end
 	end
 	set_count(self, account, kind.id, n - 1)
+	if self:total(account) == 0 then self.aside:release(account) end  -- none left to step aside
 	self.env.save()
 	return string.format("A %s returns to the ground (%d/%d).", kind.name, n - 1, self.env.setting(kind.cap))
 end
@@ -419,9 +438,11 @@ function P:step(world)
 			if world:position(id) and (not cur or cur <= 0) then emf.destroy(world, id) end  -- only while still a body
 		end
 	end
+	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now
 	if now < self.next_check then return end
 	self.next_check = now + 1
 	local present = players(world)
+	self.aside:set_players(present)
 	for _, f in ipairs(self.fallen) do
 		local owner, kind = present[f.account], self.by_id[f.kind]
 		if owner and kind then
@@ -433,7 +454,8 @@ function P:step(world)
 	for account in pairs(self.counts) do
 		local owner = present[account]
 		local away, why = false, nil
-		if owner then away, why = self.aside:check(world, account, owner, now) end
+		if self:total(account) == 0 then self.aside:release(account) end  -- none left to step aside
+		if owner then away, why = self.aside:check(world, account, owner, now, self.out[account] or {}) end
 		local stepped = false
 		local list = self.out[account] or {}
 		for i = #list, 1, -1 do
@@ -466,9 +488,12 @@ function P:step(world)
 			end
 		end
 		if owner and not away then self:restore(world, owner, account) end
-		if stepped and why == "build" and self.aside:first(account) then
-			self.env.tell(world, owner, "Your undead step aside while you build (the game blocks building next to them). "
-				.. "They come back when you stop.")
+		if stepped and why == "build" and self.aside:first(account, why) then
+			self.env.tell(world, owner, "Your undead step aside while you build (the game most likely blocks building "
+				.. "next to them). They come back a few seconds after you stop building.")
+		elseif stepped and why == "near" and self.aside:first(account, why) then
+			self.env.tell(world, owner, "Your undead step aside while a player builds near them (the game most likely "
+				.. "blocks building next to them). They come back a few seconds after that.")
 		end
 	end
 end

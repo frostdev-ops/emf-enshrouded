@@ -1038,7 +1038,7 @@ TEST_CASE("beastmaster: beasts step aside while their owner builds and come back
     b.seconds(2);
     CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 1234u) != b.r.fake.destroyed.end());
     CHECK(notes_with(b.r.fake, "step aside while you build") == 1);
-    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, out") != std::string::npos);  // still out: it comes back
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, aside") != std::string::npos);  // still out: it comes back
     CHECK(b.hud("out").find("Wolf (aside)") != std::string::npos);
     b.seconds(11);
     CHECK(b.r.fake.spawns.size() == 1);  // not while building
@@ -1090,4 +1090,99 @@ TEST_CASE("beastmaster: /beastmaster aside sends the beasts away until typed aga
     CHECK(b.reply("beastmaster aside", 2, 0xBB).find("No beast of yours is out") != std::string::npos);
     const std::string help = b.reply("beastmaster");
     CHECK(help.find("aside") != std::string::npos);
+}
+
+TEST_CASE("beastmaster: an aside by the command ends with the last beast gone home, and a newly tamed beast brings the others back") {
+    BeastRig b;
+    b.reply("beastmaster.give boar");
+    b.spawnable(3);
+    CHECK(b.reply("beastmaster.call Boar").find("comes") != std::string::npos);
+    b.seconds(2);
+    CHECK(b.reply("beastmaster.aside").find("step aside") != std::string::npos);
+    b.seconds(2);
+    CHECK(b.reply("beastmaster.dismiss").find("Boar goes home") != std::string::npos);
+    b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);  // a weakened wild wolf in front
+    b.look(1, 0, 10.5, 0, 0);
+    CHECK(b.reply("beastmaster.tame").find("Taming") != std::string::npos);
+    b.seconds(5);
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, out") != std::string::npos);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 50u) == b.r.fake.destroyed.end());  // stays
+    CHECK(b.hud("out").find("Wolf (out)") != std::string::npos);
+    // aside with a beast out, then a tame: the tamed one stays and the others come back
+    CHECK(b.reply("beastmaster.aside").find("step aside") != std::string::npos);
+    b.seconds(2);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 50u) != b.r.fake.destroyed.end());
+    b.beast(51, "aed0ecec-8a98-4fd3-a450-ab4c508b0ad4", 0, 5, kWildBeast, 20, 100);  // a weakened wild boar
+    CHECK(b.reply("beastmaster.tame").find("Taming") != std::string::npos);
+    b.seconds(5);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 51u) == b.r.fake.destroyed.end());
+    CHECK(b.hud("out").find("(aside)") == std::string::npos);
+    CHECK(b.r.fake.spawns.size() == 2);  // the boar's first call, and the wolf back
+}
+
+TEST_CASE("beastmaster: while aside by the command the wheel has Come back and the list says aside; picking it brings them back") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.spawnable(3);
+    CHECK(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(2);
+    press(b, VK_F3);
+    REQUIRE(b.r.fake.wheels.size() == 1);
+    CHECK(index_of(b.r.fake.wheels[0].items, "Come back") < 0);
+    CHECK(b.reply("beastmaster.aside").find("Come back") != std::string::npos);  // says how
+    b.seconds(2);
+    const std::string list = b.reply("beastmaster.list");
+    CHECK(list.find("Wolf - wolf, aside") != std::string::npos);
+    CHECK(list.find("/beastmaster aside") != std::string::npos);
+    press(b, VK_F3);
+    REQUIRE(b.r.fake.wheels.size() == 2);
+    const auto w = b.r.fake.wheels[1];
+    const int back = index_of(w.items, "Come back");
+    REQUIRE(back >= 0);
+    w.cb(kClient, back, w.user);
+    b.seconds(1);
+    CHECK(b.noted("Your beasts come back"));
+    b.seconds(2);
+    CHECK(b.r.fake.spawns.size() == 2);
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, out") != std::string::npos);
+}
+
+TEST_CASE("beastmaster: beasts also step aside while another player builds within 20 m of them, and come back when that player is gone") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.spawnable(3);
+    CHECK(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(2);
+    building(b.r.fake, 2, true);  // the guest builds 30 m away: too far
+    b.seconds(3);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 1234u) == b.r.fake.destroyed.end());
+    place(b.r.fake, 2, 12, 10, 0);  // now 10 m from the wolf
+    b.seconds(2);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 1234u) != b.r.fake.destroyed.end());
+    CHECK(notes_with(b.r.fake, "a player builds near them") == 1);
+    b.seconds(11);
+    CHECK(b.reply("beastmaster.call Wolf").find("is out already") != std::string::npos);
+    b.reply("beastmaster.give boar");
+    CHECK(b.reply("beastmaster.call Boar").find("while a player builds near you") != std::string::npos);
+    place(b.r.fake, 2, 60, 10, 0);  // the builder walks off
+    b.seconds(5);
+    CHECK(b.r.fake.spawns.size() == 2);  // the wolf is back
+}
+
+TEST_CASE("beastmaster: building is noticed in the step it starts; aside off while still building says when they come") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.spawnable(3);
+    CHECK(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(2);
+    building(b.r.fake, 1, true);
+    b.r.fake.tick += 1;  // the next game step (1/60 s later), not the next second
+    b.host->tick(kServer);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 1234u) != b.r.fake.destroyed.end());
+    CHECK(b.reply("beastmaster.aside").find("step aside") != std::string::npos);
+    const std::string off = b.reply("beastmaster.aside");
+    CHECK(off.find("a few seconds after you stop building") != std::string::npos);
+    CHECK(off != "Your beasts come back.");
+    b.reply("beastmaster.give boar");
+    CHECK(b.reply("beastmaster.call Boar").find("a few seconds after you stop building") != std::string::npos);
 }

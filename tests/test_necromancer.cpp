@@ -773,3 +773,52 @@ TEST_CASE("necromancer: /necromancer aside sends the undead away until typed aga
     CHECK(n.spawned(kSkeleton) == 5);
     CHECK(n.reply("necromancer").find("aside") != std::string::npos);
 }
+
+TEST_CASE("necromancer: while aside by the command the wheel's Gather says Come back and the list says how; dismissing all ends the aside") {
+    NecroRig n;
+    n.spawnable(4);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.reply("necromancer.aside").find("step aside") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.hud("out").rfind("Undead (aside): Skeletons 1/3", 0) == 0);  // "(aside)" goes with "Undead"
+    CHECK(n.reply("necromancer.list").find("Gather") != std::string::npos);
+    press_key(n, VK_F2);
+    REQUIRE(n.r.fake.wheels.size() == 1);
+    CHECK(item_at(n.r.fake.wheels[0].items, "Come back") >= 0);
+    CHECK(item_at(n.r.fake.wheels[0].items, "Gather") < 0);
+    CHECK(n.reply("necromancer.dismiss").find("returns to the ground") != std::string::npos);
+    n.seconds(1);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(2);
+    CHECK(!has(n.r.fake.destroyed, 1235));  // the new one stays: no aside left over
+    CHECK(n.hud("out").rfind("Undead: Skeletons 1/3", 0) == 0);
+}
+
+TEST_CASE("necromancer: the undead also step aside while another player builds within 20 m of them; aside off while building says when") {
+    NecroRig n;
+    n.spawnable(4);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(2);
+    component<ecs::ServerCursor>(n.r.fake, 2).currentBuildingItemInstance.itemId.value = 0x55;  // the guest, 30 m away
+    n.seconds(3);
+    CHECK(!has(n.r.fake.destroyed, 1234));
+    component<ecs::ServerCursor>(n.r.fake, 2).currentBuildingItemInstance.itemId.value = 0;
+    n.seconds(4);
+    place(n.r.fake, 2, 10, 10, 0);  // 10 m away, and builds again
+    component<ecs::ServerCursor>(n.r.fake, 2).currentBuildingItemInstance.itemId.value = 0x55;
+    n.r.fake.tick += 1;  // noticed in the next game step
+    n.host->tick(kServer);
+    CHECK(has(n.r.fake.destroyed, 1234));
+    size_t told = 0;
+    for (const auto& x : n.r.fake.notes) told += x.find("a player builds near them") != std::string::npos;
+    CHECK(told == 1);
+    CHECK(n.reply("necromancer.raise").find("while a player builds near you") != std::string::npos);
+    CHECK(n.reply("necromancer.aside").find("step aside") != std::string::npos);
+    const std::string off = n.reply("necromancer.aside");
+    CHECK(off.find("a few seconds after") != std::string::npos);
+    CHECK(off != "Your undead come back.");
+    component<ecs::ServerCursor>(n.r.fake, 2).currentBuildingItemInstance.itemId.value = 0;
+    n.seconds(5);
+    CHECK(n.spawned(kSkeleton) == 2);  // back
+}

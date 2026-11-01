@@ -122,7 +122,13 @@ end
 
 function actions.list(world, player, account)
 	if not account then return "Your account is not known yet." end
-	return "Your undead: " .. minions:summary(account) .. "."
+	local text = "Your undead: " .. minions:summary(account) .. "."
+	if minions.aside:by_command(account) then
+		text = text .. " They stepped aside: Come back on the wheel, Gather or /necromancer aside brings them back."
+	elseif minions.aside:is_aside(account) then
+		text = text .. " They step aside while someone builds next to them."
+	end
+	return text
 end
 
 -- No word or "all": every minion; a kind ("skeleton", "lich", "bone golem"): the newest of that kind.
@@ -141,12 +147,9 @@ end
 
 function actions.gather(world, player, account)
 	if not account then return "Your account is not known yet." end
-	if minions:building(world, account, player) then
-		return "Your undead wait while you build: they come back when you stop."
-	end
-	if minions.aside:release(account) then
-		return string.format("Your undead come back (%d).", minions:total(account))
-	end
+	local busy, why = minions:building(world, account, player)
+	if busy then return minions:waits(why, "they come back") end
+	if minions.aside:release(account) then return minions:coming_back(world, account, player) end
 	local n = minions:gather(world, player, account)
 	return n > 0 and string.format("Your undead gather to you (%d).", n) or "You have no undead."
 end
@@ -180,7 +183,7 @@ command("attack", ": your undead attack the creature you look at (else what hit 
 command("aside", ": your undead step aside (leave for now) or come back; while you build they do it on their own",
 	function(world, player, account)
 		if not account then return "Your account is not known yet." end
-		return minions:toggle_aside(account)
+		return minions:toggle_aside(world, account, player)
 	end)
 command("dismiss", "[skeleton|lich|golem|all]: one undead of that kind returns to the ground (the newest); nothing or "
 	.. "all: every one", actions.dismiss)
@@ -231,7 +234,7 @@ local function wheel_items(world)
 	end
 	local rest = {
 		{ string.format("Raging Spirits (%d %% mana)", setting("spirit_mana_pct")), "spirits" },
-		{ "Gather", "gather" },
+		{ account and minions.aside:by_command(account) and "Come back" or "Gather", "gather" },  -- Gather ends an aside
 		{ "Attack", "attack" },
 	}
 	for _, r in ipairs(rest) do
@@ -294,11 +297,12 @@ local function update_hud(world)
 	local parts = {}
 	if account then
 		local had = minions:summary(account, true)
-		if had ~= "" then parts[#parts + 1] = had .. (minions.aside:is_aside(account) and " (aside)" or "") end
+		if had ~= "" then parts[#parts + 1] = had end
 		local sp = spirits:count(account)
 		if sp > 0 then parts[#parts + 1] = string.format("Spirits %d", sp) end
 	end
-	local text = #parts > 0 and ("Undead: " .. table.concat(parts, ", ")) or ""
+	local title = account and minions.aside:is_aside(account) and "Undead (aside): " or "Undead: "
+	local text = #parts > 0 and (title .. table.concat(parts, ", ")) or ""
 	emf.hud("out", text, "bottom_left")
 	publish(world)
 end

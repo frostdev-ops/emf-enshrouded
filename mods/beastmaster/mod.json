@@ -31,7 +31,7 @@
     {"key": "leash_m", "type": "slider", "min": 15, "max": 100, "step": 5, "default": 40, "label": "Beasts come back from (m)", "live": true, "group": "Behaviour"},
     {"key": "leash_far_m", "type": "slider", "min": 30, "max": 300, "step": 10, "default": 80, "label": "At once from (m)", "live": true, "group": "Behaviour"},
     {"key": "xp_credit", "type": "bool", "default": true, "label": "You get your beasts' kills (XP and loot)", "live": true, "group": "Behaviour"},
-    {"key": "make_room", "type": "bool", "default": true, "label": "Beasts step aside while you build (the game blocks building next to them)", "live": true, "group": "Behaviour"},
+    {"key": "make_room", "type": "bool", "default": true, "label": "Beasts step aside while someone builds next to them", "live": true, "group": "Behaviour"},
     {"key": "wild_bears", "type": "bool", "default": true, "label": "Rare wild bears and aurochs (needs their content pack)", "live": true, "group": "World"},
     {"key": "wild_bear_minutes", "type": "slider", "min": 5, "max": 120, "step": 5, "default": 30, "label": "A wild pack beast about every (minutes)", "live": true, "group": "World"}
   ]

@@ -79,8 +79,8 @@ local function command(word, help, fn)
 	word_list[#word_list + 1] = word
 end
 
-local function state_text(b)
-	if b.out then return "out" end
+local function state_text(b, aside)
+	if b.out then return aside and "aside" or "out" end
 	if b.rest > 0 then return string.format("rests %d:%02d", math.floor(b.rest / 60), math.floor(b.rest % 60)) end
 	return "at home"
 end
@@ -93,8 +93,12 @@ command("list", ": your beasts", function(world, args)
 		return
 	end
 	local lines = { string.format("Your beasts (%d/%d):", #list, setting("collection_max")) }
+	local aside = pack:is_aside(account)
 	for i, b in ipairs(list) do
-		lines[#lines + 1] = string.format("%d. %s - %s, %s", i, b.name, b.species, state_text(b))
+		lines[#lines + 1] = string.format("%d. %s - %s, %s", i, b.name, b.species, state_text(b, aside))
+	end
+	if pack:aside_by_command(account) then
+		lines[#lines + 1] = "They stepped aside: Come back on the wheel or /beastmaster aside brings them back."
 	end
 	emf.reply(table.concat(lines, "\n"))
 end)
@@ -163,6 +167,11 @@ end
 
 local ATTACK_RANGE_M, HIT_MEMORY_S = 40, 10
 
+function actions.come_back(world, player, account)
+	if not account then return "Your account is not known yet." end
+	return pack:come_back(world, account, player)
+end
+
 function actions.attack(world, player, account)
 	if not account then return "Your account is not known yet." end
 	local function foe(id)
@@ -208,8 +217,8 @@ end)
 
 command("aside", ": your beasts out step aside (leave for now) or come back; while you build they do it on their own",
 	function(world, args)
-		local _, account = who(world)
-		emf.reply(account and pack:toggle_aside(account) or "Your account is not known yet.")
+		local player, account = who(world)
+		emf.reply(account and pack:toggle_aside(world, account, player) or "Your account is not known yet.")
 	end)
 
 local WORDS_HELP = " (call takes a name or number; dismiss a name, a number, or nothing for all)"
@@ -255,6 +264,7 @@ local function wheel_items(world)
 	add("Tame (weakened)", { action = "tame" })
 	add("Feed (bait)", { action = "feed" })
 	add("Attack", { action = "attack" })
+	if account and pack:aside_by_command(account) then add("Come back", { action = "come_back" }) end
 	local list = account and beasts:list(account) or {}
 	local out = 0
 	for _, b in ipairs(list) do

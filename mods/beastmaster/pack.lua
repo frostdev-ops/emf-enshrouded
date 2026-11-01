@@ -1,7 +1,7 @@
 -- The beasts out in the world: calling (mana, cooldown, limits), dismissing, resting after a fall, and every second:
 -- checking each beast is still ours, bringing beasts back when their owner is in the world (after a reload, or a
 -- guest who returns), and taking them out of the world while their owner is away or they step aside (aside.lua: while
--- their owner builds, or after beastmaster.aside).
+-- a player builds next to them, or after beastmaster.aside).
 -- M.new(env) where env has: setting(key), now(world), tell(world, player, text), beasts() (the roster), save(),
 -- and optionally on_spawn(world, id, species) after a beast was put into the world.
 local species = require("species")
@@ -104,15 +104,30 @@ function P:adopt(account, beast, id)
 	beast.entity = id
 	beast.out = true
 	self.ids[id] = { account = account, beast = beast }
+	self.aside:release(account)  -- it stays, and the beasts that stepped aside by the command come back
+end
+
+-- The entity ids of `account`'s beasts in the world (where another player's building counts).
+function P:spots(account)
+	local out = {}
+	for _, b in ipairs(self.env.beasts():list(account)) do
+		if b.out and b.entity then out[#out + 1] = b.entity end
+	end
+	return out
+end
+
+-- What a player hears while building keeps the beasts aside ("build": their own, "near": another player's).
+local function waits(why, what)
+	if why == "near" then return "Your beasts wait while a player builds near you: " .. what .. " a few seconds after that." end
+	return "Your beasts wait while you build: " .. what .. " a few seconds after you stop building."
 end
 
 -- beastmaster.call: returns the reply text.
 function P:call(world, owner, account, beast)
 	local s = self.env.setting
 	if beast.out then return beast.name .. " is out already." end
-	if self.aside:building(world, account, owner, self.env.now(world)) then
-		return "Your beasts wait while you build: stop building, then call."
-	end
+	local busy, busy_why = self.aside:building(world, account, owner, self.env.now(world), self:spots(account))
+	if busy then return waits(busy_why, "call again") end
 	for _, b in ipairs(self.env.beasts():list(account)) do
 		if b.out and b.species == beast.species then
 			return string.format("Your %s %s is out already: one of each kind at a time.", b.species, b.name)
@@ -142,21 +157,41 @@ function P:call(world, owner, account, beast)
 	return string.format("%s the %s comes.", beast.name, beast.species)
 end
 
+-- The reply when the command's aside ends: they come at once, or once the building next to them stops.
+local function coming_back(self, world, account, owner)
+	local busy, why = self.aside:building(world, account, owner, self.env.now(world), self:spots(account))
+	if not busy then return "Your beasts come back." end
+	if why == "near" then return "Your beasts come back a few seconds after the player near you stops building." end
+	return "Your beasts come back a few seconds after you stop building."
+end
+
 -- beastmaster.aside: the beasts that are out step aside (leave the world, still out) or come back. Returns the reply.
-function P:toggle_aside(account)
+function P:toggle_aside(world, account, owner)
 	if self:out_count(account) == 0 then
 		self.aside:release(account)
 		return "No beast of yours is out."
 	end
 	if self.aside:toggle(account) then
-		return "Your beasts step aside. Type /beastmaster aside again, or call one, to bring them back."
+		return "Your beasts step aside. Choose Come back on the wheel, type /beastmaster aside again, or call one, to "
+			.. "bring them back."
 	end
-	return "Your beasts come back."
+	return coming_back(self, world, account, owner)
 end
 
--- Aside now (by the command, or while building): the HUD says so.
+-- The wheel's Come back: the command's aside ends.
+function P:come_back(world, account, owner)
+	if not self.aside:release(account) then return "Your beasts are not aside." end
+	return coming_back(self, world, account, owner)
+end
+
+-- Aside now (by the command, or while building): the HUD and the list say so.
 function P:is_aside(account)
 	return self.aside:is_aside(account)
+end
+
+-- Aside by the command: the wheel offers Come back.
+function P:aside_by_command(account)
+	return self.aside:by_command(account)
 end
 
 -- beastmaster.dismiss: the beast leaves the world and waits at home.
@@ -166,6 +201,7 @@ function P:dismiss(world, account, beast)
 	if beast.entity then self.ids[beast.entity] = nil end
 	beast.entity = nil
 	beast.out = false
+	if self:out_count(account) == 0 then self.aside:release(account) end  -- none left to step aside
 	self.env.save()
 	return beast.name .. " goes home."
 end
@@ -290,9 +326,11 @@ function P:step(world)
 			if world:position(id) and (not cur or cur <= 0) then emf.destroy(world, id) end
 		end
 	end
+	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now
 	if now < self.next_check then return end
 	self.next_check = now + 1
 	local present = players(world)
+	self.aside:set_players(present)
 	for _, e in ipairs(self.fallen) do
 		local owner = present[e.account]
 		if owner then
@@ -302,8 +340,9 @@ function P:step(world)
 	self.fallen = {}
 	for _, account in ipairs(beasts:accounts()) do
 		local owner = present[account]
+		if self:out_count(account) == 0 then self.aside:release(account) end  -- none left to step aside
 		local away, why = false, nil
-		if owner then away, why = self.aside:check(world, account, owner, now) end
+		if owner then away, why = self.aside:check(world, account, owner, now, self:spots(account)) end
 		local stepped = false
 		for _, b in ipairs(beasts:list(account)) do
 			if b.out and b.entity then
@@ -357,9 +396,12 @@ function P:step(world)
 				end
 			end
 		end
-		if stepped and why == "build" and self.aside:first(account) then
-			self.env.tell(world, owner, "Your beasts step aside while you build (the game blocks building next to them). "
-				.. "They come back when you stop.")
+		if stepped and why == "build" and self.aside:first(account, why) then
+			self.env.tell(world, owner, "Your beasts step aside while you build (the game most likely blocks building "
+				.. "next to them). They come back a few seconds after you stop building.")
+		elseif stepped and why == "near" and self.aside:first(account, why) then
+			self.env.tell(world, owner, "Your beasts step aside while a player builds near them (the game most likely "
+				.. "blocks building next to them). They come back a few seconds after that.")
 		end
 	end
 end
