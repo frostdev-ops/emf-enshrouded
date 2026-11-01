@@ -316,6 +316,22 @@ TEST_CASE("app chain: a DLL that failed to load gets Windows' own words for the 
     CHECK(m->error.find("(Windows error 193)") != std::string::npos);
 }
 
+TEST_CASE("app chain: a DLL the last start skipped (Play without any mods) says so, and is no error") {
+    TempGame g(L"chainskipped");
+    install_emf(g);
+    g.write(L"dinput8-chain.ini", "[Chain]\r\ncreative.dll\r\n");
+    g.write(L"creative.dll", "creative");
+    g.write(L"emf\\chain_status.txt", "creative.dll\tskipped\r\n");
+    const FolderState s = scan_game_folder(g.dir);
+    const ModEntry* m = find(s, "chain", "creative.dll");
+    REQUIRE(m);
+    CHECK(m->status == "skipped");
+    CHECK(m->error.empty());
+    CHECK(m->note.find("Not started at the last game start") != std::string::npos);
+    CHECK(m->note.find("without any mods") != std::string::npos);
+    CHECK(m->note.find("Not started yet") == std::string::npos);
+}
+
 TEST_CASE("app chain: a tool's second copy that the installer kept aside (emf\\moved.txt) is shown as not started") {
     TempGame g(L"keptaside");
     install_emf(g);

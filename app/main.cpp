@@ -281,6 +281,8 @@ public:
             ILFree(pidl);
             return SUCCEEDED(hr);
         }
+        // a test run (EMF_TEST=1) never starts the real game: Play's steam:// link counts as opened
+        if (testing && _wcsnicmp(target.c_str(), L"steam:", 6) == 0) return true;
         const wchar_t* verb = how == Open::Folder ? L"explore" : L"open";
         return reinterpret_cast<INT_PTR>(ShellExecuteW(hwnd, verb, target.c_str(), nullptr, nullptr, SW_SHOWNORMAL)) > 32;
     }

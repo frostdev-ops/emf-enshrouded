@@ -17,6 +17,7 @@
 #include "emf/emf_api.h"
 #include "loader/chain_list.h"
 #include "loader/loader_id.h"
+#include "loader/play_once.h"
 #include "text.h"
 
 namespace emf::app {
@@ -229,6 +230,14 @@ std::string dll_signature(const std::wstring& path, const std::vector<core::Know
                 if (contains_nocase(bytes, text)) sig += text + "\n";
         return sig;
     });
+}
+
+// EMF's loader takes the one-shot flag of EMF.exe's Play menu ("Play without EMF mods", loader/play_once.h): its
+// marker is in the DLL. EMF 0.3.2's loader does not have it.
+bool loader_plays_once(const std::wstring& path) {
+    return cached_fact(path, "play_once", [](const std::string& bytes) {
+               return bytes.find(EMF_PLAY_ONCE_MARKER) != std::string::npos ? std::string("1") : std::string();
+           }) == "1";
 }
 
 // "emf_core <version>" that the build writes into emf_core.dll.
@@ -617,6 +626,8 @@ void scan_chain(FolderState& s, const Context& c) {
             e.error = "did not load at the last game start: " + why;
         }
         else if (on && e.status.empty()) e.note += " Not started yet: it was listed after the last game start.";
+        else if (on && e.status == "skipped")  // the loader's start without mods (loader/play_once.h)
+            e.note += " Not started at the last game start: the game was started without any mods (Play's menu).";
         s.mods.push_back(std::move(e));
     };
     for (const auto& n : c.chain_active) add(n, true);
@@ -913,6 +924,7 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
     }
     const auto runs = [&](const char* w) { return std::find(words.begin(), words.end(), w) != words.end(); };
     s.emf_installed = runs("emf") && exists(s.game + L"\\emf\\emf_core.dll");
+    s.play_once = s.emf_installed && !c.light && loader_plays_once(s.game + L"\\dinput8.dll");
     if (!c.light) s.emf_version = exists(s.game + L"\\emf\\emf_core.dll") ? core_version(s.game + L"\\emf\\emf_core.dll") : "";
     s.shroudforge_active = sf_folder && runs("shroudforge") && !shroudforge_hands_to_eml(s.game);
     c.eml_loader = runs("eml") || runs("shroudforge");

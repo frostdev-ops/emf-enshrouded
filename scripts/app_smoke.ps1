@@ -10,6 +10,8 @@
 # - the page cannot reach the network or leave https://emf.app/ (a fetch and a navigation from the page);
 # - clicking the chained DLL's switch comments out its line in dinput8-chain.ini (page script -> host -> file);
 # - several switches in a row share one note ("2 changes take effect at the next game start."), not one each;
+# - the Play menu: Play, Play without EMF mods (it writes the loader's one-shot flag emf\play_once.txt; a test run never
+#   opens the steam:// link) and Play without any mods;
 # - with a stand-in enshrouded.exe running from the folder, that switch is locked and the file stays as it is;
 # - mod profiles through the page: Save as writes emf\profiles\<name>.json and the picker shows it; a switch makes
 #   it say "(changed)"; Switch puts the switch back (dinput8-chain.ini as it was);
@@ -129,7 +131,7 @@ function Copy-In([string]$from, [string]$rel) {
 }
 $version = "$(Get-Content -LiteralPath (Join-Path $repo "VERSION") -TotalCount 1)".Trim()
 Write-File "enshrouded.exe" "fake"
-Write-File "dinput8.dll" "EMF-LOADER-7d3c9f fake"
+Write-File "dinput8.dll" "EMF-LOADER-7d3c9f EMF-PLAY-ONCE-1 fake"  # a loader that takes the Play menu's flag
 Write-File "dbghelp.dll" "EML stand-in EML_LOG_FILE_PATH"  # EML loads the mods in mods\
 Write-File "emf\emf_core.dll" ("emf_core $version" + [char]0)
 Copy-In "src\core\known_tools.txt" "emf\known_tools.txt"
@@ -282,6 +284,18 @@ try {
     Check ($null -ne $pn -and (@($pn.two) -join "|") -eq "2 changes take effect at the next game start.") "a second switch changes that note into 2 changes take effect at the next game start., no second note"
     Check ($null -ne $pn -and (@($pn.back) -join "|") -eq "2 changes take effect at the next game start.") "switching the same two mods back keeps one note for 2 changes"
     Check ($null -ne $pn -and $pn.start -eq $pn.end -and (Test-Path -LiteralPath (Join-Path $game "emf\config\life_skills.ini"))) "and both are as they were, saved in emf\config ($(if ($pn) { $pn.start + ' -> ' + $pn.end }))"
+
+    # 3c. the Play menu: Play, Play without EMF mods, Play without any mods. "Play without EMF mods" writes the loader's
+    # one-shot flag (emf\play_once.txt, mode=no-emf) and asks Steam (a test run never opens the steam:// link)
+    $playJs = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<120){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; var p={}; window.emfProbe=p; var more=function(){return document.getElementById('play-more');}; W(function(){return more()&&!more().hidden&&!more().disabled;},function(){ p.expanded=more().getAttribute('aria-expanded'); more().click(); W(function(){return !document.getElementById('play-menu').hidden;},function(){ p.items=[...document.querySelectorAll('#play-menu [role=menuitem] .play-item-label')].map(function(x){return x.textContent;}); p.focus=document.activeElement&&document.activeElement.id; p.open=more().getAttribute('aria-expanded'); document.getElementById('play-no-emf').click(); W(function(){return [...document.querySelectorAll('#toasts .toast')].some(function(t){return /without EMF mods/.test(t.textContent);});},function(){ p.toast=[...document.querySelectorAll('#toasts .toast')].map(function(t){return t.textContent;}).join(' | '); p.closed=document.getElementById('play-menu').hidden; window.emfDone=true; }); }); });"
+    $run = Invoke-Smoke -Eval $playJs -More @("--probe-wait", "9000")
+    $pp3 = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+    $flagFile = Join-Path $game "emf\play_once.txt"
+    $flagText = if (Test-Path -LiteralPath $flagFile) { Get-Content -LiteralPath $flagFile -Raw } else { "" }
+    Check ($run.Code -eq 0 -and $null -ne $pp3 -and (@($pp3.items) -join "|") -eq "Play|Play without EMF mods|Play without any mods" -and $pp3.expanded -eq "false" -and $pp3.open -eq "true") "the Play menu offers Play, Play without EMF mods and Play without any mods ($(if ($pp3) { $pp3 | ConvertTo-Json -Compress }))"
+    Check ($null -ne $pp3 -and $pp3.toast -like "*without EMF mods, this time only*" -and $pp3.closed) "Play without EMF mods says it is for this start only, and the menu closes"
+    Check ($flagText -match "(?m)^emf_play_once=1" -and $flagText -match "(?m)^mode=no-emf" -and $flagText -match "(?m)^written=\d+") "and writes the loader's one-shot flag emf\play_once.txt ($($flagText.Trim() -replace "`r`n", ' | '))"
+    Remove-Item -LiteralPath $flagFile -Force -ErrorAction SilentlyContinue
 
     # 4. a process called enshrouded.exe running from the folder (a copy of ping.exe standing in for the game): the
     # switch is locked, so the same click changes nothing. The page script must have run (else this proves nothing).

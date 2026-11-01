@@ -263,6 +263,16 @@ function renderHeader() {
     : s.game_running ? 'close it to switch mods' : s.wine ? 'start it in Steam' : 'through Steam';
   play.title = s.server ? 'A dedicated server folder: the Server tab starts and stops it'
     : s.wine ? 'Under Wine or Proton, Play cannot reach Steam: start Enshrouded from Steam. EMF still loads with it.' : '';
+  // the Play menu (a game folder only): the two starts without mods need EMF's loader here to know the one-shot flag
+  const more = $('play-more');
+  more.hidden = !!s.server || !s.game_found;
+  more.disabled = !!s.game_running;
+  const why = !s.emf_installed ? 'EMF is not installed in this folder: Play starts the game without EMF anyway.'
+    : !s.play_once ? 'The EMF in this folder is older and cannot do this. Install EMF again from its package.' : '';
+  $('play-no-emf').disabled = $('play-no-mods').disabled = !!why;
+  $('play-no-emf-sub').textContent = why || 'This start only. The DLL mods started by EMF still run.';
+  $('play-no-mods-sub').textContent = why || 'This start only. Neither EMF mods nor the DLL mods started by EMF.';
+  if (more.hidden || more.disabled) playMenu(false);
 
   const running = $('running');
   running.hidden = !s.game_running;
@@ -292,6 +302,7 @@ function statusBadges(m) {
     if (m.status === 'started') out.push(b('ok', 'Started', 'Started at the last game start'));
     else if (m.status === 'missing') out.push(b('bad', 'Missing', 'Not in the game folder at the last game start'));
     else if (m.status.startsWith('failed')) out.push(b('bad', 'Failed', 'Did not load at the last game start'));
+    else if (m.status === 'skipped') out.push(b('quiet', 'Skipped', 'Not started at the last game start: the game was started without any mods'));
     else if (!m.error) out.push(b('quiet', 'Not started yet', 'Listed after the last game start'));
   }
   const update = updateBadge(m);  // from the last "Check for updates"
@@ -2071,6 +2082,44 @@ $('filter').addEventListener('input', (e) => {
   if (state && state.game_found) renderList();
 });
 $('play').addEventListener('click', () => (state && state.server ? selectTab('server') : send({ cmd: 'play' })));
+
+// ---- the Play menu: Play, Play without EMF mods, Play without any mods (docs/app.md "Play") ----
+// The two starts without mods leave the mods out for one game start: the host writes the loader's one-shot flag
+// (emf\play_once.txt) and starts the game; the next start loads them again.
+function playMenu(open) {
+  const menu = $('play-menu');
+  if (menu.hidden === !open) return;
+  menu.hidden = !open;
+  $('play-more').setAttribute('aria-expanded', String(open));
+  if (open) {
+    const first = [...menu.querySelectorAll('[role=menuitem]')].find((b) => !b.disabled);
+    if (first) first.focus();
+  }
+}
+function playWith(mode) {
+  playMenu(false);
+  $('play-more').focus();
+  send(mode ? { cmd: 'play', mode } : { cmd: 'play' });
+}
+$('play-more').addEventListener('click', (e) => { e.stopPropagation(); playMenu($('play-menu').hidden); });
+$('play-normal').addEventListener('click', () => playWith(''));
+$('play-no-emf').addEventListener('click', () => playWith('no-emf'));
+$('play-no-mods').addEventListener('click', () => playWith('no-mods'));
+document.addEventListener('click', (e) => { if (!$('play-group').contains(e.target)) playMenu(false); });
+$('play-menu').addEventListener('keydown', (e) => {
+  const items = [...$('play-menu').querySelectorAll('[role=menuitem]')].filter((b) => !b.disabled);
+  const i = items.indexOf(document.activeElement);
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    playMenu(false);
+    $('play-more').focus();
+  } else if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && items.length) {
+    e.preventDefault();
+    items[(i + (e.key === 'ArrowDown' ? 1 : items.length - 1)) % items.length].focus();
+  } else if (e.key === 'Tab') {
+    playMenu(false);
+  }
+});
 $('change-folder').addEventListener('click', () => send({ cmd: 'pick_folder' }));
 $('nogame-pick').addEventListener('click', () => send({ cmd: 'pick_folder' }));
 $('folder-path').addEventListener('click', () => { if (state && state.game) send({ cmd: 'open_folder', path: state.game }); });

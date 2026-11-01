@@ -6,12 +6,18 @@
 // are renamed and listed there by EMF's installer. They are loaded right here in DllMain, the way the community's
 // chain loaders do it and the moment they would have started as dinput8.dll themselves. The entry point is not
 // touched for them: ShroudForge patches it too.
+//
+// Before all that, in the game (not the dedicated server), it takes EMF.exe's one-shot flag for "Play without EMF
+// mods" (play_once.h): emf\play_once.txt is read and deleted at once, and for this one start EMF's core (and with
+// "Play without any mods" the chained DLLs too) does not start.
 #include <windows.h>
 
 #include <share.h>
 
 #include <atomic>
 #include <cstdio>
+#include <ctime>
+#include <optional>
 #include <string>
 
 #include "chain_list.h"
@@ -19,9 +25,12 @@
 #include "entry_hold.h"
 #include "layer_env.h"
 #include "loader_id.h"
+#include "play_once.h"
 
 // Marks this DLL as EMF's loader for the installer and the core (loader_id.h); exported, so it is kept.
 extern "C" __declspec(dllexport) const char emf_loader_identity[] = EMF_LOADER_MARKER;
+// Tells EMF.exe that this loader takes the one-shot flag of its Play menu (play_once.h).
+extern "C" __declspec(dllexport) const char emf_loader_play_once[] = EMF_PLAY_ONCE_MARKER;
 
 namespace {
 void loader_log(const std::wstring& dir, const char* msg) {
@@ -104,11 +113,28 @@ std::string read_file(const std::wstring& path) {
 }
 
 
-// Starts the DLLs listed in dinput8-chain.ini, logs each and writes emf\chain_status.txt (read by EMF's core, which
-// starts after this, and by the manager).
-void run_chain(const std::wstring& dir) {
+// EMF.exe's one-shot flag (play_once.h), read and deleted before anything else; what this start leaves out.
+emf::loader::PlayOnce take_play_once_flag(const std::wstring& dir) {
+    const std::wstring path = dir + L"\\" + emf::loader::kPlayOnceFile;
+    const auto r = emf::loader::take_play_once(
+        [&]() -> std::optional<std::string> {
+            if (GetFileAttributesW(path.c_str()) == INVALID_FILE_ATTRIBUTES) return std::nullopt;
+            return read_file(path);  // unreadable: "" is no flag, and it is deleted all the same
+        },
+        [&] {
+            SetFileAttributesW(path.c_str(), FILE_ATTRIBUTE_NORMAL);
+            return DeleteFileW(path.c_str()) != 0 || GetLastError() == ERROR_FILE_NOT_FOUND;
+        },
+        static_cast<int64_t>(_time64(nullptr)));
+    if (!r.why.empty()) loader_log(dir, r.why.c_str());
+    return r.mode;
+}
+
+// Starts the DLLs listed in dinput8-chain.ini (or, for a start without mods, none of them), logs each and writes
+// emf\chain_status.txt (read by EMF's core, which starts after this, and by the manager).
+void run_chain(const std::wstring& dir, bool start) {
     const auto names = emf::loader::parse_chain_list(read_file(dir + L"\\dinput8-chain.ini"));
-    const auto results = emf::loader::load_chain(
+    const auto results = !start ? emf::loader::skip_chain(names) : emf::loader::load_chain(
         names,
         [&](const std::wstring& name) {
             return GetFileAttributesW((dir + L"\\" + name).c_str()) != INVALID_FILE_ATTRIBUTES;
@@ -168,10 +194,14 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
                                     emf::loader::utf8_name(self) + ") does nothing").c_str());
             return TRUE;
         }
-        run_chain(game_dir());
-        enable_vulkan_layer();  // after the chained DLLs: it puts EMF's layer first even if one of them set the list
         wchar_t exe[MAX_PATH];
         GetModuleFileNameW(nullptr, exe, MAX_PATH);
+        // EMF.exe's "Play without EMF mods": taken first of all, so that it counts for this one start only
+        const auto plan = emf::loader::start_plan(emf::loader::is_server_exe(exe) ? emf::loader::PlayOnce::Normal
+                                                                                  : take_play_once_flag(game_dir()));
+        run_chain(game_dir(), plan.chain);
+        if (!plan.core) return TRUE;  // no core, and no Vulkan layer either (the layer is emf_core.dll)
+        enable_vulkan_layer();  // after the chained DLLs: it puts EMF's layer first even if one of them set the list
         uint8_t* entry = nullptr;
         bool want_hold = false;
         if (emf::loader::is_server_exe(exe)) {

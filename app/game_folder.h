@@ -83,6 +83,7 @@ struct FolderState {
     bool game_found = false;  // enshrouded.exe or enshrouded_server.exe is there
     bool server = false;      // a dedicated server folder (enshrouded_server.exe only)
     bool emf_installed = false;
+    bool play_once = false;  // EMF's loader here takes the one-shot flag of Play's menu (loader/play_once.h)
     std::string emf_version;  // from emf\emf_core.dll ("" when unknown)
     bool shroudforge_active = false;
     std::vector<ModEntry> mods;

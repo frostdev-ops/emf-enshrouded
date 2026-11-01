@@ -46,16 +46,52 @@ account features are switched off, and a tester setting switches them on ("Nexus
   links** setting (with the Nexus features, below), and the end of `emf_core.log` and `emf_loader.log` (read while the
   game writes them), each with a **Copy** button. Error texts in a mod's details have one too. The chip at the top
   ("Nexus: not logged in", or the account's name and Premium) opens the account.
-- **Play** starts the game through Steam (`steam://rungameid/1203620`). Under Wine or Proton (Linux, the Steam Deck;
-  EMF.exe tells by Wine's `ntdll.dll`, which exports `wine_get_version`) a `steam://` link does not reach Linux's
-  Steam, so Play opens nothing and says to start Enshrouded from Steam instead (EMF still loads when the game starts);
-  the button says "start it in Steam" there.
+- **Play** starts the game through Steam (`steam://rungameid/1203620`); the arrow next to it also starts it once
+  without the mods ("Play" below). Under Wine or Proton (Linux, the Steam Deck; EMF.exe tells by Wine's `ntdll.dll`,
+  which exports `wine_get_version`) a `steam://` link does not reach Linux's Steam, so Play opens nothing and says to
+  start Enshrouded from Steam instead (EMF still loads when the game starts); the button says "start it in Steam" there.
 - **Profiles**: the on/off state of every mod under a name, above the list (below).
 - **Browse**: Enshrouded mods on Nexus Mods (with the Nexus features, below).
 - **Server** (a dedicated server's folder only): its config, EMF's chat commands, Start and Stop, EMF in it and its
   logs ("Servers" below).
 
 A mod whose `mod.json` cannot be read is still listed, with the error.
+
+## Play
+
+The arrow next to **Play** opens a menu with three ways to start the game, for a game folder (a server folder has the
+Server tab instead):
+
+| Entry | What starts |
+|---|---|
+| **Play** | the game with every mod that is switched on, as the button does |
+| **Play without EMF mods** | the game without EMF and its mods, this one start; the DLL mods started by EMF (`dinput8-chain.ini`) still run, since they are other tools |
+| **Play without any mods** | the game without EMF and without the DLL mods started by EMF, this one start (to join a public game, say). Loaders next to the game that EMF does not start (EML's or Greeneye's proxy DLL) still start by themselves; the message names them |
+
+Nothing is switched off. EMF.exe writes a one-shot flag, `emf\play_once.txt`, just before it asks Steam to start the
+game:
+
+```
+emf_play_once=1
+mode=no-emf            (or no-mods)
+written=1793520000     (seconds since 1970, UTC)
+```
+
+EMF's loader (`dinput8.dll`) reads the file and deletes it before it does anything else, then starts no core (and with
+`no-mods` none of the chained DLLs; `emf\chain_status.txt` names them `skipped`), and says so in `emf\emf_loader.log`.
+The next start loads everything again. So that EMF never stays off:
+
+- the loader obeys a flag only within five minutes of `written` (a start that never happened, a crash, a PC switched
+  off), and none that says it was written more than two minutes from now;
+- a flag the loader cannot delete is not obeyed (it would count at every start), and the log says to delete it;
+- the dedicated server ignores it;
+- **Play** deletes a flag that is still waiting, and so does a failed start (Steam did not open);
+- it is refused while the game runs, when EMF is not installed in the folder, when Steam's copy of the game is another
+  folder than the one shown, and when the folder's EMF is older than this feature (EMF.exe looks for the marker
+  `EMF-PLAY-ONCE-1`, which the loader exports as `emf_loader_play_once`; the menu says to install EMF again then).
+
+Under Wine or Proton the flag is written all the same, and the message says to start Enshrouded from Steam within five
+minutes. A test run (`EMF_TEST=1`) never opens the `steam://` link.
 
 ## What a switch does
 
@@ -732,7 +768,8 @@ game and the server folders kept in `%LOCALAPPDATA%\EMF\folders.json` ("Servers"
 - EMF.exe imports none of the proxy DLL names (`dinput8`, `dbghelp`, `dbgcore`, `winmm`, `powrprof`, `version`,
   `xinput1_4`, `dxgi`), and it loads DLLs by name only from System32: WebView2 itself loads `winmm.dll` and
   `version.dll`, and EML's proxy, for one, runs its patcher in any process that loads it.
-- In the game folder it writes only what a switch, a setting, an install or a profile changes (profiles:
+- In the game folder it writes only what a switch, a setting, an install or a profile changes, and the Play menu's
+  one-shot flag `emf\play_once.txt`, which the game's start deletes (profiles:
   `emf\profiles\`). It writes outside the game folder only `%LOCALAPPDATA%\EMF\app.ini` (the chosen folder, the window's place and
   size), `%LOCALAPPDATA%\EMF\webview\` (WebView2's own data), `%TEMP%\emf-install\<n>\` (an archive being
   installed; deleted after Install or Cancel, and left-overs older than a day at the next install), and, when the player
@@ -799,8 +836,12 @@ player's, and counts only a stand-in game running from the folder shown.
 
 - `emf_tests` (`tests/test_app_game_folder.cpp`, `test_app_locate.cpp`, `test_app_bridge.cpp`): the mod list, the
   switches (ini, rename, chain line byte for byte), settings, the Steam lookup, the game-running check, which links
-  may open and the bridge's commands (Play under Wine with the host's Wine check injected), all against fake game
-  folders in `%TEMP%`.
+  may open and the bridge's commands (Play under Wine with the host's Wine check injected; the Play menu: the flag
+  written for each way, taken back by Play and by a failed start, written under Wine, refused while the game runs, for
+  another Steam folder, an old loader and no EMF), all against fake game folders in `%TEMP%`. `test_chain_load.cpp`:
+  the loader's side of the flag (`src/loader/play_once.h`): the five minutes, a flag from the future, anything that is
+  not the flag, deleted before it is read for what it says and not obeyed when it cannot be deleted, and what starts in
+  each way.
 - `test_profiles.cpp`, `test_app_profiles.cpp`, `test_app_profiles_bridge.cpp`: profiles: names and slugs, the file
   and bad files, the store (never replacing without asking, rename, delete, the current one), "(changed)", and
   applying over fake game folders with every kind of mod (the ini, an EML folder and zip renamed, a chain line in
@@ -902,8 +943,9 @@ player's, and counts only a stand-in game running from the folder shown.
 - `scripts/app_smoke.ps1` (run by `scripts/verify.sh`): builds a fake game folder and runs `EMF.exe --smoke` on it. It
   checks the rows the page drew (read back from the page), that a canary mod's HTML and script texts stay text and
   nothing in them runs, that a `fetch` and a navigation from the page are stopped, that clicking a switch through the
-  page changes `dinput8-chain.ini`, that several switches in a row share one note, that the same switch is locked while a stand-in `enshrouded.exe` runs from the
-  folder, profiles through the page (Save as, a switch makes the picker say "(changed)", Switch puts it back),
+  page changes `dinput8-chain.ini`, that several switches in a row share one note, the Play menu (its entries, and
+  Play without EMF mods writing `emf\play_once.txt` without opening Steam), that the same switch is locked while a
+  stand-in `enshrouded.exe` runs from the folder, profiles through the page (Save as, a switch makes the picker say "(changed)", Switch puts it back),
   the message when WebView2 is missing, and EMF.exe's imports. The runs have the tester switch (an `app.ini` in their
   `EMF_TEST_APPDATA`), except one that is the release build (Off): started on Browse with an Enshrouded link, a stored key and
   the recorded Nexus at hand, it shows no Browse tab, no Check for updates, no account or nxm:// cards and no Download

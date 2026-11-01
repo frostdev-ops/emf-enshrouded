@@ -11,6 +11,7 @@
 #include "browse.h"
 #include "core/json.h"
 #include "json_out.h"
+#include "loader/play_once.h"
 #include "locate.h"
 #include "nexus/nxm.h"
 #include "server_bridge.h"
@@ -258,6 +259,7 @@ std::string state_json(const FolderState& s, const std::string& running_reason) 
     Obj o;
     o.str("type", "state").str("app_version", EMF_VERSION).str("game", utf8(s.game)).boolean("game_found", s.game_found);
     o.boolean("server", s.server).boolean("emf_installed", s.emf_installed).str("emf_version", s.emf_version);
+    o.boolean("play_once", s.play_once);
     o.boolean("shroudforge_active", s.shroudforge_active);
     o.boolean("game_running", !running_reason.empty()).str("running_reason", running_reason);
     std::vector<std::string> mods, warnings, installed;
@@ -791,16 +793,56 @@ std::vector<std::string> Bridge::handle(const std::string& message) {
     }
     if (auto out = handle_profiles(cmd, m)) return *out;  // mod profiles (bridge_profiles.cpp)
     if (cmd == "play") {
+        // the Play menu: "" plays as usual; "no-emf" and "no-mods" leave the mods out for this one start, through the
+        // loader's one-shot flag (loader/play_once.h), written just before Steam is asked
+        const std::string how = text_of(m, "mode");
+        const bool once = how == "no-emf" || how == "no-mods";
+        if (!how.empty() && !once) return {result(cmd, false, "EMF does not know that way to start the game.")};
         if (!game.empty() && !exists(game + L"\\enshrouded.exe") && exists(game + L"\\enshrouded_server.exe"))
             return {result(cmd, false, "This is a dedicated server folder: start the server with enshrouded_server.exe.")};
-        if (host_.under_wine())  // Linux's Steam never hears a steam:// link opened inside Wine or Proton
-            return {result(cmd, false, kWinePlay)};
-        const bool ok = host_.open(L"steam://rungameid/1203620", BridgeHost::Open::Url);
-        std::string text = ok ? "Starting Enshrouded through Steam..." : "";
-        // Steam starts its own copy of the game: say so when that is not the folder shown
         const std::wstring steam = host_.steam_game();
-        if (ok && !steam.empty() && !game.empty() && !(path_inside(steam, game) && path_inside(game, steam)))
-            text += " Play starts the game in " + utf8(steam) + "; this folder is not it.";
+        const bool steam_elsewhere = !steam.empty() && !game.empty() && !(path_inside(steam, game) && path_inside(game, steam));
+        const std::wstring flag = game + L"\\" + loader::kPlayOnceFile;
+        const std::string without = how == "no-mods" ? "without any mods" : "without EMF mods";
+        if (once) {
+            const std::string reason = host_.running_reason();
+            if (!reason.empty()) return {result(cmd, false, "Enshrouded is running: close it first (" + reason + ").")};
+            if (game.empty() || !folder_.game_found || !folder_.emf_installed)
+                return {result(cmd, false, "EMF is not installed in this folder, so the game starts without EMF mods anyway: use Play.")};
+            if (!folder_.play_once)
+                return {result(cmd, false, "The EMF installed in this folder is older than this EMF.exe and cannot leave its mods out "
+                                           "for one start. Update EMF (install.cmd from its package), or switch the mods off instead.")};
+            if (steam_elsewhere)
+                return {result(cmd, false, "Play starts the game in " + utf8(steam) + ", not in this folder, so EMF cannot leave this "
+                                           "folder's mods out for that start. Show that folder first (Change).")};
+            const Change w = write_file_whole(flag, loader::play_once_text(how == "no-mods" ? loader::PlayOnce::NoMods : loader::PlayOnce::NoEmf,
+                                                                           host_.now_unix()),
+                                              "emf\\play_once.txt");
+            if (!w.ok) return {result(cmd, false, w.error)};
+        } else if (exists(flag)) {
+            DeleteFileW(lp(flag).c_str());  // a start without mods asked for earlier never happened: this one loads them
+        }
+        if (host_.under_wine()) {  // Linux's Steam never hears a steam:// link opened inside Wine or Proton
+            if (!once) return {result(cmd, false, kWinePlay)};
+            return {result(cmd, true, "", "The next game start is " + without + ". Start Enshrouded from Steam within 5 minutes: "
+                                          "from Wine or Proton, Play cannot reach Steam. Later starts load the mods as usual.")};
+        }
+        const bool ok = host_.open(L"steam://rungameid/1203620", BridgeHost::Open::Url);
+        if (!ok && once) DeleteFileW(lp(flag).c_str());  // no start: no flag left for a later one
+        std::string text;
+        if (ok && once) {
+            text = "Starting Enshrouded through Steam " + without + ", this time only. The next start loads them again.";
+            std::vector<std::string> others;  // other loaders next to the game start by themselves
+            if (how == "no-mods")
+                for (const auto& mod : folder_.mods)
+                    if (mod.source == "other" && mod.is_loader) others.push_back(mod.name);
+            for (size_t i = 0; i < others.size(); ++i) text += (i ? ", " : " Other loaders next to the game still start: ") + others[i];
+            if (!others.empty()) text += ".";
+        } else if (ok) {
+            text = "Starting Enshrouded through Steam...";
+            // Steam starts its own copy of the game: say so when that is not the folder shown
+            if (steam_elsewhere) text += " Play starts the game in " + utf8(steam) + "; this folder is not it.";
+        }
         return {result(cmd, ok, ok ? "" : "Steam did not start the game. Is Steam installed?", text)};
     }
     if (cmd == "copy") {
