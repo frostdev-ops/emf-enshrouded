@@ -29,14 +29,16 @@ for _, c in ipairs(require("creatures")) do
 	if c.skeleton then
 		local sk = require(c.name .. "_skeleton")
 		local n = #sk.joints
+		local a = (n + 3) // 4 * 4  -- the game pads the default pose vectors to a multiple of 4 joints
 		local joints, units, binds = {}, {}, {}
 		for i = 1, n do
 			joints[i] = { orientation = { x = 0, y = 0, z = 0, w = 1 }, position = { x = 0, y = 0, z = 0 }, scale = { x = 1, y = 1, z = 1 } }
 			binds[i] = { rot = { x = { x = 1, y = 0, z = 0 }, y = { x = 0, y = 1, z = 0 }, z = { x = 0, y = 0, z = 1 } }, pos = { x = 0, y = 0, z = 0 } }
 		end
-		for i = 1, 3 * n do units[i] = { data = {} } end
+		for i = 1, 3 * a do units[i] = { data = {} } end
 		resources["keen::ModelHierarchyResource"][sk.source] = { guid = sk.source, data = { hierarchyId = sk.source,
-			defaultPoseJoints = joints, defaultPose = { data = units }, skinToJointMatrices = binds } }
+			jointCount = n, defaultPoseJoints = joints, defaultPose = { data = units, alignedJointCount = a },
+			skinToJointMatrices = binds } }
 		local nodes, items = {}, {}
 		for _, cl in ipairs(require(c.name .. "_clips")) do
 			resources["keen::JointAnimation"][cl.source] = { guid = cl.source, data = { headers = {}, data = {} } }
@@ -171,6 +173,12 @@ for g, r in pairs(resources["keen::ModelHierarchyResource"]) do
 		print(string.format("skeleton %s joints %d id %s", g, #d.defaultPoseJoints, tostring(d.hierarchyId)))
 		local o = d.defaultPoseJoints[4] and d.defaultPoseJoints[4].orientation
 		if o then print(string.format("pose 4 %.4f %.4f %.4f %.4f", o.x, o.y, o.z, o.w)) end
+		-- the last joint's position in the default pose vectors (after the padded rotations)
+		local n, a = #d.defaultPoseJoints, d.defaultPose.alignedJointCount
+		local b = d.defaultPose.data[a + n].data
+		if b and #b == 16 then
+			print(string.format("position %d %.4f %.4f %.4f", n, string.unpack("<fff", string.char(table.unpack(b)))))
+		end
 	end
 end
 for g in pairs(resources["keen::JointAnimation"]) do

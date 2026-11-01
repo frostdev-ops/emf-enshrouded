@@ -172,6 +172,45 @@ class MakeModTests(unittest.TestCase):
             # the joints' rest pose and inverse binds as built
             q = built["bind"][3][0]
             self.assertIn("pose 4 %.4f %.4f %.4f %.4f" % q, text)
+            self.assertIn("position 12 %.4f %.4f %.4f" % built["bind"][11][1], text)
+
+    @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
+    def test_a_skeleton_whose_joint_count_is_not_a_multiple_of_four(self):
+        """The game pads the default pose's rotation vectors to a multiple of 4 joints (the boar: 58 joints, 60
+        slots): positions start after the padding."""
+        import own_creature
+        if HERE not in sys.path:
+            sys.path.insert(0, HERE)
+        import joint_animation as ja
+        import test_own_creature as toc
+        n = 10
+        hier = toc.hierarchy()
+        hier["jointCount"] = n
+        side = toc.sidecar()
+        side["joints"] = side["joints"][:n]
+        rest = toc.REST[:n]
+        clip = ja.encode([rest] * 11, rest, fps=60, loop=True, hierarchy_hash=ja.hierarchy_hash(list(range(100, 110))))
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as src:
+            with open(os.path.join(src, "own.json"), "w", encoding="utf-8") as f:
+                json.dump(side, f)
+            with open(os.path.join(src, "beast_aaaaaaaa-0000-4000-8000-000000000001.json"), "w", encoding="utf-8") as f:
+                json.dump(clip, f)
+            cfg = {"sidecar": os.path.join(src, "own.json"), "skeleton_guid": "22222222-2222-4222-8222-222222222222",
+                   "reference_clip": os.path.join(src, "beast_aaaaaaaa-0000-4000-8000-000000000001.json"),
+                   "clips": os.path.join(src, "beast_*.json"), "graph": "33333333-3333-4333-8333-333333333333",
+                   "graph_guid": "44444444-4444-4444-8444-444444444444"}
+            built = own_creature.build(cfg, hier)
+            bear = dict(BEAR, own_proportions=cfg)
+            make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(bear)])
+            make_mod.write_own(d, bear["name"], built)
+            with open(os.path.join(d, "beast_bear_data.lua"), "w", encoding="utf-8") as f:
+                f.write(STUB_DATA)
+            with open(os.path.join(d, "beast_bear_blob.lua"), "w", encoding="utf-8") as f:
+                f.write('return "blob"\n')
+            mock = os.path.join(HERE, "..", "..", "tools", "models", "mock_eml.lua")
+            out = subprocess.run(["lua", mock, d], capture_output=True, text=True, timeout=60)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("position 10 %.4f %.4f %.4f" % built["bind"][9][1], out.stdout)
 
 
 if __name__ == "__main__":

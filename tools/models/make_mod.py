@@ -238,12 +238,15 @@ for _, c in ipairs(require("creatures")) do
 		local h = game.assets.create_resource(src_h.data, "keen::ModelHierarchyResource", sk.guid, 0).data
 		h.hierarchyId = sk.guid
 		local n = #sk.joints
+		assert(h.jointCount == n, c.name .. ": the game skeleton has " .. tostring(h.jointCount) .. " joints, ours " .. n)
+		-- the default pose vectors: rotations, then positions, then scales, each padded to a multiple of 4 joints
+		local a = h.defaultPose.alignedJointCount
 		for i, j in ipairs(sk.joints) do
 			local d = h.defaultPoseJoints[i]
 			d.orientation.x, d.orientation.y, d.orientation.z, d.orientation.w = j.q[1], j.q[2], j.q[3], j.q[4]
 			d.position.x, d.position.y, d.position.z = j.t[1], j.t[2], j.t[3]
 			h.defaultPose.data[i] = { data = j.qb }
-			h.defaultPose.data[n + i] = { data = j.tb }
+			h.defaultPose.data[a + i] = { data = j.tb }
 			local b = h.skinToJointMatrices[i]
 			for _, col in ipairs({ "x", "y", "z" }) do
 				for _, k in ipairs({ "x", "y", "z" }) do b.rot[col][k] = j.ibm.rot[col][k] end
