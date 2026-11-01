@@ -41,6 +41,11 @@ inline bool is_content_file_name(std::wstring_view n) {
     return true;
 }
 
+// The game's containers: enshrouded_<digits>.dat, any case.
+inline bool is_dat_file_name(std::wstring_view n) {
+    return is_content_file_name(n) && n.size() > 11 && iequals_ascii(n.substr(0, 11), L"enshrouded_");
+}
+
 inline bool is_slash(wchar_t c) { return c == L'\\' || c == L'/'; }
 
 inline bool is_drive_letter(wchar_t c) { return (c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z'); }
@@ -292,6 +297,148 @@ inline ContentSwitches read_content_switches(const std::wstring& ini) {
     return content_switches([&](const wchar_t* section, const wchar_t* key, int fallback) {
         return static_cast<int>(GetPrivateProfileIntW(section, key, fallback, ini.c_str()));
     });
+}
+
+// ---- is the shadow copy still the game's? emf\content\client\shadow.txt ----
+//
+// Steam updates the game by itself. A container it replaces stays alive, old, behind the shadow's hard link; one it
+// patches in place is new in the shadow too while the shadow's copies of the .kfc files are old. Either way the game
+// would read content that does not belong together. So content_shadow.ps1 -Make records the game's files as they were
+// when it made the copy, after every file it made (a -Make that stopped half-way has no record):
+//   source <name> <size in bytes> <last write time, UTC, as a Windows file time>   for each of kStampedFiles
+//   dat_count <how many enshrouded_NNN.dat files the game folder had>
+// These are the game's files, never the shadow's (the shadow's .kfc will be a patched file one day). The loader
+// redirects only while the game's files still match; otherwise it says why (shadow_problem) and leaves the game alone.
+
+constexpr const char* kStampedFiles[] = {"enshrouded.exe", "enshrouded.kfc", "enshrouded.kfc_resources"};
+constexpr size_t kStampedCount = sizeof kStampedFiles / sizeof kStampedFiles[0];
+
+struct FileStamp {
+    unsigned long long size = 0;
+    unsigned long long written = 0;  // last write time, UTC: a Windows FILETIME as one number
+    bool operator==(const FileStamp&) const = default;
+};
+
+// What shadow.txt records; nullopt for what it does not record (or records twice, differently).
+struct ShadowRecord {
+    std::optional<FileStamp> source[kStampedCount];  // in kStampedFiles' order
+    std::optional<unsigned long> dat_count;
+};
+
+namespace detail {
+inline bool ascii_iequals(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i) {
+        const char x = a[i] >= 'A' && a[i] <= 'Z' ? static_cast<char>(a[i] + 32) : a[i];
+        const char y = b[i] >= 'A' && b[i] <= 'Z' ? static_cast<char>(b[i] + 32) : b[i];
+        if (x != y) return false;
+    }
+    return true;
+}
+
+// Decimal digits only (no sign, no spaces), at most what fits in 64 bits.
+inline std::optional<unsigned long long> parse_u64(std::string_view s) {
+    if (s.empty() || s.size() > 20) return std::nullopt;
+    unsigned long long v = 0;
+    for (const char c : s) {
+        if (c < '0' || c > '9') return std::nullopt;
+        const unsigned d = static_cast<unsigned>(c - '0');
+        if (v > (~0ull - d) / 10) return std::nullopt;
+        v = v * 10 + d;
+    }
+    return v;
+}
+
+inline std::vector<std::string_view> words(std::string_view line) {
+    std::vector<std::string_view> out;
+    size_t i = 0;
+    while (i < line.size()) {
+        while (i < line.size() && (line[i] == ' ' || line[i] == '\t')) ++i;
+        size_t j = i;
+        while (j < line.size() && line[j] != ' ' && line[j] != '\t') ++j;
+        if (j > i) out.push_back(line.substr(i, j - i));
+        i = j;
+    }
+    return out;
+}
+
+// Keeps the first value of a key; a second, different one makes it untrusted for good.
+template <class T>
+void record_once(std::optional<T>& slot, bool& untrusted, const T& value) {
+    if (untrusted) return;
+    if (slot && !(*slot == value)) {
+        slot.reset();
+        untrusted = true;
+        return;
+    }
+    slot = value;
+}
+}  // namespace detail
+
+// Reads shadow.txt's `source` and `dat_count` lines; every other line (the files -Remove takes out, comments) and
+// every line not exactly in that form is passed over.
+inline ShadowRecord parse_shadow_record(std::string_view text) {
+    ShadowRecord r;
+    bool untrusted[kStampedCount] = {};
+    bool dats_untrusted = false;
+    if (text.substr(0, 3) == "\xEF\xBB\xBF") text.remove_prefix(3);  // a UTF-8 mark (saved by an editor)
+    size_t from = 0;
+    while (from < text.size()) {
+        size_t to = text.find('\n', from);
+        if (to == std::string_view::npos) to = text.size();
+        std::string_view line = text.substr(from, to - from);
+        from = to + 1;
+        if (!line.empty() && line.back() == '\r') line.remove_suffix(1);
+        const auto w = detail::words(line);
+        if (w.size() == 4 && w[0] == "source") {
+            const auto size = detail::parse_u64(w[2]);
+            const auto written = detail::parse_u64(w[3]);
+            if (!size || !written) continue;
+            for (size_t i = 0; i < kStampedCount; ++i)
+                if (detail::ascii_iequals(w[1], kStampedFiles[i]))
+                    detail::record_once(r.source[i], untrusted[i], FileStamp{*size, *written});
+        } else if (w.size() == 2 && w[0] == "dat_count") {
+            const auto n = detail::parse_u64(w[1]);
+            if (n && *n <= 100000) detail::record_once(r.dat_count, dats_untrusted, static_cast<unsigned long>(*n));
+        }
+    }
+    return r;
+}
+
+// What the loader found on the disk for the check.
+struct ShadowFacts {
+    bool record_there = false;                    // emf\content\client\shadow.txt is there
+    std::optional<std::string> record;            // its text; nullopt when it could not be read
+    std::optional<FileStamp> now[kStampedCount];  // the game's files now (nullopt: not there or unreadable)
+    unsigned long dats_now = 0;                   // enshrouded_NNN.dat files in the game folder now
+};
+
+// "" when the shadow copy may be used; else the line for emf_loader.log and file_opens.log that says why not and what
+// to do.
+inline std::string shadow_problem(const ShadowFacts& f) {
+    const std::string off = "content redirect off: ";
+    const std::string again = "; run content_shadow.ps1 -Remove and -Make again";
+    if (!f.record_there)
+        return off + "there is no emf\\content\\client\\shadow.txt (make the shadow copy with content_shadow.ps1 -Make)";
+    if (!f.record) return off + "could not read emf\\content\\client\\shadow.txt" + again;
+    const ShadowRecord r = parse_shadow_record(*f.record);
+    bool complete = r.dat_count.has_value();
+    for (const auto& s : r.source) complete = complete && s.has_value();
+    if (!complete)
+        return off + "emf\\content\\client\\shadow.txt does not record the game's files (content_shadow.ps1 -Make did not "
+                     "finish, or an older one made it)" + again;
+    std::string changed;
+    auto add = [&](const std::string& what) { changed += (changed.empty() ? "" : ", ") + what; };
+    for (size_t i = 0; i < kStampedCount; ++i) {
+        if (!f.now[i])
+            add(std::string("no ") + kStampedFiles[i]);
+        else if (!(*f.now[i] == *r.source[i]))
+            add(kStampedFiles[i]);
+    }
+    if (f.dats_now != *r.dat_count)
+        add("enshrouded_NNN.dat files: " + std::to_string(*r.dat_count) + " then, " + std::to_string(f.dats_now) + " now");
+    if (changed.empty()) return {};
+    return off + "the game changed since the shadow copy was made (" + changed + ")" + again;
 }
 
 // ---- the lines of emf\file_opens.log ----

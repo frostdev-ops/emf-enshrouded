@@ -10,8 +10,10 @@
 #include <share.h>
 
 #include <cstdio>
+#include <cstring>
 #include <filesystem>
 #include <mutex>
+#include <new>
 #include <string>
 #include <vector>
 
@@ -495,8 +497,8 @@ TEST_CASE("file hooks: installed into emf_tests.exe's import table, calls go thr
     bool hooked = false;
     for (const auto& h : inst.hooked) hooked = hooked || h == "GetFileAttributesW (KERNEL32.dll)";
     CHECK(hooked);
-    const std::string header = fh::header_text(inst, L"C:\\Games\\Enshrouded\\enshrouded.exe", 0x6720a1b2, kGame,
-                                               false, g.sw, "2026-11-01 14:03:22");
+    const std::string header = fh::header_text(&inst, L"C:\\Games\\Enshrouded\\enshrouded.exe", 0x6720a1b2, kGame,
+                                               false, g.sw, "", "2026-11-01 14:03:22");
     CHECK(header.find("# EMF file-open log") == 0);
     CHECK(header.find("# started 2026-11-01 14:03:22 local time; exe \"C:\\Games\\Enshrouded\\enshrouded.exe\" "
                       "(PE time stamp 0x6720a1b2)\r\n") != std::string::npos);
@@ -519,11 +521,13 @@ TEST_CASE("file hooks: the loader's step writes emf\\file_opens.log: the header 
     fh::state().is_file = fake_is_file;
     emf::loader::ContentSwitches sw;
     sw.log_opens = true;
-    const std::string line = fh::start(self, game + L"\\", sw);
+    const std::vector<std::string> lines = fh::start(self, game + L"\\", sw);
     ::GetFileAttributesW((game + L"\\enshrouded.kfc").c_str());  // through the hook: not there
     fh::uninstall_for_test(self);
     fh::close_log_for_test();
     fh::reset_for_test();
+    REQUIRE(lines.size() == 1);  // with redirect_test=0 the shadow copy is not checked
+    const std::string& line = lines[0];
     CHECK(line.find("content spike: hooked ") == 0);
     CHECK(line.find("the log is emf\\file_opens.log") != std::string::npos);
     std::string text;
@@ -608,7 +612,103 @@ struct StandinGame {
         return file_text(dir + L"\\standin_out.txt");
     }
 };
+
+// "source <name> <size> <last write time>" for a file as it is now, as content_shadow.ps1 -Make records it.
+std::string source_line(const std::wstring& dir, const char* name) {
+    WIN32_FILE_ATTRIBUTE_DATA d{};
+    const std::wstring path = dir + L"\\" + std::wstring(name, name + std::strlen(name));
+    REQUIRE(GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &d));
+    const unsigned long long size = (static_cast<unsigned long long>(d.nFileSizeHigh) << 32) | d.nFileSizeLow;
+    const unsigned long long written =
+        (static_cast<unsigned long long>(d.ftLastWriteTime.dwHighDateTime) << 32) | d.ftLastWriteTime.dwLowDateTime;
+    return "source " + std::string(name) + " " + std::to_string(size) + " " + std::to_string(written) + "\r\n";
+}
+
+// shadow.txt for the game folder `dir` as it is now, with `dats` containers.
+std::string record_for(const std::wstring& dir, unsigned dats) {
+    return "# made by the test\r\ncopy enshrouded.kfc\r\nlink enshrouded_000.dat\r\n" + source_line(dir, "enshrouded.exe") +
+           source_line(dir, "enshrouded.kfc") + source_line(dir, "enshrouded.kfc_resources") + "dat_count " +
+           std::to_string(dats) + "\r\n";
+}
+
+std::string lines_text(const std::vector<std::string>& lines) {
+    std::string s;
+    for (const auto& l : lines) s += l + "\n";
+    return s;
+}
+
+// fh::start() on emf_tests.exe's own imports, then the hooks out again: the lines for emf_loader.log, whether the
+// redirect stayed on, how many slots were hooked.
+std::vector<std::string> start_and_stop(const std::wstring& game, const emf::loader::ContentSwitches& sw, bool* redirect,
+                                        size_t* hooked) {
+    const HMODULE self = GetModuleHandleW(nullptr);
+    fh::reset_for_test();
+    // never the real shadow check here: it calls GetFileAttributesW through this exe's own table, which start() hooks
+    fh::state().is_file = fake_is_file;
+    const auto lines = fh::start(self, game, sw);
+    *redirect = fh::state().sw.redirect_test;
+    *hooked = fh::state().patched.size();
+    fh::uninstall_for_test(self);
+    fh::close_log_for_test();
+    fh::reset_for_test();
+    return lines;
+}
 }  // namespace
+
+TEST_CASE("file hooks: with redirect_test=1 start() first checks the shadow copy's record against the game's files") {
+    const std::wstring game = test_scratch::temp_path(L"emf_file_hooks_stamps");
+    test_scratch::remove_at_exit(game);
+    put_file(game + L"\\enshrouded.exe", "exe\r\n");
+    put_file(game + L"\\enshrouded.kfc", "kfc\r\n");
+    put_file(game + L"\\enshrouded.kfc_resources", "resources\r\n");
+    put_file(game + L"\\enshrouded_000.dat", "dat 0\r\n");
+    put_file(game + L"\\enshrouded_001.dat", "dat 1\r\n");
+    std::filesystem::create_directories(game + L"\\emf\\content\\client");
+    const std::wstring opens_log = game + L"\\emf\\file_opens.log";
+    emf::loader::ContentSwitches sw;
+    sw.redirect_test = true;
+    bool redirect = true;
+    size_t hooked = 99;
+
+    // no record: no redirect, and with log_opens=0 nothing left to do, so no hooks
+    auto lines = start_and_stop(game, sw, &redirect, &hooked);
+    CHECK_FALSE(redirect);
+    CHECK(hooked == 0);
+    CHECK(lines_text(lines).find("content redirect off: there is no emf\\content\\client\\shadow.txt") != std::string::npos);
+    std::string log = file_text(opens_log);
+    CHECK(log.find("# EMF file-open log") == 0);
+    CHECK(log.find("# content redirect off: there is no emf\\content\\client\\shadow.txt") != std::string::npos);
+    CHECK(log.find("# no hooks: ") != std::string::npos);
+
+    // a record that matches the game's files
+    put_file(game + L"\\emf\\content\\client\\shadow.txt", record_for(game, 2));
+    lines = start_and_stop(game, sw, &redirect, &hooked);
+    CHECK(redirect);
+    CHECK(hooked > 0);
+    CHECK(lines_text(lines).find("content redirect off") == std::string::npos);
+    CHECK(file_text(opens_log).find("content redirect off") == std::string::npos);
+
+    // a game update patched enshrouded.kfc: no redirect; with log_opens=1 the hooks still log
+    put_file(game + L"\\enshrouded.kfc", "kfc after an update\r\n");
+    sw.log_opens = true;
+    lines = start_and_stop(game, sw, &redirect, &hooked);
+    CHECK_FALSE(redirect);
+    CHECK(hooked > 0);
+    CHECK(lines_text(lines).find("content redirect off: the game changed since the shadow copy was made (enshrouded.kfc); "
+                                 "run content_shadow.ps1 -Remove and -Make again") != std::string::npos);
+    log = file_text(opens_log);
+    CHECK(log.find("# content redirect off: the game changed since the shadow copy was made (enshrouded.kfc)") !=
+          std::string::npos);
+    CHECK(log.find("redirect_test=1") != std::string::npos);  // the switches as the ini has them
+    CHECK(log.find("# no hooks") == std::string::npos);
+
+    // a new container after a record that matched
+    put_file(game + L"\\emf\\content\\client\\shadow.txt", record_for(game, 2));
+    put_file(game + L"\\enshrouded_002.dat", "dat 2\r\n");
+    lines = start_and_stop(game, sw, &redirect, &hooked);
+    CHECK_FALSE(redirect);
+    CHECK(lines_text(lines).find("(enshrouded_NNN.dat files: 2 then, 3 now)") != std::string::npos);
+}
 
 TEST_CASE("file hooks: end to end: EMF's loader hooks a stand-in game's imports in DllMain and redirects to the shadow") {
     REQUIRE(std::filesystem::exists(build_dir() + L"\\standin_game\\standin_game.exe"));
@@ -616,6 +716,7 @@ TEST_CASE("file hooks: end to end: EMF's loader hooks a stand-in game's imports 
     put_file(g.dir + L"\\emf\\emf_core.ini", "[content]\r\nlog_opens=1\r\nredirect_test=1\r\n");
     put_file(g.dir + L"\\emf\\content\\client\\enshrouded.kfc", "shadow kfc\r\n");
     put_file(g.dir + L"\\emf\\content\\client\\enshrouded_000.dat", "shadow dat 0\r\n");
+    put_file(g.dir + L"\\emf\\content\\client\\shadow.txt", record_for(g.dir, 2));
     const std::string out = g.run();
     CHECK(out.find("kfc=shadow kfc\n") != std::string::npos);
     CHECK(out.find("dat=shadow dat 0\n") != std::string::npos);  // relative, with CreateFileA
@@ -632,6 +733,23 @@ TEST_CASE("file hooks: end to end: EMF's loader hooks a stand-in game's imports 
     CHECK(log.find("FindFirstFileW \"") != std::string::npos);
     CHECK(file_text(g.dir + L"\\emf\\emf_loader.log").find("content spike: hooked ") != std::string::npos);
     CHECK(file_text(g.dir + L"\\enshrouded.kfc") == "vanilla kfc\r\n");  // the game's own file is untouched
+}
+
+TEST_CASE("file hooks: end to end: a shadow copy older than the game's files is not used, and both logs say why") {
+    REQUIRE(std::filesystem::exists(build_dir() + L"\\standin_game\\standin_game.exe"));
+    StandinGame g(L"emf_standin_game_stale");
+    put_file(g.dir + L"\\emf\\emf_core.ini", "[content]\r\nlog_opens=1\r\nredirect_test=1\r\n");
+    put_file(g.dir + L"\\emf\\content\\client\\enshrouded.kfc", "shadow kfc\r\n");
+    put_file(g.dir + L"\\emf\\content\\client\\shadow.txt", record_for(g.dir, 2));
+    put_file(g.dir + L"\\enshrouded.kfc", "vanilla kfc after an update\r\n");  // Steam updated the game since
+    const std::string out = g.run();
+    CHECK(out.find("kfc=vanilla kfc after an update\n") != std::string::npos);
+    const std::string why = "content redirect off: the game changed since the shadow copy was made (enshrouded.kfc); "
+                            "run content_shadow.ps1 -Remove and -Make again";
+    const std::string log = file_text(g.dir + L"\\emf\\file_opens.log");
+    CHECK(log.find("# " + why + "\r\n") != std::string::npos);
+    CHECK(log.find(" => ") == std::string::npos);
+    CHECK(file_text(g.dir + L"\\emf\\emf_loader.log").find("emf_loader: " + why + "\n") != std::string::npos);
 }
 
 TEST_CASE("file hooks: end to end: without the [content] switches the loader hooks nothing") {

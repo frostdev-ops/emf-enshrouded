@@ -10,7 +10,6 @@
 #include <map>
 #include <string>
 
-#include "loader/file_redirect.h"
 #include "test_scratch.h"
 
 using emf::loader::is_content_file_name;
@@ -370,4 +369,146 @@ TEST_CASE("redirect: the switches read from a real emf_core.ini; no file and no 
     CHECK_FALSE(s.redirect_test);
     DeleteFileW(ini.c_str());
     RemoveDirectoryW(dir.c_str());
+}
+
+namespace {
+using emf::loader::FileStamp;
+const FileStamp kExe{81234432, 133750000000000001ull};
+const FileStamp kKfc{9437184, 133750000000000002ull};
+const FileStamp kRes{224395264, 133750000000000003ull};
+
+// a record as content_shadow.ps1 -Make writes it
+const char* const kRecord =
+    "# made by content_shadow.ps1 at 2026-11-01T10:00:00Z; content_shadow.ps1 -Remove takes out exactly what is listed\r\n"
+    "folder emf\\content\r\n"
+    "folder emf\\content\\client\r\n"
+    "copy enshrouded.kfc\r\n"
+    "copy enshrouded.kfc_resources\r\n"
+    "link enshrouded_000.dat\r\n"
+    "link enshrouded_001.dat\r\n"
+    "# the game's files when this copy was made: name, size in bytes, last write time (UTC, a Windows file time)\r\n"
+    "source enshrouded.exe 81234432 133750000000000001\r\n"
+    "source enshrouded.kfc 9437184 133750000000000002\r\n"
+    "source enshrouded.kfc_resources 224395264 133750000000000003\r\n"
+    "dat_count 55\r\n";
+
+// the game folder matching kRecord
+emf::loader::ShadowFacts matching_facts() {
+    emf::loader::ShadowFacts f;
+    f.record_there = true;
+    f.record = kRecord;
+    f.now[0] = kExe;
+    f.now[1] = kKfc;
+    f.now[2] = kRes;
+    f.dats_now = 55;
+    return f;
+}
+}  // namespace
+
+TEST_CASE("redirect: shadow.txt's record of the game's files is read defensively") {
+    using emf::loader::parse_shadow_record;
+    auto r = parse_shadow_record(kRecord);
+    REQUIRE(r.source[0]);
+    REQUIRE(r.source[1]);
+    REQUIRE(r.source[2]);
+    CHECK(*r.source[0] == kExe);
+    CHECK(*r.source[1] == kKfc);
+    CHECK(*r.source[2] == kRes);
+    REQUIRE(r.dat_count);
+    CHECK(*r.dat_count == 55);
+
+    // LF only, extra spaces and tabs, names in another case, a UTF-8 mark at the start (a record saved by Notepad)
+    r = parse_shadow_record(
+        "\xEF\xBB\xBFsource ENSHROUDED.EXE 81234432 133750000000000001\n"
+        "  source\tenshrouded.kfc   9437184 133750000000000002  \n"
+        "source enshrouded.kfc_resources 224395264 133750000000000003\ndat_count 55");
+    CHECK(r.source[0].value_or(FileStamp{}) == kExe);
+    CHECK(r.source[1].value_or(FileStamp{}) == kKfc);
+    CHECK(r.source[2].value_or(FileStamp{}) == kRes);
+    CHECK(r.dat_count.value_or(0) == 55);
+
+    // what is not exactly "source <name> <digits> <digits>" or "dat_count <digits>" counts as not recorded
+    r = parse_shadow_record(
+        "source enshrouded.exe 81234432\r\n"                       // too few
+        "source enshrouded.kfc 9437184 1337x\r\n"                  // not a number
+        "source enshrouded.kfc_resources -5 133750000000000003\r\n"  // a sign
+        "source enshrouded.dll 1 2\r\n"                            // not a stamped file
+        "dat_count lots\r\n");
+    CHECK_FALSE(r.source[0]);
+    CHECK_FALSE(r.source[1]);
+    CHECK_FALSE(r.source[2]);
+    CHECK_FALSE(r.dat_count);
+    r = parse_shadow_record(
+        "source enshrouded.exe 81234432 133750000000000001 extra\r\n"     // too many
+        "source enshrouded.kfc 99999999999999999999999 1\r\n"             // too big for 64 bits
+        "source enshrouded.kfc_resources 18446744073709551616 1\r\n"      // 2^64
+        "dat_count 99999999999\r\n");
+    CHECK_FALSE(r.source[0]);
+    CHECK_FALSE(r.source[1]);
+    CHECK_FALSE(r.source[2]);
+    CHECK_FALSE(r.dat_count);
+    CHECK(parse_shadow_record("source enshrouded.kfc 18446744073709551615 0\r\n").source[1].value_or(FileStamp{}) ==
+          FileStamp{18446744073709551615ull, 0});
+
+    // a file recorded twice with different stamps is not trusted; twice the same is fine
+    r = parse_shadow_record(
+        "source enshrouded.kfc 9437184 133750000000000002\r\nsource enshrouded.kfc 9437185 133750000000000002\r\n"
+        "source enshrouded.kfc 9437184 133750000000000002\r\n"
+        "source enshrouded.exe 81234432 133750000000000001\r\nsource enshrouded.exe 81234432 133750000000000001\r\n"
+        "dat_count 55\r\ndat_count 56\r\n");
+    CHECK_FALSE(r.source[1]);
+    CHECK(r.source[0].value_or(FileStamp{}) == kExe);
+    CHECK_FALSE(r.dat_count);
+
+    r = parse_shadow_record("");
+    CHECK_FALSE(r.source[0]);
+    CHECK_FALSE(r.dat_count);
+}
+
+TEST_CASE("redirect: the shadow copy is used only while the game's files match its record") {
+    using emf::loader::shadow_problem;
+    CHECK(shadow_problem(matching_facts()).empty());
+    const std::string again = "; run content_shadow.ps1 -Remove and -Make again";
+
+    auto f = matching_facts();
+    f.now[1] = FileStamp{kKfc.size + 4096, kKfc.written};  // a game update patched enshrouded.kfc
+    CHECK(shadow_problem(f) == "content redirect off: the game changed since the shadow copy was made (enshrouded.kfc)" +
+                                   again);
+    f = matching_facts();
+    f.now[0] = FileStamp{kExe.size, kExe.written + 1};  // the same size, written later
+    CHECK(shadow_problem(f) == "content redirect off: the game changed since the shadow copy was made (enshrouded.exe)" +
+                                   again);
+    f = matching_facts();
+    f.now[0] = FileStamp{1, 1};
+    f.now[2] = std::nullopt;  // gone (or unreadable)
+    f.dats_now = 56;
+    CHECK(shadow_problem(f) ==
+          "content redirect off: the game changed since the shadow copy was made (enshrouded.exe, no "
+          "enshrouded.kfc_resources, enshrouded_NNN.dat files: 55 then, 56 now)" + again);
+
+    f = matching_facts();
+    f.record_there = false;
+    f.record = std::nullopt;
+    CHECK(shadow_problem(f) == "content redirect off: there is no emf\\content\\client\\shadow.txt (make the shadow copy "
+                               "with content_shadow.ps1 -Make)");
+    f = matching_facts();
+    f.record = std::nullopt;
+    CHECK(shadow_problem(f) == "content redirect off: could not read emf\\content\\client\\shadow.txt" + again);
+    // a record without the stamps: -Make stopped half-way (it writes them last), or an older content_shadow.ps1
+    f = matching_facts();
+    f.record = "copy enshrouded.kfc\r\nlink enshrouded_000.dat\r\n";
+    CHECK(shadow_problem(f) == "content redirect off: emf\\content\\client\\shadow.txt does not record the game's files "
+                               "(content_shadow.ps1 -Make did not finish, or an older one made it)" + again);
+    f.record = std::string(kRecord).substr(0, std::string(kRecord).find("dat_count"));
+    CHECK(shadow_problem(f).find("does not record the game's files") != std::string::npos);
+}
+
+TEST_CASE("redirect: the game's containers are the enshrouded_NNN.dat files") {
+    using emf::loader::is_dat_file_name;
+    CHECK(is_dat_file_name(L"enshrouded_000.dat"));
+    CHECK(is_dat_file_name(L"ENSHROUDED_054.DAT"));
+    CHECK_FALSE(is_dat_file_name(L"enshrouded.kfc"));
+    CHECK_FALSE(is_dat_file_name(L"enshrouded.kfc_resources"));
+    CHECK_FALSE(is_dat_file_name(L"enshrouded_000.dat.part"));
+    CHECK_FALSE(is_dat_file_name(L"enshrouded_.dat"));
 }

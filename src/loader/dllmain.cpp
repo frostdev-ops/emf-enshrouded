@@ -192,7 +192,8 @@ void start_file_hooks(const std::wstring& dir) {
     try {  // no C++ exception leaves DllMain
         const auto sw = emf::loader::read_content_switches(dir + L"\\emf\\emf_core.ini");
         if (!sw.hooks()) return;
-        loader_log(dir, emf::loader::file_hooks::start(GetModuleHandleW(nullptr), dir, sw).c_str());
+        for (const auto& line : emf::loader::file_hooks::start(GetModuleHandleW(nullptr), dir, sw))
+            loader_log(dir, line.c_str());
     } catch (...) {
         loader_log(dir, "content spike: could not start (out of memory); the game runs without it");
     }

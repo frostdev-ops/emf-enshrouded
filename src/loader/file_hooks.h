@@ -9,6 +9,9 @@
 // redirect_test=1 the content files' calls and the current-folder changes (relative paths depend on them) for as long
 // as the game runs. With log_opens=1 alone nothing is logged after log_seconds.
 //
+// With redirect_test=1, start() first checks the shadow copy's record (emf\content\client\shadow.txt) against the
+// game's files and turns the redirect off when the game changed since the copy was made (shadow_problem).
+//
 // Each hook calls the function that was in the slot before (kernel32, or another tool's hook) and leaves the caller
 // the Windows error that function left, whatever the logging did in between.
 #include <windows.h>
@@ -470,10 +473,11 @@ inline std::string joined(const std::vector<std::string>& v) {
     return s.empty() ? "(none)" : s;
 }
 
-// The first lines of emf\file_opens.log: when, which exe, the switches, the shadow folder, what was hooked.
-inline std::string header_text(const Installed& inst, const std::wstring& exe_path, unsigned long pe_stamp,
+// The first lines of emf\file_opens.log: when, which exe, the switches (as the ini has them), the shadow folder, why
+// the redirect is off (`redirect_off`, "" when it is not), what was hooked (`inst`; null: no hooks went in).
+inline std::string header_text(const Installed* inst, const std::wstring& exe_path, unsigned long pe_stamp,
                                const std::wstring& game_dir, bool shadow_there, const ContentSwitches& sw,
-                               const std::string& started_at) {
+                               const std::string& redirect_off, const std::string& started_at) {
     char stamp[16];
     std::snprintf(stamp, sizeof stamp, "0x%08lx", pe_stamp);
     std::string s = "# EMF file-open log: the content redirect spike (docs/engine_parts/file_redirect_spike.md)\r\n";
@@ -482,11 +486,14 @@ inline std::string header_text(const Installed& inst, const std::wstring& exe_pa
          " log_seconds=" + std::to_string(sw.log_seconds) + " redirect_test=" + std::to_string(sw.redirect_test ? 1 : 0) +
          "\r\n";
     s += "# shadow folder \"" + utf8(shadow_folder(game_dir)) + "\": " + (shadow_there ? "there" : "not there") + "\r\n";
-    s += "# the exe imports from: " + joined(inst.dlls) + "\r\n";
-    s += "# hooked in the exe's import table: " + joined(inst.hooked) + "\r\n";
-    s += "# not imported by the exe, so not hooked: " + joined(inst.missing) + "\r\n";
-    if (!inst.failed.empty()) s += "# could not be hooked (the slot could not be written): " + joined(inst.failed) + "\r\n";
-    s += "# other file functions the exe imports (not hooked): " + joined(inst.other_file) + "\r\n";
+    if (!redirect_off.empty()) s += "# " + redirect_off + "\r\n";
+    if (!inst) return s + "# no hooks: with the redirect off and log_opens=0 there is nothing to log or redirect\r\n";
+    s += "# the exe imports from: " + joined(inst->dlls) + "\r\n";
+    s += "# hooked in the exe's import table: " + joined(inst->hooked) + "\r\n";
+    s += "# not imported by the exe, so not hooked: " + joined(inst->missing) + "\r\n";
+    if (!inst->failed.empty())
+        s += "# could not be hooked (the slot could not be written): " + joined(inst->failed) + "\r\n";
+    s += "# other file functions the exe imports (not hooked): " + joined(inst->other_file) + "\r\n";
     s += "# each line: +<ms since the hooks went in>ms t<thread id> <function> \"<path>\" [=> \"<shadow path>\"] "
          "<arguments> -> <result>\r\n";
     return s;
@@ -518,18 +525,89 @@ inline void close_log_for_test() {
     g_log_file = INVALID_HANDLE_VALUE;
 }
 
-// The loader's whole step (DllMain, the game only, once the switches said yes): log file, hooks, header. Returns the
-// line for emf_loader.log.
-inline std::string start(HMODULE exe, const std::wstring& game_dir, const ContentSwitches& sw) {
+// ---- the check of the shadow copy against the game's files (shadow_problem in file_redirect.h) ----
+// Run in start(), before the hooks go in, through the loader's own imports (fine in DllMain: no other DLL is loaded).
+
+inline std::optional<FileStamp> stamp_of(const std::wstring& path) {
+    WIN32_FILE_ATTRIBUTE_DATA d{};
+    if (!GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &d) || (d.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+        return std::nullopt;
+    return FileStamp{(static_cast<unsigned long long>(d.nFileSizeHigh) << 32) | d.nFileSizeLow,
+                     (static_cast<unsigned long long>(d.ftLastWriteTime.dwHighDateTime) << 32) |
+                         d.ftLastWriteTime.dwLowDateTime};
+}
+
+// The enshrouded_NNN.dat files directly in `game`.
+inline unsigned long count_dat_files(const std::wstring& game) {
+    WIN32_FIND_DATAW fd{};
+    const HANDLE h = FindFirstFileExW(path_join(game, L"enshrouded_*").c_str(), FindExInfoBasic, &fd,
+                                      FindExSearchNameMatch, nullptr, 0);
+    if (h == INVALID_HANDLE_VALUE) return 0;
+    unsigned long n = 0;
+    do {
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && is_dat_file_name(fd.cFileName)) ++n;
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    return n;
+}
+
+// A small text file's bytes; nullopt when it cannot be opened or read, or is bigger than `limit`.
+inline std::optional<std::string> read_small_file(const std::wstring& path, DWORD limit) {
+    const HANDLE f = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE,
+                                 nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (f == INVALID_HANDLE_VALUE) return std::nullopt;
+    std::optional<std::string> out;
+    LARGE_INTEGER size{};
+    if (GetFileSizeEx(f, &size) && size.QuadPart <= limit) {
+        std::string text(static_cast<size_t>(size.QuadPart), '\0');
+        DWORD got = 0;
+        if (text.empty() || (ReadFile(f, text.data(), static_cast<DWORD>(text.size()), &got, nullptr) && got == text.size()))
+            out = std::move(text);
+    }
+    CloseHandle(f);
+    return out;
+}
+
+// `game`: the normal game folder.
+inline ShadowFacts shadow_facts(const std::wstring& game) {
+    ShadowFacts f;
+    const std::wstring record = path_join(shadow_folder(game), L"shadow.txt");
+    const DWORD a = GetFileAttributesW(record.c_str());
+    f.record_there = a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+    if (f.record_there) f.record = read_small_file(record, 64 * 1024);
+    for (size_t i = 0; i < kStampedCount; ++i) {
+        const std::string name = kStampedFiles[i];
+        f.now[i] = stamp_of(path_join(game, std::wstring(name.begin(), name.end())));
+    }
+    f.dats_now = count_dat_files(game);
+    return f;
+}
+
+// "" when the redirect may run; else why not (the line for both logs).
+inline std::string redirect_problem(const std::optional<std::wstring>& game) {
+    if (!game) return "content redirect off: the game folder's path is not one the redirect can read";
+    return shadow_problem(shadow_facts(*game));
+}
+
+// The loader's whole step (DllMain, the game only, once the switches said yes): with redirect_test=1 the check of the
+// shadow copy first, then the log file, the hooks (none when nothing is left to do) and the log's header. Returns the
+// lines for emf_loader.log.
+inline std::vector<std::string> start(HMODULE exe, const std::wstring& game_dir, const ContentSwitches& asked) {
     auto& g = make_state();
-    g.game_dir = normal_game_dir(game_dir).value_or(game_dir);
+    const auto normal = normal_game_dir(game_dir);
+    const std::wstring folder = normal.value_or(game_dir);
+    ContentSwitches sw = asked;
+    const std::string redirect_off = sw.redirect_test ? redirect_problem(normal) : std::string();
+    if (!redirect_off.empty()) sw.redirect_test = false;
+    g.game_dir = normal.value_or(L"");
     g.sw = sw;
-    const bool logging = open_log(path_join(g.game_dir, L"emf\\file_opens.log"));
+    const bool logging = open_log(path_join(folder, L"emf\\file_opens.log"));
     g.write = logging ? &write_log : nullptr;
     // before the hooks: in a module whose own imports are hooked (the tests) these calls would be logged
-    const DWORD shadow = GetFileAttributesW(shadow_folder(g.game_dir).c_str());
+    const DWORD shadow = GetFileAttributesW(shadow_folder(folder).c_str());
     g.start_ms = g.now_ms();
-    const Installed inst = install(exe);
+    Installed inst;
+    if (sw.hooks()) inst = install(exe);
     if (logging) {
         wchar_t exe_path[MAX_PATH] = {};
         GetModuleFileNameW(exe, exe_path, MAX_PATH);
@@ -541,14 +619,20 @@ inline std::string start(HMODULE exe, const std::wstring& game_dir, const Conten
         char when[32];
         std::snprintf(when, sizeof when, "%04u-%02u-%02u %02u:%02u:%02u", t.wYear, t.wMonth, t.wDay, t.wHour, t.wMinute,
                       t.wSecond);
-        write_raw(header_text(inst, exe_path, nt->FileHeader.TimeDateStamp, g.game_dir,
-                              shadow != INVALID_FILE_ATTRIBUTES && (shadow & FILE_ATTRIBUTE_DIRECTORY), sw, when));
+        write_raw(header_text(sw.hooks() ? &inst : nullptr, exe_path, nt->FileHeader.TimeDateStamp, folder,
+                              shadow != INVALID_FILE_ATTRIBUTES && (shadow & FILE_ATTRIBUTE_DIRECTORY), asked,
+                              redirect_off, when));
     }
-    std::string line = "content spike: hooked " + std::to_string(inst.hooked.size()) +
-                       " file functions in the exe's import table (log_opens=" + std::to_string(sw.log_opens ? 1 : 0) +
-                       ", redirect_test=" + std::to_string(sw.redirect_test ? 1 : 0) + "); ";
+    std::vector<std::string> lines;
+    if (!redirect_off.empty()) lines.push_back(redirect_off);
+    std::string line = sw.hooks() ? "content spike: hooked " + std::to_string(inst.hooked.size()) +
+                                        " file functions in the exe's import table (log_opens=" +
+                                        std::to_string(sw.log_opens ? 1 : 0) +
+                                        ", redirect_test=" + std::to_string(sw.redirect_test ? 1 : 0) + "); "
+                                  : std::string("content spike: no hooks (the redirect is off and log_opens=0); ");
     line += logging ? "the log is emf\\file_opens.log" : "could not create emf\\file_opens.log, so nothing is logged";
-    return line;
+    lines.push_back(line);
+    return lines;
 }
 
 }  // namespace emf::loader::file_hooks
