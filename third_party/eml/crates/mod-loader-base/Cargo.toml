@@ -16,4 +16,5 @@ semver.workspace = true
 
 tracing.workspace = true
 
-zip = "4.2.0"
+# EMF patch P2: zip without "bzip2", whose bzip2-sys adds an export (bz_internal_error) to emf_content.dll
+zip = { version = "4.2.0", default-features = false, features = ["aes-crypto", "deflate64", "deflate", "lzma", "time", "zstd", "xz"] }
