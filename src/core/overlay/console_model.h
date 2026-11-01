@@ -53,12 +53,14 @@ struct SettingSource {
     SettingSource() = default;
     SettingSource(const char* k) : key(k) {}  // NOLINT: a list of keys reads as settings
     SettingSource(std::string k) : key(std::move(k)) {}  // NOLINT
+    bool operator==(const SettingSource&) const = default;
 };
 
 struct ModSource {
     std::string id;
     std::vector<SettingSource> settings;
     std::string name;  // what the Mods tab calls the mod
+    bool operator==(const ModSource&) const = default;
 };
 
 struct CompletionSources {

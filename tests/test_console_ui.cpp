@@ -60,6 +60,20 @@ ImGuiWindow* scrollback() {
         if (std::string(w->Name).find("##scrollback") != std::string::npos) return w;
     return nullptr;
 }
+// A window drawn in the last frame.
+bool drawn(const char* name) {
+    for (ImGuiWindow* w : GImGui->Windows)
+        if (std::string(w->Name).find(name) != std::string::npos && w->Active) return true;
+    return false;
+}
+// Commands with help, as CommandCenter::list() gives them.
+void with_help(Rig& r) {
+    r.src.commands = {"give", "help", "loot.status", "loot.toggle", "lua.reload", "time"};
+    r.src.command_help = {"<item name> [count]: drop items at your feet (host)", "[page]: list the commands",
+                          ": is your Loot Magnet on, and its rules", "[on|off]: your Loot Magnet",
+                          ": reload the Lua mods whose files changed", "<hours 0-24>: set the time of day (host)"};
+    r.src.version = 1;
+}
 }  // namespace
 
 TEST_CASE("console UI: after the window grows and shrinks again, the scrollback still shows the newest line") {
@@ -108,6 +122,126 @@ TEST_CASE("console UI: Tab completes a command and then an item name") {
     CHECK(r.ui.input == "give Material_T1_Wood_Logs ");
 }
 
+TEST_CASE("console UI: suggestions show as you type, with ghost text; Tab takes the top one, then the next argument's") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.frame();
+    r.frame();
+    r.type("lo");
+    CHECK(r.ui.suggester.showing());
+    CHECK(r.ui.suggester.ghost() == "ot.status");
+    CHECK(drawn("##emf_suggest"));
+    CHECK(r.ui.wants_escape);  // the next Esc hides the list, it does not close the console
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "loot.status ");
+    CHECK(r.ui.caret == 12);
+    CHECK(drawn("##emf_suggest"));  // the hint line "loot.status: is your Loot Magnet on..."
+    CHECK_FALSE(r.ui.suggester.showing());
+    CHECK_FALSE(r.ui.wants_escape);
+    r.press(ImGuiKey_Backspace);
+    for (int i = 0; i < 6; ++i) r.press(ImGuiKey_Backspace);  // "loot."
+    r.type("t");
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "loot.toggle ");
+    REQUIRE(r.ui.suggester.showing());  // [on|off]
+    r.press(ImGuiKey_DownArrow);
+    CHECK(r.ui.suggester.selected() == 1);
+    r.press(ImGuiKey_RightArrow);
+    CHECK(r.ui.input == "loot.toggle off ");
+    r.type("x");
+    r.press(ImGuiKey_Enter);
+    REQUIRE(r.submitted.size() == 1);
+    CHECK(r.submitted[0] == "loot.toggle off x");
+    CHECK(r.ui.suggester.current().rows.empty());
+    CHECK(r.ui.suggester.current().hint.empty());
+}
+
+TEST_CASE("console UI: Right takes the suggestion only at the end of the line; elsewhere it moves the caret") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.frame();
+    r.frame();
+    r.type("lo");
+    r.press(ImGuiKey_LeftArrow);
+    CHECK(r.ui.caret == 1);
+    r.press(ImGuiKey_RightArrow);
+    CHECK(r.ui.input == "lo");
+    CHECK(r.ui.caret == 2);
+    r.press(ImGuiKey_RightArrow);
+    CHECK(r.ui.input == "loot.status ");
+}
+
+TEST_CASE("console UI: Up/Down move in the list and leave the history alone; Esc hides it, then Up is the history's") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.frame();
+    r.frame();
+    r.type("help");
+    r.press(ImGuiKey_Enter);
+    r.frame();  // the input line takes the keyboard again
+    r.type("lo");
+    REQUIRE(r.ui.suggester.showing());
+    r.press(ImGuiKey_DownArrow);
+    CHECK(r.ui.input == "lo");
+    CHECK(r.ui.suggester.selected() == 1);
+    CHECK(r.ui.suggester.ghost() == "ot.toggle");
+    r.press(ImGuiKey_UpArrow);
+    r.press(ImGuiKey_UpArrow);
+    CHECK(r.ui.suggester.selected() == 2);  // wrapped to lua.reload
+    CHECK(r.ui.input == "lo");
+    r.ui.escape = true;  // Esc reached the console (the router sends it while the list shows)
+    r.frame();
+    CHECK_FALSE(r.ui.suggester.showing());
+    CHECK_FALSE(r.ui.wants_escape);  // the next Esc closes the console
+    CHECK_FALSE(drawn("##emf_suggest"));
+    CHECK(r.ui.input == "lo");
+    r.press(ImGuiKey_UpArrow);
+    CHECK(r.ui.input == "help");
+}
+
+TEST_CASE("console UI: a line from the history shows no list, so Up and Down keep going through the history") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.model.push_history("loot.toggle on");
+    r.model.push_history("lo");
+    r.frame();
+    r.frame();
+    r.press(ImGuiKey_UpArrow);
+    CHECK(r.ui.input == "lo");
+    CHECK_FALSE(r.ui.suggester.showing());
+    r.press(ImGuiKey_UpArrow);
+    CHECK(r.ui.input == "loot.toggle on");
+    r.press(ImGuiKey_DownArrow);
+    CHECK(r.ui.input == "lo");
+    r.type("o");  // typing shows it again
+    CHECK(r.ui.suggester.showing());
+}
+
+TEST_CASE("console UI: with suggestions off nothing shows as you type and Tab cycles through the matches as before") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.ui.suggest = false;
+    r.src.commands = {"time", "tpl", "tplset"};
+    r.src.command_help.clear();
+    r.frame();
+    r.frame();
+    r.type("t");
+    CHECK_FALSE(r.ui.suggester.showing());
+    CHECK_FALSE(drawn("##emf_suggest"));
+    CHECK_FALSE(r.ui.wants_escape);
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "time");
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "tpl");
+    r.press(ImGuiKey_Tab);
+    CHECK(r.ui.input == "tplset");
+}
+
 TEST_CASE("console UI: while closed it takes no typing, and many lines draw without trouble") {
     Headless h;
     Rig r;
@@ -144,6 +278,31 @@ TEST_CASE("read_overlay_config: on by default with the key under Esc; enabled=0 
     CHECK_FALSE(c.chat_commands);
     WritePrivateProfileStringW(L"overlay", L"key", L"999", ini.c_str());  // out of range: default
     CHECK(read_overlay_config(ini).toggle_scan == 0x29);
+    DeleteFileW(ini.c_str());
+}
+
+TEST_CASE("read_overlay_config: suggestions as you type are on with 8 rows; suggest=0 turns them off; 3-12 rows") {
+    wchar_t dir[MAX_PATH];
+    GetTempPathW(MAX_PATH, dir);
+    const std::wstring ini = std::wstring(dir) + L"emf_test_suggest_" + std::to_wstring(GetCurrentProcessId()) + L".ini";
+    DeleteFileW(ini.c_str());
+    OverlayConfig c = read_overlay_config(ini);
+    CHECK(c.suggest);
+    CHECK(c.suggest_rows == 8);
+    WritePrivateProfileStringW(L"overlay", L"suggest", L"0", ini.c_str());
+    WritePrivateProfileStringW(L"overlay", L"suggest_rows", L"5", ini.c_str());
+    c = read_overlay_config(ini);
+    CHECK_FALSE(c.suggest);
+    CHECK(c.suggest_rows == 5);
+    WritePrivateProfileStringW(L"overlay", L"suggest", L"1", ini.c_str());
+    WritePrivateProfileStringW(L"overlay", L"suggest_rows", L"20", ini.c_str());  // more than fits: 12
+    c = read_overlay_config(ini);
+    CHECK(c.suggest);
+    CHECK(c.suggest_rows == 12);
+    WritePrivateProfileStringW(L"overlay", L"suggest_rows", L"1", ini.c_str());
+    CHECK(read_overlay_config(ini).suggest_rows == 3);
+    WritePrivateProfileStringW(L"overlay", L"suggest_rows", L"lots", ini.c_str());  // not a number: the default
+    CHECK(read_overlay_config(ini).suggest_rows == 8);
     DeleteFileW(ini.c_str());
 }
 

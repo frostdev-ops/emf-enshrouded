@@ -1,6 +1,7 @@
 #include "console_ui.h"
 
 #include <algorithm>
+#include <cfloat>
 #include <cstring>
 #include <iterator>
 #include <string>
@@ -17,6 +18,91 @@ ImVec4 colour(LineKind k) {
         case LineKind::Success: return ImVec4(0.49f, 0.91f, 0.53f, 1.0f);
         default: return ImVec4(0.70f, 0.73f, 0.76f, 1.0f);
     }
+}
+
+// The suggestions' colours: names light, argument hints a little dimmer, help grey, the argument being typed gold.
+const ImVec4 kSuggestName(0.86f, 0.88f, 0.90f, 1.0f);
+const ImVec4 kSuggestPicked(1.00f, 1.00f, 1.00f, 1.0f);
+const ImVec4 kSuggestHint(0.66f, 0.71f, 0.77f, 1.0f);
+const ImVec4 kSuggestHelp(0.52f, 0.55f, 0.59f, 1.0f);
+const ImVec4 kSuggestCurrent(0.75f, 0.69f, 0.45f, 1.0f);
+const ImVec4 kSuggestRowBack(0.75f, 0.69f, 0.45f, 0.22f);
+const ImVec4 kGhost(0.52f, 0.55f, 0.59f, 1.0f);
+
+ImVec4 piece_colour(HintPiece::Kind k) {
+    switch (k) {
+        case HintPiece::Kind::Command: return kSuggestPicked;
+        case HintPiece::Kind::Current: return kSuggestCurrent;
+        case HintPiece::Kind::Help: return kSuggestHelp;
+        default: return kSuggestHint;
+    }
+}
+
+void text(const std::string& s, const ImVec4& c) {
+    ImGui::PushStyleColor(ImGuiCol_Text, c);
+    ImGui::TextUnformatted(s.c_str(), s.c_str() + s.size());
+    ImGui::PopStyleColor();
+}
+
+// The hint line and the matching rows in a box under the input line (no input of its own). Returns the box's
+// bottom edge (`under.y` when nothing shows).
+float draw_suggestions(const Suggester& g, ImVec2 under, ImVec2 display) {
+    const Suggestions& s = g.current();
+    const bool rows = g.showing();
+    if (!rows && s.hint.empty()) return under.y;
+    ImGui::SetNextWindowPos(under);
+    ImGui::SetNextWindowSizeConstraints(ImVec2(0, 0), ImVec2((std::max)(display.x - 2.0f * under.x, 100.0f), FLT_MAX));
+    ImGui::SetNextWindowBgAlpha(0.92f);
+    ImGui::Begin("##emf_suggest", nullptr,
+                 ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
+                     ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav);
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+    if (!s.hint.empty()) {  // "give <item name> [count]: drop items at your feet (host)", the current argument gold
+        for (size_t i = 0; i < s.hint.size(); ++i) {
+            if (i) ImGui::SameLine(0.0f, 0.0f);
+            const ImVec4 c = piece_colour(s.hint[i].kind);
+            text(s.hint[i].text, c);
+            if (s.hint[i].kind == HintPiece::Kind::Current) {  // underlined too (one font: no bold)
+                const ImVec2 a = ImGui::GetItemRectMin(), b = ImGui::GetItemRectMax();
+                draw->AddLine(ImVec2(a.x, b.y), b, ImGui::GetColorU32(c));
+            }
+        }
+        if (rows) ImGui::Separator();
+    }
+    if (rows) {  // three columns: the name or value, the command's arguments, the help in grey
+        float name_w = 0.0f, hint_w = 0.0f;
+        for (const auto& r : s.rows) {
+            name_w = (std::max)(name_w, ImGui::CalcTextSize(r.label.c_str()).x);
+            hint_w = (std::max)(hint_w, ImGui::CalcTextSize(r.hint.c_str()).x);
+        }
+        const float gap = ImGui::GetFontSize();
+        const float x0 = ImGui::GetCursorPosX();
+        const float x_hint = x0 + name_w + gap;
+        const float x_help = hint_w > 0.0f ? x_hint + hint_w + gap : x_hint;
+        for (size_t i = 0; i < s.rows.size(); ++i) {
+            const SuggestRow& r = s.rows[i];
+            const bool picked = i == g.selected();
+            ImGui::SetCursorPosX(x0);
+            if (picked) {
+                const ImVec2 p = ImGui::GetCursorScreenPos();
+                const float w = x_help - x0 + ImGui::CalcTextSize(r.help.c_str()).x;
+                draw->AddRectFilled(ImVec2(p.x - 2.0f, p.y), ImVec2(p.x + w + 2.0f, p.y + ImGui::GetTextLineHeight()),
+                                    ImGui::GetColorU32(kSuggestRowBack));
+            }
+            text(r.label, picked ? kSuggestPicked : kSuggestName);
+            if (!r.hint.empty()) {
+                ImGui::SameLine(x_hint);
+                text(r.hint, kSuggestHint);
+            }
+            if (!r.help.empty()) {
+                ImGui::SameLine(x_help);
+                text(r.help, kSuggestHelp);
+            }
+        }
+    }
+    const float bottom = ImGui::GetWindowPos().y + ImGui::GetWindowHeight();
+    ImGui::End();
+    return bottom;
 }
 
 std::string common_prefix(const std::vector<std::string>& v) {
@@ -43,11 +129,28 @@ void set_buffer(ImGuiInputTextCallbackData* d, const std::string& text) {
     d->InsertChars(0, text.c_str());
 }
 
+void set_line(ImGuiInputTextCallbackData* d, const LineEdit& e) {
+    set_buffer(d, e.text);
+    d->CursorPos = d->SelectionStart = d->SelectionEnd = static_cast<int>((std::min)(e.caret, e.text.size()));
+}
+
+// Called every frame the input line is active (CallbackAlways), or for the frame's one event (Tab, Up/Down, an edit).
 int input_callback(ImGuiInputTextCallbackData* d) {
     auto* c = static_cast<CallbackCtx*>(d->UserData);
     ConsoleUiState& ui = *c->ui;
+    if (ui.suggest)  // the suggestions follow the line and the caret (they recompute only when either changed)
+        ui.suggester.update(std::string_view(d->Buf, static_cast<size_t>(d->BufTextLen)),
+                            static_cast<size_t>(d->CursorPos), *c->sources);
     switch (d->EventFlag) {
         case ImGuiInputTextFlags_CallbackCompletion: {
+            if (ui.suggest) {
+                if (const auto e = ui.suggester.accept()) {  // Tab takes the highlighted suggestion
+                    set_line(d, *e);
+                    ui.completions.clear();
+                    break;
+                }
+            }
+            // no suggestion (or suggestions off): complete and cycle through the matches
             const std::string current(d->Buf, d->BufTextLen);
             const bool cycling = !ui.completions.empty() && ui.completion_index < ui.completions.size() &&
                                  current == ui.completions[ui.completion_index];
@@ -74,17 +177,23 @@ int input_callback(ImGuiInputTextCallbackData* d) {
             break;
         }
         case ImGuiInputTextFlags_CallbackHistory: {
-            const std::string line =
-                d->EventKey == ImGuiKey_UpArrow ? c->model->history_prev() : c->model->history_next();
+            const bool up = d->EventKey == ImGuiKey_UpArrow;
+            if (ui.suggest && ui.suggester.move(up ? -1 : +1)) break;  // in the list while it shows
+            const std::string line = up ? c->model->history_prev() : c->model->history_next();
             set_buffer(d, line);
             ui.completions.clear();
+            ui.suggester.replaced(line, line.size());  // no list for a line from the history: Up/Down stay its
             break;
         }
         case ImGuiInputTextFlags_CallbackEdit:
             ui.completions.clear();  // typing ends a Tab cycle
             break;
-        default: break;
+        default:
+            if (ui.suggest && ui.accept_right)  // Right at the end of the line takes the suggestion
+                if (const auto e = ui.suggester.accept_right()) set_line(d, *e);
+            break;
     }
+    ui.caret = static_cast<size_t>(d->CursorPos);
     return 0;
 }
 
@@ -92,6 +201,7 @@ int input_callback(ImGuiInputTextCallbackData* d) {
 
 void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSources& sources, ImVec2 display,
                   const std::function<void(const std::string&)>& submit, const std::function<void()>& mods_tab) {
+    ui.wants_escape = false;  // set again below while the suggestions show
     if (ui.open_fraction <= 0.0f) return;
     const float height = (std::max)(display.y * 0.5f * (std::min)(ui.open_fraction, 1.0f), 1.0f);
     ImGui::SetNextWindowPos(ImVec2(0, 0));
@@ -125,6 +235,7 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
             ImGui::EndTabBar();
         }
         if (ui.tab == 1) {
+            ui.escape = false;
             mods_tab();
             ImGui::End();
             ImGui::PopStyleVar(2);
@@ -168,6 +279,10 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
     ImGui::EndChild();
 
     // Input line.
+    if (ui.escape) {  // Esc while the suggestions showed: they hide (the next Esc closes the console)
+        ui.escape = false;
+        ui.suggester.escape();
+    }
     char buf[kInputCap];
     const size_t n = (std::min)(ui.input.size(), kInputCap - 1);
     std::memcpy(buf, ui.input.data(), n);
@@ -179,12 +294,28 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
         ui.focus_input = false;
     }
     CallbackCtx ctx{&model, &ui, &sources};
-    const ImGuiInputTextFlags in_flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackCompletion |
-                                         ImGuiInputTextFlags_CallbackHistory | ImGuiInputTextFlags_CallbackEdit;
+    ImGuiInputTextFlags in_flags = ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_CallbackCompletion |
+                                   ImGuiInputTextFlags_CallbackHistory | ImGuiInputTextFlags_CallbackEdit;
+    if (ui.suggest) in_flags |= ImGuiInputTextFlags_CallbackAlways;  // the caret, every frame the line is active
+    // Right with the caret at the end of the line (last frame's caret: the press cannot move it further)
+    ui.accept_right = ui.suggest && ImGui::IsKeyPressed(ImGuiKey_RightArrow) && !io.KeyCtrl && !io.KeyShift &&
+                      !io.KeyAlt && ui.caret == ui.input.size();
     const bool entered = ImGui::InputText("##input", buf, kInputCap, in_flags, input_callback, &ctx);
+    ui.accept_right = false;
     ImGui::PopStyleColor();
     ImGui::PopItemWidth();
     ui.input = buf;
+    if (ui.suggest && !entered && ImGui::IsItemActive()) {  // grey ghost text completes the top match after the caret
+        const std::string ghost = ui.suggester.ghost();
+        if (!ghost.empty()) {
+            const ImGuiStyle& style = ImGui::GetStyle();
+            const ImVec2 lo = ImGui::GetItemRectMin(), hi = ImGui::GetItemRectMax();
+            const float x = lo.x + style.FramePadding.x + ImGui::CalcTextSize(ui.input.c_str()).x;
+            if (x + ImGui::CalcTextSize(ghost.c_str()).x <= hi.x - style.FramePadding.x)  // only while nothing scrolls
+                ImGui::GetWindowDrawList()->AddText(ImVec2(x, lo.y + style.FramePadding.y), ImGui::GetColorU32(kGhost),
+                                                    ghost.c_str());
+        }
+    }
     if (entered) {
         std::string line = ui.input;
         while (!line.empty() && line.back() == ' ') line.pop_back();
@@ -194,6 +325,8 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
         }
         ui.input.clear();
         ui.completions.clear();
+        ui.suggester.clear();
+        ui.caret = 0;
         ui.follow = true;
         ui.focus_input = true;
     }
@@ -204,9 +337,15 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
     ImGui::PopStyleVar(2);
     ImGui::PopStyleColor();
 
-    // Completion list under the panel.
+    // Suggestions as you type under the panel; the next Esc is theirs while rows show.
+    float below = under.y;
+    if (ui.suggest) {
+        below = draw_suggestions(ui.suggester, under, display);
+        ui.wants_escape = ui.suggester.showing();
+    }
+    // The Tab cycle's list under the panel (and under the suggestions).
     if (ui.completions.size() > 1) {
-        ImGui::SetNextWindowPos(under);
+        ImGui::SetNextWindowPos(ImVec2(under.x, below > under.y ? below + 2.0f : under.y));
         ImGui::SetNextWindowBgAlpha(0.92f);
         ImGui::Begin("##emf_completions", nullptr,
                      ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoInputs |
