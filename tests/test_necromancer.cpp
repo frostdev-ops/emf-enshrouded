@@ -397,6 +397,16 @@ TEST_CASE("beastmaster + necromancer: the wheel keys are not the game's own keys
         keys.push_back(vk);
     }
     CHECK(keys[0] != keys[1]);  // each mod's key (one wheel or two)
+    // the player docs (the zip's README.txt too) name the new keys, and that the packs need EML first
+    for (const char* doc : {"README_EMF.md", "package/README.txt", "mods/beastmaster/README.md", "mods/necromancer/README.md"}) {
+        std::string text = slurp((std::filesystem::path(EMF_SOURCE_DIR) / doc).wstring());
+        std::transform(text.begin(), text.end(), text.begin(), [](char c) { return static_cast<char>(std::tolower(c)); });
+        for (const char* old : {"hold b ", "hold v ", "hold b)", "hold v)", "hold **b**", "hold **v**", "b and v", "v and b"})
+            CHECK_MESSAGE(text.find(old) == std::string::npos, (std::string(doc) + ": " + old));
+        CHECK_MESSAGE(text.find("f3") != std::string::npos, std::string(doc));
+        CHECK_MESSAGE(text.find("f2") != std::string::npos, std::string(doc));
+        CHECK_MESSAGE(text.find("install eml") != std::string::npos, std::string(doc));
+    }
     // the old keys open nothing now
     NecroRig n({}, {"beastmaster"});
     press_key(n, 'B');
