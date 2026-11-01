@@ -1118,7 +1118,7 @@ TEST_CASE("bounty: a player who walks up to a board gets the notices in the chat
         b.seconds(2);
         REQUIRE(tells_to(b, 2).size() == 1);
         const std::string line = tells_to(b, 2)[0];
-        CHECK(line.rfind("Bounty Board: new notices in 4 days\n1. ", 0) == 0);
+        CHECK(line.rfind("Bounty Board: your starter notices (until your first bounty is done); new notices in 4 days\n1. ", 0) == 0);
         CHECK(count_of(line, "\n") <= 9);  // at most 10 lines
         CHECK(line.find("\nType /bounty.take 1-3 here") != std::string::npos);
         b.seconds(10);                   // staying there: nothing more
@@ -1456,4 +1456,31 @@ TEST_CASE("bounty: bounty.mark without camera data takes the prop nearest to the
     CHECK(b.reply("bounty.mark") == "Marked: the prop nearest to you (at 0, 10, 2) is a Bounty Board now.");
     place(b.r.fake, 1, 50, 10, 0);  // nothing within 3 m
     CHECK(b.reply("bounty.mark").rfind("Look at a prop", 0) == 0);
+}
+
+TEST_CASE("bounty: a flame altar that was abandoned makes no base for a Notice Board") {
+    BountyRig b;
+    altar(b, 900, 0, 0);
+    component<ecs::BaseIdComponent>(b.r.fake, 900).wasAbandoned = true;
+    prop(b, 950, 10, 10, 0);
+    search(b);
+    CHECK(b.reply("bounty.boards").find("No Bounty Board") != std::string::npos);
+}
+
+TEST_CASE("bounty: the chat names starter notices; a player who finished one gets the board's own") {
+    BountyRig b({{"need_board", "1"}});
+    altar(b, 900, 20, 0);
+    prop(b, 950, 20, 10, 4);
+    place(b.r.fake, 2, 20, 10, -30);  // away from the board while it is found
+    search(b);
+    b.reply("bounty.give start_wood", 2, 0xBB);  // player 2 finishes their first bounty
+    deliver(b.r.fake, "PickupEvent", pickup_event(2, 0, kLogs, 20));
+    place(b.r.fake, 2, 20, 10, 0);  // then walks up to it
+    b.look(2, 20, 11.5, 0, 0);
+    b.seconds(2);
+    std::string notices;
+    for (const auto& line : tells_to(b, 2))
+        if (line.rfind("Bounty Board:", 0) == 0) notices = line;
+    CHECK(notices.rfind("Bounty Board: new notices in 4 days\n", 0) == 0);
+    CHECK(notices.find("starter") == std::string::npos);
 }

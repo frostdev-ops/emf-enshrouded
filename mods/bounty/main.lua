@@ -851,7 +851,8 @@ local function walk_step(world)
   for k = walk.i, last do
     local id = walk.ids[k]
     walk.present[id] = true
-    if has(world, "BaseIdComponent", id) == true then
+    local ok, base = pcall(world.get, world, "BaseIdComponent", id)
+    if ok and base and not base.wasAbandoned then  -- an abandoned flame altar makes no base
       local x, _, z = world:position(id)
       if x then walk.altars[#walk.altars + 1] = {x = x, z = z} end
     end
@@ -1323,7 +1324,8 @@ emf.command("board", ": the notices and your bounties", function(world, args)
       emf.reply("This world has no Bounty Board yet: until a Notice Board is built in a base (or the host marks a prop " ..
         "with bounty.mark), take and claim anywhere.")
     end
-    emf.reply("Notices (take one with /bounty.take <n>):")
+    emf.reply(starters_for(rec.done) and "Your starter notices, until your first bounty is done (take one with /bounty.take <n>):"
+              or "Notices (take one with /bounty.take <n>):")
     for _, l in ipairs(notice_lines(me.account)) do emf.reply(l) end
   end
   if #rec.taken == 0 then emf.reply("You hold no bounty: take one from the notices.") end
@@ -1599,7 +1601,9 @@ end
 local function notice_message(account)
   local rec = record(account)
   local list = notice_lines(account)
-  local lines = {"Bounty Board: " .. lower_first(until_text())}
+  local starter = starters_for(rec.done)
+  local lines = {"Bounty Board: " .. (starter and "your starter notices (until your first bounty is done); " or "") ..
+                 lower_first(until_text())}
   for _, l in ipairs(list) do lines[#lines + 1] = l end
   local held, done = {}, owed[account] ~= nil
   for _, b in ipairs(rec.taken) do
@@ -1736,7 +1740,10 @@ emf.on_key("read_key", function(world)
   if not account or not board_under_crosshair(world, player, read_range()) then return end
   local labels, entries = wheel_items(account)
   local title = "Bounty Board: " .. lower_first(until_text())
-  emf.wheel(title, labels, "", function(w, choice) pending = choice and entries[choice] or nil end)
+  local picked_in = emf.session()
+  emf.wheel(title, labels, "", function(w, choice)
+    pending = choice and entries[choice] and {entry = entries[choice], session = picked_in} or nil
+  end)
 end)
 
 -- ---- every step ----
@@ -1805,7 +1812,7 @@ emf.on_tick(function(world)
   if pending then
     local p = pending
     pending = nil
-    run_pick(world, p)
+    if p.session == emf.session() then run_pick(world, p.entry) end  -- a pick from another session is dropped
   end
   if play_s >= walk_up_at then
     walk_up_at = play_s + WALK_EVERY
