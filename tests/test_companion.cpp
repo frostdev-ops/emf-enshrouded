@@ -852,3 +852,127 @@ TEST_CASE("companion: the state file is replaced in one step (a crash never leav
     CHECK(GetFileAttributesW((path + L".tmp").c_str()) == INVALID_FILE_ATTRIBUTES);  // no temp file left behind
     DeleteFileW(path.c_str());
 }
+
+// ---- keeping up: lost, left behind, stuck (the owner's "drifts off, disappears or stays behind" in 0.3.2) ----
+TEST_CASE("companion: one that vanished without dying while it was out comes back at once, whatever respawn says") {
+    // the game removes an enemy body away from every player within a second (re_teleport.md: 150 m, 0.6 s): after a fast
+    // travel or a long run the companion is gone without a death; 0.3.2 then only logged "F6 summons a new one"
+    companion::SummonPolicy p;  // respawn_ms 0: a death stays a death
+    p.on_session(1, 0);
+    p.on_loaded(0);
+    p.on_summoned();
+    CHECK(p.on_lost(10000));
+    CHECK(p.coming());  // the world file keeps saying it is out
+    CHECK_FALSE(p.due(10000 + companion::SummonPolicy::kLostSettleMs - 1));
+    CHECK(p.due(10000 + companion::SummonPolicy::kLostSettleMs));
+    p.on_summoned();
+    CHECK(p.on_lost(20000));
+    p.on_summoned();
+    CHECK(p.on_lost(30000));
+    p.on_summoned();
+    CHECK_FALSE(p.on_lost(40000));  // the 4th time within 2 minutes: something keeps removing it; G or F6 calls it again
+    CHECK_FALSE(p.due(999999));
+    CHECK_FALSE(p.coming());
+    p.on_summoned();  // summoned by hand
+    CHECK(p.on_lost(10000 + companion::SummonPolicy::kLostWindowMs + 1));  // the window moved on
+    // a companion that is not out (dismissed, dead) is never brought back as lost
+    companion::SummonPolicy q;
+    q.on_session(1, 0);
+    q.on_loaded(0);
+    q.on_summoned();
+    q.on_dismissed();
+    CHECK_FALSE(q.on_lost(5000));
+    CHECK_FALSE(q.due(999999));
+}
+
+TEST_CASE("companion: when your player entity changes, it guards the new one") {
+    Companion c;
+    uint32_t guard = 0, guarded = 0;
+    c.on_spawned(6817, 1, 1000, 1);
+    REQUIRE(c.take_start(&guard, &guarded));
+    CHECK_FALSE(c.on_player(1, 2000));  // the same player: nothing
+    CHECK_FALSE(c.on_player(0, 2000));  // no player now (a load screen): nothing
+    CHECK(c.on_player(2, 2000));
+    CHECK(c.player() == 2u);
+    REQUIRE(c.take_start(&guard, &guarded));
+    CHECK(guarded == 2u);
+    c.request_guard(7000, 3000);  // staying: it keeps guarding its marker, only the player it belongs to changes
+    REQUIRE(c.take_start(&guard, &guarded));
+    CHECK(c.on_player(3, 4000));
+    CHECK_FALSE(c.take_start(&guard, &guarded));
+    CHECK(c.player() == 3u);
+}
+
+namespace {
+struct Walk {
+    companion::CatchUp c;
+    uint64_t now = 0;
+    // one look a second
+    bool look(const emf::aim::Vec3& comp, const emf::aim::Vec3& player, bool following = true, bool fighting = false) {
+        now += 1000;
+        return c.tick({now, comp, player, following, fighting});
+    }
+};
+}  // namespace
+
+TEST_CASE("catch-up: left behind (over 40 m for 4 s) it is moved to the player, then not again for 10 s") {
+    Walk w;
+    const emf::aim::Vec3 player{0, 0, 0}, behind{45, 0, 0};
+    CHECK_FALSE(w.look({3, 0, 0}, player));
+    CHECK_FALSE(w.look(behind, player));  // far since this look
+    CHECK_FALSE(w.look(behind, player));
+    CHECK_FALSE(w.look(behind, player));
+    CHECK_FALSE(w.look(behind, player));
+    CHECK(w.look(behind, player));  // 4 s far
+    for (int i = 0; i < 9; ++i) CHECK_FALSE(w.look(behind, player));  // the teleport takes a few steps: no second one
+    for (int i = 0; i < 4; ++i) CHECK_FALSE(w.look(behind, player));  // after the 10 s cool-down it counts again
+    CHECK(w.look(behind, player));  // still far 4 s after the cool-down: again
+}
+
+TEST_CASE("catch-up: in a fight it may stray up to 60 m; beyond that it comes at once (the game would remove it)") {
+    Walk w;
+    const emf::aim::Vec3 player{0, 0, 0};
+    for (int i = 0; i < 20; ++i) CHECK_FALSE(w.look({45, 0, 0}, player, true, true));
+    CHECK(w.look({65, 0, 0}, player, true, true));
+    Walk v;
+    CHECK_FALSE(v.look({0, 0, 70}, player));  // very far (a fast travel, a respawn at an altar): as soon as the player
+    CHECK_FALSE(v.look({0, 0, 70}, player));  // has stood 2 s (the first look cannot tell)
+    CHECK(v.look({0, 0, 70}, player));
+}
+
+TEST_CASE("catch-up: stuck (over 20 m and not moving 2 m in 8 s) it is moved; one that walks is left alone") {
+    Walk w;
+    const emf::aim::Vec3 player{0, 0, 0};
+    for (int i = 0; i < 8; ++i) CHECK_FALSE(w.look({25, 0, 0.1 * i}, player));
+    CHECK(w.look({25, 0, 0.8}, player));  // 8 s since the first look without 2 m of way
+    Walk m;
+    for (int i = 0; i < 30; ++i) CHECK_FALSE(m.look({25, 0, 2.5 * i}, {0, 0, 2.5 * i}));  // it keeps pace, 25 m behind
+    Walk n;
+    for (int i = 0; i < 30; ++i) CHECK_FALSE(n.look({15, 0, 0}, player));  // idling 15 m away: the guard's own slack
+}
+
+TEST_CASE("catch-up: never while it stays, nor while the player is in the air or on the move (gliding, falling)") {
+    Walk w;
+    const emf::aim::Vec3 player{0, 0, 0};
+    for (int i = 0; i < 20; ++i) CHECK_FALSE(w.look({100, 0, 0}, player, false));  // "Stay here"
+    Walk g;
+    for (int i = 0; i < 10; ++i) CHECK_FALSE(g.look({0, 0, 0}, {80.0 + 12 * i, 40, 0}));  // the player glides away
+    CHECK_FALSE(g.c.player_settled());
+    CHECK_FALSE(g.look({0, 0, 0}, {200, 0, 0}));  // landed: it waits until the player has stood 2 s
+    CHECK_FALSE(g.look({0, 0, 0}, {200, 0, 0}));
+    CHECK(g.look({0, 0, 0}, {200, 0, 0}));
+    CHECK(g.c.player_settled());
+}
+
+TEST_CASE("catch-up: without a companion out the player is still watched (a lost one comes back once they stand)") {
+    companion::CatchUp c;
+    CHECK_FALSE(c.player_settled());
+    c.watch_player(1000, {10, 0, 0});
+    CHECK_FALSE(c.player_settled());
+    c.watch_player(2000, {11, 0, 0});  // within 3 m
+    CHECK_FALSE(c.player_settled());
+    c.watch_player(3000, {11, 0, 1});
+    CHECK(c.player_settled());
+    c.watch_player(4000, {20, 0, 1});  // walked on
+    CHECK_FALSE(c.player_settled());
+}

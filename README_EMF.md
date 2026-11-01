@@ -227,6 +227,18 @@ from you; while you stand still it may wander a few metres), never attacks you, 
 damage**: in the test it hit a hostile Vukah three times for 48 and killed it, and the game credited you with the kill
 ("Enemy slain", XP).
 
+**Keeping up.** The companion only walks, and the game removes a creature of its kind that ends up away from every
+player within a second. So while it follows you (Follow me, Attack; never while it stays):
+
+- left behind (more than 40 m away for 4 s, or more than 60 m even in a fight) or stuck (more than 20 m away and not
+  2 m of way in 8 s), it is moved next to you with the game's own teleport (EMF API v20; on an older EMF a new
+  companion comes instead);
+- gone without dying (after a fast travel, a respawn at an altar, a long glide), it comes back by itself: "it got lost;
+  it comes back to you when you stand still". After the third time in 2 minutes it stays away until you call it.
+
+Either waits until you have stood still for 2 s, so it never lands in the air beside you while you glide. Gear, order
+and level stay the same.
+
 **Orders.** With the companion out, hold **G**: a wheel titled "Companion (level N)" offers
 
 | Entry | What happens |
@@ -275,7 +287,7 @@ yours.
 | `faction=11` | the faction number written on the companion right after it spawns (and again if the game changes it). 11 = `PlayerAlly`, the faction of the game's own summons: full damage. 7 = `Player` follows too but every hit does 0. -1 keeps the template's faction: **with the default enemy body that leaves a hostile Vukah next to you**, and other non-ally numbers can too. Anything that is not a number from -1 to 15 falls back to 11 (logged). Level and gear need 11 |
 | `guid=` | the body (default `d5d05217-52dc-467a-9192-26b4f661d8d9`, `Enemy_Vukah_Melee`). Plain enemy-AI actors without `PlayerInput` work; the old default `FakePlayer_Vukah_Melee` (`9543cfb0-...`) follows but does no damage. Tested ones: `docs/engine_parts/re_companions.md` |
 | `auto_summon=1` | summons one by itself once a world you host is running |
-| `respawn_seconds=N` | after the companion dies (or is gone), a new one comes N seconds later; 0 (default): press G |
+| `respawn_seconds=N` | after the companion dies, a new one comes N seconds later; 0 (default): press G. One the game removed (left far behind) did not die: it always comes back (above) |
 | `follow_distance=<m>` | changes the template's guard distances (start following at d + 2 m, stop at d m). Template data: with an enemy body it changes **every wild Vukah of that template** too, until the game restarts. Not set by default |
 
 Console: `companion.gear` (what it wears, its level, and pieces still on their way back to you), `companion.aim` (your camera ray and the creatures near it, with

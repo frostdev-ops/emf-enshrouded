@@ -1,7 +1,7 @@
 {
   "id": "companion",
   "name": "Companion",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "description": "A companion that follows you, fights at your side, takes orders (follow, stay, attack) and wears gear you give it. G opens its order wheel. Saved per world. Installed switched off.",
   "authors": ["EMF"],
   "emf": 13,
