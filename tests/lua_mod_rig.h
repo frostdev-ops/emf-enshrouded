@@ -204,6 +204,9 @@ struct ModRig {
     // at the top of main.lua are meant to be edited while the game runs).
     void edit_main(const std::string& after, const std::string& insert) {
         std::string lua = slurp(folder + L"\\main.lua");
+        // A checkout with core.autocrlf=true (Windows, GitHub's runners) has CRLF line ends; the anchors are written
+        // with "\n", so the copy is made LF-only first (Lua reads both).
+        for (size_t cr = lua.find("\r\n"); cr != std::string::npos; cr = lua.find("\r\n", cr)) lua.erase(cr, 1);
         const size_t at = lua.find(after);
         REQUIRE(at != std::string::npos);
         lua.insert(at + after.size(), insert);
