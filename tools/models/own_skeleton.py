@@ -91,10 +91,10 @@ def blender_to_game(p):
 
 
 def _turn(u, v):
-    """The shortest rotation taking direction u to direction v (identity for a zero-length one)."""
+    """The shortest rotation taking direction u to direction v (identity for one shorter than 0.1 mm)."""
     lu = sum(a * a for a in u) ** 0.5
     lv = sum(a * a for a in v) ** 0.5
-    if lu < 1e-12 or lv < 1e-12:
+    if lu < 1e-4 or lv < 1e-4:  # a bone shorter than 0.1 mm has no direction (rounding noise)
         return (0.0, 0.0, 0.0, 1.0)
     u = tuple(a / lu for a in u)
     v = tuple(a / lv for a in v)

@@ -101,6 +101,14 @@ class AlignTests(unittest.TestCase):
         for a, b in zip(new[2][1], (0.0, 1.0, 0.0)):
             self.assertAlmostEqual(a, b, places=9)
 
+    def test_a_bone_of_no_length_does_not_turn(self):
+        # a child at its parent's place, moved by rounding noise only: no direction to point the parent along
+        rest = [(I, (0.0, 0.0, 0.0), (1.0, 1.0, 1.0)), (I, (0.0, 1.0, 0.0), (1.0, 1.0, 1.0)),
+                (I, (1e-8, 0.0, 0.0), (1.0, 1.0, 1.0))]
+        moved = [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 1.0, 2e-7)]
+        new = osk.align_rest(rest, self.PARENTS, moved, main={0, 1, 2})
+        self.assertLess(angle(new[1][0], I), 1e-7)
+
     def test_the_same_places_keep_the_rest(self):
         same = [w[1] for w in osk.world(self.REST, self.PARENTS)]
         new = osk.align_rest(self.REST, self.PARENTS, same, main={0, 1, 2})

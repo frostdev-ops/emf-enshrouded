@@ -86,6 +86,13 @@ class BuildTests(unittest.TestCase):
             for a, b in zip(world[j][1], osk.blender_to_game(joint["own"])):
                 self.assertAlmostEqual(a, b, places=9)
 
+    def test_the_bones_keep_the_game_skeletons_frames(self):
+        """Only the joints move: the game graph's own nodes (foot IK, leaning, aiming) turn bones about their axes as
+        they would on the game creature (seen in game: a pelvis frame turned 90 degrees sat the panther upright)."""
+        built = oc.build(self.cfg, hierarchy())
+        for (q, _, _), (q0, _, _) in zip(built["bind"], REST):
+            self.assertEqual(q, q0)
+
     def test_the_inverse_binds_undo_the_bind_pose(self):
         built = oc.build(self.cfg, hierarchy())
         for (q, p, s), m in zip(osk.world(built["bind"], PARENTS), built["skeleton"]["skinToJointMatrices"]):
@@ -112,6 +119,29 @@ class BuildTests(unittest.TestCase):
             self.assertLess(2 * math.acos(min(1.0, abs(sum(a * b for a, b in zip(q, q0))))), 1e-3)
             for a, b in zip(t, t0):
                 self.assertAlmostEqual(a, b, delta=1e-4)
+
+
+ANALYSIS = os.path.join(HERE, "..", "..", "analysis")
+PANTHER = os.path.join(ANALYSIS, "models", "panther_own.json")
+SABRE = os.path.join(ANALYSIS, "model_survey", "hierarchies", "ef2d7e9f-1a5e-4d7e-a3e5-d47448168385.json")
+SABRE_IDLE = os.path.join(ANALYSIS, "models", "anim", "export_2026-11-01b", "clips",
+                          "sabretooth_05a3f6c9-774f-4309-bb8b-6b7d9fa3570c.json")
+
+
+@unittest.skipUnless(all(os.path.exists(p) for p in (PANTHER, SABRE, SABRE_IDLE)),
+                     "needs the panther's fit and the sabretooth's dumps in analysis/")
+class PantherTests(unittest.TestCase):
+    def test_bones_that_sit_on_their_parent_do_not_turn(self):
+        """The sabretooth's pelvis and chest have a child at their own place: a direction from rounding noise turned
+        them 90 and 54 degrees."""
+        with open(SABRE, encoding="utf-8") as f:
+            hier = json.load(f)
+        cfg = {"sidecar": PANTHER, "skeleton_guid": "22222222-2222-4222-8222-222222222222",
+               "reference_clip": SABRE_IDLE, "clips": SABRE_IDLE, "graph": "g", "graph_guid": "h"}
+        built = oc.build(cfg, hier)
+        rest, _ = osk.rest_of(hier)
+        for j, ((q, _, _), (q0, _, _)) in enumerate(zip(built["bind"], rest)):
+            self.assertEqual(q, q0, j)
 
 
 if __name__ == "__main__":

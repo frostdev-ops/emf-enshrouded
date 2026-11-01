@@ -11,10 +11,13 @@ The creature's pack entry has "own_proportions":
                    every clip the graph can play
   graph            the game creature's animation graph GUID; graph_guid: its copy's GUID
 
-The skeleton copy keeps the game skeleton's joints and names (so its hash, and the clips' link to it, stay); its rest
-pose is the creature standing in its own shape, every bone of the spine and legs turned to point along the creature's
-limbs (own_skeleton.align_rest), and its inverse binds are that pose's. A clip frame becomes: each joint turned in the
-world as the game creature's turned away from its standing pose (own_skeleton.retarget).
+The skeleton copy keeps the game skeleton's joints and names (so its hash, and the clips' link to it, stay) and every
+bone's frame (the rest rotations); only the joints move, to where the creature stands in its own shape, and its
+inverse binds are that pose's. A clip frame becomes: each joint turned in the world as the game creature's turned away
+from its standing pose (own_skeleton.retarget), which does not depend on the bones' frames. Turning frames to point
+along the creature's limbs (own_skeleton.align_rest) is not used: the game graph's own nodes turn bones about their
+axes, and a turned frame tilts them (seen in game: a pelvis turned 90 degrees, from a bone of zero length, sat the
+panther upright).
 """
 import glob
 import json
@@ -23,7 +26,6 @@ import uuid
 
 import joint_animation as ja
 import own_skeleton as osk
-import quad_landmarks as ql
 
 
 def build(cfg, hier):
@@ -34,14 +36,10 @@ def build(cfg, hier):
         joints = json.load(f)["joints"]
     if len(joints) != len(rest):
         raise SystemExit("own_proportions: the sidecar has %d joints, the skeleton %d" % (len(joints), len(rest)))
-    names = [j["name"] for j in joints]
-    head = next((n for n in names if n.endswith("_Head")), None)
-    if head is None:
-        raise SystemExit("own_proportions: the skeleton has no _Head joint")
-    main_names = ql.main_bones({n: (names[p] if p is not None else None) for n, p in zip(names, parents)},
-                               {j["name"]: j["game"][2] for j in joints}, head)
-    main = {i for i, n in enumerate(names) if n in main_names}
-    bind = osk.align_rest(rest, parents, [osk.blender_to_game(j["own"]) for j in joints], main)
+    # only the joints move: every bone keeps the game skeleton's frame, so the game graph's own nodes (foot IK,
+    # leaning, aiming) turn bones about the axes they expect; the motion does not depend on the frames (retarget
+    # works in the world)
+    bind = osk.rest_from_world(rest, parents, [osk.blender_to_game(j["own"]) for j in joints])
     with open(cfg["reference_clip"], encoding="utf-8") as f:
         ref = ja.sample(json.load(f), 0, rest)
     clips = []
