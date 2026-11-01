@@ -4,8 +4,9 @@
 // switches in emf\emf_core.ini. The hooks that use them are in file_hooks.h.
 //
 // A path is redirected when it names enshrouded.kfc, enshrouded.kfc_resources or enshrouded_<digits>.dat directly in
-// the game folder (any case, either slash, relative to the current folder, with or without a \\?\ prefix); the shadow
-// path is <game>\emf\content\client\<the same name>. Whether that file exists is the caller's check.
+// the game folder (any case, either slash, relative to the current folder; with a \\?\ prefix only when it names the
+// file literally, as Windows reads such a path: no "/", "." or ".."); the shadow path is <game>\emf\content\client\<the
+// same name>. Whether that file exists is the caller's check.
 #include <windows.h>
 
 #include <cstdio>
@@ -111,11 +112,30 @@ inline bool split_root(std::wstring_view p, std::wstring* root, std::wstring_vie
     }
     return false;
 }
+
+// The names after a \\?\ path's root, as Windows takes them: true when each is an ordinary name (no "." or "..", no
+// empty name between two backslashes; one trailing backslash is allowed). Windows does not resolve them there, so the
+// redirect leaves such a path alone rather than guess what it opens.
+inline bool literal_names_ok(std::wstring_view rest) {
+    if (!rest.empty() && rest.back() == L'\\') rest.remove_suffix(1);
+    if (rest.empty()) return true;
+    size_t from = 0;
+    while (from <= rest.size()) {
+        size_t to = rest.find(L'\\', from);
+        if (to == std::wstring_view::npos) to = rest.size();
+        const std::wstring_view name = rest.substr(from, to - from);
+        if (name.empty() || name == L"." || name == L"..") return false;
+        from = to + 1;
+    }
+    return true;
+}
 }  // namespace detail
 
 // `path` made absolute against `cwd` (the current folder, itself absolute; only read when the path needs it), the way
 // Windows reads it; nullopt when that cannot be done here: empty, a device ("\\.\pipe\x", "\\?\Volume{..}"), relative
 // without a current folder, or drive-relative on another drive ("D:a" when the current folder is on C:).
+// A path with the exact prefix \\?\ is taken literally, as Windows takes it: backslashes only, each name as it is; one
+// with "/", "." or ".." or an empty name after the prefix is nullopt (never redirected), and so is a "//?/" form.
 inline std::optional<NormalPath> normalize_path(std::wstring_view p, std::wstring_view cwd) {
     if (p.empty()) return std::nullopt;
     NormalPath out;
@@ -124,14 +144,19 @@ inline std::optional<NormalPath> normalize_path(std::wstring_view p, std::wstrin
     std::wstring joined;  // keeps what `rest` points into alive
     bool trim = true;
     if (p.size() >= 4 && is_slash(p[0]) && is_slash(p[1]) && (p[2] == L'?' || p[2] == L'.') && is_slash(p[3])) {
-        out.verbatim = p[2] == L'?';
-        trim = !out.verbatim;
         std::wstring_view r = p.substr(4);
+        if (p[2] == L'?') {
+            if (p.substr(0, 4) != L"\\\\?\\") return std::nullopt;  // "//?/": not the verbatim prefix
+            if (r.find(L'/') != std::wstring_view::npos) return std::nullopt;
+            out.verbatim = true;
+            trim = false;
+        }
         if (r.size() >= 4 && iequals_ascii(r.substr(0, 3), L"UNC") && is_slash(r[3])) {
             joined = L"\\\\" + std::wstring(r.substr(4));
             r = joined;
         }
         if (!detail::split_root(r, &root, &rest)) return std::nullopt;
+        if (out.verbatim && !detail::literal_names_ok(rest)) return std::nullopt;
     } else if (!path_needs_cwd(p)) {
         if (!detail::split_root(p, &root, &rest)) return std::nullopt;
     } else {

@@ -75,6 +75,42 @@ TEST_CASE("redirect: paths are made absolute: slashes, . and .., relative to the
     CHECK(norm(L"\\\\server") == L"<none>");
 }
 
+TEST_CASE("redirect: a \\\\?\\ path is taken literally, as Windows takes it: no . or .., / is no separator") {
+    auto norm = [](const wchar_t* p) {
+        const auto n = normalize_path(p, L"");
+        return n ? n->path : std::wstring(L"<none>");
+    };
+    // Windows hands a \\?\ path to the file system as it is: ".." and "." stay names, "/" is a character, "\\" an empty
+    // name. The redirect does not guess what that opens: such a path is never redirected.
+    CHECK(norm(L"\\\\?\\C:\\Games\\Other\\..\\Enshrouded\\enshrouded.kfc") == L"<none>");
+    CHECK(norm(L"\\\\?\\C:\\Games\\.\\Enshrouded\\enshrouded.kfc") == L"<none>");
+    CHECK(norm(L"\\\\?\\C:\\Games\\Enshrouded\\..") == L"<none>");
+    CHECK(norm(L"\\\\?\\C:/Games/Enshrouded/enshrouded.kfc") == L"<none>");
+    CHECK(norm(L"\\\\?\\C:\\Games/Enshrouded\\enshrouded.kfc") == L"<none>");
+    CHECK(norm(L"\\\\?\\C:\\Games\\\\Enshrouded\\enshrouded.kfc") == L"<none>");
+    CHECK(norm(L"\\\\?\\UNC/nas/games/enshrouded.kfc") == L"<none>");
+    CHECK(norm(L"\\\\?\\UNC\\nas\\games\\..\\enshrouded.kfc") == L"<none>");
+    // only the exact prefix \\?\ is verbatim; "//?/" and mixed forms are not redirected either
+    CHECK(norm(L"//?/C:/Games/Enshrouded/enshrouded.kfc") == L"<none>");
+    CHECK(norm(L"\\\\?/C:\\Games\\Enshrouded\\enshrouded.kfc") == L"<none>");
+    // a name keeps its trailing dots and spaces (so "enshrouded.kfc." is not the content file)
+    CHECK(norm(L"\\\\?\\C:\\Games\\Enshrouded\\enshrouded.kfc.") == L"C:\\Games\\Enshrouded\\enshrouded.kfc.");
+    CHECK(norm(L"\\\\?\\C:\\Games\\Enshrouded\\") == L"C:\\Games\\Enshrouded");  // one trailing backslash: the folder
+    CHECK(norm(L"\\\\?\\C:\\") == L"C:\\");
+    // the plain forms stay as they were
+    CHECK(norm(L"\\\\?\\C:\\Games\\Enshrouded\\enshrouded.kfc") == L"C:\\Games\\Enshrouded\\enshrouded.kfc");
+    CHECK(norm(L"\\\\?\\UNC\\nas\\games\\enshrouded.kfc") == L"\\\\nas\\games\\enshrouded.kfc");
+    // \\.\ paths are normalized by Windows like plain ones
+    CHECK(norm(L"\\\\.\\C:\\Games\\Other\\..\\Enshrouded\\enshrouded.kfc") == L"C:\\Games\\Enshrouded\\enshrouded.kfc");
+    // so none of them reaches the shadow copy
+    CHECK(shadow_path(L"\\\\?\\C:\\Games\\Other\\..\\Enshrouded\\enshrouded.kfc", kGame, L"").empty());
+    CHECK(shadow_path(L"\\\\?\\C:\\Games\\Enshrouded\\.\\enshrouded.kfc", kGame, L"").empty());
+    CHECK(shadow_path(L"\\\\?\\C:\\Games\\Enshrouded/enshrouded.kfc", kGame, L"").empty());
+    CHECK(shadow_path(L"\\\\?\\C:\\Games\\Enshrouded\\enshrouded.kfc.", kGame, L"").empty());
+    CHECK(shadow_path(L"\\\\?\\C:\\Games\\Enshrouded\\enshrouded.kfc", kGame, L"") ==
+          L"\\\\?\\" + kShadow + L"enshrouded.kfc");
+}
+
 TEST_CASE("redirect: a content file in the game folder maps to emf\\content\\client\\<same name>") {
     CHECK(shadow_path(L"C:\\Games\\Enshrouded\\enshrouded.kfc", kGame, L"") == kShadow + L"enshrouded.kfc");
     CHECK(shadow_path(L"C:\\Games\\Enshrouded\\enshrouded.kfc_resources", kGame, L"") ==
