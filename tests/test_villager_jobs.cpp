@@ -2,12 +2,16 @@
 #include <doctest.h>
 
 #include <cmath>
+#include <fstream>
 #include <map>
 #include <optional>
+#include <regex>
+#include <sstream>
 #include <string>
 #include <vector>
 
 #include "../mods/villager_jobs/jobs_logic.h"
+#include "core/manifest.h"
 
 using namespace jobs;
 
@@ -1153,4 +1157,135 @@ TEST_CASE("jobs: a craft whose product is unknown is not confirmed by an item lo
     CHECK(book.find(1025)->made == 0);
     book.on_output(6830, 0x55, 600, 0);  // the craft's product (the game reports no source)
     CHECK(book.find(1025)->made == 1);
+}
+
+// ---- the settings players see (mod.json) ----
+
+namespace {
+std::string source_file(const std::string& rel) {
+    std::ifstream f(std::string(EMF_SOURCE_DIR) + "/" + rel, std::ios::binary);
+    REQUIRE_MESSAGE(f.good(), rel);
+    std::stringstream ss;
+    ss << f.rdbuf();
+    return ss.str();
+}
+}  // namespace
+
+TEST_CASE("villager_jobs manifest: every setting the mod reads from its ini is in mod.json with the same default and range") {
+    const std::string code = source_file("mods/villager_jobs/villager_jobs.cpp");
+    const std::string readme = source_file("README_EMF.md");
+    const auto r = emf::core::parse_manifest(source_file("mods/villager_jobs/mod.json"));
+    REQUIRE_MESSAGE(r.manifest, r.error);
+    std::map<std::string, emf::core::SettingDef> declared;
+    for (const auto& s : r.manifest->settings) {
+        CAPTURE(s.key);
+        CHECK(s.problem.empty());
+        CHECK(s.warning.empty());
+        CHECK(s.label != s.key);  // a label of its own for the Mods tab and EMF.exe
+        declared[s.key] = s;
+    }
+    // GetPrivateProfileIntW(L"villager_jobs", L"<key>", <default>, ...), read as at least 1 inside (std::max)(1u, ...);
+    // GetPrivateProfileStringW(L"villager_jobs", L"<key>", L"<default>", ...)
+    const std::regex int_read(R"re((\(std::max\)\(1u,\s*)?GetPrivateProfileIntW\(L"villager_jobs",\s*L"(\w+)",\s*(\d+))re");
+    const std::regex text_read(R"re(GetPrivateProfileStringW\(L"villager_jobs",\s*L"(\w+)",\s*L"([^"]*)")re");
+    std::vector<std::string> read;
+    for (std::sregex_iterator it(code.begin(), code.end(), int_read), end; it != end; ++it) {
+        const std::string key = (*it)[2].str(), def = (*it)[3].str();
+        if (key == "enabled") continue;  // EMF's own switch, never a setting
+        read.push_back(key);
+        CAPTURE(key);
+        REQUIRE(declared.count(key));
+        const auto& s = declared[key];
+        CHECK(s.type == emf::core::SettingType::Int);
+        CHECK(s.default_value == def);
+        REQUIRE(s.has_min);
+        REQUIRE(s.has_max);
+        if ((*it)[1].matched) CHECK(s.min == 1.0);  // the mod reads 0 as 1
+        CHECK(std::stod(def) >= s.min);
+        CHECK(std::stod(def) <= s.max);
+        CHECK(readme.find("`" + key + "=" + def + "`") != std::string::npos);  // README_EMF's ini table
+    }
+    for (std::sregex_iterator it(code.begin(), code.end(), text_read), end; it != end; ++it) {
+        const std::string key = (*it)[1].str(), def = (*it)[2].str();
+        read.push_back(key);
+        CAPTURE(key);
+        REQUIRE(declared.count(key));
+        CHECK(declared[key].default_value == def);
+        CHECK(readme.find("`" + key + "=" + def + "`") != std::string::npos);
+    }
+    CHECK(read.size() == 7);  // key, seconds_per_item, farm/tend radius, haul_per_trip, gather radius and seconds
+    CHECK(read.size() == declared.size());  // nothing in mod.json that the mod does not read
+    REQUIRE(declared.count("gather_radius"));
+    CHECK(declared["gather_radius"].max == 100.0);
+    REQUIRE(declared.count("gather_seconds"));
+    CHECK(declared["gather_seconds"].max == 600.0);
+    CHECK(r.manifest->description.find("gather") != std::string::npos);
+}
+
+// ---- planted trees near a farm ----
+TEST_CASE("farm: a planted tree near the chest is never targeted; the crop is farmed, with no false 'chest full' pause") {
+    JobBook book(test_cfg());
+    World w;
+    Field f;
+    w.pos[1025] = {0, 0, 0};
+    w.pos[6830] = {0, 0, 0};
+    Crop tree{7009, 7109, {2, 0, 0}, true};  // grown: its stage is a tree to chop, not a harvest to loot
+    tree.harvestable = false;
+    f.crops = {tree, {7002, 7102, {6, 0, 0}, true}};
+    REQUIRE(book.assign(farm_job(), 0, 30000));
+    std::vector<Action> all;
+    auto run = [&](uint64_t t) {
+        const auto a = book.tick(t, w.fn(), f.view());
+        all.insert(all.end(), a.begin(), a.end());
+        return a;
+    };
+    auto a = run(0);
+    const Action* go = first_of(a, ActionKind::GoToPos);
+    REQUIRE(go);
+    CHECK(go->pos.x == 6);  // the crop, though the tree is nearer (and within reach)
+    w.pos[1025] = {5, 0, 0};
+    a = run(500);
+    const Action* h = first_of(a, ActionKind::Harvest);
+    REQUIRE(h);
+    CHECK(h->target == 7102);
+    REQUIRE(book.on_pickup(6830, 7102, 600) == std::vector<uint32_t>{7002});
+    f.crops[1].ripe = false;  // re-armed: it grows again
+    for (uint64_t t = 1000; t <= 5000; t += 500) run(t);
+    f.crops[1].ripe = true;  // ripe again a few seconds later: harvested at once, no pause
+    size_t again = 0;
+    for (uint64_t t = 5500; t <= 7500; t += 500) again += count(run(t), ActionKind::Harvest);
+    CHECK(again == 1);
+    for (const auto& x : all) {
+        CAPTURE(static_cast<int>(x.kind));
+        CHECK(x.kind != ActionKind::Notice);  // no "is it full?"
+        CHECK(x.target != 7109);
+        CHECK(x.aux != 7009);
+        if (x.kind == ActionKind::GoToPos) CHECK(x.pos.x != 2);
+    }
+    CHECK(book.find(1025)->work.done == 1);
+}
+
+TEST_CASE("farm: only a crop's harvest stage is farmed, not a grown tree, a plant that is mined or a fruit tree that refills") {
+    StageParts crop;  // T1_Plant_Growth_Tomato_Seedling_2_harvest and every crop's last stage (mushrooms too)
+    crop.interaction_offer = crop.destroy_on_loot = crop.default_inventory = true;
+    CHECK(harvestable_stage(crop));
+    StageParts no_offer = crop;  // the game's loot refuses a host without an interaction offer
+    no_offer.interaction_offer = false;
+    CHECK_FALSE(harvestable_stage(no_offer));
+    StageParts mined = crop;  // chopped or mined (a grown tree, aloe's harvest)
+    mined.mining_node = true;
+    CHECK_FALSE(harvestable_stage(mined));
+    StageParts chopped = crop;  // hit until it breaks
+    chopped.health = true;
+    CHECK_FALSE(harvestable_stage(chopped));
+    StageParts refill;  // ..._fruits_harvest_PlayerPlanted_Refill: date palm, coconut, banana, coffee, hazelnut
+    refill.container = refill.mining_node = refill.interaction_offer = true;
+    CHECK_FALSE(harvestable_stage(refill));
+    StageParts container = crop;  // a loot moves its slots instead of rolling its loot table
+    container.container = true;
+    CHECK_FALSE(harvestable_stage(container));
+    StageParts no_loot;  // removed on loot, but nothing to roll
+    no_loot.destroy_on_loot = true;
+    CHECK_FALSE(harvestable_stage(no_loot));
+    CHECK_FALSE(harvestable_stage(StageParts{}));
 }

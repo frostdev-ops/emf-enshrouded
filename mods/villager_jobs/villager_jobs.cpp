@@ -1,6 +1,7 @@
 // villager_jobs: an EMF mod. Villagers work for you at a chest, through the game's own systems (host only).
 //   Look at a villager and press the jobs key (default K): it is chosen. Look at a chest and hold the key: a wheel asks
-//   what to do there: farm the crops near the chest (harvest into it; the plants grow again), tend the animals near it
+//   what to do there: farm the crops near the chest (harvest into it; the plants grow again; planted trees and fruit
+//   trees are left alone), tend the animals near it
 //   (collect what they make into it, fill their feeders from it), haul to another chest (then look at that chest and
 //   press K), craft (the recipes it can make from the chest; at a trader NPC these are its trades), or gather (pick up
 //   the wild pickables around the chest, scatter bushes with twigs or plant fibre..., into it; the game decides when
@@ -232,6 +233,18 @@ bool is_pickable(emf::World w, uint32_t id) {
     return !(d && d->shouldDestroy);
 }
 
+// What a plant's stage carries: a crop's harvest, or a planted tree to chop / a fruit tree that refills (work.h).
+jobs::StageParts stage_parts(emf::World w, uint32_t stage) {
+    jobs::StageParts p;
+    p.interaction_offer = has<gen::ecs::InteractionOfferRuntime>(w, stage);
+    p.destroy_on_loot = has<gen::ecs::DestroyOnLoot>(w, stage);
+    p.default_inventory = has<gen::ecs::DefaultInventory>(w, stage);
+    p.mining_node = has<gen::ecs::MiningNode>(w, stage);
+    p.health = has<gen::ecs::Health>(w, stage);
+    p.container = has<gen::ecs::InventorySetup>(w, stage) || has<gen::ecs::Inventory>(w, stage);
+    return p;
+}
+
 // One pass over the world per jobs tick (only when a farm, tend or gather job runs).
 struct Scan {
     std::vector<jobs::Crop> crops;
@@ -249,8 +262,10 @@ Scan scan_world(emf::World w) {
             if (!lv || !up || !p) return;
             const int32_t last = last_upgrade_level(w, id);
             const uint32_t stage = up->entityId.id;
-            const bool ripe = last > 0 && static_cast<int32_t>(lv->dataStorage[0]) >= last && stage && position(w, stage);
-            s.crops.push_back({id, stage, *p, ripe});
+            const bool live = stage && position(w, stage);
+            const bool ripe = last > 0 && static_cast<int32_t>(lv->dataStorage[0]) >= last && live;
+            // no live stage: nothing to judge (and nothing ripe); a planted tree is told apart once it has grown
+            s.crops.push_back({id, stage, *p, ripe, !live || jobs::harvestable_stage(stage_parts(w, stage))});
             return;
         }
         if (w.get<gen::ecs::AnimalSaved>(id)) {
@@ -271,7 +286,8 @@ Scan scan_world(emf::World w) {
         if (is_pickable(w, id))
             if (const auto p = position(w, id)) s.pickables.push_back({id, *p});
     });
-    // a crop's harvest stage looks like a pickable, but looting it outside a farm job would end the plant
+    // a crop's harvest stage looks like a pickable, but looting it outside a farm job would end the plant (the same for
+    // a planted tree's sapling stage: every plant stays in `crops` for this, harvestable or not)
     std::vector<uint32_t> stages;
     for (const auto& c : s.crops) stages.push_back(c.stage);
     std::sort(stages.begin(), stages.end());
@@ -508,9 +524,12 @@ void open_job_wheel(emf::World w, uint32_t villager, uint32_t chest) {
     const auto c = position(w, chest);
     if (!c) return;
     const Scan s = scan_world(w);
-    size_t ripe = 0;
-    for (const auto& x : within(s.crops, *c, g_work.farm_radius)) ripe += x.ripe;
-    const size_t crops = within(s.crops, *c, g_work.farm_radius).size();
+    size_t ripe = 0, crops = 0;
+    for (const auto& x : within(s.crops, *c, g_work.farm_radius))
+        if (x.harvestable) {  // a grown tree the player planted is not counted: the job leaves it alone
+            ++crops;
+            ripe += x.ripe;
+        }
     const size_t animals = within(s.animals, *c, g_work.tend_radius).size();
     const size_t feeders = within(s.feeders, *c, g_work.tend_radius).size();
     const size_t pickables = within(s.pickables, *c, g_work.gather_radius).size();

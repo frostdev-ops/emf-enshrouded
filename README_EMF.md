@@ -27,7 +27,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `mods/companion/` | G: a companion that follows you, fights at your side, takes orders (stay, attack) and wears gear you give it; saved per world (see below) |
 | `mods/clock/` | the time of day on screen (read-only, on by default) |
 | `mods/quick_stack/` | Quick Stack and Chest Machines: tap L to put what you carry into nearby chests that already hold it; hold L at a chest for sorting chests, recyclers and overflow chests; `/qs` for every player (see below) |
-| `mods/villager_jobs/` | K: villagers farm, tend animals, haul between chests and craft (or trade) at a chest, assigned with a radial wheel; saved per world (see below) |
+| `mods/villager_jobs/` | K: villagers farm, tend animals, haul between chests, craft (or trade) at a chest and gather wild pickables around it, assigned with a radial wheel; saved per world (see below) |
 | `mods/big_stacks/` | bigger item stacks (x4, at most 9999) by changing the game's item definitions in memory |
 | `mods/raids/` | Night Raids: at nightfall, by chance, waves of Vukah march on a base where players are; off in each world until `raids.world on` (see below) |
 | `mods/loot_magnet/` | Loot Magnet: corpses of kills near a player are looted into them, for every player on the host or a dedicated server; `/loot.toggle` (see below) |
@@ -319,14 +319,18 @@ Template GUIDs come from `export/template_guids.csv` (run the `guid_dump` EML mo
 
 ## The villager_jobs mod
 With `-EnableWrite` (`emf\config\villager_jobs.ini`: `enabled=1`), villagers on the host work for you at a chest,
-through the game's own systems: they farm, tend animals, haul goods between chests, and craft (or trade).
+through the game's own systems: they farm, tend animals, haul goods between chests, craft (or trade), and gather the
+wild pickables around a chest.
 
 1. Look at a villager and press **K** (within 8 m; the crosshair picks). A note says "Villager 1026 chosen".
 2. Within 30 s look at a chest and **hold K**: a wheel asks what to do there:
    - **Farm the crops here (N plants, M ripe)**: the villager walks to each fully grown plant within 20 m of the chest
      and harvests it straight into the chest (the game's own loot roll); the plant then grows again from a seedling,
      so the field stays planted (no seed is used). Plants still growing, or capped with the game's growth limit, are
-     left alone. In the test a villager harvested three tomato plants (2 tomatoes each) and all three regrew.
+     left alone, and so are trees you planted (you chop those), planted fruit trees and nut bushes whose fruit grows
+     back on the plant, and plants that are cut rather than picked (aloe, cabbage, artichoke): once grown, the wheel
+     counts only the crops it will farm. In the test a villager harvested three
+     tomato plants (2 tomatoes each) and all three regrew.
    - **Tend the animals here (N animals, M feeders)**: it collects what the farm animals within 20 m have made (eggs,
      milk, wool...) into the chest, and fills feeders holding fewer than 5 items with 10 animal food items from the
      chest (items whose name contains `_Feeding`, e.g. `Material_T3_Turkey_Feeding`; a food a feeder refuses is not
@@ -337,13 +341,17 @@ through the game's own systems: they farm, tend animals, haul goods between ches
      the target is empty. Gear with its own data (level, perks) is never hauled.
    - **Craft (N recipes)**: a wheel of what the villager can make from the chest. At a trader NPC these
      are its trades (the game has no shop: traders are crafting stations with barter recipes).
+   - **Gather around here (N pickables)**: the villager picks up the wild pickables within 20 m of the chest (scatter
+     bushes with twigs or plant fibre, berries...) into the chest and rests 20 s after each one; the game decides when
+     they grow back. Crops, containers and anything the game marks as a placed item (loose stones, keys, weapons,
+     potions, rewards) are left alone. A full chest pauses the job for a minute, noted once.
    Move the mouse toward an entry and release K (or tap K and click). Esc, a right click or releasing in the middle
    cancels; the mouse wheel turns the page when there are more than 8.
 3. Crafting: the villager walks to the chest (sent there again every 10 s while it is more than 4 m away) and makes
    one item every `seconds_per_item` (default 30) while it is within 6 m. When the chest runs out of materials (or has
    no room) a note says so once; it goes on by itself when you refill the chest.
 4. K on a working villager opens a wheel with "Stop farming (12 harvests)" (or the job it has: "Stop tending (3
-   collected, 20 fed)", "Stop hauling (40 items moved)") and "Keep working".
+   collected, 20 fed)", "Stop hauling (40 items moved)", "Stop gathering (5 brought in)") and "Keep working".
 
 How the work moves: a walk order makes the villager roam near its target, so it acts within 6 m of it; the order is
 repeated every 5 s, and a target it cannot get close to within 60 s is left alone for 2 minutes (noted once: villagers

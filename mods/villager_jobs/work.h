@@ -15,11 +15,35 @@ namespace jobs {
 using Vec3 = emf::aim::Vec3;
 
 // A plant root near the chest: `stage` = its current stage entity (what is harvested), ripe = fully grown.
+// harvestable = that stage is a crop's harvest (harvestable_stage); the farm job leaves every other plant alone.
 struct Crop {
     uint32_t root = 0, stage = 0;
     Vec3 pos;
     bool ripe = false;
+    bool harvestable = true;
 };
+
+// What a plant's current stage entity carries (on it or on its template).
+struct StageParts {
+    bool interaction_offer = false;  // InteractionOfferRuntime: the game's loot refuses a host without it
+    bool destroy_on_loot = false;    // DestroyOnLoot: looting removes it
+    bool default_inventory = false;  // DefaultInventory: the loot table a loot rolls
+    bool mining_node = false;        // MiningNode: chopped or mined
+    bool health = false;             // Health: hit until it breaks
+    bool container = false;          // InventorySetup or Inventory: a loot moves its slots instead of rolling a table
+};
+// The farm job harvests with a loot (the chest as the looter), which rolls the loot table of a stage that offers an
+// interaction, has no inventory of its own and is removed on loot (re_villages.md, immediate_loot_action path A): the
+// last stage of the picked crops in the game data (179 templates, mushrooms included). Plants that are cut rather than
+// picked (aloe, cabbage, artichoke) end in a MiningNode scatter prop instead. A tree the player planted grows into
+// something to chop, and planted fruit trees and nut bushes (date palm, coconut, banana, coffee, hazelnut) end in a
+// container whose fruit grows back (`..._PlayerPlanted_Refill`, with a MiningNode). Such a loot brings nothing (a false
+// "chest full" pause of the whole job), or, if it did, re-arming the plant would cut it back to a seedling: not
+// harvestable.
+inline bool harvestable_stage(const StageParts& p) {
+    return p.interaction_offer && p.destroy_on_loot && p.default_inventory && !p.mining_node && !p.health &&
+           !p.container;
+}
 // An animal feeder and how many items it holds.
 struct Feeder {
     uint32_t id = 0;

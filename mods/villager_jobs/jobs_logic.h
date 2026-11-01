@@ -666,10 +666,10 @@ private:
             go_to_chest(s, v, c, now_ms, out);
             return;
         }
-        std::vector<Crop> crops;
+        std::vector<Crop> crops;  // a planted tree (or fruit tree) is never a target: harvestable_stage
         if (view.crops)
             for (const auto& x : view.crops(c.pos, wc.farm_radius))
-                if (x.root == w.target || !claimed_by_other(s, x.root)) crops.push_back(x);
+                if (x.harvestable && (x.root == w.target || !claimed_by_other(s, x.root))) crops.push_back(x);
         const Crop* cur = nullptr;
         for (const auto& x : crops)
             if (x.root == w.target && x.ripe && x.stage) cur = &x;
