@@ -52,11 +52,15 @@ size_t count_of(const std::string& text, const std::string& part) {
 
 struct ContentGame {
     std::wstring dir, shadow;
-    explicit ContentGame(const wchar_t* name, bool with_dll = true) : dir(test_scratch::temp_path(name)) {
+    // `exe`: which stand-in game (standin_game.exe has MSVC's start-up at its entry, standin_game_bind.exe Steam's DRM
+    // stub as the real client, standin_game_jump.exe another tool's jump); `word`: what the stand-in DLL does
+    explicit ContentGame(const wchar_t* name, bool with_dll = true, const wchar_t* exe = L"standin_game.exe",
+                         const char* word = "ok")
+        : dir(test_scratch::temp_path(name)) {
         test_scratch::remove_at_exit(dir);
         shadow = dir + L"\\emf\\content\\client";
         std::filesystem::create_directories(dir + L"\\emf");
-        std::filesystem::copy_file(bin_dir() + L"\\standin_game\\standin_game.exe", dir + L"\\enshrouded.exe");
+        std::filesystem::copy_file(bin_dir() + L"\\standin_game\\" + exe, dir + L"\\enshrouded.exe");
         std::filesystem::copy_file(bin_dir() + L"\\dist\\dinput8.dll", dir + L"\\dinput8.dll");
         std::filesystem::copy_file(bin_dir() + L"\\standin\\dinput8.dll", dir + L"\\chain_standin.dll");
         std::filesystem::copy_file(bin_dir() + L"\\standin\\dinput8.dll", dir + L"\\emf\\emf_core.dll");
@@ -70,7 +74,7 @@ struct ContentGame {
         put_file(dir + L"\\mods\\beasts\\mod.json",
                  R"({"id": "beasts", "name": "Beasts", "version": "1.0.0", "capabilities": ["patch"]})");
         put_file(dir + L"\\mods\\beasts\\bear.txt", "bear 1");
-        put_file(shadow + L"\\standin.txt", "ok\r\n");  // what the stand-in content DLL does
+        if (with_dll) put_file(shadow + L"\\standin.txt", std::string(word) + "\r\n");  // what the stand-in DLL does
         check("wait emf_core.dll\r\nemf_content.dll\r\nchain_standin.dll\r\nemf_core.dll\r\n");
     }
     ~ContentGame() {
@@ -217,12 +221,7 @@ TEST_CASE("e2e content: no emf_content.dll: today's behaviour") {
     std::vector<std::wstring> emf_files;
     for (const auto& e : std::filesystem::directory_iterator(g.dir + L"\\emf")) emf_files.push_back(e.path().filename());
     std::sort(emf_files.begin(), emf_files.end());
-    CHECK(emf_files == std::vector<std::wstring>{L"chain_status.txt", L"content", L"emf_core.dll", L"emf_loader.log"});
-    // (emf\content holds only the test's standin.txt, made before the start)
-    std::vector<std::wstring> content;
-    for (const auto& e : std::filesystem::recursive_directory_iterator(g.dir + L"\\emf\\content"))
-        if (e.is_regular_file()) content.push_back(e.path().filename());
-    CHECK(content == std::vector<std::wstring>{L"standin.txt"});
+    CHECK(emf_files == std::vector<std::wstring>{L"chain_status.txt", L"emf_core.dll", L"emf_loader.log"});
 }
 
 TEST_CASE("e2e content: a shadow copy whose record is gone is built again, never used half-checked") {
@@ -235,4 +234,27 @@ TEST_CASE("e2e content: a shadow copy whose record is gone is built again, never
     CHECK(out.find("kfc=built kfc 2\n") != std::string::npos);
     CHECK(out.find("status=built\t1\t") != std::string::npos);
     CHECK(g.loader_log().find("the shadow copy's record, shadow.txt, is missing") != std::string::npos);
+}
+
+TEST_CASE("e2e content: the real client's entry (Steam's DRM stub in .bind) is held, and the build runs") {
+    ContentGame g(L"emf_e2e_bind", true, L"standin_game_bind.exe");
+    const std::string out = g.run();
+    CHECK(out.find("kfc=built kfc 1\n") != std::string::npos);
+    CHECK(out.find("status=built\t1\t") != std::string::npos);
+    CHECK(file_text(g.shadow + L"\\built.txt").find("seq=1 chain_loaded=no core_loaded=no") == 0);
+}
+
+TEST_CASE("e2e content: an entry another tool patched is not held: content off, chain and core as today, a warning") {
+    ContentGame g(L"emf_e2e_jump", true, L"standin_game_jump.exe");
+    const std::string out = g.run();
+    CHECK(out.find("kfc=KFC4") != std::string::npos);
+    CHECK(out.find("loaded chain_standin.dll=yes\n") != std::string::npos);
+    CHECK(out.find("loaded emf_core.dll=yes\n") != std::string::npos);
+    CHECK(out.find("status=failed\t") != std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(g.shadow + L"\\built.txt"));
+    const std::string log = g.loader_log();
+    INFO(log);
+    CHECK(log.find("EML content: the game's entry point is not the usual start-up code: another tool patched it") !=
+          std::string::npos);
+    CHECK(log.find("EML content: off for this start") != std::string::npos);
 }

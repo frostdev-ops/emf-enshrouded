@@ -404,7 +404,9 @@ emf::loader::StartSteps make_start_steps() {
     emf::loader::StartSteps s;
     s.hold_entry = [] {
         uint8_t* entry = emf::loader::exe_entry_point();
-        if (!emf::loader::entry_is_msvc_startup(entry)) {
+        const auto* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+        // MSVC's start-up, or Steam's DRM stub in .bind (the game client): never another tool's jump
+        if (!emf::loader::entry_holdable(entry, emf::loader::section_of(base, static_cast<uint32_t>(entry - base)))) {
             loader_log(g_dir, ("EML content: " + describe_entry(entry, "the game's")).c_str());
             return false;
         }

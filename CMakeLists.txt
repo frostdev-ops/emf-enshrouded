@@ -403,6 +403,18 @@ add_executable(emf_standin_game tools/standin_game/main.cpp)
 target_link_libraries(emf_standin_game PRIVATE emf_loader)
 set_target_properties(emf_standin_game PROPERTIES OUTPUT_NAME standin_game
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin_game)
+# The same stand-in with the real client's entry shape: Steam's DRM stub in a ".bind" section (held for a content build),
+# and with another tool's jump at the entry instead (never held) (tools/standin_game/entry_stub.cpp)
+foreach(_entry bind jump)
+  add_executable(emf_standin_game_${_entry} tools/standin_game/main.cpp tools/standin_game/entry_stub.cpp)
+  target_link_libraries(emf_standin_game_${_entry} PRIVATE emf_loader)
+  target_link_options(emf_standin_game_${_entry} PRIVATE /ENTRY:standin_entry)
+  if(_entry STREQUAL "jump")
+    target_compile_definitions(emf_standin_game_${_entry} PRIVATE STANDIN_ENTRY_JUMP)
+  endif()
+  set_target_properties(emf_standin_game_${_entry} PROPERTIES OUTPUT_NAME standin_game_${_entry}
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin_game)
+endforeach()
 
 # --- Tests ---
 enable_testing()
@@ -610,7 +622,8 @@ target_link_libraries(herald PRIVATE winhttp)
 target_sources(emf_tests PRIVATE tests/test_herald.cpp tests/test_herald_dll.cpp)
 add_dependencies(emf_tests herald)
 add_dependencies(emf_tests emf_core emf_loader)  # test_game_imports reads their import tables
-add_dependencies(emf_tests emf_standin_content emf_standin_content_abi2 emf_standin_mod)  # the content loader's tests
+add_dependencies(emf_tests emf_standin_content emf_standin_content_abi2 emf_standin_mod emf_standin_game_bind
+  emf_standin_game_jump)  # the content loader's tests
 
 # --- Save backups (docs/saves.md). src/saves/ is shared by EMF.exe (the Saves tab, the starter backup) and
 # the core (automatic backups at game start, the console's saves.* commands, save-info.json from the game's menu). ---

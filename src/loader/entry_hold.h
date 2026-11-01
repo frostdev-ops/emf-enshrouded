@@ -62,6 +62,32 @@ inline bool entry_is_msvc_startup(const uint8_t* e) {
     return e && std::memcmp(e, head, 5) == 0 && std::memcmp(e + 9, mid, 5) == 0;
 }
 
+// The name of the section of a loaded image (`base`) that holds `rva`; "" when none does.
+inline std::string section_of(const uint8_t* base, uint32_t rva) {
+    if (!base) return {};
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    const IMAGE_SECTION_HEADER* s = IMAGE_FIRST_SECTION(nt);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++s) {
+        const DWORD size = s->Misc.VirtualSize ? s->Misc.VirtualSize : s->SizeOfRawData;
+        if (rva >= s->VirtualAddress && rva < s->VirtualAddress + size) {
+            const char* n = reinterpret_cast<const char*>(s->Name);
+            return std::string(n, strnlen(n, IMAGE_SIZEOF_SHORT_NAME));
+        }
+    }
+    return {};
+}
+
+// True for an entry point the loader may hold: MSVC's start-up code, or Steam's DRM stub (SteamStub, the game client
+// of 1273043), which sits in a section named ".bind" and starts "call $+5; push rax; push rbx; push rcx; push rdx"
+// (E8 00 00 00 00 50 53 51 52). Both run unchanged once release_entry() has put their first 12 bytes back. Another
+// tool's jump (E9, FF 25, mov/jmp) is never held: that tool holds the start itself.
+inline bool entry_holdable(const uint8_t* e, const std::string& section) {
+    static const uint8_t steam[9] = {0xE8, 0x00, 0x00, 0x00, 0x00, 0x50, 0x53, 0x51, 0x52};
+    if (!e) return false;
+    if (entry_is_msvc_startup(e)) return true;
+    return section == ".bind" && std::memcmp(e, steam, sizeof steam) == 0;
+}
+
 // Where a jump at the entry point leads: "jmp rel32", "jmp [rip+disp32]" (the address read with `read8(address, &out)`,
 // which must read memory safely), "mov rax, imm64; jmp rax" (EMF's own hold) or "mov r11, imm64; jmp r11"; 0 for
 // anything else. Another tool that holds the start (ShroudForge's winmm.dll) leaves such a jump.
