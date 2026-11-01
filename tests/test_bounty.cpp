@@ -1030,6 +1030,8 @@ TEST_CASE("bounty: E at a Bounty Board opens the wheel with the notices; a pick 
 TEST_CASE("bounty: E with no board in front opens nothing; Claim and Drop act; a pick after new notices takes nothing") {
     BountyRig b({{"need_board", "1"}});
     board_ahead(b);
+    CHECK(b.noted("Bounty Board: press E to read"));  // said when the host came up to it
+    b.r.fake.notes.clear();
     b.look(1, 0, 11.5, 0, 180);  // turned away from it
     b.press('E');
     CHECK(b.r.fake.wheels.empty());
@@ -1080,4 +1082,111 @@ TEST_CASE("bounty: E with no board in front opens nothing; Claim and Drop act; a
     w3.cb(kClient, -1, w3.user);
     b.seconds(1);
     CHECK(b.r.fake.notes.size() == notes);
+}
+
+// ---- 1.2: players who joined read the board in the chat ----
+namespace {
+uint32_t no_local_player() { return 0; }  // a dedicated server has no player of its own
+// The chat lines sent to `player` so far.
+std::vector<std::string> tells_to(BountyRig& b, uint32_t player) {
+    std::vector<std::string> out;
+    for (const auto& [p, text] : b.r.fake.tells)
+        if (p == player) out.push_back(text);
+    return out;
+}
+}  // namespace
+
+TEST_CASE("bounty: a player who walks up to a board gets the notices as a private chat line, once until 8 m away") {
+    {
+        BountyRig b({{"need_board", "1"}});
+        altar(b, 900, 20, 0);
+        prop(b, 950, 20, 10, 4);  // 4 m in front of where player 2 will stand (20, 10, 0)
+        place(b.r.fake, 2, 20, 10, -10);
+        search(b);
+        CHECK(b.r.fake.tells.empty());
+        place(b.r.fake, 2, 20, 10, 0);  // walks up, looking at it
+        b.look(2, 20, 11.5, 0, 0);
+        b.seconds(2);
+        REQUIRE(tells_to(b, 2).size() == 1);
+        const std::string line = tells_to(b, 2)[0];
+        CHECK(line.rfind("Bounty Board: new notices in 4 days\n1. ", 0) == 0);
+        CHECK(count_of(line, "\n") <= 9);  // at most 10 lines
+        CHECK(line.find("\nType /bounty.take 1-3 here") != std::string::npos);
+        b.seconds(10);                   // staying there: nothing more
+        place(b.r.fake, 2, 20, 10, -1);  // 5 m away, then back
+        b.seconds(2);
+        place(b.r.fake, 2, 20, 10, 0);
+        b.seconds(2);
+        CHECK(tells_to(b, 2).size() == 1);
+        place(b.r.fake, 2, 20, 10, -5);  // 9 m away, then back: told again
+        b.seconds(2);
+        place(b.r.fake, 2, 20, 10, 0);
+        b.seconds(2);
+        CHECK(tells_to(b, 2).size() == 2);
+        // the host walking up gets a note (the wheel is theirs), no chat line
+        place(b.r.fake, 1, 20, 10, 1);
+        b.look(1, 20, 11.5, 1, 0);
+        b.seconds(2);
+        CHECK(b.noted("Bounty Board: press E to read"));
+        CHECK(tells_to(b, 1).empty());
+        // on a dedicated server (no player of its own) everyone reads it in the chat
+        b.r.api.local_player = no_local_player;
+        place(b.r.fake, 1, 20, 10, -20);
+        b.seconds(2);
+        place(b.r.fake, 1, 20, 10, 1);
+        b.seconds(2);
+        CHECK(tells_to(b, 1).size() == 1);
+    }
+    {
+        BountyRig c({{"need_board", "1"}, {"chat_notices", "0"}});
+        altar(c, 900, 20, 0);
+        prop(c, 950, 20, 10, 4);
+        search(c);
+        c.look(2, 20, 11.5, 0, 0);
+        c.seconds(2);
+        CHECK(c.r.fake.tells.empty());
+    }
+}
+
+TEST_CASE("bounty: many players at once: the lines wait and never pass 30 in 10 s") {
+    BountyRig b({{"need_board", "1"}});
+    altar(b, 900, 50, 50);
+    prop(b, 950, 50, 10, 50);
+    search(b);
+    REQUIRE(b.r.fake.tells.empty());
+    for (uint32_t p = 2; p <= 9; ++p) add_player(b.r.fake, p, 0xC0 + p, 49.0 + p % 3, 10, 47.0 + 0.2 * p);
+    std::vector<std::pair<int, int>> sent;  // (second, lines)
+    for (int s = 0; s < 40; ++s) {
+        const size_t before = b.r.fake.tells.size();
+        b.seconds(1);
+        for (size_t i = before; i < b.r.fake.tells.size(); ++i)
+            sent.push_back({s, 1 + static_cast<int>(count_of(b.r.fake.tells[i].second, "\n"))});
+    }
+    REQUIRE(sent.size() == 8);
+    CHECK(sent.back().first >= 10);  // 40 lines: the last ones waited for the next 10 s
+    for (const auto& [at, lines] : sent) {
+        int in_window = 0;
+        for (const auto& [at2, lines2] : sent)
+            if (at2 >= at && at2 < at + 10) in_window += lines2;
+        CHECK(in_window <= 30);
+    }
+    for (uint32_t p = 2; p <= 9; ++p) {
+        CAPTURE(p);
+        CHECK(tells_to(b, p).size() == 1);  // every one of them, once
+    }
+    CHECK_FALSE(logged("refused"));
+}
+
+TEST_CASE("bounty: a player who joined is told when a bounty of theirs is done") {
+    BountyRig b;
+    b.reply("bounty.give kill_vukah", 2, 0xBB);
+    for (uint32_t id = 3010; id < 3016; ++id) {
+        b.creature(id, 3);
+        b.kill(id, {2});
+    }
+    b.seconds(1);
+    const auto lines = tells_to(b, 2);
+    REQUIRE(lines.size() == 1);
+    CHECK(lines[0].rfind("Bounty done: Slay 6 Vukah!", 0) == 0);
+    CHECK_FALSE(b.noted("Bounty done"));  // the host's note is for the host's own bounties
 }

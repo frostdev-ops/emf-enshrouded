@@ -83,6 +83,10 @@ local LOAD_GRACE = 30       -- s: ... but never this soon after a load (places m
 local AT_BOARD_M = 8        -- m: "at a Bounty Board" for /bounty.take, /bounty.claim, /bounty.reroll and the notices
 local KEY_COS = 0.87        -- read_key: the board within 30 degrees of where the camera looks
 local WALK_COS = 0.7        -- walking up: within 45 degrees
+local WALK_EVERY = 0.5      -- s between two looks at who walked up to a board
+local REARM_M = 8           -- m: told about a board, a player is told again after going this far from it
+local CHAT_LINES = 30       -- chat lines this mod sends at most ...
+local CHAT_WINDOW = 10.5    -- ... in this many seconds of play (the Lua host's limit is 30 in 10 s)
 local PROP_HEIGHT = 1       -- m: the point of a prop the crosshair aims at, above its position
 local FIX = 4294967296.0    -- 1 m in the game's fixed-point positions
 
@@ -121,6 +125,12 @@ local walk, walk_after = nil, 0    -- the search of the server world under way, 
 local cwalk, cwalk_after = nil, 0  -- the same on the host's client world
 local client_models = {}  -- entity id -> board model the host's client world showed
 local loaded_at = 0       -- play second when this world's data came
+local tell_later          -- (player, account, text [, kind]): a chat line for a player who joined, when the limit allows
+local outbox = {}         -- chat lines waiting: {player, account, text, lines, kind}
+local sent_lines = {}     -- chat lines sent in the last CHAT_WINDOW: {at, lines}
+local told = {}           -- account -> the board {x, y, z} they were last told about (cleared REARM_M away)
+local tell_refused = false
+local walk_up_at = 0
 
 -- ---- the pool ----
 -- emf\config\bounty\pool.lua, when it is there, replaces POOL (that folder stays when EMF is installed again). It runs
@@ -325,6 +335,8 @@ local function period_key()
   local t = os.date("*t", os.time() - (emf.setting("reset_hour") or 6) * 3600)
   return string.format("d%04d%03d.%d", t.year, t.yday, offset)
 end
+
+local function lower_first(text) return (text:gsub("^%u", string.lower)) end
 
 local function until_text()
   local mode = emf.setting("reset")
@@ -545,6 +557,7 @@ local function same_session()
   session = emf.session()
   hits, gifts, moving, filled, dropped = {}, {}, {}, {}, {}
   boards, found, altars, client_models, walk, cwalk = {}, {}, {}, {}, nil, nil
+  told, outbox, sent_lines, walk_up_at = {}, {}, {}, 0
   loaded = false  -- the old world's data is not this one's: commands wait for on_world_data
   emf.hud("board", "")
   hud_shown = false
@@ -886,6 +899,7 @@ emf.on_world_data(function(world, text)
   loaded, dirty = true, fresh  -- a new seed is kept at once
   loaded_at = play_s
   found, altars, client_models, cwalk, cwalk_after = {}, {}, {}, nil, 0
+  told, outbox, sent_lines, walk_up_at = {}, {}, {}, 0
   search_soon()
   rebuild_boards()
   session = emf.session()
@@ -1015,8 +1029,14 @@ local function claim_all(world, player, account)
   return parts
 end
 
--- The text a player gets when a bounty of theirs is done (the host on screen; Task 8 tells players who joined).
-local function done_note(player, account, text) if player == emf.local_player() then emf.notify(text) end end
+-- The text a player gets when a bounty of theirs is done: the host on screen, players who joined in the chat.
+local function done_note(player, account, text)
+  if player == emf.local_player() then
+    emf.notify(text)
+  else
+    tell_later(player, account, text)
+  end
+end
 
 local function progress(world, player, kind, match, amount)
   local account = account_of(world, player)
@@ -1036,6 +1056,8 @@ local function progress(world, player, kind, match, amount)
         if emf.setting("auto_claim") then
           table.remove(rec.taken, i)
           text = text .. "! " .. give_rewards(world, player, account, e) .. " are yours"
+        elseif emf.setting("need_board") then
+          text = text .. "! Claim " .. short_reward(e) .. " at a Bounty Board"
         else
           text = text .. "! /bounty.claim for " .. short_reward(e)
         end
@@ -1391,6 +1413,99 @@ emf.command("boards", ": the Bounty Boards of this world (host)", function(world
   end
 end)
 
+-- ---- chat lines for players who joined (the wheel is the host's only) ----
+-- emf.tell sends at most 10 lines per call, and a Lua mod at most 30 lines in 10 s: the lines wait in `outbox` and
+-- go out as the limit allows (counted on the play clock, with a little room). A refused line (players' chat off, the
+-- player left) is left out.
+local function line_count(text)
+  local n = 1
+  for _ in text:gmatch("\n") do n = n + 1 end
+  return math.min(n, 11)
+end
+
+-- `kind` "notices": a newer one replaces that player's waiting one.
+function tell_later(player, account, text, kind)
+  local m = {player = player, account = account, text = text, lines = line_count(text), kind = kind}
+  if kind then
+    for i, w in ipairs(outbox) do
+      if w.account == account and w.kind == kind then
+        outbox[i] = m
+        return
+      end
+    end
+  end
+  outbox[#outbox + 1] = m
+end
+
+local function flush_outbox(world)
+  for i = #sent_lines, 1, -1 do
+    if play_s - sent_lines[i].at >= CHAT_WINDOW or play_s < sent_lines[i].at then table.remove(sent_lines, i) end
+  end
+  local used = 0
+  for _, s in ipairs(sent_lines) do used = used + s.lines end
+  while outbox[1] and used + outbox[1].lines <= CHAT_LINES do
+    local m = table.remove(outbox, 1)
+    if emf.tell(world, m.player, m.text) then
+      sent_lines[#sent_lines + 1] = {at = play_s, lines = m.lines}
+      used = used + m.lines
+    elseif not tell_refused then
+      tell_refused = true
+      emf.log("a chat line for player " .. m.player .. " was not sent (players' chat is off? see docs/modding/server.md); " ..
+        "such lines are left out")
+    end
+  end
+end
+
+-- The notices as one chat message (at most 8 lines): the time to new ones, the notices, yours, what to type.
+local function notice_message(account)
+  local rec = record(account)
+  local list = notice_lines(account)
+  local lines = {"Bounty Board: " .. lower_first(until_text())}
+  for _, l in ipairs(list) do lines[#lines + 1] = l end
+  local held, done = {}, owed[account] ~= nil
+  for _, b in ipairs(rec.taken) do
+    local e = entry(b.id)
+    if e then
+      held[#held + 1] = b.state == 1 and (short_of(e) .. " done") or string.format("%s %d/%d", short_of(e), b.have, b.need)
+      done = done or b.state == 1
+    end
+  end
+  if #held > 0 then lines[#lines + 1] = "Yours: " .. table.concat(held, "; ") end
+  if done then lines[#lines + 1] = "Done: /bounty.claim here" end
+  if #rec.taken >= hold_max() then
+    lines[#lines + 1] = string.format("You hold %d of %d: finish one or /bounty.drop <n>", #rec.taken, hold_max())
+  elseif #list > 0 then
+    lines[#lines + 1] = string.format("Type /bounty.take 1-%d here", #list)
+  end
+  return table.concat(lines, "\n")
+end
+
+-- Players who come within read_range of a board, facing it, are told once, again after they went REARM_M away:
+-- the host gets a note (the wheel is theirs), everyone else the notices in the chat (with chat_notices).
+local function walk_up(world)
+  if #boards == 0 then return end
+  local me = emf.local_player()
+  for _, p in ipairs(players_now(world)) do
+    local account = world:account(p.id)
+    if account then
+      local t = told[account]
+      if t and dist(t, p.x, p.y, p.z) > REARM_M then
+        told[account], t = nil, nil
+      end
+      local b = not t and board_in_front(world, p.id, read_range(), WALK_COS)
+      if b then
+        told[account] = {x = b.x, y = b.y, z = b.z}
+        if p.id == me then
+          local key = emf.setting("read_key") or ""
+          emf.notify(key ~= "" and ("Bounty Board: press " .. key .. " to read") or "Bounty Board: /bounty.board to read")
+        elseif emf.setting("chat_notices") then
+          tell_later(p.id, account, notice_message(account), "notices")
+        end
+      end
+    end
+  end
+end
+
 -- ---- the host's wheel: read_key while looking at a Bounty Board ----
 local pending = nil  -- the host's pick, run on the server world's next step
 
@@ -1469,7 +1584,7 @@ emf.on_key("read_key", function(world)
   local account = world:account(player)
   if not account or not board_in_front(world, player, read_range(), KEY_COS) then return end
   local labels, entries = wheel_items(account)
-  local title = "Bounty Board: " .. (until_text():gsub("^%u", string.lower))
+  local title = "Bounty Board: " .. lower_first(until_text())
   emf.wheel(title, labels, "", function(w, choice) pending = choice and entries[choice] or nil end)
 end)
 
@@ -1540,6 +1655,11 @@ emf.on_tick(function(world)
     pending = nil
     run_pick(world, p)
   end
+  if play_s >= walk_up_at then
+    walk_up_at = play_s + WALK_EVERY
+    walk_up(world)
+  end
+  flush_outbox(world)
   if dirty then save() end
   local s = math.floor(play_s)
   if s ~= hud_at then
