@@ -177,6 +177,8 @@ image = {
 	end,
 }
 loader = { features = { patch = true } }
+-- EML's Lua has require but no global package table (require keeps working: it uses the registry)
+package = nil
 dofile(src .. "/mod.lua")
 print("created:")
 for _, c in ipairs(created) do print("  " .. c) end

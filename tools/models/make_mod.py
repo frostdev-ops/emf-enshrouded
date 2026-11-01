@@ -117,6 +117,11 @@ local function fill(list, items)
 	for _, item in ipairs(items) do table.insert(list, item) end
 end
 
+-- a generated module whose data is copied: let Lua free it (EML's Lua has no global package table: then it stays)
+local function unload(name)
+	if package and package.loaded then package.loaded[name] = nil end
+end
+
 -- textures: a level's bytes in a block format; levels under 4 KB go into the mip tail (as in the game's own files)
 local function block_bytes(format)
 	if format:find("BC1") or format:find("BC4") then return 8 end
@@ -321,7 +326,7 @@ for _, c in ipairs(require("creatures")) do
 			seconds[cl.guid] = cl.frameCount / cl.fps
 			made = made + 1
 		end
-		package.loaded[c.name .. "_clips"] = nil  -- the clips' bytes are copied: let Lua free them
+		unload(c.name .. "_clips")
 		-- the graph copy: every clip reference plays our clip for its role, with our clip's length; the slots point
 		-- at our joints. rootMotionAnimation and the animation hashes stay the game's (how far a clip moves the
 		-- creature; the hashes key the game clip's events)
@@ -353,7 +358,7 @@ for _, c in ipairs(require("creatures")) do
 			end
 		end
 		for i, j in ipairs(sk.slots) do g.slotBoneIndexMapping[i] = j end
-		package.loaded[c.name .. "_skeleton"] = nil
+		unload(c.name .. "_skeleton")
 		log(string.format("%%s: new skeleton %%s (%%d joints), %%d clips, graph %%s: %%d clip references ours", c.name,
 			sk.guid, sk.jointCount, made, c.animation.graph_guid, ours))
 	elseif c.skeleton then
@@ -403,7 +408,7 @@ for _, c in ipairs(require("creatures")) do
 				made = made + 1
 			end
 		end
-		package.loaded[c.name .. "_clips"] = nil  -- the clips' bytes are copied: let Lua free them
+		unload(c.name .. "_clips")
 		local g = game.assets.create_resource(src_g.data, GRAPH, c.animation.graph_guid, 0).data
 		g.hierarchy = sk.guid
 		local ours, left = 0, 0
