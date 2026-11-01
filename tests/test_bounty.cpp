@@ -748,7 +748,7 @@ TEST_CASE("bounty: players who finished none see the starter notices; after thei
 
 // ---- 1.2: the world file ----
 
-TEST_CASE("bounty: a 1.1.0 world file migrates: open and finished bounties become yours, nothing earned is lost") {
+TEST_CASE("bounty: a 1.1.0 world file migrates: started and finished bounties become yours, nothing earned is lost") {
     BountyRig b({{"reset", "game_dawn"}});
     b.edit_main("local POOL = {", "\n  {id = \"gather_hemp\", kind = \"gather\", match = \"hemp\", name = \"Hemp\", n = 40, "
                                   "reward = {{item = \"Material_T1_Animal_Fur\", count = 2}}},");
@@ -758,6 +758,7 @@ TEST_CASE("bounty: a 1.1.0 world file migrates: open and finished bounties becom
                   "b 0x00000000000000aa gather_wood 60 60 1\n"
                   "b 0x00000000000000aa kill_drak 4 4 2\n"
                   "b 0x00000000000000aa gone_id 5 1 0\n"
+                  "b 0x00000000000000aa kill_scavenger 6 0 0\n"
                   "p 0x00000000000000bb d2026300.2 0 0\n"
                   "b 0x00000000000000bb gather_hemp 40 3 0\n"
                   "owe 0x00000000000000aa Material_T1_Animal_Fur 6 0 -\n");
@@ -768,6 +769,7 @@ TEST_CASE("bounty: a 1.1.0 world file migrates: open and finished bounties becom
     CHECK(held.find("Slay 6 Vukah: 2/6") != std::string::npos);        // open: yours, with its progress
     CHECK(held.find("Gather 60 Wood logs: done") != std::string::npos);  // finished, not claimed: still to claim
     CHECK(held.find("Drak") == std::string::npos);                       // claimed in 1.1: nothing left to keep
+    CHECK(held.find("Scavengers") == std::string::npos);                 // untouched (0/6): nothing earned, not held
     CHECK(count_of(held, "\n") == 2);                                    // (an id no longer in the pool is left out)
     CHECK(b.board().find("you hold 2 of 1") != std::string::npos);       // more than the hold limit: kept
     CHECK(b.board().find("1 reward waiting") != std::string::npos);
@@ -1214,4 +1216,45 @@ TEST_CASE("bounty: a wheel pick made just before a world switch does nothing in 
     b.seconds(1);
     CHECK_FALSE(b.noted("Taken: "));
     CHECK(yours_of(b.board()).empty());
+}
+
+// ---- 1.2: the world file from 1.1 and for 1.1 ----
+TEST_CASE("bounty: a 1.1 player's untouched bounties are not held after the update: they can take a notice at once") {
+    BountyRig b({{"reset", "game_dawn"}});
+    write(b.data, "offset 0\ndawns 2\nplay 100\np 0x00000000000000aa d2026300.0 0 0\n"
+                  "b 0x00000000000000aa kill_vukah 6 0 0\nb 0x00000000000000aa gather_wood 60 0 0\n"
+                  "b 0x00000000000000aa champion 1 0 0\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.board().find("You hold no bounty") != std::string::npos);
+    CHECK(b.reply("bounty.take 1").rfind("Taken: ", 0) == 0);
+}
+
+TEST_CASE("bounty: a world file from a newer Bounty Board is read but never written over") {
+    BountyRig b;
+    const std::string newer = "format 3\noffset 0\nseed 7\nposted 0\np 0x00000000000000aa - 0 2\nsomething new 1 2 3\n";
+    write(b.data, newer);
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.reply("bounty.top").find("1. 0x00000000000000aa: 2 (you)") != std::string::npos);  // read
+    b.reply("bounty.give kill_vukah");
+    b.reply("bounty.reset");
+    b.seconds(2);
+    CHECK(slurp(b.data) == newer);  // never written
+    int said = 0;
+    for (const auto& l : b.r.fake.log) said += l.find("written by a newer Bounty Board") != std::string::npos;
+    CHECK(said == 1);
+}
+
+TEST_CASE("bounty: the finished counts are saved in a line 1.1 reads too") {
+    BountyRig b;
+    b.finish_one();
+    b.seconds(1);
+    CHECK(slurp(b.data).find("\np 0x00000000000000aa - 0 1\n") != std::string::npos);  // as 1.1 wrote "p" lines
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.reply("bounty.top").find("1. 0x00000000000000aa: 1 (you)") != std::string::npos);
 }

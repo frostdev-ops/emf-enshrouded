@@ -116,6 +116,7 @@ local dropped = {}   -- pickup entity -> {item, left, until_s}: rewards this mod
 local owed = {}    -- account -> list of {item (debug name), count, level, rarity}: rewards that could not be given
                      -- (the player left before they landed); they come with that player's next /bounty.claim
 local loaded, dirty = false, false
+local read_only = false  -- the world's file was written by a newer Bounty Board: never written over
 local last_tick, last_tod = nil, nil
 local session = emf.session()
 local hud_at, hud_shown, client_steps = -1, false, 0
@@ -455,7 +456,7 @@ local function serialize()
                  "seed " .. seed}
   for _, k in ipairs(sorted_keys(players)) do
     local rec = players[k]
-    lines[#lines + 1] = string.format("p %s %d", k, rec.done or 0)
+    lines[#lines + 1] = string.format("p %s - 0 %d", k, rec.done or 0)  -- the shape 1.1 reads: finished counts survive
     if rec.offers and rec.key then
       lines[#lines + 1] = string.format("offers %s %s %d %s", k, rec.key, rec.rerolls or 0, table.concat(rec.offers, " "))
     end
@@ -476,6 +477,10 @@ local function serialize()
 end
 
 local function save()
+  if read_only then
+    dirty = false
+    return
+  end
   if loaded and emf.save_world_data(serialize()) then dirty = false end
 end
 
@@ -485,14 +490,15 @@ local function words(s)
   return out
 end
 
--- A line of a 1.1 world file (no "format 2" line): a player's board ("p <account> <key> <rerolls> <done>") and its
--- bounties ("b <account> <id> <need> <have> <state>"). Open and finished ones become the player's taken bounties, also
--- beyond the hold limit; claimed ones (state 2) and ids no longer in the pool are left out, as 1.1 did.
+-- A line of a 1.1 world file (no "format" line): a player's board ("p <account> <key> <rerolls> <done>") and its
+-- bounties ("b <account> <id> <need> <have> <state>"). Finished ones and those with progress become the player's
+-- taken bounties, also beyond the hold limit; untouched ones (nothing earned), claimed ones (state 2) and ids no
+-- longer in the pool are left out.
 local function load_old_line(line)
   local account, done = line:match("^p (%S+) %S+ %d+ (%d+)$")
   if account then record(account).done = tonumber(done) end
   local a, id, need, have, state = line:match("^b (%S+) (%S+) (%d+) (%d+) ([012])$")
-  if a and state ~= "2" and entry(id) then
+  if a and (state == "1" or (state == "0" and tonumber(have) > 0)) and entry(id) then
     table.insert(record(a).taken, {id = id, need = tonumber(need), have = tonumber(have), state = tonumber(state)})
   end
 end
@@ -501,9 +507,15 @@ end
 local function load_text(text)
   players, owed, marks = {}, {}, {}
   offset, dawns, play_s, seed, posted = 0, 0, 0, nil, nil
-  local old = true
+  local format = nil
   for line in text:gmatch("[^\r\n]+") do
-    if line == "format 2" then old = false end
+    format = format or tonumber(line:match("^format (%d+)$"))
+  end
+  local old = format == nil
+  read_only = format ~= nil and format > 2
+  if read_only then
+    emf.log("this world's file was written by a newer Bounty Board: it is read as far as this version can, and never " ..
+      "written while this version runs (install the newer one)")
   end
   for line in text:gmatch("[^\r\n]+") do
     if old then load_old_line(line) end
@@ -517,8 +529,9 @@ local function load_text(text)
     if v then play_s = tonumber(v) end
     v = line:match("^seed (%d+)$")
     if v then seed = tonumber(v) end
-    local account, done = line:match("^p (%S+) (%d+)$")
-    if account then record(account).done = tonumber(done) end
+    local account, done = line:match("^p (%S+) %S+ %d+ (%d+)$")
+    if not account then account, done = line:match("^p (%S+) (%d+)$") end
+    if account and not old then record(account).done = tonumber(done) end
     local acc, key, rerolls, ids = line:match("^offers (%S+) (%S+) (%d+) ?(.*)$")
     if acc then
       local rec = record(acc)
