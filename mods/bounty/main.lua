@@ -17,9 +17,14 @@
 --     `match` (lower case); raw materials only (names starting Material_, Food_ or Build_TerrainMaterial_);
 --   kind "champion": a kill of a strong creature: CHAMPION_LEVELS levels above the player or more, with at least
 --     CHAMPION_HEALTH health.
--- n: how many on "normal" (easy x0.6, hard x1.5). weight: how often it is drawn (3 when left out). reward: items by
--- their debug name (`items rune` in the console); gear = true comes at the player's level and the reward_rarity
--- setting; counts are scaled by the reward_scale setting.
+-- n: how many on "normal" (tiny x0.2, easy x0.6, hard x1.5). weight: how often it is drawn (3 when left out). reward:
+-- items by their debug name (`items rune` in the console); gear = true comes at the player's level and the
+-- reward_rarity setting; counts are scaled by the reward_scale setting.
+-- starter = true: a quick one for players who have not finished a bounty yet. Their boards (and rerolls) are drawn
+--   from the starters, until they finish their first bounty (with fewer starters than a board holds, the rest comes
+--   from the other bounties); later boards never have starters. A pool without starters draws as before.
+-- A kill counts for the player who hit, and for the player whose ally hit (the companion, a Beastmaster beast, a
+-- Necromancer undead: a creature of the players' side that guards that player).
 local RUNES = "Material_T1_Token_WeaponUpgrade_Rune01"
 local POOL = {
   {id = "kill_vukah", kind = "kill", faction = 3, name = "Vukah", n = 6, reward = {{item = RUNES, count = 8}}},
@@ -37,6 +42,19 @@ local POOL = {
   {id = "gather_fur", kind = "gather", match = "animal_fur", name = "Fur", n = 10, reward = {{item = RUNES, count = 6}}},
   {id = "champion", kind = "champion", name = "champion", n = 1, weight = 1,
    reward = {{item = RUNES, count = 20}, {item = "Weapon_T1_1H_SwordEpic_01", count = 1, gear = true}}},
+  -- starters: quick ones until a player finishes their first bounty
+  {id = "start_wood", kind = "gather", match = "wood_logs", name = "Wood logs", n = 20, starter = true,
+   reward = {{item = RUNES, count = 3}}},
+  {id = "start_stone", kind = "gather", match = "stone", name = "Stone", n = 20, starter = true,
+   reward = {{item = RUNES, count = 3}}},
+  {id = "start_fibre", kind = "gather", match = "plant_fibre", name = "Plant fibre", n = 15, starter = true,
+   reward = {{item = RUNES, count = 3}}},
+  {id = "start_wildlife", kind = "kill", faction = 5, name = "Wildlife", n = 2, starter = true,
+   reward = {{item = "Material_T1_Animal_Fur", count = 3}}},
+  {id = "start_shroud", kind = "kill", faction = 2, name = "Shroud creatures", n = 3, starter = true,
+   reward = {{item = RUNES, count = 3}}},
+  {id = "start_scavenger", kind = "kill", faction = 4, name = "Scavengers", n = 2, starter = true,
+   reward = {{item = RUNES, count = 3}}},
 }
 local CHAMPION_LEVELS = 2     -- a champion: at least this many levels above the player ...
 local CHAMPION_HEALTH = 1000  -- ... and at least this much health (when first hit)
@@ -47,7 +65,8 @@ local LEFTOVER_SECONDS = 120  -- ... and a loose drop of that item within LEFTOV
 local LEFTOVER_METRES = 30    -- long after, is what did not fit (quick stack's and sorting chests' drops), no gathering
 local DROP_SECONDS = 1800     -- this mod's own drops (a reward at a full player's feet) are known this long
 
-local DIFFICULTY = {easy = 0.6, normal = 1.0, hard = 1.5}
+local DIFFICULTY = {tiny = 0.2, easy = 0.6, normal = 1.0, hard = 1.5}
+local PLAYER_SIDE = {[7] = true, [8] = true, [11] = true}  -- Player, AutomatedPlayer, PlayerAlly (companions, summons)
 local RAW = {"material_", "food_", "build_terrainmaterial_"}
 local NEVER = {"processed", "_dish_", "fishingbait", "_bars", "_bar", "powder", "_dust", "dried", "charcoal"}
 
@@ -82,6 +101,7 @@ local function pool_entry_ok(e, seen)
   if e.kind == "gather" and (type(e.match) ~= "string" or e.match == "") then return false end
   if e.name ~= nil and type(e.name) ~= "string" then return false end
   if e.weight ~= nil and (type(e.weight) ~= "number" or e.weight < 0) then return false end
+  if e.starter ~= nil and type(e.starter) ~= "boolean" then return false end
   if e.reward ~= nil and type(e.reward) ~= "table" then return false end
   for _, r in ipairs(e.reward or {}) do
     if type(r) ~= "table" or type(r.item) ~= "string" or type(r.count) ~= "number" or r.count < 1 then return false end
@@ -174,11 +194,24 @@ local function random_from(seed)
   end
 end
 
--- `count` pool entries for `account` (none of `exclude`), weighted.
-local function draw(account, key, salt, count, exclude)
+-- Whether a player who finished `done` bounties draws from the starters (only while there are any in the pool).
+local function starters_for(done)
+  if (done or 0) > 0 then return false end
+  for _, e in ipairs(POOL) do
+    if e.starter then return true end
+  end
+  return false
+end
+
+-- `count` pool entries for `account` (none of `exclude`), weighted; from the starters only when `starter`, else from
+-- the rest of the pool.
+local function draw(account, key, salt, count, exclude, starter)
   local rand = random_from(hash(account .. "|" .. key .. "|" .. salt))
   local taken = {}
   for id in pairs(exclude or {}) do taken[id] = true end
+  for _, e in ipairs(POOL) do
+    if (e.starter == true) ~= (starter == true) then taken[e.id] = true end
+  end
   local out = {}
   for _ = 1, count do
     local total = 0
@@ -240,7 +273,14 @@ local function board_of(account)
   end
   if rec.key ~= key then
     rec.key, rec.rerolls = key, 0
-    rec.list = draw(account, key, "0", math.max(1, emf.setting("bounties_per_period") or 3))
+    local count = math.max(1, emf.setting("bounties_per_period") or 3)
+    local starter = starters_for(rec.done)
+    rec.list = draw(account, key, "0", count, nil, starter)
+    if starter and #rec.list < count then  -- fewer starters than the board holds: the rest from the other bounties
+      local have = {}
+      for _, b in ipairs(rec.list) do have[b.id] = true end
+      for _, b in ipairs(draw(account, key, "0f", count - #rec.list, have, false)) do rec.list[#rec.list + 1] = b end
+    end
     dirty = true
   end
   return rec
@@ -337,11 +377,40 @@ local function max_health_of(world, id)
   return (ok and h) and h.healthMax or 0
 end
 
--- Picked up in the world: from nothing (a tree), a loose drop (PickupItem), a plant or rock, or a creature's corpse;
--- never out of a chest, a station or a death bag (InventorySetup), nor out of a tombstone (seen in game: an Inventory,
--- CreateItemLoot and DestroyOnLoot, no Health). A component that cannot be read counts against (fails closed).
+-- The player a hit counts for: the player who made it, or the player an ally of theirs guards. The companion, a
+-- Beastmaster beast and a Necromancer undead are creatures of the players' side that follow their player through the
+-- game's guard system (DynamicEnemy01BehaviorState.guardEntityId names the player); so do the game's own summons.
+-- nil: no player (a wild creature, an ally guarding a marker or nobody).
+local function player_of_hit(world, source)
+  if is_player(world, source) then return source end
+  if source == 0 or source <= 1023 or not PLAYER_SIDE[faction_of(world, source)] then return nil end
+  local ok, ai = pcall(world.get, world, "DynamicEnemy01BehaviorState", source)
+  local guarded = (ok and ai) and ai.guardEntityId or 0
+  if guarded ~= 0 and is_player(world, guarded) then return guarded end
+  return nil
+end
+
+-- What a kill leaves: the loot spot the game spawns where a creature died (templates LootContainer_Enemy_*:
+-- InventorySetup, DefaultInventory, DestroyOnLoot, DoNotSave), or a corpse the game turned into loot (Health stays,
+-- InventorySetup and DestroyOnLoot come). Never a tombstone (CreateItemLoot), anything kept with the world (ForceSave;
+-- chests and storage have neither DestroyOnLoot nor DoNotSave) or a player. Unreadable counts against.
+local function kill_loot(world, from)
+  if has(world, "DestroyOnLoot", from) ~= true or has(world, "InventorySetup", from) ~= true then return false end
+  if has(world, "CreateItemLoot", from) ~= false or has(world, "ForceSave", from) ~= false or
+     has(world, "PlayerState", from) ~= false then
+    return false
+  end
+  if has(world, "Health", from) == true then return true end
+  return has(world, "DefaultInventory", from) == true and has(world, "DoNotSave", from) == true
+end
+
+-- Picked up in the world: from nothing (a tree), a loose drop (PickupItem), a plant or rock, a creature's corpse, or
+-- what a kill leaves (its loot spot); never out of a chest, a station or a death bag (InventorySetup), nor out of a
+-- tombstone (seen in game: an Inventory, CreateItemLoot and DestroyOnLoot, no Health). A component that cannot be read
+-- counts against (fails closed).
 local function from_the_world(world, from)
   if from == 0 then return true end
+  if kill_loot(world, from) then return true end
   if has(world, "InventorySetup", from) ~= false then return false end
   if has(world, "PickupItem", from) == true then return true end
   if has(world, "Inventory", from) ~= false and has(world, "CreateItemLoot", from) ~= false and
@@ -534,8 +603,10 @@ end
 -- ---- events ----
 emf.on_event("HitEvent", function(world, h)
   same_session()
-  local target, source = h.targetId, h.rootSourceId
-  if target == 0 or target <= 1023 or not is_player(world, source) then return end
+  local target = h.targetId
+  if target == 0 or target <= 1023 then return end
+  local source = player_of_hit(world, h.rootSourceId)  -- the player, or the player whose companion or summon hit
+  if not source then return end
   local rec = hits[target]
   if not rec then
     rec = {by = {}, faction = faction_of(world, target), level = level_of(world, target), max = max_health_of(world, target)}
@@ -701,7 +772,9 @@ emf.command("reroll", "<n>: swap one of your bounties for another", function(wor
   local exclude = {}
   for _, b in ipairs(rec.list) do exclude[b.id] = true end
   local used = (rec.rerolls or 0) + 1
-  local new = draw(me.account, rec.key, "r" .. used .. ":" .. n, 1, exclude)[1]
+  local salt = "r" .. used .. ":" .. n
+  local new = draw(me.account, rec.key, salt, 1, exclude, starters_for(rec.done))[1] or
+              draw(me.account, rec.key, salt, 1, exclude, false)[1]  -- no other starter: one of the other bounties
   if not new then  -- nothing to swap to: the reroll is not used up
     emf.reply("The pool has no other bounty.")
     return

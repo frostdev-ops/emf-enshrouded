@@ -41,7 +41,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `mods/bulk_craft/` | Bulk Craft (off by default): craft one by hand, then U at the station (or `/craft 25`, every player) crafts many through the game's own crafting, at the recipe's pace (see below) |
 | `mods/beastmaster/` | Beastmaster (Lua, off by default): tame wolves, boars, sabretooths and hounds (bears and aurochs with the content packs), keep 8, call 2 to fight beside you; hold B for the beast wheel, `/beastmaster` for every player; rare wild pack beasts (see below) |
 | `mods/necromancer/` | Necromancer (Lua, off by default): raise up to 3 skeleton warriors that stay and follow you (a lich and a bone golem with the undead pack), cast raging spirits (flaming skulls, 6 s); hold V for the summoning wheel, shared with Beastmaster; `/necromancer` for every player (see below) |
-| `mods/loot_scale/` | more materials per loot stack (x2 by default, off by default) by hooking the game's loot amount getter by its bytes; switching it off takes effect at the next start, factor 1 at once |
+| `mods/loot_scale/` | more materials per loot stack (x2 by default, off by default) by hooking the game's loot amount getter by its bytes; plants picked with E, chopping and mining (which never read that setting) get the difference after the game's PickupEvent, each with its own factor (0 = the same, so from 1.1.0 they follow the main factor); switching it off takes effect at the next start; factor 1 is the world's amounts at once for everything that follows it |
 | `content/emberbrand/` | an example of a new item (an EML data patch; [docs/modding/content.md](docs/modding/content.md)) |
 | `mods/event_log/` | logs gameplay events on the host (deaths, hits, pickups, crafts, xp, building) with `on_event` |
 | `mods/guid_dump/` | EML (Lua) export mod: writes every template name → GUID to `export/template_guids.csv` (12,266 templates) |
@@ -406,7 +406,9 @@ event. It runs where the world runs, so on the host or a dedicated server it wor
 joined without EMF. Each player switches their own with `/loot.toggle` (and sees it with `/loot.status`); kept per world
 and account. Never a corpse twice, a player's or an ally's body, a farm animal, anything tame or owned, or anything
 within the base radius of a flame altar; by default only corpses that hold nothing but materials. A full inventory
-loses nothing (what does not fit stays in the corpse). Settings: reach, delay after the kill, how long it looks for loot (the game gives a corpse its loot 1-3 s after the death), what comes, arrows,
+loses nothing (what does not fit stays where it was). Most creatures leave their loot in a loot spot where they died
+(a loot container the game spawns as the body fades): the magnet takes that one, or the body when it keeps its loot.
+Settings: reach, delay after the kill, how long it looks for loot (the loot appears 1-3 s after the death), what comes, arrows,
 default for new players, the host's key, base radius. Details: `mods/loot_magnet/README.md`.
 
 ## The champion mod (Wandering Champion, Lua)
@@ -420,8 +422,10 @@ top of `emf\mods\champion\main.lua`: change them while the game runs. Details: `
 ## The bounty mod (Bounty Board, Lua)
 Installed switched off: switch it on in the Mods tab or EMF.exe. Every day each player gets three bounties: slay
 creatures of a faction ("Slay 6 Vukah"), gather a raw material picked up in the world ("Gather 60 Wood logs", never
-out of a chest or a tombstone), or slay a champion (2 levels above you, 1,000 health or more). Kills count for every
-player who hit the creature in its last 10 s (`share_kills`). Rewards (runes, furs, gear at your level) with
+out of a chest or a tombstone), or slay a champion (2 levels above you, 1,000 health or more). Until a player
+finishes their first bounty, their boards are quick starters ("Gather 20 Wood logs"); the size `tiny` (x0.2) makes
+every bounty quick to try. Kills count for every player who hit the creature in its last 10 s (`share_kills`), and
+a hit by a player's companion or summon (an ally guarding them) counts as theirs. Rewards (runes, furs, gear at your level) with
 `/bounty.claim`, or at once with `auto_claim`; what does not fit is dropped at your feet. Commands for every player:
 `/bounty.board`, `/bounty.claim`, `/bounty.reroll <n>`, `/bounty.top`; the host has `bounty.give <id>` and
 `bounty.reset`. New bounties every real day at an hour, every game dawn, or every few hours of play; kept per world

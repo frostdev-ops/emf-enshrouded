@@ -3,8 +3,9 @@
 // {guest = the player, host = the corpse, lootAll, bypassInteraction} (seen in game: the corpse's stacks moved into the
 // player, a PickupEvent each). Players who joined need no EMF: it runs where the world runs. Each player switches their
 // own magnet with /loot.toggle (a command for every player, API v17); the host's default and key are settings. Never: a
-// corpse twice, a player's or an ally's body, anything owned or tame, anything inside a base. The rules (tested without
-// the game) are magnet_logic.h.
+// corpse twice, a player's or an ally's body, anything owned or tame, anything inside a base. Most creatures leave their
+// loot in a loot container where they died (the glowing loot spot) and fade away: that container is looted then. The
+// rules (tested without the game) are magnet_logic.h.
 #define NOMINMAX
 #include <windows.h>
 
@@ -100,6 +101,8 @@ uint32_t g_session = 0;
 std::map<uint32_t, std::string> g_item_names;  // item id -> debug name (the game's names do not change)
 emf::keys::Edge g_key;
 int g_looted = 0;  // corpses looted this session (for loot.status)
+bool g_told_gear = false;   // the host heard "gear stays" this session
+bool g_told_no_time = false;  // the log said once that the game gave a death no time
 
 std::optional<magnet::Vec3> pos_of(emf::World w, uint32_t id) {
     auto* t = w.get<gen::CurrentTransform>(id);
@@ -125,6 +128,9 @@ magnet::Body body_of(emf::World w, uint32_t id) {
     return magnet::read_body(w, id, [w](uint32_t item) { return item_name(w, item); });
 }
 
+// How far from a death the magnet looks for loot containers: their reach, plus how far the body may slide before it fades.
+double scan_radius(const magnet::Rules& r) { return r.container_reach + r.moved_max; }
+
 double nearest_base(const magnet::Vec3& p) {
     double best = -1;
     for (const auto& b : g_bases) {
@@ -137,15 +143,20 @@ double nearest_base(const magnet::Vec3& p) {
 // The decision log: what became of each corpse the magnet watched (looted lines always; the rest with debug_log).
 void log_decision(const magnet::Decision& d, const Config& c) {
     if (d.why == magnet::Why::Ok) {
-        EMF_LOG(kMod, "corpse %u looted into player %u (%.1f m; interaction offer %s)", d.corpse, d.player, d.distance,
-                d.offer ? "yes" : "no");
+        if (d.container)
+            EMF_LOG(kMod, "corpse %u looted into player %u from the loot it left where it died (loot container %u, %.1f m)",
+                    d.corpse, d.player, d.container, d.distance);
+        else
+            EMF_LOG(kMod, "corpse %u looted into player %u (%.1f m; interaction offer %s)", d.corpse, d.player, d.distance,
+                    d.offer ? "yes" : "no");
         return;
     }
     if (!c.debug_log) return;
     if (d.why == magnet::Why::TooLate) {
-        if (d.waited == magnet::Why::NoLoot)
-            EMF_LOG(kMod, "corpse %u left: no loot appeared within %.0f s of its death (no Health or no Inventory)", d.corpse,
-                    c.rules.window_ms / 1000.0);
+        if (d.waited == magnet::Why::NoLoot || d.waited == magnet::Why::Gone || d.waited == magnet::Why::Moved ||
+            d.waited == magnet::Why::Reused)
+            EMF_LOG(kMod, "corpse %u left: no loot appeared within %.0f s of its death (none on it, and no loot container "
+                          "within %.0f m of where it died)", d.corpse, c.rules.window_ms / 1000.0, c.rules.container_reach);
         else if (d.waited == magnet::Why::TooFar && d.distance >= 0)
             EMF_LOG(kMod, "corpse %u left: its time ran out while %s (the nearest player with a magnet was %.1f m away, reach %.0f m)",
                     d.corpse, magnet::why_text(d.waited), d.distance, c.rules.radius);
@@ -153,7 +164,11 @@ void log_decision(const magnet::Decision& d, const Config& c) {
             EMF_LOG(kMod, "corpse %u left: its time ran out while waiting (%s)", d.corpse, magnet::why_text(d.waited));
         return;
     }
-    EMF_LOG(kMod, "corpse %u skipped: %s", d.corpse, magnet::why_text(d.why));
+    if (d.container)
+        EMF_LOG(kMod, "corpse %u skipped: the loot it left (loot container %u) %s", d.corpse, d.container,
+                magnet::why_text(d.why));
+    else
+        EMF_LOG(kMod, "corpse %u skipped: %s", d.corpse, magnet::why_text(d.why));
 }
 
 void refresh_bases(emf::World w) {
@@ -189,6 +204,7 @@ void on_tick(emf::World w) {
         g_session = session;
         g_bases_ms = 0;
         g_looted = 0;
+        g_told_gear = false;
         if (!g_file.ready()) g_toggles.clear();
     }
     const uint64_t now = GetTickCount64();
@@ -212,22 +228,59 @@ void on_tick(emf::World w) {
     std::vector<magnet::Looter> looters;
     for (uint32_t id : emf::players(w))
         if (const auto p = pos_of(w, id)) looters.push_back({id, *p, magnet_on(w, id, c)});
+    // the loot containers near the deaths it watches (one walk of the world, only while it watches a death)
+    const auto containers = magnet::containers_near(w, g_magnet.watched_places(), scan_radius(c.rules),
+                                                    [w](uint32_t item) { return item_name(w, item); });
     std::vector<magnet::Decision> decisions;
-    const auto loots =
-        g_magnet.tick(now, session, looters, [w](uint32_t id) { return body_of(w, id); }, g_bases, c.rules, &decisions);
+    const auto loots = g_magnet.tick(now, session, looters, [w](uint32_t id) { return body_of(w, id); }, g_bases, c.rules,
+                                     &decisions, containers);
     for (const auto& d : decisions) log_decision(d, c);
-    for (const auto& l : loots) {
-        {
-            std::lock_guard<std::mutex> lock(g_requests_lock);
-            if (g_requests.size() < 256) g_requests.push_back({l.player, l.corpse, session});
+    if (c.debug_log)  // the loot spots near a death that were not its loot, and why (each once)
+        for (const auto& k : g_magnet.take_skips()) {
+            if (k.why == magnet::Skip::Before && k.seconds > 0)
+                EMF_LOG(kMod, "corpse %u: loot container %u (%.1f m) not taken: %s, %.1f s before it", k.corpse, k.container,
+                        k.distance, magnet::skip_text(k.why), k.seconds);
+            else
+                EMF_LOG(kMod, "corpse %u: loot container %u (%.1f m) not taken: %s", k.corpse, k.container, k.distance,
+                        magnet::skip_text(k.why));
         }
-        g_magnet.on_sent(l.corpse, l.player, now, session);
+    else
+        g_magnet.take_skips();
+    for (const auto& l : loots) {
+        // its own Inventory: the game's loot event; plain stacks in linked inventories (which that event does not
+        // reach): taken and put; gear there stays
+        const magnet::LootPlan plan = magnet::plan_loot(w, l.corpse);
+        if (plan.event) {
+            {
+                std::lock_guard<std::mutex> lock(g_requests_lock);
+                if (g_requests.size() < 256) g_requests.push_back({l.player, l.corpse, session});
+            }
+            g_magnet.on_sent(l.corpse, l.player, now, session);
+        }
+        for (const auto& st : plan.takes) {
+            const uint32_t corpse = l.corpse, player = l.player;
+            const bool started = magnet::move_linked(w, corpse, player, st, [corpse, player](uint32_t came, uint32_t dropped) {
+                if (dropped)
+                    EMF_LOG(kMod, "corpse %u: %u came into player %u, %u did not fit and lie at their feet", corpse, came,
+                            player, dropped);
+            });
+            if (!started) EMF_LOG(kMod, "corpse %u: a stack in a linked inventory could not be taken (see the core log)", l.corpse);
+        }
+        if (plan.gear_left) {
+            EMF_LOG(kMod, "corpse %u: %d gear stack(s) stay in it (taken out of a linked inventory, gear would lose its "
+                          "gems and perks): open it by hand", l.corpse, plan.gear_left);
+            if (l.player == emf::local_player() && !g_told_gear) {
+                g_told_gear = true;
+                EMF_NOTIFY("Loot Magnet: gear stays in the loot; open it by hand");
+            }
+        }
         ++g_looted;
     }
-    // nothing came from the corpse within 2 s and it still holds loot: send again (it may become lootable a moment
-    // after it died), at most 5 times; then the player has no room (or the game refused), and the loot stays there
+    // nothing came from the loot event within 2 s and its own Inventory still holds loot: send again (it may become
+    // lootable a moment after it died), at most 5 times; then the player has no room (or the game refused), and the loot
+    // stays there. Linked inventories are not the event's: their plain stacks were moved above, their gear stays.
     for (const auto& late : g_magnet.overdue(now)) {
-        if (emf::inventory_stacks(w, late.corpse).empty()) continue;  // it came (the confirmation was another stack's)
+        if (!magnet::holds_own(w, late.corpse)) continue;  // it came (the confirmation was another stack's)
         if (g_magnet.should_retry(late)) {
             if (c.debug_log)
                 EMF_LOG(kMod, "corpse %u: nothing came from the loot event yet (try %d of %d): sent again", late.corpse,
@@ -240,7 +293,7 @@ void on_tick(emf::World w) {
         EMF_LOG(kMod, "corpse %u still holds loot after %d loot events: player %u has no room, or the game refused (the loot "
                       "stays there)", late.corpse, late.tries, late.player);
         if (g_magnet.should_tell_full(late.player, session) && late.player == emf::local_player())
-            EMF_NOTIFY("Loot Magnet: no room in your inventory; the loot stays in the corpse");
+            EMF_NOTIFY("Loot Magnet: the loot did not come (is your inventory full?); it stays where it was");
     }
 }
 
@@ -310,10 +363,23 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
             if (config().debug_log) EMF_LOG(kMod, "death of %u: it has no position any more; not watched", id);
             return;
         }
-        g_magnet.on_death(id, *p, GetTickCount64(), emf::server_session(), magnet::template_of(w, id));
+        const magnet::Rules rules = config().rules;
+        magnet::Death d{id, *p, GetTickCount64(), emf::server_session(), magnet::template_of(w, id)};
+        d.guarded = magnet::guarded(body_of(w, id));  // a player's, an ally's...: nothing it leaves is taken
+        // what appeared at or after the death is its loot, by the game's clock (a loot spot's SpawnTime); without a
+        // death time, the loot spots near it now are not its loot
+        d.time = e.timeStamp.value;
+        if (!d.guarded && d.time <= 0) {
+            d.before = magnet::container_ids_near(w, *p, scan_radius(rules));
+            if (!g_told_no_time) {
+                g_told_no_time = true;
+                EMF_LOG(kMod, "the game gave death %u no time: loot spots near it now are taken as not its loot", id);
+            }
+        }
         if (config().debug_log)
-            EMF_LOG(kMod, "death of %u noted at (%.1f, %.1f, %.1f), %.0f m from the nearest flame altar", id, p->x, p->y,
-                    p->z, nearest_base(*p));
+            EMF_LOG(kMod, "death of %u noted at (%.1f, %.1f, %.1f), %.0f m from the nearest flame altar%s", id, p->x, p->y,
+                    p->z, nearest_base(*p), d.guarded ? " (a player's, an ally's, owned or tame: nothing is taken)" : "");
+        g_magnet.on_death(std::move(d));
     });
     emf::on_event<gen::PickupEvent>(EMF_WORLD_SERVER, [](emf::World, const gen::PickupEvent& e) {
         g_magnet.on_pickup(e.pickedUpByEntityId.id, e.pickedUpFromEntityId.id);

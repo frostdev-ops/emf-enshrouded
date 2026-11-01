@@ -1,7 +1,8 @@
 # Bounty Board (`bounty`, Lua)
 
 Every day each player gets three bounties: slay creatures of a faction ("Slay 6 Vukah"), gather a material ("Gather 60
-Wood logs"), or slay a champion. Finish one and claim its reward. Daily and repeatable quests (164 votes) and a kill
+Wood logs"), or slay a champion. Finish one and claim its reward. Your first bounties are quick ones ("Gather 20 Wood
+logs", "Slay 2 Wildlife") until you finish one. Daily and repeatable quests (164 votes) and a kill
 tracker (65) are open requests on the official board; no Nexus mod has them.
 
 It runs where the world runs, so on the host or a dedicated server it works for every player, also those who joined
@@ -33,10 +34,13 @@ board is `/bounty.board` rather than a bare `/bounty`.)
 
 - **Slay:** a kill of a creature of the bounty's faction (read from the creature when first hit). With **Shared
   kills** (on) it counts for every player who hit it in its last 10 seconds; off, only for the last player who hit it.
-  A kill by a companion or a summon counts only if the game names the player as the hit's source; a creature killed
+  **Your companion and your summons count as you**: a hit by the companion, a Beastmaster beast or a Necromancer undead
+  that follows you (an ally that guards you, through the game's guard system) is your hit. An ally told to stay and
+  guard a spot does not follow you then, so its kills count for nobody until it follows you again. A creature killed
   without a hit (a test command) counts for nobody.
 - **Gather:** raw materials a player picks up in the world (from a tree, a plant, a rock, a loose drop, a creature's
-  corpse) whose name holds the bounty's word. Never items taken out of a chest, a crafting station or a death bag, nor
+  corpse, or the glowing loot spot a kill leaves, also when Loot Magnet takes it for you) whose name holds the bounty's
+  word. Never items taken out of a chest, a crafting station or a death bag, nor
   out of a tombstone, nor a bounty's own reward, nor items coming back from a chest a mod was filling (quick stack,
   sorting chests). Loose drops a mod made do not count either: a reward this mod dropped at a full player's feet
   (picked up within 30 minutes of play), and a loose drop of an item that a chest within 30 m got from a mod in the
@@ -56,6 +60,16 @@ the game before it landed) is kept for you: `/bounty.board` says "1 reward waiti
 brings it. Gear comes at your level with **Gear rewards'
 rarity** (uncommon by default). **Reward amounts** scales the counts.
 
+## Your first bounties
+
+Until you finish your first bounty, your boards (and your rerolls) are drawn from quick **starters**: gather 20 wood
+logs, 20 stone or 15 plant fibre, slay 2 wildlife, 3 shroud creatures or 2 scavengers, for a small reward. Once you
+have finished one, the next boards come from the whole pool. A board you already have stays until the next period
+(the host can draw new ones for everyone now with `bounty.reset`).
+
+To try the bounties quickly, set **How many to slay or gather** to **Tiny** (x0.2: "Slay 1 Vukah", "Gather 12 Wood
+logs") and run `bounty.reset`; the size counts for bounties drawn from then on.
+
 ## New bounties
 
 **New bounties** comes every real day at **At (hour)** on the host's clock (6:00 by default), at every dawn in the
@@ -65,8 +79,10 @@ draw for the same period, so asking again never changes them); progress and uncl
 ## The pool
 
 The bounties are the `POOL` table at the top of `emf\mods\bounty\main.lua`: kind, faction or item word, how many,
-reward items, how often it is drawn. Change it while the game runs and save: the mod reloads. **How many to slay or
-gather** scales the counts (easy x0.6, hard x1.5).
+reward items, how often it is drawn, and `starter = true` for the quick first ones. Change it while the game runs and
+save: the mod reloads. **How many to slay or gather** scales the counts (tiny x0.2, easy x0.6, hard x1.5). A pool
+without starters draws everyone's boards from the whole pool; a pool with fewer starters than **Bounties per player**
+fills the rest of a first board from its other bounties.
 
 Installing EMF again replaces `main.lua`, and your changes to `POOL` with it. To keep your own bounties, put them in
 `emf\config\bounty\pool.lua` instead: that folder stays when EMF is installed again or removed. The file returns a
@@ -92,7 +108,7 @@ programs.
 | Setting | Default | What it does |
 |---|---|---|
 | Bounties per player (`bounties_per_period`) | 3 | 1-5 |
-| How many to slay or gather (`difficulty`) | normal | easy, normal, hard |
+| How many to slay or gather (`difficulty`) | normal | tiny (to try it out), easy, normal, hard |
 | Shared kills (`share_kills`) | on | |
 | New bounties (`reset`) | every day | `real_day`, `game_dawn`, `hours` |
 | At (hour) (`reset_hour`) | 6 | 0-23, the host's clock |
