@@ -60,8 +60,8 @@ never within 40 m of a flame altar. Beat it down or feed it its bait to tame it.
 - **Bear** (bear pack): 1.4x a wolf's size, 2.5x its health, 1.5x its damage, a little slower.
 - **Aurochs** (beasts pack): a huge horned wild bull on the boar's skeleton, it charges like a boar: 1.3x a boar's
   size, 3x its health, 1.4x its damage, a little slower.
-- **Snake** (beasts pack): a big snake (about 2.4 m when it rears up) on a skeleton and animations of its own: it
-  slithers, strikes and lunges; 2x a wolf's health, 1.3x its damage.
+- **Snake** (beasts pack): a 5 m snake from a 3D scan of a pit viper, on a spine and animations of its own: it
+  slithers, rears up like a cobra and strikes; 2x a wolf's health, 1.3x its damage, a little slower.
 - **Rare snakes** (beasts pack): now and then a wild snake is a rare one, bigger and tougher. Whoever slays it (the
   last player to hit it, else the nearest player within 60 m) gets a bonus in their bag: runes, by chance a tier-2
   rune, and by chance a weapon of that rarity at their level.
@@ -135,11 +135,12 @@ An EML data patch with new beasts:
 - the Aurochs, `Beastmaster_Aurochs` (template `d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02`), made with Meshy and fitted to
   the boar's skeleton (its animations and AI): size (`ScaleComponent`) 1.3, damage x1.4, speeds x0.9; the health (x3)
   comes from Beastmaster. Its tail follows its hips.
-- the Snake, `Beastmaster_Snake` (template `d4c87337-8c53-41df-8488-8079046e1502`), on a skeleton and animations of
-  its own: the snake by Quaternius (CC0) with a Meshy-made realistic skin, played by a copy of the wolf's animation
-  graph (the wolf's AI); damage x1.3; the health (x2) comes from Beastmaster.
+- the Snake, `Beastmaster_Snake` (template `d4c87337-8c53-41df-8488-8079046e1502`), on a spine and animations of
+  its own: "CC0 Japanese Pit Viper" by ffish.asia / floraZia.com (CC0), a 3D scan scaled to 5 m, its slither, rearing,
+  strikes and death made for it, played by a copy of the wolf's animation graph (the wolf's AI); damage x1.3, walk
+  1.6 and run 4.5 m/s; the health (x2) comes from Beastmaster. Pack 1.0's snake was a cartoon snake.
 - the rare snakes, `Beastmaster_CrimsonSnake`, `Beastmaster_GoldenKingSnake` and `Beastmaster_AlbinoSnake` (templates
-  `d4c87337-8c53-41df-8488-8079046e1512`, `...1522`, `...1532`): the snake with Meshy-made skins of their own, each
+  `d4c87337-8c53-41df-8488-8079046e1512`, `...1522`, `...1532`): the snake with the scan's skin recoloured, each
   its own copy of the skeleton and graph; sizes 1.15, 1.25 and 1.35, damage x1.6, x1.8 and x2.0; the health (x3, x4,
   x5) comes from Beastmaster. With an older beasts pack that lacks them, a wild snake is always a plain one.
 
