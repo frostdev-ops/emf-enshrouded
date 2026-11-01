@@ -34,6 +34,9 @@
 #include "console.h"
 #include "inventory.h"
 #include "teleport.h"
+#include "world_settings_glue.h"
+#include "world_settings_service.h"
+#include "emf/storage.hpp"
 #include "known_tools.h"
 #include "overlay/input_hook.h"
 #include "overlay/profiles_ui.h"
@@ -271,6 +274,19 @@ uint32_t g_inst_slot_flag_offset = 0;
 std::unique_ptr<emf::core::InventoryService> g_inventory;
 // teleport: the emf_teleport program and its requests (null when off on this game build).
 std::unique_ptr<emf::core::TeleportService> g_teleport;
+// v21 world settings: the change queue, the server step's write and resync, the per-world kept settings.
+struct WorldSettingsRuntime {
+    emf::core::ws::State state;
+    std::unique_ptr<emf::core::ws::Glue> glue;
+    std::unique_ptr<emf::core::ws::Service> service;
+    emf::WorldFile file{"world_settings"};
+};
+std::unique_ptr<WorldSettingsRuntime> g_ws;
+// The hosted world's ecs::GameSettings, or null (no server world here: a joined client, the main menu).
+uint8_t* server_game_settings() {
+    EmfWorld* s = g_state ? g_state->tracker.latest(EMF_WORLD_SERVER, GetTickCount64()) : nullptr;
+    return s ? static_cast<uint8_t*>(emf::WorldView(reinterpret_cast<uint8_t*>(s)).singleton("ecs::GameSettings")) : nullptr;
+}
 
 // Save2Thread: a world save was just written (result byte 0 = success).
 void hk_save2_write_world(uint8_t* save2, void* user) {
@@ -793,6 +809,36 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
                  reinterpret_cast<void**>(&o_load_savegame_step), "loadSavegameStep (on_load)");
     } else {
         emf::logf("%s (%zu match(es) 0x%x)", load_plan.reason.c_str(), load_flag.count, load_flag.value);
+    }
+    // v21 world settings: the game's resync needs sendServerInfo and the two GameServer instance offsets in it.
+    {
+        const auto& ws_flag = code_offsets[static_cast<size_t>(emf::CodeOffset::InstSendSettingsFlag)];
+        const auto& ws_ptr = code_offsets[static_cast<size_t>(emf::CodeOffset::InstSettingsPtr)];
+        const bool ws_sync = sig_ok(emf::Sig::SendServerInfo) && emf::is_usable(ws_flag, known) && emf::is_usable(ws_ptr, known);
+        g_ws = std::make_unique<WorldSettingsRuntime>();
+        emf::core::ws::GlueDeps gd;
+        gd.settings_ptr_off = ws_sync ? ws_ptr.value : 0;
+        gd.flag_off = ws_sync ? ws_flag.value : 0;
+        gd.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
+        gd.save_file = [](const std::string& text) { return g_ws && g_ws->file.save(text); };
+        g_ws->glue = std::make_unique<emf::core::ws::Glue>(g_ws->state, std::move(gd));
+        g_ws->service = std::make_unique<emf::core::ws::Service>(
+            g_ws->state, emf::core::ws::ServiceDeps{&server_game_settings, [] { return g_state->server_session.load(); }});
+        g_state->world_settings = g_ws->service.get();
+        if (!g_ws->file.attach(emf::core::api_table())) emf::logf("world settings: the kept settings per world are off");
+        emf::logf("world settings: on%s", ws_sync ? "" : " (the game's resync is not known on this build: players' games keep "
+                                                          "the old values until they reconnect)");
+        g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
+            if (!g_ws || emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() != EMF_WORLD_SERVER) return;
+            auto* live = static_cast<uint8_t*>(emf::WorldView(reinterpret_cast<uint8_t*>(w)).singleton("ecs::GameSettings"));
+            if (!live) return;
+            std::string text;
+            const bool got = g_ws->file.poll([&](const std::string& t) { text = t; });
+            const uint32_t session = g_state->server_session.load();
+            auto* inst = g_state->save_instance_session.load() == session ? static_cast<uint8_t*>(g_state->save_instance.load())
+                                                                          : nullptr;
+            g_ws->service->notify(g_ws->glue->server_step(live, inst, session, GetTickCount64(), got ? &text : nullptr));
+        }, nullptr);
     }
     // put_items watchdog: requests end with 0 when emf_inventory does not run in the server world.
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {

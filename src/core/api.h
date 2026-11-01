@@ -31,6 +31,9 @@ namespace emf::core {
 
 class InventoryService;
 class TeleportService;
+namespace ws {
+class Service;
+}
 
 // Everything the C API functions need. One instance per process (set with set_core_state).
 struct CoreState {
@@ -120,6 +123,7 @@ struct CoreState {
     RequestSaveFn request_save = nullptr;           // the game's requestServerSave (null: not found on this build)
     std::atomic<void*> save_instance{nullptr};      // the GameServer instance loadSavegameStep last ran for
     std::atomic<uint32_t> save_instance_session{0}; // the server session it ran in
+    ws::Service* world_settings = nullptr;          // v21 world settings (null: not set up)
 };
 
 void set_core_state(CoreState* state);
