@@ -34,8 +34,14 @@ Route InputRouter::decide(const KeyEvent& e) {
             swallow_char_ = true;  // and the repeat's character is not typed
             return Route::Swallow;
         }
+        if (esc && open_ && !toggle && esc_to_console_.load()) {  // Esc hides the console's suggestions first
+            swallow_char_ = true;  // its character (0x1B) is not typed
+            held_ = e.scan;        // and its auto-repeats do not close the console after the list hid
+            return Route::Console;
+        }
         if (toggle || (open_ && esc)) {
             open_ = !open_.load();
+            esc_to_console_ = false;  // until the console says again that its suggestions show
             swallow_char_ = true;
             held_ = e.scan;
             return Route::Toggle;

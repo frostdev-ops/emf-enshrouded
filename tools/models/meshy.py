@@ -6,10 +6,16 @@ so a key set with [Environment]::SetEnvironmentVariable works without restarting
   python meshy.py balance
   python meshy.py preview "<prompt>" [--polycount 12000] [--pose t-pose|a-pose]    (about 20 credits)
   python meshy.py refine <preview task id> ["<texture prompt>"]                    (about 10 credits)
-  python meshy.py status <task id>
-  python meshy.py download <task id> <folder>          (model .glb, textures, thumbnail)
+  python meshy.py image <picture> [<picture> ...] [--prompt "<texture prompt>"] [--polycount 12000] [--smart]
+      a textured model from 1-4 pictures of one object (png, jpg, webp), e.g. renders of a free rig's rest pose:
+      30 credits; --smart (one picture): Meshy's game-ready Smart Topology mesh, 20 credits
+  python meshy.py retexture <task id> "<texture prompt>" [--keep-uv]
+      new textures on a model Meshy made, the same geometry (10 credits); --keep-uv keeps its UV layout
+  python meshy.py status <task id> [--kind text|image|multi|retexture]
+  python meshy.py download <task id> <folder> [--kind text|image|multi|retexture]   (model .glb, textures, thumbnail)
 Every request is appended to meshy_log.txt next to the downloads folder you pass (or the current folder).
 """
+import base64
 import json
 import os
 import sys
@@ -41,6 +47,62 @@ def call(method, path, body=None):
         raise SystemExit("Meshy said %d: %s" % (e.code, e.read().decode()[:500]))
 
 
+KINDS = {"text": "/v2/text-to-3d/", "image": "/v1/image-to-3d/", "multi": "/v1/multi-image-to-3d/",
+         "retexture": "/v1/retexture/"}
+MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".webp": "image/webp"}
+
+
+def data_uri(path):
+    ext = os.path.splitext(path)[1].lower()
+    if ext not in MIME:
+        raise SystemExit("%s: a picture is png, jpg or webp" % path)
+    if not os.path.isfile(path):
+        raise SystemExit("%s: no such picture" % path)
+    with open(path, "rb") as f:
+        return "data:%s;base64,%s" % (MIME[ext], base64.b64encode(f.read()).decode("ascii"))
+
+
+def task_path(args):
+    kind = args[args.index("--kind") + 1] if "--kind" in args else "text"
+    if kind not in KINDS:
+        raise SystemExit("--kind is text, image, multi or retexture")
+    return KINDS[kind]
+
+
+def image_task(args):
+    """(path, body, credits) for an image task: one picture to image-to-3d, two to four to multi-image-to-3d."""
+    opts = {"--prompt", "--polycount", "--smart"}
+    pics, i = [], 0
+    while i < len(args):
+        if args[i] in ("--prompt", "--polycount"):
+            i += 2
+        elif args[i] in opts:
+            i += 1
+        else:
+            pics.append(args[i])
+            i += 1
+    if not 1 <= len(pics) <= 4:
+        raise SystemExit("image takes 1 to 4 pictures")
+    smart = "--smart" in args
+    if smart and len(pics) > 1:
+        raise SystemExit("--smart takes one picture (Meshy's multi-picture models have no Smart Topology)")
+    uris = [data_uri(p) for p in pics]
+    poly = int(args[args.index("--polycount") + 1]) if "--polycount" in args else 12000
+    body = {"ai_model": "latest", "should_texture": True, "enable_pbr": True, "topology": "triangle",
+            "target_polycount": poly}
+    if smart:
+        body.update(model_type="smart-topology", ai_model="meshy-t2.5")
+    else:
+        body["should_remesh"] = True
+    if "--prompt" in args:
+        body["texture_prompt"] = args[args.index("--prompt") + 1]
+    if len(uris) == 1:
+        body["image_url"] = uris[0]
+        return "/v1/image-to-3d", body, 20 if smart else 30
+    body["image_urls"] = uris
+    return "/v1/multi-image-to-3d", body, 30
+
+
 def log(line, folder="."):
     with open(os.path.join(folder, "meshy_log.txt"), "a", encoding="utf-8") as f:
         f.write(time.strftime("%Y-%m-%d %H:%M:%S ") + line + "\n")
@@ -69,14 +131,30 @@ def main():
         r = call("POST", "/v2/text-to-3d", body)
         log("refine %s of %s" % (r.get("result"), args[0]))
         print("refine task", r.get("result"))
+    elif cmd == "image":
+        path, body, credits = image_task(args)
+        r = call("POST", path, body)
+        log("%s %s pictures %d polycount %d prompt=%r (about %d credits)" % (
+            path.rsplit("/", 1)[-1], r.get("result"), len(body.get("image_urls", [1])), body["target_polycount"],
+            body.get("texture_prompt"), credits))
+        print("%s task %s (about %d credits); status/download with --kind %s" % (
+            path.rsplit("/", 1)[-1], r.get("result"), credits, "multi" if "image_urls" in body else "image"))
+    elif cmd == "retexture":
+        if len(args) < 2:
+            raise SystemExit(__doc__)
+        body = {"input_task_id": args[0], "text_style_prompt": args[1], "ai_model": "latest", "enable_pbr": True,
+                "enable_original_uv": "--keep-uv" in args}
+        r = call("POST", "/v1/retexture", body)
+        log("retexture %s of %s prompt=%r (about 10 credits)" % (r.get("result"), args[0], args[1]))
+        print("retexture task %s (about 10 credits); status/download with --kind retexture" % r.get("result"))
     elif cmd == "status":
-        r = call("GET", "/v2/text-to-3d/" + args[0])
+        r = call("GET", task_path(args) + args[0])
         keep = {k: r.get(k) for k in ("id", "mode", "status", "progress", "task_error")}
         print(json.dumps(keep))
     elif cmd == "download":
         task, folder = args[0], args[1]
         os.makedirs(folder, exist_ok=True)
-        r = call("GET", "/v2/text-to-3d/" + task)
+        r = call("GET", task_path(args) + task)
         if r.get("status") != "SUCCEEDED":
             raise SystemExit("task is %s (%s%%)" % (r.get("status"), r.get("progress")))
         files = []

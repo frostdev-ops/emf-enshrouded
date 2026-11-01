@@ -8,7 +8,8 @@ FOR PLAYERS
 3. Double-click install.cmd. It finds the game through Steam and copies EMF and its mods next to enshrouded.exe.
    Game somewhere Steam does not know? Drag the game folder (the one with enshrouded.exe) onto install.cmd.
    With the mod manager (EMF.exe), it asks once whether to put a shortcut to EMF.exe on your desktop (Enter = yes).
-4. Start the game normally. The key under Esc opens the EMF console; type  help  to see every command.
+4. Start the game normally. The key under Esc opens the EMF console; type  help  to see every command. Suggestions
+   pop up as you type: Tab or Right takes one, Up/Down pick another, Esc hides them.
    Nothing happens, or Discord's overlay opens too? Discord's overlay lock is often Shift and the key under Esc:
    give it another key in Discord's settings (Game Overlay).
 5. Optional: emf\EMF.exe in the game folder is EMF's mod manager: every installed mod with switches and settings,

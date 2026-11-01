@@ -23,10 +23,13 @@ struct OverlayConfig {
     uint16_t toggle_scan = 0x29;  // the key under Esc
     bool chat_commands = true;    // "/give ..." typed into the game's chat runs as a command
     float mouse_speed = 1.0f;     // the console's cursor: pixels per mouse count
+    bool suggest = true;          // suggestions as you type in the console (off: Tab completes as before)
+    size_t suggest_rows = 8;      // at most this many suggestions (3-12)
 };
 
 // [overlay] enabled=0|1 (default 1), key=<scan code, decimal or 0x hex, 1-0x7F> (default 0x29), chat=0|1 (default 1),
-// mouse_speed=<0.1-10> (default 1).
+// mouse_speed=<0.1-10> (default 1), suggest=0|1 (default 1), suggest_rows=<3-12> (default 8; more or fewer are kept
+// within 3-12). A "; comment" after a value on the same line is not part of it.
 OverlayConfig read_overlay_config(const std::wstring& ini_path);
 
 // The ImGui key for a console key event (ImGuiKey_None if the console does not use it).

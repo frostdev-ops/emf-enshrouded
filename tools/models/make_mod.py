@@ -590,6 +590,15 @@ def listing_entry(c):
 OWN_KEYS = ("sidecar", "skeleton_guid", "reference_clip", "clips", "graph", "graph_guid")
 
 
+def check_texture_slot(name, slot, groups):
+    """SystemExit when the texture replaces a material slot none of the model's meshes draw with: the model would
+    wear the source model's own texture of its slot through our UVs (game_material_N names a mesh's slot)."""
+    drawn = sorted({g["material"] for g in groups})
+    if slot not in drawn:
+        raise SystemExit("%s: the texture is for slot %d, but the model draws only with slot %s (name its materials "
+                         "game_material_%d or set the texture's slot)" % (name, slot, ", ".join(map(str, drawn)), slot))
+
+
 def write_own(src, name, built):
     """<name>_skeleton.lua and <name>_clips.lua from own_creature.build: the skeleton copy's rest pose and inverse
     binds, and the retargeted clips."""
@@ -758,6 +767,7 @@ def main():
                                                                 len(built_new["clips"])))
         if c.get("texture"):
             t = c["texture"]
+            check_texture_slot(c["name"], int(t.get("slot", 1)), groups)
             if not t.get("material_guid"):
                 t["material_guid"] = str(uuid.uuid4())
                 changed = True

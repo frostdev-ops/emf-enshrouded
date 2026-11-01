@@ -6,10 +6,14 @@ The pack names, per creature:
   scale          the size: the file's metres times this
   skeleton_guid  the skeleton's GUID (fixed forever; the clips' GUIDs follow from it and their names)
   graph, graph_guid   the game's animation graph and its copy's GUID
-  clips          our clips: {name: {"animation": the glb's animation, "loop": true for a looping clip}}, or
+  clips          our clips: {name: {"animation": the glb's animation, "loop": true for a looping clip,
+                 "speed": faster above 1}}, or {name: {"made": {"from": an animation (else the rest pose), "at":
+                 seconds into it, "keys": made_clips.py's key turns, "loop": ...}}} (a death or flinch the file lacks), or
                  {name: {"additive_zero": true}}: an additive clip that adds nothing (every joint unturned,
                  unmoved, scale 0: an additive layer adds scales, as the game's offset clips show), for the graph's
-                 additive layers whose game clips are offsets (the wolf's leaning)
+                 additive layers whose game clips are offsets (the wolf's leaning), or {name: {"offset": {joint:
+                 [axis, degrees]}}}: an offset that turns those joints (made_clips.offset; the game wolf's lean turns
+                 its neck and head about 50 degrees into a turn)
   model_glb      optional: the model from this glb instead (a copy on the skeleton, new_skeleton.write_glb, then
                  retextured; its bones named jNNN_<name>)
   roles          {game clip GUID: our clip name}: which of our clips plays where the graph plays that game clip
@@ -31,6 +35,7 @@ import gamegltf  # noqa: E402
 import gltf_clips  # noqa: E402
 import gltf_in  # noqa: E402
 import joint_animation  # noqa: E402
+import made_clips  # noqa: E402
 import new_skeleton  # noqa: E402
 
 GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
@@ -73,7 +78,7 @@ def roles(cfg):
 def offsets(cfg):
     """{GUID: True} of our offset clips: the pack's additive_zero clips and the built-in zero offset."""
     g = cfg["skeleton_guid"]
-    names = [n for n, spec in cfg["clips"].items() if spec.get("additive_zero")] + [ZERO]
+    names = [n for n, spec in cfg["clips"].items() if spec.get("additive_zero") or spec.get("offset")] + [ZERO]
     return {clip_guid(g, n): True for n in names}
 
 
@@ -106,11 +111,32 @@ def build(cfg, glb_path, creature="creature"):
         if spec.get("additive_zero"):
             out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": zero_clip(sk, hier)})
             continue
+        if spec.get("offset"):
+            try:
+                clip = made_clips.offset(sk, spec["offset"], hierarchy_hash=new_skeleton.clip_hash(hier))
+            except ValueError as e:
+                raise SystemExit("%s: clip %s: %s" % (creature, name, e))
+            out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
+            continue
+        if spec.get("made"):
+            made = spec["made"]
+            if made.get("from") and made["from"] not in have:
+                raise SystemExit("%s: clip %s is made from %r, which the glb does not have" % (creature, name,
+                                                                                            made["from"]))
+            base = (gltf_clips.pose_at(gltf, binc, sk, made["from"], float(made.get("at", 0.0)))
+                    if made.get("from") else sk["rest"])
+            try:
+                clip = made_clips.make(sk, base, made.get("keys", []), loop=bool(made.get("loop")),
+                                       hierarchy_hash=new_skeleton.clip_hash(hier))
+            except ValueError as e:
+                raise SystemExit("%s: clip %s: %s" % (creature, name, e))
+            out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
+            continue
         if spec.get("animation") not in have:
             raise SystemExit("%s: clip %s plays %r, which the glb does not have (%s)"
                              % (creature, name, spec.get("animation"), ", ".join(have)))
         clip = gltf_clips.clip(gltf, binc, sk, spec["animation"], new_skeleton.clip_hash(hier),
-                               loop=bool(spec.get("loop")))
+                               loop=bool(spec.get("loop")), speed=float(spec.get("speed", 1.0)))
         out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
     zero = {"name": ZERO, "guid": clip_guid(cfg["skeleton_guid"], ZERO), "clip": zero_clip(sk, hier)}
     return {"sk": sk, "hierarchy": hier, "clips": out, "zero": zero, "slots": slots}

@@ -1,12 +1,14 @@
 #pragma once
 // Draws the drop-down console with Dear ImGui (mockup B): top half of the screen, see-through dark, coloured lines,
-// an input line with Tab completion and Up/Down history. Renderer-agnostic (no Vulkan here).
+// an input line with suggestions as you type (console_suggest.h; or Tab completion) and Up/Down history.
+// Renderer-agnostic (no Vulkan here).
 #include <cstdint>
 #include <functional>
 #include <string>
 #include <vector>
 
 #include "console_model.h"
+#include "console_suggest.h"
 #include "hud_model.h"
 #include "imgui.h"
 
@@ -24,6 +26,14 @@ struct ConsoleUiState {
     int tab = 0;               // 0 = Console, 1 = Mods
     bool switch_tab = false;   // Ctrl+Tab asked for the other tab (applied on the next frame)
     std::string status;        // shown at the right end of the tab bar ("debug bridge on"); "" = none
+    // Suggestions as you type ([overlay] suggest; off: Tab cycles through the matches as before).
+    bool suggest = true;
+    Suggester suggester;        // the list ([overlay] suggest_rows: suggester.set_rows)
+    size_t caret = 0;           // the input's caret (bytes) after the last frame it was active
+    bool escape = false;        // Esc reached the console (the router sends it only while the list shows): hide it
+    bool wants_escape = false;  // after a frame: the list shows, so the next Esc is its (InputRouter::set_esc_to_console)
+    bool accept_right = false;  // this frame: Right was pressed with the caret at the end of the line
+    std::string ghost_shown;    // after a frame: the grey ghost text drawn after the input ("" = none)
 };
 
 // `mods_tab` (optional) draws the Mods tab's content; with it the console shows a tab bar (Console | Mods; Ctrl+Tab

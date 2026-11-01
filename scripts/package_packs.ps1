@@ -54,7 +54,12 @@ try {
                 "  through EML (emm.exe) as its page says.",
                 "Every player in a world that uses these creatures needs the same packs, and the host needs Beastmaster or",
                 "Necromancer switched on in EMF.", "",
-                "Uninstall: delete the pack folders from the mods folder (or uninstall each one in EMF.exe).")
+                "Uninstall: delete the pack folders from the mods folder (or uninstall each one in EMF.exe).", "",
+                "Licence and credits:",
+                "- The creature models and textures in these packs are by EMF contributors, made with Meshy (meshy.ai),",
+                "  and are licensed under CC BY 4.0 (https://creativecommons.org/licenses/by/4.0/): you may share and adapt",
+                "  them, also in your own mods, with the credit ""EMF contributors, made with Meshy"".",
+                "- The packs contain no game files: they reuse the skeletons and animations of your installed game.")
     [System.IO.File]::WriteAllText((Join-Path $root "README.txt"), ($lines -join "`r`n") + "`r`n")
     if (Test-Path -LiteralPath $zip) { Remove-Item -LiteralPath $zip -Force }
 

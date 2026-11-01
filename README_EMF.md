@@ -94,11 +94,20 @@ that it did not load (select it to see why); the colours are for this game start
 Press the key under Esc (`~` on US keyboards, `§` or `|` on Nordic ones, `^` on German ones) in the game: a console
 drops down over the top half of the screen. Type a command (see the table below) and press Enter; the reply appears
 under it (green when it worked, red when it did not).
-- **Tab** completes command names, item names for `give` and `stack`, and component names for `tpl` and `tplset`;
-  press it again for the next match (a list of matches shows under the input).
-- **Up / Down** go through the commands you typed before (kept in `<game>\emf\console_history.txt`).
+- **Suggestions** pop up under the input as you type: the commands that start with what you typed, then those that
+  contain it (`reload` finds `lua.reload`), each with its arguments and, in grey, what it does. Once a command and a
+  space are typed, a line shows its arguments with the one you are typing marked (`give <item name> [count]`), and the
+  list offers what fits there: item names for `give`, `put`, `take` and `stack` (best match first, by the rules of
+  `items`), mod ids and setting keys for `settings` and `set` (then the setting's values, such as `on`/`off` or a
+  list's choices), component names for `tpl` and `tplset`, and choices such as `[on|off]`.
+- **Tab** or **Right** (at the end of the line) takes the highlighted suggestion; grey text after the cursor shows what
+  it adds. While no list shows (nothing suggested, or hidden by Esc), Tab completes and cycles through the matches as
+  before.
+- **Up / Down** move in the list while it shows; otherwise they go through the commands you typed before (kept in
+  `<game>\emf\console_history.txt`). A command brought back from there shows no list until you type.
 - **Page Up / Page Down** and the mouse wheel scroll back; the console keeps the last 2000 lines.
-- **Esc** or the same key closes it.
+- **Esc** hides the suggestions first, then closes the console; the same key closes it at any time. Enter runs the line
+  as you typed it (take a suggestion with Tab or Right first).
 
 While it is open the game gets no keyboard or mouse input (only key releases, so nothing stays held) and mods' hotkeys
 are paused. On the main menu, `help`, `mods`, `settings`, `set`, `profile`, `saves.backup`, `saves.list`, `hooks` and `pattern` answer at once; the other
@@ -127,6 +136,8 @@ Settings in `<game>\emf\emf_core.ini`:
 enabled=1      ; 0 turns the console off
 key=0x29       ; the key's scan code (0x29 = the key under Esc)
 chat=1         ; 0 turns chat commands off (below)
+suggest=1      ; 0: no suggestions as you type (Tab still completes)
+suggest_rows=8 ; at most this many suggestions (3 to 12)
 ```
 How it draws: the console is a Vulkan layer (`VK_LAYER_EMF_console`, manifest `<game>\emf\vk\`). EMF's `dinput8.dll`
 enables it for the game process only; nothing is written to the registry and other games do not see it. It works next

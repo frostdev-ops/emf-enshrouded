@@ -133,6 +133,7 @@ void before_frame(ImGuiIO& io) {
         switch (e.kind) {
             case InputEvent::Toggle:
                 io.ClearInputKeys();
+                g_ui.escape = false;  // an Esc from before the console opened or closed is not the list's
                 if (e.open) {
                     g_ui.focus_input = true;
                     g_cursor.set_display(io.DisplaySize);
@@ -144,6 +145,12 @@ void before_frame(ImGuiIO& io) {
                 }
                 break;
             case InputEvent::Key:
+                // Esc reaches the console only while its suggestions show (InputRouter): it hides them (only while
+                // the console is open). ImGui never gets it (an active input line would throw away what was typed).
+                if (e.key.scan == InputRouter::kEscScan && !e.key.extended) {
+                    if (e.key.down && g_router->open()) g_ui.escape = true;
+                    break;
+                }
                 feed_key_event(g_mods_ui, e.key, io, ImGui::GetFrameCount());
                 break;
             case InputEvent::FocusLost:  // alt-tab: the releases go to another window
@@ -171,28 +178,51 @@ void before_frame(ImGuiIO& io) {
                                                      : (std::max)(target, g_ui.open_fraction - step);
 }
 
+// The names the console completes and suggests (render thread, every frame the console shows); the version changes
+// only when something did, so the suggestions recompute only then.
 void refresh_sources() {
-    if (g_sources.components.empty())
+    bool changed = false;
+    if (g_sources.components.empty()) {
         for (const auto& c : emf::gen::kComponents) {
             const char* p = std::strrchr(c.name, ':');
             g_sources.components.emplace_back(p ? p + 1 : c.name);
         }
-    g_sources.commands.clear();
-    for (const auto& [name, help] : g_deps.center->list()) g_sources.commands.push_back(name);
-    g_sources.mod_settings.clear();
+        changed = true;
+    }
+    std::vector<std::string> commands, help;
+    for (auto& [name, text] : g_deps.center->list()) {
+        commands.push_back(std::move(name));
+        help.push_back(std::move(text));
+    }
+    if (commands != g_sources.commands || help != g_sources.command_help) {
+        g_sources.commands = std::move(commands);
+        g_sources.command_help = std::move(help);
+        changed = true;
+    }
+    std::vector<ModSource> mods;
     if (g_deps.mods)
         for (const auto& m : g_deps.mods->list()) {
-            std::vector<std::string> keys;
+            ModSource mod;
+            mod.id = m.id;
+            mod.name = m.name;
             if (g_deps.settings)
-                for (const auto& d : g_deps.settings->defs(m.id)) keys.push_back(d.key);
-            g_sources.mod_settings.emplace_back(m.id, std::move(keys));
+                for (const auto& d : g_deps.settings->defs(m.id)) mod.settings.push_back(setting_source(d));
+            mods.push_back(std::move(mod));
         }
+    if (mods != g_sources.mod_settings) {
+        g_sources.mod_settings = std::move(mods);
+        changed = true;
+    }
     const uint64_t now = GetTickCount64();
     if (g_deps.item_names && (g_sources.items.empty() || now - g_items_refreshed > 10000)) {
         g_items_refreshed = now;
         auto items = g_deps.item_names();
-        if (!items.empty()) g_sources.items = std::move(items);
+        if (!items.empty() && items != g_sources.items) {
+            g_sources.items = std::move(items);
+            changed = true;
+        }
     }
+    if (changed) ++g_sources.version;
 }
 
 // A world is running (the HUD lines are current); on the main menu and loading screens none ticks.
@@ -213,6 +243,7 @@ void build(ImVec2 display) {
         submit_line(*g_deps.center, host_state(*g_deps.tracker, GetTickCount64()), line, g_deps.reply);
         g_model->save_history(g_history_path);
     }, mods_tab);
+    g_router->set_esc_to_console(g_router->open() && g_ui.wants_escape);  // Esc hides the suggestions first
     if (g_ui.open_fraction <= 0.0f) {
         draw_toast(toast_lines(*g_model, ToastState{g_toast_from.load(), g_toast_until.load()}, GetTickCount64()),
                    display);
@@ -227,23 +258,42 @@ void log_line(const char* s) {
 
 }  // namespace
 
+namespace {
+// An [overlay] value as text, without a "; comment" after it on the same line (Windows keeps those in the value) and
+// the spaces and tabs around it; "" when it is not set.
+std::wstring overlay_value(const wchar_t* key, const std::wstring& ini_path) {
+    wchar_t buf[256] = {};
+    GetPrivateProfileStringW(L"overlay", key, L"", buf, 256, ini_path.c_str());
+    std::wstring v(buf);
+    v = v.substr(0, v.find(L';'));
+    const size_t first = v.find_first_not_of(L" \t");
+    if (first == std::wstring::npos) return {};
+    return v.substr(first, v.find_last_not_of(L" \t") - first + 1);
+}
+}  // namespace
+
 OverlayConfig read_overlay_config(const std::wstring& ini_path) {
     OverlayConfig c;
     c.enabled = GetPrivateProfileIntW(L"overlay", L"enabled", 1, ini_path.c_str()) != 0;
     c.chat_commands = GetPrivateProfileIntW(L"overlay", L"chat", 1, ini_path.c_str()) != 0;
-    wchar_t speed[32] = {};
-    GetPrivateProfileStringW(L"overlay", L"mouse_speed", L"", speed, 32, ini_path.c_str());
-    if (speed[0]) {
+    const std::wstring speed = overlay_value(L"mouse_speed", ini_path);
+    if (!speed.empty()) {
         wchar_t* end = nullptr;
-        const double v = std::wcstod(speed, &end);
+        const double v = std::wcstod(speed.c_str(), &end);
         if (end && !*end && v >= 0.1 && v <= 10.0) c.mouse_speed = static_cast<float>(v);
     }
-    wchar_t text[32] = {};
-    GetPrivateProfileStringW(L"overlay", L"key", L"", text, 32, ini_path.c_str());
-    if (text[0]) {
+    const std::wstring key = overlay_value(L"key", ini_path);
+    if (!key.empty()) {
         wchar_t* end = nullptr;
-        const unsigned long v = std::wcstoul(text, &end, 0);
+        const unsigned long v = std::wcstoul(key.c_str(), &end, 0);
         if (end && !*end && v >= 1 && v <= 0x7F) c.toggle_scan = static_cast<uint16_t>(v);
+    }
+    c.suggest = GetPrivateProfileIntW(L"overlay", L"suggest", 1, ini_path.c_str()) != 0;
+    const std::wstring rows = overlay_value(L"suggest_rows", ini_path);
+    if (!rows.empty()) {
+        wchar_t* end = nullptr;
+        const unsigned long v = std::wcstoul(rows.c_str(), &end, 10);
+        if (end && !*end) c.suggest_rows = std::clamp<size_t>(v, Suggester::kMinRows, Suggester::kMaxRows);
     }
     return c;
 }
@@ -295,6 +345,8 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
     if (!config.enabled || g_model || !deps.center || !deps.tracker) return false;
     g_deps = std::move(deps);
     g_mouse_speed = config.mouse_speed;
+    g_ui.suggest = config.suggest;
+    g_ui.suggester.set_rows(config.suggest_rows);
     g_model = std::make_unique<ConsoleModel>();
     g_router = std::make_unique<InputRouter>(config.toggle_scan);
     g_history_path = g_deps.emf_dir + L"\\console_history.txt";

@@ -88,10 +88,19 @@ bool word_in(const std::string& typed, const std::vector<std::string>& words, co
                        [&](const std::string& w) { return digits(w) && number_value(w) == v; });
 }
 
-std::vector<Scored> scored_matches(const std::vector<NamedItem>& items, const std::vector<std::string>& typed) {
+// The names searched: the game's items, or plain names (the console's list, whose ids are index + 1).
+struct NameList {
+    const std::vector<NamedItem>* items = nullptr;
+    const std::vector<std::string>* names = nullptr;
+    size_t size() const { return items ? items->size() : names->size(); }
+    const std::string& name(size_t i) const { return items ? (*items)[i].name : (*names)[i]; }
+    uint32_t id(size_t i) const { return items ? (*items)[i].id : static_cast<uint32_t>(i + 1); }
+};
+
+std::vector<Scored> scored_matches(const NameList& items, const std::vector<std::string>& typed) {
     std::vector<Scored> out;
     for (size_t i = 0; i < items.size(); ++i) {
-        auto words = item_words(items[i].name);
+        auto words = item_words(items.name(i));
         if (words.empty()) continue;
         std::string compact;
         for (const auto& w : words) compact += w;
@@ -99,7 +108,7 @@ std::vector<Scored> scored_matches(const std::vector<NamedItem>& items, const st
             continue;
         Scored s;
         s.index = i;
-        s.name = lower(items[i].name);
+        s.name = lower(items.name(i));
         s.all = words.size();
         s.own = own_words(words).size();
         s.meant = own_words_typed(words, typed);
@@ -153,24 +162,25 @@ std::vector<std::string> item_words(std::string_view text) {
     return out;
 }
 
-ItemMatch match_item(const std::vector<NamedItem>& items, std::string_view typed_in) {
+namespace {
+ItemMatch match_in(const NameList& items, std::string_view typed_in) {
     ItemMatch m;
     const std::string typed = trimmed(typed_in);
     if (typed.empty()) return m;
     const auto typed_words = item_words(typed);
     const auto found = [&](size_t index, ItemHow how) {
-        m.id = items[index].id;
+        m.id = items.id(index);
         m.how = how;
-        m.own_words_typed = own_words_typed(item_words(items[index].name), typed_words);
+        m.own_words_typed = own_words_typed(item_words(items.name(index)), typed_words);
     };
     for (size_t i = 0; i < items.size(); ++i)  // the exact debug name
-        if (items[i].name == typed) {
+        if (items.name(i) == typed) {
             found(i, ItemHow::Exact);
             return m;
         }
     const std::string want = lower(typed);
     for (size_t i = 0; i < items.size(); ++i)  // in any case
-        if (lower(items[i].name) == want) {
+        if (lower(items.name(i)) == want) {
             found(i, ItemHow::Exact);
             return m;
         }
@@ -200,10 +210,27 @@ ItemMatch match_item(const std::vector<NamedItem>& items, std::string_view typed
     return m;
 }
 
-std::vector<size_t> search_items(const std::vector<NamedItem>& items, std::string_view typed) {
+std::vector<size_t> search_in(const NameList& items, std::string_view typed) {
     std::vector<size_t> out;
     for (const auto& s : scored_matches(items, item_words(typed))) out.push_back(s.index);
     return out;
+}
+}  // namespace
+
+ItemMatch match_item(const std::vector<NamedItem>& items, std::string_view typed) {
+    return match_in(NameList{&items, nullptr}, typed);
+}
+
+ItemMatch match_item(const std::vector<std::string>& names, std::string_view typed) {
+    return match_in(NameList{nullptr, &names}, typed);
+}
+
+std::vector<size_t> search_items(const std::vector<NamedItem>& items, std::string_view typed) {
+    return search_in(NameList{&items, nullptr}, typed);
+}
+
+std::vector<size_t> search_items(const std::vector<std::string>& names, std::string_view typed) {
+    return search_in(NameList{nullptr, &names}, typed);
 }
 
 namespace {

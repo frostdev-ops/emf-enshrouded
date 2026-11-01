@@ -41,7 +41,7 @@ add_library(emf_common STATIC
   src/common/log.cpp
   src/common/hooks.cpp
   src/common/sha256.cpp)
-target_link_libraries(emf_common PUBLIC minhook bcrypt)
+target_link_libraries(emf_common PUBLIC minhook)  # no bcrypt in the game's process: see src/common/sha256.h
 target_include_directories(emf_common PUBLIC src)
 
 # --- Lua 5.4.9 (vendored, MIT) and the Lua host library ---
@@ -153,6 +153,7 @@ add_library(emf_core_lib STATIC
   src/core/server_chat.cpp
   src/core/server_chat_hooks.cpp
   src/core/overlay/console_model.cpp
+  src/core/overlay/console_suggest.cpp
   src/core/overlay/wheel_model.cpp
   src/core/overlay/hud_model.cpp
   src/core/overlay/cursor_model.cpp
@@ -371,6 +372,14 @@ set_target_properties(emf_standin_server PROPERTIES OUTPUT_NAME enshrouded_serve
 add_executable(emf_standin_tar tools/standin_tar/main.cpp)
 set_target_properties(emf_standin_tar PROPERTIES OUTPUT_NAME tar RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin_tar)
 
+# --- Stand-in for the game (the content redirect spike's test only; not shipped): an exe that imports EMF's
+# dinput8.dll statically, as enshrouded.exe does, and opens content files through its import table
+# (tools/standin_game/main.cpp) ---
+add_executable(emf_standin_game tools/standin_game/main.cpp)
+target_link_libraries(emf_standin_game PRIVATE emf_loader)
+set_target_properties(emf_standin_game PROPERTIES OUTPUT_NAME standin_game
+  RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin_game)
+
 # --- Tests ---
 enable_testing()
 add_executable(emf_tests
@@ -384,6 +393,7 @@ add_executable(emf_tests
   tests/test_code_offsets.cpp
   tests/test_world_view.cpp
   tests/test_runtime.cpp
+  tests/test_game_imports.cpp
   tests/test_report.cpp
   tests/test_generated.cpp
   tests/test_core.cpp
@@ -492,6 +502,7 @@ add_executable(emf_tests
   tests/test_bridge_swapchain.cpp
   tests/test_big_stacks.cpp
   tests/test_console_model.cpp
+  tests/test_console_suggest.cpp
   tests/test_overlay_submit.cpp
   tests/test_input_router.cpp
   tests/test_console_ui.cpp
@@ -508,6 +519,8 @@ add_executable(emf_tests
   tests/test_entry_hold.cpp
   tests/test_chain_list.cpp
   tests/test_chain_load.cpp
+  tests/test_file_redirect.cpp
+  tests/test_file_hooks.cpp
   tests/test_known_tools.cpp
   tests/test_vk_overlay_device.cpp
   tests/test_app_game_folder.cpp
@@ -525,10 +538,10 @@ add_executable(emf_tests
   tests/test_app_updates.cpp
   src/probe/report.cpp)
 target_include_directories(emf_tests PRIVATE tests sdk/include)
-target_compile_definitions(emf_tests PRIVATE EMF_SOURCE_DIR="${CMAKE_SOURCE_DIR}")
+target_compile_definitions(emf_tests PRIVATE EMF_SOURCE_DIR="${CMAKE_SOURCE_DIR}" EMF_BINARY_DIR="${CMAKE_BINARY_DIR}")
 target_link_libraries(emf_tests PRIVATE emf_common emf_core_lib emf_lua_lib emf_app_lib)
 target_link_libraries(emf_tests PRIVATE emf_nexus_lib)
-add_dependencies(emf_tests emf_app emf_standin_server emf_standin_tar emf_test_folder_mod emf_test_needs_helper sim_rate loot_scale emf_test_mod emf_test_mod_crash emf_test_mod_reject sample_mod companion event_log big_stacks villager_jobs quick_stack clock raids loot_magnet sleep teleports bulk_craft)
+add_dependencies(emf_tests emf_app emf_standin_server emf_standin_tar emf_standin_game emf_loader emf_test_folder_mod emf_test_needs_helper sim_rate loot_scale emf_test_mod emf_test_mod_crash emf_test_mod_reject sample_mod companion event_log big_stacks villager_jobs quick_stack clock raids loot_magnet sleep teleports bulk_craft)
 target_include_directories(emf_tests PRIVATE third_party/doctest src)
 add_test(NAME emf_tests COMMAND emf_tests)
 
@@ -611,9 +624,10 @@ emf_mod(herald mods/herald/herald.cpp)
 target_link_libraries(herald PRIVATE winhttp)
 target_sources(emf_tests PRIVATE tests/test_herald.cpp tests/test_herald_dll.cpp)
 add_dependencies(emf_tests herald)
+add_dependencies(emf_tests emf_core emf_loader)  # test_game_imports reads their import tables
 
 # --- Save backups (docs/saves.md). src/saves/ is shared by EMF.exe (the Saves tab, the starter backup) and
 # the core (automatic backups at game start, the console's saves.* commands, save-info.json from the game's menu). ---
 target_sources(emf_core_lib PRIVATE src/saves/backup.cpp src/saves/save_info.cpp src/core/save_slots.cpp src/core/save_commands.cpp)
-target_sources(emf_app_lib PRIVATE src/saves/backup.cpp src/saves/save_info.cpp app/bridge_saves.cpp)
+target_sources(emf_app_lib PRIVATE src/saves/backup.cpp src/saves/save_info.cpp app/bridge_saves.cpp src/common/sha256.cpp)
 target_sources(emf_tests PRIVATE tests/test_save_backup.cpp tests/test_save_info.cpp tests/test_app_saves.cpp tests/test_save_slots.cpp tests/test_save_commands.cpp tests/test_save_fixes.cpp)
