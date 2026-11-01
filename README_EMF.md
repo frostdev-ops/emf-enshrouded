@@ -32,7 +32,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `mods/raids/` | Night Raids: at nightfall, by chance, waves of Vukah march on a base where players are; off in each world until `raids.world on` (see below) |
 | `mods/loot_magnet/` | Loot Magnet: corpses of kills near a player are looted into them, for every player on the host or a dedicated server; `/loot.toggle` (see below) |
 | `mods/champion/` | Wandering Champion (Lua): a roaming mini-boss appears 80-150 m away at night; the screen shows where; a bonus for the slayer (see below) |
-| `mods/bounty/` | Bounty Board (Lua): daily kill, gather and champion bounties per player, `/bounty.board` and `/bounty.claim` for every player (see below) |
+| `mods/bounty/` | Bounty Board (Lua): a Notice Board in a base posts kill, gather and champion bounties; take them there (E for the host, the chat for everyone else) and claim the rewards there (see below) |
 | `mods/grave/` | Grave Keeper (Lua): `/grave.where` finds your tombstone, `/grave.claim` brings its items back from a distance (see below) |
 | `mods/sleep/` | Sleep Through the Day: sleeping in a bed by day skips to the evening (see below) |
 | `mods/herald/` | Server Herald (server side, off by default): a message of the day, join/leave/death lines, announcements, a restart countdown, a chat log, playtime, `/players`, an opt-in Discord webhook (see below) |
@@ -412,17 +412,23 @@ player), `champion.summon`, `champion.dismiss`, `champion.kill` (host). The temp
 top of `emf\mods\champion\main.lua`: change them while the game runs. Details: `mods/champion/README.md`.
 
 ## The bounty mod (Bounty Board, Lua)
-Installed switched off: switch it on in the Mods tab or EMF.exe. Every day each player gets three bounties: slay
-creatures of a faction ("Slay 6 Vukah"), gather a raw material picked up in the world ("Gather 60 Wood logs", never
-out of a chest or a tombstone), or slay a champion (2 levels above you, 1,000 health or more). Until a player
-finishes their first bounty, their boards are quick starters ("Gather 20 Wood logs"); the size `tiny` (x0.2) makes
-every bounty quick to try. Kills count for every player who hit the creature in its last 10 s (`share_kills`), and
-a hit by a player's companion or summon (an ally guarding them) counts as theirs. Rewards (runes, furs, gear at your level) with
-`/bounty.claim`, or at once with `auto_claim`; what does not fit is dropped at your feet. Commands for every player:
-`/bounty.board`, `/bounty.claim`, `/bounty.reroll <n>`, `/bounty.top`; the host has `bounty.give <id>` and
-`bounty.reset`. New bounties every real day at an hour, every game dawn, or every few hours of play; kept per world
-and account. The bounties are the `POOL` table at the top of `emf\mods\bounty\main.lua`. Details:
-`mods/bounty/README.md`.
+Installed switched off: switch it on in the Mods tab or EMF.exe. The game's Notice Board, built within 40 m of a flame
+altar, becomes a Bounty Board (before that the host can make any prop one with `bounty.mark`; the villages' notice
+boards stay plain). It posts 3 notices, the same for everyone, renewed every 4 in-game days at dawn: slay creatures of
+a faction ("Slay 6 Vukah"), gather a raw material picked up in the world ("Gather 60 Wood logs", never out of a chest
+or a tombstone), or slay a champion (2 levels above you, 1,000 health or more). A player takes one (holds 1 by
+default, up to 4), works on it anywhere, and claims the reward at the board; a held bounty stays across new notices
+until finished or dropped. The host looks at the board and presses E for a wheel; players who joined (and everyone
+on a dedicated server) get the notices as a private chat line when they walk up, then type `/bounty.take <n>` and
+`/bounty.claim`. With `need_board` off the commands work anywhere, as in 1.1. Until a player finishes their first
+bounty, they see quick starters ("Gather 20 Wood logs"); the size `tiny` (x0.2) makes every bounty quick to try.
+Kills count for every player who hit the creature in its last 10 s (`share_kills`), and a hit by a player's companion
+or summon (an ally guarding them) counts as theirs. Rewards: runes, furs, gear at your level; what does not fit is
+dropped at your feet. Commands for every player: `/bounty.board`, `/bounty.take <n>`, `/bounty.drop <n>`,
+`/bounty.claim`, `/bounty.reroll <n>`, `/bounty.top`; the host has `bounty.mark`, `bounty.unmark`, `bounty.boards`,
+`bounty.give <id>` and `bounty.reset`. Kept per world and account in the mod's own file (a 1.1 file becomes held
+bounties, nothing earned is lost). The bounties are the `POOL` table at the top of `emf\mods\bounty\main.lua`.
+Details: `mods/bounty/README.md`.
 
 ## The grave mod (Grave Keeper, Lua)
 Installed switched off: switch it on in the Mods tab or EMF.exe. `/grave.where` says where your tombstone is

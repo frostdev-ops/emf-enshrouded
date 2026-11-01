@@ -1203,7 +1203,7 @@ local function notice_lines(account)
   return out
 end
 
-emf.command("board", ": the notices, your bounties and how far you are", function(world, args)
+emf.command("board", ": the notices and your bounties", function(world, args)
   local me = ready(world)
   if not me then return end
   local rec = record(me.account)
@@ -1237,19 +1237,19 @@ emf.command("board", ": the notices, your bounties and how far you are", functio
   emf.reply(last .. ".")
 end, {players = true})
 
-emf.command("take", "<n>: take notice n from the board", function(world, args)
+emf.command("take", "<n>: take notice n", function(world, args)
   local me = ready(world)
   if not me then return end
   emf.reply(gate(world, me.id) or take(me.account, args[1]))
 end, {players = true})
 
-emf.command("drop", "<n>: give up bounty n of yours", function(world, args)
+emf.command("drop", "<n>: give up your bounty n", function(world, args)
   local me = ready(world)
   if not me then return end
   emf.reply(drop_bounty(me.account, args[1]))
 end, {players = true})
 
-emf.command("claim", ": the rewards of your finished bounties", function(world, args)
+emf.command("claim", ": your finished bounties' rewards", function(world, args)
   local me = ready(world)
   if not me then return end
   local why = gate(world, me.id)
@@ -1263,7 +1263,7 @@ emf.command("claim", ": the rewards of your finished bounties", function(world, 
   emf.reply("Claimed: " .. table.concat(parts, "; "))
 end, {players = true})
 
-emf.command("reroll", "<n>: swap notice n for another (notices of your own)", function(world, args)
+emf.command("reroll", "<n>: swap your notice n", function(world, args)
   local me = ready(world)
   if not me then return end
   if not each_player() then
@@ -1300,7 +1300,7 @@ emf.command("reroll", "<n>: swap notice n for another (notices of your own)", fu
   emf.reply("Notice " .. n .. " is now: " .. notice_text(entry(new)))
 end, {players = true})
 
-emf.command("top", ": who finished the most bounties in this world", function(world, args)
+emf.command("top", ": who finished the most", function(world, args)
   same_session()
   local me = sender(world)
   local list = {}
@@ -1318,7 +1318,7 @@ emf.command("top", ": who finished the most bounties in this world", function(wo
   end
 end, {players = true})
 
-emf.command("give", "<bounty id>: make a bounty from the pool yours at once (host, for tests)", function(world, args)
+emf.command("give", "<id>: hold a bounty now (tests)", function(world, args)
   same_session()
   local me = sender(world)
   if not me then return unknown(world) end
@@ -1345,7 +1345,7 @@ emf.command("give", "<bounty id>: make a bounty from the pool yours at once (hos
   emf.reply("Given: " .. text_of(e, b.need) .. " (reward: " .. reward_text(e) .. ")")
 end)
 
-emf.command("reset", ": new notices for everyone now (host)", function(world, args)
+emf.command("reset", ": new notices now", function(world, args)
   if not loaded then return not_loaded() end
   offset = offset + 1
   posted = dawns
@@ -1354,7 +1354,7 @@ emf.command("reset", ": new notices for everyone now (host)", function(world, ar
   emf.reply("New notices for everyone.")
 end)
 
-emf.command("mark", ": the prop you look at becomes a Bounty Board (host, admins)", function(world, args)
+emf.command("mark", ": the prop you look at is a Bounty Board", function(world, args)
   local me = ready(world)
   if not me then return end
   local id = prop_in_front(world, me.id, MARK_REACH_M)
@@ -1378,7 +1378,7 @@ emf.command("mark", ": the prop you look at becomes a Bounty Board (host, admins
   emf.reply(string.format("Marked: this prop is a Bounty Board now (at %d, %d, %d).", round(x), round(y), round(z)))
 end)
 
-emf.command("unmark", ": the marked prop nearest to you is no Bounty Board now (host, admins)", function(world, args)
+emf.command("unmark", ": the marked prop nearest you is no board", function(world, args)
   local me = ready(world)
   if not me then return end
   local x, y, z = world:position(me.id)
@@ -1398,7 +1398,7 @@ emf.command("unmark", ": the marked prop nearest to you is no Bounty Board now (
   emf.reply(string.format("Unmarked: the prop at %d, %d, %d is no Bounty Board now.", round(m.x), round(m.y), round(m.z)))
 end)
 
-emf.command("boards", ": the Bounty Boards of this world (host)", function(world, args)
+emf.command("boards", ": this world's Bounty Boards", function(world, args)
   local me = ready(world)
   if not me then return end
   if #boards == 0 then
