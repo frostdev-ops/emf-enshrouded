@@ -228,23 +228,28 @@ damage**: in the test it hit a hostile Vukah three times for 48 and killed it, a
 ("Enemy slain", XP).
 
 **Keeping up.** The companion only walks, and the game removes a creature of its kind that ends up away from every
-player within a second. So while it follows you (Follow me, Attack; never while it stays):
+player within a second. So:
 
-- left behind (more than 40 m away for 4 s, or more than 60 m even in a fight) or stuck (more than 20 m away and not
-  2 m of way in 8 s), it is moved next to you with the game's own teleport (EMF API v20; on an older EMF a new
-  companion comes instead);
-- gone without dying (after a fast travel, a respawn at an altar, a long glide), it comes back by itself: "it got lost;
-  it comes back to you when you stand still". After the third time in 2 minutes it stays away until you call it.
+- While it follows you (Follow me, Attack): left behind (more than 40 m away for 4 s, or more than 60 m even in a
+  fight) or stuck (more than 20 m away without 2 m of way in 8 s), it is moved to the spot where you stand with the
+  game's own teleport, which looks for the ground there (EMF API v20; on an older EMF, or when the teleport fails, a new
+  companion comes instead). With `follow_distance` d these limits move out to d + 20, d + 30 and d + 10 m.
+- Gone without dying while it follows (after a fast travel, a respawn at an altar, a long glide): "it got lost; it
+  comes back to you when you stand still". The new one appears on the spot where you stand.
+- Gone while it stays (you went far away): it is not brought to you. "it waits at its stay spot; it shows up again when
+  you come back there": it appears at its spot once you are within 50 m of it.
+- It comes back by itself 3 times within 2 minutes; at the 4th loss it stays away until you call it (G or F6), which
+  starts the count over.
 
-Either waits until you have stood still for 2 s, so it never lands in the air beside you while you glide. Gear, order
-and level stay the same.
+Both wait until you have stood still for 2 s and aim at the ground you stand on, not a spot beside you (over a ledge,
+or beyond a wall). Gear, order and level stay the same.
 
 **Orders.** With the companion out, hold **G**: a wheel titled "Companion (level N)" offers
 
 | Entry | What happens |
 |---|---|
 | Follow me | it guards you again (the default) |
-| Stay here | a small barrel is put down where the companion stands and it guards that instead: it stays there when you walk off (and still fights what comes near). Follow me (or Dismiss) removes the barrel. If the barrel keeps disappearing (smashed, or out of the loaded area) it is put back at most every 5 s, and after the third time the companion follows you again ("The companion cannot keep its stay spot") |
+| Stay here | a small barrel is put down where the companion stands and it guards that instead: it stays there when you walk off (and still fights what comes near; if you go so far that the game removes it, it shows up at its spot again when you come back). Follow me (or Dismiss) removes the barrel. If the barrel keeps disappearing (smashed, or out of the loaded area) it is put back at most every 5 s, and after the third time the companion follows you again ("The companion cannot keep its stay spot") |
 | Attack (what you look at) | the creature under your crosshair within 40 m becomes its target: the game's own threat event, sent again every 2 s while the target lives and is within 40 m of you, for at most 30 s ("The companion gave up the attack"). Players, other allies and villagers are never picked |
 | Gear | a second wheel: give it a weapon or armour from your backpack / action bar, or take all of it back (below) |
 | Dismiss | it leaves (`StopGuardingEvent`, then removed) |

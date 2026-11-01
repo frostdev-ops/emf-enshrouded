@@ -86,8 +86,9 @@ std::atomic<uint32_t> g_loaded_session{0};  // the server session whose save has
 uint32_t g_client_checked = 0;     // the companion whose client-world faction was last checked (client tick only)
 uint32_t g_client_session = 0;     // the session g_client_checked belongs to (client tick only)
 companion::CatchUp g_catch;        // left behind or stuck: moved to the player (server tick only)
-bool g_lost_pending = false;       // a lost companion is coming back (once the player stands still)
-uint32_t g_companion_session = 0;  // the session g_catch and g_lost_pending belong to
+uint32_t g_companion_session = 0;  // the session g_catch belongs to
+uintptr_t g_body_tpl = 0;          // the companion's template data at its spawn (who it is: ids are reused)
+int g_body_faction = -1;           // its faction right after the spawn (-1: it has none)
 
 // Writes the configured faction on the companion in world `w` (server: authoritative; client: what your own screen
 // shows). Logs each change.
@@ -195,37 +196,61 @@ void guard_program(void* ctx) {
 
 enum class Summon { Ok, NoPlayer, Failed };
 
-// Spawns a companion 2 m from the local player and makes it an ally. NoPlayer (logged when `loud`) while the player's
-// position is unknown, Failed (logged) when the game refused the spawn.
-Summon summon(emf::World w, uint64_t now, const char* why, bool loud) {
+// Spawns a companion and makes it an ally: at `at` (metres), else 2 m from the local player. `by_hand`: the player
+// called it (G, F6). NoPlayer (logged when `loud`) while the player's position is unknown, Failed (logged) when the game
+// refused the spawn.
+Summon summon(emf::World w, uint64_t now, const char* why, bool loud,
+              const std::optional<emf::aim::Vec3>& at = std::nullopt, bool by_hand = false) {
     const uint32_t player = emf::local_player();
     double p[3];
     if (!player || !entity_pos(w, player, p)) {
         if (loud) EMF_LOG(kMod, "%s: player position unknown", why);
         return Summon::NoPlayer;
     }
-    const uint32_t id = emf::api()->spawn(w.raw(), g_guid, p[0] + 2.0, p[1], p[2]);
+    const emf::aim::Vec3 spot = at ? *at : emf::aim::Vec3{p[0] + 2.0, p[1], p[2]};
+    const uint32_t id = emf::api()->spawn(w.raw(), g_guid, spot.x, spot.y, spot.z);
     if (!id) {
         EMF_LOG(kMod, "%s: spawn failed (see the core log)", why);
         return Summon::Failed;
     }
     apply_faction(w, id, "server");  // before its AI picks targets
+    g_body_tpl = reinterpret_cast<uintptr_t>(
+        emf::api()->get_template_component(w.raw(), gen::ecs::Enemy01BehaviorState::kHash, id, nullptr));
+    const auto* f = w.get<gen::ecs::Faction>(id);
+    g_body_faction = f ? static_cast<int>(f->faction) : -1;
     g_companion.on_spawned(id, player, now, reinterpret_cast<uintptr_t>(w.raw()));
-    g_policy.on_summoned();
+    g_policy.on_summoned(by_hand);
     g_catch.reset();
-    g_lost_pending = false;
     g_orders.on_companion_spawned();  // the current order (e.g. stay) applies to the new companion too
-    EMF_LOG(kMod, "%s: companion %u spawned 2 m from player %u at (%.1f, %.1f, %.1f)", why, id, player, p[0], p[1], p[2]);
+    EMF_LOG(kMod, "%s: companion %u spawned at (%.1f, %.1f, %.1f), player %u at (%.1f, %.1f, %.1f)", why, id, spot.x,
+            spot.y, spot.z, player, p[0], p[1], p[2]);
     return Summon::Ok;
 }
 
-// A new companion in place of the current one, next to the player (its gear and order stay: they are the world's).
+// The companion is gone without dying (or could not come back): it comes back by itself (where: come_back()), or stays
+// away after too many losses. One note for the player either way.
+void lose(uint64_t now, uint32_t id, companion::LostNotice what, const char* how) {
+    const bool armed = g_policy.on_lost(now);
+    const bool staying = g_orders.mode() == companion::Mode::Stay;
+    const std::string key = g_key_wheel.vk ? g_key_wheel.name : std::string("F6");
+    EMF_LOG(kMod, "companion %u %s: %s", id, how,
+            !armed ? "lost too often in 2 minutes, it stays away until called"
+                   : staying ? "it comes back at its stay spot once you are near it" : "a new one comes to you");
+    emf::api()->notify("%s", companion::lost_notice(what, armed, staying, key).c_str());
+}
+
+// A new companion in place of the current one, on the player's own spot (its gear and order stay: they are the
+// world's). Said once when it cannot come now; it then comes back as a lost one.
 void replace_companion(emf::World w, uint64_t now) {
     const uint32_t old = g_companion.entity();
     if (!old) return;
     emf::api()->destroy(w.raw(), old);
     g_companion.on_gone();
-    if (summon(w, now, "catch-up", true) != Summon::Ok && g_policy.on_lost(now)) g_lost_pending = true;
+    double p[3];
+    std::optional<emf::aim::Vec3> at;
+    if (entity_pos(w, emf::local_player(), p)) at = companion::return_spot({p[0], p[1], p[2]});
+    if (summon(w, now, "catch-up", true, at) != Summon::Ok)
+        lose(now, old, companion::LostNotice::ReplaceFailed, "could not be replaced next to you");
 }
 
 // Moves the companion next to the player (left behind or stuck): the game's own teleport (API v20), near the player so
@@ -235,7 +260,7 @@ void catch_up(emf::World w, uint64_t now, uint32_t id, const double from[3], con
     emf::TeleportOptions o;
     o.ground = true;
     const uint32_t session = emf::server_session();
-    const bool queued = emf::teleport(w, id, {player[0] + 2.0, player[1] + 1.0, player[2]}, o,
+    const bool queued = emf::teleport(w, id, companion::catch_up_target({player[0], player[1], player[2]}), o,
                                       [id, session](emf::World w2, const emf::TeleportResult& r) {
         if (r.session_ended || session != emf::server_session() || g_companion.entity() != id) return;
         if (r.moved()) {
@@ -258,33 +283,42 @@ void summon_or_dismiss(emf::World w, uint64_t now, const char* why) {
         return;
     }
     if (g_companion.phase() != companion::Companion::Phase::None) return;  // a dismissal is in progress
-    summon(w, now, why, true);
+    summon(w, now, why, true, std::nullopt, true);
 }
 
 void check_companion(emf::World w, uint64_t now) {
     const uint32_t id = g_companion.entity();
     if (!id || g_companion.phase() != companion::Companion::Phase::Active) return;
     auto* ai = w.get<gen::ecs::DynamicEnemy01BehaviorState>(id);
-    if (!ai) {  // gone without a death (a death resets the companion first): the game removed it, away from you
-        g_companion.on_gone();
-        auto* nh = w.get<gen::ecs::NetworkHealth>(id);
-        auto* h = w.get<gen::ecs::Health>(id);
-        if (w.get<gen::ecs::CurrentTransform>(id) && (nh ? nh->health == 0 : h && h->dataStorage[0] == 0)) {
-            const bool again = g_policy.on_died(now);  // its body is still there, dead: a death after all
+    companion::BodySeen seen;  // a death resets the companion first (the program reads EntityDiedEvent)
+    seen.exists = w.get<gen::ecs::CurrentTransform>(id) != nullptr;
+    seen.tpl = reinterpret_cast<uintptr_t>(
+        emf::api()->get_template_component(w.raw(), gen::ecs::Enemy01BehaviorState::kHash, id, nullptr));
+    if (const auto* f = w.get<gen::ecs::Faction>(id)) seen.faction = static_cast<int>(f->faction);
+    seen.ai = ai != nullptr;
+    if (const auto* nh = w.get<gen::ecs::NetworkHealth>(id)) seen.health = nh->health;
+    else if (const auto* h = w.get<gen::ecs::Health>(id)) seen.health = h->dataStorage[0];
+    switch (companion::presence(seen, g_body_tpl, g_body_faction)) {
+        case companion::Presence::Ours: break;
+        case companion::Presence::Dead: {
+            g_companion.on_gone();
+            const bool again = g_policy.on_died(now);  // its body is there, dead: a death after all
             EMF_LOG(kMod, "companion %u died: %s", id, companion::death_message(again, g_policy.respawn_ms / 1000ull).c_str());
             return;
         }
-        if (g_policy.on_lost(now)) {
-            g_lost_pending = true;
-            EMF_LOG(kMod, "companion %u is gone (the game removes a companion left far behind): a new one comes to you", id);
-            emf::api()->notify("Companion: it got lost; it comes back to you when you stand still");
-        } else {
-            const char* key = g_key_wheel.vk ? g_key_wheel.name.c_str() : "F6";
-            EMF_LOG(kMod, "companion %u is gone again (more than %d times in 2 minutes): it stays away until called", id,
-                    companion::SummonPolicy::kMaxLost);
-            emf::api()->notify("Companion: it keeps getting lost; press %s to call it again", key);
-        }
-        return;
+        case companion::Presence::Gone:
+            g_companion.on_gone();
+            lose(now, id, companion::LostNotice::Lost, "is gone (the game removes a companion left far from every player)");
+            return;
+        case companion::Presence::Taken:  // never touched: another creature has the id now
+            g_companion.on_gone();
+            lose(now, id, companion::LostNotice::Lost, "is gone (its id holds another creature now, left alone)");
+            return;
+        case companion::Presence::Body:
+            emf::api()->destroy(w.raw(), id);  // our body without its AI: removed, so no second one stands around
+            g_companion.on_gone();
+            lose(now, id, companion::LostNotice::Lost, "lost its AI (its body was removed)");
+            return;
     }
     if (g_companion.on_player(emf::local_player(), now))
         EMF_LOG(kMod, "your player is entity %u now: companion %u guards it", g_companion.player(), id);
@@ -706,7 +740,7 @@ void read_keys(emf::World w, uint64_t now) {
         if (active)
             open_order_wheel(w);
         else if (g_companion.phase() == companion::Companion::Phase::None)
-            summon(w, now, "wheel key", true);
+            summon(w, now, "wheel key", true, std::nullopt, true);
     }
     if (g_key_follow.edge.pressed(emf::keys::down(g_key_follow.vk)) && active) order_follow();
     if (g_key_stay.edge.pressed(emf::keys::down(g_key_stay.vk)) && active) order_stay(w);
@@ -725,7 +759,6 @@ void on_tick(emf::World w) {
     if (session != g_companion_session) {  // a new session: nothing of the old one's companion carries over
         g_companion_session = session;
         g_catch.reset();
-        g_lost_pending = false;
     }
     g_companion.on_session(session);  // a new session (a reload keeps the world's address) forgets the old companion
     g_policy.on_session(session, now);
@@ -774,11 +807,25 @@ void on_tick(emf::World w) {
         }
         save_state();
         double you[3];
-        if (emf::local_player() && entity_pos(w, emf::local_player(), you)) g_catch.watch_player(now, {you[0], you[1], you[2]});
-        // a lost companion comes back once the player stands (never into the air beside a gliding player)
-        if (g_companion.phase() == companion::Companion::Phase::None && (!g_lost_pending || g_catch.player_settled()) &&
-            g_policy.due(now) && summon(w, now, g_lost_pending ? "back after it got lost" : "auto", false) == Summon::Failed)
-            g_policy.on_spawn_failed(now);  // try again after a back-off instead of every second
+        const bool here = emf::local_player() && entity_pos(w, emf::local_player(), you);
+        if (here) g_catch.watch_player(now, {you[0], you[1], you[2]});
+        if (g_companion.phase() == companion::Companion::Phase::None && here) {
+            // a lost one comes to your own spot once you stand (never into the air beside you while you glide), or, when
+            // it was staying, at its stay spot once you are back near it
+            const bool lost = g_policy.lost_pending();
+            const bool staying = g_orders.mode() == companion::Mode::Stay;
+            const emf::aim::Vec3 player{you[0], you[1], you[2]};
+            const emf::aim::Vec3 spot = g_orders.stay_pos();
+            const auto where =
+                companion::come_back(lost, staying, g_catch.player_settled(), emf::aim::length(emf::aim::sub(spot, player)));
+            std::optional<emf::aim::Vec3> at;
+            if (where == companion::ComeBack::AtStaySpot) at = emf::aim::Vec3{spot.x, spot.y + 0.5, spot.z};
+            else if (lost) at = companion::return_spot(player);
+            if (where != companion::ComeBack::Wait && g_policy.due(now) &&
+                summon(w, now, !lost ? "auto" : at && staying ? "back at its stay spot" : "back after it got lost", false, at) ==
+                    Summon::Failed)
+                g_policy.on_spawn_failed(now);  // try again after a back-off instead of every second
+        }
     }
 }
 
@@ -812,6 +859,7 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
     wchar_t dist[32] = {};
     GetPrivateProfileStringW(L"companion", L"follow_distance", L"0", dist, 32, ini_path().c_str());
     g_follow_distance = static_cast<float>(std::wcstod(dist, nullptr));
+    g_catch = companion::CatchUp(g_follow_distance > 50.0f ? 50.0 : g_follow_distance);  // its limits move out with it
     const std::wstring ini = ini_path();
     wchar_t fac[32] = {};  // read as text: GetPrivateProfileInt turns a negative value (-1 = keep) into 0
     GetPrivateProfileStringW(L"companion", L"faction", L"11", fac, 32, ini.c_str());
