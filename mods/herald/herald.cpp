@@ -223,22 +223,21 @@ void say(const std::string& text, herald::Hook what) {
     hook_line(what, text);
 }
 
-// The game's name for a player, else "Host" (the host of a game it hosts), else "player #<entity>". The names come from
-// the server's connection records, which EMF reads only with players' chat on; the character's name is not readable.
+// The game's name for a player, else "Host" (the host of a game it hosts: their own name is not found in the
+// connection records), else "player #<entity>". The names come from the server's connection records, which EMF reads only with
+// players' chat on; a character's name is not readable.
 std::string name_of(emf::World w, uint32_t entity) {
     const auto name = emf::player_name(w, entity);
-    static bool said = false;
-    if (!name && !said) {
-        said = true;
-        if (g_chat_on)
-            EMF_LOG(kMod, "the game gave no name for player %u (their connection holds none): they are \"%s\"", entity,
-                    herald::player_label(name, entity, emf::local_player()).c_str());
-        else
-            EMF_LOG(kMod, "no names: EMF reads players' names from their connections, which needs players' chat "
-                          "([chat] players=1 in emf\\emf_core.ini of a game you host); meanwhile the host is \"Host\" and "
-                          "the others \"player #<entity>\"");
+    const uint32_t host = emf::local_player();
+    static bool said_host = false, said_guest = false;
+    if (!name) {
+        bool& said = host && entity == host ? said_host : said_guest;
+        if (!said) {
+            said = true;
+            EMF_LOG(kMod, "%s", herald::no_name_note(host && entity == host, g_chat_on, entity).c_str());
+        }
     }
-    return herald::player_label(name, entity, emf::local_player());
+    return herald::player_label(name, entity, host);
 }
 
 int64_t unix_now() { return static_cast<int64_t>(std::time(nullptr)); }

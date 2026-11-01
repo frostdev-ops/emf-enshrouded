@@ -75,6 +75,20 @@ inline std::string player_label(const std::optional<std::string>& name, uint32_t
     return "player #" + std::to_string(entity);
 }
 
+// The log line (once each) when EMF has no name for a player. The host of a game it hosts: their own name is not
+// found in the connection records EMF reads, players' chat or not. A guest: the records need players' chat (in a game you host
+// [chat] players=1); with it on, their record held no name.
+inline std::string no_name_note(bool host, bool chat_on, uint32_t entity) {
+    if (host)
+        return "the host's own name is not available to mods (it is not found in the players' connection records EMF reads): "
+               "the host is \"Host\"";
+    if (!chat_on)
+        return "guests' names come from their connections, which needs players' chat ([chat] players=1 in "
+               "emf\\emf_core.ini of a game you host): meanwhile they are \"player #<entity>\"";
+    return "the game gave no name for player " + std::to_string(entity) + " (their connection holds none): they are \"player #" +
+           std::to_string(entity) + "\"";
+}
+
 // ---- who is online ----
 // One player entity of the server world as the herald saw it this second.
 struct Seen {
