@@ -9,6 +9,11 @@ installs an archive the player downloaded, so that EMF can uninstall it again. I
 mods, settings, who may use chat commands, EMF itself, starting and stopping them, and their logs ("Servers" below).
 Its Saves tab backs up the game's saves and restores them ("Saves" below).
 
+It is `emf\EMF.exe` in the game folder. `install.cmd` asks once, "Add an EMF shortcut to the desktop? [Y/n]", and
+remembers the answer (`emf\desktop_shortcut.txt`); `install.ps1 -DesktopShortcut` or `-NoDesktopShortcut` answers for a
+scripted install, which is never asked. `uninstall.cmd` removes the shortcut it made while it still points to that
+EMF.exe, and no other.
+
 EMF.exe also has Nexus features that use Nexus's API. Its Browse tab shows the mods on Nexus Mods and what each file
 would do in this folder. With the player's Nexus account it downloads files itself: from the website's "Mod Manager
 Download" button (nxm:// links, once the player lets EMF open them) and, for Premium members, from a "Download with

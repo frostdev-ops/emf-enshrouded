@@ -1,6 +1,6 @@
-# Removes EMF from the game folder: EMF's dinput8.dll and the emf folder. Your settings (emf\config and
-# emf\emf_core.ini) and mod profiles (emf\profiles) stay unless -All. Another mod's dinput8.dll that EMF renamed
-# (emf\moved.txt) is put back.
+# Removes EMF from the game folder: EMF's dinput8.dll and the emf folder, and the desktop shortcut install.cmd made.
+# Your settings (emf\config and emf\emf_core.ini) and mod profiles (emf\profiles) stay unless -All. Another mod's
+# dinput8.dll that EMF renamed (emf\moved.txt) is put back.
 # EMF.exe's Nexus API key and downloads (%LOCALAPPDATA%\EMF) and its saved nxm:// setting (HKCU\Software\EMF\NxmBackup)
 # stay unless -All; the saved setting also stays while a copy of EMF still opens nxm:// links (it needs it to give them
 # back). When this folder's EMF.exe opens nxm:// links, it gives them back first.
@@ -65,6 +65,19 @@ if ($nxmCommand -and (Test-Path -LiteralPath $app) -and $nxmCommand.StartsWith('
         "EMF.exe still opens nxm:// links and could not give them back: open Vortex or Mod Organizer 2 to take them, or delete HKCU\Software\Classes\nxm"
     } else {
         "gave Nexus's Mod Manager Download links (nxm://) back to the program that had them before EMF"
+    }
+}
+# The desktop shortcut install.cmd made (emf\desktop_shortcut.txt), and only while it still points to this EMF.exe:
+# never one the player made or changed.
+foreach ($line in @(Read-Lines (Join-Path $Game $script:ShortcutRecord))) {
+    if ($line -notlike "made`t*") { continue }
+    $lnk = $line.Substring(5)
+    if (-not (Test-Path -LiteralPath $lnk)) { continue }
+    if ((Get-ShortcutTarget $lnk) -ieq $app) {
+        Remove-Item -LiteralPath $lnk -Force
+        "removed the desktop shortcut EMF made ($lnk)"
+    } else {
+        "left the desktop shortcut $lnk alone: it no longer points to this folder's EMF.exe"
     }
 }
 # Other mods' dinput8.dll that the installer renamed: the newest goes back to its name, its chain line goes. Only one

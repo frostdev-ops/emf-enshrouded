@@ -271,6 +271,41 @@ function Test-GameFolder([string]$Dir) {
            (Test-Path -LiteralPath (Join-Path $Dir "enshrouded_server.exe"))
 }
 
+# ---- the desktop shortcut to emf\EMF.exe ----
+# install.cmd asks once; emf\desktop_shortcut.txt remembers the answer: "made<TAB><the .lnk's path>" (uninstall.cmd
+# removes that shortcut, and only that one) or "declined".
+$script:ShortcutRecord = "emf\desktop_shortcut.txt"
+
+# The desktop folder, or $null. Tests name a fake one with EMF_TEST_DESKTOP; a test run (EMF_TEST_NO_STEAM set) never
+# uses the real one.
+function Get-DesktopFolder {
+    if ($env:EMF_TEST_DESKTOP) { return $env:EMF_TEST_DESKTOP }
+    if ($env:EMF_TEST_NO_STEAM) { return $null }
+    $d = [Environment]::GetFolderPath("Desktop")
+    if ($d) { return $d }
+    return $null
+}
+
+# Where a shortcut points ("" when Windows cannot read it as one).
+function Get-ShortcutTarget([string]$Path) {
+    try { return [string](New-Object -ComObject WScript.Shell).CreateShortcut($Path).TargetPath } catch { return "" }
+}
+
+# What to do about the shortcut: "make", "decline" (remember a no), "keep" (answered before: leave things as they are)
+# or "none" (no shortcut, nothing remembered). -DesktopShortcut and -NoDesktopShortcut ($Yes, $No) win; otherwise the
+# question is asked only for install.cmd ($Ask) and only once. $Prompt gets the question and returns the answer, or
+# $null when there is no console to ask in. Enter means yes.
+function Resolve-DesktopShortcut([string]$Record, [bool]$Yes, [bool]$No, [bool]$Ask, [scriptblock]$Prompt) {
+    if ($Yes) { return "make" }
+    if ($No) { return "decline" }
+    if ($Record) { return "keep" }
+    if (-not $Ask) { return "none" }
+    $answer = & $Prompt "Add an EMF shortcut to the desktop? [Y/n]"
+    if ($null -eq $answer) { return "none" }
+    if ($answer -match '^\s*(n|no)\s*$') { return "decline" }
+    return "make"
+}
+
 # Why EMF must not change $Dir now, or $null: the game, a server or EMF's manager (emf\EMF.exe, which holds its
 # files open) runs from that folder. A game process whose path cannot be read counts as running from it: when the game
 # runs as administrator and this script does not, Windows gives no path (and no error), and EMF cannot tell which

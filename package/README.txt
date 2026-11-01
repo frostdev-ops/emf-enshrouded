@@ -7,6 +7,7 @@ FOR PLAYERS
 2. Close Enshrouded.
 3. Double-click install.cmd. It finds the game through Steam and copies EMF and its mods next to enshrouded.exe.
    Game somewhere Steam does not know? Drag the game folder (the one with enshrouded.exe) onto install.cmd.
+   With the mod manager (EMF.exe), it asks once whether to put a shortcut to EMF.exe on your desktop (Enter = yes).
 4. Start the game normally. The key under Esc opens the EMF console; type  help  to see every command.
 5. Optional: emf\EMF.exe in the game folder is EMF's mod manager: every installed mod with switches and settings,
    clash warnings, installing mods you downloaded and save backups. Windows may say "Windows protected your PC" the
@@ -75,6 +76,7 @@ says the files on this PC and in the cloud are in conflict, keep the files on th
 
 Remove EMF: double-click uninstall.cmd. Your settings stay (emf\config, emf\emf_core.ini), and so do
 your mod profiles (emf\profiles). Save backups always stay, also with -All.
+It also removes the desktop shortcut that install.cmd made (none other).
 To remove the settings too, run  uninstall.cmd -All  in a command prompt in this folder.
 Gear you gave the companion exists only in its settings files (emf\config\companion): take it back in game
 (G, Gear) before  uninstall.cmd -All  (it refuses while the companion holds gear; -All -Force deletes it anyway).
