@@ -269,6 +269,23 @@ TEST_CASE("suggest: item names for give, put and any <item> argument, by the fri
     CHECK(at_end("give wood", src, 2).rows.size() == 2);
 }
 
+TEST_CASE("suggest: after a name that means one item, a word that starts a choice of the next argument is that argument") {
+    const auto src = sources();
+    const std::string help = ": hand items to that player (within reach)";
+    auto s = at_end("handover.to bob torch a", src);
+    CHECK(labels(s) == std::vector<std::string>{"all"});
+    CHECK(shown(s) == "handover.to <name|#k> <item> *[count|all]*" + help);
+    CHECK(s.typed == "a");
+    CHECK(take_row("handover.to bob torch a", s, 0).text == "handover.to bob torch all ");
+    CHECK(ghost_of("handover.to bob torch a", 23, s, 0) == "ll");
+    CHECK(at_end("handover.to bob torch all", src).rows.empty());  // exactly what was typed
+    CHECK(shown(at_end("handover.to bob torch ALL", src)) == "handover.to <name|#k> <item> *[count|all]*" + help);
+    // while the words so far name no one item, the word is still part of the name
+    CHECK(shown(at_end("handover.to bob wood a", src)) == "handover.to <name|#k> *<item>* [count|all]" + help);
+    // a word that starts no choice stays in the name too
+    CHECK(shown(at_end("handover.to bob torch x", src)) == "handover.to <name|#k> *<item>* [count|all]" + help);
+}
+
 TEST_CASE("suggest: components for tpl and tplset once something is typed") {
     const auto src = sources();
     CHECK(labels(at_end("tpl 1025 activenpc", src)) == std::vector<std::string>{"ActiveNpcState"});

@@ -132,10 +132,16 @@ struct Located {
     size_t first = 0;
 };
 
+// A choice of argument `t` starts with `w` (any case).
+bool starts_choice(const HintToken& t, std::string_view w) {
+    return std::any_of(t.choices.begin(), t.choices.end(), [&](const std::string& c) { return istarts(c, w); });
+}
+
 // Walks the words after the command (words[1..]) through one way of calling it: each word starts the next argument,
 // except that an item name goes on over words that are not plain numbers (and over a space while what was typed
-// names no one item yet: resolves(first, end) says whether words [first, end) do), the last argument takes the rest
-// of the line, and an optional "[#k]" is passed by a word without a '#'.
+// names no one item yet: resolves(first, end) says whether words [first, end) do), unless the words so far name one
+// item and the word starts a choice of the next argument ("torch a": all); the last argument takes the rest of the
+// line, and an optional "[#k]" is passed by a word without a '#'.
 Located locate(const std::vector<HintToken>& tokens, const std::vector<size_t>& args, const std::vector<Word>& words,
                std::string_view line, const std::function<bool(size_t, size_t)>& resolves) {
     if (args.empty() || words.size() < 2) return {};
@@ -150,7 +156,9 @@ Located locate(const std::vector<HintToken>& tokens, const std::vector<size_t>& 
         bool same = a + 1 >= args.size();
         if (!same && item_arg(tokens[args[a]])) {
             const std::string_view t = text_of(i);
-            same = t.empty() ? !resolves(first, i) : !plain_number(t);
+            if (t.empty()) same = !resolves(first, i);
+            else if (plain_number(t)) same = false;
+            else same = !(starts_choice(tokens[args[a + 1]], t) && resolves(first, i));
         }
         if (!same) {
             ++a;

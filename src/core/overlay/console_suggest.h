@@ -70,7 +70,8 @@ struct LineEdit {
 // - The first word: the commands that start with it (any case), then those that hold it, each with its help split
 //   into hint and text.
 // - After a known command and a space: the hint line, and values for the argument being typed. An argument named
-//   like "<item name>" takes item names (several words, up to a plain number: "give wood log 5"), found by the
+//   like "<item name>" takes item names (several words, up to a plain number: "give wood log 5", or, once the words
+//   name one item, up to a word that starts a choice of the next argument: "handover.to bob torch a"), found by the
 //   rules of `items` (item_names.h), best match first, once something is typed; "<component>" takes components
 //   (once something is typed); "<mod>" mod ids; set's "<key>" the mod's keys and enabled, its "<value>" what the
 //   setting takes; an argument with "a|b" alternatives those choices. The last argument takes the rest of the line;
