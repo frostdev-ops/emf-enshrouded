@@ -47,10 +47,11 @@ std::string describe_setting(const SettingDef& d);
 // 1,000,000 apart, unless it asked to be a slider), else a box; whole numbers as 64-bit values (no overflow).
 enum class NumberWidget { SliderInt, SliderDouble, InputInt, InputDouble };
 NumberWidget number_widget(const SettingDef& d);
-// A mod's colour in the list: green when it runs (a DLL mod loaded, or a Lua mod handed to the lua mod), grey when
-// switched off, red when it did not load. The status as of this game start.
+// A mod's colour in the list: green when it is on (a DLL mod loaded, or a Lua mod handed to the lua mod; whether the
+// Lua host runs it or paused it after an error, the core does not know), grey when switched off, red when it did not
+// load. The status as of this game start.
 ImVec4 status_colour(ModStatus s);
-// The status in words, with the reason: "running", "running (a Lua mod, run by the lua mod)", "switched off: ...",
+// The status in words, with the reason: "on: loaded", "on: run by the lua mod (...)", "switched off: ...",
 // "not loaded: ...".
 std::string mod_status_text(const ModRecord& r);
 // The line under the list that says what the colours mean.

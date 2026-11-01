@@ -80,8 +80,9 @@ Logs: `<game>\emf\emf_core.log` (framework + mods), `<game>\emf\emf_loader.log` 
 core that fails to load).
 Mod settings: the console's Mods tab or the `set` command (below). Each mod starts with the defaults from its
 `mod.json`; a change is saved in `<game>\emf\config\<mod>.ini`.
-In the Mods tab's list, green means the mod runs (a DLL mod or a Lua mod), grey that it is switched off and red that
-it did not load (select it to see why); the colours are for this game start, a mod's switch for the next.
+In the Mods tab's list, green means the mod is on (a DLL mod that loaded, or a Lua mod handed to the `lua` mod, which
+pauses it on an error with a note on screen; `lua.status` shows whether it runs), grey that it is switched off and red
+that it did not load (select it to see why); the colours are for this game start, a mod's switch for the next.
 
 ## In-game console
 Press the key under Esc (`~` on US keyboards, `§` or `|` on Nordic ones, `^` on German ones) in the game: a console
