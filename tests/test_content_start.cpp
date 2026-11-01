@@ -4,11 +4,14 @@
 // loaded at all when the shadow copy is current.
 #include <doctest.h>
 
+#include <windows.h>
+
 #include <functional>
 #include <optional>
 #include <string>
 #include <vector>
 
+#include "loader/content_splash.h"
 #include "loader/content_start.h"
 
 using emf::loader::ContentPath;
@@ -306,4 +309,29 @@ TEST_CASE("content start: facts stop at the first no (a start without emf_conten
     f = emf::loader::collect_facts(io, emf::loader::PlayOnce::Normal, true);  // the server: no mods scanned
     CHECK(emf::loader::decide_content(f).why.find("dedicated server") != std::string::npos);
     CHECK(asked == std::vector<std::string>{"mode", "exists dbghelp.dll", "dll"});
+}
+
+TEST_CASE("content splash: a window while the work runs on another thread, with its last line; gone afterwards") {
+    emf::loader::ContentSplash splash;
+    REQUIRE(splash.begin("EMF is preparing EML content (first start after a change)..."));
+    const HWND w = splash.window();
+    CHECK(IsWindow(w));
+    CHECK((GetWindowLongPtrW(w, GWL_EXSTYLE) & WS_EX_NOACTIVATE) != 0);  // never takes the game's focus
+    DWORD worker = 0;
+    const bool done = emf::loader::run_with_splash(&splash,
+                                                   [&] {
+                                                       worker = GetCurrentThreadId();
+                                                       splash.line("standin: building");
+                                                       Sleep(300);
+                                                       splash.line("the last line");
+                                                   },
+                                                   10000);
+    CHECK(done);
+    CHECK(worker != 0);
+    CHECK(worker != GetCurrentThreadId());
+    CHECK(splash.last_line() == "the last line");
+    splash.end();
+    CHECK_FALSE(IsWindow(w));
+    // a work that does not come back in time: false, and the work keeps what it needs
+    CHECK_FALSE(emf::loader::run_with_splash(nullptr, [] { Sleep(1500); }, 100));
 }

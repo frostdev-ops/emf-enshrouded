@@ -147,3 +147,17 @@ TEST_CASE("entry hold: the loader's line says how EMF's start-up ended") {
     CHECK(no_export.find("until emf_core started") == std::string::npos);
     CHECK(hold_message(false, CoreOutcome::Running, 20000).find("emf_core is still starting") != std::string::npos);
 }
+
+TEST_CASE("entry hold: the game client's entry point, when it cannot be held for the content build, says why too") {
+    uint8_t rel[16] = {0xE9, 0x10, 0x00, 0x00, 0x00};
+    const std::string patched = emf::loader::entry_not_usual(rel, 0x7ff812340000ull, "winmm.dll", "the game's");
+    CHECK(patched.find("the game's entry point is not the usual start-up code: another tool patched it: it jumps into "
+                       "winmm.dll") == 0);
+    CHECK(patched.find("world setup") == std::string::npos);
+    const uint8_t code[16] = {0x48, 0x89, 0x5C, 0x24, 0x08, 0x55, 0x56, 0x57};
+    CHECK(emf::loader::entry_not_usual(code, 0, "", "the game's").find("its first bytes are 48 89 5c") != std::string::npos);
+    // the server's line stays as it was
+    CHECK(emf::loader::entry_not_held_message(rel, 0x7ff812340000ull, "winmm.dll") ==
+          emf::loader::entry_not_usual(rel, 0x7ff812340000ull, "winmm.dll", "the server's") +
+              "; not held, so mods may load after its world setup");
+}

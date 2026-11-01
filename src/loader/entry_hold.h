@@ -1,6 +1,8 @@
 #pragma once
-// Holds the game's main thread at the exe's entry point until EMF has started. Used on the dedicated server only: it
-// sets up its world within a second of starting, and EMF must hook that setup and load the mods first.
+// Holds the game's main thread at the exe's entry point until EMF has started. The dedicated server is held at every
+// start: it sets up its world within a second of starting, and EMF must hook that setup and load the mods first. The
+// game client is held only for a start that builds EML content (content_start.h): the build runs there, before the
+// chained DLLs, EMF's core and any game code.
 //
 // hold_entry() replaces the first 12 bytes of the entry point with "mov rax, <stub>; jmp rax" (rax is free at an
 // entry point; rcx, the argument, is kept). The stub runs on the main thread, waits, calls release_entry() to put the
@@ -82,10 +84,10 @@ uint64_t entry_jump_target(const uint8_t* e, Read8 read8) {
     return 0;
 }
 
-// The loader's line when the server's entry point is not MSVC's start-up code, with why: another tool's jump (into
-// `module` when it is known, else to `target`), or else its first bytes.
-inline std::string entry_not_held_message(const uint8_t* e, uint64_t target, const std::string& module) {
-    std::string s = "the server's entry point is not the usual start-up code: ";
+// Why an entry point is not MSVC's start-up code: another tool's jump (into `module` when it is known, else to
+// `target`), or else its first bytes. `whose`: "the server's", "the game's".
+inline std::string entry_not_usual(const uint8_t* e, uint64_t target, const std::string& module, const char* whose) {
+    std::string s = std::string(whose) + " entry point is not the usual start-up code: ";
     if (target) {
         char where[32];
         std::snprintf(where, sizeof where, "0x%llx", static_cast<unsigned long long>(target));
@@ -100,7 +102,12 @@ inline std::string entry_not_held_message(const uint8_t* e, uint64_t target, con
         }
         s += " (a game build EMF does not know, or another tool's code)";
     }
-    return s + "; not held, so mods may load after its world setup";
+    return s;
+}
+
+// The loader's line when the server's entry point is not MSVC's start-up code, with why.
+inline std::string entry_not_held_message(const uint8_t* e, uint64_t target, const std::string& module) {
+    return entry_not_usual(e, target, module, "the server's") + "; not held, so mods may load after its world setup";
 }
 
 inline uint8_t* exe_entry_point() {
