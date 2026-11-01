@@ -50,7 +50,7 @@ raid comes when you sleep through nightfall.
 | Raiders per wave (`per_wave`) | 4 | 1-12 |
 | Seconds between waves (`wave_gap_seconds`) | 60 | 20-300 |
 | Difficulty (`difficulty`) | normal | easy (5 levels below the strongest player at the base), normal, hard (+3), deadly (+6) |
-| Boss wave (`boss`) | off | the last wave brings a Vukah brawler, a mini-boss with a boss bar |
+| Boss wave (`boss`) | off | the last wave brings a Vukah brawler, a mini-boss with a boss bar (from level 5 with **Only creatures you are ready for**) |
 | Raiders attack (`targets`) | players, companions and summons | or players only. Allies are the fighters on the players' side: the companion, Necromancer's minions, Beastmaster's beasts, the game's own summons (never farm animals) |
 | Only creatures you are ready for (`progression`) | on | no boss or creature above the players' level (below) |
 | Who raids (`templates`) | Vukah warriors | or your own templates (below) |

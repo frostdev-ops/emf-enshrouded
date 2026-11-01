@@ -43,7 +43,7 @@
        {"value": "hard", "label": "Hard: 3 levels above"},
        {"value": "deadly", "label": "Deadly: 6 levels above"}]},
     {"key": "boss", "type": "bool", "default": false, "label": "Boss wave", "live": true, "group": "Raiders",
-     "help": "The last wave brings a Vukah brawler, a mini-boss with a boss bar.",
+     "help": "The last wave brings a Vukah brawler, a mini-boss with a boss bar (see Only creatures you are ready for).",
      "enabledWhen": {"setting": "preset", "equals": "custom"}},
     {"key": "targets", "type": "select", "default": "allies", "label": "Raiders attack", "live": true, "group": "Raiders",
      "help": "Who a raider goes for when one is near it (25 m). Otherwise it marches on the flame altar.",
