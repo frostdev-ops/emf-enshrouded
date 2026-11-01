@@ -128,6 +128,7 @@ add_library(emf_core_lib STATIC
   src/core/events.cpp
   src/core/event_relay.cpp
   src/core/items.cpp
+  src/core/item_names.cpp
   src/core/commands.cpp
   src/core/builtin_commands.cpp
   src/core/daytime.cpp

@@ -9,6 +9,7 @@
 
 #include "common/fnv.h"
 #include "common/offsets.h"
+#include "core/item_names.h"
 #include "core/items.h"
 #include "fake_world.h"
 
@@ -184,4 +185,84 @@ TEST_CASE("write_game_memory unlocks only private memory: image constants and fi
     CHECK_FALSE(write_game_memory(view, &v, sizeof(v)));
     UnmapViewOfFile(view);
     CloseHandle(map);
+}
+
+// ---- item names as people type them (give, put, take, stack, items) ----
+namespace {
+// debug names of the kind the game uses (the ones in EMF's docs and tests)
+std::vector<NamedItem> named_items() {
+    return {{0x11, "Material_T1_Wood_Logs"},        {0x12, "Material_T1_Wood_Logs_Dead"},
+            {0x13, "Material_T4_Wood_Logs_Palm"},   {0x14, "Material_T1_Wood_Twigs"},
+            {0x15, "Shield_T0_Wooden"},             {0x21, "Material_T0_simple_FishingBait"},
+            {0x22, "Food_T2_Dog_Bait"},             {0x31, "Tool_Torch_01"},
+            {0x41, "Material_T1_Stone"},            {0x42, "Material_T1_Stone_Flint"},
+            {0x43, "Block_T1_Stone_Rough"}};
+}
+std::vector<std::string> names_of(const std::vector<NamedItem>& items, const std::vector<size_t>& at) {
+    std::vector<std::string> out;
+    for (size_t i : at) out.push_back(items[i].name);
+    return out;
+}
+}  // namespace
+
+TEST_CASE("item names: the words of a debug name: split at _ - spaces and where a capital follows a small letter") {
+    CHECK(item_words("Material_T0_simple_FishingBait") ==
+          std::vector<std::string>{"material", "t0", "simple", "fishing", "bait"});
+    CHECK(item_words("  Fishing  Bait ") == std::vector<std::string>{"fishing", "bait"});
+    CHECK(item_words("wood-log") == std::vector<std::string>{"wood", "log"});
+    CHECK(item_words("").empty());
+}
+
+TEST_CASE("item names: the exact debug name wins, also in another case") {
+    const auto items = named_items();
+    CHECK(match_item(items, "Material_T1_Wood_Logs").id == 0x11);
+    CHECK(match_item(items, "material_t1_wood_logs_dead").id == 0x12);
+    CHECK(match_item(items, "Material T1 Wood Logs Dead").id == 0x12);  // spaces for '_'
+}
+
+TEST_CASE("item names: words in any order and parts of words; a unique match is used") {
+    const auto items = named_items();
+    CHECK(match_item(items, "fishing bait").id == 0x21);
+    CHECK(match_item(items, "Fishing Bait").id == 0x21);
+    CHECK(match_item(items, "FishingBait").id == 0x21);
+    CHECK(match_item(items, "bait fishing").id == 0x21);
+    CHECK(match_item(items, "dog").id == 0x22);
+    CHECK(match_item(items, "palm").id == 0x13);
+    CHECK(match_item(items, "twig").id == 0x14);
+    CHECK(match_item(items, "flint").id == 0x42);
+}
+
+TEST_CASE("item names: of several matches, the one whose own words are all typed is meant (not its category or tier)") {
+    const auto items = named_items();
+    CHECK(match_item(items, "wood logs").id == 0x11);  // not ..._Dead or ..._Palm: they have a word more
+    CHECK(match_item(items, "wood log").id == 0x11);   // a part of a word is enough
+    CHECK(match_item(items, "torch").id == 0x31);      // Tool_ and _01 are not its own words
+    CHECK(match_item(items, "stone").id == 0x41);
+}
+
+TEST_CASE("item names: several matches and none of them meant: no item, every match listed, best first") {
+    const auto items = named_items();
+    const auto bait = match_item(items, "bait");
+    CHECK(bait.id == 0);
+    CHECK(names_of(items, bait.matches) == std::vector<std::string>{"Food_T2_Dog_Bait", "Material_T0_simple_FishingBait"});
+    const auto wood = match_item(items, "wood");
+    CHECK(wood.id == 0);
+    CHECK(wood.matches.size() == 5);
+    // whole words first ("wood" is a word of Material_T1_Wood_Logs, only a part of "wooden"), then the shorter names
+    CHECK(names_of(items, wood.matches) == std::vector<std::string>{"Material_T1_Wood_Logs", "Material_T1_Wood_Twigs",
+                                                                  "Material_T1_Wood_Logs_Dead", "Material_T4_Wood_Logs_Palm",
+                                                                  "Shield_T0_Wooden"});
+    const auto none = match_item(items, "hardwood");
+    CHECK(none.id == 0);
+    CHECK(none.matches.empty());
+    CHECK(match_item(items, "").id == 0);
+    CHECK(match_item(items, "   ").matches.empty());
+}
+
+TEST_CASE("item names: search lists every match, best first; nothing typed lists every item") {
+    const auto items = named_items();
+    CHECK(names_of(items, search_items(items, "stone")) ==
+          std::vector<std::string>{"Material_T1_Stone", "Block_T1_Stone_Rough", "Material_T1_Stone_Flint"});
+    CHECK(search_items(items, "").size() == items.size());
+    CHECK(search_items(items, "nothing like it").empty());
 }

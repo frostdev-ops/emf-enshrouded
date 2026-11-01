@@ -257,7 +257,7 @@ help, mods, settings, set, hooks, pattern, profile, saves.backup, saves.list als
 - hooks: every inline hook, its owner and target (EMF's and mods')
 - pattern <bytes> [.section]: test a byte pattern against the game exe (found once?)
 - set <mod> <key> <value>: change a mod's setting (saved in emf/config/<mod>.ini)
-- items [part of a name]: list the game's items (debug names)
+- items [words]: find the game's items by name (words in any order, part of a word is enough)
 - give <item name> [count]: drop items at your feet (host)
 - put <item name> [count 1-65535] [entity] [level] [rarity 0-4]: put items straight into an inventory, yours by default (host)
 - take <item name> [count 1-65535] [entity]: take items out of an inventory, yours by default (host)

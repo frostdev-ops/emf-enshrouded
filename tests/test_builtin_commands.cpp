@@ -323,6 +323,74 @@ TEST_CASE("builtin commands: give drops the item at the player; bad input gets a
     CHECK(bsaid("usage: give <item name> [count]"));
 }
 
+namespace {
+struct FriendlyItemsWorld : ItemsWorld {
+    FriendlyItemsWorld() {
+        reg.add(0x13, 50, 250, "Material_T1_Wood_Logs_Dead");
+        reg.add(0x14, 60, 20, "Material_T0_simple_FishingBait");
+        reg.add(0x15, 70, 20, "Food_T2_Dog_Bait");
+        reg.add(0x16, 80, 1, "Tool_Torch_01");
+    }
+};
+}  // namespace
+
+TEST_CASE("builtin commands: give and stack take item names as people type them: spaces, any case, part of a name") {
+    BFixture f;
+    FriendlyItemsWorld iw;
+    f.state.tracker.on_tick(reinterpret_cast<EmfWorld*>(iw.w.p()), EMF_WORLD_SERVER, 1000);
+    f.center.enqueue("give fishing bait 4");
+    f.center.enqueue("give \"Wood Logs\" 2");  // quotes work too; not ..._Dead, which has a word more
+    f.center.enqueue("give bait");             // two baits: none is given, both are named
+    f.center.enqueue("give hardwood 2");
+    f.center.enqueue("stack dead logs 500");
+    f.center.enqueue("give tool torch 01 5");  // the count is the number at the end
+    f.run(iw.w);
+    CHECK(g_pickup_amounts == std::vector<uint32_t>{4, 2, 5});
+    CHECK(bsaid("gave 5 x Tool_Torch_01"));
+    CHECK(bsaid("gave 4 x Material_T0_simple_FishingBait"));
+    CHECK(bsaid("gave 2 x Material_T1_Wood_Logs to"));
+    CHECK(bsaid("'bait' could be 2 items: Food_T2_Dog_Bait, Material_T0_simple_FishingBait"));
+    CHECK(bsaid("unknown item 'hardwood'"));
+    CHECK(bsaid("Material_T1_Wood_Logs_Dead: stack 250 -> 500"));
+}
+
+TEST_CASE("builtin commands: items finds items by words in any order, best match first") {
+    BFixture f;
+    FriendlyItemsWorld iw;
+    f.center.enqueue("items logs wood");
+    f.run(iw.w);
+    CHECK(bsaid("2 of 6 items"));
+    const auto at = [](const std::string& start) {
+        for (size_t i = 0; i < g_bout.size(); ++i)
+            if (g_bout[i].find(start) != std::string::npos) return i;
+        return g_bout.size();
+    };
+    CHECK(at("Material_T1_Wood_Logs (") < at("Material_T1_Wood_Logs_Dead ("));
+    CHECK(at("Material_T1_Wood_Logs_Dead (") < g_bout.size());
+    CHECK(at("Torch") == g_bout.size());
+}
+
+TEST_CASE("builtin commands: put and take take item names as people type them; the numbers come after the name") {
+    BFixture f;
+    FriendlyItemsWorld iw;
+    InventoryService::Deps deps;
+    deps.after_step = [](std::function<void(EmfWorld*)>) {};
+    deps.fns.remove_items = reinterpret_cast<RemoveItemsFn>(0x1);  // present (not called: no program runs here)
+    InventoryService service(std::move(deps));
+    f.state.inventory = &service;
+    f.center.enqueue("put Fishing Bait 3 77");
+    f.center.enqueue("take dog bait 2");
+    f.run(iw.w);
+    REQUIRE(service.pending() == 2);
+    CHECK(service.pending_at(0).item == 0x14);
+    CHECK(service.pending_at(0).count == 3);
+    CHECK(service.pending_at(0).entity == 77);
+    CHECK(service.pending_at(1).item == 0x15);
+    CHECK(service.pending_at(1).count == 2);
+    service.world_reset();
+    f.state.inventory = nullptr;
+}
+
 TEST_CASE("builtin commands: spawn places count copies near the player") {
     BFixture f;
     FakeWorld w;

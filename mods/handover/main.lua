@@ -176,18 +176,73 @@ local function carried(world, id)
   return list
 end
 
--- The item `part` names among what the giver carries: an exact name wins, else the one name that contains it.
+-- Item names as people type them, the way EMF's give and items commands read them: case ignored, spaces for '_',
+-- words in any order, a part of a word is enough ("fishing bait" finds Material_T0_simple_FishingBait).
+-- The words of a name, in lower case: split at '_', '-', spaces and where a capital follows a small letter.
+local function words_of(text)
+  local out = {}
+  for chunk in text:gmatch("[^_%-%s]+") do
+    local start = 1
+    for i = 2, #chunk do
+      if chunk:sub(i - 1, i - 1):match("%l") and chunk:sub(i, i):match("%u") then
+        out[#out + 1] = chunk:sub(start, i - 1):lower()
+        start = i
+      end
+    end
+    out[#out + 1] = chunk:sub(start):lower()
+  end
+  return out
+end
+
+-- The word a debug name starts with to say what kind of item it is (Material_T1_Wood_Logs, Tool_Torch_01).
+local CATEGORY = {material = true, food = true, tool = true, ammo = true, weapon = true, armor = true, armour = true,
+  block = true, build = true, prop = true, resource = true, consumable = true}
+
+-- Every own word of the item (not its category, tier or number: "Material", "T1", "01") was typed: a typed word starts
+-- it, or it starts a typed word.
+local function all_own_words_typed(words, typed)
+  local need = {}
+  for i, w in ipairs(words) do
+    local tier = w:match("^%d+$") or w:match("^t%d+$") or w:match("^lvl%d+$")
+    if not tier and not (i == 1 and CATEGORY[w]) then need[#need + 1] = w end
+  end
+  if #need == 0 then need = words end
+  for _, w in ipairs(need) do
+    local typed_it = false
+    for _, t in ipairs(typed) do
+      if w:sub(1, #t) == t or t:sub(1, #w) == w then typed_it = true break end
+    end
+    if not typed_it then return false end
+  end
+  return true
+end
+
+-- The item `part` names among what the giver carries: an exact name wins, then the item with exactly the words typed,
+-- then the only item whose name holds every word typed, then the only one of those whose own words were all typed.
 -- Returns the entry, or nil and why.
 local function match(list, part)
   local q = part:lower()
   if q == "" then return nil, "say which item: /handover <part of its name> [count|all]" end
-  local hits = {}
+  local typed = words_of(part)
+  local hits, same, meant = {}, {}, {}
   for _, e in ipairs(list) do
     local n = e.name:lower()
     if n == q then return e end
-    if n:find(q, 1, true) then hits[#hits + 1] = e end
+    local words = words_of(e.name)
+    local compact = table.concat(words)
+    local all = #typed > 0
+    for _, t in ipairs(typed) do
+      if not compact:find(t, 1, true) then all = false break end
+    end
+    if all then
+      hits[#hits + 1] = e
+      if table.concat(words, " ") == table.concat(typed, " ") then same[#same + 1] = e end
+      if all_own_words_typed(words, typed) then meant[#meant + 1] = e end
+    end
   end
+  if #same == 1 then return same[1] end
   if #hits == 1 then return hits[1] end
+  if #meant == 1 then return meant[1] end
   if #hits == 0 then return nil, "you carry nothing named like '" .. part .. "'" end
   local names = {}
   for i = 1, math.min(5, #hits) do names[i] = hits[i].name end

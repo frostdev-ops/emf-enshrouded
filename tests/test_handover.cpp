@@ -214,6 +214,25 @@ TEST_CASE("handover: an exact name wins over parts; several matches list the fir
     CHECK(h.r.fake.takes.size() == 1);
 }
 
+TEST_CASE("handover: item names as people type them: spaces, words in any order, a part of a word") {
+    HandoverRig h;
+    h.player(1, 0, 0xA1, "Alice");
+    h.player(2, 2, 0xB2, "Bob");
+    h.r.fake.item_names[0x51] = "Material_T0_simple_FishingBait";
+    h.r.fake.item_names[0x52] = "Food_T2_Dog_Bait";
+    h.r.fake.item_names[0x53] = "Material_T1_Wood_Logs_Dead";
+    h.carry(1, {{0x51, 5}, {0x52, 3}, {kLogs, 10}, {0x53, 4}});
+    h.chat_from(1, 0xA1);
+    CHECK(h.reply("handover Fishing Bait") == "Handing 5 x Material_T0_simple_FishingBait to Bob");
+    h.seconds(3);
+    CHECK(h.reply("handover bait dog 2") == "Handing 2 x Food_T2_Dog_Bait to Bob");
+    h.seconds(3);
+    // the logs, not the dead logs: those have a word more than was typed
+    CHECK(h.reply("handover wood log 4") == "Handing 4 x Material_T1_Wood_Logs to Bob");
+    h.seconds(3);
+    CHECK(h.reply("handover bait") == "which one? Food_T2_Dog_Bait, Material_T0_simple_FishingBait");
+}
+
 TEST_CASE("handover: nobody in reach is refused; the giver never receives; the reach is a setting") {
     HandoverRig h;
     h.player(1, 0, 0xA1, "Alice");

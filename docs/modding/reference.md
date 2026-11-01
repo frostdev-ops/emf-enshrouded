@@ -462,3 +462,15 @@ every mod under a name, as in EMF.exe; a load applies at the next start), `items
 dedicated server, with their account hashes for `[chat] admins`, their connection and name). Commands go into the in-game console (the key under Esc), the optional
 console window (`[console] window=1` in `emf\emf_core.ini`), or `<game>\emf\commands.txt` (one per line; EMF runs the
 file about once a second). Replies are `[cmd]` lines in the log.
+
+**Item names** in `give`, `put`, `take` and `stack` are the game's debug names (`Material_T1_Wood_Logs`), typed the
+easy way: any case, spaces instead of `_`, words in any order, a part of a word is enough. The plain numbers at the end
+are the command's numbers and the words before them the name (`give fishing bait 4`, `put wood logs 20 1025`, `give
+tool torch 01 5`), or put the name in "double quotes". The exact
+name wins; else the item with exactly those words; else the only item whose name holds every word typed. Of several,
+the one whose own words were all typed is meant (`wood logs` is `Material_T1_Wood_Logs`, not `..._Logs_Dead`; the
+category and tier words such as `Material`, `T1` or `01` do not count); otherwise nothing is given and the reply names
+them (`'bait' could be 2 items: Food_T2_Dog_Bait, Material_T0_simple_FishingBait`). `items <words>` finds names by the
+same rules, best match first. The names the game shows ("Wood Log", "Hardwood") are in its text tables, which EMF does
+not read: type a word of the debug name (`items wood` lists them). Mods still look items up by the exact debug name
+(`find_item`, `emf.item`).

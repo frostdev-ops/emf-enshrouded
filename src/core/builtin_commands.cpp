@@ -19,6 +19,7 @@
 #include "api.h"
 #include "daytime.h"
 #include "inventory.h"
+#include "item_names.h"
 #include "emf/emf.hpp"
 #include "emf/generated/components.hpp"
 
@@ -63,6 +64,61 @@ std::string lower(std::string s) {
     for (auto& c : s)
         if (c >= 'A' && c <= 'Z') c = char(c - 'A' + 'a');
     return s;
+}
+
+// ---- item names as people type them (item_names.h): give, put, take, stack, items ----
+struct ItemList {
+    std::vector<NamedItem> named;
+    std::vector<uint16_t> stack;  // max stack, in the same order
+};
+
+ItemList all_items(BuiltinContext& c, EmfWorld* w) {
+    ItemList l;
+    c.api->for_each_item(w, [](const EmfItemInfo* i, void* p) {
+        auto* list = static_cast<ItemList*>(p);
+        list->named.push_back({i->item_id, i->name});
+        list->stack.push_back(i->max_stack);
+    }, &l);
+    return l;
+}
+
+bool all_digits(const char* s) {
+    if (!s || !*s) return false;
+    for (; *s; ++s)
+        if (*s < '0' || *s > '9') return false;
+    return true;
+}
+
+// A command's item name and the numbers after it: the numbers are the plain numbers at the end (at most max_numbers of
+// them), the name is every word before them ("give fishing bait 4", "put Fishing Bait 3 77", "give tool torch 01 5";
+// "quotes" work too). False when there is no name.
+struct ItemArgs {
+    std::string name;
+    std::vector<const char*> numbers;
+};
+bool split_item_args(int argc, const char* const* argv, size_t max_numbers, ItemArgs* out) {
+    int end = argc;
+    while (end > 2 && static_cast<size_t>(argc - end) < max_numbers && all_digits(argv[end - 1])) --end;
+    for (int i = 1; i < end; ++i) out->name += (i > 1 ? " " : "") + std::string(argv[i]);
+    for (int i = end; i < argc; ++i) out->numbers.push_back(argv[i]);
+    return !out->name.empty();
+}
+
+// The item a command means (match_item), or 0 after saying why: no item has that name, or which items it could be.
+uint32_t item_named(BuiltinContext& c, EmfWorld* w, const std::string& typed) {
+    const ItemList l = all_items(c, w);
+    const ItemMatch m = match_item(l.named, typed);
+    if (m.id) return m.id;
+    if (m.matches.empty()) {
+        command_reply_line("unknown item '" + typed + "' (items <part of a name> lists names)");
+        return 0;
+    }
+    constexpr size_t kNamed = 8;
+    std::string line = "'" + typed + "' could be " + std::to_string(m.matches.size()) + " items: ";
+    for (size_t k = 0; k < m.matches.size() && k < kNamed; ++k) line += (k ? ", " : "") + l.named[m.matches[k]].name;
+    if (m.matches.size() > kNamed) line += " and " + std::to_string(m.matches.size() - kNamed) + " more";
+    command_reply_line(line + ". Type more of the name.");
+    return 0;
 }
 
 bool player_pos(BuiltinContext& c, EmfWorld* w, uint32_t player, double out[3]) {
@@ -420,35 +476,36 @@ void cmd_set(EmfWorld*, int argc, const char* const* argv, void* u) {
     command_reply_line("refused: " + why);
 }
 
+// items [words]: the items whose names hold every word (in any order, a part of a word is enough), best match first
 void cmd_items(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
-    const std::string filter = argc > 1 ? lower(argv[1]) : std::string();
-    struct Acc {
-        std::string filter;
-        size_t total = 0, shown = 0, matched = 0;
-    } acc{filter};
-    c.api->for_each_item(w, [](const EmfItemInfo* i, void* p) {
-        auto* a = static_cast<Acc*>(p);
-        ++a->total;
-        if (!a->filter.empty() && lower(i->name).find(a->filter) == std::string::npos) return;
-        ++a->matched;
-        if (a->shown++ < 50) command_reply_line(fmt("%s (0x%08x, stack %u)", i->name, i->item_id, i->max_stack));
-    }, &acc);
-    command_reply_line(fmt("%zu of %zu items%s", acc.matched, acc.total, acc.matched > 50 ? " (first 50 shown)" : ""));
+    std::string typed;
+    for (int i = 1; i < argc; ++i) typed += (i > 1 ? " " : "") + std::string(argv[i]);
+    const ItemList l = all_items(c, w);
+    std::vector<size_t> found;
+    if (typed.empty()) {
+        for (size_t i = 0; i < l.named.size(); ++i) found.push_back(i);
+    } else {
+        found = search_items(l.named, typed);
+    }
+    for (size_t k = 0; k < found.size() && k < 50; ++k) {
+        const NamedItem& it = l.named[found[k]];
+        command_reply_line(fmt("%s (0x%08x, stack %u)", it.name.c_str(), it.id, unsigned(l.stack[found[k]])));
+    }
+    command_reply_line(fmt("%zu of %zu items%s", found.size(), l.named.size(), found.size() > 50 ? " (first 50 shown)" : ""));
 }
 
 void cmd_give(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
     uint32_t count = 1;
-    if (argc < 2 || argc > 3 || (argc == 3 && (!parse_uint(argv[2], 65535, &count) || count == 0))) {
+    ItemArgs a;
+    if (!split_item_args(argc, argv, 1, &a) ||
+        (a.numbers.size() == 1 && (!parse_uint(a.numbers[0], 65535, &count) || count == 0))) {
         command_reply_line("usage: give <item name> [count]");
         return;
     }
-    const uint32_t id = c.api->find_item(w, argv[1]);
-    if (!id) {
-        command_reply_line(fmt("unknown item '%s' (items <part of a name> lists names)", argv[1]));
-        return;
-    }
+    const uint32_t id = item_named(c, w, a.name);
+    if (!id) return;
     EmfItemInfo info{};
     info.size = sizeof(info);
     c.api->item_info(w, id, &info);
@@ -487,26 +544,23 @@ void take_done(EmfWorld* w, uint32_t entity, uint32_t item, uint32_t requested, 
 void cmd_items(EmfWorld* w, int argc, const char* const* argv, void* u, bool take) {
     auto& c = ctx_of(u);
     uint32_t count = 1, entity = 0, level = 0, rarity = 0xFF;
-    const int max_args = take ? 4 : 6;
-    bool ok = argc >= 2 && argc <= max_args;
-    if (ok && argc >= 3) ok = parse_uint(argv[2], 65535, &count) && count > 0;
-    if (ok && argc >= 4) ok = parse_uint(argv[3], 0xffffffffu, &entity) && entity > 0;
-    if (ok && argc >= 5) ok = parse_uint(argv[4], 1000, &level);
-    if (ok && argc >= 6) ok = parse_uint(argv[5], 4, &rarity);
+    ItemArgs a;
+    bool ok = split_item_args(argc, argv, take ? 2 : 4, &a);
+    if (ok && a.numbers.size() >= 1) ok = parse_uint(a.numbers[0], 65535, &count) && count > 0;
+    if (ok && a.numbers.size() >= 2) ok = parse_uint(a.numbers[1], 0xffffffffu, &entity) && entity > 0;
+    if (ok && a.numbers.size() >= 3) ok = parse_uint(a.numbers[2], 1000, &level);
+    if (ok && a.numbers.size() >= 4) ok = parse_uint(a.numbers[3], 4, &rarity);
     if (!ok) {
         command_reply_line(take ? "usage: take <item name> [count 1-65535] [entity]"
                                 : "usage: put <item name> [count 1-65535] [entity] [level] [rarity 0-4]");
         return;
     }
-    const uint32_t id = c.api->find_item(w, argv[1]);
-    if (!id) {
-        command_reply_line(fmt("unknown item '%s' (items <part of a name> lists names)", argv[1]));
-        return;
-    }
+    const uint32_t id = item_named(c, w, a.name);
+    if (!id) return;
     if (!entity) entity = c.player ? c.player() : 0;
     auto* late = new LateItems{&c, current_reply()};  // freed by the result callback, or below when refused
     bool queued = false;
-    if (!take && argc < 5) {
+    if (!take && a.numbers.size() < 3) {
         queued = c.api->put_items(w, entity, id, count, put_done, late);
     } else {
         EmfItemsRequest r{};
@@ -883,15 +937,13 @@ void cmd_tplset(EmfWorld* w, int argc, const char* const* argv, void* u) {
 void cmd_stack(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
     uint32_t max = 0;
-    if (argc != 3 || !parse_uint(argv[2], 65535, &max) || max == 0) {
+    ItemArgs a;
+    if (!split_item_args(argc, argv, 1, &a) || a.numbers.size() != 1 || !parse_uint(a.numbers[0], 65535, &max) || max == 0) {
         command_reply_line("usage: stack <item name> <max 1-65535>");
         return;
     }
-    const uint32_t id = c.api->find_item(w, argv[1]);
-    if (!id) {
-        command_reply_line(fmt("unknown item '%s' (items <part of a name> lists names)", argv[1]));
-        return;
-    }
+    const uint32_t id = item_named(c, w, a.name);
+    if (!id) return;
     EmfItemInfo info{};
     info.size = sizeof(info);
     c.api->item_info(w, id, &info);
@@ -956,7 +1008,7 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         {"hooks", ": every inline hook, its owner and target (EMF's and mods')", cmd_hooks},
         {"pattern", "<bytes> [.section]: test a byte pattern against the game exe (found once?)", cmd_pattern},
         {"set", "<mod> <key> <value>: change a mod's setting (saved in emf/config/<mod>.ini)", cmd_set},
-        {"items", "[part of a name]: list the game's items (debug names)", cmd_items},
+        {"items", "[words]: find the game's items by name (words in any order, part of a word is enough)", cmd_items},
         {"give", "<item name> [count]: drop items at your feet (host)", cmd_give},
         {"put", "<item name> [count 1-65535] [entity] [level] [rarity 0-4]: put items straight into an inventory, yours by "
                 "default (host)",
