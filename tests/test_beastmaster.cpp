@@ -631,6 +631,20 @@ TEST_CASE("beastmaster: a bear is the wolf's graph at 1.4x scale (the pack's Sca
     CHECK(b.reply("beastmaster.tame").find("Taming the wolf") != std::string::npos);
 }
 
+TEST_CASE("beastmaster: the bear pack 2's bear is its own graph (its own skeleton) at 1.4x; the older pack's is the wolf's") {
+    constexpr const char* kBearGraph = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f05";
+    BeastRig b;
+    CHECK(b.reply(std::string("beastmaster.species ") + kBearGraph + " 6 1.4") == "bear");
+    CHECK(b.reply(std::string("beastmaster.species ") + kWolfGraph + " 6 1.4") == "bear");  // the bear pack 1.0
+    CHECK(b.reply(std::string("beastmaster.species ") + kWolfGraph + " 6 1") == "wolf");
+    b.beast(60, kBearGraph, 2, 2, kWildBeast, 20, 100);
+    component<ecs::ScaleComponent>(b.r.fake, 60).uniformScale = 1.4f;
+    b.look(1, 0, 10.5, 0, 45);
+    CHECK(b.reply("beastmaster.tame").find("Taming the bear") != std::string::npos);
+    b.seconds(4);
+    CHECK(b.reply("beastmaster.list").find("1. Bear - bear, out") != std::string::npos);
+}
+
 TEST_CASE("beastmaster: a creature that gets a dead wild bear's id is not a bear") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.spawnable(1);

@@ -88,7 +88,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
 | `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while someone builds next to them |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
-| `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear is the wolf's graph at 1.4x, the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
+| `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
 
 ## Settings (Mods tab, EMF.exe, or `set beastmaster <key> <value>`)
 
@@ -113,12 +113,16 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 
 ## The bear pack (`emf_beastmaster_bear`)
 
-An EML data patch that adds one new creature, `Beastmaster_Bear` (template `b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02`). Its
-model was made with Meshy and fitted to the game wolf's skeleton, so it moves with the wolf's animations and AI. It is in
+An EML data patch that adds one new creature, `Beastmaster_Bear` (template `b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02`): a
+realistic grizzly on a skeleton and animations of its own (it walks, runs, rears up to swipe, flinches and rolls over
+when it dies), played by a copy of the game wolf's animation graph and AI. Bear model and animations: "Realistic Animated
+Bear 3D Model" by WildMesh 3D, licensed under CC BY 4.0 (used in the game with changes). Pack 1.0's bear, made with
+Meshy on the game wolf's skeleton, is still known to Beastmaster. It is in
 the **EMF creature packs** download on EMF's Nexus page. It needs **EML (or ShroudForge) installed first**, which loads
 it when the game starts; then install the pack with EMF.exe ("Install a downloaded file") or like any EML mod (the
 `mods` folder next to the game, run through EML's `emm.exe`). The template sets the size
-(`ScaleComponent` 1.4), the damage (DamageMod multiplier x1.5) and the speeds (x0.85). The health (x2.5) comes from
+(`ScaleComponent` 1.4), the damage (DamageMod multiplier x1.5) and the speeds (walk 1.6 m/s, run 6 m/s as a wolf's,
+the rest x0.85). The health (x2.5) comes from
 Beastmaster when it spawns a bear: the game's template has no base health of its own.
 
 To rebuild it from its sources (for modders; the sources are not in the repository): `python -I
