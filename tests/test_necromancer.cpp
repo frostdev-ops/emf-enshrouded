@@ -2,6 +2,7 @@
 // components and commands (tests/lua_mod_rig.h).
 #include "lua_mod_rig.h"
 
+#include "core/overlay/wheel_ui.h"
 #include "emf/keys.hpp"
 
 namespace {
@@ -331,7 +332,7 @@ TEST_CASE("beastmaster + necromancer: one wheel with both sections; a pick in ei
     CHECK(item_at(n.r.fake.wheels[3].items, "Tame") >= 0);
 }
 
-TEST_CASE("beastmaster + necromancer: the wheel's labels are short (a name of at most 20 characters, a detail of at most 14)") {
+TEST_CASE("beastmaster + necromancer: the wheel's labels are short and every line fits its slice (a page of 8, the overlay's font)") {
     NecroRig n({}, {"beastmaster"});
     for (const char* s : {"wolf", "boar", "sabretooth", "sabretooth", "hound", "aurochs"})
         n.reply(std::string("beastmaster.give ") + s);
@@ -354,7 +355,17 @@ TEST_CASE("beastmaster + necromancer: the wheel's labels are short (a name of at
         const std::string name = label.substr(0, cut);
         const std::string detail = cut == std::string::npos ? "" : label.substr(cut + 1);
         CHECK_MESSAGE(name.size() <= 20, label);
-        CHECK_MESSAGE(detail.size() <= 14, label);
+        CHECK_MESSAGE(detail.size() <= 13, label);
+    }
+    // as the overlay draws them: Consolas at height / 54 pixels (0.55 of that a character), wrapped by the wheel's code
+    for (float h : {1080.0f, 2160.0f}) {
+        const float width = emf::core::wheel_label_width(ImVec2(h * 16.0f / 9.0f, h), 8);
+        const auto measure = [h](const std::string& s) { return 0.55f * (h / 54.0f) * static_cast<float>(s.size()); };
+        for (const auto& label : n.r.fake.wheels[0].items) {
+            const auto lines = emf::core::wheel_label_layout(label, width, measure);
+            CHECK_MESSAGE(lines.size() <= 4, label);
+            for (const auto& l : lines) CHECK_MESSAGE(measure(l.text) <= width, label << ": " << l.text);
+        }
     }
 }
 

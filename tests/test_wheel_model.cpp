@@ -145,6 +145,46 @@ TEST_CASE("wheel labels: details in brackets go on a second line") {
     CHECK(one.second.empty());
 }
 
+namespace {
+std::string lines_text(const std::vector<emf::core::WheelLabelLine>& lines) {
+    std::string out;
+    for (const auto& l : lines) out += (out.empty() ? "" : "|") + std::string(l.dim ? "~" : "") + l.text;
+    return out;
+}
+}  // namespace
+
+TEST_CASE("wheel labels: a name too wide for its slice wraps (after a shared wheel's section first), its detail below, dimmed") {
+    const auto ten_per_char = [](const std::string& s) { return 10.0f * static_cast<float>(s.size()); };
+    using emf::core::wheel_label_layout;
+    // fits: as before (one line, the detail dimmed below)
+    CHECK(lines_text(wheel_label_layout("Mace (6 Wood Logs, 1 Stone)", 300.0f, ten_per_char)) == "Mace|~(6 Wood Logs, 1 Stone)");
+    CHECK(lines_text(wheel_label_layout("Stop working", 300.0f, ten_per_char)) == "Stop working");
+    CHECK(lines_text(wheel_label_layout("Undead: Gather", 160.0f, ten_per_char)) == "Undead: Gather");
+    // a shared wheel's "Section: " goes on its own dimmed line when the whole name does not fit
+    CHECK(lines_text(wheel_label_layout("Beasts: Call Sabretooth (rests 1:20)", 160.0f, ten_per_char)) ==
+          "~Beasts:|Call Sabretooth|~(rests 1:20)");
+    // and what is left still too wide wraps at a space
+    CHECK(lines_text(wheel_label_layout("Beasts: Dismiss Sabretooth 2", 160.0f, ten_per_char)) ==
+          "~Beasts:|Dismiss|Sabretooth 2");
+    // no section: the name wraps at the last space that fits
+    CHECK(lines_text(wheel_label_layout("Raise Bone Golem Champion (0/1)", 120.0f, ten_per_char)) ==
+          "Raise Bone|Golem Champion|~(0/1)");
+    // one long word: one line (the drawing cuts it)
+    CHECK(lines_text(wheel_label_layout("Supercalifragilistic", 120.0f, ten_per_char)) == "Supercalifragilistic");
+    // a colon that is not a section (no space after it, or the name fits) stays where it is
+    CHECK(lines_text(wheel_label_layout("Time 12:30", 120.0f, ten_per_char)) == "Time 12:30");
+}
+
+TEST_CASE("wheel labels: a page of 8 slices gives a label about 13 characters of the overlay's font a line, at any screen size") {
+    for (float h : {1080.0f, 1440.0f, 2160.0f}) {
+        const float w = emf::core::wheel_label_width(ImVec2(h * 16.0f / 9.0f, h), 8);
+        const float ch = 0.55f * (h / 54.0f);  // Consolas at height / 54 pixels (overlay.cpp's setup_fonts)
+        CHECK(13.0f * ch <= w);
+        CHECK(15.0f * ch > w);
+    }
+    CHECK(emf::core::wheel_label_width(ImVec2(1920, 1080), 2) > emf::core::wheel_label_width(ImVec2(1920, 1080), 8));
+}
+
 TEST_CASE("wheel title: a long title wraps at a space onto two lines") {
     const auto ten_per_char = [](const std::string& s) { return 10.0f * static_cast<float>(s.size()); };
     // "Villager 1026: make what?" is 25 chars = 250 px; 150 px fits 15 chars a line

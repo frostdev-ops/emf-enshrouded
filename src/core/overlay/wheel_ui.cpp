@@ -37,6 +37,36 @@ std::pair<std::string, std::string> wheel_title_lines(const std::string& title, 
     return {title, ""};
 }
 
+std::vector<WheelLabelLine> wheel_label_layout(const std::string& label, float width,
+                                               const std::function<float(const std::string&)>& measure) {
+    const auto [name, detail] = wheel_label_lines(label);
+    std::vector<WheelLabelLine> lines;
+    std::string rest = name;
+    if (measure(name) > width) {
+        const size_t colon = name.find(": ");  // a shared wheel's "Section: label"
+        if (colon != std::string::npos && colon > 0 && colon + 2 < name.size()) {
+            lines.push_back({name.substr(0, colon + 1), true});
+            rest = name.substr(colon + 2);
+        }
+        const auto [first, second] = wheel_title_lines(rest, width, measure);
+        lines.push_back({first, false});
+        if (!second.empty()) lines.push_back({second, false});
+    } else {
+        lines.push_back({rest, false});
+    }
+    if (!detail.empty()) lines.push_back({detail, true});
+    return lines;
+}
+
+float wheel_label_width(ImVec2 display, size_t slices) {
+    const float outer = (std::min)(display.x, display.y) * 0.30f;
+    const float inner = outer * 0.34f;
+    const float r = (outer + inner) * 0.5f;
+    const float half = kPi / static_cast<float>(slices ? slices : 1);
+    // One or two slices are half discs or more: their labels may use most of the chord.
+    return slices > 2 ? (std::min)((outer - inner) * 1.7f, 2.0f * r * std::sin(half) * 0.92f) : outer * 1.35f;
+}
+
 void draw_wheel(const WheelModel& wheel, ImVec2 display) {
     if (!wheel.is_open()) return;
     ImDrawList* dl = ImGui::GetForegroundDrawList();
@@ -64,15 +94,17 @@ void draw_wheel(const WheelModel& wheel, ImVec2 display) {
 
         const float r = (outer + inner) * 0.5f;
         const ImVec2 at(c.x + std::cos(mid) * r, c.y + std::sin(mid) * r);
-        // One or two slices are half discs or more: their labels may use most of the chord.
-        const float width = n > 2 ? (std::min)((outer - inner) * 1.7f, 2.0f * r * std::sin(half) * 0.92f) : outer * 1.35f;
-        const auto [name, detail] = wheel_label_lines(wheel.items()[first + i]);
+        const float width = wheel_label_width(display, n);
+        // The label in up to 4 lines (a name too wide wraps; a shared wheel's section and the detail are dimmed),
+        // centred on the slice, each line cut with "..." if it is still too wide.
+        const auto lines = wheel_label_layout(wheel.items()[first + i], width,
+                                              [](const std::string& s) { return ImGui::CalcTextSize(s.c_str()).x; });
         const ImU32 text = on ? IM_COL32(255, 255, 255, 255) : IM_COL32(220, 222, 230, 255);
-        if (detail.empty()) {
-            centered_text(dl, at, text, fit(name, width));
-        } else {
-            centered_text(dl, ImVec2(at.x, at.y - line_h * 0.55f), text, fit(name, width));
-            centered_text(dl, ImVec2(at.x, at.y + line_h * 0.55f), IM_COL32(170, 175, 190, 255), fit(detail, width));
+        const float step = line_h * 1.1f;
+        float y = at.y - step * 0.5f * static_cast<float>(lines.size() - 1);
+        for (const auto& l : lines) {
+            centered_text(dl, ImVec2(at.x, y), l.dim ? IM_COL32(170, 175, 190, 255) : text, fit(l.text, width));
+            y += step;
         }
     }
     // Centre: title, page, and a dot showing where the mouse points.
