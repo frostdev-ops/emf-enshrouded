@@ -22,7 +22,10 @@ struct Rig {
     ws::State state;
     ws_test::GS live = defaults();
     bool hosted = true;
-    ws::Service svc{state, ws::ServiceDeps{[this] { return hosted ? bytes(live) : nullptr; }, [] { return 1u; }}};
+    bool sync = true;     // the game's resync works on this build
+    bool can_keep = true;  // this world's kept-settings file is ready
+    ws::Service svc{state, ws::ServiceDeps{[this] { return hosted ? bytes(live) : nullptr; }, [] { return 1u; },
+                                           [this] { return sync; }, [this] { return can_keep; }}};
     CommandCenter center;
     std::vector<std::string> out;
     Rig() {
@@ -105,4 +108,32 @@ TEST_CASE("world commands: world.list shows every setting by group; world.export
     const std::string block = r.run("world.export");
     CHECK(block.find("\"gameSettingsPreset\": \"Custom\"") != std::string::npos);
     CHECK(block.find("\"dayTimeDuration\": 1800000000000") != std::string::npos);
+}
+
+TEST_CASE("world commands: without the game's resync the reply says players' games keep the old value") {
+    Rig r;
+    r.sync = false;
+    const std::string day = r.run("world.set day_minutes 10");
+    CHECK(day.find("day_minutes (dayTimeDuration) = 10 min") != std::string::npos);
+    CHECK(day.find("every player gets it") == std::string::npos);
+    CHECK(day.find("players' games keep the old value until they reconnect") != std::string::npos);
+    // a setting only the server reads still reaches everyone
+    CHECK(r.run("world.set loot 2").find("every player gets it") != std::string::npos);
+    CHECK(r.run("world.reset all").find("until they reconnect") != std::string::npos);
+    r.sync = true;
+    CHECK(r.run("world.set day_minutes 20").find("every player gets it") != std::string::npos);
+}
+
+TEST_CASE("world commands: persist is refused while this world's kept settings cannot be saved; without it the change works") {
+    Rig r;
+    r.can_keep = false;
+    const std::string kept = r.run("world.set loot 2 persist");
+    CHECK(kept.find("world.set: ") != std::string::npos);
+    CHECK(kept.find("cannot be kept") != std::string::npos);
+    CHECK(r.run("world.reset all persist").find("cannot be kept") != std::string::npos);
+    r.step(1000);
+    CHECK(r.live.resourceDropStackAmountFactor == doctest::Approx(1));  // nothing was queued
+    CHECK(r.run("world.set loot 2").find("until the world is loaded again") != std::string::npos);
+    r.step(2000);
+    CHECK(r.live.resourceDropStackAmountFactor == doctest::Approx(2));
 }

@@ -2,6 +2,7 @@
 // World settings, the game side: on the server world's step, apply the queued changes to its ecs::GameSettings and ask
 // the game to send the struct to every player (the GameServer instance's send-settings flag; the next ServerInfo carries
 // it, then the game clears the flag). Also hands the world's kept overrides in and saves them when they change.
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <string>
@@ -24,11 +25,14 @@ public:
     // GameServer instance of this session (may be null), `file_text` the world's kept overrides when they arrived.
     State::Step server_step(uint8_t* live, uint8_t* instance, uint32_t session, uint64_t now_ms, const std::string* file_text);
     bool can_sync() const;
+    // The resync works now: the offsets are known and the last attempt found this world's struct (any thread).
+    bool sync_ok() const;
 
 private:
     State& state_;
     GlueDeps deps_;
     uint32_t warned_session_ = 0;
+    std::atomic<bool> pointer_mismatch_{false};
 };
 
 }  // namespace emf::core::ws

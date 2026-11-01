@@ -21,6 +21,23 @@ bool read_live(const uint8_t* live, uint8_t (&out)[kStructSize]) { return live &
 
 Service::Service(State& state, ServiceDeps deps) : state_(state), deps_(std::move(deps)) {}
 
+bool Service::can_sync() const { return !deps_.can_sync || deps_.can_sync(); }
+
+bool Service::may_queue(bool persist, std::string* why) const {
+    if (!deps_.live || !deps_.live()) {
+        if (why) *why = kNoWorld;
+        return false;
+    }
+    if (!state_.writes_allowed(deps_.session ? deps_.session() : 0, why)) return false;
+    if (persist && deps_.can_persist && !deps_.can_persist()) {
+        if (why)
+            *why = "it cannot be kept: EMF has not seen this world's save load, so its kept settings cannot be saved "
+                   "yet (try again in a moment, or without persist)";
+        return false;
+    }
+    return true;
+}
+
 bool Service::get(std::string_view key, double* value, std::string* why) const {
     const Field* f = find(key);
     if (!f) return unknown(key, why);
@@ -34,10 +51,7 @@ bool Service::get(std::string_view key, double* value, std::string* why) const {
 }
 
 bool Service::queue_checked(const Field& f, double value, bool persist, std::string* why) {
-    if (!deps_.live || !deps_.live()) {
-        if (why) *why = kNoWorld;
-        return false;
-    }
+    if (!may_queue(persist, why)) return false;
     char b[48];
     std::snprintf(b, sizeof b, "%.9g", value);
     const Parsed p = parse(f, b);
@@ -71,10 +85,7 @@ bool Service::reset(std::string_view key, bool persist, std::string* why) {
         f = find(key);
         if (!f) return unknown(key, why);
     }
-    if (!deps_.live || !deps_.live()) {
-        if (why) *why = kNoWorld;
-        return false;
-    }
+    if (!may_queue(persist, why)) return false;
     state_.queue({f, 0, true, persist}, deps_.session ? deps_.session() : 0);
     return true;
 }

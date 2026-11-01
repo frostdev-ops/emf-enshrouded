@@ -15,6 +15,8 @@ namespace emf::core::ws {
 struct ServiceDeps {
     std::function<uint8_t*()> live;     // the server world's ecs::GameSettings, or null (no world hosted here)
     std::function<uint32_t()> session;  // the hosted session
+    std::function<bool()> can_sync;     // the game's resync works (null: yes)
+    std::function<bool()> can_persist;  // this world's kept settings can be saved now (null: yes)
 };
 
 class Service {
@@ -25,6 +27,7 @@ public:
     bool set(std::string_view key, double value, bool persist, std::string* why);
     bool set_text(std::string_view key, std::string_view value, bool persist, std::string* why);  // enum names too
     bool reset(std::string_view key, bool persist, std::string* why);  // "" or "all": every setting
+    bool can_sync() const;  // false: players' games keep the old values of the settings they read until they reconnect
 
     struct Row {
         const Field* field;
@@ -40,6 +43,7 @@ public:
 
 private:
     bool queue_checked(const Field& f, double value, bool persist, std::string* why);
+    bool may_queue(bool persist, std::string* why) const;
     State& state_;
     ServiceDeps deps_;
     std::mutex cb_m_;

@@ -62,7 +62,11 @@ void cmd_set(EmfWorld*, int argc, const char* const* argv, void* u) {
     }
     const Field* f = ws::find(argv[1]);
     const ws::Parsed p = ws::parse(*f, argv[2]);
-    command_reply_line(label(*f) + " = " + ws::text(*f, p.value) + " from the next step; every player gets it" +
+    const bool lag = f->needs_client && !svc_of(u).can_sync();
+    command_reply_line(label(*f) + " = " + ws::text(*f, p.value) + " from the next step; " +
+                       (lag ? "the server uses it, but players' games keep the old value until they reconnect (the "
+                              "game's resync is not known on this build)"
+                            : "every player gets it") +
                        (persist ? "; kept for this world" : "; until the world is loaded again"));
 }
 
@@ -77,7 +81,8 @@ void cmd_reset(EmfWorld*, int argc, const char* const* argv, void* u) {
     }
     const Field* f = key == "all" ? nullptr : ws::find(key);
     command_reply_line(std::string(f ? label(*f) + " goes" : "every setting goes") +
-                       " back to this world's own value from the next step" + (persist ? "; no longer kept" : ""));
+                       " back to this world's own value from the next step" + (persist ? "; no longer kept" : "") +
+                       (svc_of(u).can_sync() ? "" : "; players' games keep the old values until they reconnect"));
 }
 
 void cmd_list(EmfWorld*, int, const char* const*, void* u) {

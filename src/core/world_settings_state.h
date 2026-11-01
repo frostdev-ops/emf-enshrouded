@@ -37,7 +37,11 @@ public:
     bool has_base() const;
     double base_value(const Field& f) const;
     std::map<std::string, double> persisted() const;
-    void set_persisted(std::map<std::string, double> values);
+    // The kept values read from this session's world file. A new session drops kept values of another session.
+    void set_persisted(std::map<std::string, double> values, uint32_t session);
+    // On a game build EMF does not know: a session whose first struct is not plausible() gets no writes.
+    void require_plausible_base(bool on);
+    bool writes_allowed(uint32_t session, std::string* why) const;
 
 private:
     struct Queued {
@@ -47,6 +51,11 @@ private:
     mutable std::mutex m_;
     std::vector<Queued> queue_;
     std::map<std::string, double> persisted_;
+    uint32_t persisted_session_ = 0;
+    bool require_plausible_ = false;
+    bool off_ = false;          // writes are off for off_session_ (an implausible base)
+    uint32_t off_session_ = 0;
+    std::string off_why_;
     std::array<uint8_t, kStructSize> base_{};
     uint32_t base_session_ = 0;
     bool pending_sync_ = false;

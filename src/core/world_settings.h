@@ -47,6 +47,9 @@ std::string range_text(const Field& f);                   // "0.25 to 2", "Disab
 bool crash_safe(const uint8_t* gs, std::string* why);
 // Field by field (padding ignored).
 bool equal(const uint8_t* a, const uint8_t* b);
+// crash_safe, and every value one the game uses (factors finite and 0-10, durations 1-240 minutes): on a game build
+// EMF does not know, a struct that fails this is laid out differently, and EMF must not write it.
+bool plausible(const uint8_t* gs, std::string* why);
 // "gameSettingsPreset": "Custom" and the "gameSettings" object, as enshrouded_server.json has them.
 std::string export_block(const uint8_t* gs);
 

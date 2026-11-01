@@ -96,9 +96,9 @@ bool number(std::string_view s, double* out) {
     return true;
 }
 
-std::string num(double v) {
+std::string num(double v) {  // the settings are float32 or whole minutes: 7 digits print what was typed
     char b[48];
-    std::snprintf(b, sizeof b, "%.9g", v);
+    std::snprintf(b, sizeof b, "%.7g", v);
     return b;
 }
 
@@ -107,6 +107,21 @@ std::string name_of(const Field& f) { return f.alias ? std::string(f.alias) + " 
 }  // namespace
 
 std::span<const Field> fields() { return kFields; }
+
+bool plausible(const uint8_t* gs, std::string* why) {
+    if (!crash_safe(gs, why)) return false;
+    for (const auto& f : kFields) {
+        const double v = read(gs, f);
+        bool ok = true;
+        if (f.type == Type::Float) ok = std::isfinite(v) && v >= 0 && v <= 10;
+        if (f.type == Type::Minutes) ok = v >= 1 && v <= 240;
+        if (!ok) {
+            if (why) *why = std::string(f.key) + " = " + num(v) + " is not a value the game uses";
+            return false;
+        }
+    }
+    return true;
+}
 
 const Field* find(std::string_view key_or_alias) {
     const std::string_view k = trim(key_or_alias);

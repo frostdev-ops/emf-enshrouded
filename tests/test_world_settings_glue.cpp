@@ -153,3 +153,19 @@ TEST_CASE("world settings service: change callbacks get each changed key after t
     REQUIRE(got.size() == 1);
     CHECK(got[0] == "experienceCombatFactor=2");
 }
+
+TEST_CASE("world settings glue: sync_ok is false while the instance's pointer is another struct, true again when it matches") {
+    Rig r;
+    CHECK(r.glue.sync_ok());
+    r.state.queue({find("loot"), 2, false, false}, 1);
+    ws_test::GS other = defaults();
+    r.point_at(bytes(other));
+    r.step(1, 0);
+    CHECK_FALSE(r.glue.sync_ok());
+    r.point_at(bytes(r.live));
+    r.state.queue({find("loot"), 1.5, false, false}, 1);
+    r.step(1, 2000);
+    CHECK(r.glue.sync_ok());
+    Rig off(kPtr, 0);  // the flag not found on this build
+    CHECK_FALSE(off.glue.sync_ok());
+}

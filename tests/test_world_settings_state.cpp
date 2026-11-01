@@ -21,7 +21,7 @@ bool any_line(const State::Step& s, const char* needle) {
 
 TEST_CASE("world settings state: the first step keeps the base and applies persisted overrides") {
     State s;
-    s.set_persisted({{"resourceDropStackAmountFactor", 2.0}});
+    s.set_persisted({{"resourceDropStackAmountFactor", 2.0}}, 1);
     auto g = defaults();
     CHECK_FALSE(s.has_base());
     const State::Step st = s.on_server_step(bytes(g), 1, 0);
@@ -122,4 +122,42 @@ TEST_CASE("world settings state: a change that would make the struct unsafe is r
     CHECK(any_line(st, "refused"));
     CHECK(g.resourceDropStackAmountFactor == doctest::Approx(1));
     CHECK(static_cast<int>(g.fishingDifficulty) == 2);
+}
+
+TEST_CASE("world settings state: kept values belong to the session whose file was read; another world never gets them") {
+    State s;
+    s.set_persisted({{"resourceDropStackAmountFactor", 2.0}}, 1);
+    auto g1 = defaults();
+    s.on_server_step(bytes(g1), 1, 0);
+    CHECK(g1.resourceDropStackAmountFactor == doctest::Approx(2));
+    // session 2: another world, whose file never came (no on_load on this build)
+    auto g2 = defaults();
+    const State::Step st = s.on_server_step(bytes(g2), 2, 5000);
+    CHECK(g2.resourceDropStackAmountFactor == doctest::Approx(1));
+    CHECK_FALSE(any_line(st, "kept for this world"));
+    CHECK(s.persisted().empty());
+}
+
+TEST_CASE("world settings state: on an unknown build a base that does not look like the game's settings turns writes off") {
+    State s;
+    s.require_plausible_base(true);
+    auto odd = defaults();
+    odd.playerHealthFactor = 50.0f;  // a shifted layout: this would be another field's bytes
+    const State::Step first = s.on_server_step(bytes(odd), 1, 0);
+    CHECK(any_line(first, "changes are off"));
+    std::string why;
+    CHECK_FALSE(s.writes_allowed(1, &why));
+    CHECK(why.find("this game version") != std::string::npos);
+    s.queue({find("loot"), 2, false, false}, 1);
+    s.on_server_step(bytes(odd), 1, 1000);
+    CHECK(odd.resourceDropStackAmountFactor == doctest::Approx(1));
+    // a plausible base on an unknown build works as usual
+    State ok;
+    ok.require_plausible_base(true);
+    auto g = defaults();
+    ok.on_server_step(bytes(g), 1, 0);
+    CHECK(ok.writes_allowed(1, nullptr));
+    ok.queue({find("loot"), 2, false, false}, 1);
+    ok.on_server_step(bytes(g), 1, 1000);
+    CHECK(g.resourceDropStackAmountFactor == doctest::Approx(2));
 }

@@ -205,7 +205,11 @@ TEST_CASE("signature table has sendServerInfo (API v21 world settings: the game'
     REQUIRE(d != nullptr);
     CHECK(d->id == Sig::SendServerInfo);
     CHECK(d->rva[0] == kRvaUnchecked);  // 1269579: not checked
-    CHECK(d->rva[1] == 0xe4f110u);      // live_world_settings.md: GameServer_sendServerInfo
+    CHECK_FALSE(rva_checked(*d, 0));    // so world settings never set the resync flag there
+    CHECK(rva_checked(*d, 1));
+    CHECK(rva_checked(*d, 2));
+    CHECK_FALSE(rva_checked(*d, -1));   // an unknown build
+    CHECK(d->rva[1] == 0xe4f110u);      // GameServer_sendServerInfo (docs/modding/world_settings.md)
     CHECK(d->rva[2] == 0x7b9060u);      // its dedicated server
     CHECK_FALSE(d->required);
 }

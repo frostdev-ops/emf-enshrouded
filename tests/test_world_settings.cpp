@@ -92,3 +92,24 @@ TEST_CASE("world settings: export block is pasteable JSON") {
     CHECK(block.find("\"enableDurability\": true") != std::string::npos);
     CHECK(block.find("\"flameLevelFogRemoval\": 11") != std::string::npos);
 }
+
+TEST_CASE("world settings: a float setting prints as typed (1.1, not 1.10000002)") {
+    auto g = ws_test::defaults();
+    const Field& loot = *find("loot");
+    write(ws_test::bytes(g), loot, 1.1);
+    CHECK(text(loot, read(ws_test::bytes(g), loot)) == "1.1");
+    CHECK(export_block(ws_test::bytes(g)).find("\"resourceDropStackAmountFactor\": 1.1,") != std::string::npos);
+}
+
+TEST_CASE("world settings: plausible accepts the game's settings and refuses bytes that are not floats, enums or minutes") {
+    auto g = ws_test::defaults();
+    std::string why;
+    CHECK(plausible(ws_test::bytes(g), &why));
+    auto f = g;
+    f.enemyDamageFactor = 1e20f;
+    CHECK_FALSE(plausible(ws_test::bytes(f), &why));
+    CHECK(why.find("enemyDamageFactor") != std::string::npos);
+    auto m = g;
+    m.dayTimeDuration.value = 600LL * 60 * 1000000000LL;  // 600 minutes
+    CHECK_FALSE(plausible(ws_test::bytes(m), &why));
+}

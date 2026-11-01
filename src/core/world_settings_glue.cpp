@@ -26,6 +26,8 @@ Glue::Glue(State& state, GlueDeps deps) : state_(state), deps_(std::move(deps)) 
 
 bool Glue::can_sync() const { return deps_.settings_ptr_off != 0 && deps_.flag_off != 0; }
 
+bool Glue::sync_ok() const { return can_sync() && !pointer_mismatch_.load(); }
+
 State::Step Glue::server_step(uint8_t* live, uint8_t* instance, uint32_t session, uint64_t now_ms,
                               const std::string* file_text) {
     const auto log = [&](const std::string& l) {
@@ -35,7 +37,7 @@ State::Step Glue::server_step(uint8_t* live, uint8_t* instance, uint32_t session
         std::vector<std::string> skipped;
         const auto kept = parse_overrides(*file_text, &skipped);
         for (const auto& s : skipped) log("world settings: a kept setting was left out: " + s);
-        state_.set_persisted(kept);
+        state_.set_persisted(kept, session);
         for (const auto& [key, value] : kept)
             if (const Field* f = find(key)) state_.queue({f, value, false, false}, session);
     }
@@ -46,6 +48,7 @@ State::Step Glue::server_step(uint8_t* live, uint8_t* instance, uint32_t session
         void* settings = nullptr;
         const bool ours = can_sync() && instance && seh_read(instance + deps_.settings_ptr_off, &settings, sizeof settings) &&
                           settings == live;
+        if (can_sync()) pointer_mismatch_ = !ours;
         if (ours && write_flag(instance + deps_.flag_off)) {
             // the next ServerInfo carries the struct to every player, the host's own game included
         } else if (warned_session_ != session) {

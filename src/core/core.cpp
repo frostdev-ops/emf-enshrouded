@@ -815,7 +815,10 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     {
         const auto& ws_flag = code_offsets[static_cast<size_t>(emf::CodeOffset::InstSendSettingsFlag)];
         const auto& ws_ptr = code_offsets[static_cast<size_t>(emf::CodeOffset::InstSettingsPtr)];
-        const bool ws_sync = sig_ok(emf::Sig::SendServerInfo) && emf::is_usable(ws_flag, known) && emf::is_usable(ws_ptr, known);
+        // only where sendServerInfo's RVA was checked: the flag write goes into a live GameServer instance
+        const bool ws_sync = sig_ok(emf::Sig::SendServerInfo) &&
+                             emf::rva_checked(*emf::find_signature("SendServerInfo"), build) &&
+                             emf::is_usable(ws_flag, known) && emf::is_usable(ws_ptr, known);
         g_ws = std::make_unique<WorldSettingsRuntime>();
         emf::core::ws::GlueDeps gd;
         gd.settings_ptr_off = ws_sync ? ws_ptr.value : 0;
@@ -823,8 +826,11 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         gd.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
         gd.save_file = [](const std::string& text) { return g_ws && g_ws->file.save(text); };
         g_ws->glue = std::make_unique<emf::core::ws::Glue>(g_ws->state, std::move(gd));
+        g_ws->state.require_plausible_base(!known);  // a build EMF does not know: check the struct looks right first
         g_ws->service = std::make_unique<emf::core::ws::Service>(
-            g_ws->state, emf::core::ws::ServiceDeps{&server_game_settings, [] { return g_state->server_session.load(); }});
+            g_ws->state, emf::core::ws::ServiceDeps{&server_game_settings, [] { return g_state->server_session.load(); },
+                                                    [] { return g_ws && g_ws->glue->sync_ok(); },
+                                                    [] { return g_ws && g_ws->file.ready(); }});
         g_state->world_settings = g_ws->service.get();
         if (!g_ws->file.attach(emf::core::api_table())) emf::logf("world settings: the kept settings per world are off");
         emf::logf("world settings: on%s", ws_sync ? "" : " (the game's resync is not known on this build: players' games keep "

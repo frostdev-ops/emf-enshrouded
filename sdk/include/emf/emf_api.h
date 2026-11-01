@@ -275,7 +275,7 @@ typedef struct EmfWorldSettingInfo {
     uint32_t type;     /* EMF_WS_FLOAT / _BOOL / _ENUM / _MINUTES / _WHOLE */
     const char* key;   /* as enshrouded_server.json names it; these strings stay valid */
     const char* alias; /* the short name, or "" */
-    const char* group; /* "Combat", "Time", ... */
+    const char* group; /* "Player", "Survival", "Enemies", "Rates", "Time", "World" or "Other" */
     double min, max;   /* what world_setting_set accepts */
     double value;      /* now */
     double world;      /* the world's own (as it loaded, before this session's changes and kept values) */

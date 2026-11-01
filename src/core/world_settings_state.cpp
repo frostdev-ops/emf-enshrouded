@@ -31,9 +31,23 @@ std::map<std::string, double> State::persisted() const {
     return persisted_;
 }
 
-void State::set_persisted(std::map<std::string, double> values) {
+void State::set_persisted(std::map<std::string, double> values, uint32_t session) {
     std::lock_guard<std::mutex> l(m_);
     persisted_ = std::move(values);
+    persisted_session_ = session;
+}
+
+void State::require_plausible_base(bool on) {
+    std::lock_guard<std::mutex> l(m_);
+    require_plausible_ = on;
+}
+
+bool State::writes_allowed(uint32_t session, std::string* why) const {
+    std::lock_guard<std::mutex> l(m_);
+    if (!off_ || off_session_ != session) return true;
+    if (why) *why = "changes are off for this world: its settings do not look as EMF knows them (" + off_why_ +
+                    "); EMF needs an update for this game version";
+    return false;
 }
 
 State::Step State::on_server_step(uint8_t* live, uint32_t session, uint64_t now_ms) {
@@ -46,6 +60,26 @@ State::Step State::on_server_step(uint8_t* live, uint32_t session, uint64_t now_
         std::memcpy(base_.data(), live, kStructSize);
         base_session_ = session;
         pending_sync_ = false;
+        if (persisted_session_ != session) {  // kept values of another world (its file was read in another session)
+            persisted_.clear();
+            persisted_session_ = session;
+        }
+        std::string why;
+        off_ = require_plausible_ && !plausible(live, &why);
+        off_session_ = session;
+        if (off_) {
+            off_why_ = why;
+            out.lines.push_back("world settings: changes are off for this world: its settings do not look as EMF "
+                                "knows them (" + why + "); EMF needs an update for this game version");
+        }
+    }
+    if (off_ && off_session_ == session) {  // nothing is written into a struct EMF cannot read right
+        if (!queue_.empty())
+            out.lines.push_back("world settings: changes are off for this world (this game version): nothing changed");
+        queue_.clear();
+        return out;
+    }
+    if (first) {
         for (const auto& [key, value] : persisted_)
             if (const Field* f = find(key)) {
                 write(copy.data(), *f, value);

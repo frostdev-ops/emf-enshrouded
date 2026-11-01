@@ -75,6 +75,8 @@ std::span<const SigDef> all_signatures();
 const SigDef* find_signature(std::string_view name);
 // The known build's exe has no such function (its recorded RVA is 0: client-only code on the dedicated server).
 bool absent_on(const SigDef& def, int build);
+// True when the table holds this function's RVA on that known build as checked (not kRvaUnchecked, not absent).
+bool rva_checked(const SigDef& def, int build);
 
 // How start-up reports one signature. absent: client-only code the dedicated server does not have, on its known build
 // (counted only, no note) or on an unknown server build when it was not found and a known server build lacks it too.
