@@ -274,8 +274,15 @@ for _, c in ipairs(require("creatures")) do
 		local src_g = game.assets.get_resource(c.animation.graph, GRAPH)
 		assert(src_g, "the game graph " .. c.animation.graph .. " was not found (the game changed?)")
 		local gd = src_g.data
-		assert(#gd.ikChains == 0 and gd.bipedFeetIkNodeId.value == 0 and gd.genericFeetIkNodeId.value == 0,
+		assert(#gd.ikChains == 0 and gd.bipedFeetIkNodeId.value == 0 and gd.genericFeetIkNodeId.value == 0
+			and tostring(gd.feetIKSettingsReference) == NONE,
 			"the game graph " .. c.animation.graph .. " uses IK on its own skeleton's joints: it cannot play on ours")
+		for _, node in ipairs(gd.nodeDefinitions) do
+			if tostring(node.type):find("LayerBlend", 1, true) then
+				assert(tostring(node.value.blendOptions.boneMask) == NONE, "the game graph " .. c.animation.graph ..
+					" has a bone mask (it names its own skeleton's joints): it cannot play on ours")
+			end
+		end
 		local sk = require(c.name .. "_skeleton")
 		-- the source model's skeleton record holds ours: every array replaced
 		local src_h = game.assets.get_resource(tostring(m.hierarchy), HIER)
@@ -332,35 +339,50 @@ for _, c in ipairs(require("creatures")) do
 		-- creature; the hashes key the game clip's events)
 		local g = game.assets.create_resource(gd, GRAPH, c.animation.graph_guid, 0).data
 		g.hierarchy = sk.guid
-		local ours = 0
-		local function swap(obj, field, length)
+		-- a node whose clips are offsets (animationContentAdditive) adds them to the pose: it plays an offset of ours
+		-- (a whole pose there would double every joint's scale)
+		local ours, offset_swaps, defaulted, seen = 0, 0, {}, {}
+		local function swap(obj, field, length, offsets)
 			local old = tostring(obj[field])
 			if old == "nil" or old == NONE then return end
-			local new = c.animation.roles[old] or c.animation.default
+			local new = c.animation.roles[old]
+			if not new then
+				new = c.animation.default
+				if not seen[old] then
+					seen[old] = true
+					defaulted[#defaulted + 1] = old
+				end
+			end
+			if offsets and not c.animation.offsets[new] then
+				new = c.animation.zero
+				offset_swaps = offset_swaps + 1
+			end
 			obj[field] = new
 			ours = ours + 1
 			if length then obj[length] = seconds[new] end
 		end
 		for _, node in ipairs(g.nodeDefinitions) do
 			local t = tostring(node.type)
-			if t:find("SampleAnimationClip", 1, true) then
-				swap(node.value, "animation", "animationDuration")
-				swap(node.value, "animationGenderAlternative")
-				swap(node.value, "additiveReferenceAnimation")
-				swap(node.value, "additiveReferenceAnimationGenderAlternative")
-			elseif t:find("BlendSpace", 1, true) then
-				swap(node.value, "additiveReferenceAnimation")
-				swap(node.value, "additiveReferenceAnimationGenderAlternative")
-				for _, it in ipairs(node.value.items) do
-					swap(it, "animation", "animationDuration")
-					swap(it, "animationGenderAlternative")
+			if t:find("SampleAnimationClip", 1, true) or t:find("BlendSpace", 1, true) then
+				local offsets = node.value.animationContentAdditive == true
+				swap(node.value, "additiveReferenceAnimation", nil, offsets)
+				swap(node.value, "additiveReferenceAnimationGenderAlternative", nil, offsets)
+				if t:find("SampleAnimationClip", 1, true) then
+					swap(node.value, "animation", "animationDuration", offsets)
+					swap(node.value, "animationGenderAlternative", nil, offsets)
+				else
+					for _, it in ipairs(node.value.items) do
+						swap(it, "animation", "animationDuration", offsets)
+						swap(it, "animationGenderAlternative", nil, offsets)
+					end
 				end
 			end
 		end
 		for i, j in ipairs(sk.slots) do g.slotBoneIndexMapping[i] = j end
 		unload(c.name .. "_skeleton")
-		log(string.format("%%s: new skeleton %%s (%%d joints), %%d clips, graph %%s: %%d clip references ours", c.name,
-			sk.guid, sk.jointCount, made, c.animation.graph_guid, ours))
+		log(string.format("%%s: new skeleton %%s (%%d joints), %%d clips, graph %%s: %%d clip references ours, %%d by default (%%s), %%d in offset nodes: the zero offset",
+			c.name, sk.guid, sk.jointCount, made, c.animation.graph_guid, ours, #defaulted, table.concat(defaulted, " "),
+			offset_swaps))
 	elseif c.skeleton then
 		-- 1c) own_proportions: a copy of the game skeleton fitted to the creature, the game creature's clips
 		-- retargeted to it, and a copy of its animation graph that plays them
@@ -560,7 +582,8 @@ def listing_entry(c):
         roles, default = new_creature.roles(cfg)
         entry["skeleton"] = {"guid": cfg["skeleton_guid"], "new": True}
         entry["animation"] = {"graph": cfg["graph"], "graph_guid": cfg["graph_guid"], "roles": roles,
-                              "default": default}
+                              "default": default, "zero": new_creature.clip_guid(cfg["skeleton_guid"], new_creature.ZERO),
+                              "offsets": new_creature.offsets(cfg)}
     return entry
 
 
@@ -611,7 +634,7 @@ def write_new(src, name, built):
         f.write("-- generated by tools/models/make_mod.py: the skeleton of %s (its own)\nreturn %s, pose = %s}\n"
                 % (name, lua_value(skel)[:-1], lua_bytes(pose)))
     parts = []
-    for cl in built["clips"]:
+    for cl in built["clips"] + [built["zero"]]:
         k = cl["clip"]
         raw = bytes(x for u in k["data"] for x in u["data"])
         head = {"name": cl["name"], "guid": cl["guid"], "hierarchyHash": signed64(k["hierarchyHash"]),

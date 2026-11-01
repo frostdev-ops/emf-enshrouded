@@ -29,8 +29,9 @@ local resources = {
 local missing = os.getenv("MOCK_MISSING") or ""
 -- a creature on a skeleton of its own (new_skeleton): its source model's game skeleton (3 joints), a game clip for
 -- each role, and the game graph: a clip node per role (the game's non-additive nodes name their clip as the additive
--- reference too), a clip node for a clip the pack does not name, a blend space, the slot map, and (MOCK_IK=1) an IK
--- chain
+-- reference too), a clip node for a clip the pack does not name, a blend space, a blend space of offsets
+-- (animationContentAdditive, as the wolf's lean), the slot map, and MOCK_IK=chains|feet|mask: an IK chain, foot IK
+-- settings or a layer blend with a bone mask
 local MOCK_HIERARCHY = "55555555-5555-4555-8555-555555555555"
 local new_skeleton = {}
 for _, c in ipairs(require("creatures")) do
@@ -56,12 +57,22 @@ for _, c in ipairs(require("creatures")) do
 			value = { animation = "cccccccc-0000-4000-8000-000000000003", additiveReferenceAnimation = NONE,
 				animationDuration = 4 } }
 		nodes[#nodes + 1] = { type = "keen::anim_graph::runtime_graph::BlendSpace_1DNodeDefinition",
-			value = { additiveReferenceAnimation = NONE, items = { { animation = olds[1], animationDuration = 0.95 },
-				{ animation = "dddddddd-0000-4000-8000-000000000004", animationDuration = 0.95 } } } }
+			value = { additiveReferenceAnimation = NONE, animationContentAdditive = false,
+				items = { { animation = olds[1], animationDuration = 0.95 },
+					{ animation = "dddddddd-0000-4000-8000-000000000004", animationDuration = 0.95 } } } }
+		nodes[#nodes + 1] = { type = "keen::anim_graph::runtime_graph::BlendSpace_1DNodeDefinition",
+			value = { additiveReferenceAnimation = NONE, animationContentAdditive = true,
+				items = { { animation = "eeeeeeee-0000-4000-8000-000000000005", animationDuration = 0.15 },
+					{ animation = "ffffffff-0000-4000-8000-000000000006", animationDuration = 0.15 } } } }
+		local ik = os.getenv("MOCK_IK")
+		nodes[#nodes + 1] = { type = "keen::anim_graph::runtime_graph::LayerBlendNodeDefinition",
+			value = { blendOptions = { boneMask = ik == "mask" and "88888888-8888-4888-8888-888888888888" or NONE } } }
 		local slots = {}
 		for i = 1, 36 do slots[i] = 7 end
 		resources[GRAPH][c.animation.graph] = { guid = c.animation.graph, data = { hierarchy = MOCK_HIERARCHY,
-			nodeDefinitions = nodes, slotBoneIndexMapping = slots, ikChains = os.getenv("MOCK_IK") and { {} } or {},
+			nodeDefinitions = nodes, slotBoneIndexMapping = slots,
+			ikChains = (ik == "chains" or ik == "1") and { {} } or {},
+			feetIKSettingsReference = ik == "feet" and "77777777-7777-4777-8777-777777777777" or NONE,
 			bipedFeetIkNodeId = { value = 0 }, genericFeetIkNodeId = { value = 0 } } }
 	end
 end

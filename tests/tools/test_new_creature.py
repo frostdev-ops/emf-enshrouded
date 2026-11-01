@@ -117,9 +117,30 @@ class PackTests(unittest.TestCase):
         entry = make_mod.listing_entry(dict(self.BEAST, new_skeleton=config()))
         self.assertEqual(entry["skeleton"], {"guid": SKELETON, "new": True})
         move = nc.clip_guid(SKELETON, "move")
+        zero = nc.clip_guid(SKELETON, nc.ZERO)
         self.assertEqual(entry["animation"], {"graph": GRAPH, "graph_guid": GRAPH_COPY,
                                               "roles": {GAME_WALK: move, GAME_BITE: move},
-                                              "default": nc.clip_guid(SKELETON, "stand")})
+                                              "default": nc.clip_guid(SKELETON, "stand"),
+                                              "zero": zero, "offsets": {zero: True}})
+
+    def test_role_keys_are_game_clip_guids(self):
+        """A role names a game clip by its GUID (any case; the game writes them lower case)."""
+        entry = make_mod.listing_entry(dict(self.BEAST, new_skeleton=config(roles={GAME_WALK.upper(): "move"})))
+        self.assertEqual(list(entry["animation"]["roles"]), [GAME_WALK])
+        for roles in ({}, {"Idle": "move"}, {GAME_WALK[:-1]: "move"}):
+            with self.assertRaises(SystemExit, msg=str(roles)):
+                make_mod.listing_entry(dict(self.BEAST, new_skeleton=config(roles=roles)))
+
+    def test_additive_clips_are_offsets(self):
+        cfg = config(clips={"move": {"animation": "Move"}, "stand": {"animation": "Move"},
+                            "lean": {"additive_zero": True}})
+        offsets = make_mod.listing_entry(dict(self.BEAST, new_skeleton=cfg))["animation"]["offsets"]
+        self.assertEqual(set(offsets), {nc.clip_guid(SKELETON, "lean"), nc.clip_guid(SKELETON, nc.ZERO)})
+
+    def test_clip_names_with_an_underscore_first_are_ours(self):
+        with self.assertRaises(SystemExit):
+            make_mod.listing_entry(dict(self.BEAST, new_skeleton=config(
+                clips={"move": {"animation": "Move"}, "stand": {"animation": "Move"}, "_mine": {"animation": "Move"}})))
 
     def test_pack_mistakes_are_refused(self):
         cfg = config()
@@ -140,10 +161,10 @@ STUB_DATA = """return {debugName = "beast_wolf", boundingBox = {}, boundingSpher
 
 @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
 class ModTests(Fixture):
-    def run_mod(self, env=None):
+    def run_mod(self, env=None, folder="src"):
         beast = dict(PackTests.BEAST, new_skeleton=config())
         built = nc.build(config(), self.glb)
-        d = os.path.join(self.tmp.name, "src")
+        d = os.path.join(self.tmp.name, folder)
         os.makedirs(d)
         make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(beast)])
         make_mod.write_new(d, beast["name"], built)
@@ -176,7 +197,7 @@ class ModTests(Fixture):
         """The mock graph: a clip node for each game clip and one the pack does not name, and a blend space; every
         reference plays our clip for its role (the default for the one not named), with our clip's duration."""
         _, text = self.run_mod()
-        self.assertIn("graph %s hierarchy %s ours 6 left 0" % (GRAPH_COPY, SKELETON), text)
+        self.assertIn("graph %s hierarchy %s ours 8 left 0" % (GRAPH_COPY, SKELETON), text)
         move, stand = nc.clip_guid(SKELETON, "move"), nc.clip_guid(SKELETON, "stand")
         self.assertIn("graph %s node 1 %s duration 1" % (GRAPH_COPY, move), text)
         self.assertIn("graph %s node 3 %s duration 2" % (GRAPH_COPY, stand), text)
@@ -192,11 +213,28 @@ class ModTests(Fixture):
         self.assertIn("graph %s slots %s" % (GRAPH_COPY, " ".join(slots)), text)
 
     def test_a_graph_with_ik_is_refused(self):
-        """IK chains and foot IK name the game skeleton's joints: such a graph cannot play on ours."""
-        _, text = self.run_mod({"MOCK_IK": "1"})
-        self.assertIn("beast_wolf: not added:", text)
-        self.assertIn("IK", text)
-        self.assertNotIn("template Beast_Wolf", text)
+        """IK chains, foot IK settings and bone masks name the game skeleton's joints: such a graph cannot play on
+        ours."""
+        for kind, words in (("chains", "IK"), ("feet", "IK"), ("mask", "bone mask")):
+            _, text = self.run_mod({"MOCK_IK": kind}, folder=kind)
+            self.assertIn("beast_wolf: not added:", text, kind)
+            self.assertIn(words, text, kind)
+            self.assertNotIn("template Beast_Wolf", text, kind)
+
+    def test_nodes_that_play_offsets_get_an_offset(self):
+        """A node whose clips are offsets (animationContentAdditive: the wolf's lean) plays an offset clip of ours
+        even where the default role names a whole pose (a pose there is added to the pose: every joint's scale
+        doubled and the wolf was drawn many times its size)."""
+        built, text = self.run_mod()
+        zero = nc.clip_guid(SKELETON, nc.ZERO)
+        self.assertIn("graph %s item 1 %s duration 0.15" % (GRAPH_COPY, zero), text)
+        self.assertIn("graph %s item 2 %s duration 0.15" % (GRAPH_COPY, zero), text)
+        self.assertIn("2 in offset nodes: the zero offset", text)
+
+    def test_game_clips_without_a_role_are_logged(self):
+        _, text = self.run_mod()
+        self.assertIn("4 by default (cccccccc-0000-4000-8000-000000000003 dddddddd-0000-4000-8000-000000000004 "
+                      "eeeeeeee-0000-4000-8000-000000000005 ffffffff-0000-4000-8000-000000000006)", text)
 
 
 if __name__ == "__main__":

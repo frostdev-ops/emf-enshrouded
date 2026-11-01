@@ -14,11 +14,14 @@ The pack names, per creature:
                  retextured; its bones named jNNN_<name>)
   roles          {game clip GUID: our clip name}: which of our clips plays where the graph plays that game clip
   default_role   our clip for every other game clip the graph plays: every clip reference of the copy is ours (a
-                 game clip carries the game skeleton's hash and cannot play on ours)
+                 game clip carries the game skeleton's hash and cannot play on ours). A node whose clips are offsets
+                 (animationContentAdditive) plays an offset clip of ours: one of the pack's additive_zero clips, or
+                 the built-in zero offset (_additive_zero) where its role names a whole pose
   slots          {slot: our joint name}: the graph's attachment slots (gamegltf.SLOTS: Root, Head, Chest, Pelvis,
                  FootL, ...); a slot not named points at the root
 """
 import os
+import re
 import sys
 import tempfile
 import uuid
@@ -30,6 +33,8 @@ import gltf_in  # noqa: E402
 import joint_animation  # noqa: E402
 import new_skeleton  # noqa: E402
 
+GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+ZERO = "_additive_zero"  # the built-in offset that adds nothing
 ADDITIVE_FRAMES = 9  # as long as the game wolf's leaning offsets
 KEYS = ("scale", "skeleton_guid", "graph", "graph_guid", "clips", "roles", "default_role", "slots")
 
@@ -44,6 +49,14 @@ def check(cfg, creature):
     if missing:
         raise SystemExit("%s: new_skeleton needs %s" % (creature, ", ".join(missing)))
     clips = cfg["clips"]
+    if not cfg["roles"]:
+        raise SystemExit("%s: new_skeleton roles is empty: name the graph's game clips (their GUIDs)" % creature)
+    for game in cfg["roles"]:
+        if not GUID.match(game.lower()):
+            raise SystemExit("%s: new_skeleton role %r is not a game clip GUID" % (creature, game))
+    for name in clips:
+        if name.startswith("_"):
+            raise SystemExit("%s: clip names starting with _ are the tools' own (%s)" % (creature, name))
     for game, ours in list(cfg["roles"].items()) + [("default_role", cfg["default_role"])]:
         if ours not in clips:
             raise SystemExit("%s: new_skeleton role %s names the clip %r, which is not in clips (%s)"
@@ -53,11 +66,28 @@ def check(cfg, creature):
 def roles(cfg):
     """({game clip GUID: our clip GUID}, the default's GUID)."""
     g = cfg["skeleton_guid"]
-    return ({game: clip_guid(g, ours) for game, ours in cfg["roles"].items()}, clip_guid(g, cfg["default_role"]))
+    return ({game.lower(): clip_guid(g, ours) for game, ours in cfg["roles"].items()},
+            clip_guid(g, cfg["default_role"]))
+
+
+def offsets(cfg):
+    """{GUID: True} of our offset clips: the pack's additive_zero clips and the built-in zero offset."""
+    g = cfg["skeleton_guid"]
+    names = [n for n, spec in cfg["clips"].items() if spec.get("additive_zero")] + [ZERO]
+    return {clip_guid(g, n): True for n in names}
+
+
+def zero_clip(sk, hier):
+    """An offset that adds nothing: every joint unturned, unmoved, scale 0 (an additive layer adds scales, as the
+    game's offset clips show)."""
+    zero = [((0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))] * len(sk["rest"])
+    return joint_animation.encode([zero] * (ADDITIVE_FRAMES + 1), sk["rest"],
+                                  hierarchy_hash=new_skeleton.clip_hash(hier))
 
 
 def build(cfg, glb_path, creature="creature"):
-    """{sk, hierarchy, clips: [{name, guid, clip}] by name, slots: 36 joint indices}."""
+    """{sk, hierarchy, clips: [{name, guid, clip}] by name, zero: the built-in zero offset (the same shape),
+    slots: 36 joint indices}."""
     check(cfg, creature)
     gltf, binc = gltf_in.read_glb(glb_path)
     sk = new_skeleton.build(gltf, binc, scale=float(cfg["scale"]))
@@ -74,10 +104,7 @@ def build(cfg, glb_path, creature="creature"):
     for name in sorted(cfg["clips"]):
         spec = cfg["clips"][name]
         if spec.get("additive_zero"):
-            zero = [((0.0, 0.0, 0.0, 1.0), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0))] * len(sk["rest"])
-            clip = joint_animation.encode([zero] * (ADDITIVE_FRAMES + 1), sk["rest"],
-                                          hierarchy_hash=new_skeleton.clip_hash(hier))
-            out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
+            out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": zero_clip(sk, hier)})
             continue
         if spec.get("animation") not in have:
             raise SystemExit("%s: clip %s plays %r, which the glb does not have (%s)"
@@ -85,7 +112,8 @@ def build(cfg, glb_path, creature="creature"):
         clip = gltf_clips.clip(gltf, binc, sk, spec["animation"], new_skeleton.clip_hash(hier),
                                loop=bool(spec.get("loop")))
         out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
-    return {"sk": sk, "hierarchy": hier, "clips": out, "slots": slots}
+    zero = {"name": ZERO, "guid": clip_guid(cfg["skeleton_guid"], ZERO), "clip": zero_clip(sk, hier)}
+    return {"sk": sk, "hierarchy": hier, "clips": out, "zero": zero, "slots": slots}
 
 
 def model_groups(glb_path, built, material_count=None, warn=print, model_glb=None):
