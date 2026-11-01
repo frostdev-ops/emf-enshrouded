@@ -147,6 +147,28 @@ class RoundTripTests(unittest.TestCase):
         self.check(poses, clip, [IDENTITY], 20)
 
 
+SABRETOOTH = os.path.join(HERE, "..", "..", "analysis", "model_survey", "hierarchies",
+                          "ef2d7e9f-1a5e-4d7e-a3e5-d47448168385.json")
+
+
+class HierarchyHashTests(unittest.TestCase):
+    """A clip's hierarchyHash names its skeleton: FNV-1a 64 over the joint name hashes (u32 each, in joint order)."""
+
+    def test_fnv1a_64(self):
+        self.assertEqual(ja.fnv1a64(b"a"), 0xaf63dc4c8601ec8c)  # the published FNV-1a 64 test vector
+        self.assertEqual(ja.fnv1a64(b""), 0xcbf29ce484222325)
+
+    def test_a_skeleton_of_two_joints(self):
+        self.assertEqual(ja.hierarchy_hash([1, 2]), ja.fnv1a64(struct.pack("<II", 1, 2)))
+
+    @unittest.skipUnless(os.path.exists(SABRETOOTH), "needs the sabretooth skeleton dumped by mods/model_survey")
+    def test_the_sabretooths_clips_name_its_skeleton(self):
+        with open(SABRETOOTH, encoding="utf-8") as f:
+            hier = json.load(f)
+        h = ja.hierarchy_hash(hier["jointNames"][:hier["jointCount"]])
+        self.assertEqual(h - (1 << 64) if h >= 1 << 63 else h, -1033468943642191884)  # its clips' hierarchyHash
+
+
 @unittest.skipUnless(GAME_CLIPS, "needs game clips dumped by mods/model_survey (analysis/model_survey/anim)")
 class GameClipTests(unittest.TestCase):
     def test_a_game_clip_re_encoded_samples_the_same(self):

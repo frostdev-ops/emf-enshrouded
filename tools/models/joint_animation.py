@@ -24,6 +24,20 @@ SECTIONS = (("rot", "OrientationJoints", 4), ("pos", "PositionJoints", 3), ("scl
 _parsed = {}
 
 
+def fnv1a64(data):
+    h = 0xcbf29ce484222325
+    for b in data:
+        h = ((h ^ b) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
+def hierarchy_hash(joint_name_hashes):
+    """A clip's hierarchyHash for a skeleton: FNV-1a 64 over its joint name hashes (CRC32 of the lowercase names, as
+    the skeleton's jointNames store them), each as a little-endian u32, in joint order. Checked on six game
+    skeletons; proportions do not count, so a skeleton with other bone lengths keeps its clips."""
+    return fnv1a64(struct.pack("<%dI" % len(joint_name_hashes), *[h & 0xFFFFFFFF for h in joint_name_hashes]))
+
+
 def _bytes(clip):
     return bytes(x for unit in clip["data"] for x in unit["data"])
 
