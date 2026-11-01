@@ -7,6 +7,7 @@ local pack_mod = require("pack")
 local aim = require("aim")
 local health_mod = require("health")
 local wild_mod = require("wild")
+local rare_mod = require("rare")
 
 emf.emits({ "StartGuardingEvent", "AddThreatTargetEvent" })
 
@@ -52,11 +53,15 @@ local pack = pack_mod.new({
 -- rare wild bears, aurochs and snakes (with their content packs)
 local wild = wild_mod.new({ setting = setting, now = now, on_spawn = spawned })
 
+-- the slayer's bonus for a wild rare snake
+local rare = rare_mod.new()
+
 emf.on_world_data(function(world, text)
 	beasts = roster.parse(text)
 	pack:reset()
 	health:reset()
 	wild:reset()
+	rare:reset()
 	taming:reset()
 	last_hit = {}
 	next_hud = 0
@@ -118,12 +123,12 @@ taming = tame_mod.new({
 		local account = world:account(player)
 		local b = account and beasts:add(account, sp.id, sp.name, setting("collection_max"))
 		if not b then
-			tell(world, player, "Your collection is full: the " .. sp.id .. " follows you until it falls.")
+			tell(world, player, "Your collection is full: the " .. species.word(sp) .. " follows you until it falls.")
 			return
 		end
 		pack:adopt(account, b, id)
 		save()
-		tell(world, player, string.format("You tamed a %s: %s", sp.id, b.name))
+		tell(world, player, string.format("You tamed %s: %s", species.a(sp), b.name))
 	end,
 })
 
@@ -281,10 +286,10 @@ local function wheel_items(world)
 			local label
 			if b.rest > 0 then
 				label = string.format("Call %s (rests %d:%02d)", b.name, math.floor(b.rest / 60), math.floor(b.rest % 60))
-			elseif b.name:lower():find(b.species, 1, true) == 1 then
+			elseif b.name:lower():find(species.word(b.species), 1, true) == 1 then
 				label = "Call " .. b.name  -- "Wolf 2" says it is a wolf
 			else
-				label = string.format("Call %s (%s)", b.name, b.species)
+				label = string.format("Call %s (%s)", b.name, species.word(b.species))
 			end
 			add(label, { action = "call", key = b.name })
 		end
@@ -346,6 +351,7 @@ end
 
 emf.on_event("HitEvent", function(world, e)
 	pack:on_hit(world, e.rootSourceId, e.targetId)
+	rare:on_hit(world, e.rootSourceId, e.targetId)
 	if e.rootSourceId ~= 0 and e.rootSourceId ~= e.targetId and world:get("PlayerState", e.targetId) then
 		last_hit[e.targetId] = { id = e.rootSourceId, at = now(world) }
 	end
@@ -354,6 +360,7 @@ end)
 emf.on_event("EntityDiedEvent", function(world, e)
 	taming:on_died(e.deadEntityId)
 	pack:on_died(e.deadEntityId)
+	rare:on_died(world, e.deadEntityId)
 end)
 
 emf.on_tick(function(world)

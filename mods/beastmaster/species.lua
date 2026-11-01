@@ -46,10 +46,56 @@ M.list = {
 		model = "d4c87337-8c53-41df-8488-8079046e1501", pack = PACK, health_mul = 2,
 		plural = "snakes",
 		graph = "d4c87337-8c53-41df-8488-8079046e1505", factions = { [WILDBEAST] = true } },
+	-- the beasts pack's rare snakes: a wild snake is one of them by chance (rare_of, chance: wild.lua), bigger (the
+	-- pack's ScaleComponent), tougher, and with a bonus for whoever slays it (rare.lua: runes, the chance of a tier-2
+	-- rune, and the chance of a gear item of that rarity at the slayer's level)
+	{ id = "crimson_snake", name = "Crimson snake", template = "d4c87337-8c53-41df-8488-8079046e1512",
+		model = "d4c87337-8c53-41df-8488-8079046e1511", pack = PACK, health_mul = 3, plural = "crimson snakes",
+		graph = "d4c87337-8c53-41df-8488-8079046e1515", factions = { [WILDBEAST] = true },
+		rare_of = "snake", chance = 0.01,
+		bonus = { runes = { 3, 5 }, rune2 = 0.15, gear = 0.05, gear_rarity = "epic" } },
+	{ id = "golden_snake", name = "Golden king snake", template = "d4c87337-8c53-41df-8488-8079046e1522",
+		model = "d4c87337-8c53-41df-8488-8079046e1521", pack = PACK, health_mul = 4, plural = "golden king snakes",
+		graph = "d4c87337-8c53-41df-8488-8079046e1525", factions = { [WILDBEAST] = true },
+		rare_of = "snake", chance = 0.004,
+		bonus = { runes = { 4, 6 }, rune2 = 0.25, gear = 0.10, gear_rarity = "epic" } },
+	{ id = "albino_snake", name = "Albino snake", template = "d4c87337-8c53-41df-8488-8079046e1532",
+		model = "d4c87337-8c53-41df-8488-8079046e1531", pack = PACK, health_mul = 5, plural = "albino snakes",
+		graph = "d4c87337-8c53-41df-8488-8079046e1535", factions = { [WILDBEAST] = true },
+		rare_of = "snake", chance = 0.0025,
+		bonus = { runes = { 6, 10 }, rune2 = 0.50, gear = 0.25, gear_rarity = "legendary" } },
 }
 
 local by_id = {}
 for _, s in ipairs(M.list) do by_id[s.id] = s end
+
+-- How a text names a kind (a species or its id): "albino snake", its name in lower case.
+function M.word(sp)
+	if type(sp) == "string" then sp = by_id[sp] or { name = sp } end
+	return sp.name:lower()
+end
+
+-- "a wolf", "an aurochs", "an albino snake".
+function M.a(sp)
+	local w = M.word(sp)
+	return (w:find("^[aeiou]") and "an " or "a ") .. w
+end
+
+-- The kind a new wild `sp` turns out to be for a roll in [0, 1): each of its rare kinds has its own share of the
+-- rolls (chance; the rarest first), the rest stay `sp`.
+function M.variant(sp, roll)
+	local rare = {}
+	for _, r in ipairs(M.list) do
+		if r.rare_of == sp.id then rare[#rare + 1] = r end
+	end
+	table.sort(rare, function(a, b) return a.chance < b.chance end)
+	local acc = 0
+	for _, r in ipairs(rare) do
+		acc = acc + r.chance
+		if roll < acc then return r end
+	end
+	return sp
+end
 
 -- The kind of a creature running `graph` (GUID text) in `faction` (a number) at `scale` (its ScaleComponent, nil when
 -- it has none: 1), or nil.

@@ -1,9 +1,10 @@
--- Rare wild pack beasts (the bear pack's bear, the beasts pack's aurochs): every wild_bear_minutes of play,
+-- Rare wild pack beasts (the bear pack's bear, the beasts pack's aurochs and snake): every wild_bear_minutes of play,
 -- when no wild beast of ours is about, one of them (at random) comes 50-70 m from a random player who is out in the
 -- open (not within 40 m of a flame altar), on a spot that is not within 40 m of an altar either: at the player's height
 -- + 2 m, then onto the ground there (the game's ground search), hostile, at that player's level. It is tamed like any
--- beast (species.lua knows a pack beast by its scale). A pack the game does not have (no template): that beast is
--- skipped for the session, with one log line.
+-- beast (species.lua knows a pack beast by its graph, or its graph and scale). A snake is now and then one of the rare
+-- snakes (species.variant: each its own chance). A pack the game does not have (no template): that beast is skipped
+-- for the session, with one log line (a rare snake an older pack lacks: a snake comes instead).
 -- M.new(env) where env has: setting(key), now(world), and optionally on_spawn(world, id, species).
 local species = require("species")
 
@@ -46,7 +47,7 @@ end
 local function candidates(off)
 	local out = {}
 	for _, sp in ipairs(species.list) do
-		if sp.pack and not off[sp.id] then out[#out + 1] = sp end
+		if sp.pack and not sp.rare_of and not off[sp.id] then out[#out + 1] = sp end
 	end
 	for i = #out, 2, -1 do
 		local j = math.random(i)
@@ -122,8 +123,14 @@ function W:step(world)
 	if #pool == 0 then return end
 	local p, x, y, z = spot(world)
 	if not p then return end
-	local id, sp
+	local tries = {}
 	for _, c in ipairs(pool) do
+		local v = species.variant(c, math.random())
+		if v ~= c and not self.off[v.id] then tries[#tries + 1] = v end  -- a rare one first, the kind itself if it fails
+		tries[#tries + 1] = c
+	end
+	local id, sp
+	for _, c in ipairs(tries) do
 		id = emf.spawn(world, c.template, x, y, z)
 		if id and id ~= 0 then
 			sp = c

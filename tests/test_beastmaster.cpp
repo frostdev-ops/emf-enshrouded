@@ -489,12 +489,19 @@ size_t logged(const Fake& f, const std::string& needle) {
     for (const auto& l : f.log) n += l.find(needle) != std::string::npos;
     return n;
 }
+// The beasts pack's rare snakes (a wild snake is one now and then): missing, for the tests of the plain picks.
+void no_rare_snakes(Fake& f) {
+    for (const char* t : {"d4c87337-8c53-41df-8488-8079046e1512", "d4c87337-8c53-41df-8488-8079046e1522",
+                          "d4c87337-8c53-41df-8488-8079046e1532"})
+        f.missing_templates.insert(guid_bytes(t));
+}
 }  // namespace
 
 TEST_CASE("wild bears: one spawns 50-70 m from a player when none exists; none when the pack is missing") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));  // only the bear pack: the bear every time
     b.r.fake.missing_templates.insert(guid_bytes("d4c87337-8c53-41df-8488-8079046e1502"));  // (no beasts pack snake)
+    no_rare_snakes(b.r.fake);
     b.spawnable(3);
     b.seconds(30);
     CHECK(b.r.fake.spawns.empty());  // not before a minute of play
@@ -844,6 +851,7 @@ TEST_CASE("beastmaster: a pack beast that cannot come says it needs the EMF crea
 TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs and snakes come (the missing bear is skipped)") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
+    no_rare_snakes(b.r.fake);
     b.spawnable(8);
     for (int round = 0; round < 4; ++round) {
         const size_t before = b.r.fake.spawns.size();
@@ -895,6 +903,7 @@ TEST_CASE("wild beasts: wild snakes come with the beasts pack, one at a time") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
     b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));
+    no_rare_snakes(b.r.fake);
     b.spawnable(8);
     for (int round = 0; round < 3; ++round) {
         const size_t before = b.r.fake.spawns.size();
@@ -908,6 +917,189 @@ TEST_CASE("wild beasts: wild snakes come with the beasts pack, one at a time") {
         CHECK(b.r.fake.spawns.size() == before + 1);  // one at a time: it is still about
         b.r.fake.attrs[{id, EMF_ATTR_HEALTH}] = 0;     // killed
     }
+}
+
+// ---- the beasts pack's rare snakes: crimson, golden king and albino, each its own copy of the snake's graph ----
+namespace {
+constexpr const char* kCrimsonGraph = "d4c87337-8c53-41df-8488-8079046e1515";
+constexpr const char* kCrimsonTemplate = "d4c87337-8c53-41df-8488-8079046e1512";
+constexpr const char* kGoldenGraph = "d4c87337-8c53-41df-8488-8079046e1525";
+constexpr const char* kGoldenTemplate = "d4c87337-8c53-41df-8488-8079046e1522";
+constexpr const char* kAlbinoGraph = "d4c87337-8c53-41df-8488-8079046e1535";
+constexpr const char* kAlbinoTemplate = "d4c87337-8c53-41df-8488-8079046e1532";
+constexpr uint32_t kRune = 0x5e000001, kRareRune = 0x5e000002, kEpicSword = 0x5e000003;
+
+// Beastmaster with every math.random answer fixed by `beastmaster.test_roll <r>`: math.random() is r, math.random(m, n)
+// is m below 0.5 and n from 0.5 (math.random(n) as math.random(1, n)).
+struct RollRig : BeastRig {
+    explicit RollRig(const std::map<std::string, std::string>& settings = {}) : BeastRig(settings) {
+        r.fake.item_names[kRune] = "Material_T1_Token_WeaponUpgrade_Rune01";
+        r.fake.item_names[kRareRune] = "Material_T2_Token_WeaponUpgrade_Rune02";
+        r.fake.item_names[kEpicSword] = "Weapon_T1_1H_SwordEpic_01";
+        edit_main("local wild_mod = require(\"wild\")\n",
+                  "TEST_ROLL = 0.5\n"
+                  "math.random = function(m, n)\n"
+                  "  if m == nil then return TEST_ROLL end\n"
+                  "  if n == nil then m, n = 1, m end\n"
+                  "  if TEST_ROLL < 0.5 then return m end\n"
+                  "  return n\n"
+                  "end\n"
+                  "emf.command(\"test_roll\", \"<r>\", function(w, a) TEST_ROLL = tonumber(a[1]) end)\n");
+    }
+    void roll(double v) { reply("beastmaster.test_roll " + std::to_string(v)); }
+    // The puts made into `entity`'s inventory: item -> (count, level, rarity or -1)
+    std::map<uint32_t, std::tuple<uint32_t, uint32_t, int>> puts_to(uint32_t entity) {
+        std::map<uint32_t, std::tuple<uint32_t, uint32_t, int>> out;
+        for (const auto& p : r.fake.puts)
+            if (p.entity == entity)
+                out[p.item] = {p.count, p.level, (p.flags & EMF_ITEMS_RARITY) ? static_cast<int>(p.rarity) : -1};
+        return out;
+    }
+};
+}  // namespace
+
+TEST_CASE("beastmaster: the rare snakes are their own graphs: tamed with 3x, 4x and 5x health, fed game meat or dog bait") {
+    BeastRig b;
+    CHECK(b.reply(std::string("beastmaster.species ") + kCrimsonGraph + " 6 1.15") == "crimson_snake");
+    CHECK(b.reply(std::string("beastmaster.species ") + kGoldenGraph + " 6 1.25") == "golden_snake");
+    CHECK(b.reply(std::string("beastmaster.species ") + kAlbinoGraph + " 6 1.35") == "albino_snake");
+    CHECK(b.r.fake.settings["beastmaster.bait_crimson_snake"] == "Food_T2_raw_bad_meat_Game");
+    CHECK(b.r.fake.settings["beastmaster.bait_golden_snake"] == "Food_T2_raw_bad_meat_Game");
+    CHECK(b.r.fake.settings["beastmaster.bait_albino_snake"] == "Food_T2_Dog_Bait");
+    b.beast(50, kAlbinoGraph, 0, 5, kWildBeast, 20, 100);
+    component<ecs::ScaleComponent>(b.r.fake, 50).uniformScale = 1.35f;
+    b.look(1, 0, 10.5, 0, 0);
+    CHECK(b.reply("beastmaster.tame").find("Taming the albino snake") != std::string::npos);
+    b.seconds(4);
+    CHECK(b.noted("You tamed an albino snake: Albino snake"));
+    CHECK(b.reply("beastmaster.list").find("1. Albino snake - albino_snake, out") != std::string::npos);
+    b.reply("beastmaster.dismiss all");
+    b.spawnable(1);
+    b.seconds(11);
+    CHECK(b.reply("beastmaster.call 1").find("comes") != std::string::npos);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(guid_text(b.r.fake.spawns[0].guid) == kAlbinoTemplate);
+    auto& h = component<ecs::Health>(b.r.fake, 1234);
+    h.dataStorage[2] = 40;
+    b.seconds(1);
+    CHECK(h.dataStorage[3] == 160);  // 40 + 160 = 200 = 5 x 40
+    for (const char* id : {"crimson_snake", "golden_snake"}) CHECK(b.reply(std::string("beastmaster.give ") + id).find(id) != std::string::npos);
+}
+
+TEST_CASE("wild beasts: a wild snake is now and then a rare one: albino 0.25 %, golden king 0.4 %, crimson 1 % of them") {
+    RollRig b({{"wild_bear_minutes", "1"}});
+    b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
+    b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));
+    b.spawnable(8);
+    // the roll in [0, 1): albino under 0.0025, golden king under 0.0065, crimson under 0.0165, else a snake
+    const std::vector<std::pair<double, const char*>> rounds = {
+        {0.001, kAlbinoTemplate}, {0.005, kGoldenTemplate}, {0.012, kCrimsonTemplate}, {0.02, kSnakeTemplate},
+        {0.3, kSnakeTemplate}};
+    for (const auto& [roll, want] : rounds) {
+        CAPTURE(roll);
+        b.roll(roll);
+        const size_t before = b.r.fake.spawns.size();
+        b.seconds(61);
+        REQUIRE(b.r.fake.spawns.size() == before + 1);
+        CHECK(guid_text(b.r.fake.spawns.back().guid) == want);
+        const uint32_t id = 1234 + static_cast<uint32_t>(before);
+        component<ecs::ScaleComponent>(b.r.fake, id).uniformScale = 1.0f;
+        b.r.fake.attrs[{id, EMF_ATTR_HEALTH}] = 0;  // killed: the next one may come
+    }
+
+    // a rare snake the game does not have (an older beasts pack) comes as a snake, with one log line
+    RollRig old({{"wild_bear_minutes", "1"}});
+    for (const char* t : {kBearTemplate, kAurochsTemplate, kCrimsonTemplate}) old.r.fake.missing_templates.insert(guid_bytes(t));
+    old.spawnable(4);
+    old.roll(0.012);
+    old.seconds(61);
+    REQUIRE(old.r.fake.spawns.size() == 1);
+    CHECK(guid_text(old.r.fake.spawns[0].guid) == kSnakeTemplate);
+    CHECK(logged(old.r.fake, "wild crimson snakes") == 1);
+}
+
+TEST_CASE("wild beasts: a wild albino snake keeps 5x the game's base health") {
+    RollRig b({{"wild_bear_minutes", "1"}});
+    b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
+    b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));
+    b.spawnable(1);
+    b.roll(0.001);
+    b.seconds(61);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(guid_text(b.r.fake.spawns[0].guid) == kAlbinoTemplate);
+    auto& h = component<ecs::Health>(b.r.fake, 1234);
+    h.dataStorage[2] = 30;
+    b.seconds(1);
+    CHECK(h.dataStorage[3] == 120);  // 30 + 120 = 150 = 5 x 30
+}
+
+TEST_CASE("rare snakes: the slayer gets runes, maybe the tier-2 rune and gear at their level; nobody far away does") {
+    RollRig b;
+    // an albino, lucky rolls: the fewest runes (6), the tier-2 rune (50 %) and legendary gear (25 %)
+    b.roll(0.001);
+    b.beast(70, kAlbinoGraph, 0, 5, kWildBeast, 0, 100);
+    component<ecs::ScaleComponent>(b.r.fake, 70).uniformScale = 1.35f;
+    deliver(b.r.fake, "HitEvent", hit_event(1, 70));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(70));
+    b.seconds(1);
+    auto got = b.puts_to(1);
+    REQUIRE(got.count(kRune) == 1);
+    CHECK(std::get<0>(got[kRune]) == 6);
+    REQUIRE(got.count(kRareRune) == 1);
+    CHECK(std::get<0>(got[kRareRune]) == 1);
+    REQUIRE(got.count(kEpicSword) == 1);
+    CHECK(std::get<0>(got[kEpicSword]) == 1);
+    CHECK(std::get<1>(got[kEpicSword]) == 10);  // the slayer's level
+    CHECK(std::get<2>(got[kEpicSword]) == 4);   // legendary
+    CHECK(b.puts_to(2).empty());
+
+    // a crimson, unlucky rolls: the most runes (5), nothing else; player 2 hit it last
+    b.r.fake.puts.clear();
+    b.roll(0.99);
+    b.beast(71, kCrimsonGraph, 30, 5, kWildBeast, 0, 100);
+    deliver(b.r.fake, "HitEvent", hit_event(1, 71));
+    deliver(b.r.fake, "HitEvent", hit_event(2, 71));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(71));
+    b.seconds(1);
+    got = b.puts_to(2);
+    REQUIRE(got.size() == 1);
+    CHECK(std::get<0>(got[kRune]) == 5);
+    CHECK(b.puts_to(1).empty());
+
+    // a golden king with lucky rolls: epic gear (10 %), runes 4
+    b.r.fake.puts.clear();
+    b.roll(0.001);
+    b.beast(72, kGoldenGraph, 0, 5, kWildBeast, 0, 100);
+    deliver(b.r.fake, "HitEvent", hit_event(1, 72));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(72));
+    b.seconds(1);
+    got = b.puts_to(1);
+    CHECK(std::get<0>(got[kRune]) == 4);
+    CHECK(std::get<2>(got[kEpicSword]) == 3);  // epic
+
+    // no player's hit (a beast or a fall killed it): the nearest player within 60 m
+    b.r.fake.puts.clear();
+    b.beast(73, kCrimsonGraph, 28, 0, kWildBeast, 0, 100);
+    deliver(b.r.fake, "EntityDiedEvent", died_event(73));
+    b.seconds(1);
+    CHECK(b.puts_to(2).count(kRune) == 1);
+    CHECK(b.puts_to(1).empty());
+
+    // far from every player and no player's hit: no bonus; nor for a tamed one, a plain snake, or a wolf
+    b.r.fake.puts.clear();
+    b.beast(74, kCrimsonGraph, 200, 200, kWildBeast, 0, 100);
+    deliver(b.r.fake, "EntityDiedEvent", died_event(74));
+    b.beast(75, kCrimsonGraph, 0, 5, kPlayerAlly, 0, 100);
+    deliver(b.r.fake, "HitEvent", hit_event(1, 75));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(75));
+    b.beast(76, kSnakeGraph, 0, 5, kWildBeast, 0, 100);
+    deliver(b.r.fake, "HitEvent", hit_event(1, 76));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(76));
+    b.beast(77, kWolfGraph, 0, 5, kWildBeast, 0, 100);
+    deliver(b.r.fake, "HitEvent", hit_event(1, 77));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(77));
+    b.seconds(1);
+    CHECK(b.r.fake.puts.empty());
 }
 
 // ---- the sabretooth graph: no pack beast on it ----
