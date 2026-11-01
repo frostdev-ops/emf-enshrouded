@@ -1100,7 +1100,7 @@ std::vector<std::string> tells_to(BountyRig& b, uint32_t player) {
 }
 }  // namespace
 
-TEST_CASE("bounty: a player who walks up to a board gets the notices as a private chat line, once until 8 m away and a minute") {
+TEST_CASE("bounty: a player who walks up to a board gets the notices in the chat; again after 8 m away when they changed, or after 10 minutes") {
     {
         BountyRig b({{"need_board", "1"}});
         altar(b, 900, 20, 0);
@@ -1122,13 +1122,21 @@ TEST_CASE("bounty: a player who walks up to a board gets the notices as a privat
         place(b.r.fake, 2, 20, 10, 0);
         b.seconds(2);
         CHECK(tells_to(b, 2).size() == 1);
-        place(b.r.fake, 2, 20, 10, -5);  // 9 m away and back within a minute of the last line: not yet
+        place(b.r.fake, 2, 20, 10, -5);  // 9 m away and back: the same notices, not again (a hub board floods no chat)
         b.seconds(2);
         place(b.r.fake, 2, 20, 10, 0);
-        b.seconds(2);
+        b.seconds(62);
         CHECK(tells_to(b, 2).size() == 1);
-        b.seconds(60);  // still there a minute after the last line: told again
+        b.reply("bounty.reset");  // new notices: told at once (they went away since the last line)
+        b.seconds(2);
+        REQUIRE(tells_to(b, 2).size() == 2);
+        place(b.r.fake, 2, 20, 10, -5);  // away and back, then 10 minutes after the last line: told again
+        b.seconds(2);
+        place(b.r.fake, 2, 20, 10, 0);
+        b.seconds(300);
         CHECK(tells_to(b, 2).size() == 2);
+        b.seconds(300);
+        CHECK(tells_to(b, 2).size() == 3);
         // the host walking up gets a note (the wheel is theirs), no chat line; the note at most every 10 minutes
         place(b.r.fake, 1, 20, 10, 1);
         b.look(1, 20, 11.5, 1, 0);
