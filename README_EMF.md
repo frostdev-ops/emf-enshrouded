@@ -146,11 +146,12 @@ EMF's keys by default:
 | F6 | Companion: calls it, then opens its order wheel |
 | F7 | Hand-over: the host's wheel |
 | F8 | Bulk Craft: the wheel at a crafting station |
-| L | Quick Stack: tap to put things into nearby chests, hold at a chest for its wheel |
+| L | Quick Stack: tap to put things into nearby chests, hold at a chest for its wheel (the game also uses L: voice-over playback) |
 | K | Villager Jobs: a job for the villager you look at |
-| E | Bounty Board (from 1.2): reads the board you look at |
+| E | Bounty Board (from 1.2): reads the board you look at (E is also the game's interact key; the board itself has no game action) |
 
-The game's own default keys take every letter except K, so EMF's wheels sit on the free F-keys. Every mod's key can
+The game's own default keys take every letter except K, so EMF's wheels sit on the free F-keys; the game also gets a
+mod's key press. Every mod's key can
 be changed in the console's Mods tab or in EMF.exe (click the key, then press the new one). When a mod's default key
 changes, a key you chose yourself stays.
 

@@ -22,7 +22,7 @@ in the console ( settings <mod>  lists the keys;  set big_stacks enabled 1  swit
 come with EMF: every mod starts with its defaults, and your changes are saved in <game>\emf\config\<mod>.ini.
 
 Keys: the console is the key under Esc; Necromancer F2, Beastmaster F3, Companion F6, Hand-over F7, Bulk Craft F8,
-Quick Stack L, Villager Jobs K. Change any mod's key in the Mods tab or EMF.exe (click the key, then press the new
+Quick Stack L, Villager Jobs K, Bounty Board E (at a board). Change any mod's key in the Mods tab or EMF.exe (click the key, then press the new
 one); a key you chose yourself stays when a mod's default changes.
 
 Included mods:
