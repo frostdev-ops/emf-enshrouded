@@ -1740,11 +1740,12 @@ emf.on_key("read_key", function(world)
 end)
 
 -- ---- every step ----
--- A dawn between two readings of the clock: it passed 6:00, or it went back (past midnight: the host set the time, or
--- the players slept through the night) to 6:00 or later. The game keeps no day number, so the mod counts dawns.
+-- A dawn between two readings of the clock: it passed 6:00, or it wrapped past midnight (the host set the time, or the
+-- players slept through the night) to 6:00 or later. A jump back is a wrap forward only when that forward way is at
+-- most 18 hours; a clock set back a little is no new day. The game keeps no day number, so the mod counts dawns.
 local function is_dawn(before, now)
   if before < 6 and now >= 6 then return true end
-  return now < before and now >= 6
+  return now < before and now >= 6 and (now - before) % 24 <= 18
 end
 
 emf.on_tick(function(world)

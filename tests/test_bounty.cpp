@@ -857,6 +857,11 @@ TEST_CASE("bounty: a dawn counts once when the clock jumps past midnight to 6:00
     b.seconds(1);
     CHECK(saved_number(b, "dawns") == 2);
     CHECK(saved_number(b, "posted") == 2);
+    set_daytime(b.r.fake, 7.0);  // the clock set back a few hours, then a little: no new day
+    b.seconds(1);
+    set_daytime(b.r.fake, 6.5);
+    b.seconds(1);
+    CHECK(saved_number(b, "dawns") == 2);
 }
 
 // ---- 1.2: which props are Bounty Boards ----
