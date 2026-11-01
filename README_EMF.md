@@ -414,8 +414,10 @@ top of `emf\mods\champion\main.lua`: change them while the game runs. Details: `
 ## The bounty mod (Bounty Board, Lua)
 Installed switched off: switch it on in the Mods tab or EMF.exe. Every day each player gets three bounties: slay
 creatures of a faction ("Slay 6 Vukah"), gather a raw material picked up in the world ("Gather 60 Wood logs", never
-out of a chest or a tombstone), or slay a champion (2 levels above you, 1,000 health or more). Kills count for every
-player who hit the creature in its last 10 s (`share_kills`). Rewards (runes, furs, gear at your level) with
+out of a chest or a tombstone), or slay a champion (2 levels above you, 1,000 health or more). Until a player
+finishes their first bounty, their boards are quick starters ("Gather 20 Wood logs"); the size `tiny` (x0.2) makes
+every bounty quick to try. Kills count for every player who hit the creature in its last 10 s (`share_kills`), and
+a hit by a player's companion or summon (an ally guarding them) counts as theirs. Rewards (runes, furs, gear at your level) with
 `/bounty.claim`, or at once with `auto_claim`; what does not fit is dropped at your feet. Commands for every player:
 `/bounty.board`, `/bounty.claim`, `/bounty.reroll <n>`, `/bounty.top`; the host has `bounty.give <id>` and
 `bounty.reset`. New bounties every real day at an hour, every game dawn, or every few hours of play; kept per world

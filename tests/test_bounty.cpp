@@ -34,6 +34,19 @@ struct BountyRig : ModRig {
         deliver(r.fake, "EntityDiedEvent", died_event(who));
     }
     std::string board(uint32_t player = 0, uint64_t account = 0) { return reply("bounty.board", player, account); }
+    // A creature on the players' side (faction 11 PlayerAlly, as the companion, Beastmaster's beasts and Necromancer's
+    // undead are) that guards `guarded` through the game's guard system (DynamicEnemy01BehaviorState.guardEntityId).
+    void ally(uint32_t who, uint32_t guarded, int faction = 11) {
+        place(r.fake, who, 6, 10, 6);
+        component<ecs::Faction>(r.fake, who).faction = static_cast<emf::gen::FactionType>(faction);
+        component<ecs::DynamicEnemy01BehaviorState>(r.fake, who).guardEntityId.id = guarded;
+        add_entity(r.fake, who);
+    }
+    // Finishes one bounty for player 1 (their first): a starter's wood.
+    void finish_one() {
+        reply("bounty.give start_wood");
+        deliver(r.fake, "PickupEvent", pickup_event(1, 0, kLogs, 20));
+    }
 };
 size_t count_of(const std::string& text, const std::string& part) {
     size_t n = 0;
@@ -139,9 +152,11 @@ TEST_CASE("bounty: gathering counts what a player picks up from the world, never
     deliver(b.r.fake, "PickupEvent", pickup_event(1, 0, kLogs, 40));
     CHECK(b.board().find("Gather 60 Wood logs: claimed") != std::string::npos);  // done, and claimed at once
     REQUIRE_FALSE(b.r.fake.puts.empty());
-    // the reward arrives as a pickup from nowhere: it never counts for a bounty, also when it is the gathered item
+    // the reward arrives as a pickup from nowhere: it never counts for a bounty, also when it is the gathered item (the
+    // first board's starter, done with the same logs, brought runes too)
     b.reply("bounty.give gather_runes");
-    deliver(b.r.fake, "PickupEvent", pickup_event(1, 0, kRunes, b.r.fake.puts[0].count));
+    for (const auto& put : b.r.fake.puts)
+        if (put.item == kRunes) deliver(b.r.fake, "PickupEvent", pickup_event(1, 0, kRunes, put.count));
     CHECK(b.board().find("Gather 20 Runes: 0/20") != std::string::npos);
     deliver(b.r.fake, "PickupEvent", pickup_event(1, 0, kRunes, 3));  // runes found later do count
     CHECK(b.board().find("Gather 20 Runes: 3/20") != std::string::npos);
@@ -237,8 +252,9 @@ TEST_CASE("bounty: /bounty.reroll swaps one bounty for another (once a period by
         b.creature(3300 + i, 3);
         b.kill(3300 + i, {1});
     }
-    const std::string top = b.reply("bounty.top", 2, 0xBB);
-    CHECK(top.find("1. 0x00000000000000bb: 2 (you)") != std::string::npos);
+    const std::string top = b.reply("bounty.top", 2, 0xBB);  // player 2's starters may count the scavengers too
+    CHECK(top.find("1. 0x00000000000000bb: ") != std::string::npos);
+    CHECK(top.find(" (you)") != std::string::npos);
     CHECK(top.find("2. 0x00000000000000aa: 1") != std::string::npos);
 }
 
@@ -418,3 +434,92 @@ TEST_CASE("bounty: a reroll that finds no other bounty in the pool is not used u
     CHECK(b.reply("bounty.reroll 2") == "The pool has no other bounty.");  // not "No rerolls left"
 }
 
+
+// ---- kills by a player's companion and summons (the owner: "killed by the companion did not count") ----
+TEST_CASE("bounty: a kill by a player's companion, Beastmaster beast or Necromancer undead counts for that player") {
+    BountyRig b({{"share_kills", "0"}});
+    b.reply("bounty.give kill_vukah");
+    b.reply("bounty.give kill_vukah", 2, 0xBB);
+    b.ally(5001, 1);  // player 1's companion
+    b.ally(5002, 2);  // player 2's beast
+    b.creature(3001, 3);
+    b.kill(3001, {5001});
+    CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);
+    CHECK(b.board(2, 0xBB).find("Slay 6 Vukah: 0/6") != std::string::npos);
+    b.creature(3002, 3);
+    b.kill(3002, {1, 5002});  // the beast hit last: its owner gets it
+    CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);
+    CHECK(b.board(2, 0xBB).find("Slay 6 Vukah: 1/6") != std::string::npos);
+    // never: a wild creature guarding its own leader, a hostile that follows a player, an ally guarding something
+    // that is no player (the companion told to stay at a marker)
+    b.creature(5003, 3);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 5003).guardEntityId.id = 5009;
+    b.ally(5004, 1, 3);   // a Vukah (faction 3) whose guard id names player 1
+    b.ally(5005, 6000);   // guards a barrel
+    for (uint32_t hitter : {5003u, 5004u, 5005u}) {
+        b.creature(3010 + hitter, 3);
+        b.kill(3010 + hitter, {hitter});
+    }
+    CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);
+}
+
+TEST_CASE("bounty: with shared kills, a player whose companion hit the creature in its last 10 s gets the kill too") {
+    BountyRig b;
+    b.reply("bounty.give kill_vukah");
+    b.reply("bounty.give kill_vukah", 2, 0xBB);
+    b.ally(5001, 1);
+    b.creature(3001, 3);
+    deliver(b.r.fake, "HitEvent", hit_event(5001, 3001));
+    b.seconds(3);
+    b.kill(3001, {2});
+    CHECK(b.board().find("Slay 6 Vukah: 1/6") != std::string::npos);
+    CHECK(b.board(2, 0xBB).find("Slay 6 Vukah: 1/6") != std::string::npos);
+}
+
+// ---- smaller first bounties (the owner: "the first bounty was too big to try") ----
+namespace {
+const char* const kStarters[] = {"Gather 20 Wood logs", "Gather 20 Stone", "Gather 15 Plant fibre", "Slay 2 Wildlife",
+                                 "Slay 3 Shroud creatures", "Slay 2 Scavengers"};
+}  // namespace
+
+TEST_CASE("bounty: until a player finishes their first bounty, their boards are quick starters; then the pool's own") {
+    BountyRig b;
+    const std::string first = b.board();
+    for (const char* big : {"Gather 60", "Gather 40", "Slay 6", "Slay 8", "champion"}) {
+        CAPTURE(big);
+        CHECK(first.find(big) == std::string::npos);
+    }
+    size_t starters = 0;
+    for (const char* quick : kStarters) starters += count_of(first, quick);
+    CHECK(starters == 3);
+    CHECK(b.reply("bounty.reroll 1").find("Bounty 1 is now: ") == 0);  // a reroll gives another starter
+    starters = 0;
+    const std::string rerolled = b.board();
+    for (const char* quick : kStarters) starters += count_of(rerolled, quick);
+    CHECK(starters == 3);
+    CHECK(rerolled != first);
+    b.finish_one();
+    CHECK(b.noted("Bounty done: Gather 20 Wood logs"));
+    b.reply("bounty.reset");  // a new period
+    const std::string later = b.board();
+    for (const char* quick : kStarters) {
+        CAPTURE(quick);
+        CHECK(later.find(quick) == std::string::npos);
+    }
+    CHECK(later.find("3. ") != std::string::npos);
+}
+
+TEST_CASE("bounty: the Tiny size (x0.2) makes every bounty quick to try; a pool without starters draws as before") {
+    BountyRig b({{"difficulty", "tiny"}});
+    CHECK(b.reply("bounty.give kill_vukah").rfind("Given: Slay 1 Vukah", 0) == 0);
+    CHECK(b.reply("bounty.give gather_wood").rfind("Given: Gather 12 Wood logs", 0) == 0);
+    CHECK(b.reply("bounty.give start_wood").rfind("Given: Gather 4 Wood logs", 0) == 0);
+    BountyRig c;  // a pool with no starters (the one in pool.lua may have none): the first board is the pool's own
+    c.edit_main("(when first hit)", "\nfor i = #POOL, 1, -1 do if POOL[i].starter then table.remove(POOL, i) end end");
+    const std::string first = c.board(2, 0xBB);  // a board drawn after the edit (the host's is already drawn)
+    for (const char* quick : kStarters) {
+        CAPTURE(quick);
+        CHECK(first.find(quick) == std::string::npos);
+    }
+    CHECK(first.find("3. ") != std::string::npos);
+}
