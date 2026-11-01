@@ -1,7 +1,6 @@
 #include "saves/backup.h"
 
 #include <windows.h>
-#include <bcrypt.h>
 #include <shlobj.h>
 
 #include <algorithm>
@@ -13,9 +12,9 @@
 #include <map>
 #include <set>
 
+#include "common/sha256.h"
 #include "core/json.h"
 
-#pragma comment(lib, "bcrypt.lib")
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")
 #pragma comment(lib, "advapi32.lib")
@@ -69,38 +68,9 @@ std::wstring win_path(std::string_view rel) {
     return w;
 }
 
-// ---- SHA-256 (Windows CNG), streaming ----
-class Sha256 {
-public:
-    Sha256() {
-        if (BCryptOpenAlgorithmProvider(&alg_, BCRYPT_SHA256_ALGORITHM, nullptr, 0) != 0) alg_ = nullptr;
-        if (alg_ && BCryptCreateHash(alg_, &hash_, nullptr, 0, nullptr, 0, 0) != 0) hash_ = nullptr;
-    }
-    ~Sha256() {
-        if (hash_) BCryptDestroyHash(hash_);
-        if (alg_) BCryptCloseAlgorithmProvider(alg_, 0);
-    }
-    Sha256(const Sha256&) = delete;
-    Sha256& operator=(const Sha256&) = delete;
-    void update(const void* p, size_t n) {
-        if (hash_ && n) BCryptHashData(hash_, static_cast<PUCHAR>(const_cast<void*>(p)), static_cast<ULONG>(n), 0);
-    }
-    std::string hex() {
-        unsigned char d[32];
-        if (!hash_ || BCryptFinishHash(hash_, d, sizeof d, 0) != 0) return {};
-        static const char* digits = "0123456789abcdef";
-        std::string s;
-        for (unsigned char c : d) {
-            s += digits[c >> 4];
-            s += digits[c & 15];
-        }
-        return s;
-    }
-
-private:
-    BCRYPT_ALG_HANDLE alg_ = nullptr;
-    BCRYPT_HASH_HANDLE hash_ = nullptr;
-};
+// SHA-256: EMF's own (common/sha256.h), no Windows bcrypt: the backup at game start runs while the game is still
+// starting up, where bcrypt's first use could deadlock against the game's main thread.
+using emf::Sha256;
 
 // Every read of a save file opens it with CreateFileW and all three share flags, never through the C runtime or a
 // stream (their defaults deny writing): the game, or Steam, may write the file at that moment, and a write that fails
