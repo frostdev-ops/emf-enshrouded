@@ -130,6 +130,15 @@ class RoundTripTests(unittest.TestCase):
         self.assertEqual((h["usedScaleJoints"], h["nonConstScaleJoints"]), (0, 0))
         self.check(poses, clip, rest, 10)
 
+    def test_a_joint_at_the_rest_pose_does_not_coarsen_the_others(self):
+        # joint 1 stays at a rest position 100 m out: the position scale follows joint 0's small motion
+        rest = [IDENTITY, ((0.0, 0.0, 0.0, 1.0), (100.0, 0.0, 0.0), (1.0, 1.0, 1.0))]
+        poses = [[((0.0, 0.0, 0.0, 1.0), (0.01 * math.sin(f / 3), 0.0, 0.0), (1.0, 1.0, 1.0)), rest[1]]
+                 for f in range(21)]
+        clip = ja.encode(poses, rest, fps=60, loop=False, hierarchy_hash=7)
+        self.assertLess(clip["positionFactor"], 0.011 / 32767)
+        self.check(poses, clip, rest, 20)
+
     def test_a_quaternion_that_flips_sign_is_not_a_spin(self):
         # q and -q are the same rotation: the encoder keeps neighbouring keys on the same side
         poses = [[(tuple(c * (1 if f % 2 else -1) for c in turn((0, 1, 0), 0.01 * f)), (0, 0, 0), (1, 1, 1))]

@@ -169,22 +169,19 @@ def encode(poses, rest, fps=60, loop=False, hierarchy_hash=0):
         channels["scl"].append([tuple(p[j][2]) for p in poses])
     tangents = {k: [_tangents(v, loop) for v in vals] for k, vals in channels.items()}
 
-    def biggest(vals):
-        return max((abs(x) for per_joint in vals for frame in per_joint for x in frame), default=0.0)
-
-    pos_factor = max(biggest(channels["pos"]), 1e-6) / 32767
-    pos_tangent = max(biggest(tangents["pos"]), 1e-9) / 32767
-    scl_factor = max(biggest(channels["scl"]), 1e-6) / 32767
-    scales = {"rot": (ROT_SCALE, TANGENT_SCALE), "pos": (pos_factor, pos_tangent), "scl": (scl_factor, TANGENT_SCALE)}
-
-    raw = bytearray()
-    headers = []
+    # each block's joints per channel: keyed, constant, or left at the rest pose
+    ranges = []
     start = 0
     while True:
         last = min(start + BLOCK, n)
-        h = {"dataOffset": len(raw), "startTime": start, "endTime": start + BLOCK}
-        for name, field, comps in SECTIONS:
-            vscale, tscale = scales[name]
+        ranges.append((start, last))
+        if last >= n:
+            break
+        start += BLOCK
+    kinds = []
+    for start, last in ranges:
+        per = {}
+        for name, _, _ in SECTIONS:
             keyed, const, still = [], [], []
             for j in range(joints):
                 vals = channels[name][j][start:last + 1]
@@ -199,6 +196,32 @@ def encode(poses, rest, fps=60, loop=False, hierarchy_hash=0):
                     const.append(j)
                 else:
                     keyed.append(j)
+            per[name] = (keyed, const, still)
+        kinds.append(per)
+
+    def biggest(name, of_tangents=False):
+        """The largest stored component of a channel (only joints a block stores: keyed, or constant for values)."""
+        top = 0.0
+        for (start, last), per in zip(ranges, kinds):
+            keyed, const, _ = per[name]
+            src = tangents if of_tangents else channels
+            for j in keyed + ([] if of_tangents else const):
+                for frame in src[name][j][start:last + 1]:
+                    top = max(top, max(abs(x) for x in frame))
+        return top
+
+    pos_factor = max(biggest("pos"), 1e-6) / 32767
+    pos_tangent = max(biggest("pos", True), 1e-9) / 32767
+    scl_factor = max(biggest("scl"), 1e-6) / 32767
+    scales = {"rot": (ROT_SCALE, TANGENT_SCALE), "pos": (pos_factor, pos_tangent), "scl": (scl_factor, TANGENT_SCALE)}
+
+    raw = bytearray()
+    headers = []
+    for (start, last), per in zip(ranges, kinds):
+        h = {"dataOffset": len(raw), "startTime": start, "endTime": start + BLOCK}
+        for name, field, comps in SECTIONS:
+            vscale, tscale = scales[name]
+            keyed, const, still = per[name]
             mask = (1 << (last - start + 1)) - 1
             raw += struct.pack("<%dQ" % len(keyed), *([mask] * len(keyed)))
             for j in keyed:
@@ -214,9 +237,6 @@ def encode(poses, rest, fps=60, loop=False, hierarchy_hash=0):
             h["used" + field] = len(keyed) + len(const)
             h["nonConst" + field] = len(keyed)
         headers.append(h)
-        if last >= n:
-            break
-        start += BLOCK
     raw += bytes((-len(raw)) % 16) + bytes(16)
     return {"hierarchyHash": hierarchy_hash, "positionFactor": pos_factor, "positionTangent": pos_tangent,
             "scaleFactor": scl_factor, "headers": headers,
