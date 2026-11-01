@@ -39,7 +39,8 @@ semver = { version = "1.0", features = ["serde"] }
 
 # processing
 half = "2.6.0"
-image = "0.25.6"
+# EMF patch P3: image without "rayon" and "exr" (their worker threads outlive a call into emf_content.dll)
+image = { version = "0.25.6", default-features = false, features = ["avif", "bmp", "dds", "ff", "gif", "hdr", "ico", "jpeg", "png", "pnm", "qoi", "tga", "tiff", "webp"] }
 
 # logging
 tracing = "0.1.41"

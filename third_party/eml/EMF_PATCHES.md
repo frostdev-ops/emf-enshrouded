@@ -34,6 +34,10 @@ Each patch is its own commit, and each changes as little as it can.
    bzip2-sys defines `bz_internal_error` as an exported function, and a Rust DLL exports every such function of its
    dependencies, so `emf_content.dll` had a third export. Cost: a zipped mod whose files are compressed with bzip2
    cannot be read (zip tools use deflate by default; folders and deflate zips are not affected).
+3. **P3** `Cargo.toml`: the workspace's `image` without its `rayon` and `exr` features (the other default formats
+   stay). Decoding a compressed EXR builds a rayon thread pool, and rayon starts worker threads for AVIF encoding;
+   those threads outlive the call, and unloading the DLL would pull the code out from under them. Cost: a mod's
+   `image.decode`/`image.encode` with `"openexr"` fails, and AVIF encoding runs on one thread.
 
 ## How to update
 
