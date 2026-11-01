@@ -1005,3 +1005,88 @@ TEST_CASE("beastmaster: a beast in one player's taming cannot be fed or tamed by
     b.seconds(11);
     CHECK(move_mul(b.r.fake, 50) == 1.0f);
 }
+
+// ---- stepping aside: the game keeps a no-build zone around every creature with the enemy AI (add_no_buildzones_enemy),
+// so a beast at your side blocks building and placing there ----
+namespace {
+// Player `p` holds something to build or place (the game's building cursor has an item), or not.
+void building(Fake& f, uint32_t p, bool on) {
+    component<ecs::ServerCursor>(f, p).currentBuildingItemInstance.itemId.value = on ? 0x1234u : 0u;
+}
+size_t mana_paid(const Fake& f, uint32_t p, int32_t cost) {
+    size_t n = 0;
+    for (const auto& [e, a, d] : f.attr_adds) n += e == p && a == EMF_ATTR_MANA && d == -cost;
+    return n;
+}
+size_t notes_with(const Fake& f, const std::string& needle) {
+    size_t n = 0;
+    for (const auto& x : f.notes) n += x.find(needle) != std::string::npos;
+    return n;
+}
+}  // namespace
+
+TEST_CASE("beastmaster: beasts step aside while their owner builds and come back after, free; a call meanwhile waits") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give boar");
+    b.spawnable(4);
+    CHECK(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(2);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    building(b.r.fake, 1, true);
+    b.seconds(2);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 1234u) != b.r.fake.destroyed.end());
+    CHECK(notes_with(b.r.fake, "step aside while you build") == 1);
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, out") != std::string::npos);  // still out: it comes back
+    CHECK(b.hud("out").find("Wolf (aside)") != std::string::npos);
+    b.seconds(11);
+    CHECK(b.r.fake.spawns.size() == 1);  // not while building
+    CHECK(b.reply("beastmaster.call Boar").find("while you build") != std::string::npos);
+    building(b.r.fake, 1, false);
+    b.seconds(1);
+    CHECK(b.r.fake.spawns.size() == 1);  // a moment after (the hammer goes back and forth)
+    b.seconds(4);
+    REQUIRE(b.r.fake.spawns.size() == 2);  // the wolf is back beside its owner
+    CHECK(guid_text(b.r.fake.spawns[1].guid) == kWolfTemplate);
+    CHECK(std::abs(b.r.fake.spawns[1].x - 2.0) <= 1.0);
+    CHECK(mana_paid(b.r.fake, 1, 15) == 1);  // free: only the first call cost mana
+    CHECK(b.hud("out").find("Wolf (out)") != std::string::npos);
+    // a second time: no second note; with make_room off they stay
+    building(b.r.fake, 1, true);
+    b.seconds(2);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 1235u) != b.r.fake.destroyed.end());
+    CHECK(notes_with(b.r.fake, "step aside while you build") == 1);
+    b.r.fake.settings["beastmaster.make_room"] = "false";
+    b.seconds(2);
+    CHECK(b.r.fake.spawns.size() == 3);
+    b.seconds(2);
+    CHECK(b.r.fake.spawns.size() == 3);  // and stay
+}
+
+TEST_CASE("beastmaster: /beastmaster aside sends the beasts away until typed again; calling one brings them back") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give boar");
+    b.spawnable(5);
+    CHECK(b.reply("beastmaster.aside").find("No beast of yours is out") != std::string::npos);
+    CHECK(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(2);
+    CHECK(b.reply("beastmaster.aside").find("step aside") != std::string::npos);
+    b.seconds(2);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 1234u) != b.r.fake.destroyed.end());
+    b.seconds(5);
+    CHECK(b.r.fake.spawns.size() == 1);  // away until called back
+    CHECK(b.reply("beastmaster.aside").find("come back") != std::string::npos);
+    b.seconds(2);
+    CHECK(b.r.fake.spawns.size() == 2);
+    CHECK(b.reply("beastmaster.aside").find("step aside") != std::string::npos);
+    b.seconds(11);
+    CHECK(b.reply("beastmaster.call Boar").find("comes") != std::string::npos);  // a call ends it
+    b.seconds(2);
+    CHECK(b.r.fake.spawns.size() == 4);  // the boar, and the wolf back
+    CHECK(mana_paid(b.r.fake, 1, 15) == 2);
+    // a guest's own
+    CHECK(b.reply("beastmaster aside", 2, 0xBB).find("No beast of yours is out") != std::string::npos);
+    const std::string help = b.reply("beastmaster");
+    CHECK(help.find("aside") != std::string::npos);
+}

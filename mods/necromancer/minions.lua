@@ -1,6 +1,7 @@
 -- Undead minions of several kinds (skeleton warriors; a lich from the undead pack): each kind is raised for mana up to
 -- its own cap. They stay until they fall, follow and guard their owner, come back beside them when they stray, leave
--- the world while their owner is away and come back with them; after a load the saved counts come back (no mana).
+-- the world while their owner is away or they step aside (aside.lua: while their owner builds, or after
+-- necromancer.aside) and come back after; after a load the saved counts come back (no mana).
 -- Bodies are removed while dead (no loot from our own minions). Their hits hand the killing blow (XP, loot) to the
 -- owner, never on bosses or the player side.
 -- M.new(env) where env has: setting(key), now(world), tell(world, player, text), save(), kinds: an ordered list of
@@ -8,6 +9,7 @@
 --     mana = setting key, health_mul = 1.5 (optional), pack = "the ... pack" (optional: a creature from a content pack,
 --     which a game without that pack does not have) }. The first kind is the default (raise without a kind).
 local health_mod = require("health")
+local aside_mod = require("aside")
 
 local M = {}
 local P = {}
@@ -19,7 +21,8 @@ local STRAY_CHECKS = 3  -- guarding someone else this many checks (seconds) in a
 local REFUSALS = 3      -- a pack creature's spawn refused this many checks in a row: its pack is not in this game
 
 function M.new(env)
-	local p = setmetatable({ env = env, kinds = env.kinds, by_id = {}, counts = {}, health = health_mod.new() }, P)
+	local p = setmetatable({ env = env, kinds = env.kinds, by_id = {}, counts = {}, health = health_mod.new(),
+		aside = aside_mod.new({ setting = env.setting }) }, P)
 	for _, k in ipairs(env.kinds) do p.by_id[k.id] = k end
 	p:reset()
 	return p
@@ -38,6 +41,7 @@ function P:reset()
 	self.far, self.moved, self.credited, self.strays = {}, {}, {}, {}
 	self.next_check = 0
 	self.health:reset()
+	self.aside:reset()
 end
 
 -- A kind by its id or its name (singular or plural, any case); the first kind for none given; nil for an unknown word.
@@ -190,6 +194,30 @@ function P:spawn(world, owner, account, kind)
 	return id
 end
 
+-- All of `account`'s undead, of every kind.
+function P:total(account)
+	local n = 0
+	for _, c in pairs(self.counts[account] or {}) do n = n + c end
+	return n
+end
+
+-- Their owner builds (or stopped a moment ago): the undead wait aside.
+function P:building(world, account, owner)
+	return self.aside:building(world, account, owner, self.env.now(world))
+end
+
+-- necromancer.aside: the undead step aside (leave the world, still counted) or come back. Returns the reply.
+function P:toggle_aside(account)
+	if self:total(account) == 0 then
+		self.aside:release(account)
+		return "You have no undead."
+	end
+	if self.aside:toggle(account) then
+		return "Your undead step aside. Type /necromancer aside again, or Gather, to bring them back."
+	end
+	return "Your undead come back."
+end
+
 -- necromancer.raise [kind]: returns the reply text.
 function P:raise(world, owner, account, word)
 	local s = self.env.setting
@@ -199,6 +227,7 @@ function P:raise(world, owner, account, word)
 		for _, k in ipairs(self.kinds) do names[#names + 1] = k.id end
 		return "Raise what? " .. table.concat(names, " | ")
 	end
+	if self:building(world, account, owner) then return "Your undead wait while you build: stop building, then raise." end
 	local n, cap = self:count(account, kind.id), s(kind.cap)
 	if cap <= 0 then return string.format("%s are switched off in the settings.", kind.plural) end
 	if n >= cap then
@@ -224,6 +253,7 @@ function P:raise(world, owner, account, word)
 	self.missing[account .. " " .. kind.id], self.refused[account .. " " .. kind.id] = nil, nil
 	set_count(self, account, kind.id, n + 1)
 	self.last_raise[account] = now
+	self.aside:release(account)  -- the undead that stepped aside come back too
 	self.env.save()
 	return string.format("A %s rises (%d/%d).", kind.name, n + 1, cap)
 end
@@ -402,6 +432,9 @@ function P:step(world)
 	self.fallen = {}
 	for account in pairs(self.counts) do
 		local owner = present[account]
+		local away, why = false, nil
+		if owner then away, why = self.aside:check(world, account, owner, now) end
+		local stepped = false
 		local list = self.out[account] or {}
 		for i = #list, 1, -1 do
 			local id = list[i]
@@ -409,9 +442,10 @@ function P:step(world)
 			if not ours(world, id) then
 				forget(self, account, id)  -- gone, or the id names another entity now: never touched again
 				lost(self, account, kind)
-			elseif not owner then
-				emf.destroy(world, id)  -- the owner left: back when they return
+			elseif not owner or away then
+				emf.destroy(world, id)  -- the owner left, or it steps aside: back when that ends (still counted)
 				forget(self, account, id)
+				stepped = stepped or away
 			else
 				local ai = world:get("DynamicEnemy01BehaviorState", id)
 				local guard = ai and ai.guardEntityId or 0
@@ -431,7 +465,11 @@ function P:step(world)
 				end
 			end
 		end
-		if owner then self:restore(world, owner, account) end
+		if owner and not away then self:restore(world, owner, account) end
+		if stepped and why == "build" and self.aside:first(account) then
+			self.env.tell(world, owner, "Your undead step aside while you build (the game blocks building next to them). "
+				.. "They come back when you stop.")
+		end
 	end
 end
 

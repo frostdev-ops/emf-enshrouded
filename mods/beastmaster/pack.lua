@@ -1,9 +1,11 @@
 -- The beasts out in the world: calling (mana, cooldown, limits), dismissing, resting after a fall, and every second:
 -- checking each beast is still ours, bringing beasts back when their owner is in the world (after a reload, or a
--- guest who returns), and taking them out of the world while their owner is away.
+-- guest who returns), and taking them out of the world while their owner is away or they step aside (aside.lua: while
+-- their owner builds, or after beastmaster.aside).
 -- M.new(env) where env has: setting(key), now(world), tell(world, player, text), beasts() (the roster), save(),
 -- and optionally on_spawn(world, id, species) after a beast was put into the world.
 local species = require("species")
+local aside_mod = require("aside")
 
 local M = {}
 local P = {}
@@ -15,7 +17,7 @@ local STRAY_CHECKS = 3  -- a beast that guards someone else this many checks (se
 local REFUSALS = 3      -- a pack beast's call-back refused this many checks in a row: its pack is not in this game
 
 function M.new(env)
-	local p = setmetatable({ env = env }, P)
+	local p = setmetatable({ env = env, aside = aside_mod.new({ setting = env.setting }) }, P)
 	p:reset()
 	return p
 end
@@ -34,6 +36,7 @@ function P:reset()
 	self.credited = {}   -- foes whose killing blow went to an owner already
 	self.strays = {}     -- entity id -> checks in a row it guarded someone else
 	self.refused = {}    -- beast -> checks in a row the game refused to bring it back
+	self.aside:reset()
 end
 
 local function mmss(s)
@@ -107,6 +110,9 @@ end
 function P:call(world, owner, account, beast)
 	local s = self.env.setting
 	if beast.out then return beast.name .. " is out already." end
+	if self.aside:building(world, account, owner, self.env.now(world)) then
+		return "Your beasts wait while you build: stop building, then call."
+	end
 	for _, b in ipairs(self.env.beasts():list(account)) do
 		if b.out and b.species == beast.species then
 			return string.format("Your %s %s is out already: one of each kind at a time.", b.species, b.name)
@@ -131,8 +137,26 @@ function P:call(world, owner, account, beast)
 	end
 	if cost > 0 then emf.attribute_add(world, owner, "mana", -cost) end
 	self.last_call[account] = now
+	self.aside:release(account)  -- the beasts that stepped aside come back too
 	self.env.save()
 	return string.format("%s the %s comes.", beast.name, beast.species)
+end
+
+-- beastmaster.aside: the beasts that are out step aside (leave the world, still out) or come back. Returns the reply.
+function P:toggle_aside(account)
+	if self:out_count(account) == 0 then
+		self.aside:release(account)
+		return "No beast of yours is out."
+	end
+	if self.aside:toggle(account) then
+		return "Your beasts step aside. Type /beastmaster aside again, or call one, to bring them back."
+	end
+	return "Your beasts come back."
+end
+
+-- Aside now (by the command, or while building): the HUD says so.
+function P:is_aside(account)
+	return self.aside:is_aside(account)
 end
 
 -- beastmaster.dismiss: the beast leaves the world and waits at home.
@@ -278,6 +302,9 @@ function P:step(world)
 	self.fallen = {}
 	for _, account in ipairs(beasts:accounts()) do
 		local owner = present[account]
+		local away, why = false, nil
+		if owner then away, why = self.aside:check(world, account, owner, now) end
+		local stepped = false
 		for _, b in ipairs(beasts:list(account)) do
 			if b.out and b.entity then
 				if not ours(world, b.entity) then
@@ -285,10 +312,11 @@ function P:step(world)
 					b.entity = nil
 					b.out = false
 					self.env.save()
-				elseif not owner then
-					emf.destroy(world, b.entity)  -- the owner left: back when they return
+				elseif not owner or away then
+					emf.destroy(world, b.entity)  -- the owner left, or it steps aside: back when that ends (still out)
 					self.ids[b.entity] = nil
 					b.entity = nil
+					stepped = stepped or away
 				else
 					local ai = world:get("DynamicEnemy01BehaviorState", b.entity)
 					local guard = ai and ai.guardEntityId or 0
@@ -311,7 +339,7 @@ function P:step(world)
 						end
 					end
 				end
-			elseif b.out and owner and b.rest == 0 then
+			elseif b.out and owner and b.rest == 0 and not away then
 				local id, why, refused = self:spawn(world, owner, account, b)  -- after a reload, or its owner came back
 				local sp = species.by_id(b.species)
 				if id then
@@ -328,6 +356,10 @@ function P:step(world)
 					end
 				end
 			end
+		end
+		if stepped and why == "build" and self.aside:first(account) then
+			self.env.tell(world, owner, "Your beasts step aside while you build (the game blocks building next to them). "
+				.. "They come back when you stop.")
 		end
 	end
 end

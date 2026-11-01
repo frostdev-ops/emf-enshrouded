@@ -703,3 +703,63 @@ TEST_CASE("necromancer: a bone golem keeps 2x the game's base health") {
     n.seconds(1);
     CHECK(h.dataStorage[3] == 120);  // 120 + 120 = 2 x 120
 }
+
+// ---- stepping aside: the game keeps a no-build zone around every creature with the enemy AI (add_no_buildzones_enemy),
+// so a skeleton at your side blocks building and placing there ----
+TEST_CASE("necromancer: the undead step aside while their owner builds and come back after, free; a raise meanwhile waits") {
+    NecroRig n;
+    n.spawnable(6);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(1);
+    CHECK(n.reply("necromancer.raise").find("rises (2/3)") != std::string::npos);
+    CHECK(n.reply("necromancer raise", 2, 0xBB).find("rises (1/3)") != std::string::npos);  // a guest's, 1236
+    n.seconds(2);
+    component<ecs::NetworkCursor>(n.r.fake, 1).currentBuildingItemId.value = 0x77;  // the host builds (the replicated copy)
+    n.seconds(2);
+    CHECK(has(n.r.fake.destroyed, 1234));
+    CHECK(has(n.r.fake.destroyed, 1235));
+    CHECK(!has(n.r.fake.destroyed, 1236));  // the guest does not build
+    size_t told = 0;
+    for (const auto& x : n.r.fake.notes) told += x.find("step aside while you build") != std::string::npos;
+    CHECK(told == 1);
+    CHECK(n.reply("necromancer.list").find("Skeletons 2/3") != std::string::npos);  // kept: they come back
+    CHECK(n.hud("out").find("aside") != std::string::npos);
+    CHECK(n.reply("necromancer.raise").find("while you build") != std::string::npos);
+    CHECK(n.reply("necromancer.gather").find("while you build") != std::string::npos);
+    n.seconds(5);
+    CHECK(n.spawned(kSkeleton) == 3);
+    component<ecs::NetworkCursor>(n.r.fake, 1).currentBuildingItemId.value = 0;
+    n.seconds(5);
+    CHECK(n.spawned(kSkeleton) == 5);  // both back, free
+    size_t paid = 0;
+    for (const auto& [e, a, d] : n.r.fake.attr_adds) paid += e == 1 && a == EMF_ATTR_MANA && d == -25;
+    CHECK(paid == 2);
+    CHECK(n.hud("out").find("aside") == std::string::npos);
+}
+
+TEST_CASE("necromancer: /necromancer aside sends the undead away until typed again; Gather or a raise brings them back") {
+    NecroRig n;
+    n.spawnable(6);
+    CHECK(n.reply("necromancer.aside").find("You have no undead") != std::string::npos);
+    CHECK(n.reply("necromancer.raise").find("rises (1/3)") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.reply("necromancer.aside").find("step aside") != std::string::npos);
+    n.seconds(2);
+    CHECK(has(n.r.fake.destroyed, 1234));
+    n.seconds(5);
+    CHECK(n.spawned(kSkeleton) == 1);
+    CHECK(n.reply("necromancer.gather").find("come back (1)") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.spawned(kSkeleton) == 2);
+    CHECK(n.reply("necromancer.aside").find("step aside") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.reply("necromancer.aside").find("come back") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.spawned(kSkeleton) == 3);
+    CHECK(n.reply("necromancer.aside").find("step aside") != std::string::npos);
+    n.seconds(2);
+    CHECK(n.reply("necromancer.raise").find("rises (2/3)") != std::string::npos);  // a raise ends it
+    n.seconds(2);
+    CHECK(n.spawned(kSkeleton) == 5);
+    CHECK(n.reply("necromancer").find("aside") != std::string::npos);
+}

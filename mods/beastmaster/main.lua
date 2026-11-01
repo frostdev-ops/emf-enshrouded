@@ -206,6 +206,12 @@ command("attack", ": your beasts out attack the creature you look at", function(
 	emf.reply(actions.attack(world, player, account))
 end)
 
+command("aside", ": your beasts out step aside (leave for now) or come back; while you build they do it on their own",
+	function(world, args)
+		local _, account = who(world)
+		emf.reply(account and pack:toggle_aside(account) or "Your account is not known yet.")
+	end)
+
 local WORDS_HELP = " (call takes a name or number; dismiss a name, a number, or nothing for all)"
 emf.command(emf.id, "<word>: " .. table.concat(word_list, ", ") .. WORDS_HELP,
 	function(world, args)
@@ -316,9 +322,10 @@ local function update_hud(world)
 	next_hud = now_s + 1
 	local account = world:account(emf.local_player())
 	local parts = {}
+	local away = account and pack:is_aside(account)
 	for _, b in ipairs(account and beasts:list(account) or {}) do
 		if b.out then
-			parts[#parts + 1] = b.name .. " (out)"
+			parts[#parts + 1] = b.name .. (away and " (aside)" or " (out)")
 		elseif b.rest > 0 then
 			parts[#parts + 1] = string.format("%s (rests %d:%02d)", b.name, math.floor(b.rest / 60), math.floor(b.rest % 60))
 		end

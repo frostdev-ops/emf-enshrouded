@@ -25,6 +25,7 @@
     {"key": "spirit_cap", "type": "slider", "min": 1, "max": 20, "step": 1, "default": 10, "label": "Spirits at once (the oldest go first)", "live": true, "group": "Raging spirits"},
     {"key": "leash_m", "type": "slider", "min": 15, "max": 100, "step": 5, "default": 40, "label": "Minions come back from (m)", "live": true, "group": "Behaviour"},
     {"key": "leash_far_m", "type": "slider", "min": 30, "max": 300, "step": 10, "default": 80, "label": "At once from (m)", "live": true, "group": "Behaviour"},
-    {"key": "xp_credit", "type": "bool", "default": true, "label": "You get your minions' kills (XP and loot)", "live": true, "group": "Behaviour"}
+    {"key": "xp_credit", "type": "bool", "default": true, "label": "You get your minions' kills (XP and loot)", "live": true, "group": "Behaviour"},
+    {"key": "make_room", "type": "bool", "default": true, "label": "Undead step aside while you build (the game blocks building next to them)", "live": true, "group": "Behaviour"}
   ]
 }

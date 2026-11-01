@@ -141,6 +141,12 @@ end
 
 function actions.gather(world, player, account)
 	if not account then return "Your account is not known yet." end
+	if minions:building(world, account, player) then
+		return "Your undead wait while you build: they come back when you stop."
+	end
+	if minions.aside:release(account) then
+		return string.format("Your undead come back (%d).", minions:total(account))
+	end
 	local n = minions:gather(world, player, account)
 	return n > 0 and string.format("Your undead gather to you (%d).", n) or "You have no undead."
 end
@@ -169,8 +175,13 @@ command("raise", "[skeleton|lich|golem]: raise a skeleton warrior (or, with the 
 	.. "beside you (mana)", actions.raise)
 command("spirits", ": raging spirits rush the creature you look at, or the nearest foe (mana)", actions.spirits)
 command("list", ": your undead", actions.list)
-command("gather", ": your undead come to you", actions.gather)
+command("gather", ": your undead come to you (also after aside)", actions.gather)
 command("attack", ": your undead attack the creature you look at (else what hit you)", actions.attack)
+command("aside", ": your undead step aside (leave for now) or come back; while you build they do it on their own",
+	function(world, player, account)
+		if not account then return "Your account is not known yet." end
+		return minions:toggle_aside(account)
+	end)
 command("dismiss", "[skeleton|lich|golem|all]: one undead of that kind returns to the ground (the newest); nothing or "
 	.. "all: every one", actions.dismiss)
 
@@ -283,7 +294,7 @@ local function update_hud(world)
 	local parts = {}
 	if account then
 		local had = minions:summary(account, true)
-		if had ~= "" then parts[#parts + 1] = had end
+		if had ~= "" then parts[#parts + 1] = had .. (minions.aside:is_aside(account) and " (aside)" or "") end
 		local sp = spirits:count(account)
 		if sp > 0 then parts[#parts + 1] = string.format("Spirits %d", sp) end
 	end

@@ -36,13 +36,18 @@ everything else works and those beasts are simply not there.
    all** (with two or more out), or `/beastmaster dismiss <name or number>`; `/beastmaster dismiss` alone sends every
    beast home. A dismissed beast waits at home: call it again whenever you like. Beasts that are out stay out when you
    reload the world, and they come back beside you, free of mana.
+8. **Building:** the game does not let you build or place things next to a creature that runs the enemy AI, and your
+   beasts are such creatures. So while you hold something to build or place, your beasts that are out **step aside**:
+   they leave for a moment and come back beside you, free, a few seconds after you stop (the first time a note says
+   so). **Beasts step aside while you build** (`make_room`) turns this off. `/beastmaster aside` sends them away by
+   hand, for example when they stand where you want to work, until you type it again or call a beast.
 
 **The wheel (hold F3):** Tame, Feed, Attack, **Dismiss <name>** for each beast that is out (and **Dismiss all** with
 two or more out), then **Call <name>** for up to 6 beasts that are at home or resting; a resting one shows its time
 left. The labels are short so they fit the wheel; the mouse wheel turns the page when there are more than 8 items.
 With **Necromancer** installed too, F3 and F2 open one "Summons" wheel with "Beasts: ..." and "Undead: ..." items;
 turn **One wheel** (`shared_wheel`) off to keep Beastmaster's own wheel. A line at the bottom left lists your beasts
-that are out or resting: "Beasts: Wolf (out), Bear (rests 1:20)".
+that are out, aside or resting: "Beasts: Wolf (out), Bear (rests 1:20)".
 
 **Wild bears and aurochs (with their packs):** about every 30 minutes of play, when there is no wild one yet, one of
 them (at random, from the packs you have) appears 50-70 m from a player who is out in the open, at that player's level;
@@ -65,6 +70,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster dismiss <name or number>` | send that beast home |
 | `/beastmaster dismiss` (or `dismiss all`) | send every beast that is out home |
 | `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
+| `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while you build |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs) |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear is the wolf's graph at 1.4x, the aurochs the boar's at 1.3x) |
 
@@ -86,6 +92,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Bait for wolves, hounds, boars, sabretooths, bears, aurochs (`bait_<kind>`) | see above | an item's debug name (`items meat` in the console) |
 | Beasts come back from (`leash_m`), At once from (`leash_far_m`) | 40 m, 80 m | |
 | You get your beasts' kills (`xp_credit`) | on | XP and loot for the owner |
+| Beasts step aside while you build (`make_room`) | on | while you hold something to build or place, your beasts leave and come back after |
 | Rare wild bears and aurochs (`wild_bears`), About every (`wild_bear_minutes`) | on, 30 min | needs their pack |
 
 ## The bear pack (`emf_beastmaster_bear`)

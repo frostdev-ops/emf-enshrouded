@@ -33,13 +33,18 @@ download, which is EML content: **install EML (or ShroudForge) first** (below).
 6. **Kills:** when a minion's or a spirit's hit leaves a foe at 25 % health or less, you land the killing blow (XP and
    loot are yours). Never on bosses, mini-bosses or players.
 7. **They stay close:** a minion more than 40 m from you comes back after 3 s; more than 80 m at once.
+8. **Building:** the game does not let you build or place things next to a creature that runs the enemy AI, and your
+   undead are such creatures. So while you hold something to build or place, your undead **step aside**: they leave
+   for a moment and come back beside you, free, a few seconds after you stop (the first time a note says so).
+   **Undead step aside while you build** (`make_room`) turns this off. `/necromancer aside` sends them away by hand,
+   for example when they stand where you want to work, until you type it again, Gather or raise one.
 
 **The wheel (hold F2):** Raise Skeleton (n/3), Raise Lich (n/1), Raise Bone Golem (n/1), Raging Spirits, Gather,
 Attack, then **Dismiss <kind>** for each kind you have (and **Dismiss all** with two or more). The labels are short so
 they fit the wheel; the mouse wheel turns the page when there are more than 8 items. With Beastmaster installed and
 **One wheel** on in both mods, F2 and F3 open the same "Summons" wheel: "Undead: ..." and "Beasts: ..." items. Turn
 **One wheel** off in a mod to give it its own wheel again. A line at the bottom left: "Undead: Skeletons 2/3, Liches
-1/1, Spirits 2".
+1/1, Spirits 2", with "(aside)" while they step aside.
 
 ## Commands
 
@@ -57,6 +62,7 @@ All of these work from the game's chat for every player (`/necromancer <word>`) 
 | `/necromancer dismiss skeleton` (or `lich`, `golem`) | one undead of that kind returns to the ground (the newest) |
 | `/necromancer dismiss` (or `dismiss all`) | all your undead return to the ground |
 | `/necromancer list` | how many undead of each kind you have |
+| `/necromancer aside` | your undead step aside (leave for now), or come back; they do it on their own while you build |
 
 ## Settings (Mods tab, EMF.exe, or `set necromancer <key> <value>`)
 
@@ -76,6 +82,7 @@ All of these work from the game's chat for every player (`/necromancer <word>`) 
 | Spirits at once (`spirit_cap`) | 10 | the oldest go first |
 | Minions come back from (`leash_m`), At once from (`leash_far_m`) | 40 m, 80 m | |
 | You get your minions' kills (`xp_credit`) | on | |
+| Undead step aside while you build (`make_room`) | on | while you hold something to build or place, your undead leave and come back after |
 
 ## The undead pack (`emf_necromancer_undead`)
 
