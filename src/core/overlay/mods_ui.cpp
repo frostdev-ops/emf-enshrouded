@@ -265,11 +265,29 @@ std::string describe_setting(const SettingDef& d) {
 
 ImVec4 status_colour(ModStatus s) {
     switch (s) {
-        case ModStatus::Loaded: return ImVec4(0.49f, 0.91f, 0.53f, 1.0f);
-        case ModStatus::Script: return ImVec4(0.55f, 0.75f, 1.00f, 1.0f);
+        case ModStatus::Loaded:
+        case ModStatus::Script: return ImVec4(0.49f, 0.91f, 0.53f, 1.0f);  // runs (a Lua mod too: it was blue)
         case ModStatus::Disabled: return ImVec4(0.55f, 0.57f, 0.60f, 1.0f);
         default: return ImVec4(1.00f, 0.48f, 0.45f, 1.0f);
     }
+}
+
+std::string mod_status_text(const ModRecord& r) {
+    std::string s;
+    switch (r.status) {
+        case ModStatus::Loaded: s = "running"; break;
+        case ModStatus::Script: s = "running (a Lua mod, run by the lua mod)"; break;
+        case ModStatus::Disabled: s = "switched off"; break;
+        case ModStatus::Rejected: s = "not loaded"; break;
+        case ModStatus::Failed: s = "failed"; break;
+        default: s = mod_status_name(r.status); break;
+    }
+    return r.reason.empty() ? s : s + ": " + r.reason;
+}
+
+std::string mods_colour_legend() {
+    return "Green: running. Grey: switched off. Red: not loaded (select it to see why). The colours are for this game "
+           "start; a mod's switch is for the next.";
 }
 
 bool apply_setting_edit(SettingsStore& store, const std::string& mod, const std::string& key, const std::string& value,
@@ -413,8 +431,13 @@ void draw_mods_tab(const std::vector<ModRecord>& mods, SettingsStore* settings, 
             ui.message.clear();
         }
         ImGui::PopStyleColor();
+        if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mod_status_text(m).c_str());
     }
     ImGui::PopStyleColor(3);
+    ImGui::Spacing();
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextDisabled("%s", mods_colour_legend().c_str());
+    ImGui::PopTextWrapPos();
     ImGui::EndChild();
     ImGui::SameLine();
 
@@ -431,7 +454,9 @@ void draw_mods_tab(const std::vector<ModRecord>& mods, SettingsStore* settings, 
         ImGui::PopTextWrapPos();
     }
     ImGui::PushStyleColor(ImGuiCol_Text, status_colour(sel->status));
-    ImGui::Text("%s%s%s", mod_status_name(sel->status), sel->reason.empty() ? "" : ": ", sel->reason.c_str());
+    ImGui::PushTextWrapPos(0.0f);
+    ImGui::TextUnformatted(mod_status_text(*sel).c_str());
+    ImGui::PopTextWrapPos();
     ImGui::PopStyleColor();
     ImGui::TextDisabled("emf\\mods\\%s", sel->source.c_str());
     if (settings && sel->status != ModStatus::Rejected) {

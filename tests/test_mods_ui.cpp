@@ -102,6 +102,30 @@ TEST_CASE("mods ui: settings are described for players") {
     CHECK(describe_setting(def("t", SettingType::Text, "")) == "text");
 }
 
+TEST_CASE("mods ui: a Lua mod that runs is green like a loaded DLL mod; its status says so in words; the tab explains the colours") {
+    const ImVec4 loaded = status_colour(ModStatus::Loaded), script = status_colour(ModStatus::Script);
+    CHECK(script.x == loaded.x);  // was blue: it looked like something else than "on and running"
+    CHECK(script.y == loaded.y);
+    CHECK(script.z == loaded.z);
+    ModRecord r;
+    r.status = ModStatus::Loaded;
+    CHECK(mod_status_text(r) == "running");
+    r.status = ModStatus::Script;
+    CHECK(mod_status_text(r) == "running (a Lua mod, run by the lua mod)");
+    r.status = ModStatus::Disabled;
+    r.reason = "off by default";
+    CHECK(mod_status_text(r) == "switched off: off by default");
+    r.status = ModStatus::Rejected;
+    r.reason = "needs lua";
+    CHECK(mod_status_text(r) == "not loaded: needs lua");
+    r.status = ModStatus::Failed;
+    r.reason = "";
+    CHECK(mod_status_text(r) == "failed");
+    const std::string legend = mods_colour_legend();
+    for (const char* word : {"Green", "Grey", "Red", "this game start", "next"})
+        CHECK_MESSAGE(legend.find(word) != std::string::npos, word);
+}
+
 TEST_CASE("mods ui: an edit from a widget is saved, or refused with the reason shown") {
     MemIni ini;
     SettingsStore s(&ini);
