@@ -26,6 +26,16 @@ pack.json:
           "reference_clip": "<clips>/sabretooth_<guid>.json",  # a game clip whose first frame stands (the idle)
           "clips": "<clips>/sabretooth_*.json",       #   every game clip the graph plays (EML dumps <owner>_<guid>.json)
           "graph": "<guid>", "graph_guid": "..."      #   the game's animation graph and its copy's GUID
+        },
+        "new_skeleton": {                             # optional, instead: the glb's own skeleton and animations
+          "scale": 0.5,                               #   (new_creature.py; "glb" then needs no jNNN bone names)
+          "skeleton_guid": "...",                     #   FIXED forever; the clips' GUIDs follow from it
+          "graph": "<guid>", "graph_guid": "...",     #   the game's animation graph and its copy's GUID
+          "clips": {"walk": {"animation": "Walk", "loop": true}},   # our clips: the glb's animations
+          "roles": {"<game clip guid>": "walk"},      #   our clip wherever the graph plays that game clip
+          "default_role": "walk",                     #   our clip for every other game clip of the graph
+          "slots": {"Head": "Head", "Pelvis": "Hips"},#   the graph's slots: our joints (others: the root)
+          "model_glb": "wolf_palette.glb"             #   optional: the model from a retextured copy (new_creature.py)
         }
       }
     ]
@@ -34,7 +44,10 @@ Relative paths are relative to pack.json. Missing GUIDs are generated and writte
 Component names without "::" are keen::ecs:: ones. template_set field paths are names and 0-based [n] indices
 (dataStorage[2] is the third value). template_add replaces a component the template has already. A creature with
 own_proportions needs "hierarchy" (the game skeleton's dump); its clips and graph copy are made at build time from the
-dumps, and a clip or graph a game update removed is skipped (logged) when the mod is applied.
+dumps, and a clip or graph a game update removed is skipped (logged) when the mod is applied. A creature with
+new_skeleton gets a whole skeleton (made from the source model's skeleton record, every array replaced), its clips and
+a graph copy whose every clip reference is ours; a graph with IK chains or foot IK is refused (they name the game
+skeleton's joints).
 """
 import json
 import os
@@ -46,6 +59,7 @@ import uuid
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import encode  # noqa: E402
 import gltf_in  # noqa: E402
+import new_creature  # noqa: E402
 import own_creature  # noqa: E402
 import rendermodel as rm  # noqa: E402
 
@@ -69,8 +83,12 @@ def lua_value(v, indent=""):
         inner = indent + "  "
         return "{\n" + ",\n".join(inner + lua_value(x, inner) for x in v) + "\n" + indent + "}"
     if isinstance(v, dict):
-        return "{" + ", ".join("%s = %s" % (k, lua_value(x, indent)) for k, x in v.items()) + "}"
+        return "{" + ", ".join("%s = %s" % (k if LUA_NAME.match(k) else "[%s]" % lua_value(k), lua_value(x, indent))
+                               for k, x in v.items()) + "}"
     raise TypeError(type(v))
+
+
+LUA_NAME = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
 
 
 def lua_bytes(data):
@@ -97,6 +115,11 @@ local function log(...) print("%(id)s:", ...) end
 local function fill(list, items)
 	while #list > 0 do table.remove(list) end
 	for _, item in ipairs(items) do table.insert(list, item) end
+end
+
+-- a generated module whose data is copied: let Lua free it (EML's Lua has no global package table: then it stays)
+local function unload(name)
+	if package and package.loaded then package.loaded[name] = nil end
 end
 
 -- textures: a level's bytes in a block format; levels under 4 KB go into the mip tail (as in the game's own files)
@@ -240,9 +263,129 @@ for _, c in ipairs(require("creatures")) do
 			or (": texture failed, keeping the source material: " .. tostring(result))))
 	end
 
-	-- 1b) a skeleton of its own (own_proportions): a copy of the game skeleton fitted to the creature, the game
-	-- creature's clips retargeted to it, and a copy of its animation graph that plays them
-	if c.skeleton then
+	-- 1b) a skeleton of its own (new_skeleton): the whole skeleton, its own clips, and a copy of a game creature's
+	-- animation graph whose every clip reference plays ours (a game clip carries the game skeleton's hash)
+	if c.skeleton and c.skeleton.new then
+		local GRAPH = "keen::anim_graph::runtime_graph::AnimationGraphResource2_0"
+		local HIER = "keen::ModelHierarchyResource"
+		local CLIP = "keen::JointAnimation"
+		local NONE = "00000000-0000-0000-0000-000000000000"
+		-- the graph first: without it nothing of this creature is changed (the creature is not added)
+		local src_g = game.assets.get_resource(c.animation.graph, GRAPH)
+		assert(src_g, "the game graph " .. c.animation.graph .. " was not found (the game changed?)")
+		local gd = src_g.data
+		assert(#gd.ikChains == 0 and gd.bipedFeetIkNodeId.value == 0 and gd.genericFeetIkNodeId.value == 0
+			and tostring(gd.feetIKSettingsReference) == NONE,
+			"the game graph " .. c.animation.graph .. " uses IK on its own skeleton's joints: it cannot play on ours")
+		for _, node in ipairs(gd.nodeDefinitions) do
+			if tostring(node.type):find("LayerBlend", 1, true) then
+				assert(tostring(node.value.blendOptions.boneMask) == NONE, "the game graph " .. c.animation.graph ..
+					" has a bone mask (it names its own skeleton's joints): it cannot play on ours")
+			end
+		end
+		local sk = require(c.name .. "_skeleton")
+		-- the source model's skeleton record holds ours: every array replaced
+		local src_h = game.assets.get_resource(tostring(m.hierarchy), HIER)
+		assert(src_h, c.name .. ": the source model's skeleton " .. tostring(m.hierarchy) .. " was not found")
+		local h = game.assets.create_resource(src_h.data, HIER, sk.guid, 0).data
+		h.hierarchyId = sk.guid
+		fill(h.jointNames, sk.jointNames)
+		fill(h.jointParentIndices, sk.jointParentIndices)
+		fill(h.unbendableJoints, {})
+		fill(h.skinToJointMatrices, sk.skinToJointMatrices)
+		fill(h.defaultPoseJoints, sk.defaultPoseJoints)
+		local units = {}
+		for i = 1, #sk.pose, 16 do units[#units + 1] = { data = { sk.pose:byte(i, i + 15) } } end
+		fill(h.defaultPose.data, units)
+		h.defaultPose.alignedJointCount = sk.alignedJointCount
+		h.jointCount = sk.jointCount
+		m.hierarchy = sk.guid
+		m.hierarchyJointCount = sk.jointCount
+		-- per-joint data the source model keeps for its own skeleton (skinned bounds, colliders): not for ours
+		for _, part in ipairs({ { m.skinnedTree, { "jointMatrix", "jointParent", "jointSpringData", "leafJoints",
+			"inverseTransformTree" } }, { m.collider, { "spheres", "capsules", "instances" } }, { m.sdf, { "parts" } } }) do
+			local obj = part[1]
+			if obj ~= nil then
+				for _, f in ipairs(part[2]) do
+					if obj[f] ~= nil and #obj[f] > 0 then
+						log(string.format("%%s: the source model's %%s (%%d) name its skeleton's joints: removed", c.name, f,
+							#obj[f]))
+						fill(obj[f], {})
+					end
+				end
+			end
+		end
+		-- our clips, each in a copy of a game clip's record with every field replaced
+		local shape
+		for old in pairs(c.animation.roles) do shape = shape or game.assets.get_resource(old, CLIP) end
+		assert(shape, c.name .. ": none of the game clips the pack names was found (the game changed?)")
+		local seconds, made = {}, 0
+		for _, cl in ipairs(require(c.name .. "_clips")) do
+			local anim = game.assets.create_resource(shape.data, CLIP, cl.guid, 0).data
+			anim.hierarchyHash, anim.jointCount = cl.hierarchyHash, cl.jointCount
+			anim.positionFactor, anim.positionTangent, anim.scaleFactor = cl.positionFactor, cl.positionTangent,
+				cl.scaleFactor
+			anim.fps, anim.frameCount, anim.flags = cl.fps, cl.frameCount, cl.flags
+			fill(anim.headers, cl.headers)
+			local bytes = {}
+			for i = 1, #cl.bytes, 16 do bytes[#bytes + 1] = { data = { cl.bytes:byte(i, i + 15) } } end
+			fill(anim.data, bytes)
+			seconds[cl.guid] = cl.frameCount / cl.fps
+			made = made + 1
+		end
+		unload(c.name .. "_clips")
+		-- the graph copy: every clip reference plays our clip for its role, with our clip's length; the slots point
+		-- at our joints. rootMotionAnimation and the animation hashes stay the game's (how far a clip moves the
+		-- creature; the hashes key the game clip's events)
+		local g = game.assets.create_resource(gd, GRAPH, c.animation.graph_guid, 0).data
+		g.hierarchy = sk.guid
+		-- a node whose clips are offsets (animationContentAdditive) adds them to the pose: it plays an offset of ours
+		-- (a whole pose there would double every joint's scale)
+		local ours, offset_swaps, defaulted, seen = 0, 0, {}, {}
+		local function swap(obj, field, length, offsets)
+			local old = tostring(obj[field])
+			if old == "nil" or old == NONE then return end
+			local new = c.animation.roles[old]
+			if not new then
+				new = c.animation.default
+				if not seen[old] then
+					seen[old] = true
+					defaulted[#defaulted + 1] = old
+				end
+			end
+			if offsets and not c.animation.offsets[new] then
+				new = c.animation.zero
+				offset_swaps = offset_swaps + 1
+			end
+			obj[field] = new
+			ours = ours + 1
+			if length then obj[length] = seconds[new] end
+		end
+		for _, node in ipairs(g.nodeDefinitions) do
+			local t = tostring(node.type)
+			if t:find("SampleAnimationClip", 1, true) or t:find("BlendSpace", 1, true) then
+				local offsets = node.value.animationContentAdditive == true
+				swap(node.value, "additiveReferenceAnimation", nil, offsets)
+				swap(node.value, "additiveReferenceAnimationGenderAlternative", nil, offsets)
+				if t:find("SampleAnimationClip", 1, true) then
+					swap(node.value, "animation", "animationDuration", offsets)
+					swap(node.value, "animationGenderAlternative", nil, offsets)
+				else
+					for _, it in ipairs(node.value.items) do
+						swap(it, "animation", "animationDuration", offsets)
+						swap(it, "animationGenderAlternative", nil, offsets)
+					end
+				end
+			end
+		end
+		for i, j in ipairs(sk.slots) do g.slotBoneIndexMapping[i] = j end
+		unload(c.name .. "_skeleton")
+		log(string.format("%%s: new skeleton %%s (%%d joints), %%d clips, graph %%s: %%d clip references ours, %%d by default (%%s), %%d in offset nodes: the zero offset",
+			c.name, sk.guid, sk.jointCount, made, c.animation.graph_guid, ours, #defaulted, table.concat(defaulted, " "),
+			offset_swaps))
+	elseif c.skeleton then
+		-- 1c) own_proportions: a copy of the game skeleton fitted to the creature, the game creature's clips
+		-- retargeted to it, and a copy of its animation graph that plays them
 		-- the graph first: without it nothing of this creature is changed (the creature is not added)
 		local GRAPH = "keen::anim_graph::runtime_graph::AnimationGraphResource2_0"
 		local src_g = game.assets.get_resource(c.animation.graph, GRAPH)
@@ -287,7 +430,7 @@ for _, c in ipairs(require("creatures")) do
 				made = made + 1
 			end
 		end
-		package.loaded[c.name .. "_clips"] = nil  -- the clips' bytes are copied: let Lua free them
+		unload(c.name .. "_clips")
 		local g = game.assets.create_resource(src_g.data, GRAPH, c.animation.graph_guid, 0).data
 		g.hierarchy = sk.guid
 		local ours, left = 0, 0
@@ -431,6 +574,16 @@ def listing_entry(c):
             raise SystemExit("%s: own_proportions needs \"hierarchy\" (the game skeleton's dump)" % c["name"])
         entry["skeleton"] = {"guid": op["skeleton_guid"]}
         entry["animation"] = {"graph": op["graph"], "graph_guid": op["graph_guid"]}
+    if c.get("new_skeleton"):
+        if c.get("own_proportions"):
+            raise SystemExit("%s: own_proportions or new_skeleton, not both" % c["name"])
+        cfg = c["new_skeleton"]
+        new_creature.check(cfg, c["name"])
+        roles, default = new_creature.roles(cfg)
+        entry["skeleton"] = {"guid": cfg["skeleton_guid"], "new": True}
+        entry["animation"] = {"graph": cfg["graph"], "graph_guid": cfg["graph_guid"], "roles": roles,
+                              "default": default, "zero": new_creature.clip_guid(cfg["skeleton_guid"], new_creature.ZERO),
+                              "offsets": new_creature.offsets(cfg)}
     return entry
 
 
@@ -458,6 +611,39 @@ def write_own(src, name, built):
         parts.append(lua_value(head)[:-1] + ", bytes = " + lua_bytes(raw) + "}")
     with open(os.path.join(src, name + "_clips.lua"), "w", encoding="ascii", newline="\n") as f:
         f.write("-- generated by tools/models/make_mod.py: the clips of %s, retargeted from the game creature's\n"
+                "return {\n%s\n}\n" % (name, ",\n".join(parts)))
+
+
+def signed64(v):
+    """A u64 as Lua holds it (a signed 64-bit integer; EML shows u64 fields that way)."""
+    v &= 0xFFFFFFFFFFFFFFFF
+    return v - (1 << 64) if v >= 1 << 63 else v
+
+
+def write_new(src, name, built):
+    """<name>_skeleton.lua and <name>_clips.lua from new_creature.build: the whole skeleton (names, parents, inverse
+    binds, rest pose, the graph's slot map) and the clips."""
+    h = built["hierarchy"]
+    pose = bytes(x for u in h["defaultPose"]["data"] for x in u["data"])
+    skel = {"guid": h["hierarchyId"], "new": True, "jointCount": h["jointCount"],
+            "alignedJointCount": h["defaultPose"]["alignedJointCount"], "jointNames": h["jointNames"],
+            "jointParentIndices": h["jointParentIndices"], "skinToJointMatrices": h["skinToJointMatrices"],
+            "defaultPoseJoints": h["defaultPoseJoints"], "slots": built["slots"],
+            "names": built["sk"]["names"]}
+    with open(os.path.join(src, name + "_skeleton.lua"), "w", encoding="utf-8", newline="\n") as f:
+        f.write("-- generated by tools/models/make_mod.py: the skeleton of %s (its own)\nreturn %s, pose = %s}\n"
+                % (name, lua_value(skel)[:-1], lua_bytes(pose)))
+    parts = []
+    for cl in built["clips"] + [built["zero"]]:
+        k = cl["clip"]
+        raw = bytes(x for u in k["data"] for x in u["data"])
+        head = {"name": cl["name"], "guid": cl["guid"], "hierarchyHash": signed64(k["hierarchyHash"]),
+                "jointCount": k["jointCount"], "positionFactor": k["positionFactor"],
+                "positionTangent": k["positionTangent"], "scaleFactor": k["scaleFactor"], "fps": k["fps"],
+                "frameCount": k["frameCount"], "flags": k["flags"], "headers": k["headers"]}
+        parts.append(lua_value(head)[:-1] + ", bytes = " + lua_bytes(raw) + "}")
+    with open(os.path.join(src, name + "_clips.lua"), "w", encoding="ascii", newline="\n") as f:
+        f.write("-- generated by tools/models/make_mod.py: the clips of %s, made from its own animations\n"
                 "return {\n%s\n}\n" % (name, ",\n".join(parts)))
 
 
@@ -512,7 +698,7 @@ def main():
     out = path(pack["out"])
     os.makedirs(os.path.join(out, "src"), exist_ok=True)
     remove_stale(os.path.join(out, "src"), {c["name"] for c in pack["creatures"]},
-                 own={c["name"] for c in pack["creatures"] if c.get("own_proportions")})
+                 own={c["name"] for c in pack["creatures"] if c.get("own_proportions") or c.get("new_skeleton")})
     changed = False
     listing = []
     for c in pack["creatures"]:
@@ -523,11 +709,25 @@ def main():
                 c[key] = str(uuid.uuid4())
                 changed = True
         source = rm.load_record(path(c["source_model_json"]))
+        built_new = None
+        if c.get("new_skeleton"):
+            for key in ("skeleton_guid", "graph_guid"):
+                if not c["new_skeleton"].get(key):
+                    c["new_skeleton"][key] = str(uuid.uuid4())
+                    changed = True
         if c.get("game_dump"):
             model = rm.load_record(path(c["game_dump"]) + ".json")
             with open(path(c["game_dump"]) + ".render.bin", "rb") as f:
                 groups = encode.groups_from_model(model, f.read())
             palette = model["skinningMap"]
+        elif c.get("new_skeleton"):
+            built_new = new_creature.build(c["new_skeleton"], path(c["glb"]), c["name"])
+            model_glb = c["new_skeleton"].get("model_glb")
+            groups, report = new_creature.model_groups(path(c["glb"]), built_new,
+                                                       material_count=len(source["materials"]),
+                                                       model_glb=path(model_glb) if model_glb else None)
+            print("%s: model on the new skeleton, rest difference %.2g" % (c["name"], report["max_rest_difference"]))
+            palette = None
         else:
             groups, _ = gltf_in.load_groups(path(c["glb"]), rm.load_record(path(c["hierarchy"])),
                                             material_count=len(source["materials"]))
@@ -551,6 +751,11 @@ def main():
             built = own_creature.build(op, rm.load_record(path(c["hierarchy"])))
             write_own(os.path.join(out, "src"), c["name"], built)
             print("%s: own skeleton %s, %d clips retargeted" % (c["name"], op["skeleton_guid"], len(built["clips"])))
+        if built_new:
+            write_new(os.path.join(out, "src"), c["name"], built_new)
+            print("%s: new skeleton %s (%d joints), %d clips" % (c["name"], c["new_skeleton"]["skeleton_guid"],
+                                                                built_new["hierarchy"]["jointCount"],
+                                                                len(built_new["clips"])))
         if c.get("texture"):
             t = c["texture"]
             if not t.get("material_guid"):
