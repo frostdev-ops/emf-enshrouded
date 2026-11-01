@@ -167,6 +167,24 @@ class BuildTests(Fixture):
             self.assertAlmostEqual(a, b, places=6)
         self.assertTrue(same_rotation(world[2][0], (0.0, -H, 0.0, H)))
 
+    def test_yaw_turns_a_creature_that_faces_sideways(self):
+        """yaw: degrees about the vertical (glTF's, counter-clockwise seen from above): a scan lying along +x faces
+        the game's forward (+z) with yaw -90. Positions and rotations turn; the frames of clips turn alike."""
+        sk = ns.build(self.gltf, self.binc, yaw=-90)
+        world = osk.world(sk["rest"], sk["parents"])
+        # glTF head (0, 1.5, 0.3) turned -90 about y: (-0.3, 1.5, 0); game space mirrors x: (0.3, 1.5, 0)
+        for a, b in zip(world[2][1], (0.3, 1.5, 0.0)):
+            self.assertAlmostEqual(a, b, places=6)
+        frame = osk.world(ns.pose(sk, ns.bind_worlds(self.gltf, self.binc), self.gltf), sk["parents"])
+        for j in range(len(world)):
+            for a, b in zip(world[j][1], frame[j][1]):
+                self.assertAlmostEqual(a, b, places=6)
+        copy = os.path.join(self.tmp.name, "turned.glb")
+        ns.write_glb(self.gltf, self.binc, sk, copy)
+        _, report = gltf_in.load_groups(copy, ns.hierarchy(sk, "22222222-2222-4222-8222-222222222222"),
+                                        warn=self.fail)
+        self.assertLess(report["max_rest_difference"], 1e-3)
+
     def test_non_uniform_scale_is_refused(self):
         nodes = json.loads(json.dumps(NODES))
         nodes[6]["scale"] = [100.0, 50.0, 100.0]

@@ -171,12 +171,21 @@ def bind_worlds(gltf, binc, skin=0):
     return binds
 
 
-def build(gltf, binc, skin=0, scale=1.0, uneven=False):
+def yaw_matrix(degrees):
+    """A turn about glTF's vertical (counter-clockwise seen from above) as a 4 x 4 matrix."""
+    a = math.radians(degrees or 0.0)
+    c, s = math.cos(a), math.sin(a)
+    return [[c, 0.0, s, 0.0], [0.0, 1.0, 0.0, 0.0], [-s, 0.0, c, 0.0], [0.0, 0.0, 0.0, 1.0]]
+
+
+def build(gltf, binc, skin=0, scale=1.0, uneven=False, yaw=0.0):
     """The skeleton of a glTF skin: names (the root's "root", then the nodes' names), nodes (the glTF node of each
     joint, None at the root), parents (None at the root), rest (per joint local rotation, position, scale in game
     space: the bind pose), scale and rest_scale (each joint's world scale in the file at the bind pose, for poses).
     uneven: a scale that differs per axis above the joints (an FBX export's) is folded into the positions, each joint
-    taking the nearest rotation (decompose); refused without."""
+    taking the nearest rotation (decompose); refused without. yaw: degrees the creature is turned about the vertical
+    (glTF's, counter-clockwise seen from above) before it becomes ours: a file facing +x faces the game's forward with
+    -90; its poses and its copy (write_glb) turn alike."""
     nodes = gltf["nodes"]
     joints = set(gltf["skins"][skin]["joints"])
     order, parents = [None], [None]
@@ -194,7 +203,7 @@ def build(gltf, binc, skin=0, scale=1.0, uneven=False):
         raise ValueError("skin joints outside the scene: %s" % ", ".join(nodes[n].get("name", str(n)) for n in missing))
     worlds = bind_worlds(gltf, binc, skin)
     sk = {"names": ["root"] + [nodes[n].get("name") or "joint%d" % n for n in order[1:]], "nodes": order,
-          "parents": parents, "scale": scale, "uneven": bool(uneven),
+          "parents": parents, "scale": scale, "uneven": bool(uneven), "yaw": float(yaw or 0.0),
           "rest_scale": [1.0] + [decompose(worlds[n], nodes[n].get("name", str(n)), uneven)[2] for n in order[1:]]}
     sk["rest"] = pose(sk, worlds, gltf)
     return sk
@@ -206,10 +215,12 @@ def pose(sk, worlds, gltf=None):
     file's world (positions times the skeleton's scale), its scale relative to its scale at rest. The root keeps the
     game root's rest."""
     out, placed = [ROOT_REST], [(ROOT_REST[0], (0.0, 0.0, 0.0), 1.0)]
+    turn = yaw_matrix(sk["yaw"]) if sk.get("yaw") else None
     for j in range(1, len(sk["nodes"])):
         n = sk["nodes"][j]
         what = gltf["nodes"][n].get("name", str(n)) if gltf else str(n)
-        q, p, s = decompose(worlds[n], what, sk.get("uneven", False))
+        m = gltf_in.mat_mul(turn, worlds[n]) if turn else worlds[n]
+        q, p, s = decompose(m, what, sk.get("uneven", False))
         q = gamegltf.mirror_quat(q)
         p = tuple(v * sk["scale"] for v in gamegltf.mirror_vec(p))
         s = s / sk["rest_scale"][j]
@@ -319,6 +330,8 @@ def write_glb(gltf, binc, sk, path, skin=0):
     else:
         file_ibm = [[[1.0 if r == c else 0.0 for c in range(4)] for r in range(4)] for _ in src_skin["joints"]]
     to_world = [gltf_in.mat_mul(worlds[node], m) for node, m in zip(src_skin["joints"], file_ibm)]
+    if sk.get("yaw"):
+        to_world = [gltf_in.mat_mul(yaw_matrix(sk["yaw"]), m) for m in to_world]
     k = sk["scale"]
 
     scene_nodes = [0]
