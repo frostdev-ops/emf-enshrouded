@@ -14,6 +14,7 @@
 #include <vector>
 
 #include "core/manifest.h"
+#include "game_bindings.h"
 #include "emf/emf.hpp"
 #include "emf/generated/components.hpp"
 #include "lua_host/host.h"
@@ -38,7 +39,8 @@ struct Carry {
 struct HandoverRig {
     Rig r{L"handover"};
     std::unique_ptr<Host> host;
-    bool key_held = false;
+    bool key_held = false;   // the player holds `key_vk` (only that key reads as down)
+    uint32_t key_vk = VK_F7;  // the wheel's default key
     explicit HandoverRig(const std::map<std::string, std::string>& settings = {}) {
         r.api.local_player = host_is_1;
         const std::string src = EMF_SOURCE_DIR "/mods/handover/mod.json";
@@ -62,7 +64,7 @@ struct HandoverRig {
         r.fake.item_names[kSword] = "Weapon_T1_1H_Sword";
         const std::string mods = EMF_SOURCE_DIR "/mods";
         host = std::make_unique<Host>(&r.api, std::wstring(mods.begin(), mods.end()));
-        host->set_key_reader([this](uint32_t) { return key_held; });
+        host->set_key_reader([this](uint32_t vk) { return key_held && vk == key_vk; });
         host->load_all();
         REQUIRE(host->status("handover") == "running");
     }
@@ -440,6 +442,7 @@ TEST_CASE("handover: the host's wheel: a player, then a stack, then how many; it
     t.key_held = false;
     REQUIRE(t.r.fake.wheels.size() == 1);
     CHECK(t.r.fake.wheels[0].title == "Hand over to");
+    CHECK(t.r.fake.wheels[0].hold == VK_F7);  // held: letting go of F7 picks
     REQUIRE(t.r.fake.wheels[0].items.size() == 2);
     CHECK(t.r.fake.wheels[0].items[0] == "Bob (3 m)");
     t.r.fake.wheels[0].cb(kClient, 0, t.r.fake.wheels[0].user);  // Bob
@@ -523,4 +526,21 @@ TEST_CASE("handover: ships switched off (it lets players put items into other pl
     const auto m = emf::core::parse_manifest(ss.str());
     REQUIRE(m.manifest);
     CHECK_FALSE(m.manifest->enabled_default);
+}
+
+TEST_CASE("handover: the host's wheel is on F7 by default, a key the game leaves free (H opens its skills)") {
+    const std::string key = game_bindings::manifest_default("mods/handover/mod.json", "key");
+    CHECK(key == "F7");
+    CHECK_FALSE(game_bindings::is_game_key(key));
+}
+
+TEST_CASE("handover: a key the player chose stays theirs") {
+    Three t({{"key", "H"}});
+    t.key_vk = 'H';
+    t.r.fake.sender = EmfCommandSender{};
+    t.key_held = true;
+    t.host->tick(kServer);
+    t.key_held = false;
+    REQUIRE(t.r.fake.wheels.size() == 1);
+    CHECK(t.r.fake.wheels[0].hold == 'H');
 }

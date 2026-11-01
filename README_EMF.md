@@ -502,7 +502,7 @@ Installed switched off (it lets players put items into other players' bags): swi
 first, each stack exactly from its slot (worn equipment never); what does not fit goes back to the giver, and what
 does not fit back is dropped beside them (or the receiver, or the nearest player, if the giver left): nothing is lost.
 Gear is refused (it would lose its gems and perks) unless `allow_gear` is on. `/handover.block` refuses hand-overs (kept
-per world). Players who joined need nothing; the host also has a wheel on a key (H). Details: `mods/handover/README.md`.
+per world). Players who joined need nothing; the host also has a wheel on a key (F7). Details: `mods/handover/README.md`.
 
 ## The teleports mod (Waypoint Teleports)
 Installed switched off: switch it on in the Mods tab or EMF.exe. Every player may type `/unstuck` (a short hop with the

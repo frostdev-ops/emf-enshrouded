@@ -38,8 +38,10 @@ it lets any player within reach put items into another player's bag: switch it o
   `emf\emf_core.ini` ([docs/modding/server.md](../../docs/modding/server.md)). The host can type them into the chat or
   the console as well.
 
-**The host's wheel:** hold **H** (the **Your wheel** setting) in a world you host: pick a player near you, then one of
-your stacks, then how many (1, 10, half, all).
+**The host's wheel:** hold **F7** (the **Your wheel** setting) in a world you host: pick a player near you, then one
+of your stacks, then how many (1, 10, half, all).
+
+**New in 1.1.1:** the wheel's default key is now F7 (H opens the game's skills); a key you chose yourself stays.
 
 ## Items are never lost
 
@@ -72,7 +74,7 @@ equipment is never offered.
 | Wait between hand-overs (s) | 2 | per player |
 | Allow gear | off | see above |
 | Tell both players | on | the chat lines when items arrive (the host of a game you host gets a note on screen) |
-| Your wheel (host) | H | empty = no wheel |
+| Your wheel (host) | F7 | empty = no wheel |
 
 ## Testing it alone
 
