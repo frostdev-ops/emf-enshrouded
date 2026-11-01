@@ -217,7 +217,10 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
                   const std::function<void(const std::string&)>& submit, const std::function<void()>& mods_tab) {
     ui.wants_escape = false;  // set again below while the suggestions show
     ui.ghost_shown.clear();   // and the ghost text while it draws
-    if (ui.open_fraction <= 0.0f) return;
+    if (ui.open_fraction <= 0.0f) {
+        ui.escape = false;  // an Esc while closed is not the list's: it must not hide it at the next opening
+        return;
+    }
     const float height = (std::max)(display.y * 0.5f * (std::min)(ui.open_fraction, 1.0f), 1.0f);
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(display.x, height));

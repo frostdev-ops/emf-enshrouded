@@ -299,6 +299,25 @@ TEST_CASE("console UI: Up/Down move in the list and leave the history alone; Esc
     CHECK(r.ui.input == "help");
 }
 
+TEST_CASE("console UI: an Esc kept while the console was closed does not hide the list when it opens again") {
+    Headless h;
+    Rig r;
+    with_help(r);
+    r.frame();
+    r.frame();
+    r.type("lo");
+    REQUIRE(r.ui.suggester.showing());
+    r.ui.open_fraction = 0.0f;  // closed
+    r.ui.escape = true;         // an Esc that was not the list's
+    r.frame();
+    CHECK_FALSE(r.ui.escape);  // forgotten
+    r.ui.open_fraction = 1.0f;  // open again
+    for (int i = 0; i < 3; ++i) r.frame();
+    CHECK(r.ui.input == "lo");
+    CHECK(r.ui.suggester.showing());
+    CHECK(r.ui.wants_escape);
+}
+
 TEST_CASE("console UI: a line from the history shows no list, so Up and Down keep going through the history") {
     Headless h;
     Rig r;

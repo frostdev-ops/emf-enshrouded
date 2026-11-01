@@ -133,6 +133,7 @@ void before_frame(ImGuiIO& io) {
         switch (e.kind) {
             case InputEvent::Toggle:
                 io.ClearInputKeys();
+                g_ui.escape = false;  // an Esc from before the console opened or closed is not the list's
                 if (e.open) {
                     g_ui.focus_input = true;
                     g_cursor.set_display(io.DisplaySize);
@@ -144,10 +145,10 @@ void before_frame(ImGuiIO& io) {
                 }
                 break;
             case InputEvent::Key:
-                // Esc reaches the console only while its suggestions show (InputRouter): it hides them. ImGui never
-                // gets it (an active input line would throw away what was typed).
+                // Esc reaches the console only while its suggestions show (InputRouter): it hides them (only while
+                // the console is open). ImGui never gets it (an active input line would throw away what was typed).
                 if (e.key.scan == InputRouter::kEscScan && !e.key.extended) {
-                    if (e.key.down) g_ui.escape = true;
+                    if (e.key.down && g_router->open()) g_ui.escape = true;
                     break;
                 }
                 feed_key_event(g_mods_ui, e.key, io, ImGui::GetFrameCount());
