@@ -215,6 +215,27 @@ class BuildTests(Fixture):
                 self.assertAlmostEqual(a, b, places=5, msg=sk["names"][j])
         self.assertTrue(same_rotation(world[2][0], (0.0, -H, 0.0, H), tol=1e-5))
 
+    def test_a_helper_joint_with_a_meaningless_inverse_bind_stands_where_its_node_does(self):
+        """Sketchfab's '_rootJoint': a joint no vertex follows, its inverse bind the identity, 100 times off its
+        node's scale. It rests where its node stands, so a frame scales it by 1, not by 1/100 (which the clip's
+        children could not hold)."""
+        path = world_space_rig(os.path.join(self.tmp.name, "spec.glb"))
+        gltf, binc = gltf_in.read_glb(path)
+        binc = bytearray(binc)
+        k = SKIN_NODES.index(4)  # the tail: no vertex follows it
+        off = gltf["bufferViews"][0].get("byteOffset", 0) + 64 * k
+        binc[off:off + 64] = struct.pack("<16f", *colmajor(trs()))
+        gltf, binc = gltf, bytes(binc)
+        sk = ns.build(gltf, binc)
+        tail = sk["names"].index("Tail")
+        world = osk.world(sk["rest"], sk["parents"])
+        for a, b in zip(world[tail][1], (0.0, 1.0, -0.4)):
+            self.assertAlmostEqual(a, b, places=5)
+        frame = ns.pose(sk, ns.node_worlds(gltf), gltf)
+        for j in range(1, len(frame)):
+            for v in frame[j][2]:
+                self.assertAlmostEqual(v, 1.0, places=5, msg=sk["names"][j])
+
     def test_rest_is_the_bind_pose_when_the_nodes_hold_another(self):
         nodes = json.loads(json.dumps(NODES))
         nodes[4]["translation"] = [0.0, 0.003, -0.002]  # the tail lifted in the file's nodes, not in its binds

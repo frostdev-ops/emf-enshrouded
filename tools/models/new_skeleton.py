@@ -159,9 +159,16 @@ def bind_worlds(gltf, binc, skin=0):
            for v in gltf_in.accessor(gltf, binc, s["inverseBindMatrices"])]
     relative = {n: gltf_in.mat_mul(mesh, m) for n, m in zip(s["joints"], ibm)}
     absolute = dict(zip(s["joints"], ibm))
-    off_rel = sum(_likeness(relative[n], worlds[n]) for n in s["joints"])
-    off_abs = sum(_likeness(absolute[n], worlds[n]) for n in s["joints"])
-    return absolute if off_abs < off_rel else relative
+    off_rel = sum(min(_likeness(relative[n], worlds[n]), 10.0) for n in s["joints"])
+    off_abs = sum(min(_likeness(absolute[n], worlds[n]), 10.0) for n in s["joints"])
+    binds = absolute if off_abs < off_rel else relative
+    # a helper joint no vertex follows may carry a meaningless inverse bind (Sketchfab's _rootJoint: the identity,
+    # 85 times off its node's scale): it rests where its node stands
+    for n in s["joints"]:
+        ratio = abs(_det3(binds[n])) / max(abs(_det3(worlds[n])), 1e-300)
+        if not 0.125 < ratio < 8.0:  # more than twice or less than half the node's scale
+            binds[n] = worlds[n]
+    return binds
 
 
 def build(gltf, binc, skin=0, scale=1.0, uneven=False):
