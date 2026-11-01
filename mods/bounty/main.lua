@@ -89,6 +89,7 @@ local RETELL_S = 600        -- s: ... the notices changed (new ones, a bounty do
 local HINT_GAP = 600        -- s: the host's "press E" note at most this often
 local CHAT_LINES = 30       -- chat lines this mod sends at most ...
 local CHAT_WINDOW = 10.5    -- ... in this many seconds of play (the Lua host's limit is 30 in 10 s)
+local OUTBOX_MAX = 64       -- chat lines waiting at most (more: the oldest is left out)
 local PROP_HEIGHT = 1       -- m: the point of a prop the crosshair aims at, above its position
 local FIX = 4294967296.0    -- 1 m in the game's fixed-point positions
 
@@ -136,7 +137,8 @@ local sent_lines = {}     -- chat lines sent in the last CHAT_WINDOW: {at, lines
 local told = {}           -- account -> the board {x, y, z} they were last told about (cleared REARM_M away)
 local told_at = {}        -- account -> play second they were last told
 local told_what = {}      -- account -> what they were last told (notice_news)
-local tell_refused = false
+local tell_refused = false  -- said once: a chat line was refused
+local outbox_full = false   -- said once: too many lines waited
 local walk_up_at = 0
 local pending = nil       -- the host's wheel pick, run on the server world's next step (this session only)
 
@@ -1508,8 +1510,9 @@ end)
 
 -- ---- chat lines for players who joined (the wheel is the host's only) ----
 -- emf.tell sends at most 10 lines per call, and a Lua mod at most 30 lines in 10 s: the lines wait in `outbox` and
--- go out as the limit allows (counted on the play clock, with a little room). A refused line (players' chat off, the
--- player left) is left out.
+-- go out as the limit allows (counted on the play clock, with a little room). A line goes only to the account it was
+-- for (a player who left: left out, also when the game gave their id to someone else). A refused line (players' chat
+-- off, the limit) is tried once more at the next step, then left out and logged.
 local function line_count(text)
   local n = 1
   for _ in text:gmatch("\n") do n = n + 1 end
@@ -1527,6 +1530,13 @@ function tell_later(player, account, text, kind)
       end
     end
   end
+  if #outbox >= OUTBOX_MAX then
+    table.remove(outbox, 1)
+    if not outbox_full then
+      outbox_full = true
+      emf.log("too many chat lines waiting: the oldest was left out")
+    end
+  end
   outbox[#outbox + 1] = m
 end
 
@@ -1537,14 +1547,23 @@ local function flush_outbox(world)
   local used = 0
   for _, s in ipairs(sent_lines) do used = used + s.lines end
   while outbox[1] and used + outbox[1].lines <= CHAT_LINES do
-    local m = table.remove(outbox, 1)
-    if emf.tell(world, m.player, m.text) then
+    local m = outbox[1]
+    if world:account(m.player) ~= m.account then  -- they left; the id may be someone else's now
+      table.remove(outbox, 1)
+    elseif emf.tell(world, m.player, m.text) then
+      table.remove(outbox, 1)
       sent_lines[#sent_lines + 1] = {at = play_s, lines = m.lines}
       used = used + m.lines
-    elseif not tell_refused then
-      tell_refused = true
-      emf.log("a chat line for player " .. m.player .. " was not sent (players' chat is off? see docs/modding/server.md); " ..
-        "such lines are left out")
+    elseif not m.retried then
+      m.retried = true  -- once more at the next step
+      break
+    else
+      table.remove(outbox, 1)
+      if not tell_refused then
+        tell_refused = true
+        emf.log("a chat line for player " .. m.player .. " was not sent (players' chat is off? see docs/modding/server.md); " ..
+          "such lines are left out")
+      end
     end
   end
 end

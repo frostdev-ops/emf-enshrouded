@@ -1393,3 +1393,43 @@ TEST_CASE("bounty: E opens the wheel only with the crosshair on the board; a che
     b.press('E');
     CHECK(b.r.fake.wheels.size() == 1);
 }
+
+TEST_CASE("bounty: a waiting chat line goes only to the player it was for; a refused one is tried once more") {
+    BountyRig b({{"need_board", "1"}});
+    altar(b, 900, 50, 50);
+    prop(b, 950, 50, 10, 50);
+    search(b);
+    for (uint32_t p = 2; p <= 9; ++p) add_player(b.r.fake, p, 0xC0 + p, 49.0 + p % 3, 10, 47.0 + 0.2 * p);
+    b.seconds(1);  // 30 lines go now; the lines for players 8 and 9 wait
+    REQUIRE(b.r.fake.tells.size() == 6);
+    b.r.fake.player_info(8, 9, 0xEE);  // player 9 left; entity 9 is someone else now, far from the board
+    place(b.r.fake, 9, 500, 10, 0);
+    b.seconds(12);
+    CHECK(tells_to(b, 8).size() == 1);
+    CHECK(tells_to(b, 9).empty());  // never someone else's line
+    // players' chat refuses a line once: it is sent at the next step
+    b.reply("bounty.give kill_vukah", 2, 0xC2);
+    b.r.fake.chat_ok = false;
+    for (uint32_t id = 3010; id < 3016; ++id) {
+        b.creature(id, 3);
+        b.kill(id, {2});
+    }
+    b.seconds(1);
+    b.r.fake.chat_ok = true;
+    b.seconds(1);
+    bool done = false;
+    for (const auto& line : tells_to(b, 2)) done = done || line.rfind("Bounty done: Slay 6 Vukah", 0) == 0;
+    CHECK(done);
+    // refused twice: left out, and the log says so
+    b.reply("bounty.give kill_scavenger", 2, 0xC2);
+    b.r.fake.chat_ok = false;
+    for (uint32_t id = 3110; id < 3116; ++id) {
+        b.creature(id, 4);
+        b.kill(id, {2});
+    }
+    b.seconds(3);
+    b.r.fake.chat_ok = true;
+    b.seconds(2);
+    for (const auto& line : tells_to(b, 2)) CHECK(line.find("Bounty done: Slay 6 Scavengers") == std::string::npos);
+    CHECK(logged("was not sent"));
+}
