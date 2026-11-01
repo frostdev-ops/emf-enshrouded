@@ -840,7 +840,7 @@ TEST_CASE("beastmaster: a pack beast that cannot come says it needs the EMF crea
     CHECK(note.find("EML or ShroudForge") != std::string::npos);
 }
 
-TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs come (the missing bear is skipped)") {
+TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs and snakes come (the missing bear is skipped)") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
     b.spawnable(8);
@@ -848,15 +848,65 @@ TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs come (
         const size_t before = b.r.fake.spawns.size();
         b.seconds(61);
         REQUIRE(b.r.fake.spawns.size() == before + 1);
-        CHECK(guid_text(b.r.fake.spawns.back().guid) == kAurochsTemplate);
+        const std::string spawned = guid_text(b.r.fake.spawns.back().guid);
+        const bool aurochs = spawned == kAurochsTemplate;
+        CHECK((aurochs || spawned == "d4c87337-8c53-41df-8488-8079046e1502"));  // the pack's aurochs or snake
         const uint32_t id = 1234 + static_cast<uint32_t>(before);
-        component<ecs::ScaleComponent>(b.r.fake, id).uniformScale = 1.3f;  // the pack's aurochs
+        component<ecs::ScaleComponent>(b.r.fake, id).uniformScale = aurochs ? 1.3f : 1.0f;  // the pack's sizes
         CHECK(b.faction(id) == kWildBeast);
         b.seconds(60);
         CHECK(b.r.fake.spawns.size() == before + 1);  // one at a time: it is still about
         b.r.fake.attrs[{id, EMF_ATTR_HEALTH}] = 0;     // killed
     }
     CHECK(logged(b.r.fake, "wild bears") <= 1);
+}
+
+// ---- the beasts pack's snake: a skeleton of its own, played by its own copy of the wolf's graph ----
+namespace {
+constexpr const char* kSnakeGraph = "d4c87337-8c53-41df-8488-8079046e1505";
+constexpr const char* kSnakeTemplate = "d4c87337-8c53-41df-8488-8079046e1502";
+}  // namespace
+
+TEST_CASE("beastmaster: a snake is its own graph (WildBeast): tamed, listed, called with the pack's template and 2x health") {
+    BeastRig b;
+    CHECK(b.reply(std::string("beastmaster.species ") + kSnakeGraph + " 6 1") == "snake");
+    CHECK(b.reply(std::string("beastmaster.species ") + kSnakeGraph + " 6") == "snake");
+    b.beast(50, kSnakeGraph, 0, 5, kWildBeast, 20, 100);
+    component<ecs::ScaleComponent>(b.r.fake, 50).uniformScale = 1.0f;
+    b.look(1, 0, 10.5, 0, 0);
+    CHECK(b.reply("beastmaster.tame").find("Taming the snake") != std::string::npos);
+    b.seconds(4);
+    CHECK(b.reply("beastmaster.list").find("1. Snake - snake, out") != std::string::npos);
+    b.reply("beastmaster.dismiss all");
+    b.spawnable(1);
+    b.seconds(11);
+    CHECK(b.reply("beastmaster.call Snake").find("comes") != std::string::npos);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(guid_text(b.r.fake.spawns[0].guid) == kSnakeTemplate);
+    auto& h = component<ecs::Health>(b.r.fake, 1234);
+    h.dataStorage[2] = 40;
+    b.seconds(1);
+    CHECK(h.dataStorage[3] == 40);  // 40 + 40 = 80 = 2 x 40
+    CHECK(b.reply("beastmaster.give snake").find("snake") != std::string::npos);
+}
+
+TEST_CASE("wild beasts: wild snakes come with the beasts pack, one at a time") {
+    BeastRig b({{"wild_bear_minutes", "1"}});
+    b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
+    b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));
+    b.spawnable(8);
+    for (int round = 0; round < 3; ++round) {
+        const size_t before = b.r.fake.spawns.size();
+        b.seconds(61);
+        REQUIRE(b.r.fake.spawns.size() == before + 1);
+        CHECK(guid_text(b.r.fake.spawns.back().guid) == kSnakeTemplate);
+        const uint32_t id = 1234 + static_cast<uint32_t>(before);
+        component<ecs::ScaleComponent>(b.r.fake, id).uniformScale = 1.0f;  // the pack's snake
+        CHECK(b.faction(id) == kWildBeast);
+        b.seconds(60);
+        CHECK(b.r.fake.spawns.size() == before + 1);  // one at a time: it is still about
+        b.r.fake.attrs[{id, EMF_ATTR_HEALTH}] = 0;     // killed
+    }
 }
 
 // ---- the sabretooth graph: no pack beast on it ----

@@ -4,6 +4,8 @@
 --               world:template("AnimationGraphResourceComponent2", id).animationGraph; render models are client-side)
 --   factions:   when several kinds share a graph: the factions that make it this kind (the wolf's graph is also the
 --               scavengers' hound's)
+--               a beast on a skeleton of its own (the beasts pack's snake) runs its own copy of a game graph: its
+--               graph alone tells it apart
 --   min_scale / max_scale: when kinds share a graph and a faction, the creature's ScaleComponent tells them apart
 --               (the bear pack's bear runs the wolf's graph at 1.4x: seen in game, game wolves have no ScaleComponent;
 --               the beasts pack's aurochs runs the boar's graph at 1.3x).
@@ -40,6 +42,10 @@ M.list = {
 		model = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f01", pack = PACK, health_mul = 3,
 		plural = "aurochs",
 		graph = BOAR_GRAPH, factions = { [WILDBEAST] = true }, min_scale = AUROCHS_SCALE },
+	{ id = "snake", name = "Snake", template = "d4c87337-8c53-41df-8488-8079046e1502",
+		model = "d4c87337-8c53-41df-8488-8079046e1501", pack = PACK, health_mul = 2,
+		plural = "snakes",
+		graph = "d4c87337-8c53-41df-8488-8079046e1505", factions = { [WILDBEAST] = true } },
 }
 
 local by_id = {}

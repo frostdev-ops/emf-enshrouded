@@ -49,7 +49,7 @@ local pack = pack_mod.new({
 	on_spawn = spawned,
 })
 
--- rare wild bears and aurochs (with their content packs)
+-- rare wild bears, aurochs and snakes (with their content packs)
 local wild = wild_mod.new({ setting = setting, now = now, on_spawn = spawned })
 
 emf.on_world_data(function(world, text)
@@ -89,7 +89,7 @@ command("list", ": your beasts", function(world, args)
 	local _, account = who(world)
 	local list = account and beasts:list(account) or {}
 	if #list == 0 then
-		emf.reply("You have no beasts yet. Tame one: beat a wild wolf, boar, sabretooth, hound, bear or aurochs down, or feed it its bait.")
+		emf.reply("You have no beasts yet. Tame one: beat a wild wolf, boar, sabretooth, hound, bear, aurochs or snake down, or feed it its bait.")
 		return
 	end
 	local lines = { string.format("Your beasts (%d/%d):", #list, setting("collection_max")) }
