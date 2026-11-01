@@ -101,6 +101,21 @@ class FitQuadrupedTests(unittest.TestCase):
                     for a, b in zip(osk.blender_to_game(joint["game"]), world[j][1]):
                         self.assertAlmostEqual(a, b, delta=1e-4, msg=joint["name"])
 
+    def test_rigid_parts_follow_one_bone(self):
+        """--rigid: everything below the named bones (the boar's lower front legs) is on those bones."""
+        with tempfile.TemporaryDirectory() as d:
+            fig, fitted = os.path.join(d, "animal.glb"), os.path.join(d, "fitted.glb")
+            self.assertEqual(blender("make_test_quadruped.py", fig)[0], 0)
+            code, log = blender("fit_to_game_skeleton.py", BOAR, fig, fitted, "--rigid", "j034,j039")
+            self.assertEqual(code, 0, log[-2000:])
+            code, log = blender(os.path.join(HERE, "blender_bone_weights.py"), fitted)
+            self.assertEqual(code, 0, log[-2000:])
+            w = {parts[1]: float(parts[2]) for parts in (l.split() for l in log.splitlines() if l.startswith("BW "))}
+            for below in ("j035", "j036", "j040", "j041"):
+                self.assertEqual(w[below], 0.0, below)
+            self.assertGreater(w["j034"], 1.0)
+            self.assertGreater(w["j039"], 1.0)
+
 
 def bbox(path):
     code, log = blender(os.path.join(HERE, "blender_bbox.py"), path)

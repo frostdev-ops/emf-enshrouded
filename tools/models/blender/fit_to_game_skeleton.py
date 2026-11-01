@@ -2,7 +2,7 @@
 
   blender --background --factory-startup --python fit_to_game_skeleton.py -- \
       <game.glb> <creature.glb> <out.glb> [--uv-from 1] [--material 1] [--size 1.0] [--vertex-colors]
-      [--width fit|keep|<scale>] [--tail own|hips] [--own-proportions <sidecar.json>]
+      [--width fit|keep|<scale>] [--tail own|hips] [--own-proportions <sidecar.json>] [--rigid <bone>,...]
 
 Steps:
  1. Import the game model (armature with jNNN bones + its body meshes) and the creature (any rig; it is dropped).
@@ -19,7 +19,8 @@ Steps:
     their weights (the legs: the four branches off the spine that reach lowest, named or not; the fit stops when the
     skeleton has no four); bones under the head keep theirs when the game animal itself uses them on its head (the jaw).
     --tail hips gives the creature's own tail to the hips too (a long tail driven by a short tail's animation moves
-    strangely); the default, own, keeps the game animal's tail bones on the creature's tail.
+    strangely); the default, own, keeps the game animal's tail bones on the creature's tail. --rigid <bone>,... puts
+    everything below those bones on them (a cat's paw on the wrist, not on the game creature's clawed fingers).
  4. --own-proportions <sidecar.json>: the creature keeps its own shape. After the weights it goes back to its
     original proportions (uniformly scaled to the game body's height, times --size), and the sidecar lists every game
     joint moved into that shape by the inverse of the fit (../quad_landmarks.py unwarp, own_space): positions in this
@@ -38,7 +39,7 @@ from mathutils import Vector
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), ".."))
 from quad_landmarks import (clean_detail_weights, fit_z, kept_head_bones, landmarks, main_bones,  # noqa: E402
-                            own_space, tail_slices, unwarp, warp_y, width_scale)
+                            own_space, rigid_weights, tail_slices, unwarp, warp_y, width_scale)
 
 argv = sys.argv[sys.argv.index("--") + 1:]
 game_glb, creature_glb, out_glb = (os.path.abspath(p) for p in argv[:3])
@@ -61,6 +62,10 @@ keep_head = bool(opt("--keep-head", False))  # don't stretch the head to the gam
 tail_mode = opt("--tail", "own")
 if tail_mode not in ("own", "hips"):
     raise SystemExit("fit_to_game_skeleton: --tail needs own or hips")
+rigid = opt("--rigid", "")  # bones whose parts follow them as one piece: "j010_HandL,j054_HandR" (paws on wrists)
+if rigid is True:
+    raise SystemExit("fit_to_game_skeleton: --rigid needs bone names, comma-separated")
+rigid = {b for b in rigid.split(",") if b}
 own_path = opt("--own-proportions", None)  # a sidecar .json: the creature keeps its own shape (see the docstring)
 if own_path is True:
     raise SystemExit("fit_to_game_skeleton: --own-proportions needs the sidecar .json to write")
@@ -273,6 +278,27 @@ if head_b is not None:
             body.vertex_groups[n].add([v.index], w, "REPLACE")
     print("FIT detail bones: kept under the head %s, tail slices %d, vertices changed %d"
           % (sorted(keep), len(tail), changed))
+
+# --rigid: everything below the named bones moves onto them (a paw follows the wrist, not the game creature's fingers)
+if rigid:
+    missing = rigid - {b.name for b in arm.data.bones}
+    if missing:
+        raise SystemExit("fit_to_game_skeleton: --rigid: no bone %s in the game skeleton" % ", ".join(sorted(missing)))
+    names = {g_.index: g_.name for g_ in body.vertex_groups}
+    weights = [{names[g_.group]: g_.weight for g_ in v.groups if g_.weight > 0} for v in body.data.vertices]
+    moved = rigid_weights(weights, {b.name: (b.parent.name if b.parent else None) for b in arm.data.bones}, rigid)
+    changed = 0
+    for v, old, new in zip(body.data.vertices, weights, moved):
+        if new == old:
+            continue
+        changed += 1
+        for n_ in old:
+            body.vertex_groups[n_].remove([v.index])
+        for n_, w in new.items():
+            if n_ not in body.vertex_groups:
+                body.vertex_groups.new(name=n_)
+            body.vertex_groups[n_].add([v.index], w, "REPLACE")
+    print("FIT rigid %s: vertices changed %d" % (sorted(rigid), changed))
 
 # keep at most 4 weights per vertex, normalised
 bpy.ops.object.vertex_group_limit_total(limit=4)

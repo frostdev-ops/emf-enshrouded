@@ -198,6 +198,29 @@ def kept_head_bones(use, total):
     return {b for b, w in use.items() if w >= HEAD_SHARE * total}
 
 
+def rigid_weights(weights, parents, roots):
+    """Every bone below one of `roots` gives its weight to that root, so the part follows the root as one piece (a
+    cat's paw on the game creature's wrist, not on its clawed fingers). `weights`: per vertex {bone: weight};
+    `parents`: bone -> parent (None at the root). Returns new per-vertex dicts."""
+    def root_of(b):
+        x = parents.get(b)
+        while x is not None:
+            if x in roots:
+                return x
+            x = parents.get(x)
+        return None
+
+    target = {b: root_of(b) for b in parents}
+    out = []
+    for ws in weights:
+        new = {}
+        for b, w in ws.items():
+            t = target.get(b) or b
+            new[t] = new.get(t, 0.0) + w
+        out.append(new)
+    return out
+
+
 def clean_detail_weights(weights, in_tail, parents, main, keep, head):
     """Detail bones keep weight only where the creature has that detail. `weights`: per vertex {bone: weight};
     `in_tail`: per vertex, whether it is in the creature's tail; `parents`: bone -> parent (None at the root); `main`:

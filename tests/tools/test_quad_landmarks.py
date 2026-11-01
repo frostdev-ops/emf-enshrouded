@@ -205,6 +205,21 @@ class DetailWeightTests(unittest.TestCase):
         self.assertEqual(ql.kept_head_bones({"jaw": 8.0, "crest": 0.5}, 100.0), {"jaw"})
 
 
+class RigidTests(unittest.TestCase):
+    """--rigid: a part (a paw) follows one bone; the game creature's finger bones below it give it their weight."""
+    PARENTS = {"leg": None, "wrist": "leg", "finger1": "wrist", "tip1": "finger1", "finger2": "wrist"}
+
+    def test_the_fingers_weight_goes_to_the_wrist(self):
+        out = ql.rigid_weights([{"leg": 0.2, "finger1": 0.3, "tip1": 0.4, "finger2": 0.1}], self.PARENTS, {"wrist"})
+        self.assertEqual(set(out[0]), {"leg", "wrist"})
+        self.assertAlmostEqual(out[0]["wrist"], 0.8)
+        self.assertAlmostEqual(out[0]["leg"], 0.2)
+
+    def test_bones_above_and_beside_stay(self):
+        w = {"leg": 0.5, "wrist": 0.5}
+        self.assertEqual(ql.rigid_weights([w], self.PARENTS, {"wrist"})[0], w)
+
+
 # the game boar's bones (gamegltf.py names: only the spine's are named): parent and rest-pose height in metres
 BOAR = {
     "j000_Root": ("", 0.00), "j001_Pelvis": ("j000_Root", 0.74), "j002": ("j001_Pelvis", 0.74), "j003": ("j002", 0.77),
