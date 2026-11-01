@@ -40,6 +40,14 @@ local function mmss(s)
 	return string.format("%d:%02d", math.floor(s / 60), math.floor(s % 60))
 end
 
+-- Why a pack beast cannot come. The game has no such creature when its pack is missing and also when EML (or
+-- ShroudForge), which loads the packs at game start, is missing; the mod cannot tell the two apart, so it names both.
+local function no_pack(sp)
+	return string.format("%s come with the EMF creature packs, and those need EML or ShroudForge to load",
+		sp.plural or (sp.id .. "s"))
+end
+local INSTALL = "Install EML first, then the packs, and restart the game."
+
 -- Still our beast: there, alive, and an ally.
 local function ours(world, id)
 	if not id or not world:position(id) then return false end
@@ -71,7 +79,7 @@ function P:spawn(world, owner, account, beast)
 	if not x then return nil, "your position is not known" end
 	local id = emf.spawn(world, sp.template, x + 2, y + 0.5, z)
 	if not id or id == 0 then
-		if sp.pack then return nil, sp.pack .. " is not installed in this game", true end
+		if sp.pack then return nil, no_pack(sp), true end
 		return nil, "the game refused the call (see the log)", true
 	end
 	local f = world:get("Faction", id)
@@ -115,8 +123,12 @@ function P:call(world, owner, account, beast)
 	local mana, max_mana = emf.attribute(world, owner, "mana"), emf.attribute(world, owner, "max_mana")
 	local cost = max_mana and math.ceil(max_mana * s("call_mana_pct") / 100) or 0
 	if cost > 0 and (not mana or mana < cost) then return string.format("Not enough mana: calling costs %d.", cost) end
-	local id, why = self:spawn(world, owner, account, beast)
-	if not id then return "The call failed: " .. why end
+	local id, why, refused = self:spawn(world, owner, account, beast)
+	if not id then
+		local sp = species.by_id(beast.species)
+		if refused and sp and sp.pack then return "The call failed: " .. why .. ". " .. INSTALL end
+		return "The call failed: " .. why
+	end
 	if cost > 0 then emf.attribute_add(world, owner, "mana", -cost) end
 	self.last_call[account] = now
 	self.env.save()

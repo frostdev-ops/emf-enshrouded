@@ -782,6 +782,27 @@ TEST_CASE("beastmaster: a beast whose pack is missing goes home with one note; i
     CHECK(b.reply("beastmaster.call Aurochs").find("pack") != std::string::npos);
 }
 
+TEST_CASE("beastmaster: a pack beast that cannot come says it needs the EMF creature packs, which load through EML or ShroudForge") {
+    BeastRig b;
+    b.reply("beastmaster.give bear");
+    b.r.fake.spawn_fails = true;  // no bear in this game: no pack, or no EML to load it (the mod cannot tell which)
+    const std::string call = b.reply("beastmaster.call Bear");
+    CHECK(call.find("EMF creature packs") != std::string::npos);
+    CHECK(call.find("EML or ShroudForge") != std::string::npos);
+    CHECK(call.find("Install EML first") != std::string::npos);
+    CHECK(call.find("emf_beastmaster") == std::string::npos);  // no folder names
+    write(b.data, "b 0x00000000000000aa bear 0 1 Bear\n");  // saved as out
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(5);
+    std::string note;
+    for (const auto& n : b.r.fake.notes)
+        if (n.find("Bear") != std::string::npos) note = n;
+    CHECK(note.find("stays home") != std::string::npos);
+    CHECK(note.find("EMF creature packs") != std::string::npos);
+    CHECK(note.find("EML or ShroudForge") != std::string::npos);
+}
+
 TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs come (the missing bear is skipped)") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));

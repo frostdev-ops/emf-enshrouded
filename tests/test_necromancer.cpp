@@ -517,7 +517,7 @@ TEST_CASE("necromancer: old saves (s lines) load as skeleton warriors; kinds are
 TEST_CASE("necromancer: without the undead pack the lich is refused with a note, and a saved lich does not loop") {
     NecroRig n;
     n.r.fake.spawn_fails = true;
-    CHECK(n.reply("necromancer.raise lich").find("undead pack") != std::string::npos);
+    CHECK(n.reply("necromancer.raise lich").find("creature packs") != std::string::npos);
     CHECK(n.reply("necromancer.list").find("Liches 0/1") != std::string::npos);
     CHECK(!n.added(1, EMF_ATTR_MANA, -40));
     write(n.data, "s 0x00000000000000aa 0\nk 0x00000000000000aa lich 1\n");
@@ -526,9 +526,31 @@ TEST_CASE("necromancer: without the undead pack the lich is refused with a note,
     n.r.fake.log.clear();
     n.seconds(5);
     size_t notes = 0;
-    for (const auto& x : n.r.fake.notes) notes += x.find("Lich") != std::string::npos;
+    for (const auto& x : n.r.fake.notes) notes += x.find("lich") != std::string::npos;
     CHECK(notes == 1);
     CHECK(n.reply("necromancer.list").find("Liches 1/1") != std::string::npos);  // kept: it comes back with the pack
+}
+
+TEST_CASE("necromancer: a lich or golem that cannot rise says it needs the EMF creature packs, which load through EML or ShroudForge") {
+    NecroRig n;
+    n.r.fake.spawn_fails = true;  // no lich in this game: no pack, or no EML to load it (the mod cannot tell which)
+    for (const char* kind : {"lich", "golem"}) {
+        const std::string raise = n.reply(std::string("necromancer.raise ") + kind);
+        CHECK_MESSAGE(raise.find("EMF creature packs") != std::string::npos, raise);
+        CHECK_MESSAGE(raise.find("EML or ShroudForge") != std::string::npos, raise);
+        CHECK_MESSAGE(raise.find("Install EML first") != std::string::npos, raise);
+        CHECK_MESSAGE(raise.find("emf_necromancer") == std::string::npos, raise);  // no folder names
+    }
+    write(n.data, "k 0x00000000000000aa lich 1\n");
+    n.r.fake.session = 2;
+    fire_load(1);
+    n.seconds(5);
+    std::string note;
+    for (const auto& x : n.r.fake.notes)
+        if (x.find("ich") != std::string::npos) note = x;
+    CHECK(note.find("stays saved") != std::string::npos);
+    CHECK(note.find("EMF creature packs") != std::string::npos);
+    CHECK(note.find("EML or ShroudForge") != std::string::npos);
 }
 
 // ---- kinds (the undead pack): the Bone Golem ----
@@ -570,7 +592,7 @@ TEST_CASE("necromancer: a saved lich whose first restores fail for a moment (no 
     n.seconds(2);
     CHECK(n.spawned(kLich) == 1);
     size_t notes = 0;
-    for (const auto& x : n.r.fake.notes) notes += x.find("Lich") != std::string::npos;
+    for (const auto& x : n.r.fake.notes) notes += x.find("lich") != std::string::npos;
     CHECK(notes == 0);
     CHECK(n.reply("necromancer.list").find("Liches 1/1") != std::string::npos);
 }

@@ -148,6 +148,14 @@ local function forget(self, account, id)
 	end
 end
 
+-- Why a pack creature cannot rise. The game has no such creature when its pack is missing and also when EML (or
+-- ShroudForge), which loads the packs at game start, is missing; the mod cannot tell the two apart, so it names both.
+local function no_pack(kind)
+	return string.format("%s come with the EMF creature packs, and those need EML or ShroudForge to load",
+		kind.plural:lower())
+end
+local INSTALL = "Install EML first, then the packs, and restart the game."
+
 -- The number of `account`'s minions of `kind` in the world.
 local function out_of_kind(self, account, kind)
 	local n = 0
@@ -166,9 +174,7 @@ function P:spawn(world, owner, account, kind)
 	local a = #self.out[account] * 2.1  -- side by side
 	local id = emf.spawn(world, kind.template, x + 2 * math.cos(a), y + 0.5, z + 2 * math.sin(a))
 	if not id or id == 0 then
-		if kind.pack then
-			return nil, string.format("this game has no %s (%s is not installed)", kind.name, kind.pack), true
-		end
+		if kind.pack then return nil, no_pack(kind), true end
 		return nil, "the game refused it (see the log)", true
 	end
 	local f = world:get("Faction", id)
@@ -209,8 +215,11 @@ function P:raise(world, owner, account, word)
 	if cost > 0 and (not mana or mana < cost) then
 		return string.format("Not enough mana: raising a %s costs %d.", kind.name, cost)
 	end
-	local id, why = self:spawn(world, owner, account, kind)
-	if not id then return "The raise failed: " .. why .. "." end
+	local id, why, refused = self:spawn(world, owner, account, kind)
+	if not id then
+		if refused and kind.pack then return "The raise failed: " .. why .. ". " .. INSTALL end
+		return "The raise failed: " .. why .. "."
+	end
 	if cost > 0 then emf.attribute_add(world, owner, "mana", -cost) end
 	self.missing[account .. " " .. kind.id], self.refused[account .. " " .. kind.id] = nil, nil
 	set_count(self, account, kind.id, n + 1)
@@ -338,8 +347,8 @@ function P:restore(world, owner, account)
 					self.refused[key] = (self.refused[key] or 0) + 1
 					if self.refused[key] >= REFUSALS then
 						self.missing[key] = true
-						self.env.tell(world, owner, string.format("%s: %s. It stays saved and comes back with the pack.",
-							kind.title, why))
+						self.env.tell(world, owner, string.format("Your %s stays saved: %s. It comes back once they load.",
+							kind.name, why))
 					end
 				end
 				break

@@ -5,8 +5,9 @@ your collection, and call up to 2 at a time to fight beside you. They follow you
 they fall, and are kept with the world. Their kills are yours: XP and loot.
 
 It needs the `lua` mod 1.9 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
-(the key under Esc) or in EMF.exe, then restart the game. The bear and the aurochs come in separate downloads, the
-**bear pack** (`emf_beastmaster_bear`) and the **beasts pack** (`emf_beastmaster_beasts`), below; without them
+(the key under Esc) or in EMF.exe, then restart the game. The bear and the aurochs come in the **EMF creature packs**
+download (the **bear pack** and the **beasts pack**, below). The packs are EML content: **install EML (or ShroudForge)
+first**, because it loads them when the game starts; copying the pack folders alone does nothing. Without them
 everything else works and those beasts are simply not there.
 
 ## How it goes
@@ -86,8 +87,9 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 
 An EML data patch that adds one new creature, `Beastmaster_Bear` (template `b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02`). Its
 model was made with Meshy and fitted to the game wolf's skeleton, so it moves with the wolf's animations and AI. It is in
-the **EMF creature packs** download on EMF's Nexus page: install it with EMF.exe ("Install a downloaded file") or like
-any EML mod (the `mods` folder next to the game, run through EML's `emm.exe`). The template sets the size
+the **EMF creature packs** download on EMF's Nexus page. It needs **EML (or ShroudForge) installed first**, which loads
+it when the game starts; then install the pack with EMF.exe ("Install a downloaded file") or like any EML mod (the
+`mods` folder next to the game, run through EML's `emm.exe`). The template sets the size
 (`ScaleComponent` 1.4), the damage (DamageMod multiplier x1.5) and the speeds (x0.85). The health (x2.5) comes from
 Beastmaster when it spawns a bear: the game's template has no base health of its own.
 
@@ -101,9 +103,9 @@ An EML data patch with a new beast, made with Meshy and fitted to a game skeleto
 `Beastmaster_Aurochs` (template `d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02`), on the boar: size (`ScaleComponent`) 1.3,
 damage x1.4, speeds x0.9; the health (x3) comes from Beastmaster. Its tail follows its hips.
 
-Installed and rebuilt like the bear pack (`tools/models/packs/beastmaster_beasts.json`). Without the pack, an aurochs
-in your collection stays at home: calling it answers that the pack is not installed, and one that was out when you
-saved goes home with one note when you load.
+Installed (EML first) and rebuilt like the bear pack (`tools/models/packs/beastmaster_beasts.json`). Without the pack,
+or without EML to load it, an aurochs in your collection stays at home: calling it says that it needs the EMF creature
+packs and EML (or ShroudForge), and one that was out when you saved goes home with one note when you load.
 
 ## Good to know
 
