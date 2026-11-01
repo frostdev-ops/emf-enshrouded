@@ -27,6 +27,11 @@ jobs:
       - name: Ninja
         uses: seanmiddleditch/gha-setup-ninja@3b1f8f94a2f8254bd26914c4ab9474d4f0015f67 # v6
 
+      # emf_content.dll is Rust: rustup (on the runner) installs the version src/content/rust-toolchain.toml pins
+      - name: Rust toolchain
+        working-directory: src/content
+        run: rustup toolchain install
+
       - name: Configure
         run: cmake --preset msvc
 

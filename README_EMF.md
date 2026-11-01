@@ -22,6 +22,8 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `src/core/` | `emf_core.dll`: hooks the ECS sim step, runs mod callbacks, program hooks, mod programs (with engine events), spawn, items, save/load events, developer commands, the in-game console (`overlay/`: Dear ImGui through a Vulkan layer), loads mods |
 | `app/` | `EMF.exe`, the desktop mod manager: a WebView2 page in a Win32 window ([docs/app.md](docs/app.md)) |
 | `src/saves/` | save backups: the engine shared by EMF.exe's Saves tab and the core's automatic backups and `saves.*` commands, and `save-info.json` ([docs/saves.md](docs/saves.md)) |
+| `src/content/` | `emf_content.dll` (Rust, built by CMake with cargo): a C ABI around EML's mod loader that builds the content of a game folder's EML mods; nothing in EMF loads it yet ([src/content/README.md](src/content/README.md)) |
+| `third_party/eml/` | the pinned copy of EML's library crates (v0.2.0) that `emf_content.dll` is built from, with EMF's patches listed in `EMF_PATCHES.md` |
 | `sdk/include/emf/` | mod SDK: `emf_api.h` (C API v20), `emf.hpp` (C++ helpers), `generated/components.hpp` (661 components, 65 dynamic halves, 129 events) |
 | `mods/sample_mod/` | example EMF mod (see below) |
 | `mods/companion/` | F6: a companion that follows you, fights at your side, takes orders (stay, attack) and wears gear you give it; saved per world (see below) |
