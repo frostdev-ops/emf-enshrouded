@@ -1,7 +1,8 @@
 """Builds small fake game images that hold keen type descriptors laid out the way enshrouded.exe stores them
 (docs/engine_parts/re_reflection.md), for the tests of tools/re/exe_types.py and tools/gen_headers.py.
 
-No game bytes: every descriptor, name and hash here is made up; only the layout follows the game's."""
+No game bytes: every hash, size and value here is invented (none is the game's); the type names only follow the
+game's naming, and the layout follows the game's."""
 
 import struct
 
@@ -98,6 +99,12 @@ class ImageBuilder:
             self.rdata.put(at + 0x18 * i, "Q", desc)
             self.slice(at + 0x18 * i + 8, value)
         return at, len(pairs)
+
+    def holder(self, list_va, count):
+        """A {list, count} pair on its own, as a decoy or a table without its root."""
+        at = self.rdata.alloc(16)
+        self.rdata.put(at, "QQ", list_va, count)
+        return at
 
     def new_type(self):
         """Reserve a descriptor (so types can point at each other), fill it with set_type."""
@@ -205,8 +212,9 @@ class ImageBuilder:
         return bytes(out + body)
 
 
-def small_game():
-    """A few types of each kind the readers care about, with a decoy list; returns (builder, names -> descriptor)."""
+def small_game(before_root=None):
+    """A few types of each kind the readers care about, with a decoy list; returns (builder, names -> descriptor,
+    the table's order). before_root(builder, names, order) adds more (decoys) at addresses below the root."""
     b = ImageBuilder()
     keen = b.namespace("keen")
     ecs = b.namespace("ecs", keen)
@@ -220,10 +228,10 @@ def small_game():
     description = b.attribute_desc("description", keen)
     t["keen::Guid"] = b.type("keen::Guid", "guid", size=16, align=4, namespace=keen, hash=0x47554944)
     t["keen::WorldPosition"] = b.type(
-        "keen::WorldPosition", "struct", size=24, align=8, namespace=keen, hash=0xF99C5535, internal_hash=0xC3897681,
+        "keen::WorldPosition", "struct", size=24, align=8, namespace=keen, hash=0x5EED0001, internal_hash=0x5EED0002,
         fields=[("x", t["keen::sint64"], 0), ("y", t["keen::sint64"], 8), ("z", t["keen::sint64"], 16)])
     t["keen::ecs::Component"] = b.type("keen::ecs::Component", "struct", size=1, align=1, namespace=ecs,
-                                       hash=0xB4B5CB62, internal_hash=0xFA4D6974, impact_name="ecs.Component",
+                                       hash=0x5EED0003, internal_hash=0x5EED0004, impact_name="ecs.Component",
                                        attributes=[(abstract, None)])
     t["keen::ecs::FactionType"] = b.type(
         "keen::ecs::FactionType", "enum", size=1, align=1, namespace=ecs, inner=t["keen::uint8"], hash=0x11,
@@ -244,7 +252,7 @@ def small_game():
     t["keen::ecs::Position"] = pos
     t["keen::ecs::Health"] = b.type(
         "keen::ecs::Health", "struct", size=12, align=4, namespace=ecs, inner=t["keen::ecs::Component"],
-        hash=0x027AC564, internal_hash=0x6E9F416E, impact_name="ecs.Health",
+        hash=0x5EED0005, internal_hash=0x5EED0006, impact_name="ecs.Health",
         fields=[("value", t["keen::float32"], 0, [(description, "Current health")]),
                 ("faction", t["keen::ecs::FactionType"], 4), ("tag", t["keen::HashKey32"], 8)],
         attributes=[(server_only, None), (description, "Hit points")], default=bytes([0, 0, 0x80, 0x3F]) + bytes(8))
@@ -261,7 +269,9 @@ def small_game():
     t["keen::ecs::UsesHidden"] = b.type("keen::ecs::UsesHidden", "struct", size=4, align=4, namespace=ecs,
                                         hash=0x19, fields=[("hidden", hidden, 0)])
     order = [v for k, v in t.items() if k != "keen::ecs::Hidden"]
-    b.pointers(order[:3])  # a decoy: a short list of the same descriptors
+    b.holder(b.pointers(order[:3]), 3)  # a decoy: a short list of the same descriptors
+    if before_root is not None:
+        before_root(b, t, order)
     b.root(order, namespaces=[keen, ecs], attribute_descs=[abstract, server_only, description],
            groups=[("ecs.component", [t["keen::ecs::Health"], t["keen::ecs::Position"]])])
     return b, t, order

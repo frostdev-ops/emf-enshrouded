@@ -134,7 +134,7 @@ class Sources(unittest.TestCase):
         self.assertIn("struct Health {", c)
         self.assertIn("static_assert(offsetof(emf::gen::ecs::Health, faction) == 4);", c)
         self.assertIn("static_assert(sizeof(emf::gen::ecs::Position) == 24);", c)
-        self.assertIn('{"keen::ecs::Health", 0x027ac564u, 12},', c)
+        self.assertIn('{"keen::ecs::Health", 0x5eed0005u, 12},', c)
         self.assertIn('{"keen::ecs::Position", 0x0a0b0c0du, 24},', c)
         self.assertNotIn('{"keen::ecs::Component"', c)  # abstract
 

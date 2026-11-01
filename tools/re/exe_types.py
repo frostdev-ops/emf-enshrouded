@@ -3,8 +3,10 @@ file: every reflected type with its size, alignment, kind, hashes, base type, fi
 attributes and default value, plus where it came from (the exe's sha256, build, version and git commit).
 
 Usage: python -I tools/re/exe_types.py [--exe <enshrouded.exe>] [-o <types.emf.json>]
-Without --exe: EMF_GAME_DIR's enshrouded.exe (the dedicated server's exe works too). Default output: types.emf.json in
-the current folder. tools/gen_headers.py reads the file, or the exe itself.
+Without --exe: EMF_GAME_DIR's enshrouded.exe. The dedicated server's enshrouded_server.exe is expected to work too, but
+it is not checked yet. Default output: %LOCALAPPDATA%\\EMF\\types\\<exe>_<build>.emf.json, never the current folder: the
+file is game data (with the types' default values) and must not end up in a repository (.gitignore has *.emf.json).
+tools/gen_headers.py reads the file, or the exe itself.
 
 The descriptor layout is in docs/engine_parts/re_reflection.md. The reader needs no address of any build: it finds the
 type table by its shape, so it is meant to be ported as is to C++ inside the running game, where the same bytes are
@@ -21,11 +23,12 @@ import sys
 FORMAT = "emf-types"
 FORMAT_VERSION = 1
 
-# Known game builds by the exe's sha256: the same table as kKnownBuilds in src/common/signatures.cpp (a test checks).
+# Known game builds by the exe's sha256 -> (build, dedicated server): the same table as kKnownBuilds in
+# src/common/signatures.cpp (a test checks).
 KNOWN_BUILDS = {
-    "82e5020a8736348cd0374f004b2f5e5ef456b5bd27aa5420df34c7dd241cfeeb": 1269579,
-    "d64966e23b1a458ee6f147bcbceac0b577fa7e39a212f371287d8cc119817882": 1273043,
-    "d7baa768eb00aa895d9f5a1cd8747ccf66858c7b542f50983092b2e3261588ee": 1273043,  # its dedicated server
+    "82e5020a8736348cd0374f004b2f5e5ef456b5bd27aa5420df34c7dd241cfeeb": (1269579, False),
+    "d64966e23b1a458ee6f147bcbceac0b577fa7e39a212f371287d8cc119817882": (1273043, False),
+    "d7baa768eb00aa895d9f5a1cd8747ccf66858c7b542f50983092b2e3261588ee": (1273043, True),
 }
 
 # The low byte of a descriptor's kind word. 0x0B is not used by build 1273043 (between float32 and enum).
@@ -89,19 +92,27 @@ class Image:
             raise ImageError("not an exe (no MZ header)")
         pe = struct.unpack_from("<I", blob, 0x3C)[0]
         if pe + 24 > len(blob) or blob[pe:pe + 4] != b"PE\0\0":
-            raise ImageError("not an exe (no PE header)")
+            raise ImageError("not an exe (no PE header, or the file is cut off)")
         nsec, = struct.unpack_from("<H", blob, pe + 6)
         opt_size, = struct.unpack_from("<H", blob, pe + 20)
         opt = pe + 24
+        if opt_size < 0x70 or opt + opt_size > len(blob):
+            raise ImageError("not an exe (its optional header is cut off)")
         if struct.unpack_from("<H", blob, opt)[0] != 0x20B:
             raise ImageError("not a 64-bit exe")
         base, = struct.unpack_from("<Q", blob, opt + 24)
+        table = opt + opt_size
+        if table + 40 * nsec > len(blob):
+            raise ImageError("not an exe (its section table goes past the end of the file)")
         sections = []
         for i in range(nsec):
-            o = opt + opt_size + 40 * i
+            o = table + 40 * i
             name = blob[o:o + 8].rstrip(b"\0").decode("ascii", "replace")
             vsize, rva, raw_size, raw_at = struct.unpack_from("<IIII", blob, o + 8)
-            sections.append((name, base + rva, blob[raw_at:raw_at + min(raw_size, vsize or raw_size)]))
+            size = min(raw_size, vsize or raw_size)
+            if raw_at + size > len(blob):
+                raise ImageError("the exe is cut off (section %s ends past the end of the file)" % name)
+            sections.append((name, base + rva, blob[raw_at:raw_at + size]))
         img = cls(base, sections)
         img.timestamp = struct.unpack_from("<I", blob, pe + 8)[0]
         return img
@@ -203,10 +214,9 @@ def _all_types(img, list_va, count):
     raw = img.read(list_va, 8 * count)
     seen = set()
     for (v,) in struct.iter_unpack("<Q", raw):
-        if v not in seen:
-            if not looks_like_type(img, v):
-                return False
-            seen.add(v)
+        if v in seen or not looks_like_type(img, v):  # the game lists each type once
+            return False
+        seen.add(v)
     return True
 
 
@@ -229,37 +239,43 @@ def _groups(img, holder):
 
 
 def find_type_table(img):
-    """The game's master list of type descriptors: the longest list of descriptor pointers stored as {list, count} in
-    the data sections. Also the registry root that holds it (followed by the namespace, attribute and group lists)."""
-    best = None
-    holders = {}
+    """The game's master list of type descriptors: the longest list of distinct descriptor pointers stored as
+    {list, count} in the data sections, and the registry root that holds it (followed by the namespace, attribute and
+    group lists). Among lists of that length the one a root holds wins; two different ones with no way to choose
+    between them are an error, as is no list at all. No root (a new layout?) gives root_va None."""
+    longest = 0
+    valid = {}     # (ptr, count) -> [holder]; only lists of the longest length seen so far
+    checked = {}   # (ptr, count) -> it holds only distinct type descriptors
     for holder, ptr, count in _pairs(img):
-        if best is not None and count < best[1]:
-            continue
-        if not img.contains(ptr, 8 * count):
+        if count < longest or not img.contains(ptr, 8 * count):
             continue
         if not (looks_like_type(img, img.u64(ptr)) and looks_like_type(img, img.u64(ptr + 8 * (count - 1)))):
             continue
         key = (ptr, count)
-        if key not in holders:
-            if not _all_types(img, ptr, count):
-                holders[key] = None
-                continue
-            holders[key] = []
-        if holders[key] is None:
+        if key not in checked:
+            checked[key] = _all_types(img, ptr, count)
+        if not checked[key]:
             continue
-        holders[key].append(holder)
-        if best is None or count > best[1]:
-            best = key
-    if best is None:
+        if count > longest:
+            longest, valid = count, {}
+        valid.setdefault(key, []).append(holder)
+    if not valid:
         raise ImageError("no type table found: this exe has no keen type descriptors this reader knows")
-    root, groups = None, []
-    for h in holders[best]:
-        g = _groups(img, h)
-        if g is not None:
-            root, groups = h, g
-            break
-    return TypeTable(best[0], best[1], holders[best], root, groups)
+    rooted = []
+    for key, holders in valid.items():
+        for h in holders:
+            g = _groups(img, h)
+            if g is not None:
+                rooted.append((key, h, g))
+                break
+    if len(rooted) == 1:
+        key, root, groups = rooted[0]
+    elif not rooted and len(valid) == 1:
+        (key,), root, groups = valid.keys(), None, []
+    else:
+        raise ImageError("ambiguous: %d different lists of %d type descriptors (%s), %d of them held by a registry "
+                         "root" % (len(valid), longest, ", ".join("0x%x" % k[0] for k in valid), len(rooted)))
+    return TypeTable(key[0], key[1], valid[key], root, groups)
 
 
 class _Reader:
@@ -404,7 +420,7 @@ BRANCH = re.compile(r"^[\w./-]{1,64}$")
 
 def find_build_info(img):
     """The game's build record: a pointer to its git commit (40 hex digits), followed 0x10 bytes later by pointers to
-    its version ("0.0.15.0") and branch ("master"). Missing parts are None."""
+    its version ("0.0.15.0") and branch ("master"). Only a record with a version counts. Missing parts are None."""
     info = {"git_commit": None, "version": None, "branch": None}
     strings = {}
     for name, va, raw in img.sections:
@@ -415,16 +431,15 @@ def find_build_info(img):
     for name, va, raw in sorted((s for s in img.sections if s[0] in (".data", ".rdata")), key=lambda s: s[0]):
         n = len(raw) // 8
         words = memoryview(raw[:n * 8]).cast("Q")
-        for i in range(n):
+        for i in range(n - 3):
             commit = strings.get(words[i])
             if commit is None:
                 continue
-            info["git_commit"] = commit
-            if i + 3 < n:
-                version = img.cstr(words[i + 2])
-                branch = img.cstr(words[i + 3])
-                info["version"] = version if version and VERSION.match(version) else None
-                info["branch"] = branch if branch and BRANCH.match(branch) else None
+            version = img.cstr(words[i + 2])
+            if not version or not VERSION.match(version):
+                continue  # some other 40-digit text: not the build record
+            branch = img.cstr(words[i + 3])
+            info.update(git_commit=commit, version=version, branch=branch if branch and BRANCH.match(branch) else None)
             return info
     return info
 
@@ -438,7 +453,8 @@ def read_exe(path):
     doc = {"format": FORMAT, "format_version": FORMAT_VERSION}
     source = {"file": os.path.basename(path), "sha256": sha, "size": len(blob),
               "pe_timestamp": img.timestamp, "image_base": img.image_base,
-              "build": KNOWN_BUILDS.get(sha)}
+              "build": KNOWN_BUILDS[sha][0] if sha in KNOWN_BUILDS else None,
+              "server": KNOWN_BUILDS[sha][1] if sha in KNOWN_BUILDS else None}
     source.update(find_build_info(img))
     doc["source"] = source
     doc.update(read_types(img))
@@ -470,7 +486,7 @@ def describe(source):
     """One line naming the exe a types document came from."""
     parts = [source.get("file") or "exe"]
     if source.get("build"):
-        parts.append("build %d" % source["build"])
+        parts.append("build %d" % source["build"] + (" (dedicated server)" if source.get("server") else ""))
     if source.get("version"):
         parts.append("version %s" % source["version"])
     if source.get("git_commit"):
@@ -479,19 +495,40 @@ def describe(source):
     return ", ".join(parts)
 
 
-def main(argv=None):
+def default_out(source):
+    """%LOCALAPPDATA%\\EMF\\types\\<exe name>_<build, else the sha256's start>.emf.json: outside any checkout."""
+    base = os.environ.get("LOCALAPPDATA") or os.path.expanduser("~")
+    stem = os.path.splitext(source.get("file") or "exe")[0]
+    tag = str(source["build"]) if source.get("build") else (source.get("sha256") or "unknown")[:12]
+    return os.path.join(base, "EMF", "types", "%s_%s.emf.json" % (stem, tag))
+
+
+def build_parser():
     ap = argparse.ArgumentParser(description="Write EMF's types file from the game's reflection data.")
-    ap.add_argument("--exe", help="enshrouded.exe or enshrouded_server.exe (default: EMF_GAME_DIR's enshrouded.exe)")
-    ap.add_argument("-o", "--out", default="types.emf.json", help="the types file to write")
-    args = ap.parse_args(argv)
+    ap.add_argument("--exe", help="the game's enshrouded.exe (default: EMF_GAME_DIR's); the dedicated server's "
+                                  "enshrouded_server.exe is expected to work too, not checked yet")
+    ap.add_argument("-o", "--out", help="the types file to write (default: %%LOCALAPPDATA%%\\EMF\\types\\"
+                                        "<exe>_<build>.emf.json; game data, keep it out of repositories)")
+    return ap
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
     exe = args.exe or default_exe()
     try:
         doc = read_exe(exe)
     except (ImageError, OSError) as e:
         sys.exit("exe_types.py: %s: %s" % (exe, e))
-    write_types(doc, args.out)
+    if doc["type_table"]["root_rva"] is None:
+        print("exe_types.py: warning: the registry root (with the groups) was not found next to the type list; the "
+              "types were read, the groups are missing. The layout may have changed: see "
+              "docs/engine_parts/re_reflection.md.", file=sys.stderr)
+    out = args.out or default_out(doc["source"])
+    if os.path.dirname(out):
+        os.makedirs(os.path.dirname(out), exist_ok=True)
+    write_types(doc, out)
     print("wrote %s: %d types (%d in the game's table, %d groups) from %s" % (
-        args.out, len(doc["types"]), doc["type_table"]["count"], len(doc["groups"]), describe(doc["source"])))
+        out, len(doc["types"]), doc["type_table"]["count"], len(doc["groups"]), describe(doc["source"])))
 
 
 if __name__ == "__main__":

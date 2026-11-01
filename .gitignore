@@ -12,6 +12,9 @@ __pycache__/
 .playwright-mcp/
 # run logs and screenshots: local paths and account ids, never published
 analysis/runs/
+# the game's types (tools/re/exe_types.py, EML's export): game data with default values, never published
+*.emf.json
+types.json
 # custom-model research: game-derived data and dumps, never published
 analysis/model_survey/
 analysis/models/
