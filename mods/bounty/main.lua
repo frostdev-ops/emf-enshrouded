@@ -134,6 +134,7 @@ local told = {}           -- account -> the board {x, y, z} they were last told 
 local told_at = {}        -- account -> play second they were last told
 local tell_refused = false
 local walk_up_at = 0
+local pending = nil       -- the host's wheel pick, run on the server world's next step (this session only)
 
 -- ---- the pool ----
 -- emf\config\bounty\pool.lua, when it is there, replaces POOL (that folder stays when EMF is installed again). It runs
@@ -144,7 +145,7 @@ local KINDS = {kill = true, gather = true, champion = true}
 
 local function pool_entry_ok(e, seen)
   if type(e) ~= "table" or type(e.id) ~= "string" or not e.id:match("^[%w_%-]+$") or seen[e.id] then return false end
-  if not KINDS[e.kind] or type(e.n) ~= "number" or e.n < 1 then return false end
+  if not KINDS[e.kind] or type(e.n) ~= "number" or e.n < 1 or e.n % 1 ~= 0 then return false end
   if e.kind == "kill" and type(e.faction) ~= "number" then return false end
   if e.kind == "gather" and (type(e.match) ~= "string" or e.match == "") then return false end
   if e.name ~= nil and type(e.name) ~= "string" then return false end
@@ -181,7 +182,7 @@ local function load_pool()
       pool[#pool + 1] = e
     else
       emf.log(string.format("pool.lua: entry %d skipped (it needs an id of letters, digits and _, a kind of kill, " ..
-        "gather or champion, n, a faction for kill, a match for gather, and rewards with item and count)", i))
+        "gather or champion, a whole number n, a faction for kill, a match for gather, and rewards with item and count)", i))
     end
   end
   if #pool == 0 then
@@ -561,6 +562,7 @@ local function same_session()
   hits, gifts, moving, filled, dropped = {}, {}, {}, {}, {}
   boards, found, altars, client_models, walk, cwalk = {}, {}, {}, {}, nil, nil
   told, told_at, outbox, sent_lines, walk_up_at = {}, {}, {}, {}, 0
+  pending = nil
   loaded = false  -- the old world's data is not this one's: commands wait for on_world_data
   emf.hud("board", "")
   hud_shown = false
@@ -925,6 +927,7 @@ emf.on_world_data(function(world, text)
   loaded_at = play_s
   found, altars, client_models, cwalk, cwalk_after = {}, {}, {}, nil, 0
   told, told_at, outbox, sent_lines, walk_up_at = {}, {}, {}, {}, 0
+  pending = nil
   search_soon()
   rebuild_boards()
   session = emf.session()
@@ -1305,6 +1308,7 @@ end, {players = true})
 
 emf.command("top", ": who finished the most", function(world, args)
   same_session()
+  if not loaded then return not_loaded() end
   local me = sender(world)
   local list = {}
   for account, rec in pairs(players) do
@@ -1512,7 +1516,6 @@ local function walk_up(world)
 end
 
 -- ---- the host's wheel: read_key while looking at a Bounty Board ----
-local pending = nil  -- the host's pick, run on the server world's next step
 
 -- The wheel's entries for `account`: the notices they did not take, Drop for each open bounty they hold, Claim when
 -- something is done or owed. Labels "Text (details)" show the details on a second line.

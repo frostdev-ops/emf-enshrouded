@@ -148,7 +148,7 @@ return {
 ```
 
 When it is there, it is the whole pool: `main.lua`'s `POOL` is not used. It is read when the mod starts and at each
-world load. An entry that does not fit (no id, an unknown kind, no `n`, a kill without `faction`, a gather without
+world load. An entry that does not fit (no id, an unknown kind, no whole number `n`, a kill without `faction`, a gather without
 `match`) is skipped and named in the log; a file that does not run, or holds no entry that fits, leaves `main.lua`'s
 pool in use, and the log says so. The file can only build the table: it cannot reach the game, files or other
 programs.

@@ -429,6 +429,7 @@ TEST_CASE("bounty: after a world switch no command acts until the new world's da
     b.seconds(1);
     CHECK(b.board() == "Bounty Board: this world's data is not loaded yet; try again in a moment");
     CHECK(b.reply("bounty.claim") == "Bounty Board: this world's data is not loaded yet; try again in a moment");
+    CHECK(b.reply("bounty.top") == "Bounty Board: this world's data is not loaded yet; try again in a moment");
     fire_load(1);
     b.seconds(2);
     CHECK(b.board().find("1. ") != std::string::npos);
@@ -495,6 +496,7 @@ TEST_CASE("bounty: emf\\config\\bounty\\pool.lua (kept when EMF is installed aga
                 "  {id = \"kill_vukah_big\", kind = \"kill\", faction = 3, name = \"Vukah\", n = 20},\n"
                 "  {id = \"no kind\", n = 5},\n"
                 "  {id = \"gather_none\", kind = \"gather\", n = 5},\n"
+                "  {id = \"half\", kind = \"champion\", n = 1.5},\n"
                 "}\n");
     b.r.fake.session = 2;  // the next world load reads it
     fire_load(1);
@@ -502,6 +504,7 @@ TEST_CASE("bounty: emf\\config\\bounty\\pool.lua (kept when EMF is installed aga
     CHECK(logged("2 bounties from emf\\config\\bounty\\pool.lua"));
     CHECK(logged("pool.lua: entry 3 skipped"));
     CHECK(logged("pool.lua: entry 4 skipped"));
+    CHECK(logged("pool.lua: entry 5 skipped"));  // not a whole number
     CHECK(b.reply("bounty.give kill_vukah").rfind("Unknown bounty; the pool has: gather_flint, kill_vukah_big", 0) == 0);
     CHECK(b.reply("bounty.give gather_flint") == "Given: Gather 10 Flint (reward: 3 x Material_T1_Animal_Fur)");
     deliver(b.r.fake, "PickupEvent", pickup_event(1, 0, kFlint, 4));
@@ -1197,4 +1200,18 @@ TEST_CASE("bounty: a player who joined is told when a bounty of theirs is done")
     REQUIRE(lines.size() == 1);
     CHECK(lines[0].rfind("Bounty done: Slay 6 Vukah!", 0) == 0);
     CHECK_FALSE(b.noted("Bounty done"));  // the host's note is for the host's own bounties
+}
+
+TEST_CASE("bounty: a wheel pick made just before a world switch does nothing in the next world") {
+    BountyRig b({{"need_board", "1"}});
+    board_ahead(b);
+    b.press('E');
+    REQUIRE(b.r.fake.wheels.size() == 1);
+    const auto w = b.r.fake.wheels[0];
+    w.cb(kClient, 0, w.user);  // picked; the world changes before the server's next step
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    CHECK_FALSE(b.noted("Taken: "));
+    CHECK(yours_of(b.board()).empty());
 }
