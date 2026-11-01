@@ -7,7 +7,8 @@ The pack names, per creature:
   skeleton_guid  the skeleton's GUID (fixed forever; the clips' GUIDs follow from it and their names)
   graph, graph_guid   the game's animation graph and its copy's GUID
   clips          our clips: {name: {"animation": the glb's animation, "loop": true for a looping clip,
-                 "speed": faster above 1}}, or {name: {"made": {"from": an animation (else the rest pose), "at":
+                 "speed": faster above 1, "in_place": the joint that carries a walk forward when the animation
+                 travels (root motion: its travel along the ground is taken out, gltf_clips.clip)}}, or {name: {"made": {"from": an animation (else the rest pose), "at":
                  seconds into it, "keys": made_clips.py's key turns, "loop": ...}}} (a death or flinch the file lacks), or
                  {name: {"additive_zero": true}}: an additive clip that adds nothing (every joint unturned,
                  unmoved, scale 0: an additive layer adds scales, as the game's offset clips show), for the graph's
@@ -137,8 +138,12 @@ def build(cfg, glb_path, creature="creature"):
         if spec.get("animation") not in have:
             raise SystemExit("%s: clip %s plays %r, which the glb does not have (%s)"
                              % (creature, name, spec.get("animation"), ", ".join(have)))
-        clip = gltf_clips.clip(gltf, binc, sk, spec["animation"], new_skeleton.clip_hash(hier),
-                               loop=bool(spec.get("loop")), speed=float(spec.get("speed", 1.0)))
+        try:
+            clip = gltf_clips.clip(gltf, binc, sk, spec["animation"], new_skeleton.clip_hash(hier),
+                                   loop=bool(spec.get("loop")), speed=float(spec.get("speed", 1.0)),
+                                   in_place=spec.get("in_place"))
+        except (KeyError, ValueError) as e:
+            raise SystemExit("%s: clip %s: %s" % (creature, name, e.args[0] if e.args else e))
         out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
     zero = {"name": ZERO, "guid": clip_guid(cfg["skeleton_guid"], ZERO), "clip": zero_clip(sk, hier)}
     return {"sk": sk, "hierarchy": hier, "clips": out, "zero": zero, "slots": slots}

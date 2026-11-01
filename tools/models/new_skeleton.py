@@ -134,17 +134,34 @@ def mesh_world(gltf, skin=0):
     raise ValueError("no mesh is skinned to skin %d" % skin)
 
 
+def _likeness(a, b):
+    """How far apart two world matrices are in scale and turn (0: the same scale and turn)."""
+    sa, sb = abs(_det3(a)) ** (1.0 / 3.0), abs(_det3(b)) ** (1.0 / 3.0)
+    if sa <= 0 or sb <= 0:
+        return float("inf")
+    turn = sum((a[i][c] / sa - b[i][c] / sb) ** 2 for i in range(3) for c in range(3))
+    return abs(math.log(sa / sb)) + turn
+
+
 def bind_worlds(gltf, binc, skin=0):
-    """{joint node: its world matrix at the bind pose}: the pose in which the skinned mesh stands as its node puts
-    it (mesh world times the inverse of the joint's inverse bind). A file's nodes may hold another pose (a frame of
-    an animation); without inverse binds the nodes' pose is the bind pose."""
+    """{joint node: its world matrix at the bind pose}. Files hold inverse binds two ways: relative to the skinned
+    mesh node (Blender's: the bind pose is the mesh world times each inverse bind's inverse) or in world space, the
+    mesh node's own transform ignored (glTF's spec; Sketchfab's files, their mesh under a scaled FBX node). The
+    reading whose joints are turned and scaled as the file's joint nodes are is taken: the rest must stand in the
+    space the animations move the nodes in. A file's nodes may hold another pose (a frame of an animation); without
+    inverse binds the nodes' pose is the bind pose."""
     s = gltf["skins"][skin]
+    worlds = node_worlds(gltf)
     if "inverseBindMatrices" not in s:
-        worlds = node_worlds(gltf)
         return {n: worlds[n] for n in s["joints"]}
     mesh = mesh_world(gltf, skin)
-    ibm = [gltf_in.mat_from_colmajor(v) for v in gltf_in.accessor(gltf, binc, s["inverseBindMatrices"])]
-    return {n: gltf_in.mat_mul(mesh, gltf_in.mat_inv_affine(m)) for n, m in zip(s["joints"], ibm)}
+    ibm = [gltf_in.mat_inv_affine(gltf_in.mat_from_colmajor(v))
+           for v in gltf_in.accessor(gltf, binc, s["inverseBindMatrices"])]
+    relative = {n: gltf_in.mat_mul(mesh, m) for n, m in zip(s["joints"], ibm)}
+    absolute = dict(zip(s["joints"], ibm))
+    off_rel = sum(_likeness(relative[n], worlds[n]) for n in s["joints"])
+    off_abs = sum(_likeness(absolute[n], worlds[n]) for n in s["joints"])
+    return absolute if off_abs < off_rel else relative
 
 
 def build(gltf, binc, skin=0, scale=1.0, uneven=False):

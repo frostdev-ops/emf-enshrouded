@@ -105,6 +105,23 @@ def small_rig(path, nodes=None):
     return path
 
 
+def world_space_rig(path):
+    """The small rig with its inverse binds and vertices in world space, as glTF's spec has them (the skinned mesh
+    node's own transform, the armature's turn and scale 100, is to be ignored)."""
+    gltf, binc = gltf_in.read_glb(small_rig(path))
+    binc = bytearray(binc)
+    ibm = b"".join(struct.pack("<16f", *colmajor(gltf_in.mat_inv_affine(node_world(j)))) for j in SKIN_NODES)
+    pos = b"".join(struct.pack("<3f", *p) for p in WORLD_POINTS)
+    for view, data in ((gltf["bufferViews"][0], ibm), (gltf["bufferViews"][1], pos)):
+        assert view["byteLength"] == len(data)
+        binc[view.get("byteOffset", 0):view.get("byteOffset", 0) + len(data)] = data
+    acc = gltf["accessors"][1]
+    acc["min"] = [min(p[k] for p in WORLD_POINTS) for k in range(3)]
+    acc["max"] = [max(p[k] for p in WORLD_POINTS) for k in range(3)]
+    write_glb(path, gltf, bytes(binc))
+    return path
+
+
 def same_rotation(a, b, tol=1e-6):
     return abs(abs(sum(x * y for x, y in zip(a, b))) - 1.0) < tol
 
@@ -184,6 +201,19 @@ class BuildTests(Fixture):
         q, p, s = ns.decompose(stretched, uneven=True)
         self.assertTrue(same_rotation(q, (0.0, math.sin(0.35), 0.0, math.cos(0.35))), q)
         self.assertAlmostEqual(s, (1.2 * 1.2 * 1.1) ** (1 / 3), places=6)  # the even scale of the same volume
+
+    def test_inverse_binds_in_world_space_as_the_spec_has_them(self):
+        """glTF's spec ignores a skinned mesh node's transform: inverse binds in world space and vertices in world
+        space at the bind pose (Sketchfab's files, their mesh node under a scaled FBX node). The rest still stands
+        where the joint nodes stand, not scaled again by the mesh node's transform."""
+        gltf, binc = gltf_in.read_glb(world_space_rig(os.path.join(self.tmp.name, "spec.glb")))
+        sk = ns.build(gltf, binc)
+        world = osk.world(sk["rest"], sk["parents"])
+        want = [(0.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 1.5, 0.3), (0.0, 1.0, -0.4), (-0.2, 0.0, 0.0)]
+        for j, p in enumerate(want):
+            for a, b in zip(world[j][1], p):
+                self.assertAlmostEqual(a, b, places=5, msg=sk["names"][j])
+        self.assertTrue(same_rotation(world[2][0], (0.0, -H, 0.0, H), tol=1e-5))
 
     def test_rest_is_the_bind_pose_when_the_nodes_hold_another(self):
         nodes = json.loads(json.dumps(NODES))
