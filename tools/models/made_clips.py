@@ -6,6 +6,10 @@ are where those joints stand turned at that time (a joint a key does not name is
 every joint's turn eases (smoothstep, slerp) from the one to the other, and the clip ends on the last key. An axis is
 "x", "y", "z" or a vector in the creature's own frame (game space: x across, y up, z forward), carried along by the
 turns of the joint's parents: a neck turned about x after the body rolled onto its side still nods along the body.
+
+offset() makes a clip for a graph's additive layer (offsets added to the pose, as the game wolf's lean that turns its
+neck and head into a turn): per joint a turn about the creature's axis expressed in the joint's own rest frame, no move
+and scale 0 (an additive layer adds scales).
 """
 import math
 import os
@@ -61,6 +65,25 @@ def turned(sk, base, turns):
         delta[j] = osk.qmul(wq, osk.qconj(world[j][0]))
         out.append((wq if p is None else osk.qmul(osk.qconj(new_q[p]), wq), t, s))
     return out
+
+
+OFFSET_FRAMES = 9  # as long as the game wolf's lean offsets
+
+
+def offset(sk, turns, hierarchy_hash=0):
+    """An offset clip: {joint name: [axis, degrees]}, each a turn about the creature's axis in that joint's rest
+    frame (the joint's rest world rotation turned by it); every other joint adds nothing."""
+    world = osk.world(sk["rest"], sk["parents"])
+    deltas = {}
+    for name, (axis, degrees) in turns.items():
+        if name not in sk["names"]:
+            raise ValueError("no joint %r in the skeleton" % name)
+        j = sk["names"].index(name)
+        w = world[j][0]
+        t = _turn(axis, degrees)
+        deltas[j] = osk.qmul(osk.qmul(osk.qconj(w), t), w)
+    pose = [(deltas.get(j, IDENTITY), (0.0, 0.0, 0.0), (0.0, 0.0, 0.0)) for j in range(len(sk["rest"]))]
+    return joint_animation.encode([pose] * (OFFSET_FRAMES + 1), sk["rest"], hierarchy_hash=hierarchy_hash)
 
 
 def make(sk, base, keys, fps=60, loop=False, hierarchy_hash=0):

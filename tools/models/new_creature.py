@@ -11,7 +11,9 @@ The pack names, per creature:
                  seconds into it, "keys": made_clips.py's key turns, "loop": ...}}} (a death or flinch the file lacks), or
                  {name: {"additive_zero": true}}: an additive clip that adds nothing (every joint unturned,
                  unmoved, scale 0: an additive layer adds scales, as the game's offset clips show), for the graph's
-                 additive layers whose game clips are offsets (the wolf's leaning)
+                 additive layers whose game clips are offsets (the wolf's leaning), or {name: {"offset": {joint:
+                 [axis, degrees]}}}: an offset that turns those joints (made_clips.offset; the game wolf's lean turns
+                 its neck and head about 50 degrees into a turn)
   model_glb      optional: the model from this glb instead (a copy on the skeleton, new_skeleton.write_glb, then
                  retextured; its bones named jNNN_<name>)
   roles          {game clip GUID: our clip name}: which of our clips plays where the graph plays that game clip
@@ -76,7 +78,7 @@ def roles(cfg):
 def offsets(cfg):
     """{GUID: True} of our offset clips: the pack's additive_zero clips and the built-in zero offset."""
     g = cfg["skeleton_guid"]
-    names = [n for n, spec in cfg["clips"].items() if spec.get("additive_zero")] + [ZERO]
+    names = [n for n, spec in cfg["clips"].items() if spec.get("additive_zero") or spec.get("offset")] + [ZERO]
     return {clip_guid(g, n): True for n in names}
 
 
@@ -108,6 +110,13 @@ def build(cfg, glb_path, creature="creature"):
         spec = cfg["clips"][name]
         if spec.get("additive_zero"):
             out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": zero_clip(sk, hier)})
+            continue
+        if spec.get("offset"):
+            try:
+                clip = made_clips.offset(sk, spec["offset"], hierarchy_hash=new_skeleton.clip_hash(hier))
+            except ValueError as e:
+                raise SystemExit("%s: clip %s: %s" % (creature, name, e))
+            out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
             continue
         if spec.get("made"):
             made = spec["made"]
