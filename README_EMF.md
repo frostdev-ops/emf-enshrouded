@@ -167,12 +167,12 @@ notes_seconds=6  ; how long a note stays, 2 to 20 seconds
 Sleep Through the Day's, and the wheels) uses a book serif in warm white with a soft shadow, like the game's own text
 (lines and notes in bold); notes show top centre under the compass on a dark band that fades at both ends, at most
 three rows each. `[hud]` changes that, `[overlay]` changes the console. Colours are `#rrggbb` or `#rgb`; sizes are a
-percentage of the size EMF picks for the screen: on-screen text is the screen's height / 42 (26 px at 1080p), the
-console's text its height / 54 (20 px at 1080p). The text is sized again when the window's size has stayed the same
-for a moment. EMF reads these keys when the game starts and never writes them; a value it cannot use falls back to its
-default and a number out of range is kept inside its range, each with one line in `emf_core.log`. `style=boxed` alone
-gives EMF's earlier look: dark boxes at the console's size, the console's font, `#dbdbcc` and notes top left (the keys
-you set still apply).
+percentage of the size EMF picks for the screen: on-screen text is the screen's height / 38 (28 px at 1080p), the
+console's text its height / 54 (20 px at 1080p), and serif tabs 1.3 times the console's text (26 px at 1080p). The
+text is sized again when the window's size has stayed the same for a moment. EMF reads these keys when the game
+starts and never writes them; a value it cannot use falls back to its default and a number out of range is kept
+inside its range, each with one line in `emf_core.log`. `style=boxed` alone gives EMF's earlier look: dark boxes at
+the console's size, the console's font, `#dbdbcc` and notes top left (the keys you set still apply).
 
 **Fonts.** EMF ships Alegreya (the serif) and Cascadia Mono in `<game>\emf\fonts\` (both under the SIL Open Font
 License, in the zip's `licenses\`); Consolas comes from Windows. To use a font of your own, put its `.ttf` or `.otf`

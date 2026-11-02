@@ -32,14 +32,19 @@ float base_pixel_size(int swapchain_height) {
 }
 
 float hud_base_pixel_size(int swapchain_height) {
-    return std::clamp(static_cast<float>(swapchain_height) / 42.0f, 16.0f, 52.0f);
+    return std::clamp(static_cast<float>(swapchain_height) / 38.0f, 16.0f, 58.0f);
 }
 
 FontSizes font_sizes(const LookSettings& look, int swapchain_height) {
     const float hud_base =
         look.style == HudStyle::Boxed ? base_pixel_size(swapchain_height) : hud_base_pixel_size(swapchain_height);
-    return FontSizes{scaled_pixel_size(base_pixel_size(swapchain_height), look.text_size),
-                     scaled_pixel_size(hud_base, look.hud_size)};
+    FontSizes s;
+    s.text = scaled_pixel_size(base_pixel_size(swapchain_height), look.text_size);
+    s.hud = scaled_pixel_size(hud_base, look.hud_size);
+    // a serif (or a player's font) in the tab bar: bigger, so it reads as big as the console's monospace lines
+    const bool serif_tabs = look.tabs_font.kind == FontChoice::Kind::Serif || look.tabs_font.kind == FontChoice::Kind::File;
+    s.tabs = serif_tabs ? std::round(s.text * kSerifTabsScale) : s.text;
+    return s;
 }
 
 float scaled_pixel_size(float base, int percent) {
@@ -85,7 +90,7 @@ FontPlan plan_fonts(const LookSettings& look, int swapchain_height, const FontPa
     FontPlan plan;
     plan.pixel_size = base_pixel_size(swapchain_height);
     const FontSizes sizes = font_sizes(look, swapchain_height);
-    const float text = sizes.text, hud = sizes.hud;
+    const float text = sizes.text, hud = sizes.hud, tabs = sizes.tabs;
     std::map<std::wstring, bool> checked;  // each file is checked once per plan, and said once
     const auto pick = [&](const std::vector<std::wstring>& files) -> std::wstring {
         for (const auto& f : files) {
@@ -103,7 +108,7 @@ FontPlan plan_fonts(const LookSettings& look, int swapchain_height, const FontPa
     const std::vector<std::wstring> console = chain(look.console_font, false, kCascadiaFile, paths);
     const std::wstring console_file = pick(console);
     plan.faces.push_back({FontRole::Console, console_file, text});
-    plan.faces.push_back({FontRole::Tabs, pick(chain(look.tabs_font, false, kSerifFile, paths)), text});
+    plan.faces.push_back({FontRole::Tabs, pick(chain(look.tabs_font, false, kSerifFile, paths)), tabs});
     if (look.hud_font.kind == FontChoice::Kind::Console) {  // the console's font, with no bold of its own
         plan.faces.push_back({FontRole::Hud, console_file, hud});
         plan.faces.push_back({FontRole::HudBold, console_file, hud});

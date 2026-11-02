@@ -210,16 +210,16 @@ TEST_CASE("font plan: the base size is the screen height / 54 within 13-40 px; s
     CHECK(scaled_pixel_size(base_pixel_size(1080), 150) == 30.0f);
 }
 
-TEST_CASE("font plan: on-screen text has its own, bigger base: the screen height / 42 within 16-52 px") {
-    CHECK(hud_base_pixel_size(1080) == doctest::Approx(25.714f).epsilon(0.001));
-    CHECK(hud_base_pixel_size(720) == doctest::Approx(17.143f).epsilon(0.001));
-    CHECK(hud_base_pixel_size(1481) == doctest::Approx(35.262f).epsilon(0.001));
-    CHECK(hud_base_pixel_size(2160) == doctest::Approx(51.429f).epsilon(0.001));
+TEST_CASE("font plan: on-screen text has its own, bigger base: the screen height / 38 within 16-58 px") {
+    CHECK(hud_base_pixel_size(1080) == doctest::Approx(28.421f).epsilon(0.001));
+    CHECK(hud_base_pixel_size(720) == doctest::Approx(18.947f).epsilon(0.001));
+    CHECK(hud_base_pixel_size(1481) == doctest::Approx(38.974f).epsilon(0.001));
+    CHECK(hud_base_pixel_size(2160) == doctest::Approx(56.842f).epsilon(0.001));
     CHECK(hud_base_pixel_size(480) == doctest::Approx(16.0f));   // never under 16
-    CHECK(hud_base_pixel_size(4320) == doctest::Approx(52.0f));  // never over 52
-    // the sizes the faces get: on-screen 17 / 26 / 35 / 51 px, the console 13 / 20 / 27 / 40 px
+    CHECK(hud_base_pixel_size(4320) == doctest::Approx(58.0f));  // never over 58
+    // the sizes the faces get: on-screen 19 / 28 / 39 / 57 px, the console 13 / 20 / 27 / 40 px
     const int heights[] = {720, 1080, 1481, 2160};
-    const float hud[] = {17.0f, 26.0f, 35.0f, 51.0f};
+    const float hud[] = {19.0f, 28.0f, 39.0f, 57.0f};
     const float text[] = {13.0f, 20.0f, 27.0f, 40.0f};
     for (int i = 0; i < 4; ++i) {
         const FontSizes sz = font_sizes(LookSettings{}, heights[i]);
@@ -229,12 +229,47 @@ TEST_CASE("font plan: on-screen text has its own, bigger base: the screen height
     LookSettings big;
     big.hud_size = 200;
     big.text_size = 60;
-    CHECK(font_sizes(big, 2160).hud == 103.0f);
+    CHECK(font_sizes(big, 2160).hud == 114.0f);
     CHECK(font_sizes(big, 720).text == 8.0f);
     // style=boxed is EMF's earlier look: its on-screen text is the console's size
     LookSettings boxed;
     boxed.style = HudStyle::Boxed;
     CHECK(font_sizes(boxed, 1080).hud == 20.0f);
+}
+
+TEST_CASE("font plan: serif tabs are 1.3 x the console's size (its x-height is small); monospace tabs keep it") {
+    // 1481 px high: the console 27 px, serif tabs 35 px, on-screen text 39 px
+    LookSettings s;
+    CHECK(font_sizes(s, 1481).tabs == 35.0f);
+    CHECK(font_sizes(s, 720).tabs == 17.0f);
+    CHECK(font_sizes(s, 1080).tabs == 26.0f);
+    CHECK(font_sizes(s, 2160).tabs == 52.0f);
+    s.tabs_font = {FontChoice::Kind::File, "Runes.otf"};  // a player's font: treated like the serif
+    CHECK(font_sizes(s, 1481).tabs == 35.0f);
+    for (const auto mono : {FontChoice::Kind::Consolas, FontChoice::Kind::Cascadia}) {
+        s.tabs_font = {mono, {}};
+        CHECK(font_sizes(s, 1481).tabs == 27.0f);  // the console's own size, as before
+    }
+    // they follow [overlay] text_size, never [hud] size
+    LookSettings t;
+    t.hud_size = 200;
+    CHECK(font_sizes(t, 1481).tabs == 35.0f);
+    t.text_size = 80;  // the console 22 px
+    CHECK(font_sizes(t, 1481).text == 22.0f);
+    CHECK(font_sizes(t, 1481).tabs == 29.0f);
+    // the plan's face, and one face shared when the sizes match
+    const FontPlan p = plan_fonts(LookSettings{}, 1481, kPaths, Files{});
+    CHECK(p.face(FontRole::Tabs) == FontFace{FontRole::Tabs, kSerif, 35.0f});
+    CHECK(p.face(FontRole::Hud) == FontFace{FontRole::Hud, kSerif, 39.0f});
+    LookSettings same;
+    same.hud_size = 90;  // 39 x 0.9 = 35 px: the same face as the tabs
+    const FontPlan q = plan_fonts(same, 1481, kPaths, Files{});
+    CHECK(q.face(FontRole::Tabs) == FontFace{FontRole::Tabs, kSerif, 35.0f});
+    CHECK(q.face(FontRole::Hud).pixel_size == 35.0f);
+    // the rebuild sees a change of the tabs' size too
+    FontSizes a = font_sizes(LookSettings{}, 1481), b = a;
+    b.tabs += 1.0f;
+    CHECK_FALSE(a == b);
 }
 
 TEST_CASE("font plan: by default the console is Consolas, the tabs the bundled serif, on-screen text the serif and bold") {
@@ -246,9 +281,9 @@ TEST_CASE("font plan: by default the console is Consolas, the tabs the bundled s
     CHECK(p.face(FontRole::Hud).file == kSerif);
     CHECK(p.face(FontRole::HudBold).file == kBold);
     CHECK(p.face(FontRole::Console).pixel_size == 20.0f);
-    CHECK(p.face(FontRole::Tabs).pixel_size == 20.0f);
-    CHECK(p.face(FontRole::Hud).pixel_size == 26.0f);
-    CHECK(p.face(FontRole::HudBold).pixel_size == 26.0f);
+    CHECK(p.face(FontRole::Tabs).pixel_size == 26.0f);  // the serif tabs: 1.3 x the console's size
+    CHECK(p.face(FontRole::Hud).pixel_size == 28.0f);
+    CHECK(p.face(FontRole::HudBold).pixel_size == 28.0f);
     CHECK(p.problems.empty());
     // boxed with the console's font: one face for the console and the screen, as before
     LookSettings boxed;
@@ -271,9 +306,9 @@ TEST_CASE("font plan: each font value picks its file; the sizes follow text_size
     CHECK(p.face(FontRole::Tabs).file == kConsolas);
     CHECK(p.face(FontRole::Tabs).pixel_size == 16.0f);
     CHECK(p.face(FontRole::Hud).file == kCascadia);  // "console": the console's font
-    CHECK(p.face(FontRole::Hud).pixel_size == 39.0f);  // 150 % of the on-screen base (25.7 px)
+    CHECK(p.face(FontRole::Hud).pixel_size == 43.0f);  // 150 % of the on-screen base (28.4 px)
     CHECK(p.face(FontRole::HudBold).file == kCascadia);  // no bold of it: the same face
-    CHECK(p.face(FontRole::HudBold).pixel_size == 39.0f);
+    CHECK(p.face(FontRole::HudBold).pixel_size == 43.0f);
 
     s.console_font = {FontChoice::Kind::Serif, {}};
     s.hud_font = {FontChoice::Kind::File, "My Book.ttf"};

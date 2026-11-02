@@ -45,18 +45,23 @@ inline constexpr wchar_t kCascadiaFile[] = L"CascadiaMono-Regular.ttf";
 // The console's base pixel size: the swapchain's height / 54, kept within 13-40 px (EMF's size before the look
 // settings).
 float base_pixel_size(int swapchain_height);
-// On-screen text's base (HUD lines, notes, wheels): the swapchain's height / 42, kept within 16-52 px. Bigger than the
+// On-screen text's base (HUD lines, notes, wheels): the swapchain's height / 38, kept within 16-58 px. Bigger than the
 // console's: a book serif's small x-height reads smaller than a monospace font at the same pixel size, and the game's
-// own text is about this big.
+// own small status text is about this big.
 float hud_base_pixel_size(int swapchain_height);
+// Serif tabs (the tab bar and the Mods tab) are this much bigger than the console's text.
+inline constexpr float kSerifTabsScale = 1.3f;
 // `percent` of a base size in whole pixels, at least 8.
 float scaled_pixel_size(float base, int percent);
 
-// The pixel sizes of the faces: the console and the tabs ([overlay] text_size), on-screen text ([hud] size; at the
-// console's base with style=boxed, EMF's earlier look). The atlas is built again only when these change.
+// The pixel sizes of the faces: the console ([overlay] text_size), the tab bar and the Mods tab (the console's size;
+// 1.3 x that in a serif or a player's font, whose small x-height would look tiny next to the console's lines), and
+// on-screen text ([hud] size; at the console's base with style=boxed, EMF's earlier look). The atlas is built again
+// only when these change.
 struct FontSizes {
     float text = 0.0f;
     float hud = 0.0f;
+    float tabs = 0.0f;
     bool operator==(const FontSizes&) const = default;
 };
 FontSizes font_sizes(const LookSettings& look, int swapchain_height);
