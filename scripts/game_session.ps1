@@ -13,14 +13,17 @@
 #   "<owner> <time> pid=<game pid>". Someone else's lock refuses start and stop (-IgnoreLock); a lock whose pid no
 #   longer runs, or an empty one older than a minute, is stale and taken over.
 # - a marker in the game folder (emf\game_session.json): EMF that start installed, and the -Mods folders it made. start
-#   refuses an EMF it did not install (a modder's or the user's own), and stop uninstalls only with the marker.
+#   refuses an EMF it did not install (a modder's or the user's own) and an emf folder without the marker (the settings
+#   an uninstall keeps), and stop uninstalls only with the marker. start writes it before it copies anything.
 #
 # start:
 #   1. refuses while a person uses the PC: input in the last 2 minutes (-IdleLimit) that was not this script's
 #      (-IgnoreIdle when the user hands the PC over: their input from before this run is accepted);
 #   2. save_guard.ps1 -Check: stops when the Steam Cloud saves changed (recording them again is the user's step);
 #   3. installs the dev build with the debug bridge on (install_emf.ps1 -Bridge), plus -Mods folders (template_lua
-#      goes in as its mod.json id, my_first_mod; <folder>=<id> names the target);
+#      goes in as its mod.json id, my_first_mod; <folder>=<id> names the target). -Mods a,b, -Mods 'a','b' and
+#      -Mods 'a,b' are the same two mods (powershell -File hands the first two over as one string, "a,b"); a -Mods
+#      folder that does not exist stops start before anything is installed (exit 4);
 #   4. sets windowed mode, starts the game through Steam, waits for the bridge and the main menu;
 #   5. always stops at the main menu after it launched the game (exit 2), with a screenshot to check which character
 #      it shows. -Character local goes on only for a game whose menu screenshot this script showed before (the
@@ -131,6 +134,12 @@ function Set-WindowMode([string]$Path, [string]$Mode) {
         [IO.File]::WriteAllText($Path, $text, (New-Object Text.UTF8Encoding($f.bom)))
     }
     return $before
+}
+
+# -Mods as given on the command line, one spec each: every value is split on commas, trimmed, empties dropped.
+# powershell -File hands -Mods 'a','b' (and -Mods a,b) over as the one string "a,b"; -Command as two strings.
+function Split-ModList([string[]]$Specs) {
+    return @(foreach ($s in $Specs) { foreach ($part in "$s".Split(",")) { if ($part.Trim()) { $part.Trim() } } })
 }
 
 # -Mods "<folder>[=<id>]": a folder (relative to the repository) installed as <game>\emf\mods\<id>. The id is the one
@@ -734,6 +743,14 @@ function Start-GameSession {
             Say "EMF is installed in $Game and not by game_session (no emf\$MarkerName): a modder's or the user's own install, not replacing it"
             Exit-Session 3
         }
+        if (-not $inst.marker -and (Test-Path -LiteralPath (Join-Path $Game "emf"))) {
+            # (EMF's settings an uninstall kept, or anyone's files: the clean-up and stop remove the whole emf folder)
+            Say "$Game\emf is there and not game_session's (no emf\$MarkerName): the user's settings or files, not installing over it (move it away first)"
+            Exit-Session 3
+        }
+        foreach ($spec in $Mods) {  # before anything is installed
+            try { [void](Resolve-ModSpec $spec $sessionRepo) } catch { Say "-Mods: $($_.Exception.Message); nothing installed"; Exit-Session 4 }
+        }
         $sg = & $script:Env.SaveGuard
         if ($sg.code -ne 0) {
             Say "stopped: save_guard -Check says the Steam Cloud saves changed or cannot be checked ($($sg.text)). Stop here and tell the user: recording them again (save_guard.ps1 -Record) is the user's step, after their own play."
@@ -742,6 +759,11 @@ function Start-GameSession {
         Say "saves unchanged ($($sg.text))"
         try {
             $script:installedHere = $true
+            # the marker first: whatever an install that fails part-way leaves is then game_session's, and the clean-up
+            # (or stop) removes it. (emf\ is new here, or game_session's from an earlier start: checked above.)
+            New-Item -ItemType Directory -Force (Join-Path $Game "emf") | Out-Null
+            $prior = Read-InstallMarker $Game
+            Write-InstallMarker $Game $LockOwner @(if ($prior -and $prior.mods) { $prior.mods })
             $out = @(& $script:Env.Install)
             Say "$($out[0])"
             $extra = Install-ExtraMods $Mods $Game $sessionRepo
@@ -1023,6 +1045,7 @@ function Invoke-GameSession([string]$Cmd) {
     $script:lockTaken = $false
     $script:openedWorld = $false  # this run started a world (clicks or load_world): a wrong one is ended at once
     $script:inputSince = $script:t0
+    $script:Mods = @(Split-ModList $script:Mods)
     if ($Cmd -notin @("start", "stop", "status")) {
         & $script:Env.Say "usage: game_session.ps1 start | stop | status (see the top of this file)"
         return 4
