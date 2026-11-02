@@ -403,6 +403,26 @@ std::optional<std::string> scan_capture_key(ScanCapture& c, const KeyEvent& e) {
         c.message = "Enter sends the command line: choose another key (Esc: cancel)";
         return std::nullopt;
     }
+    // A key whose scan code belongs to another key (raw input reports Pause as Left Ctrl's 0x1d with VK_PAUSE): its scan
+    // code would bind that other key.
+    const auto generic = [](UINT k) -> UINT {
+        switch (k) {
+            case VK_LSHIFT:
+            case VK_RSHIFT: return VK_SHIFT;
+            case VK_LCONTROL:
+            case VK_RCONTROL: return VK_CONTROL;
+            case VK_LMENU:
+            case VK_RMENU: return VK_MENU;
+            default: return k;
+        }
+    };
+    if (e.vkey) {
+        const UINT mapped = MapVirtualKeyW(e.scan, MAPVK_VSC_TO_VK_EX);
+        if (mapped && generic(mapped) != generic(e.vkey)) {
+            c.message = shown + " cannot open the console: choose another key (Esc: cancel)";
+            return std::nullopt;
+        }
+    }
     if (c.step == ScanCapture::Step::Confirm && e.scan == c.scan) {
         c.step = ScanCapture::Step::Idle;
         c.message.clear();
@@ -413,6 +433,8 @@ std::optional<std::string> scan_capture_key(ScanCapture& c, const KeyEvent& e) {
     c.message = "press " + shown + " again to confirm (Esc: cancel)";
     return std::nullopt;
 }
+
+bool capturing_key(const ModsUiState& ui) { return ui.scan.step != ScanCapture::Step::Idle || !ui.capturing.empty(); }
 
 bool capture_key_event(ModsUiState& ui, const KeyEvent& e, int frame) {
     if (ui.scan.step != ScanCapture::Step::Idle) {  // the Settings tab's console key

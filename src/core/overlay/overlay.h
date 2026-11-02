@@ -35,6 +35,10 @@ struct OverlayConfig {
 // within 3-12), and the look (read_look_settings). A "; comment" after a value on the same line is not part of it.
 OverlayConfig read_overlay_config(const std::wstring& ini_path);
 
+// The config with what the store holds for EMF's own settings (the Settings tab's values, one parser): the look, the
+// key, chat, mouse speed and suggestions; `enabled` stays the ini's. Unchanged when the store has no EMF settings.
+OverlayConfig overlay_config_with_store(OverlayConfig c, const SettingsStore& s);
+
 // The ImGui key for a console key event (ImGuiKey_None if the console does not use it).
 ImGuiKey imgui_key(const KeyEvent& e);
 

@@ -571,3 +571,23 @@ TEST_CASE("scan capture: the same key twice saves its scan code; Esc cancels; En
     CHECK_FALSE(scan_capture_key(c, KeyEvent{0x00, 0, true, false}));  // no scan code
     CHECK(c.step == ScanCapture::Step::First);
 }
+
+TEST_CASE("scan capture: Pause (raw input says Left Ctrl's scan code with VK_PAUSE) is refused; Left Shift is a key") {
+    ScanCapture c;
+    c.step = ScanCapture::Step::First;
+    CHECK_FALSE(scan_capture_key(c, KeyEvent{0x1D, VK_PAUSE, true, false}));
+    CHECK(c.step == ScanCapture::Step::First);  // not taken: it would save Left Ctrl
+    CHECK_FALSE(c.message.empty());
+    CHECK_FALSE(scan_capture_key(c, KeyEvent{0x2A, VK_SHIFT, true, false}));  // raw input names Shift generically
+    CHECK(c.step == ScanCapture::Step::Confirm);
+}
+
+TEST_CASE("a key capture (bind or console key) takes Esc from the console, so Esc cancels instead of closing") {
+    ModsUiState ui;
+    CHECK_FALSE(capturing_key(ui));
+    ui.scan.step = ScanCapture::Step::First;
+    CHECK(capturing_key(ui));
+    ui.scan.step = ScanCapture::Step::Idle;
+    ui.capturing = "clock.key";
+    CHECK(capturing_key(ui));
+}

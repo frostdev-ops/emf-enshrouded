@@ -208,6 +208,10 @@ void before_frame(ImGuiIO& io) {
                 // Esc reaches the console only while its suggestions show (InputRouter): it hides them (only while
                 // the console is open). ImGui never gets it (an active input line would throw away what was typed).
                 if (e.key.scan == InputRouter::kEscScan && !e.key.extended) {
+                    if (capturing_key(g_mods_ui)) {  // a key bind or the console key waits: Esc cancels it
+                        feed_key_event(g_mods_ui, e.key, io, ImGui::GetFrameCount());
+                        break;
+                    }
                     if (e.key.down && g_router->open()) g_ui.escape = true;
                     break;
                 }
@@ -322,7 +326,8 @@ void build(ImVec2 display) {
         submit_line(*g_deps.center, host_state(*g_deps.tracker, GetTickCount64()), line, g_deps.reply);
         g_model->save_history(g_history_path);
     }, mods_tab, settings_tab);
-    g_router->set_esc_to_console(g_router->open() && g_ui.wants_escape);  // Esc hides the suggestions first
+    // Esc hides the suggestions first, and cancels a key bind or console key that waits for a key
+    g_router->set_esc_to_console(g_router->open() && (g_ui.wants_escape || capturing_key(g_mods_ui)));
     const TextLook look = text_look();
     if (g_ui.open_fraction <= 0.0f) {
         draw_notes(toast_lines(*g_model, ToastState{g_toast_from.load(), g_toast_until.load()}, GetTickCount64()),
@@ -384,6 +389,20 @@ OverlayConfig read_overlay_config(const std::wstring& ini_path) {
             return utf8(buf);
         },
         &c.look_problems);
+    return c;
+}
+
+OverlayConfig overlay_config_with_store(OverlayConfig c, const SettingsStore& s) {
+    if (!s.has(kEmfSettingsId, "hud.style")) return c;  // no EMF settings in this store
+    c.look_problems.clear();
+    c.look = look_from_store(s, &c.look_problems);
+    c.mouse_speed = static_cast<float>(s.get_float(kEmfSettingsId, "overlay.mouse_speed", c.mouse_speed));
+    c.chat_commands = s.get(kEmfSettingsId, "overlay.chat") == "1";
+    c.suggest = s.get(kEmfSettingsId, "overlay.suggest") == "1";
+    c.suggest_rows = static_cast<size_t>(s.get_int(kEmfSettingsId, "overlay.suggest_rows", 8));
+    const std::string key = s.get(kEmfSettingsId, "overlay.key");  // "0x29", checked by the store
+    const unsigned long scan = std::strtoul(key.c_str(), nullptr, 16);
+    if (scan >= 1 && scan <= 0x7F) c.toggle_scan = static_cast<uint16_t>(scan);
     return c;
 }
 

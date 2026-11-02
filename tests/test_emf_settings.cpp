@@ -13,6 +13,7 @@
 #include "core/emf_settings.h"
 #include "core/manifest.h"
 #include "core/overlay/look_settings.h"
+#include "core/overlay/overlay.h"
 #include "test_scratch.h"
 
 using namespace emf::core;
@@ -143,4 +144,55 @@ TEST_CASE("look_from_store: the store's emf values make the look; unset keys are
     CHECK(look.height == 50);
     SettingsStore empty(&ini);  // nothing declared (a core without the defs): the defaults
     CHECK(look_from_store(empty, nullptr) == LookSettings{});
+}
+
+TEST_CASE("look_from_store: only style=boxed in the file gives the boxed look (its own defaults), as at start") {
+    MapIni ini;
+    ini.values["emf.hud.style"] = "boxed";
+    SettingsStore s(&ini);
+    for (SettingDef d : emf_setting_defs({}))
+        REQUIRE(s.declare(kEmfSettingsId, std::move(d), nullptr, SettingsStore::Declare::Keep));
+    const LookSettings boxed = read_look_settings(
+        [](const char* section, const char* key) {
+            return std::string(section) == "hud" && std::string(key) == "style" ? std::string("boxed") : std::string();
+        },
+        nullptr);
+    CHECK(look_from_store(s, nullptr) == boxed);
+    CHECK(boxed.hud_font.kind == FontChoice::Kind::Console);  // boxed's own defaults
+    REQUIRE(s.set(kEmfSettingsId, "hud.font", "serif") == SettingsStore::SetResult::Ok);  // chosen in the tab
+    CHECK(look_from_store(s, nullptr).hud_font.kind == FontChoice::Kind::Serif);
+}
+
+TEST_CASE("emf settings: the console key is never Esc or Enter, also when typed into set or the ini") {
+    const SettingDef* key = find_def(emf_setting_defs({}), "overlay.key");
+    REQUIRE(key);
+    std::string why;
+    CHECK_FALSE(setting_value(*key, "0x01", false, &why));
+    CHECK(why.find("Esc") != std::string::npos);
+    CHECK_FALSE(setting_value(*key, "0x1c", false, nullptr));
+    CHECK_FALSE(setting_value(*key, "0x1C", true, nullptr));  // from the ini: the default is used instead
+}
+
+TEST_CASE("overlay_config_with_store: the console starts with the values the Settings tab shows (one parser)") {
+    MapIni ini;
+    ini.values["emf.hud.size"] = "125";             // snapped to whole steps of 10, as the tab shows it
+    ini.values["emf.overlay.mouse_speed"] = "20";   // kept inside 0.1-10
+    ini.values["emf.overlay.chat"] = "false";
+    ini.values["emf.overlay.key"] = "0x3B";
+    ini.values["emf.overlay.suggest_rows"] = "5";
+    SettingsStore s(&ini);
+    for (SettingDef d : emf_setting_defs({}))
+        REQUIRE(s.declare(kEmfSettingsId, std::move(d), nullptr, SettingsStore::Declare::Keep));
+    OverlayConfig from_ini;  // what read_overlay_config would give (enabled stays its own)
+    from_ini.enabled = false;
+    const OverlayConfig c = overlay_config_with_store(from_ini, s);
+    CHECK_FALSE(c.enabled);
+    CHECK(c.look.hud_size == 130);
+    CHECK(c.look == look_from_store(s, nullptr));
+    CHECK(c.mouse_speed == doctest::Approx(10.0f));
+    CHECK_FALSE(c.chat_commands);
+    CHECK(c.toggle_scan == 0x3B);
+    CHECK(c.suggest_rows == 5u);
+    SettingsStore empty(&ini);  // no defs (a core without them): the ini's config as it was
+    CHECK(overlay_config_with_store(from_ini, empty).look == from_ini.look);
 }

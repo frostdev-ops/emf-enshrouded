@@ -90,6 +90,8 @@ bool mod_switch(SettingsStore& store, const ModRecord& mod, ModsUiState& ui, uin
 // cancels. Shift, Ctrl and Alt bind only when released alone (Shift+G binds G); the IME's key never binds. `frame` is the last ImGui frame (ImGui::GetFrameCount()): a capture whose widget was not drawn in it or the
 // one before (another tab, the console closed) is dropped and takes nothing.
 bool capture_key_event(ModsUiState& ui, const KeyEvent& e, int frame);
+// A key bind or the console key waits for a key: Esc then goes to it (it cancels) instead of closing the console.
+bool capturing_key(const ModsUiState& ui);
 // The name a key setting stores for a key press ("" for a key that cannot be bound).
 std::string key_event_name(const KeyEvent& e);
 // "#rrggbb" as 0..1 floats and back (false for anything else).

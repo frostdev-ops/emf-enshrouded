@@ -81,6 +81,8 @@ public:
     std::vector<std::string> mods() const;  // mods with declared settings, by id
     bool has(const std::string& mod, const std::string& key) const;
     std::string get(const std::string& mod, const std::string& key) const;  // effective value; "" if undeclared
+    // The value came from the ini (a usable one) or a change, not from the default nobody set.
+    bool stored(const std::string& mod, const std::string& key) const;
     int64_t get_int(const std::string& mod, const std::string& key, int64_t fallback) const;
     double get_float(const std::string& mod, const std::string& key, double fallback) const;
 
@@ -99,6 +101,7 @@ private:
     struct Entry {
         SettingDef def;
         std::string value;
+        bool stored = false;  // see stored()
     };
     const Entry* find(const std::string& mod, const std::string& key) const;
     IniBackend* backend_;

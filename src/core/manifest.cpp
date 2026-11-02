@@ -552,6 +552,8 @@ std::optional<std::string> scan_code_text(const std::string& text, std::string* 
     const unsigned long v = text.empty() ? 0 : std::strtoul(p, &end, 0);
     if (text.empty() || !end || *end != '\0' || v < 1 || v > 0x7F)
         return fail(why, "a keyboard scan code from 0x01 to 0x7f (0x29 is the key under Esc)"), std::nullopt;
+    if (v == 0x01 || v == 0x1C)  // the game's menu key, and the key that sends the command line
+        return fail(why, "not Esc (0x01) or Enter (0x1c): the console would take them from the game"), std::nullopt;
     char b[8];
     std::snprintf(b, sizeof b, "0x%02x", static_cast<unsigned>(v));
     return std::string(b);

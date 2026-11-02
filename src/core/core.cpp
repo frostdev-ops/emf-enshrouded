@@ -971,7 +971,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_file_poll.settings = g_state->settings.get();
     g_file_poll.reply = command_reply_sink;
     g_file_poll.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
-    if (GetPrivateProfileIntW(L"console", L"window", 0, (dir + L"\\emf\\emf_core.ini").c_str()) != 0)
+    // [console] window, as the Settings tab reads it (on/true/1)
+    if (g_state->settings->get(emf::core::kEmfSettingsId, "console.window") == "1")
         emf::logf("console window: %s", g_console.open([](const std::string& line) {
             emf::core::submit_line(g_state->commands, emf::core::host_state(g_state->tracker, GetTickCount64()), line,
                                    command_reply_sink);
@@ -997,7 +998,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         emf::logf("dedicated server: no overlay; players' chat commands are set up below; this log also goes to the "
                   "server window");
     } else {
-        const auto cfg = emf::core::read_overlay_config(dir + L"\\emf\\emf_core.ini");
+        // the ini's [overlay] enabled, the rest as the Settings tab shows it (one parser: no change at the first frame)
+        const auto cfg = emf::core::overlay_config_with_store(
+            emf::core::read_overlay_config(dir + L"\\emf\\emf_core.ini"), *g_state->settings);
         if (cfg.enabled) {
             emf::core::OverlayDeps deps;
             deps.center = &g_state->commands;

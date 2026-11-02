@@ -157,7 +157,9 @@ std::vector<std::string> declare_emf_settings(SettingsStore& s, const std::wstri
 LookSettings look_from_store(const SettingsStore& s, std::vector<std::string>* problems) {
     return read_look_settings(
         [&s](const char* section, const char* key) {
-            return s.get(kEmfSettingsId, std::string(section) + "." + key);
+            // only what someone set: an unset key is the reader's own default (style=boxed has defaults of its own)
+            const std::string k = std::string(section) + "." + key;
+            return s.stored(kEmfSettingsId, k) ? s.get(kEmfSettingsId, k) : std::string();
         },
         problems);
 }
