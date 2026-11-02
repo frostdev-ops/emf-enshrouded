@@ -81,4 +81,5 @@ Found a way to misuse EMF (installer, EMF.exe, the dedicated server, the debug b
 ## Licence
 
 EMF is under the MIT licence (`LICENSE`). By contributing, you agree that your contribution is under the same licence.
-Third-party code and its licences are listed in `THIRD_PARTY_NOTICES.md`.
+Third-party code and its licences are listed in `THIRD_PARTY_NOTICES.md`. Changes to the third-party code in
+`third_party/` stay under that code's own licence (for EML in `third_party/eml/`, the GPL-3.0-or-later).

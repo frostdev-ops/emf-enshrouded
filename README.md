@@ -60,4 +60,7 @@ repository.
 
 ## Licence
 
-MIT ([LICENSE](LICENSE)). Third-party code and its licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+MIT ([LICENSE](LICENSE)), except emf_content.dll, the part that builds the content of EML mods: it is built from
+the Enshrouded Mod Loader and is under the GPL-3.0-or-later ([third_party/eml/LICENSE](third_party/eml/LICENSE)).
+It runs only while the game starts, before any mod loads, so mods made for EMF can use any licence. Third-party
+code and its licences: [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
