@@ -113,6 +113,26 @@ TEST_CASE("beastmaster: the roster names beasts uniquely, holds 8 per player, an
     CHECK(b.reply("beastmaster.list", 2, 0xBB).find("Grey") != std::string::npos);
 }
 
+TEST_CASE("beastmaster: a beast just tamed cannot fall for 5 s, then can again") {
+    // a swing it began as a wild beast can land on itself once it is an ally (seen in game: a tamed minotaur's
+    // three-punch combo, 2 of 3 tames, killed it just after the channel)
+    BeastRig b;
+    b.look(1, 0, 10.5, 0, 0);
+    b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);
+    auto& h = component<ecs::Health>(b.r.fake, 50);  // the game's Health storage: [0] health, [1] its minimum
+    REQUIRE(b.reply("beastmaster.tame").find("Taming") != std::string::npos);
+    b.seconds(1);
+    CHECK(h.dataStorage[1] == 0);   // the channel: as it was
+    b.seconds(3);                   // tamed, up to 50 % (50 of 100)
+    REQUIRE(b.reply("beastmaster.list").find("1. Wolf - wolf, out") != std::string::npos);
+    CHECK(h.dataStorage[1] == 50);  // its health cannot go under that
+    h.dataStorage[1] = 0;           // (the game may write it back)
+    b.seconds(2);
+    CHECK(h.dataStorage[1] == 50);  // still held
+    b.seconds(4);
+    CHECK(h.dataStorage[1] == 0);   // 5 s after: as before
+}
+
 TEST_CASE("beastmaster: species are known by animation graph and faction") {
     BeastRig b;
     CHECK(b.reply(std::string("beastmaster.species ") + kWolfGraph + " 6") == "wolf");   // WildBeast
