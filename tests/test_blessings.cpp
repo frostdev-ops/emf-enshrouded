@@ -175,16 +175,14 @@ TEST_CASE("blessings: the settings' words") {
     CHECK(corner_of("") == EMF_HUD_BOTTOM_LEFT);
 }
 
-TEST_CASE("blessings: the wheel shows each switch with on or off, then Fill me up, Level up, Loot chest and All off") {
+TEST_CASE("blessings: the wheel shows each switch with on or off, then Fill me up, Level up and All off") {
     Blessings b;
     b.health = Health::God;
     b.mana = true;
-    CHECK(wheel_items(b, 4) == std::vector<std::string>{"God mode (on)", "Endless health (off)", "Stamina (off)",
-                                                        "Mana (on)", "No fall damage (off)", "Fill me up",
-                                                        "Level up (+1)", "Loot chest (tier 4)", "All off"});
-    CHECK(wheel_items(b, 2)[7] == "Loot chest (tier 1-2)");
+    CHECK(wheel_items(b) == std::vector<std::string>{"God mode (on)", "Endless health (off)", "Stamina (off)",
+                                                     "Mana (on)", "No fall damage (off)", "Fill me up",
+                                                     "Level up (+1)", "All off"});  // 8: one page of the wheel
     CHECK(std::string(kWheelWords[kWheelLevelUp]) == "levelup");
-    CHECK(std::string(kWheelWords[kWheelChest]) == "chest");
     CHECK(std::string(kWheelWords[kWheelAllOff]) == "off");
     // a pick toggles; Endless health while god mode is on switches to it (the wheel picks the health mode)
     CHECK(wheel_toggle(b, 0).health == Health::Off);
@@ -195,7 +193,7 @@ TEST_CASE("blessings: the wheel shows each switch with on or off, then Fill me u
     CHECK(wheel_toggle(b, 4).nofall);
 }
 
-TEST_CASE("blessings 1.1: parse xp, level (to a level, up or down by some, undo) and chest") {
+TEST_CASE("blessings 1.1: parse xp and level (to a level, up or down by some, undo)") {
     Command c = parse_command({"xp", "500"});
     CHECK(c.kind == Command::Xp);
     CHECK(c.amount == 500);
@@ -220,26 +218,16 @@ TEST_CASE("blessings 1.1: parse xp, level (to a level, up or down by some, undo)
     c = parse_command({"level", "UNDO", "Ivar"});
     CHECK(c.kind == Command::Undo);
     CHECK(c.target == "Ivar");
-    c = parse_command({"chest"});
-    CHECK(c.kind == Command::Chest);
-    CHECK(c.amount == 0);  // the setting's tier
-    c = parse_command({"chest", "4", "#2"});
-    CHECK(c.kind == Command::Chest);
-    CHECK(c.amount == 4);
-    CHECK(c.target == "#2");
-    c = parse_command({"chest", "Ivar"});  // no tier: a name
-    CHECK(c.amount == 0);
-    CHECK(c.target == "Ivar");
+    CHECK(parse_command({"chest"}).kind == Command::Bad);  // loot chests are not in 1.1 (a spawned chest stays empty)
     for (const std::vector<std::string>& words : std::vector<std::vector<std::string>>{
              {"xp"}, {"xp", "0"}, {"xp", "-5"}, {"xp", "lots"}, {"xp", "100000001"}, {"level"}, {"level", "0"},
-             {"level", "x"}, {"level", "+0"}, {"level", "1000"}, {"chest", "7"}, {"chest", "0"}}) {
+             {"level", "x"}, {"level", "+0"}, {"level", "1000"}}) {
         CAPTURE(words.size() > 1 ? words[1] : words[0]);
         const Command b = parse_command(words);
         CHECK(b.kind == Command::Bad);
         CHECK(b.error.find("usage:") != std::string::npos);
     }
     CHECK(parse_command({"xp", "0"}).error.find("1 to 100000000") != std::string::npos);
-    CHECK(parse_command({"chest", "7"}).error.find("tier 1 to 6") != std::string::npos);
     CHECK(help_text().find("blessings level <n|+n|-n|undo> [#k|name]") != std::string::npos);
 }
 
@@ -275,22 +263,7 @@ TEST_CASE("blessings 1.1: xp_to_reach sums the rest of this level and every leve
     CHECK(xp_to_reach({3, 0, 0, 0}, 4, curve_1000) == -1);  // no requirement known
 }
 
-TEST_CASE("blessings 1.1: a chest tier names one of the game's loot chests (1 and 2 share one)") {
-    CHECK(std::string(chest_guid(1)) == "a424619c-dfc7-41f3-9778-cf7b1b738b66");
-    CHECK(std::string(chest_guid(2)) == chest_guid(1));
-    CHECK(std::string(chest_guid(3)) == "1b56e340-9bdd-417a-9dad-c3f34eccca4c");
-    CHECK(std::string(chest_guid(4)) == "104172f5-81a8-4ce4-a727-3e75d637c944");
-    CHECK(std::string(chest_guid(5)) == "ecf8c0e2-dd48-4d3f-b4ad-48447363a7ce");
-    CHECK(std::string(chest_guid(6)) == "46d969d5-97a6-4b7c-83a8-338b8870a3fc");
-    CHECK(chest_guid(0) == nullptr);
-    CHECK(chest_guid(7) == nullptr);
-    CHECK(chest_tier_name(2) == "1-2");
-    CHECK(chest_tier_name(5) == "5");
-    CHECK(chest_tier_of("4") == 4);
-    CHECK(chest_tier_of("nonsense") == 3);  // the setting's default
-}
-
-TEST_CASE("blessings 1.1: the chat lines for XP, levels, undo and chests") {
+TEST_CASE("blessings 1.1: the chat lines for XP, levels and undo") {
     CHECK(announce_line("Host", "500 XP for Ivar") == "[Blessings] Host: 500 XP for Ivar");
     CHECK(announce_text("Ember", "god", true, "Ivar") == announce_line("Ember", "god mode on for Ivar"));
 }
@@ -317,15 +290,9 @@ struct Fake {
     uint32_t session = 1;
     uint64_t now_ms = 1000;
     bool changed = false;  // a setting_set since the last step
-    // 1.1: the game's XP curve (1000 XP per level, cap 25) and level setter, and spawned chests
+    // 1.1: the game's XP curve (1000 XP per level, cap 25) and level setter
     bool levels_on = true;                       // the core found the game's xpRequired on this build
     std::vector<std::vector<uint32_t>> level_sets;  // player_level_set (player, level, xp)
-    struct Spawn {
-        std::string guid;
-        double x, y, z;
-    };
-    std::vector<Spawn> spawns;
-    bool spawn_ok = true;
 };
 Fake* f = nullptr;
 
@@ -342,10 +309,6 @@ bool f_level_set(EmfWorld*, uint32_t player, uint32_t level, uint32_t xp) {
     a[EMF_ATTR_XP_PENDING] = 0;
     a[EMF_ATTR_XP_REQUIRED] = need;
     return true;
-}
-uint32_t f_spawn(EmfWorld*, const uint8_t guid[16], double x, double y, double z) {
-    f->spawns.push_back({emf::guid_to_text(guid), x, y, z});
-    return f->spawn_ok ? 900u + static_cast<uint32_t>(f->spawns.size()) : 0u;
 }
 // The game's player_level over the next steps: the pending XP counted, the level-ups done.
 void game_levels(uint32_t e) {
@@ -540,11 +503,10 @@ struct Rig {
         api.player_xp_required = f_xp_required;
         api.player_level_cap = f_level_cap;
         api.player_level_set = f_level_set;
-        api.spawn = f_spawn;
         REQUIRE(emf::init(&api));
         fake.settings = {{"health", "off"},       {"stamina", "0"},        {"mana", "0"},
                          {"no_fall_damage", "0"}, {"wheel_key", "F11"},    {"hud", "1"},
-                         {"corner", "bottom_left"}, {"announce", "1"},     {"chest_tier", "3"}};
+                         {"corner", "bottom_left"}, {"announce", "1"}};
         g.clock = [] { return f->now_ms; };
         add_player(1, 0xAA);  // the host
     }
@@ -1049,17 +1011,17 @@ TEST_CASE("blessings wheel: a pick switches the host's blessing and the Mods tab
     r.fake.attrs[1][EMF_ATTR_MANA] = 1;
     r.g.wheel_pick(r.w, 5);  // Fill me up
     CHECK(r.fake.attrs[1][EMF_ATTR_MANA] == 30);
-    r.g.wheel_pick(r.w, 8);  // All off
+    r.g.wheel_pick(r.w, 7);  // All off
     CHECK(r.fake.settings["health"] == "off");
     CHECK(r.fake.settings["stamina"] == "0");
     const size_t sets = r.fake.sets.size();
     r.g.wheel_pick(r.w, -1);  // cancelled
     CHECK(r.fake.sets.size() == sets);
-    r.g.wheel_pick(r.w, 9);  // past the last entry
+    r.g.wheel_pick(r.w, 8);  // past the last entry
     CHECK(r.fake.sets.size() == sets);
 }
 
-// ---- 1.1: XP, levels and loot chests ----
+// ---- 1.1: XP and levels ----
 
 TEST_CASE("blessings 1.1 xp: given as pending XP (the game levels up itself); the chat is told; the reply says the level") {
     Rig r;
@@ -1146,7 +1108,7 @@ TEST_CASE("blessings 1.1 level undo: back to the level and XP from before the la
     CHECK(r.fake.level_sets[0] == std::vector<uint32_t>{1, 3, 500});
     CHECK(r.fake.attrs[1][EMF_ATTR_XP_PENDING] == 0);  // the raise's XP is gone, so it does not level up after all
     CHECK(r.fake.attrs[1][EMF_ATTR_LEVEL] == 3);
-    CHECK(reply == "Flame Blessings: Host is back to level 3 with 500 XP");
+    CHECK(reply.find("Flame Blessings: Host is back to level 3 with 500 XP") == 0);  // and the skill-tree note
     CHECK(r.console({"level", "undo"}).find("nothing to undo") != std::string::npos);
     r.console({"xp", "2600"});  // XP is undone too
     game_levels(1);
@@ -1172,9 +1134,7 @@ TEST_CASE("blessings 1.1: XP and levels from a chat player who is no admin are r
     r.fake.names = {{2, "Ivar"}};
     CHECK(r.chat(2, {"level", "20"}, false) == "Flame Blessings is for the host and admins");
     CHECK(r.chat(2, {"xp", "100"}, false) == "Flame Blessings is for the host and admins");
-    CHECK(r.chat(2, {"chest"}, false) == "Flame Blessings is for the host and admins");
     CHECK(r.fake.attrs[2][EMF_ATTR_XP_PENDING] == 0);
-    CHECK(r.fake.spawns.empty());
     r.chat(2, {"xp", "100"}, true);
     CHECK(r.fake.attrs[2][EMF_ATTR_XP_PENDING] == 100);  // their own, without a name
     CHECK(r.fake.broadcasts.back() == "[Blessings] Ivar: 100 XP for Ivar");
@@ -1190,48 +1150,35 @@ TEST_CASE("blessings 1.1: on a core or game build without levels, XP and levels 
     CHECK(r.fake.attrs[1][EMF_ATTR_XP_PENDING] == 0);
 }
 
-TEST_CASE("blessings 1.1 chest: the tier's loot chest 2 m beside the player; the setting's tier without one") {
+TEST_CASE("blessings 1.1 wheel: Level up raises the host by one level; the cap and an older game build are said") {
     Rig r;
     r.g.load();
     add_player(2, 0xBB);
-    r.fake.names = {{2, "Ivar"}};
-    const std::string reply = r.console({"chest", "5", "Ivar"});
-    REQUIRE(r.fake.spawns.size() == 1);
-    CHECK(r.fake.spawns[0].guid == "ecf8c0e2-dd48-4d3f-b4ad-48447363a7ce");
-    CHECK(r.fake.spawns[0].x == doctest::Approx(102.0));
-    CHECK(r.fake.spawns[0].y == doctest::Approx(50.0));
-    CHECK(r.fake.spawns[0].z == doctest::Approx(-20.0));
-    CHECK(reply == "Flame Blessings: a loot chest (tier 5) beside Ivar");
-    CHECK(r.fake.broadcasts.back() == "[Blessings] Host: a loot chest (tier 5) for Ivar");
-    r.setting("chest_tier", "2");
-    r.console({"chest"});
-    CHECK(r.fake.spawns.back().guid == "a424619c-dfc7-41f3-9778-cf7b1b738b66");
-    r.fake.spawn_ok = false;
-    CHECK(r.console({"chest"}) == "Flame Blessings: the game did not make the chest (the log says why)");
-    comp<gen::CurrentTransform>(1)->transform.position = {};  // keep the entity; lose the transform below
-    r.fake.comps.erase({gen::CurrentTransform::kHash, 1});
-    CHECK(r.console({"chest"}) == "Flame Blessings: EMF could not tell where Host is: no chest");
-}
-
-TEST_CASE("blessings 1.1 wheel: Level up raises the host by one; Loot chest puts the setting's tier beside the host") {
-    Rig r;
-    r.g.load();
-    add_player(2, 0xBB);
-    CHECK(r.g.wheel_items()[kWheelChest] == "Loot chest (tier 3)");
+    CHECK(r.g.wheel_items()[kWheelLevelUp] == "Level up (+1)");
     r.g.wheel_pick(r.w, kWheelLevelUp);
     CHECK(r.fake.attrs[1][EMF_ATTR_XP_PENDING] == 2500);
     CHECK(r.fake.broadcasts.back() == "[Blessings] Host: Host to level 4");
     game_levels(1);
     CHECK(r.fake.attrs[1][EMF_ATTR_LEVEL] == 4);
-    r.g.wheel_pick(r.w, kWheelChest);
-    REQUIRE(r.fake.spawns.size() == 1);
-    CHECK(r.fake.spawns[0].guid == "1b56e340-9bdd-417a-9dad-c3f34eccca4c");
     r.fake.attrs[1][EMF_ATTR_LEVEL] = 25;
     r.g.wheel_pick(r.w, kWheelLevelUp);
     CHECK(count_with(r.fake.notes, "the highest level") == 1);
     r.fake.levels_on = false;
     r.g.wheel_pick(r.w, kWheelLevelUp);
     CHECK(count_with(r.fake.notes, "not available") == 1);
+}
+
+TEST_CASE("blessings 1.1 level undo: an undo that lowers the level warns about the skill tree too") {
+    Rig r;
+    r.g.load();
+    r.console({"level", "6"});  // a raise
+    game_levels(1);
+    const std::string reply = r.console({"level", "undo"});  // back down to 3
+    CHECK(reply.find("Host is back to level 3 with 500 XP") != std::string::npos);
+    CHECK(reply.find("skill tree") != std::string::npos);
+    r.console({"level", "2"});  // a lower
+    const std::string up = r.console({"level", "undo"});  // back up to 3: no warning
+    CHECK(up == "Flame Blessings: Host is back to level 3 with 500 XP");
 }
 
 TEST_CASE("blessings: the command's help offers every first word to the console's suggestions") {
@@ -1245,7 +1192,7 @@ TEST_CASE("blessings: the command's help offers every first word to the console'
     const auto hint = emf::core::parse_hint(emf::core::split_help(m[1].str()).args);
     REQUIRE_FALSE(hint.empty());
     for (const char* word :
-         {"god", "refill", "stamina", "mana", "nofall", "heal", "off", "xp", "level", "chest", "list", "help"}) {
+         {"god", "refill", "stamina", "mana", "nofall", "heal", "off", "xp", "level", "list", "help"}) {
         CAPTURE(word);
         CHECK(std::find(hint[0].choices.begin(), hint[0].choices.end(), word) != hint[0].choices.end());
     }

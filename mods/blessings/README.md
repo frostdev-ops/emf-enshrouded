@@ -1,4 +1,4 @@
-# Flame Blessings: god mode, endless stamina and mana, XP, levels and loot chests (`blessings`)
+# Flame Blessings: god mode, endless stamina and mana, XP and levels (`blessings`)
 
 Cheats as plain switches, for your own world, or for the host and the admins of a server. Each one is a "blessing" and
 works per player, at once, with no restart:
@@ -10,16 +10,15 @@ works per player, at once, with no restart:
 - **Endless stamina** and **endless mana**: always full.
 - **No fall damage**: jump from as high as you like.
 - **XP and levels** (1.1): give XP, or take a player to a level, up or down, with an undo.
-- **Loot chests** (1.1): one of the game's own loot chests beside you, with random loot of the tier you pick.
-- **Free building**: planned (a later version).
+- **Free building** and **loot chests**: planned (a later version).
 
 Not covered yet by god mode: the shroud timer, drowning and the cold hurt you through other paths of the game; whether
 god mode also holds against them is **untested**.
 
 Each blessing shows on the host's screen ("Blessings: god mode, stamina", bottom left) and every player is told in
 chat when the host or an admin changes one. **The blessings are not saved:** they only fill your bars, hold your lowest
-health and reset the start of a fall, all in values the game never saves. **XP, levels and chests are:** XP and levels
-are saved with the character like XP from play, and a chest stays in the world until it is emptied.
+health and reset the start of a fall, all in values the game never saves. **XP and levels are** saved with the
+character, like XP from play.
 
 It runs where the world runs, so on the host or a dedicated server it works for every player, also those who joined
 without EMF.
@@ -35,8 +34,7 @@ In the Mods tab under Flame Blessings: **Health** (off, endless health, god mode
 and **No fall damage**. They apply at once and stay on until you switch them off (they are settings).
 
 Or hold **F11** for the blessings wheel: God mode, Endless health, Stamina, Mana, No fall damage (each shows on or
-off), Fill me up (health, stamina and mana full once), Level up (one level, the game's own level-up), Loot chest (the
-**Loot chest tier** setting's chest beside you) and, on the second page (turn it with the mouse wheel), All off.
+off), Fill me up (health, stamina and mana full once), Level up (one level, the game's own level-up) and All off.
 Release F11 over an entry, or tap F11 and click. The Mods tab follows what you pick. (Not F4: Alt+F4 closes the game,
 and the game uses Alt.)
 
@@ -57,12 +55,11 @@ Type it into the console (the key under Esc), `emf\commands.txt`, or the game's 
 | `blessings level 10 [#k\|name]` | to level 10. Up: the XP the levels on the way need, so the game levels up one level per step, with its level-up messages and skill points. Down: at once, at the start of that level |
 | `blessings level +2` / `level -1` | up two levels / down one |
 | `blessings level undo [#k\|name]` | back to the level and XP from before Flame Blessings' last XP or level change for that player (kept until the world closes; once) |
-| `blessings chest [1-6] [#k\|name]` | one of the game's own end-room loot chests, 2 m beside the player, with random loot of that tier (1 and 2 are the same chest; no tier: the **Loot chest tier** setting) |
 
 **Levels and skills:** skill points follow the level (the game works them out). Lowering a level keeps the skills
 already unlocked, but when the game loads the character next it checks the skill tree: if the skills cost more points
-than the new level gives, the game resets the whole tree by itself (the points come back to spend again). Use
-`blessings level undo` before leaving the world to avoid that.
+than the new level gives, the game resets the whole tree by itself (the points come back to spend again). The same
+goes for an undo that takes a level back down. To keep the tree, put the level back up before leaving the world.
 
 **Who may use it:** the console, `emf\commands.txt`, the host's own chat, and the accounts in `[chat] admins` of
 `emf\emf_core.ini` (see EMF's [server.md](../../docs/modding/server.md)). Other players cannot bless themselves. With
@@ -81,7 +78,6 @@ endless health and god mode, god mode wins; `off` clears both.
 | Endless mana (`mana`) | off | for the host |
 | No fall damage (`no_fall_damage`) | off | for the host |
 | Blessings wheel (`wheel_key`) | F11 | held to open the wheel (empty: no wheel) |
-| Loot chest tier (`chest_tier`) | 3 | the wheel's Loot chest, and `blessings chest` without a tier: 1 (tier 1-2), 3, 4, 5 or 6 |
 | Show your blessings on screen (`hud`) | on | the host's line |
 | Corner (`corner`) | bottom left | top right, bottom right or bottom left |
 | Tell every player in chat (`announce`) | on | "[Blessings] Ember: god mode on for Ivar" when the host (also in the Mods tab) or an admin changes a blessing (only when someone else is there to read it) |

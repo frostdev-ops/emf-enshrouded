@@ -1090,21 +1090,25 @@ uint32_t api_player_xp_required(EmfWorld* w, uint32_t level) {
     const void* bal = balancing_of(w);
     if (!bal || !g_state->xp_required || level < 1) return 0;
     const uint32_t cap = api_player_level_cap(w);
-    if (cap && level > cap) return 0;
+    if (!cap || level > cap) return 0;  // 1..cap only: with the cap unknown, no level is known to exist
     return seh_xp_required(g_state->xp_required, level, bal);
+}
+
+// Why player_level_set refuses `level` here ("" when it does not): the game's functions, the level within 1..cap.
+std::string level_set_refusal(EmfWorld* w, uint32_t level) {
+    if (!g_state->xp_required) return "the game's xpRequired is not found on this build";
+    const uint32_t cap = api_player_level_cap(w);
+    if (!cap) return "the game's level cap is not found on this build";
+    if (level < 1 || level > cap) return "the level must be 1.." + std::to_string(cap);
+    return {};
 }
 
 // player_level_set on the server world's own thread after its step: the game's admin "set level", with the
 // requirement player_level keeps (xpRequired(level), never 0) and XP below it.
 bool player_level_set_now(EmfWorld* w, uint32_t player, uint32_t level, uint32_t xp) {
     const std::string what = "player_level_set(" + std::to_string(player) + ", " + std::to_string(level) + ")";
-    if (!g_state->xp_required) {
-        refuse_limited(what + " refused: the game's xpRequired is not found on this build");
-        return false;
-    }
-    const uint32_t cap = api_player_level_cap(w);
-    if (level < 1 || (cap && level > cap)) {
-        refuse_limited(what + " refused: the level must be 1.." + (cap ? std::to_string(cap) : std::string("the cap")));
+    if (const std::string why = level_set_refusal(w, level); !why.empty()) {
+        refuse_limited(what + " refused: " + why);
         return false;
     }
     const uint32_t need = api_player_xp_required(w, level);
@@ -1139,6 +1143,8 @@ bool player_level_set_now(EmfWorld* w, uint32_t player, uint32_t level, uint32_t
         {&exp, kAttrXpPending, -static_cast<int64_t>(cur_pending)},
         {&lvl, kAttrLevel, static_cast<int64_t>(level) - cur_level},
     };
+    if (std::all_of(std::begin(writes), std::end(writes), [](const Write& wr) { return wr.delta == 0; }))
+        return true;  // already so: nothing written, nothing logged (a mod may hold a level each step)
     for (const auto& wr : writes) {
         if (wr.delta == 0) continue;
         int32_t applied = 0;
@@ -1157,6 +1163,11 @@ bool player_level_set_now(EmfWorld* w, uint32_t player, uint32_t level, uint32_t
 bool api_player_level_set(EmfWorld* w, uint32_t player, uint32_t level, uint32_t xp) {
     if (!attributes_ready(w, "player_level_set", true)) return false;
     if (dispatching_world() == w) return player_level_set_now(w, player, level, xp);
+    // checked at once too (the cap and the curve are pure reads): only the player's own state is checked later
+    if (const std::string why = level_set_refusal(w, level); !why.empty()) {
+        refuse_limited("player_level_set(" + std::to_string(player) + ", " + std::to_string(level) + ") refused: " + why);
+        return false;
+    }
     const int32_t x = static_cast<int32_t>((std::min)(xp, static_cast<uint32_t>(INT32_MAX)));
     defer_to_server({w, g_state->server_session.load(), player, level, 0, x},
                     [](EmfWorld* world, const DeferredCall& c) {

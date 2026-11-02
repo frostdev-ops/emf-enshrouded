@@ -24,8 +24,7 @@
 // 1.1: XP is given as pending XP (emf::give_xp: the game counts it and levels up itself). A raise to a level gives the XP
 // the levels on the way need, so the game's own level-ups (events, skill points) happen one per step; a lower level is
 // set at once (emf::set_level, no XP). The level and XP from before Flame Blessings' last XP or level change are kept
-// per account for `blessings level undo` until the world closes. A loot chest is one of the game's own chests, spawned
-// 2 m beside the player.
+// per account for `blessings level undo` until the world closes.
 #include <algorithm>
 #include <atomic>
 #include <climits>
@@ -64,7 +63,6 @@ struct Settings {
     uint32_t corner = EMF_HUD_BOTTOM_LEFT;
     bool announce = true;
     std::string wheel_key = "F11";
-    int chest_tier = kDefaultChestTier;  // 1.1: the wheel's chest, and blessings chest without a tier
 };
 inline Settings read_settings() {
     Settings s;
@@ -76,7 +74,6 @@ inline Settings read_settings() {
     s.hud = emf::setting_bool(kMod, "hud", true);
     s.corner = corner_of(emf::setting_text(kMod, "corner", "bottom_left"));
     s.announce = emf::setting_bool(kMod, "announce", true);
-    s.chest_tier = chest_tier_of(emf::setting_text(kMod, "chest_tier", "3"));
     return s;
 }
 
@@ -105,7 +102,7 @@ public:
     void set_switched_off(bool off) { off_ = off; }
     bool switched_off() const { return off_; }
     const Settings& settings() const { return s_; }
-    std::vector<std::string> wheel_items() const { return blessings::wheel_items(s_.host, s_.chest_tier); }
+    std::vector<std::string> wheel_items() const { return blessings::wheel_items(s_.host); }
 
     void tick(emf::World w) {
         if (!w.is_server()) {
@@ -219,8 +216,6 @@ public:
         }
         if (c.kind == Command::Xp || c.kind == Command::Level || c.kind == Command::Undo)
             return level_command(w, c, target, sender, who);
-        if (c.kind == Command::Chest)
-            return chest(w, c.amount ? static_cast<int>(c.amount) : s_.chest_tier, target, sender, who);
         const Blessings before = blessings_of(w, target);
         if (c.kind == Command::AllOff) {
             if (!store(w, target, Blessings{})) return kNotSaved;
@@ -236,19 +231,18 @@ public:
                " (now: " + (after.any() ? joined(short_names(after)) : std::string("none")) + ")";
     }
 
-    // The wheel's answer (on the server world): choice 0-8 of wheel_items(), -1 = cancelled. Acts on the host.
+    // The wheel's answer (on the server world): choice 0-7 of wheel_items(), -1 = cancelled. Acts on the host.
     void wheel_pick(emf::World w, int choice) {
         if (off_ || !w.is_server()) return;
         begin(w);
         if (!host_ || choice < 0 || choice > kWheelAllOff) return;
         const std::string who = name_of(w, host_);
-        if (choice == kWheelLevelUp || choice == kWheelChest) {  // the reply on the host's screen
+        if (choice == kWheelLevelUp) {  // the reply on the host's screen
             Command up;
             up.kind = Command::Level;
             up.relative = true;
             up.amount = 1;
-            const std::string text = choice == kWheelLevelUp ? level_command(w, up, host_, "Host", who)
-                                                             : chest(w, s_.chest_tier, host_, "Host", who);
+            const std::string text = level_command(w, up, host_, "Host", who);
             EMF_NOTIFY("%s", text.c_str());
             return;
         }
@@ -391,7 +385,7 @@ private:
         if (s_.announce && emf::players(w).size() > 1) emf::broadcast(text);
     }
 
-    // ---- 1.1: XP, levels and loot chests ----
+    // ---- 1.1: XP and levels ----
     // XP and levels work here: a core with the v22 level functions that found the game's XP curve and level cap, and the
     // game's attribute functions.
     static bool levels_on(emf::World w) {
@@ -424,8 +418,9 @@ private:
                 return "Flame Blessings: the game did not take the level (the log says why); nothing changed";
             undo_.erase(it);
             announce_act(w, sender, who + " back to level " + std::to_string(u.level));
-            return "Flame Blessings: " + who + " is back to level " + std::to_string(u.level) + " with " +
-                   std::to_string(u.xp) + " XP";
+            const std::string back = "Flame Blessings: " + who + " is back to level " + std::to_string(u.level) +
+                                     " with " + std::to_string(u.xp) + " XP";
+            return u.level < now.level ? back + ". " + skill_tree_note(who, u.level) : back;
         }
         const Undo before{now.level, now.xp};
         if (c.kind == Command::Xp) {
@@ -463,24 +458,13 @@ private:
             return "Flame Blessings: the game did not take the level (the log says why); nothing changed";
         undo_[account] = before;
         announce_act(w, sender, who + " to level " + level_want);
-        return "Flame Blessings: " + who + " is now level " + level_want + " (was " + level_now +
-               "). Skills already unlocked stay, but if they cost more skill points than level " + level_want +
-               " gives, the game resets " + who +
-               "'s skill tree at the next load (the points can be spent again). blessings level undo goes back";
+        return "Flame Blessings: " + who + " is now level " + level_want + " (was " + level_now + "). " +
+               skill_tree_note(who, static_cast<int32_t>(want)) + ". blessings level undo goes back";
     }
-    // blessings chest: the tier's loot chest 2 m beside player p. Returns the reply.
-    std::string chest(emf::World w, int tier, uint32_t p, const std::string& sender, const std::string& who) {
-        uint8_t guid[16];
-        const char* text = chest_guid(tier);
-        if (!text || !emf::parse_guid(text, guid)) return "Flame Blessings: there is no chest tier " + std::to_string(tier);
-        const auto at = emf::position(w, p);
-        if (!at) return "Flame Blessings: EMF could not tell where " + who + " is: no chest";
-        const EmfApi* a = emf::api();
-        if (!a->spawn || !a->spawn(w.raw(), guid, at->x + 2.0, at->y, at->z))
-            return "Flame Blessings: the game did not make the chest (the log says why)";
-        const std::string what = "a loot chest (tier " + chest_tier_name(tier) + ")";
-        announce_act(w, sender, what + " for " + who);
-        return "Flame Blessings: " + what + " beside " + who;
+    // What a lower level means for the skills (the game's own check at the next load).
+    static std::string skill_tree_note(const std::string& who, int32_t level) {
+        return "Skills already unlocked stay, but if they cost more skill points than level " + std::to_string(level) +
+               " gives, the game resets " + who + "'s skill tree at the next load (the points can be spent again)";
     }
     static Fill fill(emf::World w, uint32_t p, bool health, bool stamina, bool mana) {
         const auto hp = emf::attribute(w, p, EMF_ATTR_HEALTH);

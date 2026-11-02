@@ -1,7 +1,7 @@
 #pragma once
 // Flame Blessings' rules, without the game (tested in tests/test_blessings.cpp): the blessings one player has, the
 // /blessings command's words, the line on screen, the chat lines, the roster of players an admin blessed, and (1.1) the
-// game's level-up rule for XP and levels, and the loot chests.
+// game's level-up rule for XP and levels.
 //
 // Health is one of three: off, refill (hits land, health refills after the step) or god (no damage). God wins: refill
 // asked while god mode is on changes nothing, and taking refill away leaves god mode alone.
@@ -54,7 +54,7 @@ inline std::string label(const std::string& what) {
 constexpr const char* kUsage =
     "usage: blessings <god|refill|stamina|mana|nofall> <on|off> [#k|name], blessings heal [#k|name], "
     "blessings off [#k|name], blessings xp <n> [#k|name], blessings level <n|+n|-n|undo> [#k|name], "
-    "blessings chest [1-6] [#k|name], blessings list";
+    "blessings list";
 
 inline std::string help_text() {
     return "Flame Blessings (the host and admins):\n"
@@ -64,7 +64,6 @@ inline std::string help_text() {
            "blessings xp <n> [#k|name]: give XP (the game levels up as usual)\n"
            "blessings level <n|+n|-n|undo> [#k|name]: to level n, or up or down by n; undo: back to the level and XP "
            "from before Flame Blessings' last XP or level change\n"
-           "blessings chest [1-6] [#k|name]: one of the game's loot chests beside the player (no tier: the setting's)\n"
            "blessings list: who has blessings\n"
            "#k is the k-th player, lowest id first. EMF's other cheats: give, put, time, goto, stack";
 }
@@ -73,10 +72,10 @@ constexpr int64_t kMaxXp = 100000000;   // one blessings xp at most (an attribut
 constexpr int64_t kMaxLevelWord = 999;  // a level as typed (the game's cap is checked where the world runs)
 
 struct Command {
-    enum Kind { Help, List, Set, Heal, AllOff, Xp, Level, Undo, Chest, Bad } kind = Bad;
+    enum Kind { Help, List, Set, Heal, AllOff, Xp, Level, Undo, Bad } kind = Bad;
     std::string what;       // Set: god, refill, stamina, mana or nofall
     bool on = false;        // Set
-    int64_t amount = 0;     // Xp: the XP; Level: the level, or the change when relative; Chest: the tier (0: setting's)
+    int64_t amount = 0;     // Xp: the XP; Level: the level, or the change when relative
     bool relative = false;  // Level: "+n" or "-n"
     std::string target;     // "#k", a name, or "" (the sender)
     std::string error;      // Bad: what to tell the sender
@@ -156,19 +155,6 @@ inline Command parse_command(const std::vector<std::string>& words) {
             return bad("a level is 1 to " + std::to_string(kMaxLevelWord) + " (and no higher than the game's cap)");
         c.kind = Command::Level;
         c.target = rest_from(2);
-        return c;
-    }
-    if (first == "chest") {
-        c.kind = Command::Chest;
-        size_t from = 1;
-        int64_t tier = 0;
-        bool sign = false;
-        if (words.size() > 1 && parse_number(words[1], &tier, &sign) && !sign) {
-            if (tier < 1 || tier > 6) return bad("a chest is tier 1 to 6");
-            c.amount = tier;
-            from = 2;
-        }
-        c.target = rest_from(from);
         return c;
     }
     if (!is_blessing(first)) return bad("there is no blessing called " + words[0]);
@@ -254,38 +240,16 @@ inline bool has(const Blessings& b, const std::string& what) {
     return false;
 }
 
-// ---- 1.1: loot chests ----
-// The game's own end-room sarcophagus chests (random loot by tier); tiers 1 and 2 share one. Null outside 1..6.
-inline const char* chest_guid(int tier) {
-    switch (tier) {
-        case 1:
-        case 2: return "a424619c-dfc7-41f3-9778-cf7b1b738b66";  // LootChest_Random_Cairn_Sarcophagus_Wood_EndRoom_T1-T2
-        case 3: return "1b56e340-9bdd-417a-9dad-c3f34eccca4c";  // _T3
-        case 4: return "104172f5-81a8-4ce4-a727-3e75d637c944";  // _T4
-        case 5: return "ecf8c0e2-dd48-4d3f-b4ad-48447363a7ce";  // _T5
-        case 6: return "46d969d5-97a6-4b7c-83a8-338b8870a3fc";  // _T6
-        default: return nullptr;
-    }
-}
-inline std::string chest_tier_name(int tier) { return tier <= 2 ? "1-2" : std::to_string(tier); }
-constexpr int kDefaultChestTier = 3;
-// The "chest_tier" setting's value ("1".."6").
-inline int chest_tier_of(const std::string& value) {
-    return value.size() == 1 && value[0] >= '1' && value[0] <= '6' ? value[0] - '0' : kDefaultChestTier;
-}
-
-// The wheel: the five switches (with on or off on the second line), then Fill me up, Level up, Loot chest and All off
-// (the ninth entry is on the wheel's second page: the mouse wheel turns it).
-constexpr const char* kWheelWords[] = {"god", "refill", "stamina", "mana", "nofall", "heal", "levelup", "chest", "off"};
-constexpr int kWheelSwitches = 5, kWheelHeal = 5, kWheelLevelUp = 6, kWheelChest = 7, kWheelAllOff = 8;
-inline std::vector<std::string> wheel_items(const Blessings& b, int chest_tier = kDefaultChestTier) {
+// The wheel: the five switches (with on or off on the second line), then Fill me up, Level up and All off (8: one page).
+constexpr const char* kWheelWords[] = {"god", "refill", "stamina", "mana", "nofall", "heal", "levelup", "off"};
+constexpr int kWheelSwitches = 5, kWheelHeal = 5, kWheelLevelUp = 6, kWheelAllOff = 7;
+inline std::vector<std::string> wheel_items(const Blessings& b) {
     static const char* const names[] = {"God mode", "Endless health", "Stamina", "Mana", "No fall damage"};
     std::vector<std::string> out;
     for (int i = 0; i < kWheelSwitches; ++i)
         out.push_back(std::string(names[i]) + (has(b, kWheelWords[i]) ? " (on)" : " (off)"));
     out.push_back("Fill me up");
     out.push_back("Level up (+1)");
-    out.push_back("Loot chest (tier " + chest_tier_name(chest_tier) + ")");
     out.push_back("All off");
     return out;
 }

@@ -391,6 +391,52 @@ TEST_CASE("player_level_set: refused without the game's xpRequired, on a client 
     CHECK_FALSE(no_entity);
 }
 
+TEST_CASE("player_level_set: with the level cap unknown (MaxPlayerLevel not found) nothing is set and no XP is read") {
+    Fixture f;
+    f.state.level_cap = nullptr;  // xpRequired found, the cap not: "1..cap" cannot be checked
+    put_xp(1, 0, 10, 3000, 7);
+    const EmfApi* api = api_table();
+    CHECK(api->player_xp_required(f.w(), 5) == 0u);
+    bool high = true, normal = true;
+    f.in_callback([&](EmfWorld* w) {
+        high = api->player_level_set(w, 1, 500, 0);
+        normal = api->player_level_set(w, 1, 4, 0);
+    });
+    CHECK_FALSE(high);
+    CHECK_FALSE(normal);
+    CHECK(level_of(1) == 7);
+    CHECK(logged("level cap"));
+}
+
+TEST_CASE("player_level_set: outside a world callback a level outside 1..cap is refused at once, not queued") {
+    Fixture f;
+    put_xp(1, 0, 10, 3000, 7);
+    const EmfApi* api = api_table();
+    CHECK_FALSE(api->player_level_set(f.w(), 1, 0, 0));
+    CHECK_FALSE(api->player_level_set(f.w(), 1, 26, 0));
+    CHECK_FALSE(api->player_level_set(f.w(), 1, 3000000000u, 0));
+    CHECK(api->player_level_set(f.w(), 1, 4, 0));  // queued
+    CHECK(level_of(1) == 7);
+    f.step();
+    CHECK(level_of(1) == 4);
+    Fixture none(false);
+    put_xp(1, 0, 10, 3000, 7);
+    CHECK_FALSE(api->player_level_set(none.w(), 1, 4, 0));  // without xpRequired: refused at once
+}
+
+TEST_CASE("player_level_set: setting the level a player already has writes and logs nothing") {
+    Fixture f;
+    put_xp(1, 0, 150, 4000, 4);  // level 4, 150 of 4000 XP: what player_level_set(4, 150) makes
+    const EmfApi* api = api_table();
+    const int adds = g_add_calls;
+    g_lines.clear();
+    bool same = false;
+    f.in_callback([&](EmfWorld* w) { same = api->player_level_set(w, 1, 4, 150); });
+    CHECK(same);
+    CHECK(g_add_calls == adds);
+    CHECK_FALSE(logged("player_level_set"));
+}
+
 TEST_CASE("attribute_add: outside a world callback it waits for the server world's next step") {
     Fixture f;
     put_health(500, kHealthRoot, 700, 1498);
