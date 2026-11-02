@@ -148,6 +148,27 @@ Installed (EML first) and rebuilt like the bear pack (`tools/models/packs/beastm
 or without EML to load it, an aurochs or snake in your collection stays at home: calling it says that it needs the EMF creature
 packs and EML (or ShroudForge), and one that was out when you saved goes home with one note when you load.
 
+## More beasts: `species_extra.lua` (for modders)
+
+A file `species_extra.lua` in Beastmaster's folder (beside `species.lua`) adds beasts: a creature of your own, or one
+from a content pack you cannot share. It returns a list of entries like the ones in `species.lua`:
+
+```lua
+return {
+	{ id = "troll", name = "Troll", plural = "trolls",
+		template = "<GUID of the template a call spawns>",
+		graph = "<GUID of the animation graph the creature runs>",
+		factions = { [3] = true },  -- optional: only creatures of these factions (3: Vukah)
+		health_mul = 3,             -- optional: times the game's base health
+		bait = "Food_T2_Dog_Bait",  -- optional: the item it is fed; without one it is tamed only by beating it down
+		pack = "my content pack" }, -- optional: it also comes as a rare wild beast, like the packs' beasts
+}
+```
+
+Each entry needs `id`, `name`, `template` and `graph`. An entry without them, or with an id that is taken, is
+skipped. EMF's log lists the skipped entries and the beasts added, and says when the file does not load. Beastmaster
+does not ship this file.
+
 ## Good to know
 
 - It runs where the world runs: the host or a dedicated server. Without the packs, players who join need nothing:
