@@ -26,6 +26,11 @@ GRAPH_COPY = "44444444-4444-4444-8444-444444444444"
 GAME_WALK = "aaaaaaaa-0000-4000-8000-000000000001"
 GAME_BITE = "bbbbbbbb-0000-4000-8000-000000000002"
 MOCK_HIERARCHY = "55555555-5555-4555-8555-555555555555"  # the source model's skeleton in mock_eml.lua
+MOCK_ARSENAL = "66666666-6666-4666-8666-666666666666"   # the source template's arsenal in mock_eml.lua
+SEQ_COMBO = "77777777-7777-4777-8777-777777777771"      # its attacks' sequences there: a combo (hits 0.53, 0.92 s)
+SEQ_KICK = "77777777-7777-4777-8777-777777777772"       # and a kick
+ARSENAL_COPY = "88888888-8888-4888-8888-888888888888"
+SEQ_COPY = "99999999-9999-4999-8999-999999999999"
 
 
 def config(**over):
@@ -216,6 +221,25 @@ class PackTests(unittest.TestCase):
         offsets = make_mod.listing_entry(dict(self.BEAST, new_skeleton=cfg))["animation"]["offsets"]
         self.assertIn(nc.clip_guid(SKELETON, "look_left"), offsets)
 
+    def test_attacks_retime_copies_of_the_arsenals_sequences(self):
+        """attacks: the creature gets a copy of its source template's arsenal (arsenal_guid) whose attacks play
+        copies of their sequences retimed by "times" ([old s, new s] anchors from [0, 0]): its hits land when its own
+        swings do. The listing carries the times in nanoseconds, as the game stores them."""
+        attacks = {"arsenal_guid": ARSENAL_COPY,
+                   "sequences": {SEQ_COMBO.upper(): {"guid": SEQ_COPY, "times": [[0, 0], [0.53, 0.94], [2.4, 3.03]]}}}
+        entry = make_mod.listing_entry(dict(self.BEAST, attacks=attacks))
+        self.assertEqual(entry["attacks"], {"arsenal_guid": ARSENAL_COPY, "sequences": {
+            SEQ_COMBO: {"guid": SEQ_COPY, "times": [[0, 0], [530000000, 940000000], [2400000000, 3030000000]]}}})
+        for bad in ({"sequences": attacks["sequences"]},
+                    dict(attacks, sequences={}),
+                    dict(attacks, sequences={"Combo": attacks["sequences"][SEQ_COMBO.upper()]}),
+                    dict(attacks, sequences={SEQ_COMBO: {"times": [[0, 0], [1, 1]]}}),
+                    dict(attacks, sequences={SEQ_COMBO: {"guid": SEQ_COPY, "times": [[0.1, 0], [1, 1]]}}),
+                    dict(attacks, sequences={SEQ_COMBO: {"guid": SEQ_COPY, "times": [[0, 0], [1, 1], [0.5, 2]]}}),
+                    dict(attacks, sequences={SEQ_COMBO: {"guid": SEQ_COPY, "times": [[0, 0], [1, 1], [2, 0.5]]}})):
+            with self.assertRaises(SystemExit, msg=str(bad)):
+                make_mod.listing_entry(dict(self.BEAST, attacks=bad))
+
     def test_clip_names_with_an_underscore_first_are_ours(self):
         with self.assertRaises(SystemExit):
             make_mod.listing_entry(dict(self.BEAST, new_skeleton=config(
@@ -240,8 +264,8 @@ STUB_DATA = """return {debugName = "beast_wolf", boundingBox = {}, boundingSpher
 
 @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
 class ModTests(Fixture):
-    def run_mod(self, env=None, folder="src"):
-        beast = dict(PackTests.BEAST, new_skeleton=config())
+    def run_mod(self, env=None, folder="src", **extra):
+        beast = dict(PackTests.BEAST, new_skeleton=config(), **extra)
         built = nc.build(config(), self.glb)
         d = os.path.join(self.tmp.name, folder)
         os.makedirs(d)
@@ -283,6 +307,37 @@ class ModTests(Fixture):
         self.assertIn("graph %s item 1 %s duration 1" % (GRAPH_COPY, move), text)
         self.assertIn("template Beast_Wolf keen::ecs::AnimationGraphResourceComponent2 animationGraph %s" % GRAPH_COPY,
                       text)
+
+    def test_attacks_get_an_arsenal_and_sequences_of_their_own(self):
+        """The template copy points at a copy of its arsenal (the source's stays as it was, for the game's own
+        creatures); the copy's combo plays a copy of its sequence whose every event time and window end is moved by
+        the anchors (0 -> 0, 0.53 -> 0.94, 2.4 -> 3.03; after the last one by its shift), the kick the game's own."""
+        times = [[0, 0], [0.53, 0.94], [2.4, 3.03]]
+        _, text = self.run_mod(attacks={"arsenal_guid": ARSENAL_COPY,
+                                        "sequences": {SEQ_COMBO: {"guid": SEQ_COPY, "times": times}}})
+        self.assertIn("arsenal %s sequences %s %s" % (MOCK_ARSENAL, SEQ_COMBO, SEQ_KICK), text)
+        self.assertIn("arsenal %s sequences %s %s" % (ARSENAL_COPY, SEQ_COPY, SEQ_KICK), text)
+        self.assertIn("template Beast_Wolf keen::ecs::EnemyArsenalReference arsenal %s" % ARSENAL_COPY, text)
+        self.assertIn("template Enemy_Wildbeast_wolf_earlygame keen::ecs::EnemyArsenalReference arsenal %s"
+                      % MOCK_ARSENAL, text)
+        def moved(t):  # between the anchors 0.53 -> 0.94 and 2.4 -> 3.03, in whole nanoseconds, rounded
+            o0, n0, o1, n1 = 530000000, 940000000, 2400000000, 3030000000
+            return n0 + ((t - o0) * (n1 - n0) + (o1 - o0) // 2) // (o1 - o0)
+
+        # the mock combo: hits at 0.53 s for 0.10 s and 0.92 s for 0.08 s, a sound at 2.5 s (after the last anchor)
+        self.assertIn("sequence %s id %s length 3030000000 events SetAnimationEvent@0+0 SpawnImpact@940000000+%d "
+                      "SpawnImpact@%d+%d SfxNotifierEvent@3130000000+0" % (
+                          SEQ_COPY, SEQ_COPY, moved(630000000) - 940000000, moved(920000000),
+                          moved(1000000000) - moved(920000000)), text)
+        self.assertIn("sequence %s id %s length 2400000000" % (SEQ_COMBO, SEQ_COMBO), text)
+        self.assertIn("beast_wolf: arsenal %s (a copy of %s): 1 of 2 attacks retimed" % (ARSENAL_COPY, MOCK_ARSENAL),
+                      text)
+
+    def test_attacks_of_a_template_without_an_arsenal_are_logged(self):
+        _, text = self.run_mod({"MOCK_NO_ARSENAL": "1"}, attacks={
+            "arsenal_guid": ARSENAL_COPY, "sequences": {SEQ_COMBO: {"guid": SEQ_COPY, "times": [[0, 0], [1, 2]]}}})
+        self.assertIn("beast_wolf: not added: ", text)
+        self.assertIn("has no EnemyArsenalReference", text)
 
     def test_slots_point_at_our_joints(self):
         _, text = self.run_mod()
