@@ -30,6 +30,8 @@ enum class Sig : size_t {
     QueuePush,
     // world settings: the GameServer's ServerInfo, which carries the settings when the instance's flag asks (API v21)
     SendServerInfo,
+    // a player's XP curve and level cap (API v22: player_xp_required, player_level_cap, player_level_set)
+    XpRequired, MaxPlayerLevel,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

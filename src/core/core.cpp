@@ -712,6 +712,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         g_state->attr_find = reinterpret_cast<emf::core::AttrFindFn>(sig(emf::Sig::AttrFind));
         g_state->attr_add = reinterpret_cast<emf::core::AttrAddFn>(sig(emf::Sig::AttrAdd));
         g_state->alloc_pending_hit = reinterpret_cast<emf::core::AllocPendingHitFn>(sig(emf::Sig::AllocPendingHit));
+        // v22 levels: the game's XP curve and level cap (pure functions on the balancing table)
+        g_state->xp_required = reinterpret_cast<uint32_t (*)(uint32_t, const void*)>(sig(emf::Sig::XpRequired));
+        g_state->level_cap = reinterpret_cast<uint32_t (*)(const void*)>(sig(emf::Sig::MaxPlayerLevel));
         if (g_state->alloc_pending_hit && g_state->programs) {
             // damage switches on once impact_hit_conclusion's pre-hook is really installed (note_program_hook)
             g_state->reserved_programs = {"impact_hit_conclusion", "clear_hit_candidates"};

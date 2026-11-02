@@ -545,6 +545,65 @@ TEST_CASE("emf::attribute_add and emf::damage pass through to the core (false on
     emf::api_ref() = &api;
 }
 
+TEST_CASE("emf::give_xp gives XP as pending XP on a v22 core (the game levels up itself); false on an older core") {
+    reset_v18();
+    static std::vector<std::vector<int64_t>> adds;
+    adds.clear();
+    static EmfApi api = v18_api();
+    api.attribute_add = [](EmfWorld*, uint32_t e, uint32_t id, int32_t d) {
+        adds.push_back({e, static_cast<int64_t>(id), d});
+        return true;
+    };
+    api.version = 22;
+    REQUIRE(emf::init(&api));
+    emf::World w(kW);
+    CHECK(emf::has_v22());
+    CHECK(emf::give_xp(w, 1, 500));
+    REQUIRE(adds.size() == 1);
+    CHECK(adds[0] == std::vector<int64_t>{1, static_cast<int64_t>(EMF_ATTR_XP_PENDING), 500});
+    CHECK_FALSE(emf::give_xp(w, 1, 0));  // nothing to give; XP is never taken
+    CHECK_FALSE(emf::give_xp(w, 1, -5));
+    api.version = 21;
+    CHECK_FALSE(emf::has_v22());
+    CHECK_FALSE(emf::give_xp(w, 1, 500));
+    CHECK(adds.size() == 1);
+}
+
+TEST_CASE("emf::xp_required, level_cap and set_level pass through on a v22 core; nothing on a v21 core") {
+    reset_v18();
+    static std::vector<std::vector<uint32_t>> sets;
+    sets.clear();
+    static EmfApi api = v18_api();
+    api.player_xp_required = [](EmfWorld*, uint32_t level) { return level >= 1 && level <= 25 ? 1000u * level : 0u; };
+    api.player_level_cap = [](EmfWorld*) { return 25u; };
+    api.player_level_set = [](EmfWorld*, uint32_t player, uint32_t level, uint32_t xp) {
+        sets.push_back({player, level, xp});
+        return level >= 1 && level <= 25;
+    };
+    REQUIRE(emf::init(&api));
+    emf::World w(kW);
+    CHECK(emf::has_v22());
+    CHECK(emf::xp_required(w, 4) == 4000u);
+    CHECK(emf::xp_required(w, 26) == 0u);
+    CHECK(emf::level_cap(w) == 25u);
+    CHECK(emf::set_level(w, 7, 3));
+    CHECK(emf::set_level(w, 7, 5, 1200));
+    CHECK_FALSE(emf::set_level(w, 7, 30));
+    REQUIRE(sets.size() == 3);
+    CHECK(sets[0] == std::vector<uint32_t>{7, 3, 0});
+    CHECK(sets[1] == std::vector<uint32_t>{7, 5, 1200});
+    static EmfApi old = api;
+    old.size = static_cast<uint32_t>(offsetof(EmfApi, player_xp_required));  // a v21 core's table
+    old.version = 21;
+    emf::api_ref() = &old;
+    CHECK_FALSE(emf::has_v22());
+    CHECK(emf::xp_required(w, 4) == 0u);
+    CHECK(emf::level_cap(w) == 0u);
+    CHECK_FALSE(emf::set_level(w, 7, 3));
+    CHECK(sets.size() == 3);
+    emf::api_ref() = &api;
+}
+
 TEST_CASE("emf::kill on a v18 core: the current-health attribute goes to 0 through attribute_add; never a player") {
     reset_v18();
     static EmfApi api = v18_api();

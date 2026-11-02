@@ -70,7 +70,9 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
     });
     // Admins only: registered without EMF_COMMAND_PLAYERS.
     const bool added = emf::add_command(
-        "blessings", "<god|refill|stamina|mana|nofall|heal|off|list|help> [on|off] [#k|name]: Flame Blessings (admin)",
+        "blessings",
+        "<god|refill|stamina|mana|nofall|heal|off|xp|level|list|help> [on|off|n|undo] [#k|name]: Flame Blessings "
+        "(admin)",
         [](emf::World w, const std::vector<std::string>& a) {
             blessings::Sender from;
             EmfCommandSender s{};

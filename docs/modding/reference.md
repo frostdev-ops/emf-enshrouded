@@ -452,6 +452,22 @@ A key is the setting's name as `enshrouded_server.json` has it (`playerStaminaFa
 On a game build where EMF does not find the game's resync flag, the write still happens and the log says so; players'
 games may then keep the old values of the settings they read until they reconnect.
 
+## v22: XP and level
+
+A player's XP and level are attributes of the `Experience` and `Level` components, read and given through the v18
+attribute calls, and three functions read the game's XP curve and level cap and set a level (check that `api->size`
+covers `player_level_set`, or `emf::has_v22()`). Server world only.
+
+| C++ (`emf/emf.hpp`) | C | Rules |
+|---|---|---|
+| `emf::give_xp(w, player, amount)` | `attribute_add(world, player, EMF_ATTR_XP_PENDING, amount)` | gives `amount` (> 0) XP as every XP source in the game does: as **pending XP**. On its next steps the game's `player_level` program counts it into XP and levels the player up, once per step while XP reaches the requirement, with the rest carried over, a `LevelUpEvent` and the skill points of the new level (they follow the level; nothing else stores them). At the level cap pending XP is thrown away. **Saved with the character**, like XP from play. A negative or zero amount is refused. |
+| `emf::attribute(w, id, EMF_ATTR_XP)` | `attribute_get(..., EMF_ATTR_XP, &out)` | XP towards the next level; `EMF_ATTR_XP_REQUIRED` what the next level needs; `EMF_ATTR_LEVEL` the level; `EMF_ATTR_XP_PENDING` what was given and not yet counted. |
+| — | `attribute_add(..., EMF_ATTR_XP / _XP_REQUIRED / _LEVEL, ...)` | refused (logged): the game keeps the three consistent, and a change to one alone would break it (a requirement of 0 above level 1 even hands out a free level each step). To raise a level, give the XP it needs: `required - xp - pending` for the next level. |
+| `emf::xp_required(w, level)` | `player_xp_required(world, level)` | the XP `level` needs before the next one, from the game's own curve (`EMF_ATTR_XP_REQUIRED` at that level); 0 for a level outside 1..cap, on a client, or on a game build where EMF does not find the game's function. Any thread. |
+| `emf::level_cap(w)` | `player_level_cap(world)` | the highest level a player can reach (pending XP at the cap is thrown away); 0 when unknown. |
+| `emf::set_level(w, player, level, xp)` | `player_level_set(world, player, level, xp)` | sets the level (1..cap) with `xp` (default 0, cut to below the requirement) towards the next one, the way the game's own admin "set level" does: the level, the XP, the requirement for that level and no pending XP (it would level the player up again), all four together. Raises and lowers; no `LevelUpEvent` (to level up the game's way, `give_xp` the XP the levels need: `required - xp - pending` for the next level, plus `xp_required` of each level after it). The skill points follow the level. Skills already unlocked stay, but at the next load the game checks the tree: when it costs more points than the level gives, the game resets the whole tree itself (the points can be spent again). Saved with the character. Inside a world callback on the server world at once, elsewhere after its next step (true = queued; a later refusal is logged). False (logged) for a level outside 1..cap, a non-player, or without the game's function. |
+| `emf::has_v22()` | — | true when the core has them. |
+
 ## Lua
 
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
