@@ -27,7 +27,7 @@ restart the game (or the server).
 In the Mods tab under Flame Blessings: **Health** (off, endless health, god mode), **Endless stamina**, **Endless mana**
 and **No fall damage**. They apply at once and stay on until you switch them off (they are settings).
 
-Or hold **F4** for the blessings wheel: God mode, Endless health, Endless stamina, Endless mana, No fall damage (each
+Or hold **F4** for the blessings wheel: God mode, Endless health, Stamina, Mana, No fall damage (each
 shows on or off), Fill me up (health, stamina and mana full once) and All off. Release F4 over an entry, or tap F4
 and click. The Mods tab follows what you pick.
 

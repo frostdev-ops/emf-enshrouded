@@ -175,8 +175,8 @@ TEST_CASE("blessings: the wheel shows each switch with on or off, then Fill me u
     Blessings b;
     b.health = Health::God;
     b.mana = true;
-    CHECK(wheel_items(b) == std::vector<std::string>{"God mode (on)", "Endless health (off)", "Endless stamina (off)",
-                                                     "Endless mana (on)", "No fall damage (off)", "Fill me up",
+    CHECK(wheel_items(b) == std::vector<std::string>{"God mode (on)", "Endless health (off)", "Stamina (off)",
+                                                     "Mana (on)", "No fall damage (off)", "Fill me up",
                                                      "All off"});
     // a pick toggles; Endless health while god mode is on switches to it (the wheel picks the health mode)
     CHECK(wheel_toggle(b, 0).health == Health::Off);

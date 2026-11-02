@@ -184,7 +184,7 @@ inline bool has(const Blessings& b, const std::string& what) {
 constexpr const char* kWheelWords[] = {"god", "refill", "stamina", "mana", "nofall", "heal", "off"};
 constexpr int kWheelSwitches = 5, kWheelHeal = 5, kWheelAllOff = 6;
 inline std::vector<std::string> wheel_items(const Blessings& b) {
-    static const char* const names[] = {"God mode", "Endless health", "Endless stamina", "Endless mana", "No fall damage"};
+    static const char* const names[] = {"God mode", "Endless health", "Stamina", "Mana", "No fall damage"};
     std::vector<std::string> out;
     for (int i = 0; i < kWheelSwitches; ++i)
         out.push_back(std::string(names[i]) + (has(b, kWheelWords[i]) ? " (on)" : " (off)"));
