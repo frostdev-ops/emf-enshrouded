@@ -265,6 +265,28 @@ TEST_CASE("app content: a current copy with a good build is ready") {
     CHECK_FALSE(p.patched_in_place);
 }
 
+TEST_CASE("app content: the Ready line leaves the build time to the last build's line (local time there)") {
+    ContentGame g(L"cp_ready_time");
+    g.built();
+    const ContentPanel p = content_panel(g.dir, false);
+    REQUIRE(p.status == ContentStatus::Ready);
+    REQUIRE(p.last_build);
+    CHECK(has(p.detail, "1 mod"));
+    CHECK_FALSE(has(p.detail, p.last_build->built_at));  // the state's UTC text, e.g. "2026-11-02T15:35:04Z"
+}
+
+TEST_CASE("app content: Build again (the record gone, the copy kept) does not say EMF never built it") {
+    ContentGame g(L"cp_forgot");
+    g.built();
+    std::filesystem::remove(g.shadow() + L"\\emf_content_state.json");  // what the card's Build again does
+    const ContentPanel p = content_panel(g.dir, false);
+    check_loader(g, p);
+    CHECK(p.status == ContentStatus::BuildsNext);
+    CHECK(p.copy_there);
+    CHECK_FALSE(has(p.detail, "not built"));
+    CHECK(has(p.detail, "no record of its build"));
+}
+
 TEST_CASE("app content: a mod file changed since the build: it builds at the next start, naming the mod") {
     ContentGame g(L"cp_touched");
     g.built();

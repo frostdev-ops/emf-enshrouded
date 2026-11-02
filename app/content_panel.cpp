@@ -428,8 +428,9 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder, bool di
             p.status = ContentStatus::Ready;
             p.headline = "Ready";
             const size_t n = state->mods.size();
+            // the build's time is on the card's last-build line, in the player's local time
             p.detail = "The copy in emf\\content\\client is current: the next start uses it without building (" +
-                       std::to_string(n) + (n == 1 ? " mod" : " mods") + ", built " + state->built_at + ").";
+                       std::to_string(n) + (n == 1 ? " mod" : " mods") + ").";
         }
     } else if (same && state->code == kContentBuildRunning) {
         if (state->attempts < kContentMaxBuildAttempts)
@@ -439,8 +440,9 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder, bool di
     } else if (same) {
         failed(state->message.empty() ? "code " + std::to_string(state->code) : state->message);
     } else if (!state) {
-        builds(state_file ? "EMF's record of the last build (emf_content_state.json) could not be read"
-                          : "EMF has not built it yet");
+        builds(state_file     ? "EMF's record of the last build (emf_content_state.json) could not be read"
+               : p.copy_there ? "The copy in emf\\content\\client has no record of its build (Build again forgets it)"
+                              : "EMF has not built it yet");
     } else {
         std::vector<std::string> what = changes(game, *state, in, p.mods);
         std::string why;
