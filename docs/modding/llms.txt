@@ -212,7 +212,7 @@ field names (sdk/include/emf/generated/components.hpp); assigning a field writes
 - `emf.damage(world, attacker, target, amount)`: (1.5) `amount` of true damage as a real game hit on the next step: a `HitEvent` (damage numbers, always a light reaction, aggro toward the attacker), the killing blow, kill credit and XP for `attacker` when it is a player (0 = no attacker, no aggro). The target must take hits (creatures and players) and not be immune. Host only. true / false
 - `emf.xp_required(world, level)`: (1.11) the XP `level` needs before the next one (the game's own curve); nil outside 1..cap or when unknown. Host only
 - `emf.level_cap(world)`: (1.11) the highest level a player can reach; nil when unknown. Host only
-- `emf.set_level(world, player, level [, xp])`: (1.11) sets a player's level (1..cap) with `xp` (default 0) towards the next one: raises or lowers at once, without level-up events (to level up the game's way, give XP with `emf.attribute_add(w, player, "xp_pending", n)`). The skill points follow the level; skills already unlocked stay unlocked. Saved with the character. Host only. true (done or queued) / false
+- `emf.set_level(world, player, level [, xp])`: (1.11) sets a player's level (1..cap) with `xp` (default 0) towards the next one: raises or lowers at once, without level-up events (to level up the game's way, give XP with `emf.attribute_add(w, player, "xp_pending", n)`). The skill points follow the level; after lowering, a skill tree that costs more points than the level gives is reset by the game at the next load. Saved with the character. Host only. true (done or queued) / false
 - `emf.tell(world, id, text)`: (1.6) a chat line only player `id` sees, under their own name (in a game you host, a note for the host itself); `"\n"` splits lines, at most 10. Where players' chat is on: a dedicated server, or `[chat] players=1` in a game you host ([server.md](server.md)). A Lua mod may send 30 lines in 10 s. true when queued, false when refused (the log says why)
 - `emf.broadcast(text)`: (1.6) the same line for every connected player (a note for the host of a game you host). true / false
 - `emf.on_chat(fn)`: (1.6) `fn(world, account, entity, text)` for every chat line a player sends that is not an EMF command, on the server world after its next step; `account` as text ("0x" + 16 hex digits), `entity` 0 when unknown. Read-only: the line is shown as usual. false where players' chat is off
@@ -332,7 +332,7 @@ From the mods in the EMF zip (only while that mod runs):
 - craft.stop: stop your order [bulk_craft]
 - craft.list: what you can bulk-craft here [bulk_craft]
 - craft.teach <recipe hex> [player]: as if crafted by hand (host) [bulk_craft]
-- blessings <god|refill|stamina|mana|nofall|heal|off|list|help> [on|off] [#k|name]: Flame Blessings (admin) [blessings]
+- blessings <god|refill|stamina|mana|nofall|heal|off|xp|level|chest|list|help> [on|off|n|undo] [#k|name]: Flame Blessings (admin) [blessings]
 - jobs: the villagers' jobs [villager_jobs]
 - job <villager> <chest> <recipe id hex>: give a villager a job (host) [villager_jobs]
 - job.stop <villager>: end a villager's job [villager_jobs]

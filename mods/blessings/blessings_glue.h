@@ -20,11 +20,19 @@
 //     measures no fall.
 // The host's blessings are the Mods-tab settings (the local player of a world this game hosts; a dedicated server has
 // none). An admin's /blessings on another player is kept by account until that player leaves or the world closes.
+//
+// 1.1: XP is given as pending XP (emf::give_xp: the game counts it and levels up itself). A raise to a level gives the XP
+// the levels on the way need, so the game's own level-ups (events, skill points) happen one per step; a lower level is
+// set at once (emf::set_level, no XP). The level and XP from before Flame Blessings' last XP or level change are kept
+// per account for `blessings level undo` until the world closes. A loot chest is one of the game's own chests, spawned
+// 2 m beside the player.
 #include <algorithm>
 #include <atomic>
+#include <climits>
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -56,6 +64,7 @@ struct Settings {
     uint32_t corner = EMF_HUD_BOTTOM_LEFT;
     bool announce = true;
     std::string wheel_key = "F11";
+    int chest_tier = kDefaultChestTier;  // 1.1: the wheel's chest, and blessings chest without a tier
 };
 inline Settings read_settings() {
     Settings s;
@@ -67,6 +76,7 @@ inline Settings read_settings() {
     s.hud = emf::setting_bool(kMod, "hud", true);
     s.corner = corner_of(emf::setting_text(kMod, "corner", "bottom_left"));
     s.announce = emf::setting_bool(kMod, "announce", true);
+    s.chest_tier = chest_tier_of(emf::setting_text(kMod, "chest_tier", "3"));
     return s;
 }
 
@@ -95,7 +105,7 @@ public:
     void set_switched_off(bool off) { off_ = off; }
     bool switched_off() const { return off_; }
     const Settings& settings() const { return s_; }
-    std::vector<std::string> wheel_items() const { return blessings::wheel_items(s_.host); }
+    std::vector<std::string> wheel_items() const { return blessings::wheel_items(s_.host, s_.chest_tier); }
 
     void tick(emf::World w) {
         if (!w.is_server()) {
@@ -207,6 +217,10 @@ public:
             }
             return "Flame Blessings: EMF could not read " + who + "'s health: nothing filled up";
         }
+        if (c.kind == Command::Xp || c.kind == Command::Level || c.kind == Command::Undo)
+            return level_command(w, c, target, sender, who);
+        if (c.kind == Command::Chest)
+            return chest(w, c.amount ? static_cast<int>(c.amount) : s_.chest_tier, target, sender, who);
         const Blessings before = blessings_of(w, target);
         if (c.kind == Command::AllOff) {
             if (!store(w, target, Blessings{})) return kNotSaved;
@@ -222,12 +236,22 @@ public:
                " (now: " + (after.any() ? joined(short_names(after)) : std::string("none")) + ")";
     }
 
-    // The wheel's answer (on the server world): choice 0-6 of wheel_items(), -1 = cancelled. Acts on the host.
+    // The wheel's answer (on the server world): choice 0-8 of wheel_items(), -1 = cancelled. Acts on the host.
     void wheel_pick(emf::World w, int choice) {
         if (off_ || !w.is_server()) return;
         begin(w);
         if (!host_ || choice < 0 || choice > kWheelAllOff) return;
         const std::string who = name_of(w, host_);
+        if (choice == kWheelLevelUp || choice == kWheelChest) {  // the reply on the host's screen
+            Command up;
+            up.kind = Command::Level;
+            up.relative = true;
+            up.amount = 1;
+            const std::string text = choice == kWheelLevelUp ? level_command(w, up, host_, "Host", who)
+                                                             : chest(w, s_.chest_tier, host_, "Host", who);
+            EMF_NOTIFY("%s", text.c_str());
+            return;
+        }
         const Blessings before = s_.host;
         if (choice == kWheelHeal) {
             if (!attributes_on()) {
@@ -263,6 +287,9 @@ private:
     struct Held {             // a player's Health minimum from before god mode, by entity
         uint64_t account = 0;  // emf::player_account then (0: not known yet; filled in once known)
         int32_t before = 0;
+    };
+    struct Undo {  // a player's level and XP from before Flame Blessings' last XP or level change
+        int32_t level = 0, xp = 0;
     };
 
     static bool needs_attributes(const std::string& what) {
@@ -303,6 +330,7 @@ private:
         roster_.by_account.clear();
         held_.clear();
         looked_.clear();
+        undo_.clear();
         missing_health_ = missing_fall_ = 0;
         warned_health_ = warned_fall_ = false;
     }
@@ -353,9 +381,106 @@ private:
     }
     // A chat line for every player, when that is on and someone else is there to read it.
     void announce(emf::World w, const std::string& sender, const std::string& what, bool on, const std::string& who) {
-        const std::string text = announce_text(sender, what, on, who);
+        say_in_chat(w, announce_text(sender, what, on, who));
+    }
+    void announce_act(emf::World w, const std::string& sender, const std::string& act) {
+        say_in_chat(w, announce_line(sender, act));
+    }
+    void say_in_chat(emf::World w, const std::string& text) {
         EMF_LOG(kMod, "%s", text.c_str());
         if (s_.announce && emf::players(w).size() > 1) emf::broadcast(text);
+    }
+
+    // ---- 1.1: XP, levels and loot chests ----
+    // XP and levels work here: a core with the v22 level functions that found the game's XP curve and level cap, and the
+    // game's attribute functions.
+    static bool levels_on(emf::World w) {
+        return attributes_on() && emf::has_v22() && emf::level_cap(w) > 0 && emf::xp_required(w, 1) > 0;
+    }
+    static std::optional<LevelState> level_state(emf::World w, uint32_t p) {
+        const auto level = emf::attribute(w, p, EMF_ATTR_LEVEL), xp = emf::attribute(w, p, EMF_ATTR_XP),
+                   pending = emf::attribute(w, p, EMF_ATTR_XP_PENDING), need = emf::attribute(w, p, EMF_ATTR_XP_REQUIRED);
+        if (!level || !xp || !pending || !need) return std::nullopt;
+        return LevelState{*level, *xp, *pending, *need};
+    }
+    // blessings xp / level / level undo for player p. Returns the reply.
+    std::string level_command(emf::World w, const Command& c, uint32_t p, const std::string& sender,
+                              const std::string& who) {
+        if (!levels_on(w)) return std::string("Flame Blessings: XP and levels are ") + kUnavailable;
+        const auto read = level_state(w, p);
+        if (!read) return "Flame Blessings: EMF could not read " + who + "'s level";
+        const uint32_t cap = emf::level_cap(w);
+        const XpCurve need_of = [w](uint32_t level) { return emf::xp_required(w, level); };
+        const LevelState now = counted(*read, cap, need_of);  // as it is once the game counted the pending XP
+        const uint64_t account = account_of(w, p);
+        const std::string level_now = std::to_string(now.level);
+        if (c.kind == Command::Undo) {
+            const auto it = undo_.find(account);
+            if (it == undo_.end())
+                return "Flame Blessings: nothing to undo for " + who +
+                       " (Flame Blessings keeps its last XP or level change per player until the world closes)";
+            const Undo u = it->second;
+            if (!emf::set_level(w, p, static_cast<uint32_t>(u.level), static_cast<uint32_t>((std::max)(u.xp, 0))))
+                return "Flame Blessings: the game did not take the level (the log says why); nothing changed";
+            undo_.erase(it);
+            announce_act(w, sender, who + " back to level " + std::to_string(u.level));
+            return "Flame Blessings: " + who + " is back to level " + std::to_string(u.level) + " with " +
+                   std::to_string(u.xp) + " XP";
+        }
+        const Undo before{now.level, now.xp};
+        if (c.kind == Command::Xp) {
+            if (cap && static_cast<uint32_t>(now.level) >= cap)
+                return "Flame Blessings: " + who + " is at the highest level (" + std::to_string(cap) +
+                       "): XP would be thrown away";
+            const auto amount = static_cast<int32_t>(c.amount);
+            if (!emf::give_xp(w, p, amount)) return "Flame Blessings: the game did not take the XP (the log says why)";
+            undo_[account] = before;
+            announce_act(w, sender, std::to_string(amount) + " XP for " + who);
+            const LevelState after = counted({now.level, now.xp, amount, now.need}, cap, need_of);
+            if (after.level != now.level)
+                return "Flame Blessings: " + std::to_string(amount) + " XP for " + who + ": level " + level_now + " -> " +
+                       std::to_string(after.level);
+            return "Flame Blessings: " + std::to_string(amount) + " XP for " + who + " (level " + level_now + ", " +
+                   std::to_string(after.xp) + " of " + std::to_string(after.need) + " XP)";
+        }
+        const int64_t want = c.relative ? now.level + c.amount : c.amount;
+        if (want < 1) return "Flame Blessings: the lowest level is 1 (" + who + " is level " + level_now + ")";
+        if (cap && want > cap) return "Flame Blessings: the highest level is " + std::to_string(cap);
+        const std::string level_want = std::to_string(want);
+        if (want == now.level) return "Flame Blessings: " + who + " is already level " + level_now;
+        if (want > now.level) {  // the game's own level-ups: the XP the levels on the way need
+            const int64_t give = xp_to_reach(now, static_cast<uint32_t>(want), need_of);
+            if (give <= 0 || give > INT32_MAX)
+                return "Flame Blessings: EMF could not work out the XP for level " + level_want + "; nothing changed";
+            if (!emf::give_xp(w, p, static_cast<int32_t>(give)))
+                return "Flame Blessings: the game did not take the XP (the log says why); nothing changed";
+            undo_[account] = before;
+            announce_act(w, sender, who + " to level " + level_want);
+            return "Flame Blessings: " + who + " goes from level " + level_now + " to " + level_want + " (" +
+                   std::to_string(give) + " XP; the game levels up one level per step)";
+        }
+        if (!emf::set_level(w, p, static_cast<uint32_t>(want), 0))
+            return "Flame Blessings: the game did not take the level (the log says why); nothing changed";
+        undo_[account] = before;
+        announce_act(w, sender, who + " to level " + level_want);
+        return "Flame Blessings: " + who + " is now level " + level_want + " (was " + level_now +
+               "). Skills already unlocked stay, but if they cost more skill points than level " + level_want +
+               " gives, the game resets " + who +
+               "'s skill tree at the next load (the points can be spent again). blessings level undo goes back";
+    }
+    // blessings chest: the tier's loot chest 2 m beside player p. Returns the reply.
+    std::string chest(emf::World w, int tier, uint32_t p, const std::string& sender, const std::string& who) {
+        uint8_t guid[16];
+        const char* text = chest_guid(tier);
+        if (!text || !emf::parse_guid(text, guid)) return "Flame Blessings: there is no chest tier " + std::to_string(tier);
+        const auto at = emf::position(w, p);
+        if (!at) return "Flame Blessings: EMF could not tell where " + who + " is: no chest";
+        const EmfApi* a = emf::api();
+        if (!a->spawn || !a->spawn(w.raw(), guid, at->x + 2.0, at->y, at->z))
+            return "Flame Blessings: the game did not make the chest (the log says why)";
+        const std::string what = "a loot chest (tier " + chest_tier_name(tier) + ")";
+        announce_act(w, sender, what + " for " + who);
+        return "Flame Blessings: " + what + " beside " + who;
     }
     static Fill fill(emf::World w, uint32_t p, bool health, bool stamina, bool mana) {
         const auto hp = emf::attribute(w, p, EMF_ATTR_HEALTH);
@@ -480,6 +605,7 @@ private:
     Settings s_;
     Roster roster_;
     std::map<uint32_t, Held> held_;  // by entity
+    std::map<uint64_t, Undo> undo_;  // by account (1.1), for this world session
     std::set<uint32_t> looked_;      // players looked at in this session (the left-behind check)
     std::atomic<bool> dirty_{false}, off_{false};
     bool cleaned_ = false;  // switched off: minimums put back and the line removed

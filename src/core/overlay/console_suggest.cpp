@@ -64,7 +64,7 @@ bool stand_in(const std::string& w) {
     static const char* const kWords[] = {"count", "name",  "entity", "item",   "number", "n",      "k",     "m",
                                          "id",    "value", "text",   "player", "amount", "metres", "meters",
                                          "radius", "x",    "y",      "z",      "guid",   "words",  "word",  "hours",
-                                         "setting", "mod", "key",    "page",   "label",  "villager", "chest",
+                                         "setting", "mod", "key",    "page",   "label",  "villager",
                                          "species", "offset", "bytes", "part"};
     return std::any_of(std::begin(kWords), std::end(kWords), [&](const char* k) { return w == k; });
 }

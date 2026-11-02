@@ -342,8 +342,8 @@ TEST_CASE("manifest: Flame Blessings parses with every setting clean, installed 
         CHECK(s.live);  // every one applies at once
         keys.push_back(s.key);
     }
-    CHECK(keys == std::vector<std::string>{"health", "stamina", "mana", "no_fall_damage", "wheel_key", "hud", "corner",
-                                           "announce"});
+    CHECK(keys == std::vector<std::string>{"health", "stamina", "mana", "no_fall_damage", "wheel_key", "chest_tier",
+                                           "hud", "corner", "announce"});
 }
 
 TEST_CASE("manifest: ShroudForge's \"dependencies\" is read as \"depends\"; both at once is refused") {

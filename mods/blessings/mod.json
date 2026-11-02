@@ -1,8 +1,8 @@
 {
   "id": "blessings",
   "name": "Flame Blessings",
-  "version": "1.0.0",
-  "description": "God mode, endless health, stamina and mana, and no fall damage, per player and at once. The host switches their own here or on a wheel (F11); admins use /blessings for any player. Each blessing shows on screen and is told in chat; nothing is saved into the world or the character. Host or dedicated server; players who join need nothing. Installed switched off.",
+  "version": "1.1.0",
+  "description": "God mode, endless health, stamina and mana, and no fall damage, per player and at once; XP, levels (up or down, with an undo) and loot chests. The host switches their own here or on a wheel (F11); admins use /blessings for any player. Each blessing shows on screen and is told in chat; the blessings are not saved, XP and levels are (with the character). Host or dedicated server; players who join need nothing. Installed switched off.",
   "authors": ["EMF"],
   "enabled": false,
   "emf": 19,
@@ -19,13 +19,18 @@
     {"key": "no_fall_damage", "type": "bool", "default": false, "label": "No fall damage", "live": true,
      "group": "Your blessings (host)"},
     {"key": "wheel_key", "type": "keybind", "default": "F11", "label": "Blessings wheel (hold)", "live": true,
-     "group": "Your blessings (host)", "help": "The same switches, plus Fill me up and All off."},
+     "group": "Your blessings (host)", "help": "The same switches, plus Fill me up, Level up, Loot chest and All off."},
+    {"key": "chest_tier", "type": "select", "default": "3", "label": "Loot chest tier", "live": true,
+     "group": "Your blessings (host)",
+     "options": [{"value": "1", "label": "Tier 1-2"}, {"value": "3", "label": "Tier 3"}, {"value": "4", "label": "Tier 4"},
+                 {"value": "5", "label": "Tier 5"}, {"value": "6", "label": "Tier 6"}],
+     "help": "The wheel's Loot chest, and blessings chest without a tier: one of the game's own end-room chests, with random loot of that tier."},
     {"key": "hud", "type": "bool", "default": true, "label": "Show your blessings on screen", "live": true, "group": "Screen"},
     {"key": "corner", "type": "select", "default": "bottom_left", "label": "Corner", "live": true, "group": "Screen",
      "enabledWhen": {"setting": "hud", "equals": true},
      "options": [{"value": "top_right", "label": "Top right"}, {"value": "bottom_right", "label": "Bottom right"},
                  {"value": "bottom_left", "label": "Bottom left"}]},
     {"key": "announce", "type": "bool", "default": true, "label": "Tell every player in chat", "live": true, "group": "Screen",
-     "help": "A chat line for everyone when the host or an admin changes a blessing."}
+     "help": "A chat line for everyone when the host or an admin changes a blessing, or gives XP, a level or a loot chest."}
   ]
 }

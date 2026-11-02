@@ -719,8 +719,8 @@ typedef struct EmfApi {
     /* Sets a player's level to `level` (1..cap) with `xp` towards the next one (cut to below its requirement), the way the
      * game's own admin "set level" does: the level, the XP, the requirement for that level, and no pending XP (it would
      * level the player up again). Lowers as well as raises; no level-up event (to raise with the game's level-ups, give
-     * XP: EMF_ATTR_XP_PENDING). The skill points follow the level (the game computes them); skills already unlocked stay
-     * unlocked. Saved with the character. SERVER world; inside a world callback on that world at once, elsewhere after
+     * XP: EMF_ATTR_XP_PENDING). The skill points follow the level (the game computes them); after lowering, a skill tree
+     * that costs more points than the level gives is reset by the game at the next load. Saved with the character. SERVER world; inside a world callback on that world at once, elsewhere after
      * the server world's next step (true = queued, a later refusal is logged). False (logged) when refused. */
     bool (*player_level_set)(EmfWorld* world, uint32_t player, uint32_t level, uint32_t xp);
 } EmfApi;
