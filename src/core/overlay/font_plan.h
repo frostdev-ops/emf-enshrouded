@@ -42,10 +42,24 @@ inline constexpr wchar_t kSerifFile[] = L"Alegreya-Regular.ttf";
 inline constexpr wchar_t kSerifBoldFile[] = L"Alegreya-Bold.ttf";
 inline constexpr wchar_t kCascadiaFile[] = L"CascadiaMono-Regular.ttf";
 
-// The base pixel size: the swapchain's height / 54, kept within 13-40 px (EMF's size before the look settings).
+// The console's base pixel size: the swapchain's height / 54, kept within 13-40 px (EMF's size before the look
+// settings).
 float base_pixel_size(int swapchain_height);
-// `percent` of the base size in whole pixels, at least 8.
+// On-screen text's base (HUD lines, notes, wheels): the swapchain's height / 42, kept within 16-52 px. Bigger than the
+// console's: a book serif's small x-height reads smaller than a monospace font at the same pixel size, and the game's
+// own text is about this big.
+float hud_base_pixel_size(int swapchain_height);
+// `percent` of a base size in whole pixels, at least 8.
 float scaled_pixel_size(float base, int percent);
+
+// The pixel sizes of the faces: the console and the tabs ([overlay] text_size), on-screen text ([hud] size; at the
+// console's base with style=boxed, EMF's earlier look). The atlas is built again only when these change.
+struct FontSizes {
+    float text = 0.0f;
+    float hud = 0.0f;
+    bool operator==(const FontSizes&) const = default;
+};
+FontSizes font_sizes(const LookSettings& look, int swapchain_height);
 
 // The plan for a swapchain `swapchain_height` pixels high. `file_ok` says whether a font file can be used
 // (font_file_ok in the game; tests pass their own). Pure.
@@ -55,14 +69,18 @@ FontPlan plan_fonts(const LookSettings& look, int swapchain_height, const FontPa
 // The glyphs every face gets (pairs, 0-terminated): Basic Latin and Latin-1, Latin Extended-A, Cyrillic.
 extern const ImWchar kFontRanges[];
 
-// Whether the atlas is due for a (re)build at the base size `pixel_size`: true the first time and once for each new
-// size, never twice in a row for the same size.
+// When the atlas is (re)built: at once the first time; for new sizes once they held for kSettleMs (dragging a window's
+// edge changes the size every frame); never while the sizes are those built.
 class FontRebuild {
 public:
-    bool due(float pixel_size);
+    static constexpr uint64_t kSettleMs = 250;
+    bool due(const FontSizes& sizes, uint64_t now_ms);
+    void built(const FontSizes& sizes);  // the atlas now has these sizes
 
 private:
-    float built_ = 0.0f;
+    bool any_ = false;
+    FontSizes built_, pending_;
+    uint64_t since_ = 0;
 };
 
 // A font file EMF can hand to ImGui: at most `max_bytes`, a TrueType or OpenType font (or collection) whose tables lie

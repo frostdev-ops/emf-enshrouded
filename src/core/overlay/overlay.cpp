@@ -101,12 +101,16 @@ std::string utf8(const std::wstring& w) {
     return s;
 }
 
-// The fonts for a swapchain `height` pixels high (render thread, between frames): planned and built when the base size
-// is new (the first frame, a window resize), else nothing. True when the atlas was built again. A font that cannot be
-// used is said once in the log, however often the window changes size.
-bool setup_fonts(ImGuiIO& io, float height) {
+// Whether the fonts must be built again for a swapchain `height` pixels high (render thread, before a frame): the
+// first time, and when a new size changed the faces' pixel sizes and held for a moment.
+bool fonts_due(float height) {
+    return g_font_rebuild.due(font_sizes(g_look, static_cast<int>(height)), GetTickCount64());
+}
+
+// Plans and builds the fonts for a swapchain `height` pixels high (render thread, between frames). A font that cannot
+// be used is said once in the log, however often the window changes size; the first few builds are logged.
+void setup_fonts(ImGuiIO& io, float height) {
     const int h = static_cast<int>(height);
-    if (!g_font_rebuild.due(base_pixel_size(h))) return false;
     wchar_t windir[MAX_PATH] = {};
     GetWindowsDirectoryW(windir, MAX_PATH);
     const FontPaths paths{g_deps.emf_dir + L"\\fonts", std::wstring(windir) + L"\\Fonts\\consola.ttf"};
@@ -114,17 +118,19 @@ bool setup_fonts(ImGuiIO& io, float height) {
     std::vector<std::string> problems = plan.problems;
     g_fonts = build_font_atlas(*io.Fonts, plan, &problems);
     g_ui.tabs_font = g_fonts.tabs;  // the old fonts are gone
+    g_font_rebuild.built(font_sizes(g_look, h));
     for (const auto& p : problems)
         if (g_font_told.insert(p).second) log_line(("overlay: " + p).c_str());
-    static bool first = true;
-    if (first) {
-        first = false;
-        char msg[160];
-        std::snprintf(msg, sizeof(msg), "overlay: text at %.0f px (console) and %.0f px (on-screen), %d fonts",
-                      plan.face(FontRole::Console).pixel_size, plan.face(FontRole::Hud).pixel_size, io.Fonts->Fonts.Size);
+    constexpr int kLoggedBuilds = 10;
+    static int builds = 0;
+    if (++builds <= kLoggedBuilds) {
+        char msg[200];
+        std::snprintf(msg, sizeof(msg), "overlay: text at %.0f px (console) and %.0f px (on-screen), %d fonts, atlas %dx%d%s",
+                      plan.face(FontRole::Console).pixel_size, plan.face(FontRole::Hud).pixel_size, io.Fonts->Fonts.Size,
+                      io.Fonts->TexWidth, io.Fonts->TexHeight,
+                      builds == kLoggedBuilds ? " (later font builds are not logged)" : "");
         log_line(msg);
     }
-    return true;
 }
 
 void before_frame(ImGuiIO& io) {
@@ -445,6 +451,7 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
                g_wheel_gate.busy() ||
                (g_deps.hud && show_hud(g_router->open(), !g_deps.hud->empty(), world_live()));
     };
+    hooks.fonts_due = fonts_due;
     hooks.fonts = setup_fonts;
     hooks.style = [](ImGuiStyle& s) { apply_look_theme(s, g_look); };
     hooks.before_frame = before_frame;

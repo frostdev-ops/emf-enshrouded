@@ -31,6 +31,17 @@ float base_pixel_size(int swapchain_height) {
     return std::clamp(static_cast<float>(swapchain_height) / 54.0f, 13.0f, 40.0f);
 }
 
+float hud_base_pixel_size(int swapchain_height) {
+    return std::clamp(static_cast<float>(swapchain_height) / 42.0f, 16.0f, 52.0f);
+}
+
+FontSizes font_sizes(const LookSettings& look, int swapchain_height) {
+    const float hud_base =
+        look.style == HudStyle::Boxed ? base_pixel_size(swapchain_height) : hud_base_pixel_size(swapchain_height);
+    return FontSizes{scaled_pixel_size(base_pixel_size(swapchain_height), look.text_size),
+                     scaled_pixel_size(hud_base, look.hud_size)};
+}
+
 float scaled_pixel_size(float base, int percent) {
     return (std::max)(8.0f, std::round(base * static_cast<float>(percent) / 100.0f));
 }
@@ -73,8 +84,8 @@ FontPlan plan_fonts(const LookSettings& look, int swapchain_height, const FontPa
                     const std::function<bool(const std::wstring&)>& file_ok) {
     FontPlan plan;
     plan.pixel_size = base_pixel_size(swapchain_height);
-    const float text = scaled_pixel_size(plan.pixel_size, look.text_size);
-    const float hud = scaled_pixel_size(plan.pixel_size, look.hud_size);
+    const FontSizes sizes = font_sizes(look, swapchain_height);
+    const float text = sizes.text, hud = sizes.hud;
     std::map<std::wstring, bool> checked;  // each file is checked once per plan, and said once
     const auto pick = [&](const std::vector<std::wstring>& files) -> std::wstring {
         for (const auto& f : files) {
@@ -103,10 +114,23 @@ FontPlan plan_fonts(const LookSettings& look, int swapchain_height, const FontPa
     return plan;
 }
 
-bool FontRebuild::due(float pixel_size) {
-    if (pixel_size == built_) return false;
-    built_ = pixel_size;
-    return true;
+bool FontRebuild::due(const FontSizes& sizes, uint64_t now_ms) {
+    if (!any_) return true;  // the first atlas: at once
+    if (sizes == built_) {   // the sizes it has: nothing to do (and a size that came and went is forgotten)
+        pending_ = built_;
+        return false;
+    }
+    if (!(sizes == pending_)) {  // a new size: wait until it held for a moment
+        pending_ = sizes;
+        since_ = now_ms;
+        return false;
+    }
+    return now_ms - since_ >= kSettleMs;
+}
+
+void FontRebuild::built(const FontSizes& sizes) {
+    any_ = true;
+    built_ = pending_ = sizes;
 }
 
 bool read_font_file(const std::wstring& path, size_t max_bytes, std::vector<unsigned char>& out) {
@@ -225,6 +249,7 @@ bool guarded_atlas_build(ImFontAtlas& atlas) {
 
 OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vector<std::string>* problems) {
     atlas.Clear();
+    atlas.TexDesiredWidth = 4096;  // wide and low: big text on 4K stays within a few rows
     struct Made {
         std::wstring file;
         float size;

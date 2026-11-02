@@ -206,7 +206,34 @@ TEST_CASE("font plan: the base size is the screen height / 54 within 13-40 px; s
     CHECK(scaled_pixel_size(base_pixel_size(1080), 150) == 30.0f);
 }
 
-TEST_CASE("font plan: by default the console is Consolas, the tabs and the HUD the bundled serif, bold for titles") {
+TEST_CASE("font plan: on-screen text has its own, bigger base: the screen height / 42 within 16-52 px") {
+    CHECK(hud_base_pixel_size(1080) == doctest::Approx(25.714f).epsilon(0.001));
+    CHECK(hud_base_pixel_size(720) == doctest::Approx(17.143f).epsilon(0.001));
+    CHECK(hud_base_pixel_size(1481) == doctest::Approx(35.262f).epsilon(0.001));
+    CHECK(hud_base_pixel_size(2160) == doctest::Approx(51.429f).epsilon(0.001));
+    CHECK(hud_base_pixel_size(480) == doctest::Approx(16.0f));   // never under 16
+    CHECK(hud_base_pixel_size(4320) == doctest::Approx(52.0f));  // never over 52
+    // the sizes the faces get: on-screen 17 / 26 / 35 / 51 px, the console 13 / 20 / 27 / 40 px
+    const int heights[] = {720, 1080, 1481, 2160};
+    const float hud[] = {17.0f, 26.0f, 35.0f, 51.0f};
+    const float text[] = {13.0f, 20.0f, 27.0f, 40.0f};
+    for (int i = 0; i < 4; ++i) {
+        const FontSizes sz = font_sizes(LookSettings{}, heights[i]);
+        CHECK(sz.hud == hud[i]);
+        CHECK(sz.text == text[i]);
+    }
+    LookSettings big;
+    big.hud_size = 200;
+    big.text_size = 60;
+    CHECK(font_sizes(big, 2160).hud == 103.0f);
+    CHECK(font_sizes(big, 720).text == 8.0f);
+    // style=boxed is EMF's earlier look: its on-screen text is the console's size
+    LookSettings boxed;
+    boxed.style = HudStyle::Boxed;
+    CHECK(font_sizes(boxed, 1080).hud == 20.0f);
+}
+
+TEST_CASE("font plan: by default the console is Consolas, the tabs the bundled serif, on-screen text the serif and bold") {
     const FontPlan p = plan_fonts(LookSettings{}, 1080, kPaths, Files{});
     REQUIRE(p.faces.size() == 4);
     CHECK(p.pixel_size == doctest::Approx(20.0f));
@@ -214,8 +241,17 @@ TEST_CASE("font plan: by default the console is Consolas, the tabs and the HUD t
     CHECK(p.face(FontRole::Tabs).file == kSerif);
     CHECK(p.face(FontRole::Hud).file == kSerif);
     CHECK(p.face(FontRole::HudBold).file == kBold);
-    for (const auto& f : p.faces) CHECK(f.pixel_size == 20.0f);
+    CHECK(p.face(FontRole::Console).pixel_size == 20.0f);
+    CHECK(p.face(FontRole::Tabs).pixel_size == 20.0f);
+    CHECK(p.face(FontRole::Hud).pixel_size == 26.0f);
+    CHECK(p.face(FontRole::HudBold).pixel_size == 26.0f);
     CHECK(p.problems.empty());
+    // boxed with the console's font: one face for the console and the screen, as before
+    LookSettings boxed;
+    boxed.style = HudStyle::Boxed;
+    boxed.hud_font = {FontChoice::Kind::Console, {}};
+    const FontPlan b = plan_fonts(boxed, 1080, kPaths, Files{});
+    CHECK(b.face(FontRole::Hud) == FontFace{FontRole::Hud, kConsolas, 20.0f});
 }
 
 TEST_CASE("font plan: each font value picks its file; the sizes follow text_size and size") {
@@ -231,9 +267,9 @@ TEST_CASE("font plan: each font value picks its file; the sizes follow text_size
     CHECK(p.face(FontRole::Tabs).file == kConsolas);
     CHECK(p.face(FontRole::Tabs).pixel_size == 16.0f);
     CHECK(p.face(FontRole::Hud).file == kCascadia);  // "console": the console's font
-    CHECK(p.face(FontRole::Hud).pixel_size == 30.0f);
+    CHECK(p.face(FontRole::Hud).pixel_size == 39.0f);  // 150 % of the on-screen base (25.7 px)
     CHECK(p.face(FontRole::HudBold).file == kCascadia);  // no bold of it: the same face
-    CHECK(p.face(FontRole::HudBold).pixel_size == 30.0f);
+    CHECK(p.face(FontRole::HudBold).pixel_size == 39.0f);
 
     s.console_font = {FontChoice::Kind::Serif, {}};
     s.hud_font = {FontChoice::Kind::File, "My Book.ttf"};
@@ -333,19 +369,29 @@ TEST_CASE("font plan: a player's garbage font file is refused by the check and t
     CHECK(said);
 }
 
-TEST_CASE("font rebuild: due the first time and once per new size, never again for the same size") {
+TEST_CASE("font rebuild: at once the first time; a new size once it held for 250 ms; never for the same sizes") {
+    const LookSettings look;
+    const FontSizes a = font_sizes(look, 1080), b = font_sizes(look, 1481), c = font_sizes(look, 1440);
     FontRebuild r;
-    CHECK(r.due(20.0f));
-    CHECK_FALSE(r.due(20.0f));
-    CHECK_FALSE(r.due(20.0f));
-    CHECK(r.due(base_pixel_size(1440)));
-    CHECK_FALSE(r.due(base_pixel_size(1440)));
-    CHECK(r.due(20.0f));  // back to the first size: built again
-    CHECK_FALSE(r.due(20.0f));
-    // heights that clamp to the same size need no rebuild
-    FontRebuild clamped;
-    CHECK(clamped.due(base_pixel_size(600)));
-    CHECK_FALSE(clamped.due(base_pixel_size(500)));
+    CHECK(r.due(a, 0));  // the first atlas: at once
+    r.built(a);
+    CHECK_FALSE(r.due(a, 10));
+    CHECK(font_sizes(look, 1081) == a);  // a pixel more or less: the same faces, nothing to build
+    CHECK_FALSE(r.due(font_sizes(look, 1081), 20));
+    // a new size waits until the window stopped changing
+    CHECK_FALSE(r.due(b, 1000));
+    CHECK_FALSE(r.due(b, 1200));
+    CHECK(r.due(b, 1250));
+    CHECK(r.due(b, 1260));  // still due until it is built
+    r.built(b);
+    CHECK_FALSE(r.due(b, 1300));
+    // dragging the window's edge: each new size starts the wait again; back to the built size: nothing to do
+    CHECK_FALSE(r.due(c, 2000));
+    CHECK_FALSE(r.due(a, 2200));
+    CHECK_FALSE(r.due(a, 2400));
+    CHECK(r.due(a, 2450));
+    CHECK_FALSE(r.due(b, 2460));  // back to b (built) before a was built: nothing
+    CHECK_FALSE(r.due(b, 3000));
 }
 
 TEST_CASE("font atlas: the plan's faces with Latin, Latin Extended-A and Cyrillic; one font per file and size") {
@@ -368,6 +414,7 @@ TEST_CASE("font atlas: the plan's faces with Latin, Latin Extended-A and Cyrilli
     CHECK(f.hud_bold != f.hud);
     CHECK(atlas.Fonts.Size == 3);
     CHECK(atlas.IsBuilt());
+    CHECK(atlas.TexWidth == 4096);  // a wide atlas: big text on 4K stays a few rows high
     CHECK(f.hud->FontSize == 20.0f);
     for (ImWchar c : {ImWchar('A'), ImWchar(0xE9) /* e acute */, ImWchar(0x141) /* L stroke */,
                       ImWchar(0x416) /* Zhe */}) {
