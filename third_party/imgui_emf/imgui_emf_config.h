@@ -6,6 +6,8 @@ extern "C" {
 #endif
 void emf_imgui_assert_failed(const char* expr, const char* file, int line);
 const char* emf_imgui_last_assert(void);
+// Forgets the last failed assert (one that was caught and handled, such as a font atlas that could not be built).
+void emf_imgui_clear_last_assert(void);
 #ifdef __cplusplus
 }
 #endif

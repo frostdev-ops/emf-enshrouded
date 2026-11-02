@@ -240,10 +240,15 @@ bool font_file_ok(const std::wstring& path, size_t max_bytes) {
     return read_font_file(path, max_bytes, bytes) && font_bytes_ok(bytes.data(), bytes.size());
 }
 
-bool guarded_atlas_build(ImFontAtlas& atlas) {
+bool guarded_atlas_build(ImFontAtlas& atlas, std::string* why) {
     DWORD fault = 0;
     const bool ok = build_guarded(&atlas, &fault);
     after_fault(fault);
+    if (!ok) {  // handled here: ImGui's words go to the caller, and are not left as the overlay's last failure
+        const char* a = emf_imgui_last_assert();
+        if (why) *why = a && *a ? a : "a fault while building";
+        emf_imgui_clear_last_assert();
+    }
     return ok;
 }
 
@@ -289,12 +294,10 @@ OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vec
     }
     for (auto& r : roles)
         if (!r) r = roles[0];  // a plan with fewer faces: the console's font
-    if (atlas.Fonts.Size == 0 || !guarded_atlas_build(atlas)) {
-        if (atlas.Fonts.Size && problems) {
-            const char* why = emf_imgui_last_assert();
-            problems->push_back(std::string("the font atlas could not be built, ImGui's own font is used") +
-                                (why && *why ? std::string(" (") + why + ")" : std::string()));
-        }
+    std::string why;
+    if (atlas.Fonts.Size == 0 || !guarded_atlas_build(atlas, &why)) {
+        if (atlas.Fonts.Size && problems)
+            problems->push_back("the font atlas could not be built, ImGui's own font is used (" + why + ")");
         atlas.Clear();
         ImFont* d = atlas.AddFontDefault();
         guarded_atlas_build(atlas);

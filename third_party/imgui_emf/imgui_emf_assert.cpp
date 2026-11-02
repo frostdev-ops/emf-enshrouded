@@ -17,3 +17,5 @@ extern "C" void emf_imgui_assert_failed(const char* expr, const char* file, int 
 }
 
 extern "C" const char* emf_imgui_last_assert(void) { return g_last; }
+
+extern "C" void emf_imgui_clear_last_assert(void) { g_last[0] = '\0'; }

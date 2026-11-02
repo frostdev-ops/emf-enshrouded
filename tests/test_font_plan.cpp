@@ -181,7 +181,11 @@ TEST_CASE("font atlas: a build that fails inside ImGui is caught, never a crash"
     cfg.SizePixels = 13.0f;
     cfg.GlyphRanges = kBackwards;
     atlas.AddFontDefault(&cfg);
-    CHECK_FALSE(guarded_atlas_build(atlas));
+    std::string why;
+    CHECK_FALSE(guarded_atlas_build(atlas, &why));
+    CHECK(why.find("Invalid range") != std::string::npos);  // ImGui's own words, for the log
+    // handled here: it is not left behind as the reason the next, unrelated overlay failure would give
+    CHECK(emf_imgui_last_assert()[0] == '\0');
     atlas.Clear();
     atlas.AddFontDefault();
     CHECK(guarded_atlas_build(atlas));
