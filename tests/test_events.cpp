@@ -76,6 +76,21 @@ TEST_CASE("find_event resolves an event through the world's event map and type t
     CHECK_FALSE(find_event(ew.w.p(), "").has_value());
 }
 
+TEST_CASE("find_event reads the event registry where the start-up's world offsets put it (build 1283531: +0x1C00)") {
+    emf::test::ScopedWorldOffsets moved(emf::shifted_world_offsets(0xE179C0));
+    FakeWorld w(0x1C00);
+    emf::test::EventStore ev;
+    ev.attach(w);  // the map at +0xE176E0, the type table at +0xE176B8
+    ev.plant(w, "StartGuardingEvent", 3, 16);
+    auto e = find_event(w.p(), "StartGuardingEvent");
+    REQUIRE(e.has_value());
+    CHECK(e->index == 3);
+    CHECK(e->size == 16);
+    uint64_t at_map = 0;
+    std::memcpy(&at_map, w.p() + 0xE176E0 + off::kMapCapacity, 8);
+    CHECK(at_map == 8);  // the planted map really is at the moved place
+}
+
 TEST_CASE("find_event refuses an entry whose descriptor names a different type") {
     EventWorld ew;
     ew.plant("StopGuardingEvent", 2, 16, 0x12345678u);

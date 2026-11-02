@@ -27,7 +27,7 @@ static_assert(sizeof(SpawnComponent) == 0x18 && sizeof(WorldTransformData) == 56
 // spawn wrapper 0x1409788d0: (world, Guid* template, Slice<SpawnComponent>*) -> createEntity(id 0);
 // tail-returns createEntity's result in eax: the new EntityId, 0 on failure.
 using SpawnWrapperFn = uint32_t (*)(void* world, const void* template_guid, const SpawnSlice* components);
-// destroyEntity 0x140995ad0: (storage = world+0xE15DC0, EntityId, bool, ?)
+// destroyEntity 0x140995ad0: (storage = world + world_offsets().storage (0xE15DC0 on 1273043), EntityId, bool, ?)
 using DestroyEntityFn = uint64_t (*)(void* storage, uint32_t entity, char flag, uint64_t extra);
 
 int64_t meters_to_fixed(double meters);

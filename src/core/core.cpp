@@ -21,6 +21,7 @@
 #include "common/seh.h"
 #include "common/sha256.h"
 #include "common/signatures.h"
+#include "common/world_offsets.h"
 #include "common/world_view.h"
 #include "fault_report.h"
 #include "builtin_commands.h"
@@ -566,6 +567,17 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         emf::logf("a required signature is missing: EMF stays idle, no mods loaded");
         return;
     }
+    // Struct offsets read from instructions in the located functions (common/code_offsets.h), before any hook: the
+    // world's own offsets first (build 1283531 moved the world's block by +0x1C00; common/world_offsets.h).
+    const auto code_offsets = emf::resolve_code_offsets(GetModuleHandleW(nullptr), g_state->sigs, build);
+    for (const auto& note : emf::unconfirmed_offset_notes(code_offsets)) emf::logf("%s", note.c_str());
+    const emf::WorldOffsetPlan world_plan = emf::plan_world_offsets(code_offsets, known);
+    emf::logf("%s", world_plan.line.c_str());
+    if (!world_plan.ok) {
+        emf::logf("the world's offsets are not known on this game build: EMF stays idle, no mods loaded");
+        return;
+    }
+    emf::set_world_offsets(world_plan.offsets);
     // Before EMF's tick work on the server world: the game's own wait for that world's jobs (core/world_jobs.h).
     {
         const auto& wait = g_state->sigs[static_cast<size_t>(emf::Sig::WaitWorldJobs)];
@@ -645,7 +657,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         return;
     }
     const auto& reg = g_state->sigs[static_cast<size_t>(emf::Sig::RegisterProgram)];
-    if (emf::is_usable(reg, known) &&
+    if (emf::is_usable(reg, known) && world_plan.program_table &&
         emf::core::install_emf_hook("RegisterProgram", reg.addr, reinterpret_cast<void*>(&hk_register_program),
                                     reinterpret_cast<void**>(&o_register_program))) {
         emf::logf("registerProgram hooked (program hooks available)");
@@ -804,11 +816,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         emf::logf("%s %s", what, ok ? "hooked" : "NOT hooked (event unavailable)");
     };
     // on_save needs two save-state offsets read from save2WriteWorld's code (they moved in build 1273043).
-    const auto code_offsets = emf::resolve_code_offsets(GetModuleHandleW(nullptr), g_state->sigs, build);
     const auto& result_off = code_offsets[static_cast<size_t>(emf::CodeOffset::Save2Result)];
     const auto& slot_off = code_offsets[static_cast<size_t>(emf::CodeOffset::Save2WorldSlot)];
     const auto& load_flag = code_offsets[static_cast<size_t>(emf::CodeOffset::InstWorldSlotFlag)];
-    for (const auto& note : emf::unconfirmed_offset_notes(code_offsets)) emf::logf("%s", note.c_str());
     g_state->tick_offsets_ok = emf::world_tick_offsets_ok(code_offsets, known);
     if (!g_state->tick_offsets_ok)
         emf::logf("the world's tick fields are not confirmed in SimStep's code: world_tick, ecs_time_ns and the time "

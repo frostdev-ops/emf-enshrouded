@@ -886,7 +886,13 @@ TEST_CASE("teleport: QueuePush is a signature with a checked RVA on both exes of
     CHECK(teleport_layouts_checked(1));
     CHECK(teleport_layouts_checked(2));
     CHECK_FALSE(teleport_layouts_checked(-1));
-    CHECK_FALSE(teleport_layouts_checked(3));
+    // 1283531 (both exes): queuePush's body is the old one byte for byte (the server's compared), Teleport and
+    // Actor.currentState kept their layouts, and the job's command buffer (+0x08) is below the part that grew
+    CHECK(d->rva[3] == 0x95e350u);
+    CHECK(d->rva[4] == 0x5f9f60u);
+    CHECK(teleport_layouts_checked(3));
+    CHECK(teleport_layouts_checked(4));
+    CHECK_FALSE(teleport_layouts_checked(5));
 }
 
 

@@ -91,6 +91,16 @@ TEST_CASE("destroy_entity calls destroyEntity with the world's storage") {
     CHECK_FALSE(destroy_entity(fake_destroy, w.p(), 0));
 }
 
+TEST_CASE("destroy_entity passes the storage where the start-up's world offsets put it (build 1283531: +0x1C00)") {
+    emf::test::ScopedWorldOffsets moved(emf::shifted_world_offsets(0xE179C0));
+    FakeWorld w(0x1C00);
+    w.put<uint8_t>(emf::off::kKind, 2);  // the base's kind byte says client: not read any more
+    REQUIRE(destroy_entity(fake_destroy, w.p(), 77));
+    CHECK(g_storage == w.p() + 0xE179C0);
+    w.put<uint8_t>(0xE179C8, 2);  // the moved kind byte says client
+    CHECK_FALSE(destroy_entity(fake_destroy, w.p(), 77));
+}
+
 // ---- spawn with extra components, give a pickup ----
 #include <string>
 #include <vector>

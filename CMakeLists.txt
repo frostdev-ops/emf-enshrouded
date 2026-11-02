@@ -37,6 +37,7 @@ add_library(emf_common STATIC
   src/common/seh.cpp
   src/common/signatures.cpp
   src/common/code_offsets.cpp
+  src/common/world_offsets.cpp
   src/common/world_view.cpp
   src/common/log.cpp
   src/common/hooks.cpp
@@ -382,6 +383,7 @@ add_executable(emf_tests
   tests/test_pe_image.cpp
   tests/test_signatures.cpp
   tests/test_code_offsets.cpp
+  tests/test_world_offsets.cpp
   tests/test_world_view.cpp
   tests/test_runtime.cpp
   tests/test_game_imports.cpp
