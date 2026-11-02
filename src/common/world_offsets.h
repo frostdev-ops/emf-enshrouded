@@ -45,7 +45,8 @@ void set_world_offsets(const WorldOffsets& offsets);
 // The start-up decision. ok: the world's offsets are known (a known build: its records, normally confirmed by the scan;
 // an unknown build: one match of GetComponent's storage offset, SimStep's tick fields where EMF expects them relative to
 // the storage, and a storage high enough for the block before it); without it EMF stays idle. program_table: the
-// program count and stride are known (else both are 0 in `offsets` and the program features stay off).
+// program count and stride are known (an unknown build: one match each, entries of at least 0x20 bytes and the count
+// after the table's end); else both are 0 in `offsets` and the program features stay off.
 struct WorldOffsetPlan {
     bool ok = false;
     bool program_table = false;
