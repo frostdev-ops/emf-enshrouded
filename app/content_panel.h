@@ -37,7 +37,7 @@ const char* take_over_name(TakeOver t);  // "none", "offer", "given"
 struct ContentPanel {
     ContentStatus status = ContentStatus::NotInstalled;
     std::string headline, detail;
-    std::string why;  // the loader's own line at the next start, after "EML content: " (decide_content)
+    std::string why;  // decide_content's reason for the next start (emf_loader.log has it after "EML content: ")
     std::string mode = "auto";  // [content] mode: auto, on or off
     struct Dll {
         bool present = false;

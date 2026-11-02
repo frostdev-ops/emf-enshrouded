@@ -77,7 +77,7 @@ function renderContent() {
     el('span', { class: 'badge ' + badge[0] }, badge[1]),
     el('h3', { id: 'content-headline' }, p.headline)));
   if (p.detail) kids.push(el('p', { id: 'content-detail' }, p.detail));
-  if (p.why) kids.push(el('p', { class: 'muted small', id: 'content-why' }, 'At the next start emf_loader.log says: EML content: ' + p.why));
+  if (p.why) kids.push(el('p', { class: 'muted small', id: 'content-why' }, 'The loader’s decision for the next start: ' + p.why));
   if (running) kids.push(el('p', { class: 'sheet-warn', role: 'note', id: 'content-running' }, 'Close the game to change these: ' + running));
 
   // When to apply

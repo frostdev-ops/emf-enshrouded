@@ -780,7 +780,8 @@ times, the mods' `mod.json`, `emf\content\client\emf_content_state.json` and `sh
   game or `emf_content.dll` changed, the copy gone, a build the game stopped in), **Failed** (the same files failed
   before, with the message; EMF tries again when a mod, the game or `emf_content.dll` changes), **Off** (the loader's
   reason: `[content] mode=off`, no EML mod EMF can build, no base), **Applied by** EML or ShroudForge, **Not installed**
-  (no `emf\emf_content.dll`). Under it, the line the loader will write to `emf_loader.log`. A dedicated server's folder
+  (no `emf\emf_content.dll`). Under it, the loader's decision for the next start (`decide_content`'s reason, the same
+  words `emf_loader.log` will have after "EML content: "). A dedicated server's folder
   gets one line: "The dedicated server gets EML content in a later version of EMF."
 - **The mods**: the ones EMF builds (and whether the last build had them at this version) and the ones it leaves out,
   each with the loader's reason (exports only, needs EML's runtime loader, a `.zip`, a name starting with a dot, an id
