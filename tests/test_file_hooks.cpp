@@ -646,12 +646,13 @@ std::string lines_text(const std::vector<std::string>& lines) {
 // fh::start() on emf_tests.exe's own imports, then the hooks out again: the lines for emf_loader.log, whether the
 // redirect stayed on, how many slots were hooked.
 std::vector<std::string> start_and_stop(const std::wstring& game, const emf::loader::ContentSwitches& sw, bool* redirect,
-                                        size_t* hooked) {
+                                        size_t* hooked,
+                                        const emf::loader::ContentTarget& target = emf::loader::kClientTarget) {
     const HMODULE self = GetModuleHandleW(nullptr);
     fh::reset_for_test();
     // never the real shadow check here: it calls GetFileAttributesW through this exe's own table, which start() hooks
     fh::state().is_file = fake_is_file;
-    const auto lines = fh::start(self, game, sw);
+    const auto lines = fh::start(self, game, sw, target);
     *redirect = fh::state().sw.redirect_test;
     *hooked = fh::state().patched.size();
     fh::uninstall_for_test(self);
@@ -714,6 +715,56 @@ TEST_CASE("file hooks: with redirect_test=1 start() first checks the shadow copy
     lines = start_and_stop(game, sw, &redirect, &hooked);
     CHECK_FALSE(redirect);
     CHECK(lines_text(lines).find("(enshrouded_NNN.dat files: 2 then, 3 now)") != std::string::npos);
+}
+
+TEST_CASE("file hooks: on the dedicated server the redirect sends enshrouded_server files to emf\\content\\server") {
+    setup(false, true);
+    fh::state().target = emf::loader::kServerTarget;
+    const std::wstring server_shadow = kGame + L"\\emf\\content\\server\\";
+    g_shadow_files = {server_shadow + L"enshrouded_server_003.dat", kShadow + L"enshrouded_003.dat"};
+    fh::create_file_w((kGame + L"\\enshrouded_server_003.dat").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                      OPEN_EXISTING, 0, nullptr);
+    CHECK(g_opened == server_shadow + L"enshrouded_server_003.dat");
+    // a client name in a server folder is not one of its content files: the call goes through unchanged
+    fh::create_file_w((kGame + L"\\enshrouded_003.dat").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0,
+                      nullptr);
+    CHECK(g_opened == kGame + L"\\enshrouded_003.dat");
+    fh::reset_for_test();
+    CHECK_FALSE(fh::state().target.server);  // a new state is the client's again
+}
+
+TEST_CASE("file hooks: on the server start() checks emf\\content\\server\\shadow.txt against the enshrouded_server files") {
+    const std::wstring game = test_scratch::temp_path(L"emf_file_hooks_server");
+    test_scratch::remove_at_exit(game);
+    put_file(game + L"\\enshrouded_server.exe", "exe\r\n");
+    put_file(game + L"\\enshrouded_server.kfc", "kfc\r\n");
+    put_file(game + L"\\enshrouded_server.kfc_resources", "resources\r\n");
+    put_file(game + L"\\enshrouded_server_000.dat", "dat 0\r\n");
+    std::filesystem::create_directories(game + L"\\emf\\content\\server");
+    emf::loader::ContentSwitches sw;
+    sw.redirect_test = true;
+    bool redirect = false;
+    size_t hooked = 0;
+    const std::string record = "# made by the test\r\n" + source_line(game, "enshrouded_server.exe") +
+                               source_line(game, "enshrouded_server.kfc") +
+                               source_line(game, "enshrouded_server.kfc_resources") + "dat_count 1\r\n";
+
+    // the client's folder and names are not the server's: no record there
+    auto lines = start_and_stop(game, sw, &redirect, &hooked, emf::loader::kServerTarget);
+    CHECK_FALSE(redirect);
+    CHECK(lines_text(lines).find("there is no emf\\content\\server\\shadow.txt") != std::string::npos);
+
+    put_file(game + L"\\emf\\content\\server\\shadow.txt", record);
+    lines = start_and_stop(game, sw, &redirect, &hooked, emf::loader::kServerTarget);
+    CHECK(redirect);
+    CHECK(lines_text(lines).find("content redirect off") == std::string::npos);
+    CHECK(file_text(game + L"\\emf\\file_opens.log").find("emf\\content\\server") != std::string::npos);
+
+    // a new server container since the record
+    put_file(game + L"\\enshrouded_server_001.dat", "dat 1\r\n");
+    lines = start_and_stop(game, sw, &redirect, &hooked, emf::loader::kServerTarget);
+    CHECK_FALSE(redirect);
+    CHECK(lines_text(lines).find("(enshrouded_server_NNN.dat files: 1 then, 2 now)") != std::string::npos);
 }
 
 TEST_CASE("file hooks: end to end: EMF's loader hooks a stand-in game's imports in DllMain and redirects to the shadow") {

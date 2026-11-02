@@ -68,6 +68,7 @@ inline bool default_is_file(const wchar_t* path) {
 struct State {
     Real real;
     std::wstring game_dir;  // normal (normal_game_dir), worked out once in start(): decide() compares every path with it
+    ContentTarget target = kClientTarget;  // the client's or the dedicated server's names and shadow folder
     ContentSwitches sw;
     unsigned long long start_ms = 0;  // when the hooks went in
     unsigned max_lines = kMaxLines;
@@ -146,7 +147,7 @@ inline Decision decide(const wchar_t* path, bool open, DWORD access, DWORD dispo
     Decision d;
     if (!g.sw.redirect_test || !path || g.game_dir.empty()) return d;
     const std::wstring cwd = path_needs_cwd(path) ? g.cwd() : std::wstring();
-    std::wstring s = shadow_path_in(path, g.game_dir, cwd);  // game_dir: made normal once, in start()
+    std::wstring s = shadow_path_in(path, g.game_dir, cwd, g.target);  // game_dir: made normal once, in start()
     if (s.empty()) return d;
     d.content = true;
     if (open && !redirect_allowed(access, disposition, flags)) {  // a write, a create, a delete: the game's own path
@@ -448,6 +449,7 @@ inline void reset_for_test() {
     auto& g = make_state();
     g.real = {};
     g.game_dir.clear();
+    g.target = kClientTarget;
     g.sw = {};
     g.start_ms = 0;
     g.max_lines = kMaxLines;
@@ -477,7 +479,8 @@ inline std::string joined(const std::vector<std::string>& v) {
 // the redirect is off (`redirect_off`, "" when it is not), what was hooked (`inst`; null: no hooks went in).
 inline std::string header_text(const Installed* inst, const std::wstring& exe_path, unsigned long pe_stamp,
                                const std::wstring& game_dir, bool shadow_there, const ContentSwitches& sw,
-                               const std::string& redirect_off, const std::string& started_at) {
+                               const std::string& redirect_off, const std::string& started_at,
+                               const ContentTarget& target = kClientTarget) {
     char stamp[16];
     std::snprintf(stamp, sizeof stamp, "0x%08lx", pe_stamp);
     std::string s = "# EMF file-open log: the content redirect spike (docs/engine_parts/file_redirect_spike.md)\r\n";
@@ -485,7 +488,8 @@ inline std::string header_text(const Installed* inst, const std::wstring& exe_pa
     s += "# switches ([content] in emf\\emf_core.ini): log_opens=" + std::to_string(sw.log_opens ? 1 : 0) +
          " log_seconds=" + std::to_string(sw.log_seconds) + " redirect_test=" + std::to_string(sw.redirect_test ? 1 : 0) +
          "\r\n";
-    s += "# shadow folder \"" + utf8(shadow_folder(game_dir)) + "\": " + (shadow_there ? "there" : "not there") + "\r\n";
+    s += "# shadow folder \"" + utf8(shadow_folder(game_dir, target)) + "\": " + (shadow_there ? "there" : "not there") +
+         "\r\n";
     if (!redirect_off.empty()) s += "# " + redirect_off + "\r\n";
     if (!inst) return s + "# no hooks: with the redirect off and log_opens=0 there is nothing to log or redirect\r\n";
     s += "# the exe imports from: " + joined(inst->dlls) + "\r\n";
@@ -537,15 +541,15 @@ inline std::optional<FileStamp> stamp_of(const std::wstring& path) {
                          d.ftLastWriteTime.dwLowDateTime};
 }
 
-// The enshrouded_NNN.dat files directly in `game`.
-inline unsigned long count_dat_files(const std::wstring& game) {
+// The <stem>_NNN.dat files directly in `game` (enshrouded_NNN.dat for the client).
+inline unsigned long count_dat_files(const std::wstring& game, const ContentTarget& t = kClientTarget) {
     WIN32_FIND_DATAW fd{};
-    const HANDLE h = FindFirstFileExW(path_join(game, L"enshrouded_*").c_str(), FindExInfoBasic, &fd,
+    const HANDLE h = FindFirstFileExW(path_join(game, std::wstring(t.stem) + L"_*").c_str(), FindExInfoBasic, &fd,
                                       FindExSearchNameMatch, nullptr, 0);
     if (h == INVALID_HANDLE_VALUE) return 0;
     unsigned long n = 0;
     do {
-        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && is_dat_file_name(fd.cFileName)) ++n;
+        if (!(fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && is_dat_file_name(fd.cFileName, t)) ++n;
     } while (FindNextFileW(h, &fd));
     FindClose(h);
     return n;
@@ -569,42 +573,45 @@ inline std::optional<std::string> read_small_file(const std::wstring& path, DWOR
 }
 
 // `game`: the normal game folder.
-inline ShadowFacts shadow_facts(const std::wstring& game) {
+inline ShadowFacts shadow_facts(const std::wstring& game, const ContentTarget& t = kClientTarget) {
     ShadowFacts f;
-    const std::wstring record = path_join(shadow_folder(game), L"shadow.txt");
+    const std::wstring record = path_join(shadow_folder(game, t), L"shadow.txt");
     const DWORD a = GetFileAttributesW(record.c_str());
     f.record_there = a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
     if (f.record_there) f.record = read_small_file(record, 64 * 1024);
     for (size_t i = 0; i < kStampedCount; ++i) {
-        const std::string name = kStampedFiles[i];
+        const std::string name = stamped_file(t, i);
         f.now[i] = stamp_of(path_join(game, std::wstring(name.begin(), name.end())));
     }
-    f.dats_now = count_dat_files(game);
+    f.dats_now = count_dat_files(game, t);
     return f;
 }
 
 // "" when the redirect may run; else why not (the line for both logs).
-inline std::string redirect_problem(const std::optional<std::wstring>& game) {
+inline std::string redirect_problem(const std::optional<std::wstring>& game, const ContentTarget& t = kClientTarget) {
     if (!game) return "content redirect off: the game folder's path is not one the redirect can read";
-    return shadow_problem(shadow_facts(*game));
+    return shadow_problem(shadow_facts(*game, t), t);
 }
 
 // The loader's whole step (DllMain, the game only, once the switches said yes): with redirect_test=1 the check of the
 // shadow copy first, then the log file, the hooks (none when nothing is left to do) and the log's header. Returns the
 // lines for emf_loader.log.
-inline std::vector<std::string> start(HMODULE exe, const std::wstring& game_dir, const ContentSwitches& asked) {
+// `target`: the client's names and shadow folder, or the dedicated server's.
+inline std::vector<std::string> start(HMODULE exe, const std::wstring& game_dir, const ContentSwitches& asked,
+                                      const ContentTarget& target = kClientTarget) {
     auto& g = make_state();
     const auto normal = normal_game_dir(game_dir);
     const std::wstring folder = normal.value_or(game_dir);
     ContentSwitches sw = asked;
-    const std::string redirect_off = sw.redirect_test ? redirect_problem(normal) : std::string();
+    const std::string redirect_off = sw.redirect_test ? redirect_problem(normal, target) : std::string();
     if (!redirect_off.empty()) sw.redirect_test = false;
     g.game_dir = normal.value_or(L"");
+    g.target = target;
     g.sw = sw;
     const bool logging = open_log(path_join(folder, L"emf\\file_opens.log"));
     g.write = logging ? &write_log : nullptr;
     // before the hooks: in a module whose own imports are hooked (the tests) these calls would be logged
-    const DWORD shadow = GetFileAttributesW(shadow_folder(folder).c_str());
+    const DWORD shadow = GetFileAttributesW(shadow_folder(folder, target).c_str());
     g.start_ms = g.now_ms();
     Installed inst;
     if (sw.hooks()) inst = install(exe);
@@ -621,7 +628,7 @@ inline std::vector<std::string> start(HMODULE exe, const std::wstring& game_dir,
                       t.wSecond);
         write_raw(header_text(sw.hooks() ? &inst : nullptr, exe_path, nt->FileHeader.TimeDateStamp, folder,
                               shadow != INVALID_FILE_ATTRIBUTES && (shadow & FILE_ATTRIBUTE_DIRECTORY), asked,
-                              redirect_off, when));
+                              redirect_off, when, target));
     }
     std::vector<std::string> lines;
     if (!redirect_off.empty()) lines.push_back(redirect_off);
