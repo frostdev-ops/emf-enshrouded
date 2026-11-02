@@ -164,7 +164,7 @@ function New-Pc {
         saveGuard = @{ code = 0; text = "unchanged: character0.ksd; unchanged: world0.ksd" }; saveGuardCalls = 0
         menu = $true; blank = $false; noShot = $false; shots = 0; events = @(); eventsStarted = 0; eventsStopped = 0
         inFront = $true; uninstallThrows = $false; onClick = $null; gameDir = ""; stateFails = $false; failSleepAt = $null
-        bridgeCalls = New-Object System.Collections.ArrayList; launchFails = $false
+        bridgeCalls = New-Object System.Collections.ArrayList; launchFails = $false; installFails = $false
         eventsDelay = 0; eventReads = 0; readyAfter = 0; readyAsks = 0; readerFails = $false; firstClickReadyAsks = -1
         # load_world: whether hello lists it (an older build does not), what it answers (ok, refused, off, timeout,
         # busy, silent: no answer in time), after how many polls, the world's name in the state and in the reply
@@ -297,15 +297,25 @@ function New-FakeEnv($pc) {
         }
         return @{ code = 0; out = "focused" }
     }.GetNewClosure()
+    # like install_emf.ps1: refuses a dinput8.dll that is not EMF's, then copies the loader, the core and EMF's mods;
+    # installFails: a copy fails part-way (after the loader and some of emf\)
     $e.Install = {
         $pc.installs++
-        New-Item -ItemType Directory -Force (Join-Path $pc.gameDir "emf\mods") | Out-Null
+        $loader = Join-Path $pc.gameDir "dinput8.dll"
+        if ((Test-Path -LiteralPath $loader) -and -not ((Get-Content -Raw -LiteralPath $loader) -match "EMF-LOADER-7d3c9f")) { throw "$loader exists and is not ours; not overwriting" }
+        Set-Content -LiteralPath $loader "EMF-LOADER-7d3c9f"
+        New-Item -ItemType Directory -Force (Join-Path $pc.gameDir "emf\mods\clock") | Out-Null
         Set-Content -LiteralPath (Join-Path $pc.gameDir "emf\emf_core.dll") "x"
+        if ($pc.installFails) { throw "copying the Vulkan layer manifest failed" }
+        Set-Content -LiteralPath (Join-Path $pc.gameDir "emf\mods\clock\clock.dll") "x"
         return @("installed EMF into $($pc.gameDir)")
     }.GetNewClosure()
+    # like uninstall_probe.ps1: removes EMF's dinput8.dll (another one stays) and the emf folder
     $e.Uninstall = {
         if ($pc.uninstallThrows) { throw "the game is running; close it first" }
         $pc.uninstalls++
+        $loader = Join-Path $pc.gameDir "dinput8.dll"
+        if ((Test-Path -LiteralPath $loader) -and (Get-Content -Raw -LiteralPath $loader) -match "EMF-LOADER-7d3c9f") { Remove-Item -LiteralPath $loader -Force }
         Remove-Item -Recurse -Force (Join-Path $pc.gameDir "emf") -ErrorAction SilentlyContinue
         return @("removed emf")
     }.GetNewClosure()
@@ -708,6 +718,51 @@ $pc = New-Case
 $pc.launchFails = $true
 $code = Invoke-Fake $pc "start" @{ Mods = @("template_lua") }
 Check ($code -eq 1 -and $pc.uninstalls -eq 1 -and -not (Test-Path (Join-Path $Game "emf")) -and (Get-WindowMode $Settings) -eq "Fullscreen" -and -not (Test-Path $LockFile)) "a start that fails before the game runs removes its install, sets Fullscreen and releases the lock"
+Done $pc
+
+# -Mods with commas: powershell -File hands -Mods 'a','b' (and -Mods a,b) over as the one string "a,b"; -Command as
+# two strings. Each means the two mods a and b.
+$spellings = @(
+    @{ how = "'a,b' (powershell -File)"; mods = @("template_lua=mod_a,template_lua=mod_b") },
+    @{ how = "' a , b ,' (spaces, an empty part)"; mods = @(" template_lua=mod_a , template_lua=mod_b ,", "") },
+    @{ how = "'a','b' (powershell -Command)"; mods = @("template_lua=mod_a", "template_lua=mod_b") })
+foreach ($sp in $spellings) {
+    $pc = New-Case
+    $code = Invoke-Fake $pc "start" @{ Mods = $sp.mods }
+    $made = @((Read-InstallMarker $Game).mods)
+    Check ($code -eq 2 -and (Test-Path (Join-Path $Game "emf\mods\mod_a\main.lua")) -and (Test-Path (Join-Path $Game "emf\mods\mod_b\main.lua")) -and $made.Count -eq 2 -and $made -contains "mod_a" -and $made -contains "mod_b") "-Mods $($sp.how): the two mods a and b are installed and in the marker ($code; $(Text $pc))"
+    Done $pc
+}
+
+# an install that fails part-way leaves nothing behind: the marker is written first, so the clean-up removes it
+$pc = New-Case
+$pc.installFails = $true
+$code = Invoke-Fake $pc "start"
+Check ($code -eq 1 -and $pc.uninstalls -eq 1 -and $pc.launches -eq 0 -and -not (Test-Path (Join-Path $Game "dinput8.dll")) -and -not (Test-Path (Join-Path $Game "emf")) -and -not (Test-Path $LockFile) -and (Get-WindowMode $Settings) -eq "Fullscreen") "an install that fails part-way: its loader and emf folder are removed, the lock released ($code; $(Text $pc))"
+Done $pc
+# the reported case: a -Mods value that cannot be installed (here a folder that does not exist): nothing is installed
+$pc = New-Case
+$code = Invoke-Fake $pc "start" @{ Mods = @("template_lua=mod_a,no_such_mod_folder") }
+Check ($code -eq 4 -and $pc.installs -eq 0 -and $pc.launches -eq 0 -and -not (Test-Path (Join-Path $Game "dinput8.dll")) -and -not (Test-Path (Join-Path $Game "emf")) -and -not (Test-Path $LockFile) -and (Text $pc) -match "no_such_mod_folder") "a -Mods folder that does not exist stops start before anything is installed ($code; $(Text $pc))"
+Done $pc
+# -Mods that fail after EMF is in (a mod EMF's install made has that id): the clean-up removes it all
+$pc = New-Case
+$code = Invoke-Fake $pc "start" @{ Mods = @("template_lua=clock") }
+Check ($code -eq 1 -and $pc.uninstalls -eq 1 -and $pc.launches -eq 0 -and -not (Test-Path (Join-Path $Game "dinput8.dll")) -and -not (Test-Path (Join-Path $Game "emf")) -and -not (Test-Path $LockFile)) "-Mods that fail after EMF's files are in: they are removed again, the lock released ($code; $(Text $pc))"
+Done $pc
+# what was there before stays: another mod's dinput8.dll, the player's own emf folder (EMF's settings an uninstall kept)
+$pc = New-Case
+Set-Content -LiteralPath (Join-Path $Game "dinput8.dll") "another mod's loader"
+$code = Invoke-Fake $pc "start"
+Check ($code -eq 1 -and $pc.launches -eq 0 -and (Get-Content -Raw (Join-Path $Game "dinput8.dll")) -match "another mod's loader" -and -not (Test-Path (Join-Path $Game "emf")) -and -not (Test-Path $LockFile)) "an install refused for another mod's dinput8.dll leaves that file and nothing else ($code; $(Text $pc))"
+Done $pc
+$pc = New-Case
+New-Item -ItemType Directory -Force (Join-Path $Game "emf\config") | Out-Null
+Set-Content -LiteralPath (Join-Path $Game "emf\config\clock.ini") "[clock]"
+$code = Invoke-Fake $pc "start"
+Check ($code -eq 3 -and $pc.installs -eq 0 -and $pc.launches -eq 0 -and (Test-Path (Join-Path $Game "emf\config\clock.ini")) -and -not (Test-Path (Join-Path $Game "emf\$MarkerName")) -and (Text $pc) -match "not game_session's") "start refuses an emf folder without game_session's marker (the player's settings), installs nothing ($code; $(Text $pc))"
+$code = Invoke-Fake $pc "stop"
+Check ($pc.uninstalls -eq 0 -and (Test-Path (Join-Path $Game "emf\config\clock.ini"))) "stop leaves the player's emf folder alone"
 Done $pc
 
 $pc = New-Case
