@@ -56,14 +56,19 @@ def _travel(gltf, channels, node):
 
 def _take_travel_out(gltf, channels, node):
     """The channels with the node's travel along the ground taken out of its translation keys, evenly over the
-    animation (in its parent's space at the first key: a parent that holds still); its bobbing and swaying stay."""
+    animation, and the node brought back over its resting spot where it starts away from it (the last part of a
+    charge starts where the run before it ended); in its parent's space at the first key (a parent that holds
+    still). Its bobbing and swaying stay."""
     d, w0 = _travel(gltf, channels, node)
+    rest = ns.node_worlds(gltf)[node]
+    off = (w0[node][0][3] - rest[0][3], 0.0, w0[node][2][3] - rest[2][3])
     start, end = _span(channels)
     length = end - start
     parent = ns.parents_of(gltf).get(node)
     inv = gltf_in.mat_inv_affine(w0[parent]) if parent is not None else [[float(r == c) for c in range(4)]
                                                                          for r in range(4)]
     local = tuple(sum(inv[r][c] * d[c] for c in range(3)) for r in range(3))
+    local_off = tuple(sum(inv[r][c] * off[c] for c in range(3)) for r in range(3))
     out, found = [], False
     for nd, path, interp, times, values in channels:
         if nd == node and path == "translation" and length > 0:
@@ -75,13 +80,14 @@ def _take_travel_out(gltf, channels, node):
                     a, v, b = values[3 * k:3 * k + 3]
                     f = (t - start) / length
                     new += [tuple(x - y / length for x, y in zip(a, local)),
-                            tuple(x - y * f for x, y in zip(v, local)),
+                            tuple(x - y * f - o for x, y, o in zip(v, local, local_off)),
                             tuple(x - y / length for x, y in zip(b, local))]
                 values = new
             else:
-                values = [tuple(x - y * (t - start) / length for x, y in zip(v, local)) for t, v in zip(times, values)]
+                values = [tuple(x - y * (t - start) / length - o for x, y, o in zip(v, local, local_off))
+                          for t, v in zip(times, values)]
         out.append((nd, path, interp, times, values))
-    if not found and any(abs(c) > 1e-9 for c in d):
+    if not found and any(abs(c) > 1e-9 for c in d + off):
         raise ValueError("node %s travels but has no translation keys of its own: name the joint that carries the "
                          "travel" % gltf["nodes"][node].get("name", node))
     return out
