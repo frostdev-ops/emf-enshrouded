@@ -9,7 +9,7 @@
 namespace emf::core {
 
 // [hud] style: game = the game's look (serif, soft shadow, no box; notes on a band that fades at both ends);
-// boxed = text in dark boxes (EMF before 0.4); plain = the text alone (no shadow, no band, no box).
+// boxed = text in dark boxes (EMF's earlier look); plain = the text alone (no shadow, no band, no box).
 enum class HudStyle : uint8_t { Game, Boxed, Plain };
 // [hud] notes_place: where notes (and the replies to a chat command) show.
 enum class NotesPlace : uint8_t { TopCentre, TopLeft, Right };

@@ -636,8 +636,9 @@ target_sources(emf_tests PRIVATE tests/test_move_retry.cpp tests/test_save_backu
 
 # --- The in-game look (src/core/overlay/look_*.cpp): [hud] and the look keys of [overlay], the bundled fonts, the
 # game-style drawing ---
-target_sources(emf_core_lib PRIVATE src/core/overlay/look_settings.cpp src/core/overlay/font_plan.cpp)
-target_sources(emf_tests PRIVATE tests/test_look_settings.cpp tests/test_font_plan.cpp)
+target_sources(emf_core_lib PRIVATE src/core/overlay/look_settings.cpp src/core/overlay/font_plan.cpp
+  src/core/overlay/look_layout.cpp)
+target_sources(emf_tests PRIVATE tests/test_look_settings.cpp tests/test_font_plan.cpp tests/test_look_layout.cpp)
 # The bundled fonts (third_party/fonts/README.md), unmodified, installed to <game>\emf\fonts\
 foreach(f alegreya/Alegreya-Regular.ttf alegreya/Alegreya-Bold.ttf cascadia/CascadiaMono-Regular.ttf)
   get_filename_component(name ${f} NAME)

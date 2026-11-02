@@ -299,6 +299,7 @@ bool init_imgui(const SwapchainRecord& r, VkQueue queue, uint32_t family) {
         GImGui->ConfigNavWindowingKeyNext = ImGuiKey_None;
         GImGui->ConfigNavWindowingKeyPrev = ImGuiKey_None;
         ImGui::StyleColorsDark();
+        if (g_hooks.style) g_hooks.style(ImGui::GetStyle());
         if (g_hooks.fonts) g_hooks.fonts(io, static_cast<float>(r.extent.height));
         QueryPerformanceFrequency(&g_freq);
         QueryPerformanceCounter(&g_last);

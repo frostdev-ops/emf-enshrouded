@@ -423,11 +423,9 @@ void draw_mods_tab(const std::vector<ModRecord>& mods, SettingsStore* settings, 
 
     const float list_w = (std::max)(ImGui::GetFontSize() * 16.0f, ImGui::GetContentRegionAvail().x * 0.28f);
     ImGui::BeginChild("##mods_list", ImVec2(list_w, 0), ImGuiChildFlags_Borders);
-    // The selected and hovered rows get a dark slate instead of ImGui's bright blue, so the status colours stay readable;
-    // low values also stay dark when the game's HDR swapchain reads the overlay's colours as PQ (see ENGINE_MAP.md).
-    ImGui::PushStyleColor(ImGuiCol_Header, ImVec4(0.22f, 0.26f, 0.32f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderHovered, ImVec4(0.17f, 0.20f, 0.25f, 1.0f));
-    ImGui::PushStyleColor(ImGuiCol_HeaderActive, ImVec4(0.27f, 0.32f, 0.39f, 1.0f));
+    // The selected and hovered rows take the theme's dark gold (apply_look_theme), never ImGui's bright blue, so the
+    // status colours stay readable; low values also stay dark when the game's HDR swapchain reads the overlay's colours
+    // as PQ (see ENGINE_MAP.md).
     for (const auto& m : mods) {
         ImGui::PushStyleColor(ImGuiCol_Text, status_colour(m.status));
         if (ImGui::Selectable(mod_row_label(m).c_str(), m.source == ui.selected)) {
@@ -437,7 +435,6 @@ void draw_mods_tab(const std::vector<ModRecord>& mods, SettingsStore* settings, 
         ImGui::PopStyleColor();
         if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", mod_status_text(m).c_str());
     }
-    ImGui::PopStyleColor(3);
     ImGui::Spacing();
     ImGui::PushTextWrapPos(0.0f);
     ImGui::TextDisabled("%s", mods_colour_legend().c_str());

@@ -59,12 +59,14 @@ struct OverlayDeps {
 
 bool start_overlay(const OverlayConfig& config, OverlayDeps deps);
 ConsoleModel* overlay_console();  // null until started
-// Shows the replies that follow (a command typed into the game's chat) for `ms` at the top of the screen.
-void overlay_show_replies(uint64_t ms = 6000);
+// Shows the replies that follow (a command typed into the game's chat) for `ms` (0: [hud] notes_seconds) where notes
+// show.
+void overlay_show_replies(uint64_t ms = 0);
 // Opens a mod's radial wheel (API v10). False when the overlay is not running or cannot draw, the console is open, or
 // another wheel is open. Any thread; the input is captured at once, the wheel appears on the next frame.
 bool overlay_open_wheel(const WheelRequest& request);
-// A line at the top of the screen for a few seconds, also kept in the console. Any thread.
+// A note for [hud] notes_seconds where [hud] notes_place says (top centre by default), also kept in the console. Any
+// thread.
 void overlay_notify(const std::string& text);
 
 // What the debug bridge's state reports about the overlay. Any thread.

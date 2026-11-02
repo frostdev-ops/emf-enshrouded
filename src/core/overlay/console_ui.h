@@ -11,6 +11,7 @@
 #include "console_suggest.h"
 #include "hud_model.h"
 #include "imgui.h"
+#include "look_layout.h"
 
 namespace emf::core {
 
@@ -34,6 +35,11 @@ struct ConsoleUiState {
     bool wants_escape = false;  // after a frame: the list shows, so the next Esc is its (InputRouter::set_esc_to_console)
     bool accept_right = false;  // this frame: Right was pressed with the caret at the end of the line
     std::string ghost_shown;    // after a frame: the grey ghost text drawn after the input ("" = none)
+    // The look ([overlay] height, opacity, background, tabs_font).
+    float height = 0.50f;   // the console's height, a fraction of the screen
+    float opacity = 0.80f;  // its background's
+    ImVec4 background{0x08 / 255.0f, 0x0A / 255.0f, 0x0E / 255.0f, 1.0f};
+    ImFont* tabs_font = nullptr;  // the tab bar and the Mods tab (null: the console's font)
 };
 
 // `mods_tab` (optional) draws the Mods tab's content; with it the console shows a tab bar (Console | Mods; Ctrl+Tab
@@ -42,8 +48,8 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
                   const std::function<void(const std::string&)>& submit,
                   const std::function<void()>& mods_tab = std::function<void()>());
 
-// A short-lived box at the top of the screen with the replies to a command typed into the game's chat (the console
-// stays closed). It shows the lines added since `from_version` until `until_ms`.
+// Notes (notify) and the replies to a command typed into the game's chat (the console stays closed), for a few seconds
+// at [hud] notes_place. They are the lines added since `from_version`, shown until `until_ms`.
 struct ToastState {
     uint64_t from_version = 0;
     uint64_t until_ms = 0;
@@ -52,8 +58,11 @@ using ConsoleLines = std::vector<std::pair<LineKind, std::string>>;
 // The lines the toast shows at now_ms: those added since it started, at most `max` (when more came, a note saying how
 // many are left out, then the newest); none once it is over.
 ConsoleLines toast_lines(const ConsoleModel& model, const ToastState& toast, uint64_t now_ms, size_t max = 8);
-void draw_toast(const ConsoleLines& lines, ImVec2 display);
-// The mods' on-screen lines (API v12), one small window per place.
-void draw_hud(const std::vector<HudLine>& lines, ImVec2 display);
+// Game style: bold text with a soft shadow on a band that fades at its ends; plain: the text alone; boxed: in a dark
+// box (EMF's earlier look). At look.notes_place.
+void draw_notes(const ConsoleLines& lines, ImVec2 display, const TextLook& look);
+// The mods' on-screen lines (API v12): game style, text with a soft shadow; plain, the text alone; boxed, one small
+// window per place (EMF's earlier look).
+void draw_hud(const std::vector<HudLine>& lines, ImVec2 display, const TextLook& look);
 
 }  // namespace emf::core

@@ -113,6 +113,7 @@ bool setup_fonts(ImGuiIO& io, float height) {
     const FontPlan plan = plan_fonts(g_look, h, paths, [](const std::wstring& f) { return font_file_ok(f); });
     std::vector<std::string> problems = plan.problems;
     g_fonts = build_font_atlas(*io.Fonts, plan, &problems);
+    g_ui.tabs_font = g_fonts.tabs;  // the old fonts are gone
     for (const auto& p : problems)
         if (g_font_told.insert(p).second) log_line(("overlay: " + p).c_str());
     static bool first = true;
@@ -252,6 +253,19 @@ bool world_live() {
            (g_deps.tracker->latest(EMF_WORLD_CLIENT, now) || g_deps.tracker->latest(EMF_WORLD_SERVER, now));
 }
 
+// How HUD lines, notes and wheels are drawn: the look's settings with this atlas's fonts.
+TextLook text_look() {
+    TextLook t;
+    t.style = g_look.style;
+    t.shadow = g_look.shadow;
+    t.colour = g_look.hud_colour;
+    t.accent = g_look.accent;
+    t.notes_place = g_look.notes_place;
+    t.font = g_fonts.hud;
+    t.bold = g_fonts.hud_bold;
+    return t;
+}
+
 void build(ImVec2 display) {
     if (g_router->open() || g_ui.open_fraction > 0.0f) refresh_sources();  // Tab completion: only for the console
     std::function<void()> mods_tab;
@@ -264,12 +278,14 @@ void build(ImVec2 display) {
         g_model->save_history(g_history_path);
     }, mods_tab);
     g_router->set_esc_to_console(g_router->open() && g_ui.wants_escape);  // Esc hides the suggestions first
+    const TextLook look = text_look();
     if (g_ui.open_fraction <= 0.0f) {
-        draw_toast(toast_lines(*g_model, ToastState{g_toast_from.load(), g_toast_until.load()}, GetTickCount64()),
-                   display);
-        if (g_deps.hud && show_hud(false, !g_deps.hud->empty(), world_live())) draw_hud(g_deps.hud->lines(), display);
+        draw_notes(toast_lines(*g_model, ToastState{g_toast_from.load(), g_toast_until.load()}, GetTickCount64()),
+                   display, look);
+        if (g_deps.hud && show_hud(false, !g_deps.hud->empty(), world_live()))
+            draw_hud(g_deps.hud->lines(), display, look);
     }
-    draw_wheel(g_wheel, display);
+    draw_wheel(g_wheel, display, look);
 }
 
 void log_line(const char* s) {
@@ -374,6 +390,9 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
     g_deps = std::move(deps);
     for (const auto& p : config.look_problems) log_line(("overlay: emf_core.ini " + p).c_str());
     g_look = config.look;
+    g_ui.height = static_cast<float>(g_look.height) / 100.0f;
+    g_ui.opacity = static_cast<float>(g_look.opacity) / 100.0f;
+    g_ui.background = look_colour4(g_look.background);
     g_mouse_speed = config.mouse_speed;
     g_ui.suggest = config.suggest;
     g_ui.suggester.set_rows(config.suggest_rows);
@@ -427,6 +446,7 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
                (g_deps.hud && show_hud(g_router->open(), !g_deps.hud->empty(), world_live()));
     };
     hooks.fonts = setup_fonts;
+    hooks.style = [](ImGuiStyle& s) { apply_look_theme(s, g_look); };
     hooks.before_frame = before_frame;
     hooks.build = build;
     hooks.turned_off = [] {  // never leave an invisible console or wheel holding the input
@@ -448,7 +468,7 @@ ConsoleModel* overlay_console() { return g_model.get(); }
 void overlay_show_replies(uint64_t ms) {
     if (!g_model) return;
     g_toast_from = g_model->version();
-    g_toast_until = GetTickCount64() + ms;
+    g_toast_until = GetTickCount64() + (ms ? ms : static_cast<uint64_t>(g_look.notes_seconds) * 1000);
 }
 
 bool overlay_open_wheel(const WheelRequest& request) {
@@ -465,7 +485,7 @@ bool overlay_open_wheel(const WheelRequest& request) {
 void overlay_notify(const std::string& text) {
     if (!g_model) return;
     if (GetTickCount64() >= g_toast_until.load()) g_toast_from = g_model->version();  // a new toast, else join it
-    g_toast_until = GetTickCount64() + 6000;
+    g_toast_until = GetTickCount64() + static_cast<uint64_t>(g_look.notes_seconds) * 1000;  // [hud] notes_seconds
     g_model->add_line(text);
 }
 
