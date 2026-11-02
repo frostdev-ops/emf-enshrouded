@@ -86,6 +86,7 @@ struct BeastRig : ModRig {
 };
 constexpr int kWildBeast = 6, kPlayerAlly = 11;
 constexpr uint32_t kDogBait = 0x4d0a0001;
+constexpr uint32_t kLeanMeat = 0x4d0a0002;  // the wolves' bait
 }  // namespace
 
 TEST_CASE("beastmaster: the roster names beasts uniquely, holds 8 per player, and comes back from the world's data") {
@@ -183,9 +184,26 @@ TEST_CASE("beastmaster: the channel breaks when you walk away (more than 8 m) or
     CHECK(b.reply("beastmaster.list").find("no beasts") != std::string::npos);
 }
 
+TEST_CASE("beastmaster: each beast's bait suits it and when you meet it: lean meat from level 1, the game's animal baits later") {
+    BeastRig b;
+    const std::map<std::string, std::string> want = {
+        {"wolf", "Food_T1_raw_bad_meat_LeanMeat"},  // wolves are there from level 1: goats, hares and rats drop it
+        {"boar", "Food_T1_raw_bad_meat_LeanMeat"},
+        {"snake", "Food_T1_raw_bad_meat_LeanMeat"},
+        {"hound", "Food_T2_Dog_Bait"},
+        {"sabretooth", "Food_T2_Cat_Bait"},
+        {"bear", "Food_T1_raw_fruit_Red_Berries"},
+        {"aurochs", "Food_T1_Goat_Bait"},
+        {"crimson_snake", "Food_T2_raw_bad_meat_Game"},
+        {"golden_snake", "Food_T3_Turkey_Bait"},
+        {"albino_snake", "Food_T5_Yak_Bait"},  // the rarest takes the hardest bait
+    };
+    for (const auto& [kind, item] : want) CHECK_MESSAGE(b.r.fake.settings["beastmaster.bait_" + kind] == item, kind);
+}
+
 TEST_CASE("beastmaster: a healthy beast is not tamed by defeat; with 3 baits it is tamed by feeding") {
     BeastRig b;
-    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    b.r.fake.item_names[kLeanMeat] = "Food_T1_raw_bad_meat_LeanMeat";
     b.look(1, 0, 10.5, 0, 0);
     b.beast(50, kWolfGraph, 0, 5, kWildBeast, 100, 100);
     CHECK(b.reply("beastmaster.tame").find("too strong") != std::string::npos);
@@ -193,7 +211,7 @@ TEST_CASE("beastmaster: a healthy beast is not tamed by defeat; with 3 baits it 
         b.reply("beastmaster.feed");
         REQUIRE(b.r.fake.takes.size() == static_cast<size_t>(i + 1));
         const EmfItemsRequest t = b.r.fake.takes.back();
-        CHECK(t.item == kDogBait);
+        CHECK(t.item == kLeanMeat);
         CHECK(t.count == 1u);
         CHECK(t.entity == 1u);
         t.cb(kServer, t.entity, t.item, t.count, 1, t.user);  // one bait was taken
@@ -764,7 +782,7 @@ TEST_CASE("beastmaster: /beastmaster <word> in the chat runs the players' comman
 
 TEST_CASE("beastmaster: with nothing under the crosshair, tame takes the nearest weakened beast within 8 m and feed the nearest beast") {
     BeastRig b;
-    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    b.r.fake.item_names[kLeanMeat] = "Food_T1_raw_bad_meat_LeanMeat";
     b.look(1, 0, 10.5, 0, 180);                              // looking away from them all (-z)
     b.beast(50, kWolfGraph, 3, 1, kWildBeast, 100, 100);    // beside you, healthy
     b.beast(51, kWolfGraph, -4, 2, kWildBeast, 20, 100);    // beside you, beaten down
@@ -872,7 +890,7 @@ TEST_CASE("beastmaster: no XP credit (no killing blow) on bosses, mini-bosses or
 
 TEST_CASE("beastmaster: a second tame or feed during a channel turns the first calmed beast wild again") {
     BeastRig b;
-    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    b.r.fake.item_names[kLeanMeat] = "Food_T1_raw_bad_meat_LeanMeat";
     b.look(1, 0, 10.5, 0, 0);
     b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);   // under the crosshair
     b.beast(51, kWolfGraph, 3, -2, kWildBeast, 20, 100);  // beside you
@@ -1157,8 +1175,8 @@ TEST_CASE("beastmaster: the rare snakes are their own graphs: tamed with 3x, 4x 
     CHECK(b.reply(std::string("beastmaster.species ") + kGoldenGraph + " 6 1.25") == "golden_snake");
     CHECK(b.reply(std::string("beastmaster.species ") + kAlbinoGraph + " 6 1.35") == "albino_snake");
     CHECK(b.r.fake.settings["beastmaster.bait_crimson_snake"] == "Food_T2_raw_bad_meat_Game");
-    CHECK(b.r.fake.settings["beastmaster.bait_golden_snake"] == "Food_T2_raw_bad_meat_Game");
-    CHECK(b.r.fake.settings["beastmaster.bait_albino_snake"] == "Food_T2_Dog_Bait");
+    CHECK(b.r.fake.settings["beastmaster.bait_golden_snake"] == "Food_T3_Turkey_Bait");
+    CHECK(b.r.fake.settings["beastmaster.bait_albino_snake"] == "Food_T5_Yak_Bait");
     b.beast(50, kAlbinoGraph, 0, 5, kWildBeast, 20, 100);
     component<ecs::ScaleComponent>(b.r.fake, 50).uniformScale = 1.35f;
     b.look(1, 0, 10.5, 0, 0);
@@ -1404,7 +1422,7 @@ TEST_CASE("beastmaster: a beast that still runs off during the taming is put bac
 
 TEST_CASE("beastmaster: feeding holds the beast too, and lets it go when the feeding ends") {
     BeastRig b;
-    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    b.r.fake.item_names[kLeanMeat] = "Food_T1_raw_bad_meat_LeanMeat";
     b.beast(50, kWolfGraph, 0, 5, kWildBeast, 100, 100);
     set_move_mul(b.r.fake, 50, 1.0f);
     b.look(1, 0, 10.5, 0, 0);
@@ -1426,7 +1444,7 @@ TEST_CASE("beastmaster: a feed with an unknown bait name leaves the beast free t
 
 TEST_CASE("beastmaster: a beast in one player's taming cannot be fed or tamed by another, and is let go once") {
     BeastRig b;
-    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    b.r.fake.item_names[kLeanMeat] = "Food_T1_raw_bad_meat_LeanMeat";
     b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);
     set_move_mul(b.r.fake, 50, 1.0f);
     b.look(1, 0, 10.5, 0, 0);

@@ -19,9 +19,10 @@ everything else works and those beasts are simply not there.
      and your beasts leave it alone. Stay within 8 m. If it dies or you walk away, taming stops and it turns wild
      again. A beast someone else is taming or feeding is theirs to finish.
    - **By bait:** choose **Feed** 3 times within 10 s (the beast you look at, else the nearest within 8 m). Each feed
-     takes one bait from your bag: dog bait for wolves and hounds, lean meat for boars, game meat for sabretooths, red
-     berries for bears and aurochs, lean meat for snakes, game meat for crimson and golden king snakes, dog bait for
-     albino snakes.
+     takes one bait from your bag, one that suits the beast and when you meet it: raw lean meat (goats, hophares and
+     rats drop it) for wolves, boars and snakes; the game's animal baits from the Farmer for the rest: dog bait for
+     hounds, cat bait for sabretooths, goat bait for aurochs; red berries for bears; for the rare snakes game meat
+     (crimson), turkey bait (golden king) and yak bait (albino).
 2. A tamed beast becomes your ally, guards you, and joins your collection with a name: "Wolf", "Wolf 2", "Boar"... For its first
    5 s it cannot fall (a swing it began as a wild beast can land on itself).
 3. **Call a beast** from your collection: **Call <name>** on the wheel, or `/beastmaster call <name or number>`. It costs
