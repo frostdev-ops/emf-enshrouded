@@ -272,7 +272,7 @@ help, mods, settings, set, hooks, pattern, profile, saves.backup, saves.list als
 - give <item name> [count]: drop items at your feet (host)
 - put <item name> [count 1-65535] [entity] [level] [rarity 0-4]: put items straight into an inventory, yours by default (host)
 - take <item name> [count 1-65535] [entity]: take items out of an inventory, yours by default (host)
-- spawn <template guid> [count 1-20]: spawn templates next to you (host)
+- spawn <template guid> [count 1-20] [at <x> <y> <z>]: spawn templates next to you, or at a place (host)
 - time <hours 0-24>: set the time of day (host)
 - pos: your position
 - goto [#k] <x> <y> <z> | <entity> [ground] (host)

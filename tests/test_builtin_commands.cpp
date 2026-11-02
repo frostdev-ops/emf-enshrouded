@@ -438,7 +438,24 @@ TEST_CASE("builtin commands: spawn places count copies near the player") {
     f.run(w);
     CHECK(g_bspawns == 2);
     CHECK(bsaid("spawned 2"));
-    CHECK(bsaid("usage: spawn <template guid> [count 1-20]"));
+    CHECK(bsaid("usage: spawn <template guid> [count 1-20] [at <x> <y> <z>]"));
+}
+
+TEST_CASE("builtin commands: spawn at a place: no player needed (a dedicated server's console)") {
+    BFixture f;
+    FakeWorld w;
+    w.put<uint8_t>(off::kKind, 0);
+    f.center.enqueue("spawn 9543cfb0-b4d7-408e-905c-ccb79a15136d at 3738.5 843.75 1428");
+    f.center.enqueue("spawn 9543cfb0-b4d7-408e-905c-ccb79a15136d 3 at -10 0 5.5");
+    f.center.enqueue("spawn 9543cfb0-b4d7-408e-905c-ccb79a15136d at 1 2");      // no z
+    f.center.enqueue("spawn 9543cfb0-b4d7-408e-905c-ccb79a15136d 2 near 1 2 3");  // not "at"
+    f.center.enqueue("spawn 9543cfb0-b4d7-408e-905c-ccb79a15136d at 1 two 3");
+    f.run(w);
+    CHECK(g_bspawns == 4);
+    CHECK(bsaid("spawned 1"));
+    CHECK(bsaid("spawned 3"));
+    CHECK(bsaid("usage: spawn <template guid> [count 1-20] [at <x> <y> <z>]"));
+    CHECK_FALSE(bsaid("player position unknown"));
 }
 
 TEST_CASE("builtin commands: time sets the time of day; pos and entities report") {
