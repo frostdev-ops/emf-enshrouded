@@ -1,11 +1,11 @@
 # Beastmaster (`beastmaster`, a Lua mod)
 
-A Beastmaster class for Enshrouded. Tame wild wolves, boars, sabretooths, hounds, bears, aurochs and snakes, keep up to 8 in
+A Beastmaster class for Enshrouded. Tame wild wolves, boars, sabretooths, hounds, bears, aurochs, snakes and minotaurs, keep up to 8 in
 your collection, and call up to 2 at a time to fight beside you. They follow you, come back when they stray, rest after
 they fall, and are kept with the world. Their kills are yours: XP and loot.
 
 It needs the `lua` mod 1.9 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
-(the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs and the snake come in the **EMF creature packs**
+(the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs, the snake and the minotaur come in the **EMF creature packs**
 download (the **bear pack** and the **beasts pack**, below). The packs are EML content: **install EML (or ShroudForge)
 first**, because it loads them when the game starts; copying the pack folders alone does nothing. Without them
 everything else works and those beasts are simply not there.
@@ -21,7 +21,7 @@ everything else works and those beasts are simply not there.
    - **By bait:** choose **Feed** 3 times within 10 s (the beast you look at, else the nearest within 8 m). Each feed
      takes one bait from your bag: dog bait for wolves and hounds, lean meat for boars, game meat for sabretooths, red
      berries for bears and aurochs, lean meat for snakes, game meat for crimson and golden king snakes, dog bait for
-     albino snakes.
+     albino snakes, game meat for minotaurs.
 2. A tamed beast becomes your ally, guards you, and joins your collection with a name: "Wolf", "Wolf 2", "Boar"...
 3. **Call a beast** from your collection: **Call <name>** on the wheel, or `/beastmaster call <name or number>`. It costs
    15 % of your maximum mana, with 10 s between calls. At most 2 are out, one of each kind.
@@ -54,7 +54,7 @@ open one "Summons" wheel with "Beasts: ..." and "Undead: ..." items; turn **One 
 Beastmaster's own wheel. A line at the bottom left lists your beasts that are out, aside or resting: "Beasts: Wolf
 (out), Bear (rests 1:20)".
 
-**Wild bears, aurochs and snakes (with their packs):** about every 30 minutes of play, when there is no wild one yet, one of
+**Wild bears, aurochs, snakes and minotaurs (with their packs):** about every 30 minutes of play, when there is no wild one yet, one of
 them (at random, from the packs you have) appears 50-70 m from a player who is out in the open, at that player's level;
 never within 40 m of a flame altar. Beat it down or feed it its bait to tame it.
 - **Bear** (bear pack): 1.4x a wolf's size, 2.5x its health, 1.5x its damage, a little slower.
@@ -71,6 +71,9 @@ never within 40 m of a flame altar. Beat it down or feed it its bait to tame it.
   | Crimson snake | 1 % | 1.15x | 3x / 1.6x | 3-5 | 15 % | 5 %, epic |
   | Golden king snake | 0.4 % | 1.25x | 4x / 1.8x | 4-6 | 25 % | 10 %, epic |
   | Albino snake | 0.25 % | 1.35x | 5x / 2.0x | 6-10 | 50 % | 25 %, legendary |
+- **Minotaur** (beasts pack): a 2.6 m bull-headed brute on a skeleton and animations of its own, with the armoured
+  Vukah elite's fighting (fists, a three-punch combo, a charge), health and damage, a little slower; its swings land
+  when its hits do.
 
 ## Commands
 
@@ -87,8 +90,8 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster dismiss` (or `dismiss all`) | send every beast that is out home |
 | `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
 | `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while someone builds next to them |
-| `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
-| `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
+| `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake, minotaur) |
+| `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph, the minotaur its own copy of the armoured Vukah elite's (faction 3)) |
 
 ## Settings (Mods tab, EMF.exe, or `set beastmaster <key> <value>`)
 
@@ -105,11 +108,11 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Taming takes (`tame_channel_s`) | 3 s | |
 | Taming range (`tame_range_m`) | 8 m | |
 | Baits to tame by feeding (`feed_count`), Feeding window (`feed_window_s`) | 3, 10 s | |
-| Bait for wolves, hounds, boars, sabretooths, bears, aurochs, snakes, the rare snakes (`bait_<kind>`) | see above | an item's debug name (`items meat` in the console) |
+| Bait for wolves, hounds, boars, sabretooths, bears, aurochs, snakes, the rare snakes, minotaurs (`bait_<kind>`) | see above | an item's debug name (`items meat` in the console) |
 | Beasts come back from (`leash_m`), At once from (`leash_far_m`) | 40 m, 80 m | |
 | You get your beasts' kills (`xp_credit`) | on | XP and loot for the owner |
 | Beasts step aside while someone builds next to them (`make_room`) | on | while you, or a player within 20 m of them, hold something to build or place, your beasts leave and come back after |
-| Rare wild bears, aurochs and snakes (`wild_bears`), About every (`wild_bear_minutes`) | on, 30 min | needs their pack |
+| Rare wild bears, aurochs, snakes and minotaurs (`wild_bears`), About every (`wild_bear_minutes`) | on, 30 min | needs their pack |
 
 ## The bear pack (`emf_beastmaster_bear`)
 

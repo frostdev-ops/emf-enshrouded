@@ -24,6 +24,7 @@ local BOAR_GRAPH = "aed0ecec-8a98-4fd3-a450-ab4c508b0ad4"
 local BEAR_SCALE = 1.3     -- the pack's bear is 1.4
 local AUROCHS_SCALE = 1.2  -- the pack's aurochs is 1.3
 local PACK = "the beasts pack (emf_beastmaster_beasts)"
+local VUKAH = 3
 
 M.list = {
 	{ id = "wolf", name = "Wolf", template = "478381c5-585f-4264-b373-dbb1ea596eca",
@@ -68,6 +69,11 @@ M.list = {
 		graph = "d4c87337-8c53-41df-8488-8079046e1535", factions = { [WILDBEAST] = true },
 		rare_of = "snake", chance = 0.0025,
 		bonus = { runes = { 6, 10 }, rune2 = 0.50, gear = 0.25, gear_rarity = "legendary" } },
+	-- the beasts pack's minotaur: a skeleton of its own, played by its own copy of the armoured Vukah elite's graph
+	-- (its AI and attacks), on the elite's template: the elite's health is its own (no health_mul)
+	{ id = "minotaur", name = "Minotaur", template = "69120584-30ec-43e5-bd54-cce04295cdb6",
+		model = "36cf5ce4-0e82-43e0-b6f2-416fcb278ed0", pack = PACK, plural = "minotaurs",
+		graph = "e0a47a97-379b-4384-8602-79eeeffc4a92", factions = { [VUKAH] = true } },
 }
 
 local by_id = {}

@@ -15,15 +15,19 @@ T.__index = T
 local PLAYER_ALLY = 11
 local HOLD_M = 5        -- a beast being tamed this far from where it was held is put back there
 local HOLD_EVERY_S = 1  -- at most one such teleport a second
+-- A beast just tamed cannot fall for this long: a swing it began as a wild beast can land on itself once it is an ally
+-- (seen in game: a tamed minotaur's three-punch combo killed it just after the channel, 2 of 3 tames)
+local GUARD_S = 5
 
 function M.new(env)
-	return setmetatable({ env = env, channels = {}, dead = {} }, T)
+	return setmetatable({ env = env, channels = {}, dead = {}, guarded = {} }, T)
 end
 
 -- A new world (or a reload): channels on entity ids from before mean nothing now (and are never touched again).
 function T:reset()
 	self.channels = {}
 	self.dead = {}
+	self.guarded = {}
 end
 
 local function alive(world, id)
@@ -127,7 +131,30 @@ function T:succeed(world, player, ch)
 	emf.emit("server", "StartGuardingEvent", { guardingEntityId = ch.id, guardedEntityId = player })
 	local cur, max = emf.health(world, ch.id)
 	if cur and max and cur < max / 2 then emf.attribute_add(world, ch.id, "health", math.floor(max / 2 - cur)) end
+	-- its health cannot go under what it has now for GUARD_S: the game's Health storage [2], its minimum
+	local h = world:get("Health", ch.id)
+	if cur and max and h and h.dataStorage then
+		local floor = math.max(cur, math.floor(max / 2))
+		self.guarded[ch.id] = { floor = floor, old = h.dataStorage[2], until_s = self.env.now(world) + GUARD_S }
+		h.dataStorage[2] = floor
+	end
 	self.env.on_tamed(world, player, ch.id, ch.sp)
+end
+
+-- Keeps each guarded beast's minimum health (the game may write it back) until its time is up, then gives the old
+-- minimum back.
+local function guard(self, world, now)
+	for id, g in pairs(self.guarded) do
+		local h = world:position(id) and world:get("Health", id)
+		if not h or not h.dataStorage then
+			self.guarded[id] = nil
+		elseif now >= g.until_s then
+			h.dataStorage[2] = g.old
+			self.guarded[id] = nil
+		elseif h.dataStorage[2] ~= g.floor then
+			h.dataStorage[2] = g.floor
+		end
+	end
 end
 
 -- Ends the player's channel, if any: a calmed beast (or its body) turns wild again.
@@ -235,6 +262,7 @@ end
 local FAR_GRACE_S = 2
 function T:step(world)
 	local now = self.env.now(world)
+	guard(self, world, now)
 	for player, ch in pairs(self.channels) do
 		local what = species.word(ch.sp)
 		local bx, by, bz = world:position(ch.id)
