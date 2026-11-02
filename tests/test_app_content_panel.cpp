@@ -408,12 +408,24 @@ TEST_CASE("app content: EML's dbghelp.dll set aside by EMF is given") {
     CHECK(p.status == ContentStatus::BuildsNext);
 }
 
-TEST_CASE("app content: the dedicated server's folder gets one line") {
-    ContentGame g(L"cp_server");
-    const ContentPanel p = content_panel(g.dir, true);
-    CHECK(p.status == ContentStatus::ServerLater);
-    CHECK(p.headline == "The dedicated server gets EML content in a later version of EMF.");
-    CHECK(p.mods.empty());
+TEST_CASE("app content: a dedicated server's folder: the server's own files and emf\\content\\server") {
+    ContentGame g(L"cp_server", true, true, true);
+    ContentPanel p = content_panel(g.dir, true);
+    CHECK(p.status == ContentStatus::BuildsNext);
+    CHECK(p.why.find("the base is enshrouded_server.kfc") != std::string::npos);
+    REQUIRE(p.mods.size() == 1);
+    CHECK(p.mods[0].folder == "beasts");
+    CHECK_FALSE(p.copy_there);
+    g.built();
+    p = content_panel(g.dir, true);
+    CHECK(p.status == ContentStatus::Ready);
+    CHECK(p.copy_there);
+    CHECK(p.copy_bytes > 0);
+    CHECK(p.detail.find("emf\\content\\server") != std::string::npos);
+    CHECK(p.detail.find("emf\\content\\client") == std::string::npos);
+    // a change to a server container since the build: the next start builds again
+    g.write(L"enshrouded_server_002.dat", "a new container");
+    CHECK(content_panel(g.dir, true).status == ContentStatus::BuildsNext);
 }
 
 TEST_CASE("app content: the panel as JSON for the page") {

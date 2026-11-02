@@ -73,10 +73,6 @@ function renderContent() {
     fill(card, el('p', { class: 'muted' }, 'Looking at the EML mods…'));
     return;
   }
-  if (p.status === 'server_later') {
-    fill(card, el('p', { class: 'content-line', id: 'content-headline' }, p.headline));
-    return;
-  }
   const badge = CONTENT_BADGE[p.status] || ['quiet', p.status];
   const owns = p.status === 'ready' || p.status === 'builds_next' || p.status === 'failed';
   const kids = [];

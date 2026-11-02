@@ -1033,8 +1033,8 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
     // EMF builds the EML mods' content in the game's folder when EMF and emf_content.dll are installed: the EMF tab's
     // card says what the next start does, with the loader's own rules (another tool, [content] mode, the mods, the base,
     // the last build), and the list follows it
-    if (!c.light && !s.server && s.emf_installed && exists(s.game + L"\\emf\\emf_content.dll")) {
-        c.content = content_panel(s.game, false, false);  // without walking the copy: this scan runs every few seconds
+    if (!c.light && s.emf_installed && exists(s.game + L"\\emf\\emf_content.dll")) {
+        c.content = content_panel(s.game, s.server, false);  // without walking the copy: this scan runs every few seconds
         c.emf_content = c.content->status == ContentStatus::Ready || c.content->status == ContentStatus::BuildsNext;
         c.content_failed = c.content->status == ContentStatus::Failed;
         c.content_off = c.content->status == ContentStatus::Off;
