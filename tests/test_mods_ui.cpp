@@ -84,6 +84,40 @@ TEST_CASE("cursor: starts in the middle, follows raw movement scaled by the spee
     CHECK(c.pos().x == 0.0f);
 }
 
+TEST_CASE("cursor: one pointer: the game's own Windows pointer in its menus, EMF's arrow in play") {
+    // Live (2026-11-02): in play the game hides the pointer and clips it to its window; in the inventory or another
+    // menu it shows the real Windows pointer, free. EMF's arrow there was a second cursor.
+    CHECK(pointer_source(true, true, false) == PointerSource::Windows);   // a game menu is open
+    CHECK(pointer_source(false, true, false) == PointerSource::Own);      // play: hidden pointer
+    CHECK(pointer_source(true, false, false) == PointerSource::Own);      // another window in front
+    CHECK(pointer_source(false, true, true) == PointerSource::Windows);   // absolute mouse (remote desktop, a VM)
+    CHECK(pointer_source(false, false, true) == PointerSource::Own);
+}
+
+TEST_CASE("cursor: the Windows pointer's place in the window, scaled to the display; the arrow can start there") {
+    const auto p = client_to_display(500, 400, 2858, 1481, ImVec2(2858, 1481));
+    REQUIRE(p);
+    CHECK(p->x == doctest::Approx(500.0f));
+    CHECK(p->y == doctest::Approx(400.0f));
+    const auto half = client_to_display(1000, 500, 2000, 1000, ImVec2(1000, 500));  // a swapchain at half size
+    REQUIRE(half);
+    CHECK(half->x == doctest::Approx(500.0f));
+    CHECK(half->y == doctest::Approx(250.0f));
+    const auto out = client_to_display(-50, 5000, 2000, 1000, ImVec2(1000, 500));  // outside the window: kept inside
+    REQUIRE(out);
+    CHECK(out->x == 0.0f);
+    CHECK(out->y == 499.0f);
+    CHECK_FALSE(client_to_display(1, 1, 0, 0, ImVec2(1000, 500)));  // minimised: no client area
+    CursorModel c;
+    c.set_display(ImVec2(1000, 500));
+    c.place(ImVec2(123, 45));  // switching back to the arrow starts where the pointer was
+    CHECK(c.pos().x == 123.0f);
+    CHECK(c.pos().y == 45.0f);
+    c.place(ImVec2(5000, -3));
+    CHECK(c.pos().x == 999.0f);
+    CHECK(c.pos().y == 0.0f);
+}
+
 TEST_CASE("mods ui: settings are described for players") {
     SettingDef place = def("place", SettingType::Choice, "1");
     place.choices = {"top right", "bottom right"};
