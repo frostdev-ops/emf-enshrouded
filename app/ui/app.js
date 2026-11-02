@@ -24,7 +24,7 @@ let tab = TABS.includes(new URLSearchParams(location.search).get('tab')) ? new U
 let selected = new URLSearchParams(location.search).get('select');  // a row's key, or "source:id" from --select
 let filterText = '';
 let logWhich = 'core';
-let logs = { core: '', loader: '' };
+let logs = { core: '', loader: '', content: '' };
 let reportedRender = false;
 let detailsShown = '';
 let forceDetails = false;  // a save was refused: draw the details again even if a control has focus
@@ -98,7 +98,7 @@ function onMessage(m) {
   } else if (m.type === 'result') {
     onResult(m);
   } else if (m.type === 'logs') {
-    logs = { core: m.core || '', loader: m.loader || '' };
+    logs = { core: m.core || '', loader: m.loader || '', content: m.content || '' };
     renderLog();
   } else if (m.type === 'nexus_search') {
     onSearch(m);
@@ -234,6 +234,7 @@ function render() {
   if (!nogame) renderDetails(false);
   renderWarnings();
   renderEmf();
+  if (typeof renderContent === 'function') renderContent();  // the EML content card (content.js)
   renderAccount();
   renderNexusChip();
   renderServers();
@@ -682,7 +683,12 @@ function renderEmf() {
 function renderLog() {
   const text = logs[logWhich];
   const log = $('log');
-  log.textContent = text || (logWhich === 'core' ? 'No emf_core.log yet: EMF writes it when the game starts.' : 'No emf_loader.log yet: EMF writes it when the game starts.');
+  const none = {
+    core: 'No emf_core.log yet: EMF writes it when the game starts.',
+    loader: 'No emf_loader.log yet: EMF writes it when the game starts.',
+    content: 'No content.log yet: EMF writes it when it builds the EML content at a game start.',
+  };
+  log.textContent = text || none[logWhich] || '';
   log.scrollTop = log.scrollHeight;
 }
 

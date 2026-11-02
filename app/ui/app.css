@@ -702,3 +702,22 @@ main { flex: 1; min-height: 0; position: relative; }
 .save-file:hover { background: var(--dusk); }
 .save-file-what { overflow-wrap: anywhere; }
 .save-file-meta { color: var(--fog); font-size: 12px; white-space: nowrap; }
+
+/* ---- EML content card on the EMF tab (content.js) ---- */
+.content-card { padding: 16px 20px; display: grid; gap: 8px; }
+.content-card p { margin: 0; overflow-wrap: anywhere; }
+.content-card h4 { margin: 6px 0 0; font-family: var(--label); font-weight: normal; font-size: 12px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--haze); }
+.content-head { display: flex; align-items: center; gap: 10px; }
+.content-head h3 { margin: 0; font-family: var(--display); font-weight: normal; font-size: 20px; letter-spacing: 0.01em; }
+.content-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.content-row select { padding: 5px 10px; border: 1px solid var(--rim); border-radius: 8px; background: var(--dusk); color: var(--mist); outline: none; font-size: 13px; }
+.content-row select:focus { border-color: rgba(255, 138, 61, 0.6); }
+.content-row select:disabled { opacity: 0.45; cursor: not-allowed; }
+.content-list { margin: 0; padding-left: 18px; display: grid; gap: 3px; font-size: 13.5px; overflow-wrap: anywhere; }
+.content-list.errors { color: #ffb3bb; }
+.content-name { font-weight: 600; }
+.content-last .d-error { margin: 4px 0; }
+.content-take { display: grid; gap: 8px; padding: 10px 12px; border: 1px solid rgba(106, 165, 255, 0.3); border-radius: 10px; background: rgba(106, 165, 255, 0.06); }
+.content-take button { justify-self: start; }
+.content-line { margin: 0; color: var(--haze); }
+.content-card .sheet-warn { margin: 2px 0; }

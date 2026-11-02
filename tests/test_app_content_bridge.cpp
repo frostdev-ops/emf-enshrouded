@@ -388,3 +388,21 @@ TEST_CASE("app content bridge: EMF.exe never loads emf_content.dll") {
         CHECK_MESSAGE(_wcsnicmp(path, g.dir.c_str(), g.dir.size()) != 0, "loaded from the game folder");
     }
 }
+
+TEST_CASE("app content bridge: the logs carry emf\\content.log as text") {
+    ContentGame g(L"cb_log");
+    g.write(L"emf\\emf_core.log", "core");
+    g.write(L"emf\\content.log", "[emf] building EML content <script>window.__x=1</script>\r\n[info] built 1 mod\r\n");
+    ContentHost host;
+    host.dir = g.dir;
+    Bridge bridge(host);
+    (void)bridge.handle(R"({"cmd":"state"})");
+    for (const auto& r : bridge.handle(R"({"cmd":"logs"})")) {
+        const json::Value v = parse(r);
+        if (!v.get("type") || v.get("type")->s != "logs") continue;
+        CHECK(at(v, "core").s == "core");
+        CHECK(at(v, "content").s == "[emf] building EML content <script>window.__x=1</script>\r\n[info] built 1 mod\r\n");
+        return;
+    }
+    FAIL("no logs reply");
+}

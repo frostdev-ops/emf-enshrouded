@@ -897,15 +897,16 @@ std::vector<std::string> Bridge::handle(const std::string& message) {
         return {result(cmd, ok, ok ? "" : "Explorer did not open.")};
     }
     if (cmd == "logs") {
-        std::string core, loader;
+        std::string core, loader, content;
         if (folder_.server) {  // a dedicated server's: every password seen this session is stripped (server_bridge.h)
             core = desk_->server_log_text(game, game + L"\\emf\\emf_core.log");
             loader = desk_->server_log_text(game, game + L"\\emf\\emf_loader.log");
         } else {
             core = log_tail(game + L"\\emf\\emf_core.log");
             loader = log_tail(game + L"\\emf\\emf_loader.log");
+            content = log_tail(game + L"\\emf\\content.log");  // what the last EML content build did (content_loader.md)
         }
-        return {Obj().str("type", "logs").str("core", core).str("loader", loader).text()};
+        return {Obj().str("type", "logs").str("core", core).str("loader", loader).str("content", content).text()};
     }
     if (cmd == "rendered") {
         const Value* count = m.get("count");

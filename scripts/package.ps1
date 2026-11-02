@@ -43,7 +43,7 @@ $needed = @("dinput8.dll", "emf\emf_core.dll", "emf\vk\VkLayer_EMF_console.json"
 foreach ($f in $needed) { if (-not (Test-Path -LiteralPath (Join-Path $dist $f))) { throw "missing build output $dist\$f (run scripts\test.sh first)" } }
 if (-not (Test-Path -LiteralPath (Join-Path $Build "emf_sigcheck.exe"))) { throw "missing build output $Build\emf_sigcheck.exe (run scripts\test.sh first)" }
 # EMF.exe, the desktop mod manager, with its page (docs/app.md)
-$appFiles = @("EMF.exe", "ui\index.html", "ui\app.css", "ui\app.js", "ui\saves.js")
+$appFiles = @("EMF.exe", "ui\index.html", "ui\app.css", "ui\app.js", "ui\saves.js", "ui\content.js")
 foreach ($f in $appFiles) { if (-not (Test-Path -LiteralPath (Join-Path $Build "app\$f"))) { throw "missing build output $Build\app\$f (run scripts\test.sh first)" } }
 # The core must be built from this VERSION: the build bakes it into emf_core.dll as "emf_core <version>" (the first
 # line of emf_core.log), and a build that missed a VERSION change would ship under the new name with the old number.
