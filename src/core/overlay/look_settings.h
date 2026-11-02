@@ -55,4 +55,8 @@ struct LookSettings {
 LookSettings read_look_settings(const std::function<std::string(const char* section, const char* key)>& get,
                                 std::vector<std::string>* problems);
 
+// Whether going from `a` to `b` needs the font atlas built again: a font, the style (boxed draws HUD lines in the
+// console's font and size) or a text size changed. Colours, opacity, height and places do not.
+bool fonts_differ(const LookSettings& a, const LookSettings& b);
+
 }  // namespace emf::core

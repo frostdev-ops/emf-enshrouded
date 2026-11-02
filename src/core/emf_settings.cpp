@@ -154,4 +154,12 @@ std::vector<std::string> declare_emf_settings(SettingsStore& s, const std::wstri
     return lines;
 }
 
+LookSettings look_from_store(const SettingsStore& s, std::vector<std::string>* problems) {
+    return read_look_settings(
+        [&s](const char* section, const char* key) {
+            return s.get(kEmfSettingsId, std::string(section) + "." + key);
+        },
+        problems);
+}
+
 }  // namespace emf::core

@@ -109,3 +109,38 @@ TEST_CASE("emf settings: a mod cannot take the id emf") {
     CHECK(r.error.find("EMF's own") != std::string::npos);
     CHECK(parse_manifest(R"({"id": "emf_tools", "version": "1.0.0"})").manifest);
 }
+
+namespace {
+struct MapIni : IniBackend {
+    std::map<std::string, std::string> values;
+    std::optional<std::string> read(const std::string& mod, const std::string& key) override {
+        auto it = values.find(mod + "." + key);
+        if (it == values.end()) return std::nullopt;
+        return it->second;
+    }
+    bool write(const std::string& mod, const std::string& key, const std::string& value) override {
+        values[mod + "." + key] = value;
+        return true;
+    }
+};
+}  // namespace
+
+TEST_CASE("look_from_store: the store's emf values make the look; unset keys are the defaults") {
+    MapIni ini;
+    ini.values["emf.hud.size"] = "140";
+    SettingsStore s(&ini);
+    for (SettingDef d : emf_setting_defs({}))
+        REQUIRE(s.declare(kEmfSettingsId, std::move(d), nullptr, SettingsStore::Declare::Keep));
+    REQUIRE(s.set(kEmfSettingsId, "overlay.accent", "#112233") == SettingsStore::SetResult::Ok);
+    REQUIRE(s.set(kEmfSettingsId, "overlay.colour_error", "#010203") == SettingsStore::SetResult::Ok);
+    std::vector<std::string> problems;
+    const LookSettings look = look_from_store(s, &problems);
+    CHECK(problems.empty());
+    CHECK(look.hud_size == 140);
+    CHECK(look.accent == 0x112233FFu);
+    CHECK(look.colour_error == 0x010203FFu);
+    CHECK(look.style == HudStyle::Game);
+    CHECK(look.height == 50);
+    SettingsStore empty(&ini);  // nothing declared (a core without the defs): the defaults
+    CHECK(look_from_store(empty, nullptr) == LookSettings{});
+}

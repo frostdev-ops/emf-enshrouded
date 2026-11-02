@@ -297,3 +297,33 @@ TEST_CASE("read_overlay_config: the look comes from emf_core.ini's [hud] and [ov
     CHECK(c.look_problems[0].find("[overlay] height=lots") != std::string::npos);
     DeleteFileW(ini.c_str());
 }
+
+TEST_CASE("fonts_differ: a font, style or size change rebuilds the fonts; a colour, opacity or place does not") {
+    const LookSettings base;
+    LookSettings x = base;
+    CHECK_FALSE(fonts_differ(base, x));
+    x.hud_colour = 0x112233FFu;
+    x.opacity = 40;
+    x.accent = 0x445566FFu;
+    x.notes_place = NotesPlace::Right;
+    x.colour_error = 0x010203FFu;
+    CHECK_FALSE(fonts_differ(base, x));
+    LookSettings f = base;
+    f.hud_font = FontChoice{FontChoice::Kind::Console};
+    CHECK(fonts_differ(base, f));
+    f = base;
+    f.console_font = FontChoice{FontChoice::Kind::File, "Mine.ttf"};
+    CHECK(fonts_differ(base, f));
+    f = base;
+    f.tabs_font = FontChoice{FontChoice::Kind::Consolas};
+    CHECK(fonts_differ(base, f));
+    f = base;
+    f.style = HudStyle::Boxed;  // boxed draws HUD lines at the console's size and font
+    CHECK(fonts_differ(base, f));
+    f = base;
+    f.hud_size = 140;
+    CHECK(fonts_differ(base, f));
+    f = base;
+    f.text_size = 80;
+    CHECK(fonts_differ(base, f));
+}

@@ -11,6 +11,7 @@
 #include <optional>
 #include <set>
 
+#include "core/emf_settings.h"
 #include "console_ui.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
@@ -133,7 +134,37 @@ void setup_fonts(ImGuiIO& io, float height) {
     }
 }
 
+// EMF's own settings changed (the Settings tab, `set emf ...`): the look, the console's colours, the mouse speed and the
+// suggestions follow at once; the fonts are built again only when a font, the style or a size changed. Render thread,
+// before a frame; one version compare while nothing changed.
+void follow_settings() {
+    static uint64_t seen = 0;
+    if (!g_deps.settings) return;
+    const uint64_t v = g_deps.settings->version();
+    if (v == seen) return;
+    seen = v;
+    std::vector<std::string> problems;
+    const LookSettings look = look_from_store(*g_deps.settings, &problems);
+    if (fonts_differ(g_look, look)) g_font_rebuild.request();
+    g_look = look;
+    g_ui.height = static_cast<float>(g_look.height) / 100.0f;
+    g_ui.opacity = static_cast<float>(g_look.opacity) / 100.0f;
+    g_ui.background = look_colour4(g_look.background);
+    g_ui.colour_command = look_colour4(g_look.colour_command);
+    g_ui.colour_reply = look_colour4(g_look.colour_reply);
+    g_ui.colour_error = look_colour4(g_look.colour_error);
+    g_ui.colour_success = look_colour4(g_look.colour_success);
+    apply_look_theme(ImGui::GetStyle(), g_look);
+    const SettingsStore& s = *g_deps.settings;
+    if (s.has(kEmfSettingsId, "overlay.mouse_speed"))
+        g_mouse_speed = static_cast<float>(s.get_float(kEmfSettingsId, "overlay.mouse_speed", g_mouse_speed));
+    if (s.has(kEmfSettingsId, "overlay.suggest")) g_ui.suggest = s.get(kEmfSettingsId, "overlay.suggest") == "1";
+    if (s.has(kEmfSettingsId, "overlay.suggest_rows"))
+        g_ui.suggester.set_rows(static_cast<size_t>(s.get_int(kEmfSettingsId, "overlay.suggest_rows", 8)));
+}
+
 void before_frame(ImGuiIO& io) {
+    follow_settings();
     take_wheel_request();
     if (g_wheel_gate.take_cancel() && g_wheel.is_open()) {  // alt-tab while it was open: its keys' releases are gone
         g_wheel.cancel();

@@ -6,6 +6,7 @@
 #include <vector>
 
 #include "manifest.h"
+#include "overlay/look_settings.h"
 #include "settings.h"
 
 namespace emf::core {
@@ -25,5 +26,8 @@ std::vector<std::string> emf_font_files(const std::wstring& fonts_dir);
 // Declares every setting under kEmfSettingsId (Declare::Keep: what the player typed stays in emf_core.ini). Returns the
 // lines worth logging (a value that had to be clamped, a definition refused).
 std::vector<std::string> declare_emf_settings(SettingsStore& s, const std::wstring& fonts_dir);
+
+// The look as the store holds EMF's settings now ([hud] and [overlay] keys; unset or undeclared ones: the defaults).
+LookSettings look_from_store(const SettingsStore& s, std::vector<std::string>* problems);
 
 }  // namespace emf::core

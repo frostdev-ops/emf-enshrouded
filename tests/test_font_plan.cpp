@@ -496,3 +496,17 @@ TEST_CASE("font atlas: a file that cannot be loaded becomes ImGui's built-in fon
     CHECK(f.hud_bold->FindGlyphNoFallback(0x416) != nullptr);
     CHECK(problems.size() == 2);  // Broken.ttf and Gone.ttf
 }
+
+TEST_CASE("font rebuild: a font change in the settings asks for a rebuild at once, once") {
+    const LookSettings look;
+    const FontSizes a = font_sizes(look, 1080);
+    FontRebuild r;
+    CHECK(r.due(a, 0));
+    r.built(a);
+    CHECK_FALSE(r.due(a, 10));
+    r.request();  // the same sizes, another font
+    CHECK(r.due(a, 20));
+    CHECK(r.due(a, 30));  // still due until it is built
+    r.built(a);
+    CHECK_FALSE(r.due(a, 40));  // one rebuild per change, never per frame
+}

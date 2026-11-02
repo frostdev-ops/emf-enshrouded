@@ -185,4 +185,9 @@ LookSettings read_look_settings(const std::function<std::string(const char* sect
     return s;
 }
 
+bool fonts_differ(const LookSettings& a, const LookSettings& b) {
+    return !(a.hud_font == b.hud_font) || !(a.console_font == b.console_font) || !(a.tabs_font == b.tabs_font) ||
+           a.style != b.style || a.hud_size != b.hud_size || a.text_size != b.text_size;
+}
+
 }  // namespace emf::core

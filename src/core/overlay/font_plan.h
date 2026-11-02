@@ -81,8 +81,10 @@ public:
     static constexpr uint64_t kSettleMs = 250;
     bool due(const FontSizes& sizes, uint64_t now_ms);
     void built(const FontSizes& sizes);  // the atlas now has these sizes
+    void request();                      // a font (not a size) changed: due at once, until built
 
 private:
+    bool requested_ = false;
     bool any_ = false;
     FontSizes built_, pending_;
     uint64_t since_ = 0;
