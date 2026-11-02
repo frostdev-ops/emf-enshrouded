@@ -1,4 +1,4 @@
-# Enshrouded engine map (build 1269579, release_1.0; build 1273043 differences in "Game update" below)
+# Enshrouded engine map (build 1269579, release_1.0; builds 1273043 and 1283531 differences in "Game update" below)
 
 This map covers the engine pieces a general modding framework needs (BepInEx + Jotunn style), not just NPC mods.
 
@@ -69,6 +69,45 @@ Seen with the drop-down console:
 - Not used: loading `vulkan-1.dll` from EMF before the game did was followed by game crashes in `vulkan-1.dll` (+0xdce55, `0xc0000409`) in three tries; the cause was not found.
 - **Keys and the mouse with the console open (build 1273043):** closing the console with Esc in the world does not open the pause menu; ten repeated make codes of the console key (auto-repeat) toggle it once and type nothing; Shift+Tab opens the Steam overlay while the console is open and closes it again; moving the mouse with the console open leaves the camera where it was (it turns with the console closed).
 - **Text chat is off in an offline session:** the game binds "Open Text Chat" to Enter, but Enter opens nothing in the offline local world (matches the session's `isTextChatEnabled` gate in `docs/engine_parts/re_chat.md`). Chat commands therefore need an online session to test; they were checked on the dedicated server (`docs/engine_parts/re_chat.md`).
+
+## Game update: build 1283531 of 2026-11-02 (game git 2c08d7bbd8f4, a known build)
+The Steam update of 2026-11-02 (game git `2c08d7bbd8f4`) brought `enshrouded.exe` sha256 `0403981fd2e8ad18bd8c5698dff03c8d505b5a46677832c496db9c645513f2a6` and `enshrouded_server.exe` sha256 `4429653ac0cfa154bc08e138853caa5d8557f82129b7488031f40345816aa6dc`. The build number comes from the new `enshrouded.kfc`'s version string (`1283531|^/game38/branches/release_1.0|2026-10-30T09:15:50Z`), the same way 1273043 was named. EMF 0.3.4 stayed idle on it ("signatures: 39 of 51 usable ... a required signature is missing"): 12 signatures held offsets that moved.
+
+What moved, and how it was found (disp32 counts in `.text`: each old value occurs 0 times in the new exes, the new one as often as the old one did before; and the 1273043 dedicated server's functions compared with the new server's, instruction by instruction):
+- **The ECS program table's entries grew by 8 bytes** (stride 0x1F20 → 0x1F28: `registerProgram`'s `add r14, 0x1f28` and `imul rbx, rax, 0x1f28`). The table (`world+0x746350`, 0x380 entries) did not move, but everything after it moved by 0x380 × 8 = **+0x1C00**: the program count `+0xE15350` → `+0xE16F50` (8 occurrences), the program name map `+0xE15A60` → `+0xE17660`, the event types `+0xE15AB8` → `+0xE176B8` (5), the event map `+0xE15AE0` → `+0xE176E0` (4), the task group `+0xE15D60` → `+0xE17960` (9), the entity storage `+0xE15DC0` → `+0xE179C0` (62), the world kind `+0xE15DC8` → `+0xE179C8` (65), the entity map `+0xE15F08` → `+0xE17B08` (13), the tick period `+0xE16280` → `+0xE17E80` (6) and the tick `+0xE1629C` → `+0xE17E9C` (31). The singletons before the table (`+0x7462D0`, `+0x7462D8`, `+0x7462F8`) did not move.
+- **Inside the entity storage 0x700000 bytes went away after `+0x4DC`** (`storage+0xEBC028` → `+0x7BC028`, `+0xEDD420` → `+0x7DD420`; 28 and 9 occurrences). The fields EMF reads there (`+0x8` kind, `+0x148` entity map, `+0x4C0` tick period, `+0x4DC` tick) did not move. The world's real-time tick length moved from `+0x1CFB6C0` to `+0x15FD2C0` (6 occurrences); EMF no longer reads it.
+- **The program job grew by 8 bytes between `+0x4C0` and `+0x7A0`** (`iterBegin` reads `+0x7A8`, `+0x7B0`, `+0x7F8` where it read `+0x7A0`, `+0x7A8`, `+0x7F0`): the slice's entity list and count moved from `+0x828` / `+0x830` to `+0x830` / `+0x838` (`iterNext`, `currentEntityId`). The job fields EMF reads (`+0x0` to `+0x1C0`) did not move.
+- **The UI's pregame command queue** moved from `UiData+0x33CC0` to `+0x33CE0` (the four `post*` functions).
+- **`allocPendingHit`** keeps its logic (the list at `sys+0x110`, the fallback at `sys+0x138`, the type byte at `+0x144`) but got a bigger frame (`sub rsp, 0x40`) and a new path: when both lists are full it logs "[impact] Could not add HitCandidate Event" and returns NULL (EMF's damage queue already waits for the next step then).
+
+What EMF does now:
+- The 12 patterns have their moved bytes as `??` and match the code before and after the update (GetComponent, GetEntityTransform, GetTemplateComponent, SpawnWrapper, WaitWorldJobs, IterNext, CurrentEntityId, AllocPendingHit, PostSelectCharacter, PostSelectWorld, PostSessionArea, PostStart). WaitWorldJobs keeps the disp32's upper half (`48 8B 89 ?? ?? E1 00 E9`): fully wildcarded it matches 133 times.
+- The world's offsets are no longer constants: `src/common/world_offsets.h` keeps 1273043's block as the base and shifts it by the distance between the entity storage the code uses and the base's. The storage comes from `getComponent`'s `lea rdi, [rdx+disp32]` at +0xF (code offset `WorldStorage`), the program count and stride from `registerProgram`'s table walk (`cmp di, word [rcx+disp32]` at +0x39, `add r14, imm32` at +0x7b). On a known build the values must equal the recorded ones; on an unknown build GetComponent's storage must match once and SimStep's tick fields must still sit at storage +0x4C0 / +0x4DC, or EMF stays idle. The start-up logs "world offsets from code: storage +0xe179c0 (shift +0x1c00), program table: count +0xe16f50, stride 0x1f28", and `emf_sigcheck` prints the same line.
+- Unchanged and confirmed by the code offsets: the save state's result and world slot (`save2+0xB729C` / `+0xB7297`; server `+0xE4` / `+0xDF`), the GameServer instance's slot flag `+0x1756`, send-settings flag `+0x18E0` and settings pointer `+0x1758`.
+- Compared with the 1273043 server, the bodies of `queuePush`, `sendServerInfo`, `requestServerSave`, `attrFind`, `attrAdd`, `emitEvent`, `readOther`, `writeOther`, `chatLogAdd`, `loadSavegameStep` and the inventory transaction's functions are unchanged (code generation aside), so attributes, damage and teleport count as checked on 1283531. The main-menu start (`load_world`) and the save-slot recorder stay limited to 1273043's game exe: their gameApp and save2 offsets were not re-read.
+
+Type registry: only five types changed. `enemy01::CombatSetup` 384 → 392 bytes (new field `preferredDistanceThreshold`), `enemy01::TargetSelectionSetup` 224 → 232, `ecs::Enemy01BehaviorState` 2504 → 2520, `ecs::UiAutomaticTransferEvent` 32 → 64, and two new types, `enemy01::TargetSelectionBonusSettings` and the event `ecs::ItemPerkChanged`. HitCandidate, HitEvent, Health, Teleport and Actor (`currentState` at 0xBF8) are unchanged. The SDK's `get` / `get_template` check the size, so a mod built against the old headers gets NULL for a changed type, never wrong fields. `sdk/include/emf/generated/` was regenerated from the new exe.
+
+RVAs on build 1283531 (game / dedicated server; every signature's is in `src/common/signatures.cpp`):
+
+| Signature | Game | Server |
+|---|---|---|
+| SimStep | `0xa2c5a0` | `0x6c8f10` |
+| GetComponent | `0x9b2e00` | `0x64ed50` |
+| GetEntityTransform | `0x9b3df0` | `0x64fd40` |
+| GetTemplateComponent | `0x9b3b90` | `0x64fae0` |
+| SpawnWrapper | `0x984db0` | `0x620d00` |
+| WaitWorldJobs | `0xa2d710` | `0x6ca080` |
+| IterNext | `0x9c26c0` | `0x65e610` |
+| CurrentEntityId | `0x9bf920` | `0x65b870` |
+| AllocPendingHit | `0x1235e70` | `0x98bfb0` |
+| RegisterProgram | `0x9e2d80` | `0x67ede0` |
+| PostSelectCharacter | `0xd726a0` | (client only) |
+| PostSelectWorld | `0xd729d0` | (client only) |
+| PostSessionArea | `0xd727f0` | (client only) |
+| PostStart | `0xd6fe60` | (client only) |
+
+`emf_sigcheck` on both new exes: "all signatures OK: 51 of 51 signatures and 10 of 10 code offsets OK on build 1283531"; the 1273043 server still passes with the new patterns. Not yet checked in the running game.
 
 ## Game update: build 1273043 (a known build)
 Build 1273043 came as a Steam update (`enshrouded.exe` sha256 `d64966e23b1a458ee6f147bcbceac0b577fa7e39a212f371287d8cc119817882`, menu "Build version: 1273043"). Run as an unknown build ("UNKNOWN build: signatures only"), EMF found **all 26 signatures exactly once**; every function moved (e.g. SimStep `0xa1e2e0` → `0xa1fe10`, QueueChatMessage `0xd5ce70` → `0xd5e8f0`). The addresses in this map are still those of 1269579; `src/common/signatures.cpp` has each signature's RVA on both builds.
@@ -253,14 +292,14 @@ The same `X` / `DynamicX` split shows up elsewhere (NpcState/DynamicNpcState, Ac
 | `+0x928` | start of the "registry" part; `*(world+0xE15DC0)` points here | sim step math |
 | `+0x7462D0` | singleton array (ptr), stride 0xE8; `+0x7462D8` count | `registerSingleton` |
 | `+0x7462F8` | singleton name map (FNV-1a hash of name → u16 index) | `registerSingleton` |
-| `+0x746350` | program table, stride 0x1F20 (entry `+0x00` desc ptr, `+0x08` u16 index, `+0x10` name, `+0x20` flags) | `registerProgram` |
-| `+0xE15350` | u16 program count (max 0x380 = 896) | `registerProgram` |
+| `+0x746350` | program table, stride 0x1F20 (0x1F28 on 1283531; entry `+0x00` desc ptr, `+0x08` u16 index, `+0x10` name, `+0x20` flags) | `registerProgram` |
+| `+0xE15350` | u16 program count (max 0x380 = 896). From here to the tick, build 1283531 has every offset +0x1C00 | `registerProgram` |
 | `+0xE15A60` | program name map (FNV-1a → index) | `registerProgram` |
 | `+0xE15DC0` | **entity storage / sim** struct (passed to most ECS functions) | everywhere |
 | `+0xE15DC8` | u8 world kind: 0 server, 1 prediction, 2 client | log code (`'s'`,`'p'`,`'c'`) |
 | `+0xE15F08` | entity map (EntityId → entity record), = storage`+0x148` | `getEntity` |
 | `+0xE1629C` | u32 current tick number | world tick |
-| `+0x1CFB6C0` | i64 tick length in ns | world tick |
+| `+0x1CFB6C0` | i64 tick length in ns (`+0x15FD2C0` on 1283531) | world tick |
 | `+0x1CF3AC0` | pointer to a second storage (prediction?) | `destroyAllEntities` |
 
 Inside the registry (`world+0x928`): `+0x08` → component type info array (stride 0x100), `+0x88` component map (qualifiedHash → u16 type index), `+0xE15440` (= world+0xE15D68) resource system pointer used to lock templates.
