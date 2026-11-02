@@ -1,5 +1,5 @@
 // blessings (Flame Blessings): an EMF mod. God mode, endless health, stamina and mana, and no fall damage, per player.
-//   - The host switches their own in the Mods tab or on a wheel (hold F4); they are settings, so they stay on.
+//   - The host switches their own in the Mods tab or on a wheel (hold F11); they are settings, so they stay on.
 //   - Admins (the console, emf\commands.txt, the host's own chat, [chat] admins) use /blessings on any player; those end
 //     when the player leaves or the world closes. Not a command for every player.
 // Each blessing shows on the host's screen and is told in chat; nothing reaches the save. Runs where the world runs (the
@@ -41,9 +41,9 @@ void reply(const std::string& text) {
 }
 
 void on_tick(emf::World w) {
-    if (!w.is_server()) return;
-    g_blessings.tick(w);
-    if (g_blessings.switched_off() || !emf::local_player()) return;  // the wheel is the host's (no screen on a server)
+    g_blessings.tick(w);  // also a client world's step: in someone else's game it takes the host's line away
+    // the wheel is the host's (a dedicated server has no screen)
+    if (!w.is_server() || g_blessings.switched_off() || !emf::local_player()) return;
     const std::string& key = g_blessings.settings().wheel_key;
     if (key != g_key_text) {
         g_key_text = key;
@@ -62,6 +62,7 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
         EMF_LOG(kMod, "needs EMF API v19 (attributes, chat lines and player names): update EMF");
         return false;
     }
+    g_blessings.clock = [] { return GetTickCount64(); };
     g_blessings.load();
     emf::on_setting_changed(kMod, [](emf::World, const std::string& key) {
         if (key == "enabled") g_blessings.set_switched_off(!switch_on());
@@ -69,12 +70,13 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
     });
     // Admins only: registered without EMF_COMMAND_PLAYERS.
     const bool added = emf::add_command(
-        "blessings", "<god|refill|stamina|mana|nofall> <on|off> [#k|name] | heal | off | list: Flame Blessings (admin)",
+        "blessings", "<god|refill|stamina|mana|nofall|heal|off|list|help> [on|off] [#k|name]: Flame Blessings (admin)",
         [](emf::World w, const std::vector<std::string>& a) {
             blessings::Sender from;
             EmfCommandSender s{};
             if (emf::command_sender(&s) && s.from_chat) {
                 from.from_chat = true;
+                from.admin = s.admin != 0;
                 from.entity = s.entity;
             }
             reply(g_blessings.command(w, {a.begin() + (a.empty() ? 0 : 1), a.end()}, from));
@@ -82,7 +84,7 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
     if (!added) EMF_LOG(kMod, "the blessings command could not be added (see the core log): another mod may use the name");
     emf::on_tick(on_tick);
     const auto& s = g_blessings.settings();
-    EMF_LOG(kMod, "ready: the host's blessings: %s; wheel key %s; refills %s on this game build",
+    EMF_LOG(kMod, "ready: the host's blessings: %s; wheel key %s; god mode and refills %s on this game build",
             s.host.any() ? blessings::joined(blessings::short_names(s.host)).c_str() : "none",
             s.wheel_key.empty() ? "(none)" : s.wheel_key.c_str(), blessings::attributes_on() ? "work" : "do not work");
     return true;
