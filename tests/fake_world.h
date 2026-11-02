@@ -9,14 +9,25 @@
 #include "common/fnv.h"
 #include "common/keen_map.h"
 #include "common/offsets.h"
+#include "common/world_offsets.h"
 
 namespace emf::test {
 
+// A zeroed world as big as EMF's base layout needs; `extra` more bytes for a layout moved up (ScopedWorldOffsets).
 struct FakeWorld {
-    std::unique_ptr<uint8_t[]> mem{new uint8_t[off::kWorldMinSize]()};
+    explicit FakeWorld(size_t extra = 0) : mem(new uint8_t[off::kWorldMinSize + extra]()) {}
+    std::unique_ptr<uint8_t[]> mem;
     uint8_t* p() { return mem.get(); }
     template <class T>
     void put(uint32_t offset, T v) { std::memcpy(mem.get() + offset, &v, sizeof(T)); }
+};
+
+// Sets the world offsets EMF uses (world_offsets()) for one test and puts the base back afterwards.
+struct ScopedWorldOffsets {
+    explicit ScopedWorldOffsets(const WorldOffsets& o) { set_world_offsets(o); }
+    ~ScopedWorldOffsets() { set_world_offsets(kBaseWorldOffsets); }
+    ScopedWorldOffsets(const ScopedWorldOffsets&) = delete;
+    ScopedWorldOffsets& operator=(const ScopedWorldOffsets&) = delete;
 };
 
 // Backing arrays for an 8-slot Keen map embedded in a FakeWorld at `map_off`.
@@ -41,7 +52,7 @@ struct MapStore {
     }
 };
 
-// A component registry (*(world + kStorage)) whose per-entity ("dynamic") component map at +0x88 holds `hashes`
+// A component registry (*(world + the entity storage's offset)) whose per-entity ("dynamic") component map at +0x88 holds `hashes`
 // (plain keys, linear probing, u16 type indices).
 struct FakeRegistry {
     alignas(8) uint8_t reg[0x100] = {};
@@ -68,17 +79,18 @@ struct FakeRegistry {
         }
         const uint32_t count = i;
         std::memcpy(map + off::kMapCount, &count, 4);
-        w.put<const void*>(off::kStorage, reg);
+        w.put<const void*>(world_offsets().storage, reg);
     }
 };
 
 // Plants entities (mixed-key slots) into the world's entity map.
 inline void plant_entities(FakeWorld& w, MapStore& ms, std::initializer_list<uint32_t> ids) {
-    ms.attach(w, off::kEntityMap, false);
+    const uint32_t map = world_offsets().entity_map;
+    ms.attach(w, map, false);
     for (uint32_t id : ids) {
         size_t slot = KeenMapView::mix(id) & 7;
         while (ms.bits[0] >> slot & 1) slot = (slot + 1) & 7;
-        ms.put(w, off::kEntityMap, slot, id);
+        ms.put(w, map, slot, id);
     }
 }
 
@@ -109,8 +121,8 @@ struct EventStore {
     alignas(8) uint8_t descs[8][0x90] = {};
     alignas(8) uint8_t game_event_desc[0x90] = {};  // keen::ecs::GameEvent (timeStamp at +0)
     void attach(FakeWorld& w) {
-        map.attach(w, off::kEventMap, true);
-        w.put<const void*>(off::kEventTypes, types);
+        map.attach(w, world_offsets().event_map, true);
+        w.put<const void*>(world_offsets().event_types, types);
         const uint32_t ge = fnv1a32(std::string("keen::ecs::GameEvent"));
         std::memcpy(game_event_desc + off::kTypeDescHash, &ge, 4);
     }
@@ -121,7 +133,7 @@ struct EventStore {
         size_t slot = h & 7;
         while (map.bits[0] >> slot & 1) slot = (slot + 1) & 7;
         map.vals2[slot] = index;
-        map.put(w, off::kEventMap, slot, h);
+        map.put(w, world_offsets().event_map, slot, h);
         types[index].desc = descs[index];
         const uint32_t dh = desc_hash ? desc_hash : h;
         std::memcpy(descs[index] + off::kTypeDescSize, &size, 4);
@@ -170,7 +182,7 @@ struct FakeProgramCtx {
         uint32_t index, pad;
     } ctx{};
     explicit FakeProgramCtx(uint8_t* world, uint16_t program_id = 9, int64_t tick = 10, uint32_t tick_len = 100) {
-        uint8_t* storage = world + off::kStorage;
+        uint8_t* storage = world + world_offsets().storage;
         void* b = buffer_obj;
         std::memcpy(job + off::kJobStorage, &storage, 8);
         std::memcpy(job + off::kJobEventBuffer, &b, 8);

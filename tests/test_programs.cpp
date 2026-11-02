@@ -20,7 +20,7 @@ struct FakeProgram {
 // Plants programs into the fake world's program table.
 void plant_programs(FakeWorld& w, std::vector<FakeProgram>& progs) {
     for (size_t i = 0; i < progs.size(); ++i) {
-        const uint32_t e = kProgramTable + static_cast<uint32_t>(i) * kProgramStride;
+        const uint32_t e = emf::off::kProgramTable + static_cast<uint32_t>(i) * emf::world_offsets().program_stride;
         w.put<const void*>(e + 0x00, progs[i].desc);
         w.put<uint16_t>(e + 0x08, static_cast<uint16_t>(i + 1));
         w.put<const char*>(e + 0x10, progs[i].name.c_str());
@@ -28,7 +28,7 @@ void plant_programs(FakeWorld& w, std::vector<FakeProgram>& progs) {
         const uintptr_t fn = 0x140000000 + 0x1000 * (i + 1);
         std::memcpy(progs[i].desc + 0x10, &fn, 8);
     }
-    w.put<uint16_t>(kProgramCount, static_cast<uint16_t>(progs.size()));
+    w.put<uint16_t>(emf::world_offsets().program_count, static_cast<uint16_t>(progs.size()));
 }
 
 std::vector<std::string> g_events;
@@ -52,6 +52,36 @@ TEST_CASE("list_programs and find_program read the world's program table") {
     CHECK(p.desc == progs[2].desc);
     CHECK(p.update_fn == 0x140003000u);
     CHECK(find_program(w.p(), "nope").desc == nullptr);
+}
+
+TEST_CASE("list_programs walks the table with the start-up's count and stride (build 1283531: entries of 0x1F28 bytes)") {
+    emf::WorldOffsets moved_offsets = emf::shifted_world_offsets(0xE179C0);
+    moved_offsets.program_count = 0xE16F50;
+    moved_offsets.program_stride = 0x1F28;
+    emf::test::ScopedWorldOffsets moved(moved_offsets);
+    FakeWorld w(0x1C00);
+    std::vector<FakeProgram> progs(3);
+    progs[0].name = "player_state";
+    progs[1].name = "npc_active_behavior";
+    progs[2].name = "death";
+    plant_programs(w, progs);
+    auto all = list_programs(w.p());
+    REQUIRE(all.size() == 3);
+    CHECK(all[2].name == "death");
+    CHECK(find_program(w.p(), "death").desc == progs[2].desc);
+}
+
+TEST_CASE("list_programs is empty when the program table's layout is not known on this build") {
+    FakeWorld w;
+    std::vector<FakeProgram> progs(1);
+    progs[0].name = "death";
+    plant_programs(w, progs);
+    emf::WorldOffsets unknown = emf::kBaseWorldOffsets;
+    unknown.program_count = 0;
+    unknown.program_stride = 0;
+    emf::test::ScopedWorldOffsets none(unknown);
+    CHECK(list_programs(w.p()).empty());
+    CHECK(find_program(w.p(), "death").desc == nullptr);
 }
 
 TEST_CASE("list_programs is empty for an empty or invalid world") {

@@ -7,6 +7,7 @@
 
 #include "common/offsets.h"
 #include "common/seh.h"
+#include "common/world_offsets.h"
 #include "common/world_view.h"
 #include "emf/generated/components.hpp"
 #include "fault_report.h"
@@ -76,7 +77,7 @@ uint8_t* world_of(void* ctx) {
     if (!ctx || !seh_read(ctx, &job, 8) || !job || !seh_read(static_cast<uint8_t*>(job) + off::kJobStorage, &storage, 8) ||
         !storage)
         return nullptr;
-    return storage - off::kStorage;
+    return storage - world_offsets().storage;
 }
 
 void run_slot(size_t i, void* ctx) {
@@ -314,8 +315,9 @@ size_t SystemPrograms::register_into(void* world, RegisterProgramFn register_pro
     auto* w = static_cast<uint8_t*>(world);
     size_t done = 0;
     for (size_t i = 0; i < n; ++i) {
-        uint16_t programs = 0;
-        if (!seh_read(w + kProgramCount, &programs, 2) || programs >= kProgramMax) break;
+        uint16_t programs = 0;  // a program table EMF does not know on this build: nothing is added
+        const uint32_t count_at = world_offsets().program_count;
+        if (!count_at || !seh_read(w + count_at, &programs, 2) || programs >= off::kProgramMax) break;
         Slot& s = g_slots[i];
         WorldEvents we;
         we.world = world;

@@ -2,6 +2,7 @@
 #include <cstring>
 #include <set>
 #include <string>
+#include <vector>
 #include "common/signatures.h"
 #include "common/sigscan.h"
 
@@ -29,26 +30,66 @@ TEST_CASE("resolve_one: the expected RVA is the detected build's own") {
     CHECK(is_usable(resolve_one(text, 0x1000, 0x0, kDef, -1), false));  // ...but a unique match is still usable
 }
 
-TEST_CASE("known builds: client 1269579 and 1273043, and the dedicated server of 1273043, found by sha256") {
+TEST_CASE("known builds: client 1269579, 1273043 and 1283531, and the dedicated servers of 1273043 and 1283531, by sha256") {
     auto builds = known_builds();
     REQUIRE(builds.size() == kKnownBuildCount);
-    REQUIRE(kKnownBuildCount == 3);
+    REQUIRE(kKnownBuildCount == 5);
     CHECK(builds[0].number == 1269579u);
     CHECK_FALSE(builds[0].server);
     CHECK(builds[1].number == 1273043u);
     CHECK_FALSE(builds[1].server);
     CHECK(builds[2].number == 1273043u);
     CHECK(builds[2].server);
+    CHECK(builds[3].number == 1283531u);  // the update of 2026-11-02 (game git 2c08d7bbd8f4)
+    CHECK_FALSE(builds[3].server);
+    CHECK(builds[4].number == 1283531u);
+    CHECK(builds[4].server);
     CHECK(find_known_build("82e5020a8736348cd0374f004b2f5e5ef456b5bd27aa5420df34c7dd241cfeeb") == 0);
     CHECK(find_known_build("d64966e23b1a458ee6f147bcbceac0b577fa7e39a212f371287d8cc119817882") == 1);
     CHECK(find_known_build("d7baa768eb00aa895d9f5a1cd8747ccf66858c7b542f50983092b2e3261588ee") == 2);
+    CHECK(find_known_build("0403981fd2e8ad18bd8c5698dff03c8d505b5a46677832c496db9c645513f2a6") == 3);
+    CHECK(find_known_build("4429653ac0cfa154bc08e138853caa5d8557f82129b7488031f40345816aa6dc") == 4);
     CHECK(find_known_build("") == -1);
     CHECK(find_known_build("D64966E23B1A458EE6F147BCBCEAC0B577FA7E39A212F371287D8CC119817882") == 1);  // any case
     CHECK(find_known_build("0000000000000000000000000000000000000000000000000000000000000000") == -1);
     CHECK(known_build_index(1273043) == 1);  // the game (client) exe
     CHECK(known_build_index(1273043, true) == 2);
+    CHECK(known_build_index(1283531) == 3);
+    CHECK(known_build_index(1283531, true) == 4);
     CHECK(known_build_index(1269579, true) == -1);
     CHECK(known_build_index(1) == -1);
+}
+
+TEST_CASE("signature table: build 1283531's RVAs, game and dedicated server, as emf_sigcheck found them") {
+    struct Want {
+        const char* name;
+        uint32_t client, server;
+    } const want[] = {
+        {"SimStep", 0xa2c5a0u, 0x6c8f10u},          {"GetComponent", 0x9b2e00u, 0x64ed50u},
+        {"GetEntityTransform", 0x9b3df0u, 0x64fd40u}, {"GetTemplateComponent", 0x9b3b90u, 0x64fae0u},
+        {"SpawnWrapper", 0x984db0u, 0x620d00u},     {"WaitWorldJobs", 0xa2d710u, 0x6ca080u},
+        {"IterNext", 0x9c26c0u, 0x65e610u},         {"CurrentEntityId", 0x9bf920u, 0x65b870u},
+        {"AllocPendingHit", 0x1235e70u, 0x98bfb0u}, {"AttrAdd", 0x3ef490u, 0x190810u},
+        {"PostSelectCharacter", 0xd726a0u, 0u},     {"PostSelectWorld", 0xd729d0u, 0u},
+        {"PostSessionArea", 0xd727f0u, 0u},         {"PostStart", 0xd6fe60u, 0u},
+        {"QueuePush", 0x95e350u, 0x5f9f60u},        {"SendServerInfo", 0xe65fa0u, 0x7c2610u},
+    };
+    const int client = known_build_index(1283531), server = known_build_index(1283531, true);
+    REQUIRE(client >= 0);
+    REQUIRE(server >= 0);
+    for (const auto& w : want) {
+        const std::string name = w.name;
+        CAPTURE(name);
+        const SigDef* d = find_signature(w.name);
+        REQUIRE(d != nullptr);
+        CHECK(d->rva[static_cast<size_t>(client)] == w.client);
+        CHECK(d->rva[static_cast<size_t>(server)] == w.server);
+    }
+    // every signature was checked on both exes of 1283531 (none is kRvaUnchecked there)
+    for (const auto& d : all_signatures()) {
+        CHECK(d.rva[static_cast<size_t>(client)] != kRvaUnchecked);
+        CHECK(d.rva[static_cast<size_t>(server)] != kRvaUnchecked);
+    }
 }
 
 TEST_CASE("absent_on: an RVA of 0 marks a function the exe does not have (client-only code on the server)") {
@@ -344,8 +385,12 @@ TEST_CASE("signature table has WaitWorldJobs (the game's wait for a world's own 
     CHECK(r.count == 1);
     CHECK(r.addr == 0xa20f70);
     CHECK(is_usable(r, true));
-    const uint8_t other_disp[] = {0x48, 0x8B, 0x89, 0x68, 0x5D, 0xE1, 0x00, 0xE9, 0x00, 0x00, 0x00, 0x00};
-    CHECK(resolve_one(other_disp, 0x1000, 0x0, *d, -1).count == 0);  // another field: not the world's task group
+    // build 1283531 moved the task group with the rest of the world's block (+0x1C00): mov rcx, [rcx+0xE17960]
+    const uint8_t moved[] = {0x48, 0x8B, 0x89, 0x60, 0x79, 0xE1, 0x00, 0xE9, 0x00, 0x00, 0x00, 0x00};
+    CHECK(resolve_one(moved, 0x1000, 0x0, *d, -1).count == 1);
+    // a field outside the world's 0xE1xxxx block (the singleton array): not the world's task group
+    const uint8_t other_disp[] = {0x48, 0x8B, 0x89, 0xD0, 0x62, 0x74, 0x00, 0xE9, 0x00, 0x00, 0x00, 0x00};
+    CHECK(resolve_one(other_disp, 0x1000, 0x0, *d, -1).count == 0);
 }
 
 TEST_CASE("resolve_one with call_at: a target outside .text, or not matching the function's own pattern, is not usable") {
@@ -365,4 +410,90 @@ TEST_CASE("resolve_one with call_at: a target outside .text, or not matching the
     std::memcpy(text, far_site, sizeof far_site);
     CHECK_FALSE(is_usable(resolve_one(text, 0x1000, 0x0, def, -1), false));
     CHECK(find_signature("AttrAdd")->call_target_pattern != nullptr);  // attrAdd's body (both twins match it)
+}
+
+namespace {
+std::vector<uint8_t> hex_bytes(const char* text) {
+    std::vector<uint8_t> out;
+    for (const char* p = text; *p;) {
+        if (*p == ' ') {
+            ++p;
+            continue;
+        }
+        out.push_back(static_cast<uint8_t>(std::stoul(std::string(p, 2), nullptr, 16)));
+        p += 2;
+    }
+    return out;
+}
+size_t matches_in(const char* sig, const std::vector<uint8_t>& code) {
+    std::vector<uint8_t> text(4, 0xCC);  // a little padding before and after
+    text.insert(text.end(), code.begin(), code.end());
+    text.insert(text.end(), 4, 0xCC);
+    return resolve_one(text, 0x1000, 0x0, *find_signature(sig), -1).count;
+}
+}  // namespace
+
+TEST_CASE("the signatures with a world or UI offset in their bytes match the code before and after the update of 2026-11-02") {
+    // Each pair: the function's first bytes on build 1273043 and on build 1283531, where the world's block moved by
+    // +0x1C00 (every ECS program entry 8 bytes longer), the iterator's entity list and count by +8, the UI's pregame
+    // queue by +0x20, and allocPendingHit got a bigger frame. The offsets are wildcards; the code around them is not.
+    struct Pair {
+        const char* sig;
+        const char* before;
+        const char* after;
+    } const pairs[] = {
+        {"GetComponent", "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8D BA C0 5D E1 00 44 89",
+         "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8D BA C0 79 E1 00 44 89"},
+        {"GetEntityTransform", "48 89 5C 24 08 57 48 83 EC 20 48 8D B9 C0 5D E1 00 89 54 24 38 48 8D 8F",
+         "48 89 5C 24 08 57 48 83 EC 20 48 8D B9 C0 79 E1 00 89 54 24 38 48 8D 8F"},
+        {"GetTemplateComponent",
+         "48 89 5C 24 08 57 48 83 EC 20 48 8D B9 C0 5D E1 00 89 54 24 38 48 8B 0F 48 8D 54 24 38 48 83 C1 30 41 8B D8 E8",
+         "48 89 5C 24 08 57 48 83 EC 20 48 8D B9 C0 79 E1 00 89 54 24 38 48 8B 0F 48 8D 54 24 38 48 83 C1 30 41 8B D8 E8"},
+        {"SpawnWrapper", "48 83 EC 58 0F 10 02 8B 15 11 22 33 44 33 C0 41 0F 10 08 48 81 C1 C0 5D E1 00",
+         "48 83 EC 58 0F 10 02 8B 15 11 22 33 44 33 C0 41 0F 10 08 48 81 C1 C0 79 E1 00"},
+        {"WaitWorldJobs", "48 8B 89 60 5D E1 00 E9 11 22 33 44", "48 8B 89 60 79 E1 00 E9 11 22 33 44"},
+        {"IterNext", "40 57 48 83 EC 20 4C 8B 01 48 8B FA 8B 41 08 4C 8B C9 49 3B 80 30 08 00 00",
+         "40 57 48 83 EC 20 4C 8B 01 48 8B FA 8B 41 08 4C 8B C9 49 3B 80 38 08 00 00"},
+        {"CurrentEntityId",
+         "8B 41 08 4C 8B C2 85 C0 75 06 89 02 48 8B C2 C3 8D 50 FF 48 8B 01 48 03 D2 48 8B 88 28 08 00 00 8B 04 D1 41",
+         "8B 41 08 4C 8B C2 85 C0 75 06 89 02 48 8B C2 C3 8D 50 FF 48 8B 01 48 03 D2 48 8B 88 30 08 00 00 8B 04 D1 41"},
+        {"AllocPendingHit", "48 89 5C 24 08 57 48 83 EC 20 48 8B D9 0F B6 FA 48 81 C1 10 01 00 00",
+         "48 89 5C 24 08 57 48 83 EC 40 48 8B D9 0F B6 FA 48 81 C1 10 01 00 00"},
+        {"PostStart",
+         "48 89 5C 24 10 57 48 83 EC 20 48 8B 81 D0 00 00 00 48 8B 98 C0 3C 03 00 4C 8D 43 18 8B 43 10 49 3B 00 75 13 33 FF "
+         "48 85 FF 0F 95 C0 48 8B 5C 24 38 48 83 C4 20 5F C3 8B 53 40 8B C2 83 E0 0F 74 05 2B D0 83 C2 10 48 8B 7B 30 8D 42 "
+         "01 8B CA 48 03 F9 C6 07 28",
+         "48 89 5C 24 10 57 48 83 EC 20 48 8B 81 D0 00 00 00 48 8B 98 E0 3C 03 00 4C 8D 43 18 8B 43 10 49 3B 00 75 13 33 FF "
+         "48 85 FF 0F 95 C0 48 8B 5C 24 38 48 83 C4 20 5F C3 8B 53 40 8B C2 83 E0 0F 74 05 2B D0 83 C2 10 48 8B 7B 30 8D 42 "
+         "01 8B CA 48 03 F9 C6 07 28"},
+        {"PostSessionArea",
+         "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B 81 D0 00 00 00 0F B6 F2 48 8B 98 C0 3C 03 00 8B 43 10 48 3B 43 "
+         "18 74 7F 44 8B 43 40 41 8B C0 83 E0 0F 74 07 44 2B C0 41 83 C0 10 48 8B 7B 30 41 8D 40 02 41 8B C8 48 03 F9 66 C7 "
+         "07 27 00",
+         "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B 81 D0 00 00 00 0F B6 F2 48 8B 98 E0 3C 03 00 8B 43 10 48 3B 43 "
+         "18 74 7F 44 8B 43 40 41 8B C0 83 E0 0F 74 07 44 2B C0 41 83 C0 10 48 8B 7B 30 41 8D 40 02 41 8B C8 48 03 F9 66 C7 "
+         "07 27 00"},
+        {"PostSelectWorld",
+         "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B 81 D0 00 00 00 0F B7 DA 48 8B B8 C0 3C 03 00 4C 8D 47 18 8B 47 "
+         "10 49 3B 00 74 7D 8B 57 40 8B C2 83 E0 0F 74 05 2B D0 83 C2 10 48 8B 77 30 8D 42 03 8B CA 48 03 F1 66 C7 06 16 00",
+         "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B 81 D0 00 00 00 0F B7 DA 48 8B B8 E0 3C 03 00 4C 8D 47 18 8B 47 "
+         "10 49 3B 00 74 7D 8B 57 40 8B C2 83 E0 0F 74 05 2B D0 83 C2 10 48 8B 77 30 8D 42 03 8B CA 48 03 F1 66 C7 06 16 00"},
+        {"PostSelectCharacter",
+         "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 48 8B 81 D0 00 00 00 41 0F B7 D8 8B FA 48 8B B0 C0 "
+         "3C 03 00 4C 8D 46 18 8B 46 10 49 3B 00 74 78 8B 56 40 8B C2 83 E0 0F 74 05 2B D0 83 C2 10 4C 8B 76 30 33 C0 8B CA "
+         "4C 03 F1 49 89 06 41 89 46 08 8D 42 0C 41 C6 06 11",
+         "48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 48 8B 81 D0 00 00 00 41 0F B7 D8 8B FA 48 8B B0 E0 "
+         "3C 03 00 4C 8D 46 18 8B 46 10 49 3B 00 74 78 8B 56 40 8B C2 83 E0 0F 74 05 2B D0 83 C2 10 4C 8B 76 30 33 C0 8B CA "
+         "4C 03 F1 49 89 06 41 89 46 08 8D 42 0C 41 C6 06 11"},
+    };
+    for (const auto& p : pairs) {
+        const std::string name = p.sig;
+        CAPTURE(name);
+        REQUIRE(find_signature(p.sig) != nullptr);
+        CHECK(matches_in(p.sig, hex_bytes(p.before)) == 1);
+        CHECK(matches_in(p.sig, hex_bytes(p.after)) == 1);
+    }
+    // the code around the offsets still counts: GetComponent with another instruction in place of its lea
+    CHECK(matches_in("GetComponent",
+                     hex_bytes("48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B BA C0 79 E1 00 44 89")) == 0);
 }

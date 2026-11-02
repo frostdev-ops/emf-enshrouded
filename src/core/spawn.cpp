@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "common/offsets.h"
+#include "common/world_offsets.h"
 #include "common/world_view.h"
 #include "items.h"
 
@@ -121,7 +122,7 @@ uint32_t give_pickup(SpawnWrapperFn fn, uint8_t* world, const ItemRecord& item, 
 
 bool destroy_entity(DestroyEntityFn fn, uint8_t* world, uint32_t entity) {
     if (!fn || !world || !entity || !is_server(world)) return false;
-    return guarded_destroy(fn, world + off::kStorage, entity);
+    return guarded_destroy(fn, world + world_offsets().storage, entity);
 }
 
 }  // namespace emf::core

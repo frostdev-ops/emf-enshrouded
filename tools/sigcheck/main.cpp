@@ -15,6 +15,7 @@
 #include "common/pe_image.h"
 #include "common/sha256.h"
 #include "common/signatures.h"
+#include "common/world_offsets.h"
 
 // emf_sigcheck --patterns <file> <exe>: checks a mod's pattern file (common/pattern_file.h) against an exe.
 // Exit: 0 = every pattern found exactly once; 1 = a pattern failed or a line is bad; 3 = usage, file or exe unreadable.
@@ -132,7 +133,10 @@ int wmain(int argc, wchar_t** argv) {
             std::printf("%-4s %-20s matches=%zu offset=0x%x (in %s)\n", good ? "OK" : "FAIL", odefs[i].name,
                         offs[i].count, offs[i].scanned, in);
     }
-    const bool all = ok == emf::kSigCount && ook == emf::kCodeOffsetCount;
+    // the world's offsets the core would use (common/world_offsets.h): without them it stays idle
+    const emf::WorldOffsetPlan world = emf::plan_world_offsets(offs, known);
+    std::printf("%-4s %s\n", world.ok ? "OK" : "FAIL", world.line.c_str());
+    const bool all = ok == emf::kSigCount && ook == emf::kCodeOffsetCount && world.ok;
     if (known)
         std::printf("%s: %zu of %zu signatures and %zu of %zu code offsets OK on build %u\n",
                     all ? "all signatures OK" : "FAILED", ok, emf::kSigCount, ook, emf::kCodeOffsetCount, number);

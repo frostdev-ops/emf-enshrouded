@@ -158,6 +158,19 @@ TEST_CASE("code offset table: one entry per CodeOffset, in order, unique names, 
     CHECK(all[kLoadFlag].value[2] == 0x1756u);
     CHECK(period.value[2] == 0x4C0u);
     CHECK(tick.value[2] == 0x4DCu);
+    // build 1283531 (emf_sigcheck on both exes): the save state, the instance and the storage's tick fields did not move
+    const size_t c1283531 = static_cast<size_t>(known_build_index(1283531));
+    const size_t s1283531 = static_cast<size_t>(known_build_index(1283531, true));
+    CHECK(all[kResult].value[c1283531] == 0xB729Cu);
+    CHECK(all[kSlot].value[c1283531] == 0xB7297u);
+    CHECK(all[kResult].value[s1283531] == 0xE4u);
+    CHECK(all[kSlot].value[s1283531] == 0xDFu);
+    CHECK(all[kLoadFlag].value[c1283531] == 0x1756u);
+    CHECK(all[kLoadFlag].value[s1283531] == 0x1756u);
+    CHECK(period.value[c1283531] == 0x4C0u);
+    CHECK(period.value[s1283531] == 0x4C0u);
+    CHECK(tick.value[c1283531] == 0x4DCu);
+    CHECK(tick.value[s1283531] == 0x4DCu);
     const auto& flag = all[static_cast<size_t>(CodeOffset::InstSendSettingsFlag)];
     const auto& ptr = all[static_cast<size_t>(CodeOffset::InstSettingsPtr)];
     CHECK(flag.function == Sig::SendServerInfo);
@@ -274,4 +287,89 @@ TEST_CASE("code offsets: sigcheck's row check: a known build needs the scan to c
     r = resolve_code_offsets(sim_step(0x4C0, 0x4DC), kTextBase, sigs, -1);
     CHECK(offset_check_ok(r, period, false));
     CHECK(offset_check_ok(r, tick, false));
+}
+
+namespace {
+// GetComponent's first bytes: ... sub rsp, 0x20; lea rdi, [rdx+storage]; mov ... (build 1283531: storage 0xE179C0)
+std::vector<uint8_t> get_component(uint32_t storage) {
+    std::vector<uint8_t> text(0x100, 0xCC);
+    put(text, 0x10, {0x48, 0x89, 0x5C, 0x24, 0x08, 0x48, 0x89, 0x74, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8D,
+                     0xBA, uint8_t(storage), uint8_t(storage >> 8), uint8_t(storage >> 16), uint8_t(storage >> 24), 0x44,
+                     0x89});
+    return text;
+}
+// RegisterProgram's table walk: cmp di, word ptr [rcx+count] at +0x39 and add r14, stride at +0x7b (as on 1283531)
+std::vector<uint8_t> register_program(uint32_t count, uint32_t stride) {
+    std::vector<uint8_t> text(0x200, 0xCC);
+    put(text, 0x10 + 0x39, {0x66, 0x3B, 0xB9, uint8_t(count), uint8_t(count >> 8), uint8_t(count >> 16), uint8_t(count >> 24)});
+    put(text, 0x10 + 0x7b, {0x49, 0x81, 0xC6, uint8_t(stride), uint8_t(stride >> 8), uint8_t(stride >> 16), uint8_t(stride >> 24)});
+    return text;
+}
+std::array<Resolved, kSigCount> sigs_with(Sig s, uintptr_t addr) {
+    std::array<Resolved, kSigCount> sigs{};
+    sigs[static_cast<size_t>(s)] = Resolved{addr, 1, true};
+    return sigs;
+}
+const size_t kStorage = static_cast<size_t>(CodeOffset::WorldStorage);
+const size_t kProgCount = static_cast<size_t>(CodeOffset::ProgramCount);
+const size_t kProgStride = static_cast<size_t>(CodeOffset::ProgramStride);
+}  // namespace
+
+TEST_CASE("code offsets: the entity storage's place in the world comes from GetComponent's lea rdi, [rdx+disp32]") {
+    const auto sigs = sigs_with(Sig::GetComponent, kTextBase + 0x10);
+    const int c1283531 = known_build_index(1283531);
+    auto r = resolve_code_offsets(get_component(0xE179C0), kTextBase, sigs, c1283531);
+    CHECK(r[kStorage].count == 1);
+    CHECK(r[kStorage].value == 0xE179C0u);
+    CHECK(r[kStorage].value_matches);
+    CHECK_FALSE(r[kStorage].from_record);
+    // the same code on an exe whose hash says 1273043: the record (0xE15DC0) is used and the disagreement flagged
+    r = resolve_code_offsets(get_component(0xE179C0), kTextBase, sigs, known_build_index(1273043));
+    CHECK(r[kStorage].value == 0xE15DC0u);
+    CHECK(r[kStorage].from_record);
+    CHECK(r[kStorage].scanned == 0xE179C0u);
+    // an unknown build takes the single match
+    r = resolve_code_offsets(get_component(0xE1A9C0), kTextBase, sigs, -1);
+    CHECK(r[kStorage].value == 0xE1A9C0u);
+    CHECK(is_usable(r[kStorage], false));
+}
+
+TEST_CASE("code offsets: the ECS program table's count and stride come from RegisterProgram's own code") {
+    const auto sigs = sigs_with(Sig::RegisterProgram, kTextBase + 0x10);
+    auto r = resolve_code_offsets(register_program(0xE16F50, 0x1F28), kTextBase, sigs, known_build_index(1283531));
+    CHECK(r[kProgCount].value == 0xE16F50u);
+    CHECK(r[kProgCount].value_matches);
+    CHECK(r[kProgStride].value == 0x1F28u);
+    CHECK(r[kProgStride].value_matches);
+    r = resolve_code_offsets(register_program(0xE15350, 0x1F20), kTextBase, sigs, known_build_index(1273043, true));
+    CHECK(r[kProgCount].value_matches);
+    CHECK(r[kProgStride].value_matches);
+    r = resolve_code_offsets(register_program(0xE16F50, 0x1F28), kTextBase, sigs, -1);
+    CHECK(is_usable(r[kProgCount], false));
+    CHECK(is_usable(r[kProgStride], false));
+    std::array<Resolved, kSigCount> none{};  // RegisterProgram not located on an unknown build: nothing
+    r = resolve_code_offsets(register_program(0xE16F50, 0x1F28), kTextBase, none, -1);
+    CHECK_FALSE(is_usable(r[kProgCount], false));
+    CHECK_FALSE(is_usable(r[kProgStride], false));
+}
+
+TEST_CASE("code offset table: the world's storage and program table on every known build") {
+    const auto all = all_code_offsets();
+    const auto& storage = all[kStorage];
+    const auto& count = all[kProgCount];
+    const auto& stride = all[kProgStride];
+    CHECK(storage.function == Sig::GetComponent);
+    CHECK(count.function == Sig::RegisterProgram);
+    CHECK(stride.function == Sig::RegisterProgram);
+    for (int b : {known_build_index(1269579), known_build_index(1273043), known_build_index(1273043, true)}) {
+        CHECK(storage.value[static_cast<size_t>(b)] == 0xE15DC0u);
+        CHECK(count.value[static_cast<size_t>(b)] == 0xE15350u);
+        CHECK(stride.value[static_cast<size_t>(b)] == 0x1F20u);
+    }
+    // 1283531: every one of the 0x380 program entries grew by 8 bytes, so all after the table moved by +0x1C00
+    for (int b : {known_build_index(1283531), known_build_index(1283531, true)}) {
+        CHECK(storage.value[static_cast<size_t>(b)] == 0xE179C0u);
+        CHECK(count.value[static_cast<size_t>(b)] == 0xE16F50u);
+        CHECK(stride.value[static_cast<size_t>(b)] == 0x1F28u);
+    }
 }

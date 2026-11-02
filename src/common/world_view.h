@@ -21,6 +21,7 @@ struct ComponentRef {
 
 // Safe, read-only accessors on an ECS world pointer. Every read is fault-guarded:
 // a bad pointer or a half-built world yields 0 / nullptr / nothing, never a crash.
+// The world's own offsets are those the start-up set (common/world_offsets.h).
 class WorldView {
 public:
     explicit WorldView(uint8_t* world) : world_(world) {}
@@ -30,7 +31,6 @@ public:
     uint8_t state() const;
     uint8_t kind() const;
     uint32_t tick() const;
-    int64_t tick_length_ns() const;
     uint32_t entity_count() const;
     uint64_t singleton_count() const;
     void* singleton(std::string_view name) const;

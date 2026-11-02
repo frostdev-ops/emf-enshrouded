@@ -5,7 +5,9 @@
 
 #include "common/log.h"
 #include "common/sha256.h"
+#include "common/code_offsets.h"
 #include "common/signatures.h"
+#include "common/world_offsets.h"
 #include "probe.h"
 
 namespace {
@@ -46,6 +48,14 @@ DWORD WINAPI init_thread(LPVOID) {
         emf::logf("a required signature is missing: probe stays idle (no hooks installed)");
         return 0;
     }
+    // the world's offsets from the game's code (common/world_offsets.h), before the sim step hook reads any world
+    const emf::WorldOffsetPlan world = emf::plan_world_offsets(emf::resolve_code_offsets(base, res, build), known);
+    emf::logf("%s", world.line.c_str());
+    if (!world.ok) {
+        emf::logf("the world's offsets are not known on this game build: probe stays idle (no hooks installed)");
+        return 0;
+    }
+    emf::set_world_offsets(world.offsets);
     emf::probe::start(res, known);
     return 0;
 }
