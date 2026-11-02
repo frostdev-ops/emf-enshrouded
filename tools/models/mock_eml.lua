@@ -146,6 +146,8 @@ local arsenals = setmetatable({ { guid = MOCK_ARSENAL, attacks = {
 	{ guid = "attack-2", description = { actionSequence = SEQ_KICK } } } } },
 	{ __newindex = function(t, k, v) rawset(t, k, deepcopy(v)) end })
 local arsenal_registry = { guid = "arsenal-registry", data = { arsenals = arsenals } }
+-- the game's list of every actor sequence (the game plays only the sequences listed there)
+local sequence_collection = { guid = "sequence-collection", data = { sequences = { SEQ_COMBO, SEQ_KICK } } }
 local templates = {}
 for _, c in ipairs(require("creatures")) do
 	local comps = { { type = "keen::ecs::ModelResource", value = { model = "old" } }, { type = "keen::ecs::Faction", value = {} },
@@ -167,6 +169,7 @@ game = {
 			if typ == "keen::ecs::TemplateResource" then return templates end
 			if typ == "keen::GuidRegistryResource" then return { { data = { guids = { "tpl-Animal_Wildlife_Dog_04_black_AG2" } } } } end
 			if typ == "keen::enemy::EnemyArsenalRegistryResource" then return { arsenal_registry } end
+			if typ == "keen::ActorSequenceCollectionResource" then return { sequence_collection } end
 			return {}
 		end,
 		create_resource = function(value, typ, guid, part)
@@ -247,6 +250,9 @@ for _, a in ipairs(arsenals) do
 	for _, atk in ipairs(a.attacks) do seqs[#seqs + 1] = tostring(atk.description.actionSequence) end
 	print(string.format("arsenal %s sequences %s", tostring(a.guid), table.concat(seqs, " ")))
 end
+local listed = {}
+for _, g in ipairs(sequence_collection.data.sequences) do listed[#listed + 1] = tostring(g) end
+print("sequence collection " .. table.concat(listed, " "))
 for g, r in pairs(resources[SEQ]) do
 	for _, sub in ipairs(r.data.subSequences) do
 		local evs = {}

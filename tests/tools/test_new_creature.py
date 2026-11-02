@@ -333,6 +333,13 @@ class ModTests(Fixture):
         self.assertIn("beast_wolf: arsenal %s (a copy of %s): 1 of 2 attacks retimed" % (ARSENAL_COPY, MOCK_ARSENAL),
                       text)
 
+    def test_a_retimed_sequence_is_listed_where_the_game_lists_its_source(self):
+        """The game plays only the sequences its actor sequence collection lists (2026-11-02: a Minotaur whose combo
+        played an unlisted copy stood in range without attacking): the copy is listed after the game's own."""
+        _, text = self.run_mod(attacks={"arsenal_guid": ARSENAL_COPY,
+                                        "sequences": {SEQ_COMBO: {"guid": SEQ_COPY, "times": [[0, 0], [1, 2]]}}})
+        self.assertIn("sequence collection %s %s %s\n" % (SEQ_COMBO, SEQ_KICK, SEQ_COPY), text)
+
     def test_a_sequence_the_game_has_not_adds_nothing(self):
         """A sequence the game no longer has stops the creature before the arsenal is copied."""
         missing = "77777777-7777-4777-8777-777777777779"

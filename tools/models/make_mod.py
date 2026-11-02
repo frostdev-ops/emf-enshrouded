@@ -590,6 +590,20 @@ for _, c in ipairs(require("creatures")) do
 				end
 			end
 		end
+		-- the game plays only the sequences its actor sequence collection lists: list each copy where its source is
+		local coll = game.assets.get_resources_by_type("keen::ActorSequenceCollectionResource")[1]
+		local listed = 0
+		if coll then
+			local has = {}
+			for _, g in ipairs(coll.data.sequences) do has[tostring(g)] = true end
+			for old, s in pairs(c.attacks.sequences) do
+				if has[old] then
+					table.insert(coll.data.sequences, s.guid)
+					listed = listed + 1
+				end
+			end
+		end
+		log(string.format("%%s: %%d sequence copies listed in the game's sequence collection", c.name, listed))
 		ref.arsenal = c.attacks.arsenal_guid
 		log(string.format("%%s: arsenal %%s (a copy of %%s): %%d of %%d attacks retimed", c.name,
 			c.attacks.arsenal_guid, from, retimed, #copy.attacks))
