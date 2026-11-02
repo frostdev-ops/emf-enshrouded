@@ -151,6 +151,63 @@ class MakeModTests(unittest.TestCase):
             self.assertIn("model %s cloth none" % BEAR["model_guid"], out.stdout)
             self.assertIn("model %s cloth kept" % BEAR["source_model_guid"], out.stdout)
 
+    def plain_mod(self, d, env):
+        """The bear pack's creature (a model on the source's skeleton, with a texture) run through the mock."""
+        bear = dict(BEAR, texture={"albedo_dir": "x", "slot": 0, "material_guid": "mat-ours", "flat_size": 4})
+        make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(bear)])
+        with open(os.path.join(d, "beast_bear_data.lua"), "w", encoding="utf-8") as f:
+            f.write(STUB_DATA)
+        with open(os.path.join(d, "beast_bear_blob.lua"), "w", encoding="utf-8") as f:
+            f.write('return "blob"\n')
+        with open(os.path.join(d, "beast_bear_albedo.lua"), "w", encoding="utf-8") as f:
+            f.write("return {}\n")
+        mock = os.path.join(HERE, "..", "..", "tools", "models", "mock_eml.lua")
+        return subprocess.run(["lua", mock, d], capture_output=True, text=True, timeout=60, env=dict(os.environ, **env))
+
+    @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
+    def test_on_a_dedicated_server_the_template_is_made_without_the_model(self):
+        """A dedicated server's data has no render data: the template copy and its edits are made, the model and the
+        material are left out (the template still names the model, as the game's own templates do there)."""
+        with tempfile.TemporaryDirectory() as d:
+            out = self.plain_mod(d, {"MOCK_SERVER": "1"})
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("beast_bear: no render data here (a dedicated server): the model and its material are left "
+                          "out", out.stdout)
+            self.assertNotIn("not added", out.stdout)
+            self.assertIn("template Beast_Bear keen::ecs::ModelResource model m-1", out.stdout)
+            self.assertIn("template Beast_Bear keen::ecs::DamageMod dataStorage 0 0.5 1.5 0", out.stdout)
+            self.assertNotIn("keen::RenderModel", out.stdout)
+            self.assertNotIn("keen::RenderMaterialResource", out.stdout)
+
+    @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
+    def test_a_client_without_the_source_model_still_stops_the_creature(self):
+        """Where the game has render data, a source model it no longer has is a game change: the creature is not
+        added."""
+        with tempfile.TemporaryDirectory() as d:
+            out = self.plain_mod(d, {"MOCK_MISSING": "src-model"})
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("beast_bear: not added: ", out.stdout)
+            self.assertIn("the source model was not found", out.stdout)
+            self.assertNotIn("template Beast_Bear", out.stdout)
+
+    @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
+    def test_own_proportions_on_a_dedicated_server(self):
+        """own_proportions on a server: the skeleton copy, the clips and the graph copy are made, the model is not."""
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as src:
+            self.own_mod(d, src)
+            mock = os.path.join(HERE, "..", "..", "tools", "models", "mock_eml.lua")
+            out = subprocess.run(["lua", mock, d], capture_output=True, text=True, timeout=60,
+                                 env=dict(os.environ, MOCK_SERVER="1"))
+            self.assertEqual(out.returncode, 0, out.stderr)
+            text = out.stdout
+            self.assertNotIn("not added", text)
+            self.assertIn("skeleton 22222222-2222-4222-8222-222222222222 joints 12 id 22222222-2222-4222-8222-222222222222",
+                          text)
+            self.assertEqual(text.count("clip copy "), 2)
+            self.assertIn("graph 44444444-4444-4444-8444-444444444444 hierarchy 22222222-2222-4222-8222-222222222222 "
+                          "ours 4 left 1", text)
+            self.assertNotIn("keen::RenderModel", text)
+
 
     @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
     def test_a_creature_on_a_skeleton_of_its_own(self):

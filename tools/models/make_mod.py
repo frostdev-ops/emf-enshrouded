@@ -41,7 +41,8 @@ pack.json:
           "roles": {"<game clip guid>": "walk"},      #   our clip wherever the graph plays that game clip
           "default_role": "walk",                     #   our clip for every other game clip of the graph
           "slots": {"Head": "Head", "Pelvis": "Hips"},#   the graph's slots: our joints (others: the root)
-          "model_glb": "wolf_palette.glb"             #   optional: the model from a retextured copy (new_creature.py)
+          "model_glb": "wolf_palette.glb",            #   optional: the model from a retextured copy (new_creature.py)
+          "widen": 1.2                                #   optional: the model this much wider across the body
         }
       }
     ]
@@ -229,44 +230,57 @@ if registry then
 	for _, g in ipairs(registry.data.guids) do registered[tostring(g)] = true end
 end
 
+-- a dedicated server's data has no render data (no keen::RenderModel at all, no materials): there a creature gets
+-- everything but its model and material (its template still names the model, as the game's own templates do there)
+local render_data
+local function has_render_data()
+	if render_data == nil then render_data = #game.assets.get_resources_by_type("keen::RenderModel") > 0 end
+	return render_data
+end
+
 for _, c in ipairs(require("creatures")) do
 	-- one creature that cannot be added (a game update) does not stop the others
 	local ok, err = pcall(function()
-	local data = require(c.name .. "_data")
+	local data, m
 
 	-- 1) the model: a copy of the source model's record, then our geometry
 	local src = game.assets.get_resource(c.source_model_guid, "keen::RenderModel")
-	assert(src, c.name .. ": the source model was not found (the game changed?)")
-	local m = game.assets.create_resource(src.data, "keen::RenderModel", c.model_guid, 0).data
-	m.debugName = data.debugName
-	m.boundingBox = data.boundingBox
-	m.boundingSphere = data.boundingSphere
-	m.positionScale = data.positionScale
-	m.positionOffset = data.positionOffset
-	if data.wholeModelRadius > m.wholeModelRadius then m.wholeModelRadius = data.wholeModelRadius end
-	fill(m.meshlets, {})
-	fill(m.meshes, data.meshes)
-	fill(m.lods, data.lods)
-	fill(m.skinningMap, data.skinningMap)
-	fill(m.blendShapes, {})
-	m.blendShapeMask = 0
-	-- the source's cloth simulation (the mage's robe, the knight's cape) runs over the source's own vertices: never on
-	-- our geometry (seen in game: the lich and the bone golem glitched as they walked)
-	if m.cloth ~= nil then
-		local ok, err = pcall(function() m.cloth = nil end)
-		if not ok then log(c.name .. ": the source's cloth could not be removed: " .. tostring(err)) end
-	end
-	m.jointCount = data.jointCount
-	m.indexData = data.indexData
-	m.meshletData = data.meshletData
-	m.vertexData = data.vertexData
-	m.skinningData = data.skinningData
-	m.blendShapeData = data.blendShapeData
-	m.renderData.hash = game.assets.create_content(buffer.wrap(require(c.name .. "_blob")))
-	if c.texture then
-		local ok, result = pcall(make_material, c, m)
-		log(c.name .. (ok and (": material " .. c.texture.material_guid .. ": " .. result)
-			or (": texture failed, keeping the source material: " .. tostring(result))))
+	if not src then
+		assert(not has_render_data(), c.name .. ": the source model was not found (the game changed?)")
+		log(c.name .. ": no render data here (a dedicated server): the model and its material are left out")
+	else
+		data = require(c.name .. "_data")
+		m = game.assets.create_resource(src.data, "keen::RenderModel", c.model_guid, 0).data
+		m.debugName = data.debugName
+		m.boundingBox = data.boundingBox
+		m.boundingSphere = data.boundingSphere
+		m.positionScale = data.positionScale
+		m.positionOffset = data.positionOffset
+		if data.wholeModelRadius > m.wholeModelRadius then m.wholeModelRadius = data.wholeModelRadius end
+		fill(m.meshlets, {})
+		fill(m.meshes, data.meshes)
+		fill(m.lods, data.lods)
+		fill(m.skinningMap, data.skinningMap)
+		fill(m.blendShapes, {})
+		m.blendShapeMask = 0
+		-- the source's cloth simulation (the mage's robe, the knight's cape) runs over the source's own vertices: never on
+		-- our geometry (seen in game: the lich and the bone golem glitched as they walked)
+		if m.cloth ~= nil then
+			local ok, err = pcall(function() m.cloth = nil end)
+			if not ok then log(c.name .. ": the source's cloth could not be removed: " .. tostring(err)) end
+		end
+		m.jointCount = data.jointCount
+		m.indexData = data.indexData
+		m.meshletData = data.meshletData
+		m.vertexData = data.vertexData
+		m.skinningData = data.skinningData
+		m.blendShapeData = data.blendShapeData
+		m.renderData.hash = game.assets.create_content(buffer.wrap(require(c.name .. "_blob")))
+		if c.texture then
+			local ok, result = pcall(make_material, c, m)
+			log(c.name .. (ok and (": material " .. c.texture.material_guid .. ": " .. result)
+				or (": texture failed, keeping the source material: " .. tostring(result))))
+		end
 	end
 
 	-- 1b) a skeleton of its own (new_skeleton): the whole skeleton, its own clips, and a copy of a game creature's
@@ -290,9 +304,11 @@ for _, c in ipairs(require("creatures")) do
 			end
 		end
 		local sk = require(c.name .. "_skeleton")
-		-- the source model's skeleton record holds ours: every array replaced
-		local src_h = game.assets.get_resource(tostring(m.hierarchy), HIER)
-		assert(src_h, c.name .. ": the source model's skeleton " .. tostring(m.hierarchy) .. " was not found")
+		-- a game skeleton record holds ours, every array replaced: the source model's (without render data, the game
+		-- graph's)
+		local shape_h = tostring(m and m.hierarchy or gd.hierarchy)
+		local src_h = game.assets.get_resource(shape_h, HIER)
+		assert(src_h, c.name .. ": the game skeleton " .. shape_h .. " was not found")
 		local h = game.assets.create_resource(src_h.data, HIER, sk.guid, 0).data
 		h.hierarchyId = sk.guid
 		fill(h.jointNames, sk.jointNames)
@@ -305,18 +321,20 @@ for _, c in ipairs(require("creatures")) do
 		fill(h.defaultPose.data, units)
 		h.defaultPose.alignedJointCount = sk.alignedJointCount
 		h.jointCount = sk.jointCount
-		m.hierarchy = sk.guid
-		m.hierarchyJointCount = sk.jointCount
-		-- per-joint data the source model keeps for its own skeleton (skinned bounds, colliders): not for ours
-		for _, part in ipairs({ { m.skinnedTree, { "jointMatrix", "jointParent", "jointSpringData", "leafJoints",
-			"inverseTransformTree" } }, { m.collider, { "spheres", "capsules", "instances" } }, { m.sdf, { "parts" } } }) do
-			local obj = part[1]
-			if obj ~= nil then
-				for _, f in ipairs(part[2]) do
-					if obj[f] ~= nil and #obj[f] > 0 then
-						log(string.format("%%s: the source model's %%s (%%d) name its skeleton's joints: removed", c.name, f,
-							#obj[f]))
-						fill(obj[f], {})
+		if m then
+			m.hierarchy = sk.guid
+			m.hierarchyJointCount = sk.jointCount
+			-- per-joint data the source model keeps for its own skeleton (skinned bounds, colliders): not for ours
+			for _, part in ipairs({ { m.skinnedTree, { "jointMatrix", "jointParent", "jointSpringData", "leafJoints",
+				"inverseTransformTree" } }, { m.collider, { "spheres", "capsules", "instances" } }, { m.sdf, { "parts" } } }) do
+				local obj = part[1]
+				if obj ~= nil then
+					for _, f in ipairs(part[2]) do
+						if obj[f] ~= nil and #obj[f] > 0 then
+							log(string.format("%%s: the source model's %%s (%%d) name its skeleton's joints: removed", c.name,
+								f, #obj[f]))
+							fill(obj[f], {})
+						end
 					end
 				end
 			end
@@ -417,7 +435,7 @@ for _, c in ipairs(require("creatures")) do
 			end
 			b.pos.x, b.pos.y, b.pos.z = j.ibm.pos.x, j.ibm.pos.y, j.ibm.pos.z
 		end
-		m.hierarchy = sk.guid
+		if m then m.hierarchy = sk.guid end
 		local map, made = {}, 0
 		for _, cl in ipairs(require(c.name .. "_clips")) do
 			local src_c = game.assets.get_resource(cl.source, "keen::JointAnimation")
@@ -613,8 +631,13 @@ for _, c in ipairs(require("creatures")) do
 	if registry and registered[tostring(source.guid)] then
 		table.insert(registry.data.guids, c.template_guid)
 	end
-	log(string.format("added %%s: model %%s (%%d meshes), template %%s %%s", c.name, c.model_guid, #data.meshes,
-		c.template_name, c.template_guid))
+	if m then
+		log(string.format("added %%s: model %%s (%%d meshes), template %%s %%s", c.name, c.model_guid, #data.meshes,
+			c.template_name, c.template_guid))
+	else
+		log(string.format("added %%s: no model here (no render data), template %%s %%s", c.name, c.template_name,
+			c.template_guid))
+	end
 	end)
 	if not ok then log(c.name .. ": not added: " .. tostring(err)) end
 end
@@ -845,10 +868,13 @@ def main():
         elif c.get("new_skeleton"):
             built_new = new_creature.build(c["new_skeleton"], path(c["glb"]), c["name"])
             model_glb = c["new_skeleton"].get("model_glb")
+            widen_by = float(c["new_skeleton"].get("widen", 1.0))
             groups, report = new_creature.model_groups(path(c["glb"]), built_new,
                                                        material_count=len(source["materials"]),
-                                                       model_glb=path(model_glb) if model_glb else None)
-            print("%s: model on the new skeleton, rest difference %.2g" % (c["name"], report["max_rest_difference"]))
+                                                       model_glb=path(model_glb) if model_glb else None,
+                                                       widen_by=widen_by)
+            print("%s: model on the new skeleton, rest difference %.2g, %.2f times as wide"
+                  % (c["name"], report["max_rest_difference"], widen_by))
             palette = None
         else:
             groups, _ = gltf_in.load_groups(path(c["glb"]), rm.load_record(path(c["hierarchy"])),

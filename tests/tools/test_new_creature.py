@@ -177,6 +177,32 @@ class BuildTests(Fixture):
             with self.assertRaises(SystemExit):
                 nc.build(bad, self.glb)
 
+    def test_widen_moves_each_vertex_sideways_from_the_joints_that_carry_it(self):
+        """widen: the model this much wider (x, across the body) about the joints that carry each vertex, so a body
+        on the spine gets broader and a leg on its own joints thicker without moving off them; up and forward, the
+        skeleton and the clips stay as they were. Normals and tangents follow the stretch."""
+        def joint(x, y, z):  # a joint at (x, y, z), unturned: its inverse bind moves by minus that
+            return {"rot": {a: {b: 1.0 if a == b else 0.0 for b in "xyz"} for a in "xyz"},
+                    "pos": {"x": -x, "y": -y, "z": -z}}
+        hier = {"jointCount": 2, "skinToJointMatrices": [joint(0.0, 1.0, 0.0), joint(0.5, 0.5, 0.2)]}
+        groups = [{"material": 0, "pos": [(0.3, 1.0, 0.1), (0.6, 0.0, 0.2), (0.15, 0.5, 0.0)],
+                   "nrm": [(1.0, 0.0, 0.0), (0.6, 0.8, 0.0), (0.0, 0.0, 1.0)],
+                   "tan": [(0.0, 1.0, 0.0, 1.0), (0.6, 0.8, 0.0, -1.0), (1.0, 0.0, 0.0, 1.0)],
+                   "uv": [(0.0, 0.0)] * 3, "col": None, "skin": [([0], [1.0]), ([1], [1.0]), ([0, 1], [0.5, 0.5])],
+                   "lods": [[(0, 1, 2)]]}]
+        wide = nc.widen(groups, hier, 1.5)
+        want_pos = [(0.45, 1.0, 0.1), (0.65, 0.0, 0.2), (0.1, 0.5, 0.0)]  # about x 0, 0.5 and their mean 0.25
+        want_nrm = [(1.0, 0.0, 0.0), (0.4 / 0.8 ** 0.5, 0.8 / 0.8 ** 0.5, 0.0), (0.0, 0.0, 1.0)]
+        t = (0.81 + 0.64) ** 0.5
+        want_tan = [(0.0, 1.0, 0.0, 1.0), (0.9 / t, 0.8 / t, 0.0, -1.0), (1.0, 0.0, 0.0, 1.0)]
+        for got, want in ((wide[0]["pos"], want_pos), (wide[0]["nrm"], want_nrm), (wide[0]["tan"], want_tan)):
+            for g, w in zip(got, want):
+                for a, b in zip(g, w):
+                    self.assertAlmostEqual(a, b, places=6)
+        self.assertEqual(wide[0]["skin"], groups[0]["skin"])
+        self.assertEqual(groups[0]["pos"][0], (0.3, 1.0, 0.1))  # the groups given are left as they were
+        self.assertEqual(nc.widen(groups, hier, 1.0)[0]["pos"], groups[0]["pos"])
+
     def test_model_on_the_skeleton(self):
         built = nc.build(config(scale=0.5), self.glb)
         groups, report = nc.model_groups(self.glb, built, warn=self.fail)
@@ -250,7 +276,8 @@ class PackTests(unittest.TestCase):
         del cfg["graph_guid"]
         bad = [dict(self.BEAST, new_skeleton=cfg), dict(self.BEAST, new_skeleton=config(default_role="run")),
                dict(self.BEAST, new_skeleton=config(roles={GAME_WALK: "run"})),
-               dict(self.BEAST, new_skeleton=config(), own_proportions={"sidecar": "x"})]
+               dict(self.BEAST, new_skeleton=config(), own_proportions={"sidecar": "x"}),
+               dict(self.BEAST, new_skeleton=config(widen=0)), dict(self.BEAST, new_skeleton=config(widen="wide"))]
         for c in bad:
             with self.assertRaises(SystemExit):
                 make_mod.listing_entry(c)
@@ -353,6 +380,28 @@ class ModTests(Fixture):
             "arsenal_guid": ARSENAL_COPY, "sequences": {SEQ_COMBO: {"guid": SEQ_COPY, "times": [[0, 0], [1, 2]]}}})
         self.assertIn("beast_wolf: not added: ", text)
         self.assertIn("has no EnemyArsenalReference", text)
+
+    def test_a_dedicated_server_gets_everything_but_the_model(self):
+        """A dedicated server's data has no render data (no keen::RenderModel, no materials) but has skeletons, clips,
+        graphs, templates and the attack data: there the creature gets its skeleton (from the game graph's skeleton
+        record), its clips, the graph copy, the template (still naming the model, as the game's own templates do on a
+        server) and the attack copies; the model and its material are left out."""
+        built, text = self.run_mod({"MOCK_SERVER": "1"}, attacks={
+            "arsenal_guid": ARSENAL_COPY, "sequences": {SEQ_COMBO: {"guid": SEQ_COPY, "times": [[0, 0], [1, 2]]}}})
+        self.assertIn("beast_wolf: no render data here (a dedicated server): the model and its material are left out",
+                      text)
+        self.assertNotIn("not added", text)
+        self.assertNotIn("keen::RenderModel m-1", text)
+        self.assertIn("skeleton %s jointCount 5 names 5 parents 5 binds 5 aligned 8 poses 8 data 24 id %s"
+                      % (SKELETON, SKELETON), text)
+        self.assertEqual(text.count("clip copy "), len(built["clips"]) + 1)  # ours and the built-in zero offset
+        self.assertIn("graph %s hierarchy %s ours 8 left 0" % (GRAPH_COPY, SKELETON), text)
+        self.assertIn("template Beast_Wolf keen::ecs::ModelResource model m-1", text)
+        self.assertIn("template Beast_Wolf keen::ecs::AnimationGraphResourceComponent2 animationGraph %s" % GRAPH_COPY,
+                      text)
+        self.assertIn("template Beast_Wolf keen::ecs::EnemyArsenalReference arsenal %s" % ARSENAL_COPY, text)
+        self.assertIn("sequence collection %s %s %s\n" % (SEQ_COMBO, SEQ_KICK, SEQ_COPY), text)
+        self.assertIn("added beast_wolf: no model here (no render data), template Beast_Wolf t-1", text)
 
     def test_slots_point_at_our_joints(self):
         _, text = self.run_mod()
