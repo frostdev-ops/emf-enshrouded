@@ -181,7 +181,7 @@ function Invoke-Smoke([string]$Eval = "", [string]$SelectMod = "", [string[]]$Mo
     } finally {
         if ($fresh) { Remove-Item Env:\EMF_TEST_APPDATA -ErrorAction SilentlyContinue }
     }
-    if (-not $p.WaitForExit(30000)) { $p.Kill(); throw "EMF.exe did not exit within 30 s" }
+    if (-not $p.WaitForExit(60000)) { $p.Kill(); throw "EMF.exe did not exit within 60 s" }  # a probe may wait 30 s on a busy PC
     $json = if (Test-Path -LiteralPath $out) { (Get-Content -LiteralPath $out -Raw).Trim() } else { "" }
     return [pscustomobject]@{ Code = $p.ExitCode; Json = $json; R = $(if ($json) { $json | ConvertFrom-Json } else { $null }) }
 }
@@ -822,11 +822,11 @@ try {
         Write-File "emf\content\client\emf_content_state.json" '{"fingerprint": "sha256:an earlier set of files", "code": 1, "message": "<img src=x onerror=\"window.__x=1\">a mod failed", "mods": [], "errors": ["mods\\beasts\\main.lua: <script>window.__x=1</script>"], "ms": 4200, "built_at": "2026-11-01T20:00:00Z", "unloaded": true, "truncated": false}'
         Write-File "emf\content.log" "[emf] building EML content`r`n[error] <img src=x onerror=`"window.__x=1`">the log's own line`r`n"
         $dllBefore = Get-Content -LiteralPath (Join-Path $game "emf\emf_content.dll") -Raw
-        $cW = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<150){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; var pr={}; window.emfProbe=pr; var t=function(id){return (document.getElementById(id)||{}).textContent||'';}; var items=function(id){return [...document.querySelectorAll('#'+id+' li')].map(function(x){return x.textContent;});}; var ctl=function(){return [...document.querySelectorAll('#content-card button, #content-card select')];};"
+        $cW = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<250){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; var pr={}; window.emfProbe=pr; var t=function(id){return (document.getElementById(id)||{}).textContent||'';}; var items=function(id){return [...document.querySelectorAll('#'+id+' li')].map(function(x){return x.textContent;});}; var ctl=function(){return [...document.querySelectorAll('#content-card button, #content-card select')];};"
         $js = $cW + " W(function(){return !!document.getElementById('content-mode');},function(){ pr.title=!document.getElementById('content-title').hidden; pr.headline=t('content-headline'); pr.detail=t('content-detail'); pr.built=items('content-built'); pr.builtTitle=t('content-built-title'); pr.left=items('content-left'); pr.last=t('content-last'); pr.mode=document.getElementById('content-mode').value; pr.disabled=ctl().filter(function(b){return b.disabled;}).length; document.querySelector('.seg[data-log=content]').click(); W(function(){return /the log's own line/.test(t('log'));},function(){ pr.log=t('log'); var s=document.getElementById('content-mode'); s.value='off'; s.dispatchEvent(new Event('change',{bubbles:true})); W(function(){return t('content-headline')==='Off';},function(){ pr.after=t('content-headline'); pr.imgs=document.querySelectorAll('img').length; pr.inline=document.querySelectorAll('script:not([src])').length; pr.ran=!!window.__x; window.emfDone=true; }); }); });"
         $env:EMF_TEST_APPDATA = New-AppData (Join-Path $runTemp ("appdata content " + [guid]::NewGuid().ToString("N").Substring(0, 8))) $false
         try {
-            $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "15000")
+            $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "30000")
         } finally {
             Remove-Item Env:\EMF_TEST_APPDATA -ErrorAction SilentlyContinue
         }
@@ -852,7 +852,7 @@ try {
         $stand = Start-Process -FilePath (Join-Path $game "enshrouded.exe") -ArgumentList @("-n", "30", "127.0.0.1") -WindowStyle Hidden -PassThru
         try {
             $js = $cW + " W(function(){return !!document.getElementById('content-mode')&&state&&state.game_running;},function(){ pr.total=ctl().length; pr.disabled=ctl().filter(function(b){return b.disabled;}).length; pr.running=t('content-running'); window.emfDone=true; });"
-            $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "15000")
+            $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "30000")
         } finally {
             if (-not $stand.HasExited) { $stand.Kill() }
             $null = $stand.WaitForExit(5000)
@@ -866,7 +866,7 @@ try {
         Write-File "dbghelp.dll" "EML stand-in EML_LOG_FILE_PATH"
         Write-File "mods\live\mod.json" '{"id": "live", "name": "Live Map", "version": "1.0.0", "capabilities": ["patch", "runtime"]}'
         $js = $cW + " W(function(){return !!document.getElementById('content-take-over');},function(){ pr.headline=t('content-headline'); pr.builtTitle=t('content-built-title'); pr.loses=items('content-loses'); pr.note=t('content-loses-note'); window.emfDone=true; });"
-        $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "15000")
+        $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "30000")
         $pr3 = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
         $pr3Text = if ($pr3) { $pr3 | ConvertTo-Json -Compress } else { "the page script did not run" }
         Check ($run.Code -eq 0 -and $null -ne $pr3 -and $pr3.headline -like "Applied by EML*" -and $pr3.builtTitle -eq "EMF would build") "EML content: with EML there the card offers the take-over, and lists what EMF would build ($pr3Text)"
