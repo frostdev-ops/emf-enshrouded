@@ -35,7 +35,8 @@ struct FakeGame {
     uint64_t now = 1000;
     std::vector<std::string> log;
 
-    FakeGame() {
+    L::AppLayout lay;  // where this build's game app keeps its fields (load_world reads them there)
+    explicit FakeGame(const L::AppLayout& layout = L::kApp1273043) : lay(layout) {
         const uintptr_t a = reinterpret_cast<uintptr_t>(app.data()), s = reinterpret_cast<uintptr_t>(save2.data());
         std::memcpy(pregame + L::kPregameGameApp, &a, 8);
         std::memcpy(pregame + L::kPregameSave2, &s, 8);
@@ -69,12 +70,12 @@ struct FakeGame {
             } else if (p.cmd == 0x16) {  // selectWorld, then playWorld
                 set16(save2, L::kSelectedWorld, p.value);
                 save2[L::kSelectedWorldValid] = 1;
-                set16(app, L::kPlaySlot, p.value);
-                app[L::kPlaySlotSet] = 1;
-                app[L::kAdventure] = 0;
+                set16(app, lay.play_slot, p.value);
+                app[lay.play_slot_set] = 1;
+                app[lay.adventure] = 0;
                 const size_t rec = L::kWorldRecords + (p.value >> 8) * L::kWorldStorageStride +
                                    ((p.value & 0xFF) - 1) * L::kWorldRecordSize;
-                std::memcpy(app.data() + L::kSessionName, save2.data() + rec + L::kWorldRecordName, 16);
+                std::memcpy(app.data() + lay.session_name, save2.data() + rec + L::kWorldRecordName, 16);
             } else if (p.cmd == 0x28) {
                 if (!menu) {
                     started = true;
@@ -110,6 +111,7 @@ struct FakeGame {
         d.queued_commands = [this](void* ui) -> size_t { return ui ? posts.size() - applied + foreign_queued : SIZE_MAX; };
         d.now_ms = [this] { return now; };
         d.log = [this](const std::string& s) { log.push_back(s); };
+        d.app = lay;
         return d;
     }
     bool post(uint8_t cmd, uint16_t value, void* ui) {
@@ -119,6 +121,14 @@ struct FakeGame {
     }
     void* pg() { return pregame; }
     uintptr_t s2() { return reinterpret_cast<uintptr_t>(save2.data()); }
+};
+
+// The game app layouts of the two game exes load_world knows: every test below runs on both.
+struct On1273043 {
+    static constexpr L::AppLayout app = L::kApp1273043;
+};
+struct On1283531 {
+    static constexpr L::AppLayout app = L::kApp1283531;
 };
 
 int g_ui = 0;  // the UI context (its address is all the machine needs)
@@ -154,8 +164,61 @@ void standard_saves(FakeGame& g) {
 
 }  // namespace
 
-TEST_CASE("load_world: frame A selects the LOCAL character and world, frame B checks them and posts offline + start") {
-    FakeGame g;
+TYPE_TO_STRING(On1273043);
+TYPE_TO_STRING(On1283531);
+
+TEST_CASE("load_world layout: 1273043's and 1283531's game exes; build 1283531's game app and UI fields are 0x20 later") {
+    const int c1273043 = emf::known_build_index(1273043), c1283531 = emf::known_build_index(1283531);
+    REQUIRE(menu_app_layout(c1273043).has_value());
+    REQUIRE(menu_app_layout(c1283531).has_value());
+    const L::AppLayout a = *menu_app_layout(c1273043), b = *menu_app_layout(c1283531);
+    CHECK(a.ui_command_queue == 0x33CC0u);
+    CHECK(a.mode == 0x34FA8u);
+    CHECK(a.session_name == 0x34FE8u);
+    CHECK(a.play_slot == 0x35058u);
+    CHECK(a.play_slot_set == 0x3505Au);
+    CHECK(a.adventure == 0x35270u);
+    CHECK(b.ui_command_queue == a.ui_command_queue + 0x20);  // counted in the new client's code (356 uses)
+    CHECK(b.mode == a.mode + 0x20);
+    CHECK(b.session_name == a.session_name + 0x20);
+    CHECK(b.play_slot == a.play_slot + 0x20);
+    CHECK(b.play_slot_set == a.play_slot_set + 0x20);
+    CHECK(b.adventure == a.adventure + 0x20);
+    // the dedicated servers have no menu; 1269579 and unknown builds were never checked
+    CHECK_FALSE(menu_app_layout(emf::known_build_index(1273043, true)).has_value());
+    CHECK_FALSE(menu_app_layout(emf::known_build_index(1283531, true)).has_value());
+    CHECK_FALSE(menu_app_layout(emf::known_build_index(1269579)).has_value());
+    CHECK_FALSE(menu_app_layout(-1).has_value());
+}
+
+namespace {
+// postStart's first bytes: ... sub rsp, 0x20; mov rax, [rcx+0xD0]; mov rbx, [rax+queue]; lea r8, [rbx+0x18] ...
+std::vector<uint8_t> post_start_code(uint32_t queue) {
+    std::vector<uint8_t> c = {0x48, 0x89, 0x5C, 0x24, 0x10, 0x57, 0x48, 0x83, 0xEC, 0x20, 0x48, 0x8B, 0x81, 0xD0,
+                              0x00, 0x00, 0x00, 0x48, 0x8B, 0x98};
+    for (int i = 0; i < 4; ++i) c.push_back(static_cast<uint8_t>(queue >> (8 * i)));
+    c.insert(c.end(), {0x4C, 0x8D, 0x43, 0x18});
+    return c;
+}
+}  // namespace
+
+TEST_CASE("load_world layout: postStart's own code must read the UI's command queue where the build's layout says") {
+    const auto code = post_start_code(0x33CE0);
+    CHECK(menu_queue_problem(L::kApp1283531, code.data(), code.size()).empty());
+    const std::string wrong = menu_queue_problem(L::kApp1273043, code.data(), code.size());
+    CHECK(wrong == "postStart reads the UI's command queue at +0x33ce0, the layout says +0x33cc0");
+    const auto old_code = post_start_code(0x33CC0);
+    CHECK(menu_queue_problem(L::kApp1273043, old_code.data(), old_code.size()).empty());
+    auto other = code;
+    other[18] = 0x8D;  // lea, not mov: not the instruction the layout was read from
+    CHECK(menu_queue_problem(L::kApp1283531, other.data(), other.size()) ==
+          "postStart's code does not read the UI's command queue where EMF expects (mov rbx, [rax+disp32] at +0x11)");
+    CHECK_FALSE(menu_queue_problem(L::kApp1283531, code.data(), 20).empty());  // too short to hold the disp32
+    CHECK_FALSE(menu_queue_problem(L::kApp1283531, nullptr, 0).empty());
+}
+
+TEST_CASE_TEMPLATE("load_world: frame A selects the LOCAL character and world, frame B checks them and posts offline + start", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);  // the main menu is up
@@ -202,8 +265,8 @@ TEST_CASE("load_world: frame A selects the LOCAL character and world, frame B ch
     CHECK(m.session_world_name() == std::optional<std::string>("My World 1"));
 }
 
-TEST_CASE("load_world: requests from the bridge thread are only handed over; the UI frame does every post") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: requests from the bridge thread are only handed over; the UI frame does every post", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -221,8 +284,8 @@ TEST_CASE("load_world: requests from the bridge thread are only handed over; the
     for (const auto& p : g.posts) CHECK(p.thread == std::this_thread::get_id());  // the UI frame's thread
 }
 
-TEST_CASE("load_world: a slot that does not exist, a wrong name and bad numbers are refused") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: a slot that does not exist, a wrong name and bad numbers are refused", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     g.world(0, 1, 1, "");  // LOCAL world slot 2 is empty (state 1)
     MenuStart m(g.deps());
@@ -258,8 +321,8 @@ TEST_CASE("load_world: a slot that does not exist, a wrong name and bad numbers 
     CHECK_FALSE(m.armed());
 }
 
-TEST_CASE("load_world: one at a time; not while a world runs") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: one at a time; not while a world runs", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -268,7 +331,7 @@ TEST_CASE("load_world: one at a time; not while a world runs") {
     REQUIRE(m.request(req(), c.done(), &no));
     CHECK_FALSE(m.request(req(), d.done(), &no));
     CHECK(no.code == "busy");
-    FakeGame g2;
+    FakeGame g2(Build::app);
     standard_saves(g2);
     g2.any_running = true;  // in a game (or someone else's)
     MenuStart m2(g2.deps());
@@ -282,8 +345,8 @@ TEST_CASE("load_world: one at a time; not while a world runs") {
     CHECK(g2.posts.empty());
 }
 
-TEST_CASE("load_world: waits for the main menu and the save lists, then times out naming what it waited for") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: waits for the main menu and the save lists, then times out naming what it waited for", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     g.save2[L::kWorldListState] = 1;  // still loading
     MenuStart m(g.deps());
@@ -304,8 +367,8 @@ TEST_CASE("load_world: waits for the main menu and the save lists, then times ou
     CHECK(g.posts.empty());
 }
 
-TEST_CASE("load_world: poll ends a request whose time is up even when no UI frame runs") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: poll ends a request whose time is up even when no UI frame runs", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     LoadWorldResult no;
@@ -321,8 +384,8 @@ TEST_CASE("load_world: poll ends a request whose time is up even when no UI fram
     CHECK_FALSE(m.busy());
 }
 
-TEST_CASE("load_world: the selection that never shows (the game ignored it) ends the request") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: the selection that never shows (the game ignored it) ends the request", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -340,8 +403,8 @@ TEST_CASE("load_world: the selection that never shows (the game ignored it) ends
     CHECK_FALSE(m.armed());
 }
 
-TEST_CASE("load_world: frame B never starts when the selection shows a Steam character (the user clicked one)") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: frame B never starts when the selection shows a Steam character (the user clicked one)", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -358,20 +421,20 @@ TEST_CASE("load_world: frame B never starts when the selection shows a Steam cha
     CHECK(g.posts.size() == 2);  // no session area, no start
 }
 
-TEST_CASE("load_world guard: it does nothing outside an EMF load, even with a Steam character selected") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world guard: it does nothing outside an EMF load, even with a Steam character selected", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
     g.set16(g.save2, L::kSelectedCharacter, 0x0101);  // the user plays their Steam character
-    g.set16(g.app, L::kPlaySlot, 0x0101);
+    g.set16(g.app, g.lay.play_slot, 0x0101);
     uint8_t result[16] = {};
     CHECK_FALSE(m.guard(result, g.s2()));
     CHECK(result[0] == 0);  // untouched: the game decides
 }
 
-TEST_CASE("load_world guard: during an EMF load a Steam character or world (or another name) becomes 'No Character selected'") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world guard: during an EMF load a Steam character or world (or another name) becomes 'No Character selected'", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -390,11 +453,11 @@ TEST_CASE("load_world guard: during an EMF load a Steam character or world (or a
     CHECK(m.guard(r1, g.s2()));
     CHECK(r1[0] == L::kNoCharacterSelected);
     g.set16(g.save2, L::kSelectedCharacter, 0x0001);
-    g.set16(g.app, L::kPlaySlot, 0x0101);  // the world to load is Steam storage
+    g.set16(g.app, g.lay.play_slot, 0x0101);  // the world to load is Steam storage
     uint8_t r2[16] = {};
     CHECK(m.guard(r2, g.s2()));
     CHECK(r2[0] == L::kNoCharacterSelected);
-    g.set16(g.app, L::kPlaySlot, 0x0001);
+    g.set16(g.app, g.lay.play_slot, 0x0001);
     g.character(0, 0, L::kRecordExists, "Somebody Else");  // the name check
     uint8_t r3[16] = {};
     CHECK(m.guard(r3, g.s2()));
@@ -413,8 +476,8 @@ TEST_CASE("load_world guard: during an EMF load a Steam character or world (or a
     CHECK(after[0] == 0);
 }
 
-TEST_CASE("load_world: back at the main menu after start without the guard: the game refused it") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: back at the main menu after start without the guard: the game refused it", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -432,8 +495,8 @@ TEST_CASE("load_world: back at the main menu after start without the guard: the 
     CHECK(c.last.error.find("back to the main menu") != std::string::npos);
 }
 
-TEST_CASE("load_world: a full command queue is retried on the next frame") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: a full command queue is retried on the next frame", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -449,8 +512,8 @@ TEST_CASE("load_world: a full command queue is retried on the next frame") {
     CHECK(g.posts.size() == 2);
 }
 
-TEST_CASE("load_world: another pregame state (Start Play) means the main menu is not active") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: another pregame state (Start Play) means the main menu is not active", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -483,8 +546,8 @@ void start_with_timeout(FakeGame& g, MenuStart& m, Capture& c, uint32_t timeout_
 }
 }  // namespace
 
-TEST_CASE("load_world guard: a timeout after Start was posted leaves the guard armed until the game is back in the main menu") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world guard: a timeout after Start was posted leaves the guard armed until the game is back in the main menu", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -510,8 +573,8 @@ TEST_CASE("load_world guard: a timeout after Start was posted leaves the guard a
     CHECK_FALSE(m.guard(after, g.s2()));
 }
 
-TEST_CASE("load_world guard: after a timeout the guard also turns off when the world runs, and at the latest 60 s after the start") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world guard: after a timeout the guard also turns off when the world runs, and at the latest 60 s after the start", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -524,7 +587,7 @@ TEST_CASE("load_world guard: after a timeout the guard also turns off when the w
     g.server_running = g.player = true;  // the start went through after all
     m.poll();
     CHECK_FALSE(m.armed());
-    FakeGame g2;
+    FakeGame g2(Build::app);
     standard_saves(g2);
     MenuStart m2(g2.deps());
     m2.on_menu_state(g2.pg(), 0);
@@ -543,8 +606,8 @@ TEST_CASE("load_world guard: after a timeout the guard also turns off when the w
     CHECK_FALSE(m2.armed());
 }
 
-TEST_CASE("load_world guard: the fake game's Start Play runs the guard; the user's Steam select queued with our start is refused") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world guard: the fake game's Start Play runs the guard; the user's Steam select queued with our start is refused", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     g.menu = &m;
@@ -568,8 +631,8 @@ TEST_CASE("load_world guard: the fake game's Start Play runs the guard; the user
     CHECK_FALSE(m.armed());
 }
 
-TEST_CASE("load_world guard: test_refuse makes the guard refuse even the LOCAL pair (the live check of the refusal path)") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world guard: test_refuse makes the guard refuse even the LOCAL pair (the live check of the refusal path)", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     g.menu = &m;
@@ -601,8 +664,8 @@ TEST_CASE("load_world guard: test_refuse makes the guard refuse even the LOCAL p
     CHECK(c.last.ok);
 }
 
-TEST_CASE("load_world: the game app is kept for the process; the pregame is forgotten when Start Play begins") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("load_world: the game app is kept for the process; the pregame is forgotten when Start Play begins", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
@@ -611,7 +674,7 @@ TEST_CASE("load_world: the game app is kept for the process; the pregame is forg
     m.on_other_state(g.pg(), 3, 0);  // Start Play: the pregame object is destroyed once it succeeds
     std::memset(g.pregame, 0xEE, sizeof g.pregame);  // freed memory
     CHECK(m.game_app() == app);
-    g.put_name(g.app, L::kSessionName, "My World 1");
+    g.put_name(g.app, g.lay.session_name, "My World 1");
     CHECK(m.session_world_name() == std::optional<std::string>("My World 1"));
     // a request now waits for the main menu (it does not read the freed pregame)
     Capture c;
@@ -622,7 +685,7 @@ TEST_CASE("load_world: the game app is kept for the process; the pregame is forg
     CHECK(g.posts.empty());
 }
 
-TEST_CASE("load_world: frame B posts the start only in the main menu, in Lobby mode, with no world and an empty command queue") {
+TEST_CASE_TEMPLATE("load_world: frame B posts the start only in the main menu, in Lobby mode, with no world and an empty command queue", Build, On1273043, On1283531) {
     auto at_frame_b = [](FakeGame& g, MenuStart& m, Capture& c) {
         LoadWorldResult no;
         REQUIRE(m.request(req(), c.done(), &no));
@@ -630,7 +693,7 @@ TEST_CASE("load_world: frame B posts the start only in the main menu, in Lobby m
         g.dispatch();
     };
     {
-        FakeGame g;
+        FakeGame g(Build::app);
         standard_saves(g);
         MenuStart m(g.deps());
         m.on_menu_state(g.pg(), 0);
@@ -644,7 +707,7 @@ TEST_CASE("load_world: frame B posts the start only in the main menu, in Lobby m
         CHECK(g.posts.size() == 4);
     }
     {
-        FakeGame g;
+        FakeGame g(Build::app);
         standard_saves(g);
         MenuStart m(g.deps());
         m.on_menu_state(g.pg(), 0);
@@ -657,21 +720,21 @@ TEST_CASE("load_world: frame B posts the start only in the main menu, in Lobby m
         CHECK(g.posts.size() == 2);
     }
     {
-        FakeGame g;
+        FakeGame g(Build::app);
         standard_saves(g);
         MenuStart m(g.deps());
         m.on_menu_state(g.pg(), 0);
         Capture c;
         at_frame_b(g, m, c);
         const uint32_t mode = 2;  // Host_Online
-        std::memcpy(g.app.data() + L::kMode, &mode, 4);
+        std::memcpy(g.app.data() + g.lay.mode, &mode, 4);
         m.on_ui_frame(kUi);
         REQUIRE(c.calls == 1);
         CHECK(c.last.error.find("mode") != std::string::npos);
         CHECK(g.posts.size() == 2);
     }
     {
-        FakeGame g;
+        FakeGame g(Build::app);
         standard_saves(g);
         MenuStart m(g.deps());
         m.on_menu_state(g.pg(), 0);
@@ -685,10 +748,10 @@ TEST_CASE("load_world: frame B posts the start only in the main menu, in Lobby m
     }
 }
 
-TEST_CASE("frame B: a selection with another world, another slot to load or an adventure never starts") {
+TEST_CASE_TEMPLATE("frame B: a selection with another world, another slot to load or an adventure never starts", Build, On1273043, On1283531) {
     for (int which = 0; which < 3; ++which) {
         CAPTURE(which);
-        FakeGame g;
+        FakeGame g(Build::app);
         standard_saves(g);
         MenuStart m(g.deps());
         m.on_menu_state(g.pg(), 0);
@@ -698,8 +761,8 @@ TEST_CASE("frame B: a selection with another world, another slot to load or an a
         m.on_ui_frame(kUi);
         g.dispatch();
         if (which == 0) g.set16(g.save2, L::kSelectedWorld, 0x0002);
-        if (which == 1) g.set16(g.app, L::kPlaySlot, 0x0002);
-        if (which == 2) g.app[L::kAdventure] = 1;
+        if (which == 1) g.set16(g.app, g.lay.play_slot, 0x0002);
+        if (which == 2) g.app[g.lay.adventure] = 1;
         m.on_ui_frame(kUi);
         CHECK(g.posts.size() == 2);
         g.now += MenuStart::kSelectMs + 1;
@@ -711,11 +774,11 @@ TEST_CASE("frame B: a selection with another world, another slot to load or an a
     }
 }
 
-TEST_CASE("frame A: a session mode other than Lobby waits, and the timeout names it") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("frame A: a session mode other than Lobby waits, and the timeout names it", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     const uint32_t mode = 1;  // Host_Offline
-    std::memcpy(g.app.data() + L::kMode, &mode, 4);
+    std::memcpy(g.app.data() + g.lay.mode, &mode, 4);
     MenuStart m(g.deps());
     m.on_menu_state(g.pg(), 0);
     Capture c;
@@ -730,8 +793,8 @@ TEST_CASE("frame A: a session mode other than Lobby waits, and the timeout names
     CHECK(c.last.error.find("session mode") != std::string::npos);
 }
 
-TEST_CASE("character: the selection the pregame state hook last saw; unknown before and when it cannot be read") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("character: the selection the pregame state hook last saw; unknown before and when it cannot be read", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     CharacterSelection c = m.character();
@@ -759,8 +822,8 @@ TEST_CASE("character: the selection the pregame state hook last saw; unknown bef
     CHECK(*c.name == "Steam Hero");  // the name from the Steam table, not the LOCAL one
 }
 
-TEST_CASE("character: no valid selection, a storage or slot the layout does not know, or unreadable memory: unknown") {
-    FakeGame g;
+TEST_CASE_TEMPLATE("character: no valid selection, a storage or slot the layout does not know, or unreadable memory: unknown", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
     standard_saves(g);
     MenuStart m(g.deps());
     auto seen = [&](uint16_t slot, uint8_t valid) {

@@ -1,7 +1,8 @@
 #pragma once
 // What the game's main menu knows about the save slots (docs/saves.md), for save-info.json: the character and
 // world slot records in Save2System (menu_layout in menu_start.h), with the character's level and the world's
-// last-played time and play time (docs/engine_parts/re_saves.md, the menu's slot records). Build 1273043's client only.
+// last-played time and play time (docs/engine_parts/re_saves.md, the menu's slot records). The game exes of builds
+// 1273043 and 1283531 (whose save2 is the same).
 //
 // SaveInfoRecorder: a hook on the pregame state handler tells it when the main menu is up; then, on a worker, it reads
 // the slot tables once the game has loaded its save lists and merges them into save-info.json. When Start Play begins it
@@ -69,10 +70,13 @@ private:
     std::mutex file_lock_;
 };
 
+// True on a known build's game exe whose slot records EMF checked: 1273043 and 1283531 (save2's offsets did not move).
+bool slot_records_known(int build_index);
+
 // The process's recorder (null until install_save_info ran and succeeded).
 SaveInfoRecorder* save_info_recorder();
-// Hooks the pregame state handler for the recorder, on build 1273043's game exe only (the record offsets are that
-// build's). False and why otherwise. The deps' read is set here.
+// Hooks the pregame state handler for the recorder, on a game exe slot_records_known accepts. False and why otherwise.
+// The deps' read is set here.
 bool install_save_info(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index,
                        SaveInfoRecorder::Deps deps, std::string* why);
 

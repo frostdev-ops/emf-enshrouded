@@ -1,7 +1,7 @@
 #pragma once
 // Starting a LOCAL save offline from the main menu without clicks (the debug bridge's load_world), the way the menu's
 // own "Play -> Start a Session -> Start... -> Offline: Start" does it: commands posted to the pregame command queue from
-// inside the UI frame (docs/engine_parts/re_attributes_menu.md, Part 2). Build 1273043's client only.
+// inside the UI frame (docs/engine_parts/re_attributes_menu.md, Part 2). The game exes of builds 1273043 and 1283531.
 //
 // The bridge thread only stores a request; every game call happens in the UI frame hook. While an EMF-started load runs,
 // and only then, a post-hook on the game's "character selected?" check refuses a Steam character or world (and, when
@@ -9,6 +9,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <cstddef>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -18,13 +19,14 @@
 namespace emf::core {
 
 // Offsets inside the game's objects, read from build 1273043's code (re_attributes_menu.md: save2 is +0x10 from 1269579).
+// Build 1283531 kept save2's; its game app and UI data grew by 0x20 before the fields in AppLayout.
 namespace menu_layout {
 constexpr uint32_t kPregameGameApp = 0x28;   // Pregame -> gameApp*
 constexpr uint32_t kPregameSave2 = 0x140;    // Pregame -> save2*
 constexpr uint8_t kMainMenuState = 2;        // the pregame state handler's state id of the main menu (3 = Start Play)
-// the UI's pregame command queue, as the posters reach it: ui+0xD0 -> UiData; *(UiData+0x33CC0) -> queue; +0x10 u32 count
+// the UI's pregame command queue, as the posters reach it: ui+0xD0 -> UiData; *(UiData+app.ui_command_queue) -> queue;
+// +0x10 u32 count
 constexpr uint32_t kUiData = 0xD0;
-constexpr uint32_t kUiCommandQueue = 0x33CC0;
 constexpr uint32_t kQueueCount = 0x10;
 // save2
 constexpr uint32_t kWorldListJob = 0x980;    // u8: 1 = the world list job is busy
@@ -44,12 +46,19 @@ constexpr uint32_t kSelectedWorld = 0x1192BB;    // u16 slot id
 constexpr uint32_t kSelectedWorldValid = 0x1192BD;
 constexpr uint32_t kSelectedCharacter = 0x1192BE;  // u16 slot id (its high byte, +0x1192BF, is the storage)
 constexpr uint32_t kSelectedCharacterValid = 0x1192C0;
-// gameApp
-constexpr uint32_t kMode = 0x34FA8;         // u32: 0 Lobby, 1 Host_Offline, 2 Host_Online, 3 Client_Online
-constexpr uint32_t kSessionName = 0x34FE8;  // {char* data; u64 length}: the world's name once playWorld ran
-constexpr uint32_t kPlaySlot = 0x35058;     // u16 slot id of the save to load (its high byte, +0x35059, the storage)
-constexpr uint32_t kPlaySlotSet = 0x3505A;  // u8
-constexpr uint32_t kAdventure = 0x35270;    // u8: an adventure instead of a save (playWorld clears it)
+// the game app's fields and the UI's command queue: these moved with the game app and the UI data (one layout per build)
+struct AppLayout {
+    uint32_t ui_command_queue;  // UiData -> the pregame command queue*
+    uint32_t mode;              // gameApp: u32 0 Lobby, 1 Host_Offline, 2 Host_Online, 3 Client_Online
+    uint32_t session_name;      // gameApp: {char* data; u64 length}: the world's name once playWorld ran
+    uint32_t play_slot;         // gameApp: u16 slot id of the save to load (its high byte, the next one, the storage)
+    uint32_t play_slot_set;     // gameApp: u8
+    uint32_t adventure;         // gameApp: u8: an adventure instead of a save (playWorld clears it)
+};
+inline constexpr AppLayout kApp1273043{0x33CC0, 0x34FA8, 0x34FE8, 0x35058, 0x3505A, 0x35270};
+// every field 0x20 later: counted as disp32 in 1283531's client (the queue 356 times, the old value 3 times; mode 27,
+// session name 8, play slot 19, adventure 25), and the four post* functions read the queue there
+inline constexpr AppLayout kApp1283531{0x33CE0, 0x34FC8, 0x35008, 0x35078, 0x3507A, 0x35290};
 // record states (u8 at +0)
 constexpr uint8_t kRecordExists = 2, kRecordLoaded = 3, kRecordChanged = 4;
 constexpr uint8_t kNoCharacterSelected = 0x1F;  // the "character selected?" check's error: back to the menu
@@ -103,6 +112,7 @@ public:
         std::function<size_t(void* ui)> queued_commands;
         std::function<uint64_t()> now_ms;
         std::function<void(const std::string&)> log;
+        menu_layout::AppLayout app = menu_layout::kApp1273043;  // this build's game app fields
     };
     static constexpr uint64_t kSelectMs = 5000;  // frame B: the selection must show within this
     // A request that ends (a timeout) after the start was posted leaves the guard on until the game is back in the main
@@ -132,7 +142,8 @@ public:
     bool busy() const;
     bool menu_active() const { return menu_active_.load(); }
     uintptr_t game_app() const;
-    // The session's world name (gameApp+0x34FE8) once the game has seen the menu; nothing before or when unreadable.
+    // The session's world name (gameApp + app.session_name) once the game has seen the menu; nothing before or when
+    // unreadable.
     std::optional<std::string> session_world_name() const;
     // The pregame state handler's thread, before the game's handler runs (the thread that changes the selection, and
     // the pregame is alive then): reads the selected character from the pregame's save2 and keeps it. A world never
@@ -188,11 +199,18 @@ private:
     CharacterSelection character_;  // the last note_character (under character_lock_)
 };
 
+// The game app layout of a known build's game exe whose menu offsets EMF checked (1273043, 1283531); nothing for
+// another build, an unknown build or a dedicated server (no menu).
+std::optional<menu_layout::AppLayout> menu_app_layout(int build_index);
+// "" when postStart's own code (its first bytes, `size` of them) reads the UI's command queue where `app` says
+// (`mov rbx, [rax+disp32]` at +0x11, which its signature holds); else why not.
+std::string menu_queue_problem(const menu_layout::AppLayout& app, const uint8_t* post_start_code, size_t size);
+
 // The process's MenuStart (null until install_menu_start ran and succeeded).
 MenuStart* menu_start();
 // Installs the hooks (UI frame, main-menu state, character check) and the posters when every signature is usable, on
-// build 1273043's client (the offsets are that build's); false (and the reason) otherwise. Deps other than the game's
-// functions come from the caller.
+// a game exe menu_app_layout knows and whose postStart confirms that layout's queue; false (and the reason) otherwise.
+// Deps other than the game's functions and the layout come from the caller.
 bool install_menu_start(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index,
                         MenuStart::Deps deps, std::string* why);
 // The hosted world's display name for the bridge's state, when the menu hooks know the game app.

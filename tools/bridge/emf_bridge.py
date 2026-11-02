@@ -126,7 +126,7 @@ def load_world_message(code, error):
                 "character's name (load_world never starts a Steam Cloud save)." % error)
     if code == "unavailable":
         return ("load_world could not start the world: %s. It works from the main menu of a game with the bridge on "
-                "(build 1273043's game exe, not the dedicated server)." % error)
+                "(the game exe of build 1273043 or 1283531, not the dedicated server)." % error)
     if code == "busy":
         return "another load_world is already running: %s. Wait for its reply." % error
     if code == "timeout":

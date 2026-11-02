@@ -2,6 +2,11 @@
 #include <cstdint>
 
 // Engine offsets for builds 1269579 and 1273043 (unchanged by that update). Source: docs/ENGINE_MAP.md section 1.
+// Build 1283531 (2026-11-02) made every ECS program entry 8 bytes longer, which moved the world's block after the
+// program table (program count, event registry, entity storage with its kind, entity map and tick fields) by +0x1C00.
+// The world offsets below are the base of that block: EMF's code reads them through world_offsets()
+// (common/world_offsets.h), which the start-up sets from the storage's offset in GetComponent's code and the program
+// table's count and stride in RegisterProgram's code. Use these constants directly only in world_offsets.h and tests.
 namespace emf::off {
 
 // World object
@@ -12,13 +17,16 @@ constexpr uint32_t kSingletonMap = 0x7462F8;    // Keen map: fnv1a32(name) -> u1
 constexpr uint32_t kSingletonEntrySize = 0xE8;
 constexpr uint32_t kSingletonEntryHash = 0xA0;  // u32 fnv1a32(name)
 constexpr uint32_t kSingletonEntryObj = 0xA8;   // void* object
+constexpr uint32_t kProgramTable = 0x746350;    // ECS program table: entries of kProgramStride bytes (+0 desc*, +0x10 name)
+constexpr uint32_t kProgramMax = 0x380;         // entries in the table
+constexpr uint32_t kProgramStride = 0x1F20;     // base: world_offsets().program_stride (0x1F28 on 1283531)
+constexpr uint32_t kProgramCount = 0xE15350;    // base: world_offsets().program_count (u16)
 constexpr uint32_t kStorage = 0xE15DC0;         // entity storage / sim (argument of the sim step)
 constexpr uint32_t kKind = 0xE15DC8;            // u8: 0 server, 1 prediction, 2 client
 constexpr uint32_t kEntityMap = 0xE15F08;       // Keen map: EntityId (mixed) -> entity record*
 constexpr uint32_t kTickPeriodNs = 0xE16280;    // i64 ns per tick (16,666,667 = 60 Hz); ecsNow = period * tick
 constexpr uint32_t kTick = 0xE1629C;            // u32 current tick
-constexpr uint32_t kTickLengthNs = 0x1CFB6C0;   // i64 tick length in ns
-constexpr uint32_t kWorldMinSize = 0x1CFB6C8;   // highest offset we touch + 8
+constexpr uint32_t kWorldMinSize = kTick + 8;   // the base's highest offset EMF touches + 8 (the tests' fake worlds)
 
 // ECS events (docs/engine_parts/re_events.md)
 constexpr uint32_t kEventTypes = 0xE15AB8;      // ptr to event type entries, stride kEventTypeStride

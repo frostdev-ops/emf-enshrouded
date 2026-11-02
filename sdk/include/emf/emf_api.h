@@ -28,7 +28,7 @@ extern "C" {
 
 #define EMF_API_VERSION 21
 
-/* World kinds (the byte at world+0xE15DC8). */
+/* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
 #define EMF_WORLD_PREDICTION 1
 #define EMF_WORLD_CLIENT 2

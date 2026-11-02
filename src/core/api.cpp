@@ -20,6 +20,7 @@
 #include "common/hooks.h"
 #include "common/offsets.h"
 #include "common/seh.h"
+#include "common/world_offsets.h"
 #include "events.h"
 #include "inventory.h"
 #include "items.h"
@@ -94,7 +95,8 @@ int64_t api_ecs_time_ns(EmfWorld* w) {
     if (!w || !tick_fields_ok()) return 0;
     int64_t period = 0;
     uint32_t tick = 0;
-    if (!seh_read(raw(w) + off::kTickPeriodNs, &period, 8) || !seh_read(raw(w) + off::kTick, &tick, 4)) return 0;
+    const WorldOffsets& wo = world_offsets();
+    if (!seh_read(raw(w) + wo.tick_period_ns, &period, 8) || !seh_read(raw(w) + wo.tick, &tick, 4)) return 0;
     return period * static_cast<int64_t>(tick);
 }
 
@@ -1587,7 +1589,7 @@ void damage_pre_conclusion(void* program_context) {
     void* system = view.singleton(kImpactSystem);
     int64_t period = 0;
     int64_t time_ns = 0;
-    if (g_state->tick_offsets_ok && seh_read(world + off::kTickPeriodNs, &period, 8))
+    if (g_state->tick_offsets_ok && seh_read(world + world_offsets().tick_period_ns, &period, 8))
         time_ns = period * static_cast<int64_t>(view.tick());
     const size_t n = g_state->damage_queue.flush(world, g_state->server_session.load(), system,
                                                  g_state->alloc_pending_hit, time_ns, view.tick(), core_log);

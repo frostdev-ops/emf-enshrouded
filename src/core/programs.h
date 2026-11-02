@@ -6,7 +6,8 @@
 
 namespace emf::core {
 
-// One entry of a world's ECS program table (world+0x746350, stride 0x1F20, count u16 at world+0xE15350).
+// One entry of a world's ECS program table (world + off::kProgramTable; its stride and the u16 count's offset are
+// world_offsets().program_stride / program_count: 0x1F20 / +0xE15350 on 1273043, 0x1F28 / +0xE16F50 on 1283531).
 struct ProgramInfo {
     uint16_t index = 0;
     std::string name;
@@ -14,12 +15,8 @@ struct ProgramInfo {
     uintptr_t update_fn = 0;
 };
 
-constexpr uint32_t kProgramTable = 0x746350;
-constexpr uint32_t kProgramStride = 0x1F20;
-constexpr uint32_t kProgramCount = 0xE15350;
-constexpr uint32_t kProgramMax = 0x380;
-
-// Snapshot of all programs registered in `world` (fault-guarded; empty on a bad world).
+// Snapshot of all programs registered in `world` (fault-guarded; empty on a bad world, or when the program table's layout
+// is not known on this build).
 std::vector<ProgramInfo> list_programs(const uint8_t* world);
 // The program called `name`, or an empty ProgramInfo (desc == nullptr).
 ProgramInfo find_program(const uint8_t* world, std::string_view name);
