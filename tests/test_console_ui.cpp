@@ -565,14 +565,16 @@ TEST_CASE("toast: a long reply (like /help) says how many lines it does not show
     CHECK(toast_lines(m, t, 0, 13).size() == 13);  // all fit: no note
 }
 
-TEST_CASE("toast: draws headless without trouble") {
+TEST_CASE("toast: draws headless without trouble (boxed, as before)") {
     Headless h;
     ConsoleModel m;
     const ToastState t{m.version(), 1000};
     m.add_line("> time 12");
     m.add_line("time of day is now 12.00 h (was 3.00 h)");
+    TextLook boxed;
+    boxed.style = HudStyle::Boxed;
     ImGui::NewFrame();
-    draw_toast(toast_lines(m, t, 0), ImVec2(1920, 1080));
+    draw_notes(toast_lines(m, t, 0), ImVec2(1920, 1080), boxed);
     ImGui::Render();
     bool found = false;
     for (ImGuiWindow* w : GImGui->Windows) found |= std::string(w->Name).find("##emf_toast") != std::string::npos;

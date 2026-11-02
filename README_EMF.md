@@ -146,7 +146,44 @@ key=0x29       ; the key's scan code (0x29 = the key under Esc)
 chat=1         ; 0 turns chat commands off (below)
 suggest=1      ; 0: no suggestions as you type (Tab still completes)
 suggest_rows=8 ; at most this many suggestions (3 to 12)
+font=consolas  ; the console's font: consolas, cascadia, serif or file:<name>.ttf
+tabs_font=serif  ; the tab bar and the Mods tab: serif, consolas, cascadia or file:<name>.ttf
+text_size=100  ; the console's text size, 60 to 200 (%)
+height=50      ; the console's height, 25 to 90 (% of the screen)
+opacity=80     ; how solid its background is, 30 to 100 (%)
+background=#080a0e  ; its background colour
+accent=#c0b074 ; the tabs, the selection, the scrollbar and the wheels' ring
+
+[hud]
+style=game     ; game (serif, soft shadow, no box), boxed (EMF's earlier look) or plain (the text alone)
+font=serif     ; on-screen text and wheels: serif, console (the console's font) or file:<name>.ttf
+size=100       ; on-screen text size, 60 to 200 (%)
+colour=#fffff4 ; notes, and lines whose mod chose no colour of its own
+shadow=1       ; 0: no shadow (style=game)
+notes_place=top_centre  ; top_centre (under the compass), top_left or right
+notes_seconds=6  ; how long a note stays, 2 to 20 seconds
 ```
+**The look.** EMF's on-screen text (the clock, Life Skills, Flame Blessings and the other mods' lines, notes such as
+Sleep Through the Day's, and the wheels) uses a book serif in warm white with a soft shadow, like the game's own text
+(lines and notes in bold); notes show top centre under the compass on a dark band that fades at both ends, at most
+three rows each. `[hud]` changes that, `[overlay]` changes the console. Colours are `#rrggbb` or `#rgb`; sizes are a
+percentage of the size EMF picks for the screen: on-screen text is the screen's height / 38 (28 px at 1080p), the
+console's text its height / 54 (20 px at 1080p), and serif tabs 1.3 times the console's text (26 px at 1080p). The
+text is sized again when the window's size has stayed the same for a moment. EMF reads these keys when the game
+starts and never writes them; a value it cannot use falls back to its default and a number out of range is kept
+inside its range, each with one line in `emf_core.log`. `style=boxed` alone gives EMF's earlier look: dark boxes at
+the console's size, the console's font, `#dbdbcc` and notes top left (the keys you set still apply).
+
+**Fonts.** EMF ships Alegreya (the serif) and Cascadia Mono in `<game>\emf\fonts\` (both under the SIL Open Font
+License, in the zip's `licenses\`); Consolas comes from Windows. To use a font of your own, put its `.ttf` or `.otf`
+in `<game>\emf\fonts\` and set `font=file:<its file name>`; use only fonts from a source you trust. A font that is
+missing or is not a font EMF can read is skipped with a line in the log: then the bundled one, then Consolas, then the
+console's built-in font.
+
+**HDR.** With the game's HDR on, EMF does not convert its colours yet: the screen reads them as HDR values, so
+bright ones (the warm white text, channel values above about 150) look very bright. A darker `colour=` (for example
+`#969690`) tones the text down.
+
 How it draws: the console is a Vulkan layer (`VK_LAYER_EMF_console`, manifest `<game>\emf\vk\`). EMF's `dinput8.dll`
 enables it for the game process only; nothing is written to the registry and other games do not see it. It works next
 to RivaTuner/RTSS, the Steam overlay and the Discord overlay.

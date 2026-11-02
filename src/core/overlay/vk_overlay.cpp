@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <malloc.h>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -19,12 +20,20 @@
 namespace emf::core {
 namespace {
 
-bool guarded_render(RenderFn render, VkQueue q, const VkPresentInfoKHR* info, VkSemaphore* sem, void* user) {
+bool render_guarded(RenderFn render, VkQueue q, const VkPresentInfoKHR* info, VkSemaphore* sem, void* user,
+                    DWORD* fault) {
     __try {
         return render(q, info, sem, user);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (*fault = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+
+bool guarded_render(RenderFn render, VkQueue q, const VkPresentInfoKHR* info, VkSemaphore* sem, void* user) {
+    DWORD fault = 0;
+    const bool ok = render_guarded(render, q, info, sem, user, &fault);
+    if (fault == EXCEPTION_STACK_OVERFLOW) _resetstkoflw();  // the guard page back: the next overflow is caught too
+    return ok;
 }
 
 }  // namespace
@@ -106,6 +115,7 @@ struct DeviceFns {
     PFN_vkCmdBeginRenderPass CmdBeginRenderPass;
     PFN_vkCmdEndRenderPass CmdEndRenderPass;
     PFN_vkQueueSubmit QueueSubmit;
+    PFN_vkQueueWaitIdle QueueWaitIdle;
     PFN_vkCreateFence CreateFence;
     PFN_vkDestroyFence DestroyFence;
     PFN_vkWaitForFences WaitForFences;
@@ -227,6 +237,15 @@ void free_record(SwapchainRecord& r) {
     r = SwapchainRecord{};
 }
 
+// EMF's earlier frames are done (before the font atlas they read is replaced): this swapchain's, on any queue, and
+// this queue's, on any swapchain. ImGui's upload then also waits for the queue it started on.
+bool our_frames_done(const SwapchainRecord& r, VkQueue queue) {
+    if (!r.fences.empty() && D.WaitForFences(g_device, static_cast<uint32_t>(r.fences.size()), r.fences.data(), VK_TRUE,
+                                             1000000000ull) != VK_SUCCESS)
+        return false;
+    return D.QueueWaitIdle(queue) == VK_SUCCESS;
+}
+
 // Our per-image objects for a swapchain (first draw after it was created).
 bool prepare(SwapchainRecord& r, uint32_t family) {
     if (r.ready) return true;
@@ -299,7 +318,8 @@ bool init_imgui(const SwapchainRecord& r, VkQueue queue, uint32_t family) {
         GImGui->ConfigNavWindowingKeyNext = ImGuiKey_None;
         GImGui->ConfigNavWindowingKeyPrev = ImGuiKey_None;
         ImGui::StyleColorsDark();
-        if (g_hooks.fonts) g_hooks.fonts(io, static_cast<float>(r.extent.height));
+        if (g_hooks.style) g_hooks.style(ImGui::GetStyle());
+        if (g_hooks.fonts) g_hooks.fonts(io, static_cast<float>(r.extent.height));  // the first atlas
         QueryPerformanceFrequency(&g_freq);
         QueryPerformanceCounter(&g_last);
         g_imgui = true;
@@ -362,10 +382,18 @@ bool render(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* signal, vo
     if (!init_imgui(r, queue, family)) return false;
     const uint32_t i = info->pImageIndices[0];
     if (i >= r.images.size()) return true;
+    ImGuiIO& io = ImGui::GetIO();
+    // A swapchain size that changes the text's size: the atlas is built again between frames, once EMF's earlier
+    // frames (on any queue, any swapchain) are done with the old one, then uploaded; its CPU copy is let go.
+    const float height = static_cast<float>(r.extent.height);
+    if (g_hooks.fonts_due && g_hooks.fonts && g_hooks.fonts_due(height) && our_frames_done(r, queue)) {
+        g_hooks.fonts(io, height);
+        ImGui_ImplVulkan_CreateFontsTexture();
+        io.Fonts->ClearTexData();
+    }
     if (D.WaitForFences(g_device, 1, &r.fences[i], VK_TRUE, 100000000ull) != VK_SUCCESS) return true;  // skip a frame
     D.ResetFences(g_device, 1, &r.fences[i]);
 
-    ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(static_cast<float>(r.extent.width), static_cast<float>(r.extent.height));
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
@@ -373,7 +401,8 @@ bool render(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* signal, vo
                               1.0f / 1000.0f, 0.25f);
     g_last = now;
     if (g_hooks.before_frame) g_hooks.before_frame(io);
-    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplVulkan_NewFrame();  // uploads the atlas when the backend has none yet (its first frame)
+    if (io.Fonts->TexPixelsAlpha8 || io.Fonts->TexPixelsRGBA32) io.Fonts->ClearTexData();  // on the GPU now
     ImGui::NewFrame();
     if (g_hooks.build) g_hooks.build(io.DisplaySize);
     ImGui::Render();
@@ -455,6 +484,7 @@ bool overlay_attach_device(const LayerDevice& d) {
     EMF_LOAD(CmdBeginRenderPass);
     EMF_LOAD(CmdEndRenderPass);
     EMF_LOAD(QueueSubmit);
+    EMF_LOAD(QueueWaitIdle);
     EMF_LOAD(CreateFence);
     EMF_LOAD(DestroyFence);
     EMF_LOAD(WaitForFences);

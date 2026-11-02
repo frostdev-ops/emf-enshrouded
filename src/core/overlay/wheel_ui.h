@@ -7,6 +7,7 @@
 #include <vector>
 
 #include "imgui.h"
+#include "look_layout.h"
 #include "wheel_model.h"
 
 namespace emf::core {
@@ -30,11 +31,16 @@ std::vector<WheelLabelLine> wheel_label_layout(const std::string& label, float w
 std::pair<std::string, std::string> wheel_title_lines(const std::string& title, float width,
                                                       const std::function<float(const std::string&)>& measure);
 
-// The width in pixels a slice's label may use on a page of `slices` slices on a `display`-sized screen. The overlay's
-// font is Consolas at height / 54 pixels (about 0.55 x that wide a character), so a page of 8 fits about 13 characters
-// a line at any screen size.
+// `text` cut to fit `width` (measured by `measure`), with "..." when it was cut; the cut falls between UTF-8 characters.
+std::string wheel_fit(const std::string& text, float width, const std::function<float(const std::string&)>& measure);
+
+// The width in pixels a slice's label may use on a page of `slices` slices on a `display`-sized screen. At [hud] size
+// 100 the labels are height / 38 pixels in the bundled serif: a page of 8 fits about 12 characters a line at any
+// screen size (tests/test_look_layout.cpp checks the shipped mods' labels).
 float wheel_label_width(ImVec2 display, size_t slices);
 
-void draw_wheel(const WheelModel& wheel, ImVec2 display);
+// The wheel in the [hud] font (the title in its bold), the lit slice with the accent's ring, labels with the look's
+// shadow.
+void draw_wheel(const WheelModel& wheel, ImVec2 display, const TextLook& look);
 
 }  // namespace emf::core

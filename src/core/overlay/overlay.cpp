@@ -9,10 +9,12 @@
 #include <cwchar>
 #include <memory>
 #include <optional>
+#include <set>
 
 #include "console_ui.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
+#include "font_plan.h"
 #include "input_hook.h"
 #include "mods_ui.h"
 #include "submit.h"
@@ -56,6 +58,12 @@ WheelModel g_wheel;  // render thread
 WheelGate g_wheel_gate([](bool on) {
     if (g_router) g_router->set_wheel(on);
 });
+LookSettings g_look;                // [hud] and the look keys of [overlay], read at start
+OverlayFonts g_fonts;               // render thread: the atlas's fonts (new pointers after each rebuild)
+FontRebuild g_font_rebuild;         // render thread
+std::set<std::string> g_font_told;  // render thread: the font problems already in the log
+
+void log_line(const char* s);
 
 // Runs just before a wheel's capture ends: closed while its hold key is still down (Esc, a click), the mod that
 // opened it must not take that key as a new press, so it stays hidden from mods until released.
@@ -93,17 +101,36 @@ std::string utf8(const std::wstring& w) {
     return s;
 }
 
+// Whether the fonts must be built again for a swapchain `height` pixels high (render thread, before a frame): the
+// first time, and when a new size changed the faces' pixel sizes and held for a moment.
+bool fonts_due(float height) {
+    return g_font_rebuild.due(font_sizes(g_look, static_cast<int>(height)), GetTickCount64());
+}
+
+// Plans and builds the fonts for a swapchain `height` pixels high (render thread, between frames). A font that cannot
+// be used is said once in the log, however often the window changes size; the first few builds are logged.
 void setup_fonts(ImGuiIO& io, float height) {
-    const float size = std::clamp(height / 54.0f, 13.0f, 40.0f);
+    const int h = static_cast<int>(height);
     wchar_t windir[MAX_PATH] = {};
     GetWindowsDirectoryW(windir, MAX_PATH);
-    const std::wstring font = std::wstring(windir) + L"\\Fonts\\consola.ttf";
-    if (GetFileAttributesW(font.c_str()) != INVALID_FILE_ATTRIBUTES &&
-        io.Fonts->AddFontFromFileTTF(utf8(font).c_str(), size))
-        return;
-    ImFontConfig cfg;
-    cfg.SizePixels = size;
-    io.Fonts->AddFontDefault(&cfg);
+    const FontPaths paths{g_deps.emf_dir + L"\\fonts", std::wstring(windir) + L"\\Fonts\\consola.ttf"};
+    const FontPlan plan = plan_fonts(g_look, h, paths, [](const std::wstring& f) { return font_file_ok(f); });
+    std::vector<std::string> problems = plan.problems;
+    g_fonts = build_font_atlas(*io.Fonts, plan, &problems);
+    g_ui.tabs_font = g_fonts.tabs;  // the old fonts are gone
+    g_font_rebuild.built(font_sizes(g_look, h));
+    for (const auto& p : problems)
+        if (g_font_told.insert(p).second) log_line(("overlay: " + p).c_str());
+    constexpr int kLoggedBuilds = 10;
+    static int builds = 0;
+    if (++builds <= kLoggedBuilds) {
+        char msg[200];
+        std::snprintf(msg, sizeof(msg), "overlay: text at %.0f px (console) and %.0f px (on-screen), %d fonts, atlas %dx%d%s",
+                      plan.face(FontRole::Console).pixel_size, plan.face(FontRole::Hud).pixel_size, io.Fonts->Fonts.Size,
+                      io.Fonts->TexWidth, io.Fonts->TexHeight,
+                      builds == kLoggedBuilds ? " (later font builds are not logged)" : "");
+        log_line(msg);
+    }
 }
 
 void before_frame(ImGuiIO& io) {
@@ -232,6 +259,19 @@ bool world_live() {
            (g_deps.tracker->latest(EMF_WORLD_CLIENT, now) || g_deps.tracker->latest(EMF_WORLD_SERVER, now));
 }
 
+// How HUD lines, notes and wheels are drawn: the look's settings with this atlas's fonts.
+TextLook text_look() {
+    TextLook t;
+    t.style = g_look.style;
+    t.shadow = g_look.shadow;
+    t.colour = g_look.hud_colour;
+    t.accent = g_look.accent;
+    t.notes_place = g_look.notes_place;
+    t.font = g_fonts.hud;
+    t.bold = g_fonts.hud_bold;
+    return t;
+}
+
 void build(ImVec2 display) {
     if (g_router->open() || g_ui.open_fraction > 0.0f) refresh_sources();  // Tab completion: only for the console
     std::function<void()> mods_tab;
@@ -244,12 +284,14 @@ void build(ImVec2 display) {
         g_model->save_history(g_history_path);
     }, mods_tab);
     g_router->set_esc_to_console(g_router->open() && g_ui.wants_escape);  // Esc hides the suggestions first
+    const TextLook look = text_look();
     if (g_ui.open_fraction <= 0.0f) {
-        draw_toast(toast_lines(*g_model, ToastState{g_toast_from.load(), g_toast_until.load()}, GetTickCount64()),
-                   display);
-        if (g_deps.hud && show_hud(false, !g_deps.hud->empty(), world_live())) draw_hud(g_deps.hud->lines(), display);
+        draw_notes(toast_lines(*g_model, ToastState{g_toast_from.load(), g_toast_until.load()}, GetTickCount64()),
+                   display, look);
+        if (g_deps.hud && show_hud(false, !g_deps.hud->empty(), world_live()))
+            draw_hud(g_deps.hud->lines(), display, look);
     }
-    draw_wheel(g_wheel, display);
+    draw_wheel(g_wheel, display, look);
 }
 
 void log_line(const char* s) {
@@ -295,6 +337,14 @@ OverlayConfig read_overlay_config(const std::wstring& ini_path) {
         const unsigned long v = std::wcstoul(rows.c_str(), &end, 10);
         if (end && !*end) c.suggest_rows = std::clamp<size_t>(v, Suggester::kMinRows, Suggester::kMaxRows);
     }
+    c.look = read_look_settings(
+        [&ini_path](const char* section, const char* key) {
+            wchar_t buf[512] = {};
+            GetPrivateProfileStringW(std::wstring(section, section + std::strlen(section)).c_str(),
+                                     std::wstring(key, key + std::strlen(key)).c_str(), L"", buf, 512, ini_path.c_str());
+            return utf8(buf);
+        },
+        &c.look_problems);
     return c;
 }
 
@@ -344,6 +394,11 @@ ImGuiKey imgui_key(const KeyEvent& e) {
 bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
     if (!config.enabled || g_model || !deps.center || !deps.tracker) return false;
     g_deps = std::move(deps);
+    for (const auto& p : config.look_problems) log_line(("overlay: emf_core.ini " + p).c_str());
+    g_look = config.look;
+    g_ui.height = static_cast<float>(g_look.height) / 100.0f;
+    g_ui.opacity = static_cast<float>(g_look.opacity) / 100.0f;
+    g_ui.background = look_colour4(g_look.background);
     g_mouse_speed = config.mouse_speed;
     g_ui.suggest = config.suggest;
     g_ui.suggester.set_rows(config.suggest_rows);
@@ -396,7 +451,9 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
                g_wheel_gate.busy() ||
                (g_deps.hud && show_hud(g_router->open(), !g_deps.hud->empty(), world_live()));
     };
+    hooks.fonts_due = fonts_due;
     hooks.fonts = setup_fonts;
+    hooks.style = [](ImGuiStyle& s) { apply_look_theme(s, g_look); };
     hooks.before_frame = before_frame;
     hooks.build = build;
     hooks.turned_off = [] {  // never leave an invisible console or wheel holding the input
@@ -418,7 +475,7 @@ ConsoleModel* overlay_console() { return g_model.get(); }
 void overlay_show_replies(uint64_t ms) {
     if (!g_model) return;
     g_toast_from = g_model->version();
-    g_toast_until = GetTickCount64() + ms;
+    g_toast_until = GetTickCount64() + (ms ? ms : static_cast<uint64_t>(g_look.notes_seconds) * 1000);
 }
 
 bool overlay_open_wheel(const WheelRequest& request) {
@@ -435,7 +492,7 @@ bool overlay_open_wheel(const WheelRequest& request) {
 void overlay_notify(const std::string& text) {
     if (!g_model) return;
     if (GetTickCount64() >= g_toast_until.load()) g_toast_from = g_model->version();  // a new toast, else join it
-    g_toast_until = GetTickCount64() + 6000;
+    g_toast_until = GetTickCount64() + static_cast<uint64_t>(g_look.notes_seconds) * 1000;  // [hud] notes_seconds
     g_model->add_line(text);
 }
 

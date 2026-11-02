@@ -817,6 +817,15 @@ try {
         $fnames = @($zf.Entries | ForEach-Object { $_.FullName })
         $zf.Dispose()
         Check (($fnames -contains "EMF-$ver/LICENSE.txt") -and ($fnames -contains "EMF-$ver/licenses/THIRD_PARTY_NOTICES.md") -and ($mnames -contains "EMF-$ver-manual/LICENSE.txt")) "both zips carry EMF's MIT licence and the third-party notices"
+        # the bundled fonts (third_party\fonts, SIL OFL 1.1) install to game\emf\fonts\; their licences are in licenses\
+        foreach ($z in @(@{n = $fnames; p = "EMF-$ver"}, @{n = $mnames; p = "EMF-$ver-manual"})) {
+            $missing = @(@("game/emf/fonts/Alegreya-Regular.ttf", "game/emf/fonts/Alegreya-Bold.ttf",
+                         "game/emf/fonts/CascadiaMono-Regular.ttf", "licenses/Alegreya-OFL.txt",
+                         "licenses/CascadiaMono-OFL.txt") | Where-Object { $z.n -notcontains "$($z.p)/$_" })
+            Check ($missing.Count -eq 0) "$($z.p).zip has the bundled fonts in game\emf\fonts\ and their licences (missing: $($missing -join ', '))"
+            $extra = @($z.n | Where-Object { $_ -match "/game/emf/fonts/." -and $_ -notmatch "/(Alegreya-Regular|Alegreya-Bold|CascadiaMono-Regular)\.ttf$" })
+            Check ($extra.Count -eq 0) "$($z.p).zip has no other files in game\emf\fonts\ ($($extra -join ', '))"
+        }
         # in both downloads: Loot Magnet (DLL + mod.json), Wandering Champion (Lua)
         foreach ($z in @(@{n = $fnames; p = "EMF-$ver"}, @{n = $mnames; p = "EMF-$ver-manual"})) {
             $missing = @(@("game/emf/mods/loot_magnet/loot_magnet.dll",
@@ -909,6 +918,17 @@ try {
                          "game\emf\tools\emf_mcp.py", "docs\modding\llms.txt", "docs\modding\ai_agents.md")) {
             Check (Test-Path (Join-Path $pkg $f)) "package has $f"
         }
+        # the fonts ship unmodified (third_party\fonts\README.md records their SHA-256), and the notices name them
+        foreach ($f in @("alegreya\Alegreya-Regular.ttf", "alegreya\Alegreya-Bold.ttf", "cascadia\CascadiaMono-Regular.ttf")) {
+            $shipped = Join-Path $pkg ("game\emf\fonts\" + (Split-Path $f -Leaf))
+            $source = Join-Path $repo "third_party\fonts\$f"
+            $same = (Test-Path -LiteralPath $shipped) -and ((Get-FileHash -LiteralPath $shipped).Hash -eq (Get-FileHash -LiteralPath $source).Hash)
+            Check $same "the package's game\emf\fonts\$(Split-Path $f -Leaf) is third_party\fonts\$f, unmodified"
+        }
+        $notices = Get-Content -LiteralPath (Join-Path $pkg "licenses\THIRD_PARTY_NOTICES.md") -Raw
+        Check (($notices -match "Alegreya") -and ($notices -match "Cascadia Mono") -and ($notices -match "OFL")) "THIRD_PARTY_NOTICES.md names Alegreya and Cascadia Mono and their licence (SIL OFL 1.1)"
+        $ofl = Join-Path $pkg "licenses\Alegreya-OFL.txt"
+        Check ((Test-Path -LiteralPath $ofl) -and ((Get-Content -LiteralPath $ofl -Raw) -match "SIL OPEN FONT LICENSE Version 1\.1")) "licenses\Alegreya-OFL.txt is the OFL text"
         Check (-not (Test-Path (Join-Path $pkg "game\EMF.exe"))) "EMF.exe ships in game\emf\, never next to enshrouded.exe"
         # every relative link in the packaged engine map points at a file the package has
         $map = Join-Path $pkg "docs\ENGINE_MAP.md"

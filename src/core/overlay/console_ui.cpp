@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <cstring>
 #include <iterator>
 #include <string>
@@ -221,11 +222,11 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
         ui.escape = false;  // an Esc while closed is not the list's: it must not hide it at the next opening
         return;
     }
-    const float height = (std::max)(display.y * 0.5f * (std::min)(ui.open_fraction, 1.0f), 1.0f);
+    const float height = (std::max)(display.y * ui.height * (std::min)(ui.open_fraction, 1.0f), 1.0f);
     ImGui::SetNextWindowPos(ImVec2(0, 0));
     ImGui::SetNextWindowSize(ImVec2(display.x, height));
-    ImGui::SetNextWindowBgAlpha(0.80f);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.03f, 0.04f, 0.055f, 1.0f));
+    ImGui::SetNextWindowBgAlpha(ui.opacity);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, ui.background);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowRounding, 0.0f);
     ImGui::PushStyleVar(ImGuiStyleVar_WindowBorderSize, 0.0f);
     const ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
@@ -238,6 +239,7 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
         if (tio.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Tab, false)) ui.switch_tab = true;
         const int want = ui.switch_tab ? 1 - ui.tab : -1;
         ui.switch_tab = false;
+        if (ui.tabs_font) ImGui::PushFont(ui.tabs_font);  // the tab bar and the Mods tab ([overlay] tabs_font)
         if (ImGui::BeginTabBar("##emf_tabs")) {
             if (ImGui::BeginTabItem("Console", nullptr, want == 0 ? ImGuiTabItemFlags_SetSelected : 0)) {
                 if (ui.tab != 0) ui.focus_input = true;
@@ -255,11 +257,13 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
         if (ui.tab == 1) {
             ui.escape = false;
             mods_tab();
+            if (ui.tabs_font) ImGui::PopFont();
             ImGui::End();
             ImGui::PopStyleVar(2);
             ImGui::PopStyleColor();
             return;
         }
+        if (ui.tabs_font) ImGui::PopFont();
     }
 
     // Scrollback.
@@ -400,33 +404,53 @@ ConsoleLines toast_lines(const ConsoleModel& model, const ToastState& toast, uin
     return out;
 }
 
-void draw_toast(const ConsoleLines& lines, ImVec2 display) {
-    if (lines.empty()) return;
+namespace {
+
+// A note line's colour: errors red, successes green, the echoed command white, everything else the look's colour.
+uint32_t note_rgba(LineKind k, uint32_t normal) {
+    switch (k) {
+        case LineKind::Command: return 0xFFFFFFFFu;
+        case LineKind::Error: return 0xFF7A73FFu;
+        case LineKind::Success: return 0x7DE887FFu;
+        default: return normal;
+    }
+}
+
+constexpr ImGuiWindowFlags kBoxFlags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
+                                       ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
+                                       ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
+const ImVec4 kBoxBack(0.03f, 0.04f, 0.055f, 1.0f);  // EMF's earlier boxes
+
+// style=boxed: the notes in a dark box (EMF's earlier look) at the notes' place.
+void draw_notes_boxed(const ConsoleLines& lines, ImVec2 display, const TextLook& look) {
+    if (look.font) ImGui::PushFont(look.font);
     const float pad = ImGui::GetFontSize();
-    ImGui::SetNextWindowPos(ImVec2(pad, pad));
+    const NotesPlace place = look.notes_place;
+    const ImVec2 pos = place == NotesPlace::TopLeft ? ImVec2(pad, pad)
+                     : place == NotesPlace::Right   ? ImVec2(display.x - pad, display.y * 0.40f)
+                                                    : ImVec2(display.x * 0.5f, display.y * 0.075f);
+    const ImVec2 pivot = place == NotesPlace::TopLeft ? ImVec2(0, 0) : place == NotesPlace::Right ? ImVec2(1, 0) : ImVec2(0.5f, 0);
+    ImGui::SetNextWindowPos(pos, ImGuiCond_Always, pivot);
     ImGui::SetNextWindowBgAlpha(0.80f);
-    ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.03f, 0.04f, 0.055f, 1.0f));
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
-                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
-                                   ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
-    ImGui::Begin("##emf_toast", nullptr, flags);
-    ImGui::PushTextWrapPos(display.x * 0.6f);
+    ImGui::PushStyleColor(ImGuiCol_WindowBg, kBoxBack);
+    ImGui::Begin("##emf_toast", nullptr, kBoxFlags);
+    ImGui::PushTextWrapPos(ImGui::GetCursorPosX() + note_wrap_width(place, display));
     for (const auto& [kind, text] : lines) {
-        ImGui::PushStyleColor(ImGuiCol_Text, colour(kind));
+        ImGui::PushStyleColor(ImGuiCol_Text, look_colour4(note_rgba(kind, look.colour)));
         ImGui::TextUnformatted(text.c_str(), text.c_str() + text.size());
         ImGui::PopStyleColor();
     }
     ImGui::PopTextWrapPos();
     ImGui::End();
     ImGui::PopStyleColor();
+    if (look.font) ImGui::PopFont();
 }
 
-void draw_hud(const std::vector<HudLine>& lines, ImVec2 display) {
-    if (lines.empty()) return;
+// style=boxed: one small window per place (EMF's earlier look).
+void draw_hud_boxed(const std::vector<HudLine>& lines, ImVec2 display, const TextLook& look) {
+    ImFont* font = look.bold ? look.bold : look.font;  // HUD lines are bold (with font=console: the console's font)
+    if (font) ImGui::PushFont(font);
     const float pad = ImGui::GetFontSize();
-    const ImGuiWindowFlags flags = ImGuiWindowFlags_NoDecoration | ImGuiWindowFlags_NoInputs |
-                                   ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoSavedSettings |
-                                   ImGuiWindowFlags_NoFocusOnAppearing | ImGuiWindowFlags_NoNav;
     static const char* const kNames[] = {"##emf_hud_top_right", "##emf_hud_bottom_right", "##emf_hud_bottom_left"};
     for (int place = 0; place < 3; ++place) {
         bool any = false;
@@ -440,19 +464,92 @@ void draw_hud(const std::vector<HudLine>& lines, ImVec2 display) {
         const ImVec2 pivot = place == 0 ? ImVec2(1.0f, 0.0f) : place == 1 ? ImVec2(1.0f, 1.0f) : ImVec2(0.0f, 1.0f);
         ImGui::SetNextWindowPos(pos, ImGuiCond_Always, pivot);
         ImGui::SetNextWindowBgAlpha(0.55f);
-        ImGui::PushStyleColor(ImGuiCol_WindowBg, ImVec4(0.03f, 0.04f, 0.055f, 1.0f));
-        ImGui::Begin(kNames[place], nullptr, flags);
+        ImGui::PushStyleColor(ImGuiCol_WindowBg, kBoxBack);
+        ImGui::Begin(kNames[place], nullptr, kBoxFlags);
         for (const auto& l : lines) {
             if (static_cast<int>(l.place) != place) continue;
-            const ImVec4 c = l.rgba ? ImVec4(((l.rgba >> 24) & 0xFF) / 255.0f, ((l.rgba >> 16) & 0xFF) / 255.0f,
-                                             ((l.rgba >> 8) & 0xFF) / 255.0f, (l.rgba & 0xFF) / 255.0f)
-                                    : ImVec4(0.86f, 0.86f, 0.80f, 1.0f);
-            ImGui::PushStyleColor(ImGuiCol_Text, c);
+            ImGui::PushStyleColor(ImGuiCol_Text, look_colour4(l.rgba ? l.rgba : look.colour));
             ImGui::TextUnformatted(l.text.c_str(), l.text.c_str() + l.text.size());
             ImGui::PopStyleColor();
         }
         ImGui::End();
         ImGui::PopStyleColor();
+    }
+    if (font) ImGui::PopFont();
+}
+
+}  // namespace
+
+void draw_notes(const ConsoleLines& lines, ImVec2 display, const TextLook& look) {
+    if (lines.empty()) return;
+    if (look.style == HudStyle::Boxed) {
+        draw_notes_boxed(lines, display, look);
+        return;
+    }
+    // like the game's banners: bold, on a band that fades at its ends (game style), under the compass by default; each
+    // note wraps at half the screen's width into at most kNoteMaxRows rows, and the band holds at most kNoteBandRows
+    // rows (the newest)
+    ImFont* font = look.bold ? look.bold : look.font ? look.font : ImGui::GetFont();
+    const float size = font->FontSize;
+    const float wrap = note_wrap_width(look.notes_place, display);
+    const float gap = std::floor(size * 0.15f);
+    const auto measure = [font, size](const std::string& s) {
+        return font->CalcTextSizeA(size, FLT_MAX, 0.0f, s.c_str(), s.c_str() + s.size()).x;
+    };
+    constexpr size_t kNoteBandRows = 8;
+    struct Row {
+        std::string text;
+        uint32_t rgba;
+        float width;
+    };
+    std::vector<Row> rows;
+    for (const auto& [kind, text] : lines)
+        for (auto& r : wrap_rows(text, wrap, measure)) {
+            const float w = measure(r);
+            rows.push_back({std::move(r), note_rgba(kind, look.colour), w});
+        }
+    if (rows.empty()) return;
+    if (rows.size() > kNoteBandRows) rows.erase(rows.begin(), rows.end() - kNoteBandRows);
+    ImVec2 block(0.0f, size * static_cast<float>(rows.size()) + gap * static_cast<float>(rows.size() - 1));
+    for (const Row& r : rows) block.x = (std::max)(block.x, r.width);
+    const NoteBand band = note_band(look.notes_place, block, size, display);
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    if (look.style == HudStyle::Game) draw_note_band(dl, band);
+    float y = band.text_min.y;
+    for (const Row& r : rows) {
+        draw_look_text(dl, look, font, size, ImVec2(note_line_x(look.notes_place, band, r.width), y), r.rgba,
+                       r.text.c_str(), r.text.c_str() + r.text.size());
+        y += size + gap;
+    }
+}
+
+void draw_hud(const std::vector<HudLine>& lines, ImVec2 display, const TextLook& look) {
+    if (lines.empty()) return;
+    if (look.style == HudStyle::Boxed) {
+        draw_hud_boxed(lines, display, look);
+        return;
+    }
+    // the game's own lines are bold
+    ImFont* font = look.bold ? look.bold : look.font ? look.font : ImGui::GetFont();
+    const float size = font->FontSize;
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    for (const HudPlace place : {HudPlace::TopRight, HudPlace::BottomRight, HudPlace::BottomLeft}) {
+        const HudLine* here[HudModel::kMaxLines];  // drawn every frame: no allocation
+        size_t n = 0;
+        for (const auto& l : lines)
+            if (l.place == place && n < HudModel::kMaxLines) here[n++] = &l;
+        for (size_t i = 0; i < n; ++i) {
+            char text[HudModel::kMaxText + 1];  // one line: a line break becomes a space
+            const size_t len = (std::min)(here[i]->text.size(), HudModel::kMaxText);
+            for (size_t k = 0; k < len; ++k) {
+                const char c = here[i]->text[k];
+                text[k] = c == '\n' || c == '\r' ? ' ' : c;
+            }
+            text[len] = '\0';
+            const ImVec2 s = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text, text + len);
+            const ImVec2 at = hud_line_position(place, i, n, s, size, display);
+            draw_look_text(dl, look, font, size, at, here[i]->rgba ? here[i]->rgba : look.colour, text, text + len);
+        }
     }
 }
 

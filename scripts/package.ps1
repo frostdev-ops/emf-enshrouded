@@ -37,7 +37,9 @@ foreach ($pack in @($ExtraContent | ForEach-Object { $_ -split "," })) {  # powe
     $extraPacks += $p
 }
 
-$needed = @("dinput8.dll", "emf\emf_core.dll", "emf\vk\VkLayer_EMF_console.json", "emf\known_tools.txt") + ($playerMods | ForEach-Object { "emf\mods\$_\$_.dll", "emf\mods\$_\mod.json" })
+# The bundled fonts (third_party\fonts\README.md, SIL OFL 1.1): the build copies them to dist\emf\fonts\
+$fonts = @("Alegreya-Regular.ttf", "Alegreya-Bold.ttf", "CascadiaMono-Regular.ttf")
+$needed = @("dinput8.dll", "emf\emf_core.dll", "emf\vk\VkLayer_EMF_console.json", "emf\known_tools.txt") + ($fonts | ForEach-Object { "emf\fonts\$_" }) + ($playerMods | ForEach-Object { "emf\mods\$_\$_.dll", "emf\mods\$_\mod.json" })
 foreach ($f in $needed) { if (-not (Test-Path -LiteralPath (Join-Path $dist $f))) { throw "missing build output $dist\$f (run scripts\test.sh first)" } }
 if (-not (Test-Path -LiteralPath (Join-Path $Build "emf_sigcheck.exe"))) { throw "missing build output $Build\emf_sigcheck.exe (run scripts\test.sh first)" }
 # EMF.exe, the desktop mod manager, with its page (docs/app.md)
@@ -84,6 +86,7 @@ Copy-Into (Join-Path $dist "dinput8.dll") (Join-Path $game "dinput8.dll")
 Copy-Into (Join-Path $dist "emf\emf_core.dll") (Join-Path $game "emf\emf_core.dll")
 Copy-Into (Join-Path $dist "emf\vk\VkLayer_EMF_console.json") (Join-Path $game "emf\vk\VkLayer_EMF_console.json")
 Copy-Into (Join-Path $dist "emf\known_tools.txt") (Join-Path $game "emf\known_tools.txt")  # loaders EMF recognises
+foreach ($f in $fonts) { Copy-Into (Join-Path $dist "emf\fonts\$f") (Join-Path $game "emf\fonts\$f") }  # the overlay's text
 # EMF.exe goes in emf\, never next to enshrouded.exe (where mods put proxy DLLs); it finds the game as its parent folder
 foreach ($f in $appFiles) { Copy-Into (Join-Path $Build "app\$f") (Join-Path $game "emf\$f") }
 # the installer's scripts again in emf\setup\: EMF.exe installs EMF into a dedicated server's folder with them
@@ -137,6 +140,8 @@ Copy-Into (Join-Path $repo "third_party\vulkan-headers\LICENSE.md") (Join-Path $
 Copy-Into (Join-Path $repo "third_party\vulkan-headers\LICENSES\Apache-2.0.txt") (Join-Path $lic "Apache-2.0.txt")
 Copy-Into (Join-Path $repo "third_party\lua\LICENSE.txt") (Join-Path $lic "Lua-LICENSE.txt")
 Copy-Into (Join-Path $repo "third_party\webview2\LICENSE.txt") (Join-Path $lic "WebView2-LICENSE.txt")  # EMF.exe links its loader
+Copy-Into (Join-Path $repo "third_party\fonts\alegreya\OFL.txt") (Join-Path $lic "Alegreya-OFL.txt")  # the bundled fonts
+Copy-Into (Join-Path $repo "third_party\fonts\cascadia\LICENSE") (Join-Path $lic "CascadiaMono-OFL.txt")
 
 # offline signature check for modders (docs/modding/updating.md)
 Copy-Into (Join-Path $Build "emf_sigcheck.exe") (Join-Path $root "tools\emf_sigcheck.exe")
