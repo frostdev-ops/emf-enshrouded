@@ -47,7 +47,9 @@ def licence_files(folder, named=None):
 
 
 def collect(metadata):
-    """The crates.io packages the root links through normal dependencies, sorted by name and version."""
+    """The crates.io packages the root links through normal dependencies, sorted by name and version. A build
+    dependency named <name>-src is one too: such a crate compiles a C library into the crate that uses it (lua-src:
+    EML's Lua 5.4)."""
     packages = {p["id"]: p for p in metadata["packages"]}
     nodes = {n["id"]: n for n in metadata["resolve"]["nodes"]}
     seen, todo = set(), [metadata["resolve"]["root"]]
@@ -57,7 +59,10 @@ def collect(metadata):
             continue
         seen.add(pid)
         for d in nodes.get(pid, {}).get("deps", []):
-            if any(k.get("kind") is None for k in d.get("dep_kinds", [])):  # normal: linked (not dev, not build)
+            kinds = [k.get("kind") for k in d.get("dep_kinds", [])]
+            normal = None in kinds  # linked (not dev, not a build tool)
+            c_source = "build" in kinds and packages.get(d["pkg"], {}).get("name", "").endswith("-src")
+            if normal or c_source:
                 todo.append(d["pkg"])
     out = []
     for pid in seen:

@@ -54,18 +54,23 @@ class CrateLicences(unittest.TestCase):
                       license_file="COPYING.txt")
         builder = package("cc", "1.2.0", self.folder("cc", {"LICENSE": "cc"}))
         tester = package("tempfile", "3.0.0", self.folder("tempfile", {"LICENSE": "t"}))
+        # a "-src" crate is a build dependency that compiles a C library into the crate that uses it (lua-src: Lua 5.4)
+        lua_src = package("lua-src", "548.1.1", self.folder("lua-src", {"LICENSE": "Lua's MIT text"}))
+        lua_sys = package("mlua-sys", "0.8.3", self.folder("mlua-sys"))
         nodes = [
             {"id": root["id"], "deps": [dep(eml), dep(serde), dep(tester, ("dev",))]},
-            {"id": eml["id"], "deps": [dep(zlib), dep(own), dep(builder, ("build",))]},
+            {"id": eml["id"], "deps": [dep(zlib), dep(own), dep(builder, ("build",)), dep(lua_sys)]},
             {"id": serde["id"], "deps": []}, {"id": zlib["id"], "deps": []}, {"id": own["id"], "deps": []},
             {"id": builder["id"], "deps": []}, {"id": tester["id"], "deps": []},
+            {"id": lua_sys["id"], "deps": [dep(lua_src, ("build",)), dep(builder, ("build",))]}, {"id": lua_src["id"], "deps": []},
         ]
-        return {"packages": [root, eml, serde, zlib, own, builder, tester],
+        return {"packages": [root, eml, serde, zlib, own, builder, tester, lua_src, lua_sys],
                 "resolve": {"root": root["id"], "nodes": nodes}}
 
     def test_only_linked_crates_io_packages(self):
         names = [p["name"] for p in crate_licences.collect(self.metadata())]
-        self.assertEqual(names, ["adler2", "odd", "serde"])  # sorted; no path crates, no dev or build dependencies
+        # sorted; no path crates, no dev dependencies, no build tools (cc); a -src build dependency's C code is linked
+        self.assertEqual(names, ["adler2", "lua-src", "mlua-sys", "odd", "serde"])
 
     def test_licence_files_are_read(self):
         serde = next(p for p in crate_licences.collect(self.metadata()) if p["name"] == "serde")
@@ -101,6 +106,7 @@ class LinkedCrates(unittest.TestCase):
         self.assertIsNotNone(meta, "cargo metadata failed (a build fetches the crates first)")
         packages = crate_licences.collect(meta)
         self.assertGreater(len(packages), 50)
+        self.assertIn("lua-src", [p["name"] for p in packages])  # EML's Lua 5.4, compiled into the DLL
         copyleft = [f"{p['name']} {p['version']}: {p['license']}" for p in packages
                     if any(w in p["license"].upper() for w in ("GPL", "MPL", "EPL", "CDDL", "EUPL"))
                     or p["license"] in ("not stated",) or p["license"].startswith("see ")]
