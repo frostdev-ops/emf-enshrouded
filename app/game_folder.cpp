@@ -1,4 +1,5 @@
 #include "game_folder.h"
+#include "common/move_retry.h"
 
 #include <windows.h>
 
@@ -1072,7 +1073,8 @@ Change write_file_whole(const std::wstring& path, const std::string& bytes, cons
     const BOOL ok = WriteFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &put, nullptr) && put == bytes.size();
     const DWORD err = GetLastError();
     CloseHandle(h);
-    if (!ok || !MoveFileExW(lp(tmp).c_str(), lp(path).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    // a virus scanner may hold either file for a moment: the rename waits for it
+    if (!ok || !emf::move_retrying(lp(tmp), lp(path), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         const DWORD e = ok ? GetLastError() : err;
         DeleteFileW(lp(tmp).c_str());  // only the new file this made
         return fail("Could not write " + shown + ": " + windows_error_text(e));
@@ -1154,7 +1156,7 @@ Change set_mod_enabled(const std::wstring& game_in, const std::string& source, c
         if (exists(to))
             return fail("Cannot rename: mods\\" + utf8(on ? on_name : off_name) +
                         " already exists (two copies of this mod?). Remove the one you do not want first.");
-        if (!MoveFileExW(from.c_str(), to.c_str(), 0)) {
+        if (!emf::move_retrying(from, to, 0)) {
             const DWORD e = GetLastError();
             return fail("Could not rename mods\\" + utf8(on ? off_name : on_name) + ": " + windows_error_text(e) +
                         (e == ERROR_SHARING_VIOLATION || e == ERROR_ACCESS_DENIED ? ". Is a program using its files?" : ""));

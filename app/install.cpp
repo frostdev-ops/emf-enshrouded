@@ -1,4 +1,5 @@
 #include "install.h"
+#include "common/move_retry.h"
 
 #include <windows.h>
 
@@ -409,7 +410,7 @@ std::string parent_of(const std::string& rel) {
 // Moves a file or folder of the game folder to `to` (relative), making its folders. No overwriting.
 bool move_into(const std::wstring& game, const std::string& from, const std::string& to, std::vector<std::string>& made) {
     if (!make_folders(game, parent_of(to), made)) return false;
-    return MoveFileExW(lp(game + L"\\" + wide(from)).c_str(), lp(game + L"\\" + wide(to)).c_str(), 0) != 0;
+    return emf::move_retrying(lp(game + L"\\" + wide(from)), lp(game + L"\\" + wide(to)), 0);
 }
 
 // Removes the folders in `dirs` that are empty, deepest first.
@@ -1381,7 +1382,7 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
         for (auto it = moved.rbegin(); it != moved.rend(); ++it) {
             std::vector<std::string> ignore;
             make_folders(game, parent_of(it->first), ignore);  // recreate the parent the new files' removal may have left empty
-            if (!MoveFileExW(lp(game + L"\\" + wide(it->second)).c_str(), lp(game + L"\\" + wide(it->first)).c_str(), 0))
+            if (!emf::move_retrying(lp(game + L"\\" + wide(it->second)), lp(game + L"\\" + wide(it->first)), 0))
                 stuck.push_back(it->first + " (your copy is in " + it->second + ")");
         }
         if (chain_changed) {

@@ -8,7 +8,7 @@
 
 #include <string>
 
-namespace emf::saves {
+namespace emf {
 
 inline bool move_retrying(const std::wstring& from, const std::wstring& to, DWORD flags, DWORD wait_ms = 5000) {
     const ULONGLONG until = GetTickCount64() + wait_ms;
@@ -24,4 +24,4 @@ inline bool move_retrying(const std::wstring& from, const std::wstring& to, DWOR
     }
 }
 
-}  // namespace emf::saves
+}  // namespace emf

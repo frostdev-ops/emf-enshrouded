@@ -1,4 +1,5 @@
 #include "profiles.h"
+#include "common/move_retry.h"
 
 #include <windows.h>
 
@@ -211,7 +212,7 @@ bool write_whole(const std::wstring& path, const std::string& bytes, std::string
     const BOOL ok = WriteFile(h, bytes.data(), static_cast<DWORD>(bytes.size()), &put, nullptr) && put == bytes.size();
     const DWORD err = GetLastError();
     CloseHandle(h);
-    if (!ok || !MoveFileExW(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    if (!ok || !emf::move_retrying(tmp, path, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         if (error) *error = error_text(ok ? GetLastError() : err);
         DeleteFileW(tmp.c_str());
         return false;

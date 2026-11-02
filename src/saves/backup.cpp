@@ -14,7 +14,7 @@
 
 #include "common/sha256.h"
 #include "core/json.h"
-#include "saves/move_retry.h"
+#include "common/move_retry.h"
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")
