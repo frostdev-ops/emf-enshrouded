@@ -13,7 +13,7 @@ licence. Their full licence texts are next to their code in `third_party/`. The 
 | [MinHook](https://github.com/TsudaKageyu/minhook) (`third_party/minhook`), with Hacker Disassembler Engine | function hooks | BSD 2-Clause | yes, inside `emf_core.dll` |
 | [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) (`third_party/vulkan-headers`) | the overlay's Vulkan layer (headers only) | Apache-2.0 | headers compiled in |
 | [Microsoft WebView2 SDK](https://www.nuget.org/packages/Microsoft.Web.WebView2) 1.0.4258.31 (`third_party/webview2`) | EMF.exe's window (static loader library) | BSD 3-Clause style (Microsoft) | yes, inside `EMF.exe` |
-| [Alegreya](https://github.com/huertatipografica/Alegreya) 2.008 by Huerta Tipográfica, Regular and Bold (`third_party/fonts/alegreya`) | the serif of the on-screen text, the wheels and the console's tabs | SIL OFL 1.1 | yes, unmodified, in `emf\fonts\` |
+| [Alegreya](https://github.com/huertatipografica/Alegreya) 2.008 by The Alegreya Project Authors (Huerta Tipográfica), Regular and Bold (`third_party/fonts/alegreya`) | the serif of the on-screen text, the wheels and the console's tabs | SIL OFL 1.1 | yes, unmodified, in `emf\fonts\` |
 | [Cascadia Mono](https://github.com/microsoft/cascadia-code) 2407.24 by Microsoft, Regular (`third_party/fonts/cascadia`) | the console's font where Windows' Consolas is missing | SIL OFL 1.1 | yes, unmodified, in `emf\fonts\` |
 | [doctest](https://github.com/doctest/doctest) (`third_party/doctest`) | unit tests | MIT | no (tests only) |
 
