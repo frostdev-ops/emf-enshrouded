@@ -97,7 +97,8 @@ record; it never loads `emf_content.dll` and never writes a game file): **Ready*
 uses it without building), **Builds at the next start** (and why: never built, a mod new or changed, the game or
 `emf_content.dll` changed, the copy gone), **Failed** (the same files failed before, with the message: EMF tries again
 when a mod, the game or `emf_content.dll` changes), **Off** (the loader's reason), **Applied by EML** or **ShroudForge**,
-or **Not installed**; a dedicated server's folder gets one line (it gets EML content in a later version). The card lists
+or **Not installed**; a dedicated server's folder gets the same card for the server (its copy is
+`emf\content\server\`, and the server's console says when it builds at its start). The card lists
 the mods EMF builds and the ones it leaves out with the loader's reason (the Mods tab says "loaded by EMF" or "left
 out" with the same reason), the last build (when, how long, its errors) and the copy's disk use, and `emf\content.log`
 is the log viewer's third choice. Its actions, all refused while the game runs: **When to apply** (`[content] mode`),
