@@ -2,6 +2,7 @@
 // the navy and gold theme, and the drawing itself (headless ImGui: draw lists and windows are counted, not pixels).
 #include <doctest.h>
 
+#include <algorithm>
 #include <string>
 #include <vector>
 
@@ -369,4 +370,160 @@ TEST_CASE("look drawing: the wheel's lit slice has the gold accent ring and none
     CHECK(has_colour(dl, IM_COL32(0xC0, 0xB0, 0x74, 255)));
     CHECK_FALSE(has_colour(dl, IM_COL32(62, 80, 108, 235)));
     CHECK_FALSE(has_colour(dl, IM_COL32(118, 140, 172, 255)));
+}
+
+// ---- the fix pass: bold on-screen text, wide and multi-line text, UTF-8 cuts, the wheel at the bigger size ----
+#include <cfloat>
+#include <functional>
+
+#include "core/overlay/font_plan.h"
+
+namespace {
+// The vertical extent of the background draw list's vertices.
+float drawn_height() {
+    float lo = FLT_MAX, hi = -FLT_MAX;
+    for (const ImDrawVert& v : ImGui::GetBackgroundDrawList()->VtxBuffer) {
+        lo = (std::min)(lo, v.pos.y);
+        hi = (std::max)(hi, v.pos.y);
+    }
+    return hi > lo ? hi - lo : 0.0f;
+}
+// One measure per UTF-8 character, 10 px each (continuation bytes are free).
+float ten_per_char(const std::string& s) {
+    float w = 0.0f;
+    for (unsigned char c : s) w += (c & 0xC0) == 0x80 ? 0.0f : 10.0f;
+    return w;
+}
+// 5 px per byte: a cut inside a character is possible (and must not happen).
+float five_per_byte(const std::string& s) { return 5.0f * static_cast<float>(s.size()); }
+bool whole_utf8(const std::string& s) {
+    for (size_t i = 0; i < s.size();) {
+        const unsigned char c = static_cast<unsigned char>(s[i]);
+        const size_t n = c < 0x80 ? 1 : (c >> 5) == 6 ? 2 : (c >> 4) == 14 ? 3 : (c >> 3) == 30 ? 4 : 0;
+        if (!n || i + n > s.size()) return false;
+        for (size_t k = 1; k < n; ++k)
+            if ((static_cast<unsigned char>(s[i + k]) & 0xC0) != 0x80) return false;
+        i += n;
+    }
+    return true;
+}
+const char* const kRussian = "\xD0\x9F\xD1\x80\xD0\xB8\xD0\xB7\xD0\xB2\xD0\xB0\xD1\x82\xD1\x8C\xD1\x81\xD0\xBA\xD0\xB5"
+                             "\xD0\xBB\xD0\xB5\xD1\x82\xD0\xB0";  // "Призвать скелета" without the space
+}  // namespace
+
+TEST_CASE("look drawing: HUD lines are in the bold on-screen font, like the game's own lines") {
+    ImGuiContext* ctx = ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.DisplaySize = ImVec2(1920, 1080);
+    io.DeltaTime = 1.0f / 60.0f;
+    io.IniFilename = nullptr;
+    ImFontConfig small_cfg, big_cfg;
+    small_cfg.SizePixels = 13.0f;
+    big_cfg.SizePixels = 26.0f;
+    ImFont* regular = io.Fonts->AddFontDefault(&small_cfg);
+    ImFont* bold = io.Fonts->AddFontDefault(&big_cfg);  // a bigger "bold", to tell them apart
+    io.Fonts->Build();
+    TextLook look = look_of(HudStyle::Plain);
+    look.font = regular;
+    look.bold = bold;
+    hud_vertices({{"x", "Hi", HudPlace::BottomLeft, 0}}, look);
+    const float with_bold = drawn_height();
+    look.bold = nullptr;  // no bold: the regular font
+    hud_vertices({{"x", "Hi", HudPlace::BottomLeft, 0}}, look);
+    CHECK(with_bold > drawn_height() * 1.5f);
+    ImGui::DestroyContext(ctx);
+}
+
+TEST_CASE("look layout: a HUD line wider than the screen starts at the margin, never off the left edge") {
+    for (const ImVec2 s : kScreens) {
+        const float lh = line_height(s);
+        for (const HudPlace place : kPlaces)
+            CHECK(hud_line_position(place, 0, 1, ImVec2(s.x * 1.5f, lh), lh, s).x == doctest::Approx(lh));
+    }
+}
+
+TEST_CASE("look drawing: a HUD line with a line break stays one line high") {
+    Headless h;
+    hud_vertices({{"x", "Hi Ho", HudPlace::BottomRight, 0}}, look_of(HudStyle::Plain));
+    const float one = drawn_height();
+    hud_vertices({{"x", "Hi\nHo", HudPlace::BottomRight, 0}}, look_of(HudStyle::Plain));
+    CHECK(drawn_height() == doctest::Approx(one));
+}
+
+TEST_CASE("look layout: note text wraps at spaces, at most three rows, the last ending in ... when text is left") {
+    CHECK(wrap_rows("Sleeping", 200.0f, ten_per_char) == std::vector<std::string>{"Sleeping"});
+    CHECK(wrap_rows("aaa bbb ccc", 70.0f, ten_per_char) == std::vector<std::string>{"aaa bbb", "ccc"});
+    CHECK(wrap_rows("one\ntwo", 200.0f, ten_per_char) == std::vector<std::string>{"one", "two"});  // a break is a row
+    const std::string long_text = "the clock runs sixty times faster while you sleep through the day and night";
+    const auto rows = wrap_rows(long_text, 120.0f, ten_per_char);
+    REQUIRE(rows.size() == 3);
+    for (const auto& r : rows) CHECK(ten_per_char(r) <= 120.0f);
+    CHECK(rows.back().size() >= 3);
+    CHECK(rows.back().compare(rows.back().size() - 3, 3, "...") == 0);
+    // a word wider than a row is cut between characters, never inside one
+    const auto cut = wrap_rows(kRussian, 72.0f, five_per_byte, 5);
+    REQUIRE(cut.size() >= 2);
+    for (const auto& r : cut) {
+        CHECK(whole_utf8(r));
+        CHECK(five_per_byte(r) <= 72.0f);
+    }
+    CHECK(wrap_rows("", 100.0f, ten_per_char).empty());
+}
+
+TEST_CASE("look drawing: a very long note stays three rows high on its band") {
+    Headless h;
+    ConsoleModel m;
+    const ToastState t{m.version(), 1000};
+    std::string text;
+    for (int i = 0; i < 60; ++i) text += "word" + std::to_string(i) + " ";
+    m.add_line(text);
+    ImGui::NewFrame();
+    draw_notes(toast_lines(m, t, 0), ImVec2(1920, 1080), look_of(HudStyle::Game));
+    ImGui::Render();
+    const float row = ImGui::GetFontSize();
+    CHECK(drawn_height() <= row * 3.0f * 1.2f + row * 1.0f);  // three rows and the band's padding
+    CHECK(drawn_height() >= row * 3.0f);
+}
+
+TEST_CASE("look drawing: the wheel cuts a label between UTF-8 characters, with ...") {
+    const std::string cut = wheel_fit(kRussian, 72.0f, five_per_byte);
+    CHECK(whole_utf8(cut));
+    CHECK(five_per_byte(cut) <= 72.0f);
+    CHECK(cut.compare(cut.size() - 3, 3, "...") == 0);
+    CHECK(wheel_fit("Stay here", 200.0f, ten_per_char) == "Stay here");
+}
+
+TEST_CASE("look drawing: the mods' wheel labels still fit in the serif at the bigger on-screen size") {
+    ImGuiContext* ctx = ImGui::CreateContext();
+    const std::string serif = std::string(EMF_SOURCE_DIR) + "/third_party/fonts/alegreya/Alegreya-Regular.ttf";
+    const char* const labels[] = {"God mode (on)", "Endless health (off)", "Stamina (off)", "No fall damage (on)",
+                                  "Fill me up", "All off", "Follow me", "Stay here", "Attack (what you look at)",
+                                  "Raise Skeleton Warrior (2/3)", "Dismiss all", "Mace (6 Wood Logs, 1 Stone)",
+                                  "Summons: Raise Skeleton Archer (1/3)", "Wood Logs (x120)", "Hand over to"};
+    for (const int h : {720, 1080, 1481, 2160}) {
+        ImFontAtlas atlas;
+        ImFont* f = atlas.AddFontFromFileTTF(serif.c_str(), scaled_pixel_size(hud_base_pixel_size(h), 100), nullptr,
+                                             kFontRanges);
+        REQUIRE(f);
+        REQUIRE(atlas.Build());
+        const auto measure = [f](const std::string& s) { return f->CalcTextSizeA(f->FontSize, FLT_MAX, 0.0f, s.c_str()).x; };
+        const ImVec2 display(h * 16.0f / 9.0f, static_cast<float>(h));
+        const float ring = (std::min)(display.x, display.y) * 0.30f * (1.0f - 0.34f);  // the ring's depth
+        for (const size_t slices : {size_t(8), size_t(5)}) {
+            const float width = wheel_label_width(display, slices);
+            int cut = 0;
+            for (const char* label : labels) {
+                const auto lines = wheel_label_layout(label, width, measure);
+                CHECK(lines.size() <= 4);
+                CHECK(lines.size() * f->FontSize * 1.1f <= ring);  // the label's lines stay inside the ring
+                for (const auto& l : lines) {
+                    cut += measure(l.text) > width;
+                    CHECK(measure(wheel_fit(l.text, width, measure)) <= width);
+                }
+            }
+            INFO("height " << h << ", " << slices << " slices");
+            CHECK(cut <= (slices == 8 ? 1 : 0));  // only "(6 Wood Logs, 1 Stone)" on a full page
+        }
+    }
+    ImGui::DestroyContext(ctx);
 }

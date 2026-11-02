@@ -31,6 +31,9 @@ std::vector<WheelLabelLine> wheel_label_layout(const std::string& label, float w
 std::pair<std::string, std::string> wheel_title_lines(const std::string& title, float width,
                                                       const std::function<float(const std::string&)>& measure);
 
+// `text` cut to fit `width` (measured by `measure`), with "..." when it was cut; the cut falls between UTF-8 characters.
+std::string wheel_fit(const std::string& text, float width, const std::function<float(const std::string&)>& measure);
+
 // The width in pixels a slice's label may use on a page of `slices` slices on a `display`-sized screen. At [hud] size
 // 100 the text is height / 54 pixels: a page of 8 fits about 13 characters a line in a monospace font at any screen
 // size, and more in the bundled serif.

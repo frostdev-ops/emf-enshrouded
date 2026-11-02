@@ -448,7 +448,8 @@ void draw_notes_boxed(const ConsoleLines& lines, ImVec2 display, const TextLook&
 
 // style=boxed: one small window per place (EMF's earlier look).
 void draw_hud_boxed(const std::vector<HudLine>& lines, ImVec2 display, const TextLook& look) {
-    if (look.font) ImGui::PushFont(look.font);
+    ImFont* font = look.bold ? look.bold : look.font;  // HUD lines are bold (with font=console: the console's font)
+    if (font) ImGui::PushFont(font);
     const float pad = ImGui::GetFontSize();
     static const char* const kNames[] = {"##emf_hud_top_right", "##emf_hud_bottom_right", "##emf_hud_bottom_left"};
     for (int place = 0; place < 3; ++place) {
@@ -474,7 +475,7 @@ void draw_hud_boxed(const std::vector<HudLine>& lines, ImVec2 display, const Tex
         ImGui::End();
         ImGui::PopStyleColor();
     }
-    if (look.font) ImGui::PopFont();
+    if (font) ImGui::PopFont();
 }
 
 }  // namespace
@@ -485,29 +486,40 @@ void draw_notes(const ConsoleLines& lines, ImVec2 display, const TextLook& look)
         draw_notes_boxed(lines, display, look);
         return;
     }
-    // like the game's banners: bold, on a band that fades at its ends (game style), under the compass by default
+    // like the game's banners: bold, on a band that fades at its ends (game style), under the compass by default; each
+    // note wraps at half the screen's width into at most kNoteMaxRows rows, and the band holds at most kNoteBandRows
+    // rows (the newest)
     ImFont* font = look.bold ? look.bold : look.font ? look.font : ImGui::GetFont();
     const float size = font->FontSize;
     const float wrap = note_wrap_width(look.notes_place, display);
     const float gap = std::floor(size * 0.15f);
-    std::vector<ImVec2> sizes;
-    ImVec2 block(0.0f, 0.0f);
-    for (const auto& [kind, text] : lines) {
-        const ImVec2 s = font->CalcTextSizeA(size, FLT_MAX, wrap, text.c_str(), text.c_str() + text.size());
-        block.x = (std::max)(block.x, s.x);
-        block.y += (sizes.empty() ? 0.0f : gap) + s.y;
-        sizes.push_back(s);
-    }
+    const auto measure = [font, size](const std::string& s) {
+        return font->CalcTextSizeA(size, FLT_MAX, 0.0f, s.c_str(), s.c_str() + s.size()).x;
+    };
+    constexpr size_t kNoteBandRows = 8;
+    struct Row {
+        std::string text;
+        uint32_t rgba;
+        float width;
+    };
+    std::vector<Row> rows;
+    for (const auto& [kind, text] : lines)
+        for (auto& r : wrap_rows(text, wrap, measure)) {
+            const float w = measure(r);
+            rows.push_back({std::move(r), note_rgba(kind, look.colour), w});
+        }
+    if (rows.empty()) return;
+    if (rows.size() > kNoteBandRows) rows.erase(rows.begin(), rows.end() - kNoteBandRows);
+    ImVec2 block(0.0f, size * static_cast<float>(rows.size()) + gap * static_cast<float>(rows.size() - 1));
+    for (const Row& r : rows) block.x = (std::max)(block.x, r.width);
     const NoteBand band = note_band(look.notes_place, block, size, display);
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     if (look.style == HudStyle::Game) draw_note_band(dl, band);
     float y = band.text_min.y;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        const std::string& text = lines[i].second;
-        const float x = note_line_x(look.notes_place, band, sizes[i].x);
-        draw_look_text(dl, look, font, size, ImVec2(x, y), note_rgba(lines[i].first, look.colour), text.c_str(),
-                       text.c_str() + text.size(), wrap);
-        y += sizes[i].y + gap;
+    for (const Row& r : rows) {
+        draw_look_text(dl, look, font, size, ImVec2(note_line_x(look.notes_place, band, r.width), y), r.rgba,
+                       r.text.c_str(), r.text.c_str() + r.text.size());
+        y += size + gap;
     }
 }
 
@@ -517,19 +529,26 @@ void draw_hud(const std::vector<HudLine>& lines, ImVec2 display, const TextLook&
         draw_hud_boxed(lines, display, look);
         return;
     }
-    ImFont* font = look.font ? look.font : ImGui::GetFont();
+    // the game's own lines are bold
+    ImFont* font = look.bold ? look.bold : look.font ? look.font : ImGui::GetFont();
     const float size = font->FontSize;
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     for (const HudPlace place : {HudPlace::TopRight, HudPlace::BottomRight, HudPlace::BottomLeft}) {
-        std::vector<const HudLine*> here;
+        const HudLine* here[HudModel::kMaxLines];  // drawn every frame: no allocation
+        size_t n = 0;
         for (const auto& l : lines)
-            if (l.place == place) here.push_back(&l);
-        for (size_t i = 0; i < here.size(); ++i) {
-            const std::string& text = here[i]->text;
-            const ImVec2 s = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text.c_str(), text.c_str() + text.size());
-            const ImVec2 at = hud_line_position(place, i, here.size(), s, size, display);
-            draw_look_text(dl, look, font, size, at, here[i]->rgba ? here[i]->rgba : look.colour, text.c_str(),
-                           text.c_str() + text.size());
+            if (l.place == place && n < HudModel::kMaxLines) here[n++] = &l;
+        for (size_t i = 0; i < n; ++i) {
+            char text[HudModel::kMaxText + 1];  // one line: a line break becomes a space
+            const size_t len = (std::min)(here[i]->text.size(), HudModel::kMaxText);
+            for (size_t k = 0; k < len; ++k) {
+                const char c = here[i]->text[k];
+                text[k] = c == '\n' || c == '\r' ? ' ' : c;
+            }
+            text[len] = '\0';
+            const ImVec2 s = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text, text + len);
+            const ImVec2 at = hud_line_position(place, i, n, s, size, display);
+            draw_look_text(dl, look, font, size, at, here[i]->rgba ? here[i]->rgba : look.colour, text, text + len);
         }
     }
 }

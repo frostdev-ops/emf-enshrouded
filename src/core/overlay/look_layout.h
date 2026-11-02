@@ -3,6 +3,8 @@
 // band that fades at its ends, the text's soft shadow, and the navy and gold theme for the console. The layout is pure
 // (unit-tested at 720p, 1080p and 4K); the drawing helpers only add to an ImDrawList.
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <vector>
 
 #include "hud_model.h"
@@ -35,8 +37,19 @@ struct TextPass {
     bool shadow = false;
 };
 // The passes for a text of `pixel_size`: in game style with the shadow on, a halo and a drop shadow, then the text; in
-// any other case the text alone.
-std::vector<TextPass> text_passes(HudStyle style, bool shadow, float pixel_size);
+// any other case the text alone. A fixed array: drawn for every text, every frame.
+struct TextPasses {
+    TextPass pass[6];
+    size_t count = 0;
+    size_t size() const { return count; }
+    const TextPass* begin() const { return pass; }
+    const TextPass* end() const { return pass + count; }
+    const TextPass& operator[](size_t i) const { return pass[i]; }
+    const TextPass& back() const { return pass[count - 1]; }
+};
+TextPasses text_passes(HudStyle style, bool shadow, float pixel_size);
+// Removes the last UTF-8 character of `s` (all its bytes).
+void utf8_pop_back(std::string& s);
 // How far the drop shadow sits from the text: 1 px at 1080p, 2 at 4K, at most 3.
 float shadow_offset(float pixel_size);
 
@@ -54,6 +67,12 @@ struct NoteBand {
 // The band for a block of note text `text` big. Top centre: centred under the game's compass, fading at both ends;
 // top left: from the left edge, at EMF's old place; right: from the right edge, a little above the middle.
 NoteBand note_band(NotesPlace place, ImVec2 text, float line_h, ImVec2 screen);
+// `text` as rows at most `width` wide (measured by `measure`): broken at spaces and at line breaks; a word wider than a
+// row is cut between UTF-8 characters. At most `max_rows`: when text is left over, the last row ends in "...".
+inline constexpr size_t kNoteMaxRows = 3;
+std::vector<std::string> wrap_rows(const std::string& text, float width,
+                                   const std::function<float(const std::string&)>& measure,
+                                   size_t max_rows = kNoteMaxRows);
 // The widest a note's line may be before it wraps.
 float note_wrap_width(NotesPlace place, ImVec2 screen);
 // The x of a line `line_w` wide inside the band's text block: centred, left or right as the place.

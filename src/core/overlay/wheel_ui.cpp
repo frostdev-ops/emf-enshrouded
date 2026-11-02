@@ -7,12 +7,9 @@ namespace emf::core {
 namespace {
 constexpr float kPi = 3.14159265358979323846f;
 
-// The text cut to fit `width` pixels (with "..." when it was cut).
+// The text cut to fit `width` pixels in the current font (with "..." when it was cut).
 std::string fit(const std::string& text, float width) {
-    if (ImGui::CalcTextSize(text.c_str()).x <= width) return text;
-    std::string s = text;
-    while (!s.empty() && ImGui::CalcTextSize((s + "...").c_str()).x > width) s.pop_back();
-    return s + "...";
+    return wheel_fit(text, width, [](const std::string& s) { return ImGui::CalcTextSize(s.c_str()).x; });
 }
 
 // `text` centred on `at` in the current font, with the look's shadow; rgba is 0xRRGGBBAA.
@@ -32,6 +29,13 @@ uint32_t blend(uint32_t a, uint32_t b, float t, uint32_t alpha) {
     return out | (alpha & 0xFF);
 }
 }  // namespace
+
+std::string wheel_fit(const std::string& text, float width, const std::function<float(const std::string&)>& measure) {
+    if (measure(text) <= width) return text;
+    std::string s = text;
+    while (!s.empty() && measure(s + "...") > width) utf8_pop_back(s);  // whole characters: never half of one
+    return s + "...";
+}
 
 std::pair<std::string, std::string> wheel_label_lines(const std::string& label) {
     const size_t cut = label.find(" (");

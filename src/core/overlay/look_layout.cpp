@@ -30,16 +30,84 @@ ImVec4 look_colour4(uint32_t rgba) {
 
 float shadow_offset(float pixel_size) { return std::clamp(std::round(pixel_size / 18.0f), 1.0f, 3.0f); }
 
-std::vector<TextPass> text_passes(HudStyle style, bool shadow, float pixel_size) {
-    std::vector<TextPass> passes;
+TextPasses text_passes(HudStyle style, bool shadow, float pixel_size) {
+    TextPasses p;
     if (style == HudStyle::Game && shadow) {
         for (const ImVec2 d : {ImVec2(-1, 0), ImVec2(1, 0), ImVec2(0, -1), ImVec2(0, 1)})  // the halo
-            passes.push_back({d, kShadowHaloAlpha, true});
+            p.pass[p.count++] = {d, kShadowHaloAlpha, true};
         const float o = shadow_offset(pixel_size);
-        passes.push_back({ImVec2(o, o), kShadowAlpha, true});  // the drop shadow
+        p.pass[p.count++] = {ImVec2(o, o), kShadowAlpha, true};  // the drop shadow
     }
-    passes.push_back({ImVec2(0, 0), 1.0f, false});  // the text, on top
-    return passes;
+    p.pass[p.count++] = {ImVec2(0, 0), 1.0f, false};  // the text, on top
+    return p;
+}
+
+void utf8_pop_back(std::string& s) {
+    while (!s.empty() && (static_cast<unsigned char>(s.back()) & 0xC0) == 0x80) s.pop_back();  // continuation bytes
+    if (!s.empty()) s.pop_back();  // and the character's first byte
+}
+
+std::vector<std::string> wrap_rows(const std::string& text, float width,
+                                   const std::function<float(const std::string&)>& measure, size_t max_rows) {
+    std::vector<std::string> rows;
+    if (text.empty() || max_rows == 0) return rows;
+    bool more = false;  // text was left over
+    const auto add = [&](const std::string& row) {
+        if (rows.size() == max_rows) {
+            more = true;
+            return false;
+        }
+        rows.push_back(row);
+        return true;
+    };
+    size_t at = 0;
+    while (at <= text.size() && !more) {
+        size_t nl = text.find('\n', at);
+        if (nl == std::string::npos) nl = text.size();
+        std::string para = text.substr(at, nl - at);
+        if (!para.empty() && para.back() == '\r') para.pop_back();
+        std::string row;
+        size_t w = 0;
+        while (w <= para.size() && !more) {
+            size_t sp = para.find(' ', w);
+            if (sp == std::string::npos) sp = para.size();
+            std::string word = para.substr(w, sp - w);
+            w = sp + 1;
+            if (word.empty()) {
+                if (sp >= para.size()) break;
+                continue;
+            }
+            const std::string with = row.empty() ? word : row + " " + word;
+            if (measure(with) <= width) {
+                row = with;
+            } else {
+                if (!row.empty() && !add(row)) break;
+                row.clear();
+                while (measure(word) > width && !more) {  // a word wider than a row: cut between characters
+                    std::string head = word;  // the most that fits, at least one character
+                    while (measure(head) > width) {
+                        std::string shorter = head;
+                        utf8_pop_back(shorter);
+                        if (shorter.empty()) break;
+                        head = shorter;
+                    }
+                    if (!add(head)) break;
+                    word = word.substr(head.size());
+                }
+                row = word;
+            }
+            if (sp >= para.size()) break;
+        }
+        if (!more && (!row.empty() || para.empty())) add(row);
+        at = nl + 1;
+        if (nl >= text.size()) break;
+    }
+    if (more && !rows.empty()) {  // say that text was left out
+        std::string& last = rows.back();
+        while (!last.empty() && measure(last + "...") > width) utf8_pop_back(last);
+        last += "...";
+    }
+    return rows;
 }
 
 ImVec2 hud_line_position(HudPlace place, size_t index, size_t count, ImVec2 text, float line_h, ImVec2 screen) {
@@ -47,15 +115,13 @@ ImVec2 hud_line_position(HudPlace place, size_t index, size_t count, ImVec2 text
     const float step = line_h * kHudLineStep;
     count = (std::max<size_t>)(count, 1);
     index = (std::min)(index, count - 1);
-    const float x = place == HudPlace::BottomLeft ? pad : screen.x - pad - text.x;
+    const float x = place == HudPlace::BottomLeft ? pad : (std::max)(pad, screen.x - pad - text.x);  // never off the left
     if (place == HudPlace::TopRight) return ImVec2(x, screen.y * kTopRightY + step * static_cast<float>(index));
     const float last = screen.y - pad - line_h;  // the bottom lines grow upwards from here
     return ImVec2(x, last - step * static_cast<float>(count - 1 - index));
 }
 
-float note_wrap_width(NotesPlace place, ImVec2 screen) {
-    return screen.x * (place == NotesPlace::Right ? 0.40f : 0.50f);
-}
+float note_wrap_width(NotesPlace, ImVec2 screen) { return screen.x * 0.50f; }
 
 NoteBand note_band(NotesPlace place, ImVec2 text, float line_h, ImVec2 screen) {
     NoteBand b;
