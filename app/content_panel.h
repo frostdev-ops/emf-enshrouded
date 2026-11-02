@@ -74,4 +74,9 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder);
 // The panel as a JSON object for the page (every text as data).
 std::string content_panel_json(const ContentPanel& p);
 
+// EML's dbghelp.dll set aside by EMF (E5) is recorded in emf\moved.txt as "set-aside<TAB><name><TAB>dbghelp.dll" (CRLF
+// lines, next to the installer's "moved<TAB><name>" lines), so that EMF's uninstall (package/uninstall.ps1) puts it
+// back. The names those lines give (in the game folder), whether or not the file is still there.
+std::vector<std::string> content_set_aside_names(const std::wstring& game);
+
 }  // namespace emf::app

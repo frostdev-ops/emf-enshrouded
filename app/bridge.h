@@ -59,6 +59,10 @@
 // {type: "saves", ...} (the list, the total size, the automatic backup settings), {type: "saves_restored", ok, error,
 // restored, before_id, steam}, {type: "saves_note", ok, text} (the starter backup EMF.exe made at its first start).
 // The state carries "saves_busy": why saves must not change now (an enshrouded.exe runs, or this folder's server).
+//
+// EML content (bridge_content.cpp, content_panel.h; docs/engine_parts/content_loader.md): page -> host "content" |
+// "content_rebuild" | "content_remove" | "content_mode" {mode} | "content_take_over" | "content_give_back"; host -> page
+// {type: "content", cmd, ok, why, text, panel} (content_panel_json). Every action is refused while the game runs.
 #include <atomic>
 #include <cstdint>
 #include <functional>
@@ -352,6 +356,9 @@ private:
     void saves_first_start();
     bool saves_working_ = false;  // a backup or a restore runs on a worker
     bool starter_tried_ = false;
+    // ---- EML content (bridge_content.cpp, content_panel.h) ----
+    // The content commands; nullopt for any other command.
+    std::optional<std::vector<std::string>> handle_content(const std::string& cmd, const core::json::Value& m);
 };
 
 }  // namespace emf::app

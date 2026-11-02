@@ -1177,6 +1177,7 @@ std::vector<std::string> Bridge::handle(const std::string& message) {
     }
     if (auto out = handle_updates(cmd, m)) return *out;
     if (auto out = handle_saves(cmd, m)) return *out;  // save backups (bridge_saves.cpp)
+    if (auto out = handle_content(cmd, m)) return *out;  // EML content (bridge_content.cpp)
     return {result(cmd, false, "The app does not know the command \"" + cmd + "\".")};
 }
 

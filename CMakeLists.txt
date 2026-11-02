@@ -648,5 +648,5 @@ endforeach()
 # --- EML content in EMF.exe (docs/engine_parts/content_loader.md "What the player sees"): the card on the EMF tab,
 # computed with the loader's own header-only rules (src/loader/content_*.h, eml_mods.h). EMF.exe never loads
 # emf_content.dll: only the loader does, at the held start. ---
-target_sources(emf_app_lib PRIVATE app/content_panel.cpp)
-target_sources(emf_tests PRIVATE tests/test_app_content_panel.cpp)
+target_sources(emf_app_lib PRIVATE app/content_panel.cpp app/bridge_content.cpp)
+target_sources(emf_tests PRIVATE tests/test_app_content_panel.cpp tests/test_app_content_bridge.cpp)

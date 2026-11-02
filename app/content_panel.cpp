@@ -148,8 +148,9 @@ std::vector<std::string> changes(const ld::ContentState& state, const ld::Finger
     return out;
 }
 
-// EML's dbghelp.dll set aside by EMF: the "set-aside<TAB><name><TAB>dbghelp.dll" lines of emf\moved.txt.
-std::vector<std::string> set_aside_names(const std::wstring& game) {
+}  // namespace
+
+std::vector<std::string> content_set_aside_names(const std::wstring& game) {
     std::vector<std::string> names;
     const auto text = cio::read_file(game + L"\\emf\\moved.txt", 1u << 20);
     if (!text) return names;
@@ -168,8 +169,6 @@ std::vector<std::string> set_aside_names(const std::wstring& game) {
     }
     return names;
 }
-
-}  // namespace
 
 const char* content_status_name(ContentStatus s) {
     switch (s) {
@@ -275,7 +274,7 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder) {
     if (p.copy_there && ld::shadow_path_safe(game, shadow)) p.copy_bytes = own_bytes(shadow, 0);
 
     // ---- EML's dbghelp.dll and EMF (E5), and a patch in place ----
-    for (const auto& name : set_aside_names(game))
+    for (const auto& name : content_set_aside_names(game))
         if (p.set_aside.empty() && is_file(game + L"\\" + cio::from_utf8(name))) p.set_aside = name;
     if (!p.set_aside.empty())
         p.take_over = TakeOver::Given;
