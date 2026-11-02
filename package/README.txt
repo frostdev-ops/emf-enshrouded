@@ -47,6 +47,9 @@ Included mods:
                  switch it on in the Mods tab and restart the game)
   bulk_craft     craft one by hand, then F8 at the station (or /craft 25) crafts many through the game's own
                  crafting, at the recipe's pace, from what you carry (OFF by default; see mods\bulk_craft\README.md)
+  blessings      Flame Blessings: god mode, endless health, stamina and mana, no fall damage; your own in the Mods
+                 tab or on the F11 wheel, /blessings for admins on any player; nothing is saved (OFF by default;
+                 see mods\blessings\README.md)
   beastmaster    tame wild beasts and call them to fight beside you; hold F3 for the beast wheel, /beastmaster for
                  every player (a Lua mod; OFF by default; the bear and the aurochs are in the EMF creature packs
                  download, which is EML content: install EML or ShroudForge first; see

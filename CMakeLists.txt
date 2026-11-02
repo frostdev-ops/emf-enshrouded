@@ -274,6 +274,8 @@ emf_mod(sleep mods/sleep/sleep.cpp)
 emf_mod(teleports mods/teleports/teleports.cpp)
 # --- bulk_craft mod (Bulk Craft: repeat a hand-crafted recipe N times through the game's own craft) ---
 emf_mod(bulk_craft mods/bulk_craft/bulk_craft.cpp)
+# --- blessings mod (Flame Blessings: god mode, endless health/stamina/mana, no fall damage; F4 wheel, /blessings) ---
+emf_mod(blessings mods/blessings/blessings.cpp)
 
 # --- examples/hello: the first mod of docs/modding/README.md (built to prove it compiles; not installed) ---
 add_library(hello SHARED examples/hello/hello.cpp)
@@ -512,6 +514,7 @@ add_executable(emf_tests
   tests/test_teleports_glue.cpp
   tests/test_bulk_craft.cpp
   tests/test_bulk_craft_glue.cpp
+  tests/test_blessings.cpp
   tests/test_lua_round2.cpp
   tests/test_bounty.cpp
   tests/test_lua_take_back.cpp
