@@ -437,6 +437,17 @@ TEST_CASE("blessings tick: nofall resets fallStartAltitude to the player's heigh
     CHECK(comp<gen::DynamicFallDamage>(1)->fallStartAltitude == doctest::Approx(50.0f));  // where the player is
 }
 
+TEST_CASE("blessings tick: a player without CombatFlags or DynamicFallDamage gets one log line each, not one per step") {
+    Rig r;
+    r.g.load();
+    f->comps.erase({gen::CombatFlags::kHash, 1u});  // what a game update could do; never silent
+    r.setting("health", "god");
+    r.setting("no_fall_damage", "1");
+    for (int i = 0; i < 4; ++i) r.g.tick(r.w);
+    CHECK(count_with(r.fake.log, "CombatFlags") == 1);
+    CHECK(count_with(r.fake.log, "DynamicFallDamage") == 1);
+}
+
 TEST_CASE("blessings tick: mod switched off restores immune and clears hud") {
     Rig r;
     r.g.load();

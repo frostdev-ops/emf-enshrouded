@@ -112,12 +112,15 @@ public:
             wants_attrs = wants_attrs || b.health == Health::Refill || b.stamina || b.mana;
             if (attrs && (health || b.stamina || b.mana)) fill(w, p, health, b.stamina, b.mana);
             if (b.health == Health::God) {
-                hold_immune(w, p, account[p]);
+                if (!hold_immune(w, p, account[p])) missing(p, "CombatFlags", "god mode", &warned_flags_);
                 god.insert(account[p]);
             }
-            if (b.nofall)
-                if (auto* fall = w.get<emf::gen::ecs::DynamicFallDamage>(p))
-                    if (const auto at = emf::position(w, p)) fall->fallStartAltitude = static_cast<float>(at->y);
+            if (b.nofall) {
+                auto* fall = w.get<emf::gen::ecs::DynamicFallDamage>(p);
+                const auto at = emf::position(w, p);
+                if (fall && at) fall->fallStartAltitude = static_cast<float>(at->y);
+                else if (!fall) missing(p, "DynamicFallDamage", "no fall damage", &warned_fall_);
+            }
         }
         for (auto it = held_.begin(); it != held_.end();) {
             if (god.count(it->first)) {
@@ -229,6 +232,15 @@ private:
         session_ = session;
         roster_.by_account.clear();
         held_.clear();
+        warned_flags_ = warned_fall_ = false;
+    }
+    // A blessed player lacks the component a blessing writes (a game update?): said once per world session, never
+    // silently skipped.
+    static void missing(uint32_t p, const char* component, const char* blessing, bool* warned) {
+        if (*warned) return;
+        *warned = true;
+        EMF_LOG(kMod, "player %u has no %s: %s does nothing for them on this game build", p, component, blessing);
+        EMF_NOTIFY("Flame Blessings: %s does not work on this game version", blessing);
     }
     static bool is_host(uint32_t p) {
         const uint32_t host = emf::local_player();
@@ -273,11 +285,12 @@ private:
         if (stamina) top(EMF_ATTR_STAMINA, EMF_ATTR_MAX_STAMINA);
         if (mana) top(EMF_ATTR_MANA, EMF_ATTR_MAX_MANA);
     }
-    void hold_immune(emf::World w, uint32_t p, uint64_t account) {
+    bool hold_immune(emf::World w, uint32_t p, uint64_t account) {
         auto* flags = w.get<emf::gen::ecs::CombatFlags>(p);
-        if (!flags) return;
+        if (!flags) return false;
         if (!held_.count(account)) held_[account] = Held{p, flags->immune};
         flags->immune = true;
+        return true;
     }
     // Puts immune back, only on the same player (entity and account) still in the world.
     static void restore(emf::World w, uint64_t account, const Held& h) {
@@ -321,6 +334,7 @@ private:
     std::atomic<bool> dirty_{false}, off_{false};
     bool cleaned_ = false;  // switched off: immune put back and the line removed
     bool told_ = false;     // "not available" said since something last needed the attributes
+    bool warned_flags_ = false, warned_fall_ = false;  // a missing component said (this world session)
     uint32_t session_ = 0;
     std::string hud_text_;
     uint32_t hud_corner_ = EMF_HUD_BOTTOM_LEFT;
