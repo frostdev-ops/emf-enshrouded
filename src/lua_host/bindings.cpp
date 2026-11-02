@@ -922,6 +922,52 @@ int l_damage(lua_State* L) {
     return 1;
 }
 
+// ---- lua 1.11: a player's level (API v22) ----
+bool has_v22(const EmfApi* a) {
+    return a && a->version >= 22 && a->size >= offsetof(EmfApi, player_level_set) + sizeof(a->player_level_set);
+}
+
+uint32_t level_arg(lua_State* L, int index) {
+    const lua_Integer v = luaL_checkinteger(L, index);
+    luaL_argcheck(L, v >= 0 && v <= UINT32_MAX, index, "out of range");
+    return static_cast<uint32_t>(v);
+}
+
+// emf.xp_required(world, level): the XP that level needs before the next one, or nil (no such level, unknown).
+int l_xp_required(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const uint32_t level = level_arg(L, 2);
+    const EmfApi* a = s->host->api;
+    const uint32_t need = has_v22(a) && a->player_xp_required ? a->player_xp_required(w, level) : 0u;
+    if (need) lua_pushinteger(L, need);
+    else lua_pushnil(L);
+    return 1;
+}
+
+// emf.level_cap(world): the highest level a player can reach, or nil when unknown.
+int l_level_cap(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const EmfApi* a = s->host->api;
+    const uint32_t cap = has_v22(a) && a->player_level_cap ? a->player_level_cap(w) : 0u;
+    if (cap) lua_pushinteger(L, cap);
+    else lua_pushnil(L);
+    return 1;
+}
+
+// emf.set_level(world, player, level [, xp]): true when set (or queued); raises or lowers, no level-up events.
+int l_set_level(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const auto player = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    const uint32_t level = level_arg(L, 3);
+    const uint32_t xp = lua_isnoneornil(L, 4) ? 0u : level_arg(L, 4);
+    const EmfApi* a = s->host->api;
+    lua_pushboolean(L, has_v22(a) && a->player_level_set && a->player_level_set(w, player, level, xp));
+    return 1;
+}
+
 // ---- lua 1.6: chat lines and saves (API v19) ----
 bool has_v19(const EmfApi* a) { return a && a->size >= offsetof(EmfApi, request_save) + sizeof(a->request_save); }
 
@@ -1885,6 +1931,7 @@ void open_bindings(lua_State* L, Script&) {
                                    {"destroy", l_destroy}, {"kill", l_kill},           {"time_of_day", l_time_of_day},
                                    {"health", l_health},   {"attribute", l_attribute}, {"attribute_add", l_attribute_add},
                                    {"damage", l_damage},
+                                   {"xp_required", l_xp_required}, {"level_cap", l_level_cap}, {"set_level", l_set_level},
                                    {"tell", l_tell},       {"broadcast", l_broadcast}, {"on_chat", l_on_chat},
                                    {"request_save", l_request_save}, {"teleport", l_teleport},
                                    {"on_world_setting_changed", l_on_world_setting_changed},

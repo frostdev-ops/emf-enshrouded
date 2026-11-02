@@ -1056,6 +1056,116 @@ bool api_attribute_add(EmfWorld* w, uint32_t entity, uint32_t id, int32_t delta)
     return true;
 }
 
+// ---- v22: a player's level (docs/research xp_levels; reference.md "v22: XP and level") ----
+
+constexpr const char* kBalancingRegistry = "BalancingRegistry";
+
+// The game's pure balancing functions, called on their table (a fault is "unknown": 0).
+uint32_t seh_xp_required(uint32_t (*fn)(uint32_t, const void*), uint32_t level, const void* bal) {
+    __try {
+        return fn(level, bal);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+uint32_t seh_level_cap(uint32_t (*fn)(const void*), const void* bal) {
+    __try {
+        return fn(bal);
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return 0;
+    }
+}
+
+const void* balancing_of(EmfWorld* w) {
+    if (!g_state || !w || WorldView(raw(w)).kind() != EMF_WORLD_SERVER) return nullptr;
+    return WorldView(raw(w)).singleton(kBalancingRegistry);
+}
+
+uint32_t api_player_level_cap(EmfWorld* w) {
+    const void* bal = balancing_of(w);
+    return bal && g_state->level_cap ? seh_level_cap(g_state->level_cap, bal) : 0u;
+}
+
+uint32_t api_player_xp_required(EmfWorld* w, uint32_t level) {
+    const void* bal = balancing_of(w);
+    if (!bal || !g_state->xp_required || level < 1) return 0;
+    const uint32_t cap = api_player_level_cap(w);
+    if (cap && level > cap) return 0;
+    return seh_xp_required(g_state->xp_required, level, bal);
+}
+
+// player_level_set on the server world's own thread after its step: the game's admin "set level", with the
+// requirement player_level keeps (xpRequired(level), never 0) and XP below it.
+bool player_level_set_now(EmfWorld* w, uint32_t player, uint32_t level, uint32_t xp) {
+    const std::string what = "player_level_set(" + std::to_string(player) + ", " + std::to_string(level) + ")";
+    if (!g_state->xp_required) {
+        refuse_limited(what + " refused: the game's xpRequired is not found on this build");
+        return false;
+    }
+    const uint32_t cap = api_player_level_cap(w);
+    if (level < 1 || (cap && level > cap)) {
+        refuse_limited(what + " refused: the level must be 1.." + (cap ? std::to_string(cap) : std::string("the cap")));
+        return false;
+    }
+    const uint32_t need = api_player_xp_required(w, level);
+    if (need == 0 || need > static_cast<uint32_t>(INT32_MAX)) {
+        refuse_limited(what + " refused: the game gave no XP requirement for that level");
+        return false;
+    }
+    AttrHome lvl, exp;
+    std::string why;
+    if (attribute_home(w, player, kAttrLevel, &lvl, &why) != AttrStatus::Ok ||
+        attribute_home(w, player, kAttrXp, &exp, &why) != AttrStatus::Ok) {
+        refuse_limited(what + " refused: " + why);
+        return false;
+    }
+    int32_t cur_level = 0, cur_xp = 0, cur_pending = 0, cur_need = 0;
+    if (attr_read(g_state->attr_find, lvl.comp, lvl.size, lvl.registry, kAttrLevel, &cur_level) != AttrStatus::Ok ||
+        attr_read(g_state->attr_find, exp.comp, exp.size, exp.registry, kAttrXp, &cur_xp) != AttrStatus::Ok ||
+        attr_read(g_state->attr_find, exp.comp, exp.size, exp.registry, kAttrXpPending, &cur_pending) != AttrStatus::Ok ||
+        attr_read(g_state->attr_find, exp.comp, exp.size, exp.registry, kAttrXpRequired, &cur_need) != AttrStatus::Ok) {
+        refuse_limited(what + " refused: the player's level or XP could not be read");
+        return false;
+    }
+    const int32_t want_xp = static_cast<int32_t>((std::min)(xp, need - 1));
+    // the requirement first, so no step ever sees a requirement of 0 (a free level) or the old one with the new XP
+    struct Write {
+        AttrHome* home;
+        uint32_t id;
+        int64_t delta;
+    } const writes[] = {
+        {&exp, kAttrXpRequired, static_cast<int64_t>(need) - cur_need},
+        {&exp, kAttrXp, static_cast<int64_t>(want_xp) - cur_xp},
+        {&exp, kAttrXpPending, -static_cast<int64_t>(cur_pending)},
+        {&lvl, kAttrLevel, static_cast<int64_t>(level) - cur_level},
+    };
+    for (const auto& wr : writes) {
+        if (wr.delta == 0) continue;
+        int32_t applied = 0;
+        const AttrStatus s = attr_add(g_state->attr_find, g_state->attr_add, wr.home->comp, wr.home->size,
+                                      wr.home->registry, wr.id, static_cast<int32_t>(wr.delta), INT32_MAX, &applied, nullptr);
+        if (s != AttrStatus::Ok) {
+            refuse_limited(what + " stopped half-way: " + attr_status_text(s));
+            return false;
+        }
+    }
+    core_log(what + ": level " + std::to_string(cur_level) + " -> " + std::to_string(level) + ", " +
+             std::to_string(want_xp) + " of " + std::to_string(need) + " XP");
+    return true;
+}
+
+bool api_player_level_set(EmfWorld* w, uint32_t player, uint32_t level, uint32_t xp) {
+    if (!attributes_ready(w, "player_level_set", true)) return false;
+    if (dispatching_world() == w) return player_level_set_now(w, player, level, xp);
+    const int32_t x = static_cast<int32_t>((std::min)(xp, static_cast<uint32_t>(INT32_MAX)));
+    defer_to_server({w, g_state->server_session.load(), player, level, 0, x},
+                    [](EmfWorld* world, const DeferredCall& c) {
+                        player_level_set_now(world, c.a, c.b, static_cast<uint32_t>(c.value));
+                    },
+                    "player_level_set");
+    return true;
+}
+
 // The position of an entity in metres (CurrentTransform: fixed point, 1 m = 2^32), if it has one.
 bool entity_position(EmfWorld* w, uint32_t entity, double out[3], uint8_t* transform56) {
     const ComponentRef t = get_component(g_state->get_component, raw(w), ecs::CurrentTransform::kHash, entity);
@@ -1561,6 +1671,7 @@ const EmfApi kApi = {
     api_teleport,
     api_world_setting_get, api_world_setting_set, api_world_setting_reset, api_on_world_setting_changed,
     api_world_setting_info,
+    api_player_xp_required, api_player_level_cap, api_player_level_set,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

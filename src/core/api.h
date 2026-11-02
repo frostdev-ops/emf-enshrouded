@@ -95,6 +95,10 @@ struct CoreState {
     AttrFindFn attr_find = nullptr;
     AttrAddFn attr_add = nullptr;
     AllocPendingHitFn alloc_pending_hit = nullptr;
+    // v22 levels: the game's xpRequired(level, BalancingRegistry*) and maxPlayerLevel(BalancingRegistry*) (null: not
+    // found on this build)
+    uint32_t (*xp_required)(uint32_t level, const void* balancing) = nullptr;
+    uint32_t (*level_cap)(const void* balancing) = nullptr;
     std::atomic<bool> damage_hooked{false};  // impact_hit_conclusion's pre-hook (damage_pre_conclusion) is requested
     DamageQueue damage_queue;                // damage requests waiting for that pre-hook
     HitOrderCheck hit_order;                 // logs once whether it runs after clear_hit_candidates in the same step

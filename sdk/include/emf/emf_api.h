@@ -708,6 +708,21 @@ typedef struct EmfApi {
         applied after a load. False: cb NULL or no world settings on this core */
     bool (*world_setting_info)(uint32_t index, EmfWorldSettingInfo* out); /* the settings one by one from index 0:
         false past the last one, without a server world, or when out->size is too small */
+
+    /* ---- v22: a player's level (with the EMF_ATTR_XP* / EMF_ATTR_LEVEL attributes above) ---- */
+    /* The XP level `level` needs before the next one, from the game's own curve (what the game keeps as
+     * EMF_ATTR_XP_REQUIRED at that level); 0 for a level outside 1..cap, without a server world, or when the game's
+     * function is not found on this build. Any thread. */
+    uint32_t (*player_xp_required)(EmfWorld* world, uint32_t level);
+    /* The highest level a player can reach (the game's level cap; pending XP at the cap is thrown away); 0 when unknown. */
+    uint32_t (*player_level_cap)(EmfWorld* world);
+    /* Sets a player's level to `level` (1..cap) with `xp` towards the next one (cut to below its requirement), the way the
+     * game's own admin "set level" does: the level, the XP, the requirement for that level, and no pending XP (it would
+     * level the player up again). Lowers as well as raises; no level-up event (to raise with the game's level-ups, give
+     * XP: EMF_ATTR_XP_PENDING). The skill points follow the level (the game computes them); skills already unlocked stay
+     * unlocked. Saved with the character. SERVER world; inside a world callback on that world at once, elsewhere after
+     * the server world's next step (true = queued, a later refusal is logged). False (logged) when refused. */
+    bool (*player_level_set)(EmfWorld* world, uint32_t player, uint32_t level, uint32_t xp);
 } EmfApi;
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);

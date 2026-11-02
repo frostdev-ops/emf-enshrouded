@@ -32,6 +32,7 @@ constexpr uint32_t kApiV18Size = EMF_FIELD_END(EmfApi, damage);
 constexpr uint32_t kApiV19Size = EMF_FIELD_END(EmfApi, request_save);
 constexpr uint32_t kApiV20Size = EMF_FIELD_END(EmfApi, teleport);
 constexpr uint32_t kApiV21Size = EMF_FIELD_END(EmfApi, world_setting_info);
+constexpr uint32_t kApiV22Size = EMF_FIELD_END(EmfApi, player_level_set);
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
 // then read it only when size covers it and update the sizeof here.
@@ -75,7 +76,10 @@ static_assert(offsetof(EmfApi, world_setting_get) == kApiV20Size &&
                   offsetof(EmfApi, world_setting_info) == kApiV20Size + 32,
               "EmfApi layout (v21 appends world_setting_get, _set, _reset, on_world_setting_changed, world_setting_info "
               "after teleport)");
-static_assert(kApiV21Size == 592 && sizeof(EmfApi) == kApiV21Size, "EmfApi size (v21)");
+static_assert(kApiV21Size == 592, "EmfApi size (v21)");
+static_assert(offsetof(EmfApi, player_xp_required) == kApiV21Size && offsetof(EmfApi, player_level_set) == kApiV21Size + 16,
+              "EmfApi layout (v22 appends player_xp_required, player_level_cap, player_level_set after world_setting_info)");
+static_assert(kApiV22Size == 616 && sizeof(EmfApi) == kApiV22Size, "EmfApi size (v22)");
 static_assert(sizeof(EmfWorldSettingInfo) == 72 && offsetof(EmfWorldSettingInfo, key) == 8 &&
                   offsetof(EmfWorldSettingInfo, min) == 32 && offsetof(EmfWorldSettingInfo, flags) == 64,
               "EmfWorldSettingInfo layout (v21)");

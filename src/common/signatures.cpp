@@ -142,6 +142,13 @@ constexpr SigDef kSignatures[] = {
     // it copies the session's ecs::GameSettings into the ServerInfo every client gets, then clears the flag. Not checked
     // on 1269579: world settings use the resync only where this RVA was checked (rva_checked).
     {Sig::SendServerInfo, "SendServerInfo", "48 8B C4 55 53 41 54 41 55 41 57 48", {kRvaUnchecked, 0xe4f110u, 0x7b9060u, 0xe65fa0u, 0x7c2610u}, false},
+    // u32 xpRequired(u32 level, const BalancingRegistry* reg): the XP level `level` needs before the next (pure: the
+    // balancing table at reg+0x20, experienceNeedPerLevel at +0x1D8); what player_level stores as the requirement
+    // (docs/research xp_levels, build 1283531; 1273043 not checked).
+    {Sig::XpRequired, "XpRequired", "4C 8B 4A 20 44 8B D1 4D 85 C9 75 06 B8 01 00 00 00 C3 41 83 FA 05 77 0D 41 8D 4A FF 41 8B 84 89 D8 01 00 00 C3", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xe97620u, 0x93e880u}, false},
+    // u32 maxPlayerLevel(const BalancingRegistry* reg): the balancing table's playerLevelCap (+0x10); pending XP at the
+    // cap is thrown away by player_level.
+    {Sig::MaxPlayerLevel, "MaxPlayerLevel", "48 8B 41 20 48 85 C0 75 06 B8 01 00 00 00 C3 8B 40 10 C3", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xe99270u, 0x9404f0u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

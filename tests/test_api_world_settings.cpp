@@ -47,10 +47,10 @@ void on_change(const char* key, double value, void* user) {
 
 TEST_CASE("api v21: the table has the world settings functions after v20's teleport") {
     const EmfApi* api = api_table();
-    CHECK(api->version >= 21u);  // v22 (XP and level attributes) added no functions
+    CHECK(api->version >= 21u);
     CHECK(EMF_API_VERSION >= 21);
     CHECK(offsetof(EmfApi, world_setting_get) == kApiV20Size);
-    CHECK(kApiV21Size == sizeof(EmfApi));
+    CHECK(kApiV21Size <= sizeof(EmfApi));  // later versions append after world_setting_info
     CHECK(api->world_setting_info != nullptr);
     CHECK(sizeof(EmfWorldSettingInfo) == 72);
     CHECK(api->world_setting_get != nullptr);

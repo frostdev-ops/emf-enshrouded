@@ -138,6 +138,11 @@ appended (check api->size before using a later one). Refusals return NULL/0/fals
 - bool on_world_setting_changed(EmfWorldSettingCallback cb, void* user): cb runs once per changed setting after the server step wrote it (server world's thread), whoever changed it: a command, a mod, a kept value ...
 - bool world_setting_info(uint32_t index, EmfWorldSettingInfo* out): the settings one by one from index 0: false past the last one, without a server world, or when out->size is too small
 
+### v22
+- uint32_t player_xp_required(EmfWorld* world, uint32_t level): The XP level `level` needs before the next one, from the game's own curve (what the game keeps as EMF_ATTR_XP_REQUIRED at that level); 0 ...
+- uint32_t player_level_cap(EmfWorld* world): The highest level a player can reach (the game's level cap; pending XP at the cap is thrown away); 0 when unknown.
+- bool player_level_set(EmfWorld* world, uint32_t player, uint32_t level, uint32_t xp): Sets a player's level to `level` (1..cap) with `xp` towards the next one (cut to below its requirement), the way the game's own admin "set ...
+
 ### Constants
 EMF_API_VERSION=22, EMF_WORLD_SERVER=0, EMF_WORLD_PREDICTION=1, EMF_WORLD_CLIENT=2, EMF_ITEMS_EXACT_SLOT=0x01u, EMF_ITEMS_RARITY=0x02u, EMF_HUD_TOP_RIGHT=0u, EMF_HUD_BOTTOM_RIGHT=1u, EMF_HUD_BOTTOM_LEFT=2u, EMF_SETTING_BOOL=0u, EMF_SETTING_INT=1u, EMF_SETTING_FLOAT=2u, EMF_SETTING_CHOICE=3u, EMF_SETTING_KEY=4u, EMF_SETTING_TEXT=5u, EMF_SETTING_HAS_MIN=0x01u, EMF_SETTING_HAS_MAX=0x02u, EMF_SETTING_LIVE=0x04u, EMF_FOLLOW_NONE=0u, EMF_FOLLOW_REL32=1u, EMF_COMMAND_PLAYERS=0x01u, EMF_ATTR_HEALTH=0x8EB84995u, EMF_ATTR_MAX_HEALTH=0xDC8358BEu, EMF_ATTR_STAMINA=0x04B6AA8Bu, EMF_ATTR_MANA=0x6AA2574Eu, EMF_ATTR_MAX_STAMINA=0xF443C410u, EMF_ATTR_MAX_MANA=0x17536777u, EMF_ATTR_XP_PENDING=0x1D7DD102u, EMF_ATTR_XP=0x8DCDDAF4u, EMF_ATTR_XP_REQUIRED=0x04723F62u, EMF_ATTR_LEVEL=0x724BF568u, EMF_CHAT_MAX_LINES=10u, EMF_CHAT_LINE_BYTES=1024u, EMF_TELEPORT_FIND_GROUND=0x01u, EMF_TELEPORT_FACE_YAW=0x02u, EMF_TELEPORT_CHECKPOINT=0x04u, EMF_TELEPORT_NOTIFY_READY=0x08u, EMF_TELEPORT_FAILED=0u, EMF_TELEPORT_MOVED=1u, EMF_TELEPORT_READY=2u, EMF_TELEPORT_OFF_TARGET=0x01u, EMF_TELEPORT_RAW_TARGET=0x02u, EMF_TELEPORT_LAST=0x04u, EMF_TELEPORT_SESSION_ENDED=0x08u, EMF_WS_PERSIST=0x1u, EMF_WS_FLOAT=0u, EMF_WS_BOOL=1u, EMF_WS_ENUM=2u, EMF_WS_MINUTES=3u, EMF_WS_WHOLE=4u, EMF_WS_CHANGED=0x1u, EMF_WS_NEEDS_CLIENT=0x2u, EMF_MOD_LOADED=0u, EMF_MOD_FAILED=1u, EMF_MOD_DISABLED=2u, EMF_MOD_REJECTED=3u, EMF_MOD_SCRIPT=4u, EMF_MOD_PENDING=5u
 
@@ -176,7 +181,7 @@ EMF_API_VERSION=22, EMF_WORLD_SERVER=0, EMF_WORLD_PREDICTION=1, EMF_WORLD_CLIENT
 
 ## Lua (the lua mod; docs/modding/lua.md)
 
-mod.json has "main": "main.lua" and "depends": {"lua": ">=1.10"} (the Lua host is 1.10.0). Callbacks get a
+mod.json has "main": "main.lua" and "depends": {"lua": ">=1.11"} (the Lua host is 1.11.0). Callbacks get a
 `world` valid only during the callback. world:get(component, id) returns a component as a table with its real
 field names (sdk/include/emf/generated/components.hpp); assigning a field writes the game's data.
 
@@ -202,9 +207,12 @@ field names (sdk/include/emf/generated/components.hpp); assigning a field writes
 - `emf.spawn(world, guid, x, y, z)` / `emf.destroy(world, id)`: spawns a template at a position in metres / removes an entity (host only)
 - `emf.kill(world, id)`: (1.4) kills a creature without a hit: its current health becomes 0 (1.5: through the game's attribute code) and the game's death program sends `EntityDiedEvent` the next step; the corpse keeps its loot. No attacker, no kill credit (`emf.damage` gives one); never a player; host only. true / false
 - `emf.health(world, id)`: (1.5) the current and maximum health: `local cur, max = emf.health(w, id)`; the game's attributes in a world you host, else the replicated `NetworkHealth`; nil when neither is there
-- `emf.attribute(world, id, attr)`: (1.5) an attribute as the game reads it: `attr` is `"health"`, `"max_health"`, `"stamina"`, `"max_stamina"`, `"mana"`, `"max_mana"`, a player's `"xp_pending"`, `"xp"`, `"xp_required"` and `"level"` (EMF API v22), or an attribute id; nil when the entity has none. Give XP with `emf.attribute_add(w, player, "xp_pending", n)`: the game levels the player up itself (the other three are read-only). Host only
+- `emf.attribute(world, id, attr)`: (1.5) an attribute as the game reads it: `attr` is `"health"`, `"max_health"`, `"stamina"`, `"max_stamina"`, `"mana"`, `"max_mana"`, a player's `"xp_pending"`, `"xp"`, `"xp_required"` and `"level"` (1.11, EMF API v22), or an attribute id; nil when the entity has none. Give XP with `emf.attribute_add(w, player, "xp_pending", n)`: the game levels the player up itself (the other three are read-only). Host only
 - `emf.attribute_add(world, id, attr, delta)`: (1.5) adds `delta` (a whole number) through the game's own attribute code: damage stops at 0, a heal of `"health"`, `"stamina"` or `"mana"` at its maximum (other heals are refused). Not a hit: no kill credit, no hit reaction. Host only. true / false
 - `emf.damage(world, attacker, target, amount)`: (1.5) `amount` of true damage as a real game hit on the next step: a `HitEvent` (damage numbers, always a light reaction, aggro toward the attacker), the killing blow, kill credit and XP for `attacker` when it is a player (0 = no attacker, no aggro). The target must take hits (creatures and players) and not be immune. Host only. true / false
+- `emf.xp_required(world, level)`: (1.11) the XP `level` needs before the next one (the game's own curve); nil outside 1..cap or when unknown. Host only
+- `emf.level_cap(world)`: (1.11) the highest level a player can reach; nil when unknown. Host only
+- `emf.set_level(world, player, level [, xp])`: (1.11) sets a player's level (1..cap) with `xp` (default 0) towards the next one: raises or lowers at once, without level-up events (to level up the game's way, give XP with `emf.attribute_add(w, player, "xp_pending", n)`). The skill points follow the level; skills already unlocked stay unlocked. Saved with the character. Host only. true (done or queued) / false
 - `emf.tell(world, id, text)`: (1.6) a chat line only player `id` sees, under their own name (in a game you host, a note for the host itself); `"\n"` splits lines, at most 10. Where players' chat is on: a dedicated server, or `[chat] players=1` in a game you host ([server.md](server.md)). A Lua mod may send 30 lines in 10 s. true when queued, false when refused (the log says why)
 - `emf.broadcast(text)`: (1.6) the same line for every connected player (a note for the host of a game you host). true / false
 - `emf.on_chat(fn)`: (1.6) `fn(world, account, entity, text)` for every chat line a player sends that is not an EMF command, on the server world after its next step; `account` as text ("0x" + 16 hex digits), `entity` 0 when unknown. Read-only: the line is shown as usual. false where players' chat is off

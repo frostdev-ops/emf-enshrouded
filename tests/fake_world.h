@@ -94,19 +94,33 @@ inline void plant_entities(FakeWorld& w, MapStore& ms, std::initializer_list<uin
     }
 }
 
-// Plants one named singleton (entry index 0) pointing at `object`.
+// Plants named singletons pointing at objects: up to 8, each its own entry; planting a name again points it elsewhere.
 struct SingletonStore {
     MapStore map;
-    alignas(8) uint8_t entries[off::kSingletonEntrySize] = {};
+    alignas(8) uint8_t entries[8 * off::kSingletonEntrySize] = {};
+    uint16_t count = 0;
     void plant(FakeWorld& w, const char* name, void* object) {
         map.attach(w, off::kSingletonMap, true);
         const uint32_t h = fnv1a32(name);
-        map.vals2[h & 7] = 0;
-        map.put(w, off::kSingletonMap, h & 7, h);
-        std::memcpy(entries + off::kSingletonEntryHash, &h, 4);
-        std::memcpy(entries + off::kSingletonEntryObj, &object, 8);
+        uint16_t index = count;
+        for (uint16_t i = 0; i < count; ++i) {  // planted before: the same entry
+            uint32_t eh = 0;
+            std::memcpy(&eh, entries + i * off::kSingletonEntrySize + off::kSingletonEntryHash, 4);
+            if (eh == h) index = i;
+        }
+        if (index == count) {
+            if (count == 8) return;
+            size_t slot = h & 7;  // open addressing, as the game's map
+            while (map.bits[0] & (1ull << slot)) slot = (slot + 1) & 7;
+            map.vals2[slot] = index;
+            map.put(w, off::kSingletonMap, slot, h);
+            ++count;
+        }
+        uint8_t* e = entries + index * off::kSingletonEntrySize;
+        std::memcpy(e + off::kSingletonEntryHash, &h, 4);
+        std::memcpy(e + off::kSingletonEntryObj, &object, 8);
         w.put<const void*>(off::kSingletonArray, entries);
-        w.put<uint64_t>(off::kSingletonCount, 1);
+        w.put<uint64_t>(off::kSingletonCount, count);
     }
 };
 
