@@ -20,6 +20,18 @@ namespace emf::loader {
 
 constexpr const wchar_t* kShadowSubdir = L"emf\\content\\client";
 
+// What differs between the game client and the dedicated server: the stem of the data files (<stem>.exe, .kfc,
+// .kfc_resources, <stem>_NNN.dat) and the shadow copy's folder under the game folder. Every function below that names
+// those files takes one; the default is the client.
+struct ContentTarget {
+    std::wstring_view stem;
+    std::wstring_view subdir;
+    bool server = false;
+};
+inline constexpr ContentTarget kClientTarget{L"enshrouded", L"emf\\content\\client", false};
+inline constexpr ContentTarget kServerTarget{L"enshrouded_server", L"emf\\content\\server", true};
+inline const ContentTarget& content_target(bool server) { return server ? kServerTarget : kClientTarget; }
+
 inline wchar_t ascii_lower(wchar_t c) { return c >= L'A' && c <= L'Z' ? static_cast<wchar_t>(c + 32) : c; }
 
 inline bool iequals_ascii(std::wstring_view a, std::wstring_view b) {
@@ -29,10 +41,13 @@ inline bool iequals_ascii(std::wstring_view a, std::wstring_view b) {
     return true;
 }
 
-// enshrouded.kfc, enshrouded.kfc_resources and enshrouded_<digits>.dat, any case.
-inline bool is_content_file_name(std::wstring_view n) {
-    if (iequals_ascii(n, L"enshrouded.kfc") || iequals_ascii(n, L"enshrouded.kfc_resources")) return true;
-    constexpr std::wstring_view head = L"enshrouded_", tail = L".dat";
+// <stem>.kfc, <stem>.kfc_resources and <stem>_<digits>.dat, any case (enshrouded.kfc ... for the client). The digits
+// make the names exclusive: enshrouded_server_000.dat is no client container.
+inline bool is_content_file_name(std::wstring_view n, const ContentTarget& t = kClientTarget) {
+    const std::wstring stem(t.stem);
+    if (iequals_ascii(n, stem + L".kfc") || iequals_ascii(n, stem + L".kfc_resources")) return true;
+    const std::wstring head = stem + L"_";
+    constexpr std::wstring_view tail = L".dat";
     if (n.size() <= head.size() + tail.size()) return false;
     if (!iequals_ascii(n.substr(0, head.size()), head) || !iequals_ascii(n.substr(n.size() - tail.size()), tail))
         return false;
@@ -41,9 +56,10 @@ inline bool is_content_file_name(std::wstring_view n) {
     return true;
 }
 
-// The game's containers: enshrouded_<digits>.dat, any case.
-inline bool is_dat_file_name(std::wstring_view n) {
-    return is_content_file_name(n) && n.size() > 11 && iequals_ascii(n.substr(0, 11), L"enshrouded_");
+// The game's containers: <stem>_<digits>.dat, any case.
+inline bool is_dat_file_name(std::wstring_view n, const ContentTarget& t = kClientTarget) {
+    const size_t head = t.stem.size() + 1;
+    return is_content_file_name(n, t) && n.size() > head && iequals_ascii(n.substr(0, head), std::wstring(t.stem) + L"_");
 }
 
 inline bool is_slash(wchar_t c) { return c == L'\\' || c == L'/'; }
@@ -221,33 +237,35 @@ inline std::optional<std::wstring> normal_game_dir(std::wstring_view dir) {
     return n->path;
 }
 
-// <game>\emf\content\client
-inline std::wstring shadow_folder(std::wstring_view game_dir) {
+// <game>\emf\content\client (the server: <game>\emf\content\server)
+inline std::wstring shadow_folder(std::wstring_view game_dir, const ContentTarget& t = kClientTarget) {
     const auto g = normal_game_dir(game_dir);
-    return g ? path_join(*g, kShadowSubdir) : std::wstring();
+    return g ? path_join(*g, t.subdir) : std::wstring();
 }
 
 // Where an open of `opened` goes with the redirect on: <game>\emf\content\client\<name> for a content file directly in
 // the game folder, "" for anything else. A \\?\ path stays one, and so does a result too long for a plain path.
 // `game` is the game folder as normal_game_dir gives it (the hooks work it out once, in start()).
-inline std::wstring shadow_path_in(std::wstring_view opened, const std::wstring& game, std::wstring_view cwd) {
+inline std::wstring shadow_path_in(std::wstring_view opened, const std::wstring& game, std::wstring_view cwd,
+                                   const ContentTarget& t = kClientTarget) {
     if (game.empty()) return {};
     const auto o = normalize_path(opened, cwd);
     if (!o) return {};
     const size_t slash = o->path.find_last_of(L'\\');
     if (slash == std::wstring::npos) return {};
     const std::wstring_view name = std::wstring_view(o->path).substr(slash + 1);
-    if (!is_content_file_name(name)) return {};
+    if (!is_content_file_name(name, t)) return {};
     if (!same_path(std::wstring_view(o->path).substr(0, slash), game)) return {};
-    std::wstring out = path_join(path_join(game, kShadowSubdir), name);
+    std::wstring out = path_join(path_join(game, t.subdir), name);
     if (o->verbatim || out.size() >= MAX_PATH) out = with_verbatim_prefix(out);
     return out;
 }
 
 // The same for a game folder in any form ("C:/Games/Enshrouded/", "C:").
-inline std::wstring shadow_path(std::wstring_view opened, std::wstring_view game_dir, std::wstring_view cwd) {
+inline std::wstring shadow_path(std::wstring_view opened, std::wstring_view game_dir, std::wstring_view cwd,
+                                const ContentTarget& t = kClientTarget) {
     const auto g = normal_game_dir(game_dir);
-    return g ? shadow_path_in(opened, *g, cwd) : std::wstring();
+    return g ? shadow_path_in(opened, *g, cwd, t) : std::wstring();
 }
 
 // The access rights an open may ask for and still go to the shadow copy: reading only.
@@ -313,6 +331,14 @@ inline ContentSwitches read_content_switches(const std::wstring& ini) {
 constexpr const char* kStampedFiles[] = {"enshrouded.exe", "enshrouded.kfc", "enshrouded.kfc_resources"};
 constexpr size_t kStampedCount = sizeof kStampedFiles / sizeof kStampedFiles[0];
 
+// The i-th stamped file for a target: <stem>.exe, <stem>.kfc, <stem>.kfc_resources (kStampedFiles for the client).
+inline std::string stamped_file(const ContentTarget& t, size_t i) {
+    static constexpr const char* kExt[kStampedCount] = {".exe", ".kfc", ".kfc_resources"};
+    std::string stem;
+    for (const wchar_t c : t.stem) stem += static_cast<char>(c);  // the stems are ASCII
+    return stem + (i < kStampedCount ? kExt[i] : "");
+}
+
 struct FileStamp {
     unsigned long long size = 0;
     unsigned long long written = 0;  // last write time, UTC: a Windows FILETIME as one number
@@ -377,8 +403,10 @@ void record_once(std::optional<T>& slot, bool& untrusted, const T& value) {
 
 // Reads shadow.txt's `source` and `dat_count` lines; every other line (the files -Remove takes out, comments) and
 // every line not exactly in that form is passed over.
-inline ShadowRecord parse_shadow_record(std::string_view text) {
+inline ShadowRecord parse_shadow_record(std::string_view text, const ContentTarget& t = kClientTarget) {
     ShadowRecord r;
+    std::string stamped[kStampedCount];
+    for (size_t i = 0; i < kStampedCount; ++i) stamped[i] = stamped_file(t, i);
     bool untrusted[kStampedCount] = {};
     bool dats_untrusted = false;
     if (text.substr(0, 3) == "\xEF\xBB\xBF") text.remove_prefix(3);  // a UTF-8 mark (saved by an editor)
@@ -395,7 +423,7 @@ inline ShadowRecord parse_shadow_record(std::string_view text) {
             const auto written = detail::parse_u64(w[3]);
             if (!size || !written) continue;
             for (size_t i = 0; i < kStampedCount; ++i)
-                if (detail::ascii_iequals(w[1], kStampedFiles[i]))
+                if (detail::ascii_iequals(w[1], stamped[i]))
                     detail::record_once(r.source[i], untrusted[i], FileStamp{*size, *written});
         } else if (w.size() == 2 && w[0] == "dat_count") {
             const auto n = detail::parse_u64(w[1]);
@@ -415,28 +443,34 @@ struct ShadowFacts {
 
 // "" when the shadow copy may be used; else the line for emf_loader.log and file_opens.log that says why not and what
 // to do.
-inline std::string shadow_problem(const ShadowFacts& f) {
+inline std::string shadow_problem(const ShadowFacts& f, const ContentTarget& t = kClientTarget) {
     const std::string off = "content redirect off: ";
     const std::string again = "; run content_shadow.ps1 -Remove and -Make again";
+    std::string record_name;
+    for (const wchar_t c : t.subdir) record_name += static_cast<char>(c);  // ASCII
+    record_name += "\\shadow.txt";
     if (!f.record_there)
-        return off + "there is no emf\\content\\client\\shadow.txt (make the shadow copy with content_shadow.ps1 -Make)";
-    if (!f.record) return off + "could not read emf\\content\\client\\shadow.txt" + again;
-    const ShadowRecord r = parse_shadow_record(*f.record);
+        return off + "there is no " + record_name + " (make the shadow copy with content_shadow.ps1 -Make)";
+    if (!f.record) return off + "could not read " + record_name + again;
+    const ShadowRecord r = parse_shadow_record(*f.record, t);
     bool complete = r.dat_count.has_value();
     for (const auto& s : r.source) complete = complete && s.has_value();
     if (!complete)
-        return off + "emf\\content\\client\\shadow.txt does not record the game's files (content_shadow.ps1 -Make did not "
+        return off + record_name + " does not record the game's files (content_shadow.ps1 -Make did not "
                      "finish, or an older one made it)" + again;
     std::string changed;
     auto add = [&](const std::string& what) { changed += (changed.empty() ? "" : ", ") + what; };
     for (size_t i = 0; i < kStampedCount; ++i) {
         if (!f.now[i])
-            add(std::string("no ") + kStampedFiles[i]);
+            add("no " + stamped_file(t, i));
         else if (!(*f.now[i] == *r.source[i]))
-            add(kStampedFiles[i]);
+            add(stamped_file(t, i));
     }
-    if (f.dats_now != *r.dat_count)
-        add("enshrouded_NNN.dat files: " + std::to_string(*r.dat_count) + " then, " + std::to_string(f.dats_now) + " now");
+    if (f.dats_now != *r.dat_count) {
+        const std::string exe = stamped_file(t, 0);
+        add(exe.substr(0, exe.size() - 4) + "_NNN.dat files: " + std::to_string(*r.dat_count) + " then, " +
+            std::to_string(f.dats_now) + " now");
+    }
     if (changed.empty()) return {};
     return off + "the game changed since the shadow copy was made (" + changed + ")" + again;
 }

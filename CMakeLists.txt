@@ -594,6 +594,67 @@ add_dependencies(emf_tests emf_app emf_standin_server emf_standin_tar emf_standi
 target_include_directories(emf_tests PRIVATE third_party/doctest src)
 add_test(NAME emf_tests COMMAND emf_tests)
 
+# --- emf_content.dll (src/content, Rust): EMF's C ABI around EML's mod loader, built from the pinned copy in
+# third_party/eml. cargo builds it in its own target folder; nothing in EMF loads it yet. Without Rust, configure
+# with -DEMF_CONTENT=OFF. ---
+option(EMF_CONTENT "Build emf_content.dll with cargo (needs Rust: rustup.rs)" ON)
+if(EMF_CONTENT)
+  find_program(CARGO cargo HINTS "$ENV{CARGO_HOME}/bin" "$ENV{USERPROFILE}/.cargo/bin")
+  if(NOT CARGO)
+    message(FATAL_ERROR "emf_content.dll needs Rust (rustup.rs); or configure with -DEMF_CONTENT=OFF")
+  endif()
+  set(EMF_CONTENT_SRC ${CMAKE_SOURCE_DIR}/src/content)
+  set(EMF_CARGO_TARGET_DIR ${CMAKE_BINARY_DIR}/cargo)
+  set(EMF_CONTENT_DLL ${CMAKE_BINARY_DIR}/content/emf_content.dll)
+  file(GLOB_RECURSE EMF_CONTENT_INPUTS CONFIGURE_DEPENDS
+    ${EMF_CONTENT_SRC}/src/*.rs
+    ${CMAKE_SOURCE_DIR}/third_party/eml/*.rs
+    ${CMAKE_SOURCE_DIR}/third_party/eml/*Cargo.toml
+    ${CMAKE_SOURCE_DIR}/third_party/eml/crates/mod-loader-lua/definitions/*.lua)
+  # WORKING_DIRECTORY src/content, so rust-toolchain.toml and .cargo/config.toml apply. The copy always runs, so the
+  # DLL is newer than its inputs and ninja does not call cargo again when nothing changed.
+  # The version resource (src/content/emf_content.rc) with EMF's version: CMake compiles it, cargo links it (build.rs
+  # reads EMF_CONTENT_RES). The cargo tests get the same variable, so the two never relink the DLL without it.
+  set(EMF_CONTENT_RES ${CMAKE_BINARY_DIR}/content/emf_content.res)
+  add_custom_command(
+    OUTPUT ${EMF_CONTENT_RES}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/content
+    COMMAND ${CMAKE_RC_COMPILER} /nologo /DEMF_VERSION="${EMF_VERSION}" /DEMF_VER_MAJOR=${PROJECT_VERSION_MAJOR}
+      /DEMF_VER_MINOR=${PROJECT_VERSION_MINOR} /DEMF_VER_PATCH=${PROJECT_VERSION_PATCH} /fo ${EMF_CONTENT_RES}
+      ${EMF_CONTENT_SRC}/emf_content.rc
+    DEPENDS ${EMF_CONTENT_SRC}/emf_content.rc ${CMAKE_SOURCE_DIR}/VERSION
+    COMMENT "Compiling emf_content.dll's version resource"
+    VERBATIM)
+  set(EMF_CARGO_ENV CARGO_TARGET_DIR=${EMF_CARGO_TARGET_DIR} EMF_CONTENT_RES=${EMF_CONTENT_RES})
+  add_custom_command(
+    OUTPUT ${EMF_CONTENT_DLL}
+    COMMAND ${CMAKE_COMMAND} -E env ${EMF_CARGO_ENV} ${CARGO} build --release --locked
+    COMMAND ${CMAKE_COMMAND} -E copy ${EMF_CARGO_TARGET_DIR}/release/emf_content.dll ${EMF_CONTENT_DLL}
+    DEPENDS ${EMF_CONTENT_INPUTS} ${EMF_CONTENT_SRC}/Cargo.toml ${EMF_CONTENT_SRC}/Cargo.lock
+      ${EMF_CONTENT_SRC}/rust-toolchain.toml ${EMF_CONTENT_SRC}/.cargo/config.toml ${EMF_CONTENT_SRC}/build.rs
+      ${EMF_CONTENT_RES}
+    WORKING_DIRECTORY ${EMF_CONTENT_SRC}
+    COMMENT "Building emf_content.dll with cargo"
+    VERBATIM)
+  add_custom_target(emf_content ALL DEPENDS ${EMF_CONTENT_DLL})
+  add_test(NAME emf_content_cargo_tests
+    COMMAND ${CMAKE_COMMAND} -E env ${EMF_CARGO_ENV} ${CARGO} test --release --locked
+    WORKING_DIRECTORY ${EMF_CONTENT_SRC})
+  target_compile_definitions(emf_tests PRIVATE EMF_CONTENT_DLL="${EMF_CONTENT_DLL}")
+  add_dependencies(emf_tests emf_content)
+  # emf_content_run.exe: one build from the command line, for tests and checks by hand; never packaged. It finds the
+  # DLL next to itself, else at EMF_CONTENT_DLL.
+  add_executable(emf_content_run tools/content_run/content_run.cpp)
+  target_include_directories(emf_content_run PRIVATE src)
+  target_compile_definitions(emf_content_run PRIVATE EMF_CONTENT_DLL="${EMF_CONTENT_DLL}")
+  add_dependencies(emf_content_run emf_content)
+  target_compile_definitions(emf_tests PRIVATE EMF_CONTENT_RUN_EXE="$<TARGET_FILE:emf_content_run>")
+  add_dependencies(emf_tests emf_content_run)
+endif()
+# The tests load the built DLL; without EMF_CONTENT_DLL the file compiles to nothing. src/loader/module_threads.h
+# (threads started inside a module) is header-only, for the tests, emf_content_run and the loader.
+target_sources(emf_tests PRIVATE tests/test_content_dll.cpp tests/test_module_threads.cpp)
+
 # --- Mod profiles (docs/app.md "Profiles"): src/core/profiles.cpp is the file format, the store and the
 # rules, in EMF.exe and in the core (the console's "profile" command). ---
 # app/profiles.cpp reads the game folder with EMF.exe's own scan (app/game_folder.cpp, which the core builds too; the

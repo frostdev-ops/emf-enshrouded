@@ -23,6 +23,8 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `src/core/` | `emf_core.dll`: hooks the ECS sim step, runs mod callbacks, program hooks, mod programs (with engine events), spawn, items, save/load events, developer commands, the in-game console (`overlay/`: Dear ImGui through a Vulkan layer), loads mods |
 | `app/` | `EMF.exe`, the desktop mod manager: a WebView2 page in a Win32 window ([docs/app.md](docs/app.md)) |
 | `src/saves/` | save backups: the engine shared by EMF.exe's Saves tab and the core's automatic backups and `saves.*` commands, and `save-info.json` ([docs/saves.md](docs/saves.md)) |
+| `src/content/` | `emf_content.dll` (Rust, built by CMake with cargo): a C ABI around EML's mod loader that builds the content of a game folder's EML mods; nothing in EMF loads it yet ([src/content/README.md](src/content/README.md)) |
+| `third_party/eml/` | the pinned copy of EML's library crates (v0.2.0) that `emf_content.dll` is built from, with EMF's patches listed in `EMF_PATCHES.md` |
 | `sdk/include/emf/` | mod SDK: `emf_api.h` (C API v20), `emf.hpp` (C++ helpers), `generated/components.hpp` (661 components, 65 dynamic halves, 129 events) |
 | `mods/sample_mod/` | example EMF mod (see below) |
 | `mods/companion/` | F6: a companion that follows you, fights at your side, takes orders (stay, attack) and wears gear you give it; saved per world (see below) |
@@ -95,7 +97,8 @@ record; it never loads `emf_content.dll` and never writes a game file): **Ready*
 uses it without building), **Builds at the next start** (and why: never built, a mod new or changed, the game or
 `emf_content.dll` changed, the copy gone), **Failed** (the same files failed before, with the message: EMF tries again
 when a mod, the game or `emf_content.dll` changes), **Off** (the loader's reason), **Applied by EML** or **ShroudForge**,
-or **Not installed**; a dedicated server's folder gets one line (it gets EML content in a later version). The card lists
+or **Not installed**; a dedicated server's folder gets the same card for the server (its copy is
+`emf\content\server\`, and the server's console says when it builds at its start). The card lists
 the mods EMF builds and the ones it leaves out with the loader's reason (the Mods tab says "loaded by EMF" or "left
 out" with the same reason), the last build (when, how long, its errors) and the copy's disk use, and `emf\content.log`
 is the log viewer's third choice. Its actions, all refused while the game runs: **When to apply** (`[content] mode`),
@@ -281,7 +284,7 @@ end the game; use `commands.txt` then.)
 | `give <item name> [count]` | drops items 1 m above you; the game collects them (e.g. `give Material_T1_Wood_Logs 3`, or `give wood logs 3`: item names take spaces, any case, words in any order and parts of words; several matches are listed, see docs/modding/reference.md) |
 | `put <item name> [count] [entity] [level] [rarity 0-4]` | puts items straight into an inventory, yours by default (e.g. `put Weapon_T1_1H_SwordEpic_01`, `put Material_T1_Wood_Logs 2 1025` for a villager, `put Weapon_T1_1H_SwordEpic_01 1 1 10 3` for a level-10 Epic sword; the game may cap the level an item can have); the reply comes one tick later with how many fitted, and why when fewer did (`0 added (entity 77 has no inventory ...)`, `3 added (only 3 of 5 fit: no room for the rest)`) |
 | `take <item name> [count] [entity]` | takes items out of an inventory, yours by default: all or nothing (`take Material_T1_Wood_Logs 5`; when fewer are there nothing is taken and the reply says how many were missing). It searches every inventory of the entity, **equipped gear included**, and a taken gear item is gone for good (its level and perks with it) |
-| `spawn <template guid> [count 1-20]` | spawns templates 2 m from you (GUIDs from `export/template_guids.csv`) |
+| `spawn <template guid> [count 1-20] [at <x> <y> <z>]` | spawns templates 2 m from you, or at a place in metres (a dedicated server's console has no "you") (GUIDs from `export/template_guids.csv`) |
 | `time <hours 0-24>` | sets the time of day (`time 12` = noon) and lets the weather roll again; on a game build EMF does not know it leaves the weather alone, and refuses when the world's tick fields are not confirmed |
 | `pos` | your position in metres |
 | `entities` | how many entities the server world has |

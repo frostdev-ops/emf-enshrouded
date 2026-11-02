@@ -36,7 +36,6 @@ namespace ld = emf::loader;
 namespace cio = emf::loader::cio;
 using VT = core::json::Value::Type;
 
-constexpr const char* kFileName = "enshrouded";  // the game client's data: enshrouded.kfc, enshrouded_NNN.dat
 
 int64_t unix_seconds(uint64_t filetime) {
     constexpr uint64_t k1970 = 116444736000000000ull;
@@ -104,11 +103,12 @@ uint64_t own_bytes(const std::wstring& dir, int depth) {
 
 // "" when the redirect will take the shadow copy at the next start (dllmain.cpp's record_ok): its record, shadow.txt,
 // matches the game's files, and its copies and links are whole.
-std::string copy_problem(const std::wstring& game, const std::wstring& shadow, uint32_t dat_count) {
+std::string copy_problem(const std::wstring& game, const std::wstring& shadow, uint32_t dat_count,
+                         const ld::ContentTarget& t) {
     const auto normal = ld::normal_game_dir(game);
     if (!normal) return "the game folder's path is not one the redirect can read";
-    if (const std::string p = ld::shadow_problem(ld::file_hooks::shadow_facts(*normal)); !p.empty()) return p;
-    return ld::shadow_intact(game, shadow, kFileName, dat_count);
+    if (const std::string p = ld::shadow_problem(ld::file_hooks::shadow_facts(*normal, t), t); !p.empty()) return p;
+    return ld::shadow_intact(game, shadow, cio::to_utf8(std::wstring(t.stem)), dat_count);
 }
 
 // The known-tools table the loader reads: the folder's emf\known_tools.txt only (never EMF.exe's own copy).
@@ -215,7 +215,6 @@ const char* content_status_name(ContentStatus s) {
         case ContentStatus::Off: return "off";
         case ContentStatus::OtherTool: return "other_tool";
         case ContentStatus::NotInstalled: return "not_installed";
-        case ContentStatus::ServerLater: return "server_later";
     }
     return "unknown";
 }
@@ -264,14 +263,18 @@ std::string content_take_over_problem(const std::wstring& game) {
 
 ContentPanel content_panel(const std::wstring& game, bool server_folder, bool disk_use) {
     ContentPanel p;
-    if (server_folder) {
-        p.status = ContentStatus::ServerLater;
-        p.headline = "The dedicated server gets EML content in a later version of EMF.";
-        return p;
-    }
+    // the game client's names and copy (enshrouded.*, emf\content\client), or the dedicated server's
+    const ld::ContentTarget& target = ld::content_target(server_folder);
+    const std::wstring stem(target.stem);
+    const std::string stem_utf8 = cio::to_utf8(stem);
+    const std::string copy_name = cio::to_utf8(std::wstring(target.subdir));
     const std::wstring dll = game + L"\\emf\\emf_content.dll";
-    const std::wstring shadow = game + L"\\" + ld::kShadowSubdir;
+    const std::wstring shadow = game + L"\\" + std::wstring(target.subdir);
     const std::wstring ini = game + L"\\emf\\emf_core.ini";
+    const auto game_base = [&] {
+        return ld::choose_base(ld::read_base_file(game + L"\\" + stem + L".kfc"),
+                               ld::read_base_file(game + L"\\" + stem + L".kfc.bak"), stem_utf8);
+    };
 
     // ---- the facts, in the loader's order ----
     ld::ContentFacts f;
@@ -305,9 +308,7 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder, bool di
             f.mods = ld::scan_eml_mods(game + L"\\mods");
             if (!f.mods.usable.empty()) {
                 f.other_tool = ld::chained_tool_by_text(look);
-                if (!f.other_tool)
-                    f.base = ld::choose_base(ld::read_base_file(game + L"\\enshrouded.kfc"),
-                                             ld::read_base_file(game + L"\\enshrouded.kfc.bak"));
+                if (!f.other_tool) f.base = game_base();
             }
         }
     }
@@ -373,10 +374,7 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder, bool di
         }
     }
     if (!f.other_tool) {
-        const ld::BaseChoice base = f.base.ok || !f.base.why.empty()
-                                        ? f.base
-                                        : ld::choose_base(ld::read_base_file(game + L"\\enshrouded.kfc"),
-                                                          ld::read_base_file(game + L"\\enshrouded.kfc.bak"));
+        const ld::BaseChoice base = f.base.ok || !f.base.why.empty() ? f.base : game_base();
         p.patched_in_place = base.use_bak;
     }
 
@@ -404,7 +402,7 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder, bool di
         const std::string v = emf_core_version(game + L"\\emf\\emf_core.dll");
         return v.empty() ? std::string(EMF_VERSION) : v;
     }();
-    const ld::FingerprintInput in = ld::collect_fingerprint_input(game, kFileName, f.base, f.mods.usable, dll, emf_version);
+    const ld::FingerprintInput in = ld::collect_fingerprint_input(game, stem_utf8, f.base, f.mods.usable, dll, emf_version);
     const std::string fingerprint = ld::content_fingerprint(in);
     const bool same = state && !state->fingerprint.empty() && state->fingerprint == fingerprint;
     const std::string again = "EMF tries again when a mod, the game or emf_content.dll changes.";
@@ -422,14 +420,14 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder, bool di
         p.detail = "The last build with these files failed: " + message + ". " + again;
     };
     if (ld::state_current(state, fingerprint)) {
-        if (const std::string broken = copy_problem(game, shadow, f.base.dat_count); !broken.empty()) {
-            builds("The copy in emf\\content\\client is missing or does not match the game's files");
+        if (const std::string broken = copy_problem(game, shadow, f.base.dat_count, target); !broken.empty()) {
+            builds("The copy in " + copy_name + " is missing or does not match the game's files");
         } else {
             p.status = ContentStatus::Ready;
             p.headline = "Ready";
             const size_t n = state->mods.size();
             // the build's time is on the card's last-build line, in the player's local time
-            p.detail = "The copy in emf\\content\\client is current: the next start uses it without building (" +
+            p.detail = "The copy in " + copy_name + " is current: the next start uses it without building (" +
                        std::to_string(n) + (n == 1 ? " mod" : " mods") + ").";
         }
     } else if (same && state->code == kContentBuildRunning) {
@@ -441,7 +439,7 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder, bool di
         failed(state->message.empty() ? "code " + std::to_string(state->code) : state->message);
     } else if (!state) {
         builds(state_file     ? "EMF's record of the last build (emf_content_state.json) could not be read"
-               : p.copy_there ? "The copy in emf\\content\\client has no record of its build (Build again forgets it)"
+               : p.copy_there ? "The copy in " + copy_name + " has no record of its build (Build again forgets it)"
                               : "EMF has not built it yet");
     } else {
         std::vector<std::string> what = changes(game, *state, in, p.mods);

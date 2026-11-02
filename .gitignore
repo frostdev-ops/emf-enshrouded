@@ -1,6 +1,8 @@
 # build output
 build/
 out/
+# cargo run by hand in src/content (CMake builds into build/)
+src/content/target/
 # regenerable / large
 tools/eml-0.2.0/
 export/

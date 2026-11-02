@@ -505,7 +505,8 @@ TEST_CASE("app servers: the EMF to install into a server is the package or game 
     package_tree(game, L"");
     game.write(L"emf\\installed.txt",
                "dinput8.dll\r\nemf\\emf_core.dll\r\nemf\\known_tools.txt\r\nemf\\mods\\clock\\mod.json\r\nemf\\mods\\clock\\clock.dll\r\n"
-               "emf\\EMF.exe\r\nemf\\setup\\install.ps1\r\nemf\\setup\\emf_common.ps1\r\n");
+               "emf\\EMF.exe\r\nemf\\setup\\install.ps1\r\nemf\\setup\\emf_common.ps1\r\nemf\\emf_content.dll\r\n");
+    game.write(L"emf\\emf_content.dll", "MZ emf_content stand-in");  // the EML content builder goes to the server too
     game.write(L"emf\\config\\clock.ini", "[clock]\r\nplace=0\r\n");  // the player's settings stay out
     const EmfPackage b = find_emf_package(game.at(L"emf"));
     REQUIRE_MESSAGE(b.ok, b.error);
@@ -518,6 +519,7 @@ TEST_CASE("app servers: the EMF to install into a server is the package or game 
     CHECK(stage.has(L"tree\\dinput8.dll"));
     CHECK(stage.has(L"tree\\emf\\mods\\clock\\clock.dll"));
     CHECK(stage.has(L"tree\\emf\\setup\\install.ps1"));
+    CHECK(stage.has(L"tree\\emf\\emf_content.dll"));  // else a server never builds EML content, and an update deletes it
     CHECK_FALSE(stage.has(L"tree\\emf\\config\\clock.ini"));
     CHECK_FALSE(stage.has(L"tree\\enshrouded.exe"));
 

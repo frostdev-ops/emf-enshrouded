@@ -7,9 +7,9 @@
 //   3. another tool applies it: a dbghelp.dll in the game folder (EML's or ShroudForge's proxy), or EML's or
 //      ShroudForge's dinput8.dll listed in dinput8-chain.ini; mode=on never overrides another tool
 //   4. emf_content.dll is not installed (<game>\emf\emf_content.dll)
-//   5. the dedicated server (its content comes later)
-//   6. no EML mod in <game>\mods that EMF can build (eml_mods.h)
-//   7. no base to build from (content_base.h)
+//   5. no EML mod in <game>\mods that EMF can build (eml_mods.h)
+//   6. no base to build from (content_base.h)
+// The dedicated server decides the same way, with its own files (enshrouded_server.*, emf\content\server).
 #include <cwchar>
 #include <functional>
 #include <optional>
@@ -69,8 +69,6 @@ inline ContentDecision decide_content(const ContentFacts& f) {
         d.why = "applied by " + *f.other_tool + ", so EMF leaves it alone";
     } else if (!f.dll_present) {
         d.why = "off (emf_content.dll is not installed)";
-    } else if (f.server) {
-        d.why = "off (the dedicated server does not take EML content from EMF yet)";
     } else if (f.mods.usable.empty()) {
         d.why = "off (no EML mod in the game's mods folder that EMF can build)";
     } else if (!f.base.ok) {

@@ -1,0 +1,32 @@
+# emf_content.dll: EMF's C ABI around EML's mod loader (third_party/eml). This crate is its own workspace.
+# The shim's own code is EMF's (MIT); the DLL built from it and EML is GPL-3.0-or-later as a whole (see README.md).
+[package]
+name = "emf-content"
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.88.0"
+license = "MIT"
+publish = false
+description = "EMF's C ABI around EML's mod loader: builds the content of EML mods into a game folder"
+
+[lib]
+name = "emf_content"
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+mod-loader = { path = "../../third_party/eml/crates/mod-loader", features = ["lua"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+tracing = "0.1.41"
+tracing-subscriber = { version = "0.3.20", default-features = false, features = ["fmt", "std"] }
+
+[dev-dependencies]
+# tests/eml_writer.rs drives EML's container writer directly
+kfc-base = { path = "../../third_party/eml/crates/kfc-base" }
+
+[workspace]
+
+[profile.release]
+panic = "unwind"
+lto = true
+codegen-units = 1

@@ -128,17 +128,24 @@ TEST_CASE("app content bridge: content answers with the panel") {
     REQUIRE(at(at(v, "panel"), "mods").arr.size() == 1);
 }
 
-TEST_CASE("app content bridge: a dedicated server's folder gets the one line, and no action") {
-    ContentGame g(L"cb_server");
-    std::filesystem::remove(g.at(L"enshrouded.exe"));
-    g.write(L"enshrouded_server.exe", "fake server");
+TEST_CASE("app content bridge: a dedicated server's folder: its own card, and the actions on emf\\content\\server") {
+    ContentGame g(L"cb_server", true, true, true);
+    g.built();
     ContentHost host;
     host.dir = g.dir;
     Bridge bridge(host);
-    CHECK(at(at(content_reply(bridge.handle(R"({"cmd":"content"})")), "panel"), "status").s == "server_later");
-    const auto v = content_reply(bridge.handle(R"({"cmd":"content_mode","mode":"off"})"));
-    CHECK_FALSE(at(v, "ok").b);
-    CHECK_FALSE(g.has(L"emf\\emf_core.ini"));
+    CHECK(at(at(content_reply(bridge.handle(R"({"cmd":"content"})")), "panel"), "status").s == "ready");
+    // Build again forgets the server's record; Remove the copy takes the server's copy away
+    auto v = content_reply(bridge.handle(R"({"cmd":"content_rebuild"})"));
+    CHECK(at(v, "ok").b);
+    CHECK_FALSE(g.has(L"emf\\content\\server\\emf_content_state.json"));
+    CHECK(at(at(v, "panel"), "status").s == "builds_next");
+    v = content_reply(bridge.handle(R"({"cmd":"content_remove"})"));
+    CHECK(at(v, "ok").b);
+    CHECK_FALSE(g.has(L"emf\\content\\server"));
+    v = content_reply(bridge.handle(R"({"cmd":"content_mode","mode":"off"})"));
+    CHECK(at(v, "ok").b);
+    CHECK(g.read(L"emf\\emf_core.ini").find("mode=off") != std::string::npos);
 }
 
 TEST_CASE("app content bridge: every action is refused while the game runs, and nothing changes") {

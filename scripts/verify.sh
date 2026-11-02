@@ -33,6 +33,9 @@ powershell -NoProfile -ExecutionPolicy Bypass -File scripts/test_tools.ps1 | gre
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/uninstall_probe_test.ps1 | grep -v "^ok "
 # content_shadow.ps1 (the content redirect spike's shadow copy) against fake game folders in %TEMP%.
 powershell -NoProfile -ExecutionPolicy Bypass -File scripts/content_shadow_test.ps1 | grep -v "^ok "
+# source_archive.ps1: the GitHub release's source zip (emf_content.dll is GPL: the repo at HEAD plus the vendored Rust
+# libraries), and cargo resolving emf_content's graph from it alone (~40 s).
+powershell -NoProfile -ExecutionPolicy Bypass -File scripts/source_archive_test.ps1 | grep -v "^ok "
 # The byte signatures against the installed game's exe (scripts/find_game.ps1: EMF_GAME_DIR, else Steam's libraries).
 if game=$(powershell -NoProfile -ExecutionPolicy Bypass -File scripts/find_game.ps1 2>/dev/null | tr -d '\r') && [ -n "$game" ]; then
     exe="$game\\enshrouded.exe"

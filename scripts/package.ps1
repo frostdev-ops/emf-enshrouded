@@ -42,6 +42,10 @@ $fonts = @("Alegreya-Regular.ttf", "Alegreya-Bold.ttf", "CascadiaMono-Regular.tt
 $needed = @("dinput8.dll", "emf\emf_core.dll", "emf\vk\VkLayer_EMF_console.json", "emf\known_tools.txt") + ($fonts | ForEach-Object { "emf\fonts\$_" }) + ($playerMods | ForEach-Object { "emf\mods\$_\$_.dll", "emf\mods\$_\mod.json" })
 foreach ($f in $needed) { if (-not (Test-Path -LiteralPath (Join-Path $dist $f))) { throw "missing build output $dist\$f (run scripts\test.sh first)" } }
 if (-not (Test-Path -LiteralPath (Join-Path $Build "emf_sigcheck.exe"))) { throw "missing build output $Build\emf_sigcheck.exe (run scripts\test.sh first)" }
+# emf_content.dll (src/content, built from EML: GPL-3.0-or-later, THIRD_PARTY_NOTICES.md) builds the content of EML mods
+# at a held game start; a build configured with -DEMF_CONTENT=OFF has none and cannot make a release
+$contentDll = Join-Path $Build "content\emf_content.dll"
+if (-not (Test-Path -LiteralPath $contentDll)) { throw "missing build output $contentDll (configure with EMF_CONTENT on, the default, and build first)" }
 # EMF.exe, the desktop mod manager, with its page (docs/app.md)
 $appFiles = @("EMF.exe", "ui\index.html", "ui\app.css", "ui\app.js", "ui\saves.js", "ui\content.js")
 foreach ($f in $appFiles) { if (-not (Test-Path -LiteralPath (Join-Path $Build "app\$f"))) { throw "missing build output $Build\app\$f (run scripts\test.sh first)" } }
@@ -84,6 +88,7 @@ function Copy-Tree([string]$from, [string]$to, [string[]]$skipDirs = @()) {
 $game = Join-Path $root "game"
 Copy-Into (Join-Path $dist "dinput8.dll") (Join-Path $game "dinput8.dll")
 Copy-Into (Join-Path $dist "emf\emf_core.dll") (Join-Path $game "emf\emf_core.dll")
+Copy-Into $contentDll (Join-Path $game "emf\emf_content.dll")  # the loader loads it only at a start that builds EML content
 Copy-Into (Join-Path $dist "emf\vk\VkLayer_EMF_console.json") (Join-Path $game "emf\vk\VkLayer_EMF_console.json")
 Copy-Into (Join-Path $dist "emf\known_tools.txt") (Join-Path $game "emf\known_tools.txt")  # loaders EMF recognises
 foreach ($f in $fonts) { Copy-Into (Join-Path $dist "emf\fonts\$f") (Join-Path $game "emf\fonts\$f") }  # the overlay's text
@@ -105,6 +110,9 @@ foreach ($m in $scriptMods) {  # whole folder: mod.json and the scripts
 foreach ($f in @("install.ps1", "uninstall.ps1", "emf_common.ps1", "install.cmd", "uninstall.cmd", "README.txt")) {
     Copy-Into (Join-Path $repo "package\$f") (Join-Path $root $f)
 }
+# README.txt links emf_content.dll's source at this release's tag
+$readmeText = [System.IO.File]::ReadAllText((Join-Path $root "README.txt")).Replace("{VERSION}", $version)
+[System.IO.File]::WriteAllText((Join-Path $root "README.txt"), $readmeText)
 Copy-Into (Join-Path $repo "README_EMF.md") (Join-Path $root "README_EMF.md")
 
 # modder files
@@ -142,6 +150,11 @@ Copy-Into (Join-Path $repo "third_party\lua\LICENSE.txt") (Join-Path $lic "Lua-L
 Copy-Into (Join-Path $repo "third_party\webview2\LICENSE.txt") (Join-Path $lic "WebView2-LICENSE.txt")  # EMF.exe links its loader
 Copy-Into (Join-Path $repo "third_party\fonts\alegreya\OFL.txt") (Join-Path $lic "Alegreya-OFL.txt")  # the bundled fonts
 Copy-Into (Join-Path $repo "third_party\fonts\cascadia\LICENSE") (Join-Path $lic "CascadiaMono-OFL.txt")
+# emf_content.dll: EML's licence (the GPL-3.0) and every Rust library inside it with its licence, from the crate's
+# Cargo.lock and the sources cargo already fetched (tools\content\crate_licences.py)
+Copy-Into (Join-Path $repo "third_party\eml\LICENSE") (Join-Path $lic "EML-LICENSE.txt")
+& python -I (Join-Path $repo "tools\content\crate_licences.py") --manifest (Join-Path $repo "src\content\Cargo.toml") --out (Join-Path $lic "rust-crates.html")
+if ($LASTEXITCODE -ne 0) { throw "tools\content\crate_licences.py failed (exit $LASTEXITCODE)" }
 
 # offline signature check for modders (docs/modding/updating.md)
 Copy-Into (Join-Path $Build "emf_sigcheck.exe") (Join-Path $root "tools\emf_sigcheck.exe")

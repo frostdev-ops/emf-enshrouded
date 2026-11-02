@@ -200,19 +200,20 @@ void enable_vulkan_layer() {
 }
 
 // The content redirect spike's hooks (file_hooks.h, docs/engine_parts/file_redirect_spike.md) in the game client
-// (enshrouded.exe; not the dedicated server or another program that loads this DLL). They go into the exe's import table
-// before the exe's own code runs (its entry point comes after every DllMain, and a held entry runs this before it lets
-// the entry go), and stay for the life of the game. After the chained DLLs: a hook one of them put into the same table
-// is called through. `hooks`: the switches as emf_core.ini has them ([content] log_opens, redirect_test), or the
-// redirect to EML content's shadow copy on (a good build or a current shadow) or forced off (EMF owns the content but
-// has no good build, so the spike's switch must not send the game to that copy either).
-void start_file_hooks(const std::wstring& dir, emf::loader::Hooks hooks) {
+// (enshrouded.exe) or the dedicated server (enshrouded_server.exe, with its own names: `target`); not in another program
+// that loads this DLL. They go into the exe's import table before the exe's own code runs (its entry point comes after
+// every DllMain, and a held entry runs this before it lets the entry go), and stay for the life of the game. After the
+// chained DLLs: a hook one of them put into the same table is called through. `hooks`: the switches as emf_core.ini
+// has them ([content] log_opens, redirect_test), or the redirect to EML content's shadow copy on (a good build or a
+// current shadow) or forced off (EMF owns the content but has no good build, so the spike's switch must not send the
+// game to that copy either).
+void start_file_hooks(const std::wstring& dir, emf::loader::Hooks hooks, const emf::loader::ContentTarget& target) {
     try {  // no C++ exception leaves DllMain (or the held entry)
         auto sw = emf::loader::read_content_switches(dir + L"\\emf\\emf_core.ini");
         if (hooks == emf::loader::Hooks::ContentOn) sw.redirect_test = true;
         if (hooks == emf::loader::Hooks::ContentOff) sw.redirect_test = false;
         if (!sw.hooks()) return;
-        for (const auto& line : emf::loader::file_hooks::start(GetModuleHandleW(nullptr), dir, sw))
+        for (const auto& line : emf::loader::file_hooks::start(GetModuleHandleW(nullptr), dir, sw, target))
             loader_log(dir, line.c_str());
     } catch (...) {
         loader_log(dir, "content spike: could not start (out of memory); the game runs without it");
@@ -226,13 +227,44 @@ std::wstring g_dir;  // the game folder
 emf::loader::StartPlan g_start;  // the chained DLLs and EMF's core, after EMF.exe's one-shot flag
 emf::loader::ContentFacts g_facts;
 emf::loader::ContentPlan g_content;
-emf::loader::EntryHold g_content_hold;  // the game client's entry, held for a content build
+// the exe's entry, held for a content build (the dedicated server: released before the build, then held again by
+// start_core_today for the core, as at every server start)
+emf::loader::EntryHold g_content_hold;
 emf::loader::ContentSplash g_splash;
 bool g_chain_ran = false, g_core_ran = false;
 
 std::wstring content_dll() { return g_dir + L"\\emf\\emf_content.dll"; }
-std::wstring shadow_dir() { return g_dir + L"\\" + emf::loader::kShadowSubdir; }
+// The client's data names and shadow folder (enshrouded.*, emf\content\client), or the dedicated server's
+// (enshrouded_server.*, emf\content\server).
+const emf::loader::ContentTarget& target() { return emf::loader::content_target(emf::loader::is_server_exe(g_exe)); }
+std::string stem() { return emf::loader::cio::to_utf8(std::wstring(target().stem)); }
+std::wstring shadow_dir() { return g_dir + L"\\" + std::wstring(target().subdir); }
 std::wstring state_path() { return shadow_dir() + L"\\" + emf::loader::kStateFile; }
+
+// The dedicated server has no desktop window to show (it may run without a desktop): what the client's splash and
+// message box say goes to its console, through the standard output handle (no user32), and to emf_loader.log as always.
+void server_console(const std::string& text) {
+    const HANDLE out = GetStdHandle(STD_OUTPUT_HANDLE);
+    if (!out || out == INVALID_HANDLE_VALUE) return;
+    const std::string line = "[EMF] " + text + "\r\n";
+    DWORD n = 0;
+    WriteFile(out, line.data(), static_cast<DWORD>(line.size()), &n, nullptr);
+}
+
+// One line of a build's progress: the client's splash, or the server's console.
+void build_progress(const std::string& text) {
+    if (target().server)
+        server_console(text);
+    else
+        g_splash.line(text);
+}
+
+// The loader's line for emf_loader.log; on the server the EML content lines ("EML content: built 3 mods ...", "could
+// not be built ...", "the shadow copy is current ...") also go to its console, so an admin sees how a start went.
+void content_line(const std::string& line) {
+    loader_log(g_dir, line.c_str());
+    if (target().server && line.rfind("EML content", 0) == 0) server_console(line);
+}
 
 // Says why an entry point is not the usual start-up code: another tool's jump (and into which DLL), or unknown code.
 std::string describe_entry(const uint8_t* entry, const char* whose) {
@@ -362,8 +394,9 @@ emf::loader::FactsIo facts_io() {
     };
     io.scan_mods = [] { return emf::loader::scan_eml_mods(g_dir + L"\\mods"); };
     io.base = [] {
-        return emf::loader::choose_base(emf::loader::read_base_file(g_dir + L"\\enshrouded.kfc"),
-                                        emf::loader::read_base_file(g_dir + L"\\enshrouded.kfc.bak"));
+        const std::wstring kfc = g_dir + L"\\" + std::wstring(target().stem) + L".kfc";
+        return emf::loader::choose_base(emf::loader::read_base_file(kfc), emf::loader::read_base_file(kfc + L".bak"),
+                                        stem());
     };
     return io;
 }
@@ -379,17 +412,19 @@ emf::loader::ContentPlan plan_this_start(emf::loader::PlayOnce play) {
         };
         p.fingerprint = [] {
             return emf::loader::content_fingerprint(emf::loader::collect_fingerprint_input(
-                g_dir, "enshrouded", g_facts.base, g_facts.mods.usable, content_dll(), EMF_VERSION));
+                g_dir, stem(), g_facts.base, g_facts.mods.usable, content_dll(), EMF_VERSION));
         };
         p.read_state = [] { return prev_state(); };
         p.record_ok = [] {
             const auto game = emf::loader::normal_game_dir(g_dir);
-            if (!game || !emf::loader::shadow_problem(emf::loader::file_hooks::shadow_facts(*game)).empty()) return false;
-            const std::string broken = emf::loader::shadow_intact(g_dir, shadow_dir(), "enshrouded", g_facts.base.dat_count);
+            if (!game ||
+                !emf::loader::shadow_problem(emf::loader::file_hooks::shadow_facts(*game, target()), target()).empty())
+                return false;
+            const std::string broken = emf::loader::shadow_intact(g_dir, shadow_dir(), stem(), g_facts.base.dat_count);
             if (!broken.empty()) loader_log(g_dir, ("EML content: " + broken).c_str());
             return broken.empty();
         };
-        p.log = [](const std::string& line) { loader_log(g_dir, line.c_str()); };
+        p.log = [](const std::string& line) { content_line(line); };
         return emf::loader::plan_content(p);
     } catch (...) {
         loader_log(g_dir, "EML content: off (the loader ran out of memory while looking)");
@@ -453,29 +488,37 @@ emf::loader::StartSteps make_start_steps() {
         run_chain(g_dir, g_start.chain);
     };
     s.hooks = [](emf::loader::Hooks h) {
-        if (!emf::loader::is_game_client_exe(g_exe)) return;
+        if (!emf::loader::is_game_client_exe(g_exe) && !emf::loader::is_server_exe(g_exe)) return;
         // the content redirect also without EMF's core (Play without EMF mods keeps EML content); the spike's
         // switches only with the core, as before
-        if (h == emf::loader::Hooks::ContentOn || g_start.core) start_file_hooks(g_dir, h);
+        if (h == emf::loader::Hooks::ContentOn || g_start.core) start_file_hooks(g_dir, h, target());
     };
     s.start_core = [] { start_core_today(); };
     s.set_status = [](const emf::loader::ContentStatus& st) {
         SetEnvironmentVariableW(emf::loader::kContentStatusVariable,
                                 emf::loader::cio::from_utf8(emf::loader::content_status_text(st)).c_str());
     };
-    s.log = [](const std::string& line) { loader_log(g_dir, line.c_str()); };
-    s.splash_begin = [](const std::string& text) { g_splash.begin(text); };
-    s.splash_end = [] { g_splash.end(); };
+    s.log = [](const std::string& line) { content_line(line); };
+    // the dedicated server: no window, its console says it instead
+    s.splash_begin = [](const std::string& text) {
+        if (target().server)
+            server_console(text + " The server starts when it is done; emf\\content.log has the details.");
+        else
+            g_splash.begin(text);
+    };
+    s.splash_end = [] {
+        if (!target().server) g_splash.end();
+    };
     s.run_work = [](const std::function<void()>& work) {
-        return emf::loader::run_with_splash(&g_splash, work, emf::loader::kBuildTimeoutMs);
+        return emf::loader::run_with_splash(target().server ? nullptr : &g_splash, work, emf::loader::kBuildTimeoutMs);
     };
     s.build_shadow = [] {
         g_content_log.open();
         g_content_log.line("emf", "EMF " EMF_VERSION ": building EML content for " +
                                       emf::loader::mods_text(g_facts.mods.usable.size()) + "; " + g_facts.base.why);
         g_content_log.line("emf", "making the shadow copy in " + emf::loader::cio::to_utf8(shadow_dir()));
-        g_splash.line("Making the shadow copy of the game's data...");
-        const auto r = emf::loader::build_shadow(g_dir, shadow_dir(), "enshrouded", g_facts.base, g_facts.mods.usable);
+        build_progress("Making the shadow copy of the game's data...");
+        const auto r = emf::loader::build_shadow(g_dir, shadow_dir(), stem(), g_facts.base, g_facts.mods.usable);
         g_content_log.line("emf", r.ok ? "the shadow copy is ready" : "the shadow copy could not be made: " + r.why);
         if (!r.ok) g_content_log.close();
         return r;
@@ -483,11 +526,12 @@ emf::loader::StartSteps make_start_steps() {
     s.run_build = [](const std::atomic<bool>& abandoned) {
         g_content_log.line("emf", "loading emf_content.dll");
         const auto out = emf::loader::run_content_build(
-            content_dll(), emf::loader::content_request(shadow_dir(), "enshrouded", false),
+            content_dll(), emf::loader::content_request(shadow_dir(), stem(), target().server),
             [](int level, const std::string& line) {
                 static const char* names[] = {"error", "warning", "info", "debug"};
                 g_content_log.line(level >= 0 && level <= 3 ? names[level] : "log", line);
-                if (level <= 2) g_splash.line(line);
+                // the splash shows the last info line; the server's console only warnings and errors
+                if (level <= (target().server ? 1 : 2)) build_progress(line);
             },
             emf::loader::kReplyCapacity, &abandoned);
         g_content_log.line("emf", "code " + std::to_string(out.code) + ": " + out.message +
@@ -522,6 +566,13 @@ emf::loader::StartSteps make_start_steps() {
     };
     s.dll_gone = [] { return GetModuleHandleW(content_dll().c_str()) == nullptr; };
     s.alert = [](const std::string& text) {
+        if (target().server) {  // a message box would stop a server nobody watches: its console instead
+            std::string one_line = text;
+            for (char& c : one_line)
+                if (c == '\n' || c == '\r') c = ' ';
+            server_console(one_line);
+            return;
+        }
         MessageBoxW(nullptr, emf::loader::cio::from_utf8(text).c_str(), L"EMF", MB_OK | MB_ICONWARNING | MB_TOPMOST);
     };
     s.now = [] { return utc_now(); };

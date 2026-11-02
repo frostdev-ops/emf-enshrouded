@@ -39,10 +39,13 @@ item.damageSetup.dmgMod = 1.75                          -- the Bronze Sword: 1.0
 item.damageSetup.distribution.magicalFireDamage = 0.5   -- and some fire
 
 -- its icon: the game shows an item's icon from a UiTextureResource stored under the item's own GUID, and stops with
--- "corrupted game ui texture" when that is missing. The Bronze Sword's icon fits (the same model).
-local icon = game.assets.get_resource(SOURCE_ITEM, "keen::UiTextureResource")
-assert(icon, "the Bronze Sword's icon was not found (the game changed?)")
-game.assets.create_resource(icon.data, "keen::UiTextureResource", ITEM_GUID, 0)
+-- "corrupted game ui texture" when that is missing. The Bronze Sword's icon fits (the same model). The dedicated
+-- server has no UI data at all (no UiTextureResource type): the icon and the name (4) are for the game only.
+if not loader.is_server then
+	local icon = game.assets.get_resource(SOURCE_ITEM, "keen::UiTextureResource")
+	assert(icon, "the Bronze Sword's icon was not found (the game changed?)")
+	game.assets.create_resource(icon.data, "keen::UiTextureResource", ITEM_GUID, 0)
+end
 
 -- 2) register it: itemRefs and dbgNames are parallel lists
 local registry = game.assets.get_resources_by_type("keen::ItemRegistryResource")[1].data
@@ -74,18 +77,22 @@ recipe.input[1].inputItemCategory.count = 0
 recipe.requiresSheltered = false
 recipe.completionRequirementQuery.knowledgeOrQueryId = { value = recipeId } -- "crafted once" is tracked per recipe
 
--- 4) the name: one new tag in the keenglish table (the game falls back to it for every language), in sorted order
-local collection = game.assets.get_resources_by_type("keen::LocaTagCollectionResource")[1].data
-local content = game.assets.get_content(game.guid.from_content_hash(collection.keenglishData.hash))
-local loca = content:read_data():read_resource("keen::LocaTagCollectionResourceData")
-local at = #loca.tags + 1
-for i, tag in ipairs(loca.tags) do
-	assert(tag.id.value ~= nameId, "the name's loca id is already taken: pick another NAME_GUID")
-	if tag.id.value > nameId then at = i break end
+-- 4) the name: one new tag in the keenglish table (the game falls back to it for every language), in sorted order.
+-- The game only: the dedicated server shows no text.
+if not loader.is_server then
+	local collection = game.assets.get_resources_by_type("keen::LocaTagCollectionResource")[1].data
+	local content = game.assets.get_content(game.guid.from_content_hash(collection.keenglishData.hash))
+	local loca = content:read_data():read_resource("keen::LocaTagCollectionResourceData")
+	local at = #loca.tags + 1
+	for i, tag in ipairs(loca.tags) do
+		assert(tag.id.value ~= nameId, "the name's loca id is already taken: pick another NAME_GUID")
+		if tag.id.value > nameId then at = i break end
+	end
+	table.insert(loca.tags, at, { id = { value = nameId }, text = DISPLAY, arguments = {}, genericArguments = 0 })
+	local buf = buffer.create()
+	buf:write_resource("keen::LocaTagCollectionResourceData", loca)
+	collection.keenglishData.hash = game.assets.create_content(buf)
 end
-table.insert(loca.tags, at, { id = { value = nameId }, text = DISPLAY, arguments = {}, genericArguments = 0 })
-local buf = buffer.create()
-buf:write_resource("keen::LocaTagCollectionResourceData", loca)
-collection.keenglishData.hash = game.assets.create_content(buf)
 
-log(string.format("added %s (item 0x%08x, recipe 0x%08x)", DEBUG_NAME, itemId, recipeId))
+log(string.format("added %s (item 0x%08x, recipe 0x%08x)%s", DEBUG_NAME, itemId, recipeId,
+	loader.is_server and " on the dedicated server (no icon or name: no UI there)" or ""))

@@ -1,0 +1,20 @@
+[package]
+name = "mod-loader-base"
+edition.workspace = true
+version.workspace = true
+authors.workspace = true
+
+[dependencies]
+thiserror.workspace = true
+walkdir.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+indexmap.workspace = true
+parking_lot.workspace = true
+camino.workspace = true
+semver.workspace = true
+
+tracing.workspace = true
+
+# EMF patch P2: zip without "bzip2", whose bzip2-sys adds an export (bz_internal_error) to emf_content.dll
+zip = { version = "4.2.0", default-features = false, features = ["aes-crypto", "deflate64", "deflate", "lzma", "time", "zstd", "xz"] }

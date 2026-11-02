@@ -35,6 +35,12 @@ All four come from the example, and the game stops or shows nothing if one is mi
   the game's recipe table, but the crafting menu does not list it: the menu seems to show recipes that knowledge
   unlocks, not every recipe whose requirement passes. Hand items out with EMF (`give`, `put`) or your own mod.
   (`docs/engine_parts/re_content.md` has the details.)
+- **The dedicated server has no render or UI data.** Its files (`enshrouded_server.*`) carry no models, meshes,
+  textures, icons (`keen::UiTextureResource` is not even a type there) or text tables, and EML tells your script with
+  `loader.is_server`. Make those parts conditional (`if not loader.is_server then ... end`) and keep the rest (items,
+  templates, registries, recipes) for both sides, or the server's build stops at the first missing resource or type.
+  Emberbrand does this: on a server it adds the item and the recipe without the icon and the name. EMF builds a
+  server's content at the server's start in `emf\content\server\` (`docs/engine_parts/content_loader.md`).
 
 ## Apply it
 

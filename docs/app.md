@@ -781,8 +781,8 @@ times, the mods' `mod.json`, `emf\content\client\emf_content_state.json` and `sh
   before, with the message; EMF tries again when a mod, the game or `emf_content.dll` changes), **Off** (the loader's
   reason: `[content] mode=off`, no EML mod EMF can build, no base), **Applied by** EML or ShroudForge, **Not installed**
   (no `emf\emf_content.dll`). Under it, the loader's decision for the next start (`decide_content`'s reason;
-  `emf_loader.log` words a start that uses or builds the copy in its own way). A dedicated server's folder gets one
-  line: "The dedicated server gets EML content in a later version of EMF." Every status is checked against the loader's
+  `emf_loader.log` words a start that uses or builds the copy in its own way). A dedicated server's folder gets the
+  same card for the server's own files and its copy, `emf\content\server\`. Every status is checked against the loader's
   own `plan_content` on the same folders, also when the loader got the folder's path spelled another way (the
   fingerprint holds no path of the folder itself).
 - **The mods**: the ones EMF builds (and whether the last build had them at this version) and the ones it leaves out,

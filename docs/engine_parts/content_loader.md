@@ -23,15 +23,26 @@ The checks, in this order; the first that says no decides, and the loader writes
 1. `[content] mode=off` in `emf\emf_core.ini`.
 2. EMF.exe's "Play without any mods". ("Play without EMF mods" keeps EML content: the redirect goes in without EMF's
    core.)
-3. Not the game: only `enshrouded.exe` (and the dedicated server, below) get EML content, no other program that loads
-   the DLL.
+3. Not the game: only `enshrouded.exe` and the dedicated server, `enshrouded_server.exe` (below), get EML content, no
+   other program that loads the DLL.
 4. Another tool applies it: a `dbghelp.dll` in the game folder (EML's or ShroudForge's proxy), or EML's or
    ShroudForge's `dinput8.dll` in `dinput8-chain.ini` (by the names EMF's installer gives them, `eml.dll` and
    `shroudforge.dll`; under another name by its text). `mode=on` never overrides another tool.
 5. `emf\emf_content.dll` is not there.
-6. The dedicated server (not yet).
-7. No EML mod EMF can build in `<game>\mods\` (below).
-8. No base to build from (below).
+6. No EML mod EMF can build in `<game>\mods\` (below).
+7. No base to build from (below).
+
+### The dedicated server
+
+The server decides and builds the same way, with its own files: `enshrouded_server.exe`, `enshrouded_server.kfc`,
+`.kfc_resources` and `enshrouded_server_NNN.dat`, the EML mods in the server's own `mods\`, and the copy in
+`emf\content\server\` (the client's is `emf\content\client\`; neither name ever matches the other's files). Its build
+also runs on the held entry point, before the chained DLLs, EMF's core and the mods, with these differences: no window
+and no message box (a server may run without a desktop, and a box would stop a server nobody watches): its console gets
+one line when the build begins and the build's warnings and errors, `emf_loader.log` and `emf\content.log` the rest.
+The wait for the build uses no message loop, so the server loads nothing of user32 for it. After the build the server's
+own hold for EMF's core applies, as at every server start. Players who join need the same EML mods on their game
+(multiplayer reads the same content on both sides); EMF builds the client's copy at their game's start.
 
 The facts are gathered lazily: a start without `emf_content.dll` looks whether the DLL and a `dbghelp.dll` are there,
 reads neither of them nor any mod folder, writes its line and goes on exactly as before. A `dbghelp.dll` is read for its
@@ -186,8 +197,8 @@ only when it can work: `emf_content.dll` there, `mode` not off, no EML or Shroud
 EML mods that would stop working, such as those that need EML's runtime loader): EML's
 `dbghelp.dll` (by `known_tools.txt`; never ShroudForge's) becomes `eml-dbghelp.dll`, recorded in `emf\moved.txt` as
 `set-aside<TAB>eml-dbghelp.dll<TAB>dbghelp.dll` so that EMF's uninstall puts it back; the card gives it back too. EMF.exe
-never loads `emf_content.dll` (a test pins it). The dedicated server's folder gets one line: EML content comes there in
-a later version.
+never loads `emf_content.dll` (a test pins it). A dedicated server's folder gets the same card, for the server's own
+files and its copy in `emf\content\server\`.
 
 ## Settings and logs
 

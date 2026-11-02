@@ -148,10 +148,10 @@ private:
 // would end the game at its start.
 constexpr SIZE_T kWorkerStackReserve = 256u << 20;
 
-// Runs `work` on a worker thread with a big stack and keeps `splash` (may be null) alive until it ends or `timeout_ms`
-// passes; false then (the work goes on, owning what it uses). Without a thread it runs here.
+// Runs `work` on a worker thread with a big stack and keeps `splash` alive until it ends or `timeout_ms` passes; false
+// then (the work goes on, owning what it uses). Without a thread it runs here. Without a splash (the dedicated server,
+// which may have no desktop) it only waits: no message loop, so nothing of user32 is used.
 inline bool run_with_splash(ContentSplash* splash, std::function<void()> work, DWORD timeout_ms) {
-    (void)splash;  // its window is this thread's: the messages below keep it drawn
     auto owned = std::make_unique<std::function<void()>>(std::move(work));
     const LPTHREAD_START_ROUTINE run = [](void* p) -> DWORD {
         const std::unique_ptr<std::function<void()>> w(static_cast<std::function<void()>*>(p));
@@ -171,6 +171,12 @@ inline bool run_with_splash(ContentSplash* splash, std::function<void()> work, D
         return true;
     }
     owned.release();  // the thread's now
+    if (!splash) {
+        const DWORD w = WaitForSingleObject(t, timeout_ms);
+        CloseHandle(t);
+        return w == WAIT_OBJECT_0;
+    }
+    // the splash's window is this thread's: the messages below keep it drawn
     const ULONGLONG until = GetTickCount64() + timeout_ms;
     for (;;) {
         const ULONGLONG now = GetTickCount64();

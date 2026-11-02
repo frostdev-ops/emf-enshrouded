@@ -26,7 +26,6 @@ enum class ContentStatus {
     Off,           // [content] mode=off, no EML mod EMF can build, no base to build from
     OtherTool,     // EML or ShroudForge applies the content
     NotInstalled,  // no emf\emf_content.dll
-    ServerLater,   // a dedicated server's folder: later
 };
 const char* content_status_name(ContentStatus s);  // "ready", "builds_next", "failed", "off", "other_tool", ...
 
@@ -75,7 +74,8 @@ struct ContentPanel {
 
 constexpr size_t kMaxErrors = 20;  // the last build's errors the card lists
 
-// The panel for `game` at its next start; `server_folder`: a dedicated server's folder (ServerLater). `disk_use`: walk
+// The panel for `game` at its next start; `server_folder`: a dedicated server's folder (its own data files and
+// emf\content\server, as the loader there takes them). `disk_use`: walk
 // the copy for its own bytes (the Mods tab's scan, every few seconds, does not).
 ContentPanel content_panel(const std::wstring& game, bool server_folder, bool disk_use = true);
 // The panel as a JSON object for the page (every text as data).

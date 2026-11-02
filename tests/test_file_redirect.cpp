@@ -512,3 +512,89 @@ TEST_CASE("redirect: the game's containers are the enshrouded_NNN.dat files") {
     CHECK_FALSE(is_dat_file_name(L"enshrouded_000.dat.part"));
     CHECK_FALSE(is_dat_file_name(L"enshrouded_.dat"));
 }
+
+// ---- the dedicated server (ContentTarget): enshrouded_server.* and emf\content\server ----
+
+TEST_CASE("redirect: the server's content files are enshrouded_server.kfc, .kfc_resources and enshrouded_server_NNN.dat") {
+    using emf::loader::is_content_file_name;
+    using emf::loader::is_dat_file_name;
+    using emf::loader::kClientTarget;
+    using emf::loader::kServerTarget;
+    CHECK(is_content_file_name(L"enshrouded_server.kfc", kServerTarget));
+    CHECK(is_content_file_name(L"ENSHROUDED_SERVER.KFC_RESOURCES", kServerTarget));
+    CHECK(is_content_file_name(L"enshrouded_server_009.dat", kServerTarget));
+    CHECK(is_dat_file_name(L"enshrouded_server_000.dat", kServerTarget));
+    // a client name is never a server file, and a server name never a client one
+    CHECK_FALSE(is_content_file_name(L"enshrouded.kfc", kServerTarget));
+    CHECK_FALSE(is_content_file_name(L"enshrouded_000.dat", kServerTarget));
+    CHECK_FALSE(is_dat_file_name(L"enshrouded_000.dat", kServerTarget));
+    CHECK_FALSE(is_content_file_name(L"enshrouded_server.kfc", kClientTarget));
+    CHECK_FALSE(is_content_file_name(L"enshrouded_server_000.dat", kClientTarget));
+    CHECK_FALSE(is_content_file_name(L"enshrouded_server_000.dat"));  // the default is the client
+    CHECK_FALSE(is_dat_file_name(L"enshrouded_server_000.dat"));
+    CHECK_FALSE(is_content_file_name(L"enshrouded_server_.dat", kServerTarget));
+    CHECK_FALSE(is_content_file_name(L"enshrouded_server_00x.dat", kServerTarget));
+    CHECK_FALSE(is_content_file_name(L"enshrouded_server.exe", kServerTarget));
+}
+
+TEST_CASE("redirect: a server content file maps to emf\\content\\server\\<same name>") {
+    using emf::loader::kServerTarget;
+    using emf::loader::shadow_folder;
+    const std::wstring server = L"D:\\Servers\\Enshrouded";
+    CHECK(shadow_folder(server, kServerTarget) == L"D:\\Servers\\Enshrouded\\emf\\content\\server");
+    CHECK(shadow_folder(server) == L"D:\\Servers\\Enshrouded\\emf\\content\\client");
+    CHECK(shadow_path(L"D:\\Servers\\Enshrouded\\enshrouded_server_003.dat", server, L"", kServerTarget) ==
+          L"D:\\Servers\\Enshrouded\\emf\\content\\server\\enshrouded_server_003.dat");
+    CHECK(shadow_path(L"enshrouded_server.kfc", server, server, kServerTarget) ==
+          L"D:\\Servers\\Enshrouded\\emf\\content\\server\\enshrouded_server.kfc");
+    CHECK(shadow_path(L"D:\\Servers\\Enshrouded\\enshrouded.kfc", server, L"", kServerTarget).empty());
+    CHECK(shadow_path(L"D:\\Servers\\Enshrouded\\enshrouded_server.kfc", server, L"").empty());  // the client's names
+}
+
+TEST_CASE("redirect: the server's shadow.txt stamps enshrouded_server.exe, .kfc and .kfc_resources") {
+    using emf::loader::kServerTarget;
+    using emf::loader::parse_shadow_record;
+    using emf::loader::shadow_problem;
+    using emf::loader::stamped_file;
+    CHECK(stamped_file(kServerTarget, 0) == "enshrouded_server.exe");
+    CHECK(stamped_file(kServerTarget, 1) == "enshrouded_server.kfc");
+    CHECK(stamped_file(kServerTarget, 2) == "enshrouded_server.kfc_resources");
+    CHECK(stamped_file(emf::loader::kClientTarget, 2) == "enshrouded.kfc_resources");
+    const char* record =
+        "source enshrouded_server.exe 30000000 133750000000000001\r\n"
+        "source enshrouded_server.kfc 9000000 133750000000000002\r\n"
+        "source enshrouded_server.kfc_resources 200000000 133750000000000003\r\n"
+        "dat_count 10\r\n";
+    const auto r = parse_shadow_record(record, kServerTarget);
+    CHECK(r.source[0].value_or(FileStamp{}) == FileStamp{30000000, 133750000000000001ull});
+    CHECK(r.source[2].value_or(FileStamp{}) == FileStamp{200000000, 133750000000000003ull});
+    CHECK(r.dat_count.value_or(0) == 10);
+    CHECK_FALSE(parse_shadow_record(record).source[0]);  // read as the client's: none of its files are recorded
+
+    emf::loader::ShadowFacts f;
+    f.record_there = true;
+    f.record = record;
+    f.now[0] = FileStamp{30000000, 133750000000000001ull};
+    f.now[1] = FileStamp{9000000, 133750000000000002ull};
+    f.now[2] = FileStamp{200000000, 133750000000000003ull};
+    f.dats_now = 10;
+    CHECK(shadow_problem(f, kServerTarget).empty());
+    f.now[1] = FileStamp{9000001, 133750000000000002ull};
+    f.dats_now = 11;
+    CHECK(shadow_problem(f, kServerTarget) ==
+          "content redirect off: the game changed since the shadow copy was made (enshrouded_server.kfc, "
+          "enshrouded_server_NNN.dat files: 10 then, 11 now); run content_shadow.ps1 -Remove and -Make again");
+    f.record_there = false;
+    CHECK(shadow_problem(f, kServerTarget) == "content redirect off: there is no emf\\content\\server\\shadow.txt (make "
+                                              "the shadow copy with content_shadow.ps1 -Make)");
+}
+
+TEST_CASE("redirect: the target for an exe: the dedicated server's or the client's") {
+    using emf::loader::content_target;
+    CHECK(content_target(true).server);
+    CHECK(content_target(true).stem == L"enshrouded_server");
+    CHECK(content_target(true).subdir == L"emf\\content\\server");
+    CHECK_FALSE(content_target(false).server);
+    CHECK(content_target(false).stem == L"enshrouded");
+    CHECK(content_target(false).subdir == std::wstring_view(emf::loader::kShadowSubdir));
+}

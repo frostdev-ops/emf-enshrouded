@@ -706,7 +706,8 @@ bool stageable(const std::string& rel) {
     for (auto& c : low)
         if (c == '/') c = '\\';
     if (low.find("..") != std::string::npos) return false;
-    for (const char* file : {"dinput8.dll", "emf\\emf_core.dll", "emf\\emf.exe", "emf\\known_tools.txt"})
+    // emf_content.dll: the server builds EML content at its start too (docs/engine_parts/content_loader.md)
+    for (const char* file : {"dinput8.dll", "emf\\emf_core.dll", "emf\\emf.exe", "emf\\known_tools.txt", "emf\\emf_content.dll"})
         if (low == file) return true;
     for (const char* folder : {"emf\\ui\\", "emf\\vk\\", "emf\\mods\\", "emf\\setup\\"}) {
         const size_t n = std::strlen(folder);

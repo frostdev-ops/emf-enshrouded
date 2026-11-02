@@ -108,4 +108,10 @@ examples\hello\          the example from the docs
 mods\                    the sources of the included mods
 tools\emf_sigcheck.exe   checks EMF's engine signatures against a game exe without starting the game
 
-licenses\ holds the licences of the third-party code inside EMF (MinHook, Dear ImGui, Vulkan headers, Lua).
+licenses\ holds the licences of the third-party code inside EMF (MinHook, Dear ImGui, Vulkan headers, Lua,
+WebView2, the fonts, EML and its Rust libraries).
+EMF is under the MIT licence (LICENSE.txt), except emf\emf_content.dll, which builds the content of EML mods: it is
+built from the Enshrouded Mod Loader (EML) and is under the GNU GPL v3 or later (licenses\EML-LICENSE.txt). Its
+complete source is the file EMF-{VERSION}-source.zip on https://github.com/matenm/emf-enshrouded/releases/tag/v{VERSION}
+(the repository at this version with every Rust library it is built from). It runs only while the game starts,
+before any mod loads; your own mods can use any licence.

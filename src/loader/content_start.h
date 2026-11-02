@@ -70,7 +70,7 @@ inline ContentFacts collect_facts(const FactsIo& io, PlayOnce play, bool server,
     if (f.mode == ContentMode::Off || play == PlayOnce::NoMods || !game) return f;
     f.dll_present = io.dll_present && io.dll_present();
     f.other_tool = other_content_tool(io.look, f.dll_present, false);  // dbghelp.dll read only with the DLL there
-    if (f.other_tool || !f.dll_present || server) return f;
+    if (f.other_tool || !f.dll_present) return f;
     if (io.scan_mods) f.mods = io.scan_mods();
     if (f.mods.usable.empty()) return f;
     f.other_tool = chained_tool_by_text(io.look);

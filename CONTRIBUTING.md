@@ -11,6 +11,9 @@ You need:
 - Windows 10 or 11, x64;
 - Visual Studio 2022 or its Build Tools, with "Desktop development with C++";
 - CMake 3.24+ and Ninja (both come with Visual Studio's C++ CMake tools);
+- Rust through rustup ([rustup.rs](https://rustup.rs)) for `emf_content.dll` (`src/content/`). rustup installs the
+  version `src/content/rust-toolchain.toml` names (or run `rustup toolchain install` in `src/content`). To build
+  without Rust and without `emf_content.dll`, configure with `-DEMF_CONTENT=OFF`;
 - Git Bash for the `.sh` scripts.
 
 ```
@@ -78,4 +81,5 @@ Found a way to misuse EMF (installer, EMF.exe, the dedicated server, the debug b
 ## Licence
 
 EMF is under the MIT licence (`LICENSE`). By contributing, you agree that your contribution is under the same licence.
-Third-party code and its licences are listed in `THIRD_PARTY_NOTICES.md`.
+Third-party code and its licences are listed in `THIRD_PARTY_NOTICES.md`. Changes to the third-party code in
+`third_party/` stay under that code's own licence (for EML in `third_party/eml/`, the GPL-3.0-or-later).

@@ -64,16 +64,21 @@ inline void age_files(const std::wstring& dir, int ago) {
 }
 
 // A game folder with EMF, the game's data (a KFC4 header with 2 containers) and, unless told otherwise,
-// emf_content.dll and one EML mod; every file last written two hours ago.
+// emf_content.dll and one EML mod; every file last written two hours ago. `server`: a dedicated server's folder
+// instead (enshrouded_server.exe and its data; the shadow copy in emf\content\server).
 struct ContentGame : TempGame {
-    explicit ContentGame(const wchar_t* name, bool with_dll = true, bool with_mod = true) : TempGame(name) {
+    bool server = false;
+    std::wstring stem;  // L"enshrouded" or L"enshrouded_server"
+    explicit ContentGame(const wchar_t* name, bool with_dll = true, bool with_mod = true, bool server_folder = false)
+        : TempGame(name, !server_folder), server(server_folder), stem(server_folder ? L"enshrouded_server" : L"enshrouded") {
         write(L"dinput8.dll", "MZ EMF-LOADER-7d3c9f fake");
         write(L"emf\\emf_core.dll", std::string("MZ emf_core 1.2.3\0 more", 23));
         write(L"emf\\known_tools.txt", kTools);
-        write(L"enshrouded.kfc", kfc_bytes("7|r|t", 2));
-        write(L"enshrouded.kfc_resources", "resources");
-        write(L"enshrouded_000.dat", "dat 0");
-        write(L"enshrouded_001.dat", "dat 1");
+        if (server) write(L"enshrouded_server.exe", "fake server exe");
+        write(stem + L".kfc", kfc_bytes("7|r|t", 2));
+        write(stem + L".kfc_resources", "resources");
+        write(stem + L"_000.dat", "dat 0");
+        write(stem + L"_001.dat", "dat 1");
         if (with_dll) write(L"emf\\emf_content.dll", "emf_content stand-in");
         if (with_mod) {
             write(L"mods\\beasts\\mod.json", mod_json("beasts", "Beasts of the Shroud"));
@@ -81,21 +86,23 @@ struct ContentGame : TempGame {
         }
         age_files(dir, 7200);
     }
-    std::wstring shadow() const { return at(L"emf\\content\\client"); }
+    std::string stem_utf8() const { return loader::cio::to_utf8(stem); }
+    std::wstring shadow() const { return at(server ? L"emf\\content\\server" : L"emf\\content\\client"); }
     loader::BaseChoice base() const {
-        return loader::choose_base(loader::read_base_file(at(L"enshrouded.kfc")), loader::read_base_file(at(L"enshrouded.kfc.bak")));
+        return loader::choose_base(loader::read_base_file(at(stem + L".kfc")), loader::read_base_file(at(stem + L".kfc.bak")),
+                                   stem_utf8());
     }
     // `spelled`: the game folder's path as the loader got it ("" = as this test has it)
     std::string fingerprint(const std::wstring& spelled = L"") const {
         const std::wstring d = spelled.empty() ? dir : spelled;
         return loader::content_fingerprint(loader::collect_fingerprint_input(
-            d, "enshrouded", base(), loader::scan_eml_mods(at(L"mods")).usable, loader::cio::join(d, L"emf\\emf_content.dll"),
+            d, stem_utf8(), base(), loader::scan_eml_mods(at(L"mods")).usable, loader::cio::join(d, L"emf\\emf_content.dll"),
             kVersion));
     }
     // What a good build leaves: the shadow copy (the loader's build_shadow), its record and a state with this
     // folder's fingerprint (computed from the path as `spelled`).
     void built(int code = 0, const std::string& message = "", int ago = 3600, const std::wstring& spelled = L"") const {
-        const auto r = loader::build_shadow(dir, shadow(), "enshrouded", base(), loader::scan_eml_mods(at(L"mods")).usable);
+        const auto r = loader::build_shadow(dir, shadow(), stem_utf8(), base(), loader::scan_eml_mods(at(L"mods")).usable);
         REQUIRE_MESSAGE(r.ok, r.why);
         if (code == 0) REQUIRE(loader::cio::write_file_atomic(shadow() + L"\\shadow.txt", r.record));
         loader::ContentState s;

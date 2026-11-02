@@ -9,8 +9,8 @@
 // - When to apply: [content] mode=auto|on|off in emf\emf_core.ini.
 // - Let EMF load EML content (E5): EML's dbghelp.dll (never ShroudForge's) is renamed to eml-dbghelp.dll and recorded
 //   in emf\moved.txt first, so EMF's uninstall puts it back; the give-back renames it back and drops the record.
-// Every action is refused while the game runs from the folder, and in a dedicated server's folder. Nothing here writes
-// a game file, and nothing loads emf_content.dll.
+// Every action is refused while the game (or a dedicated server) runs from the folder; in a dedicated server's folder
+// they act on its copy, emf\content\server. Nothing here writes a game file, and nothing loads emf_content.dll.
 #include <windows.h>
 
 #include "bridge.h"
@@ -47,7 +47,11 @@ bool is_file(const std::wstring& path) {
     return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
 }
 
-std::wstring shadow_of(const std::wstring& game) { return game + L"\\" + ld::kShadowSubdir; }
+// The copy's folder: emf\content\client, or emf\content\server in a dedicated server's folder (no enshrouded.exe).
+std::wstring shadow_of(const std::wstring& game) {
+    const bool server = !is_file(game + L"\\enshrouded.exe") && is_file(game + L"\\enshrouded_server.exe");
+    return game + L"\\" + std::wstring(ld::content_target(server).subdir);
+}
 
 const std::string kJunction =
     "emf\\content (or a folder in it) is a junction or link, so EMF changes nothing there: it would act somewhere else";
@@ -205,8 +209,6 @@ std::optional<std::vector<std::string>> Bridge::handle_content(const std::string
                 out = refuse("EMF is busy (switching, installing or unpacking). Wait a moment, then try again.");
             else if (meant && meant->is(VT::String) && !(path_inside(game, wide(meant->s)) && path_inside(wide(meant->s), game)))
                 out = refuse("The folder changed since the card was drawn: look at it again first.");
-            else if (server)
-                out = refuse("The dedicated server gets EML content in a later version of EMF.");
             else if (cmd == "content_rebuild")
                 out = rebuild(game);
             else if (cmd == "content_remove")

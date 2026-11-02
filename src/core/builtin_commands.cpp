@@ -594,25 +594,43 @@ void cmd_items(EmfWorld* w, int argc, const char* const* argv, void* u, bool tak
 void cmd_put(EmfWorld* w, int argc, const char* const* argv, void* u) { cmd_items(w, argc, argv, u, false); }
 void cmd_take(EmfWorld* w, int argc, const char* const* argv, void* u) { cmd_items(w, argc, argv, u, true); }
 
+bool parse_coord(const char* s, double* out);  // goto's, below
+
+// spawn <guid> [count] [at <x> <y> <z>]: next to the player, or at a place in metres (a dedicated server's console has
+// no player of its own).
 void cmd_spawn(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
     uint8_t guid[16];
     uint32_t count = 1;
-    if (argc < 2 || argc > 3 || !emf::parse_guid(argv[1], guid) ||
-        (argc == 3 && (!parse_uint(argv[2], 20, &count) || count == 0))) {
-        command_reply_line("usage: spawn <template guid> [count 1-20]");
+    double p[3];
+    bool at = false;
+    int i = 2;
+    bool ok = argc >= 2 && emf::parse_guid(argv[1], guid);
+    if (ok && i < argc && std::strcmp(argv[i], "at") != 0) {
+        ok = parse_uint(argv[i], 20, &count) && count != 0;
+        ++i;
+    }
+    if (ok && i < argc) {
+        at = std::strcmp(argv[i], "at") == 0 && argc == i + 4 && parse_coord(argv[i + 1], &p[0]) &&
+             parse_coord(argv[i + 2], &p[1]) && parse_coord(argv[i + 3], &p[2]);
+        ok = at;
+    }
+    if (!ok) {
+        command_reply_line("usage: spawn <template guid> [count 1-20] [at <x> <y> <z>]");
         return;
     }
-    const uint32_t player = c.player ? c.player() : 0;
-    double p[3];
-    if (!player_pos(c, w, player, p)) {
-        command_reply_line("spawn: player position unknown");
-        return;
+    if (!at) {
+        const uint32_t player = c.player ? c.player() : 0;
+        if (!player_pos(c, w, player, p)) {
+            command_reply_line("spawn: player position unknown (give a place: spawn <guid> at <x> <y> <z>)");
+            return;
+        }
+        p[0] += 2.0;  // beside the player, not inside
     }
     std::string ids;
     uint32_t made = 0;
-    for (uint32_t i = 0; i < count; ++i) {
-        const uint32_t id = c.api->spawn(w, guid, p[0] + 2.0 + 1.5 * i, p[1], p[2]);
+    for (uint32_t k = 0; k < count; ++k) {
+        const uint32_t id = c.api->spawn(w, guid, p[0] + 1.5 * k, p[1], p[2]);
         if (!id) continue;
         ++made;
         ids += (ids.empty() ? "" : " ") + std::to_string(id);
@@ -1023,7 +1041,8 @@ bool add_builtin_commands(BuiltinContext& ctx) {
                 "default (host)",
          cmd_put},
         {"take", "<item name> [count 1-65535] [entity]: take items out of an inventory, yours by default (host)", cmd_take},
-        {"spawn", "<template guid> [count 1-20]: spawn templates next to you (host)", cmd_spawn},
+        {"spawn", "<template guid> [count 1-20] [at <x> <y> <z>]: spawn templates next to you, or at a place (host)",
+         cmd_spawn},
         {"time", "<hours 0-24>: set the time of day (host)", cmd_time},
         {"pos", ": your position", cmd_pos},
         {"goto", "[#k] <x> <y> <z> | <entity> [ground] (host)",
