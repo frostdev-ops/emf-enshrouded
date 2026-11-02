@@ -1088,6 +1088,14 @@ std::string known_tools_table(const std::wstring& game) {
     return g_fallback_tools;
 }
 
+std::string dll_tool_word(const std::wstring& game, const std::wstring& rel) {
+    const std::wstring path = trim_slashes(game) + L"\\" + rel;
+    if (game.empty() || !exists(path) || is_dir(path)) return {};
+    const std::string table = known_tools_table(game);
+    const auto tools = core::parse_known_tools(table);
+    return core::tool_for_dll_text(tools, dll_signature(path, tools, table));
+}
+
 Change edit_chain_file(const std::wstring& game_in, const std::function<std::optional<std::string>(const std::string&)>& edit,
                        bool* created) {
     if (created) *created = false;
