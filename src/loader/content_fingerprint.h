@@ -2,9 +2,12 @@
 // The fingerprint of everything an EML content build depends on: when it equals the one the last good build recorded
 // (content_state.h), the shadow copy is still right and emf_content.dll is not loaded at all. It covers, by size and
 // last write time (no file is hashed: a start must stay quick):
-//   the base (its path too: .kfc or .kfc.bak), the game's own .kfc, .kfc_resources and exe, the base's container
-//   count and the game folder's .dat count (the redirect's check of shadow.txt looks at those), emf_content.dll, each
-//   usable mod sorted by id (id, version, every file's relative path, size and time), and EMF's version.
+//   the base (which file: <name>.kfc or <name>.kfc.bak), the game's own .kfc, .kfc_resources and exe, the base's
+//   container count and the game folder's .dat count (the redirect's check of shadow.txt looks at those),
+//   emf_content.dll, each usable mod sorted by id (id, version, every file's relative path, size and time), and EMF's
+//   version. Only names relative to the game folder go in, never its own path: the loader (GetModuleFileNameW) and
+//   EMF.exe (--game, the picker, Steam) may spell one folder differently (letter case, a trailing backslash, a
+//   junction or a subst drive), and a start must not build again for that.
 // The fingerprint is "sha256:" + EMF's own SHA-256 of that list (no Windows crypto while the game starts up).
 #include <windows.h>
 
@@ -33,7 +36,7 @@ struct ModFiles {
 };
 
 struct FingerprintInput {
-    FileFact base;      // name: the base's full path
+    FileFact base;      // name: the base's file name (<name>.kfc or <name>.kfc.bak), never the folder's path
     FileFact game_kfc;  // the game's own <name>.kfc (the base may be the .bak)
     FileFact resources;
     FileFact exe;
@@ -57,7 +60,7 @@ inline bool name_less(const std::string& a, const std::string& b) {
 }  // namespace detail
 
 inline std::string content_fingerprint(const FingerprintInput& in) {
-    std::string text = "emf content fingerprint 1\nemf\t" + in.emf_version + "\n";
+    std::string text = "emf content fingerprint 2\nemf\t" + in.emf_version + "\n";
     text += detail::fact_line("base", in.base);
     text += detail::fact_line("kfc", in.game_kfc);
     text += detail::fact_line("resources", in.resources);
@@ -115,7 +118,7 @@ inline FingerprintInput collect_fingerprint_input(const std::wstring& game, cons
     FingerprintInput in;
     const std::wstring name = cio::from_utf8(file_name);
     const std::wstring base_path = cio::join(game, name + (base.use_bak ? L".kfc.bak" : L".kfc"));
-    in.base = fact_of(base_path, cio::to_utf8(base_path));
+    in.base = fact_of(base_path, file_name + (base.use_bak ? ".kfc.bak" : ".kfc"));
     in.game_kfc = fact_of(cio::join(game, name + L".kfc"), file_name + ".kfc");
     in.resources = fact_of(cio::join(game, name + L".kfc_resources"), file_name + ".kfc_resources");
     in.exe = fact_of(cio::join(game, name + L".exe"), file_name + ".exe");
