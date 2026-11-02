@@ -285,20 +285,27 @@ TEST_CASE("content owner: EML's dbghelp wins over everything but Off") {
     CHECK(emf::loader::decide_content(f).why.find("mode=off") != std::string::npos);
 }
 
-TEST_CASE("content owner: no emf_content.dll, then the dedicated server, then no usable mod, then the base") {
+TEST_CASE("content owner: the dedicated server takes EML content from EMF as the game does") {
+    auto f = all_there();
+    f.server = true;
+    auto d = emf::loader::decide_content(f);
+    CHECK(d.emf_owns);
+    CHECK(d.why.find("EMF builds it from 1 mod") == 0);
+    f.mods.usable.clear();
+    d = emf::loader::decide_content(f);
+    CHECK_FALSE(d.emf_owns);
+    CHECK(d.why.find("no EML mod") != std::string::npos);
+}
+
+TEST_CASE("content owner: no emf_content.dll, then no usable mod, then the base") {
     auto f = all_there();
     f.dll_present = false;
-    f.server = true;
     f.mods.usable.clear();
     f.base.ok = false;
     auto d = emf::loader::decide_content(f);
     CHECK_FALSE(d.emf_owns);
     CHECK(d.why.find("emf_content.dll is not installed") != std::string::npos);
     f.dll_present = true;
-    d = emf::loader::decide_content(f);
-    CHECK_FALSE(d.emf_owns);
-    CHECK(d.why.find("dedicated server") != std::string::npos);
-    f.server = false;
     d = emf::loader::decide_content(f);
     CHECK_FALSE(d.emf_owns);
     CHECK(d.why.find("no EML mod") != std::string::npos);

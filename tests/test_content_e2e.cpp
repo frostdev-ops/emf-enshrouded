@@ -53,25 +53,27 @@ size_t count_of(const std::string& text, const std::string& part) {
 
 struct ContentGame {
     std::wstring dir, shadow;
+    std::wstring stem;  // the data files' stem: enshrouded, or enshrouded_server for the dedicated server
     // `exe`: which stand-in game (standin_game.exe has MSVC's start-up at its entry, standin_game_bind.exe Steam's DRM
-    // stub as the real client, standin_game_jump.exe another tool's jump); `word`: what the stand-in DLL does
+    // stub as the real client, standin_game_jump.exe another tool's jump); `word`: what the stand-in DLL does;
+    // `server`: the stand-in runs as enshrouded_server.exe in a server folder (enshrouded_server.*, emf\content\server)
     explicit ContentGame(const wchar_t* name, bool with_dll = true, const wchar_t* exe = L"standin_game.exe",
-                         const char* word = "ok")
-        : dir(test_scratch::temp_path(name)) {
+                         const char* word = "ok", bool server = false)
+        : dir(test_scratch::temp_path(name)), stem(server ? L"enshrouded_server" : L"enshrouded") {
         test_scratch::remove_at_exit(dir);
-        shadow = dir + L"\\emf\\content\\client";
+        shadow = dir + (server ? L"\\emf\\content\\server" : L"\\emf\\content\\client");
         std::filesystem::create_directories(dir + L"\\emf");
-        std::filesystem::copy_file(bin_dir() + L"\\standin_game\\" + exe, dir + L"\\enshrouded.exe");
+        std::filesystem::copy_file(bin_dir() + L"\\standin_game\\" + exe, dir + L"\\" + stem + L".exe");
         std::filesystem::copy_file(bin_dir() + L"\\dist\\dinput8.dll", dir + L"\\dinput8.dll");
         std::filesystem::copy_file(bin_dir() + L"\\standin\\dinput8.dll", dir + L"\\chain_standin.dll");
         std::filesystem::copy_file(bin_dir() + L"\\standin\\dinput8.dll", dir + L"\\emf\\emf_core.dll");
         if (with_dll)
             std::filesystem::copy_file(bin_dir() + L"\\standin_content\\emf_content.dll", dir + L"\\emf\\emf_content.dll");
         put_file(dir + L"\\dinput8-chain.ini", "[Chain]\r\nchain_standin.dll\r\n");
-        put_file(dir + L"\\enshrouded.kfc", kfc_bytes("1|e2e|t", 2));
-        put_file(dir + L"\\enshrouded.kfc_resources", "the game's resources\r\n");
-        put_file(dir + L"\\enshrouded_000.dat", "the game's dat 0\r\n");
-        put_file(dir + L"\\enshrouded_001.dat", "the game's dat 1\r\n");
+        put_file(dir + L"\\" + stem + L".kfc", kfc_bytes("1|e2e|t", 2));
+        put_file(dir + L"\\" + stem + L".kfc_resources", "the game's resources\r\n");
+        put_file(dir + L"\\" + stem + L"_000.dat", "the game's dat 0\r\n");
+        put_file(dir + L"\\" + stem + L"_001.dat", "the game's dat 1\r\n");
         put_file(dir + L"\\mods\\beasts\\mod.json",
                  R"({"id": "beasts", "name": "Beasts", "version": "1.0.0", "capabilities": ["patch"]})");
         put_file(dir + L"\\mods\\beasts\\bear.txt", "bear 1");
@@ -127,11 +129,12 @@ struct ContentGame {
     // runs the stand-in game and returns its standin_out.txt
     std::string run() {
         for (const wchar_t* f : {L"\\emf\\emf_loader.log", L"\\emf\\chain_status.txt", L"\\emf\\file_opens.log",
-                                 L"\\emf\\content.log", L"\\standin_out.txt", L"\\emf\\content\\client\\built.txt",
-                                 L"\\emf\\content\\client\\standin_seq.txt", L"\\emf\\content\\client\\enshrouded.kfc",
-                                 L"\\emf\\content\\client\\emf_content_state.json"})
+                                 L"\\emf\\content.log", L"\\standin_out.txt"})
             wait_unlocked(dir + f);
-        std::wstring cmd = L"\"" + dir + L"\\enshrouded.exe\"";
+        for (const std::wstring& f : {std::wstring(L"built.txt"), std::wstring(L"standin_seq.txt"), stem + L".kfc",
+                                      std::wstring(L"emf_content_state.json")})
+            wait_unlocked(shadow + L"\\" + f);
+        std::wstring cmd = L"\"" + dir + L"\\" + stem + L".exe\"";
         STARTUPINFOW si{sizeof si};
         PROCESS_INFORMATION pi{};
         REQUIRE(CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, dir.c_str(), &si,
@@ -370,4 +373,57 @@ TEST_CASE("e2e content: emf_content.dll that stays loaded: a message box, no cha
     CHECK(out.find("loaded emf_core.dll=yes\n") != std::string::npos);
     CHECK(out.find("status=failed\t") != std::string::npos);
     CHECK(g.dll_attaches() == 1);
+}
+
+// ---- the dedicated server: the stand-in runs as enshrouded_server.exe with enshrouded_server.* ----
+
+TEST_CASE("e2e content: the dedicated server builds from its own files into emf\\content\\server, with no window") {
+    ContentGame g(L"emf_e2e_server", true, L"standin_game.exe", "ok", true);
+    std::string out = g.run();
+    const std::string log = g.loader_log();
+    INFO(log);
+    INFO(out);
+    CHECK(out.find("kfc=built kfc 1\n") != std::string::npos);  // the server reads its shadow's built index
+    CHECK(out.find("dat=the game's dat 0\n") != std::string::npos);
+    CHECK(out.find("found=enshrouded_server_000.dat,enshrouded_server_001.dat\n") != std::string::npos);
+    CHECK(out.find("loaded emf_content.dll=no\n") != std::string::npos);
+    CHECK(out.find("loaded chain_standin.dll=yes\n") != std::string::npos);
+    CHECK(out.find("loaded emf_core.dll=yes\n") != std::string::npos);
+    CHECK(out.find("status=built\t1\t") != std::string::npos);
+    CHECK(out.find("at_tls chain_standin.dll=no\n") != std::string::npos);  // on the held entry, not in DllMain
+    CHECK(file_text(g.shadow + L"\\built.txt") == "seq=1 chain_loaded=no core_loaded=no entry_held=no\n");
+    CHECK(g.box_text.empty());  // no message box and no splash on a server
+    CHECK(before(log, "EML content: EMF builds it from 1 mod; the base is enshrouded_server.kfc",
+                 "a build is needed at this start (no earlier build)"));
+    CHECK(before(log, "EML content: built 1 mod in ", "chain_standin.dll"));
+    // after the build the server's own hold for the core, as at every server start
+    CHECK(before(log, "EML content: built 1 mod in ", "held the server's start "));
+    CHECK(file_text(g.dir + L"\\emf\\file_opens.log").find("\\emf\\content\\server\\enshrouded_server.kfc\"") !=
+          std::string::npos);
+    CHECK_FALSE(std::filesystem::exists(g.dir + L"\\emf\\content\\client"));
+    CHECK(file_text(g.dir + L"\\enshrouded_server.kfc") == kfc_bytes("1|e2e|t", 2));  // the server's own files stay
+    CHECK(file_text(g.shadow + L"\\enshrouded_server_002.dat") == "built dat 1\r\n");
+    const auto state = emf::loader::read_state(g.shadow + L"\\emf_content_state.json");
+    REQUIRE(state.has_value());
+    CHECK(state->code == 0);
+
+    // the next start uses the copy without loading the DLL
+    out = g.run();
+    CHECK(out.find("kfc=built kfc 1\n") != std::string::npos);
+    CHECK(out.find("status=current\t1\t") != std::string::npos);
+    CHECK(g.dll_attaches() == 1);
+    CHECK(g.loader_log().find("EML content: the shadow copy is current") != std::string::npos);
+}
+
+TEST_CASE("e2e content: a server build whose DLL stays loaded: no message box; the server runs without chain and core") {
+    ContentGame g(L"emf_e2e_server_stuck", true, L"standin_game.exe", "thread", true);
+    g.check("emf_content.dll\r\nchain_standin.dll\r\nemf_core.dll\r\n");
+    const std::string out = g.run();
+    INFO(g.loader_log());
+    INFO(out);
+    CHECK(g.box_text.empty());  // a server nobody watches is never stopped by a box
+    CHECK(out.find("loaded chain_standin.dll=no\n") != std::string::npos);
+    CHECK(out.find("loaded emf_core.dll=no\n") != std::string::npos);
+    CHECK(out.find("kfc=KFC4") != std::string::npos);  // its own data
+    CHECK(g.loader_log().find("without the chained DLLs and without EMF's core") != std::string::npos);
 }

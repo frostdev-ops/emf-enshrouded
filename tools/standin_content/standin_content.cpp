@@ -4,7 +4,8 @@
 //                link), keeps the .kfc as .kfc.bak, writes the .kfc anew ("built kfc <n>"), writes the next container
 //                (<name>_NNN.dat after the last one there, deleted first), lists the mods in mods\ (real folders only,
 //                as EML) and writes built.txt: "seq=<n> chain_loaded=<yes|no> core_loaded=<yes|no>", n counted in
-//                standin_seq.txt (chain_standin.dll and emf_core.dll: the e2e test's chained DLL and EMF's core)
+//                standin_seq.txt (chain_standin.dll and emf_core.dll: the e2e test's chained DLL and EMF's core);
+//                <name> is the request's file_name (enshrouded, or enshrouded_server for the dedicated server)
 //   slow         sleeps 2 s, then as ok
 //   deep         recurses through about 64 MB of stack (a thread's usual 1 MB is not enough), then as ok
 //   fail         code 2
@@ -127,8 +128,8 @@ __declspec(noinline) int descend(int n) {
     return descend(n - 1) + pad[sizeof pad - 1];
 }
 
-void build_ok(const std::wstring& dir, Reply& r) {
-    for (const wchar_t* name : {L"enshrouded.kfc", L"enshrouded.kfc_resources", L"enshrouded.kfc.bak"}) {
+void build_ok(const std::wstring& dir, Reply& r, const std::wstring& stem) {
+    for (const std::wstring& name : {stem + L".kfc", stem + L".kfc_resources", stem + L".kfc.bak"}) {
         if (links_of(cio::join(dir, name)) > 1) {
             r.code = abi::EMF_CONTENT_RUN_FAILED;
             r.message = cio::to_utf8(name) + " has more than one name (a hard link): refused";
@@ -138,15 +139,17 @@ void build_ok(const std::wstring& dir, Reply& r) {
     const auto seq_text = cio::read_file(cio::join(dir, L"standin_seq.txt"), 64).value_or("0");
     const int seq = std::atoi(seq_text.c_str()) + 1;
     write_file(cio::join(dir, L"standin_seq.txt"), std::to_string(seq));
-    const std::wstring kfc = cio::join(dir, L"enshrouded.kfc"), bak = cio::join(dir, L"enshrouded.kfc.bak");
+    const std::wstring kfc = cio::join(dir, stem + L".kfc"), bak = cio::join(dir, stem + L".kfc.bak");
     DeleteFileW(bak.c_str());
     CopyFileW(kfc.c_str(), bak.c_str(), TRUE);
     DeleteFileW(kfc.c_str());  // EML removes a file before it writes it again
     write_file(kfc, "built kfc " + std::to_string(seq) + "\r\n");
     int next = 0;
-    wchar_t dat[32];
+    std::wstring dat;
     for (;; ++next) {
-        swprintf_s(dat, L"enshrouded_%03d.dat", next);
+        wchar_t number[16];
+        swprintf_s(number, L"_%03d.dat", next);
+        dat = stem + number;
         if (!cio::stat(cio::join(dir, dat)).exists) break;
     }
     write_file(cio::join(dir, dat), "built dat " + std::to_string(seq) + "\r\n");
@@ -229,7 +232,9 @@ extern "C" __declspec(dllexport) int32_t emf_content_build(const char* request_j
         } else {
             if (word == "slow") Sleep(2000);
             const int depth = word == "deep" ? descend(1000) : 0;
-            build_ok(dir, r);
+            // the data files' stem, as EML takes it: "enshrouded", or "enshrouded_server" for the dedicated server
+            const auto* file_name = parsed.value->get("file_name");
+            build_ok(dir, r, file_name && !file_name->s.empty() ? cio::from_utf8(file_name->s) : L"enshrouded");
             if (word == "deep") r.message += " after a deep descent (" + std::to_string(depth) + ")";
         }
     }

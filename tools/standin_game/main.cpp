@@ -1,6 +1,7 @@
 // A stand-in for enshrouded.exe, for the content redirect spike's and the content loader's tests only
 // (tests/test_file_hooks.cpp, tests/test_content_e2e.cpp); never shipped.
-// The test copies it into a temp game folder as enshrouded.exe (the loader hooks only an exe of that name).
+// The test copies it into a temp game folder as enshrouded.exe (the loader hooks only an exe of that name), or as
+// enshrouded_server.exe for the dedicated server: then it reads the server's files (enshrouded_server.kfc ...) instead.
 // Like the game it imports dinput8.dll statically, so EMF's loader copied next to it runs its DllMain before this
 // program's own code, and the program's file calls go through its own import table, as the game's do. It writes what
 // it read to standin_out.txt:
@@ -59,19 +60,24 @@ int wmain() {
     wchar_t exe[MAX_PATH];
     const DWORD len = GetModuleFileNameW(nullptr, exe, MAX_PATH);
     std::wstring dir(exe, len);
+    const std::wstring file = dir.substr(dir.find_last_of(L'\\') + 1);
     dir = dir.substr(0, dir.find_last_of(L'\\'));
     SetCurrentDirectoryW(dir.c_str());
+    // the data files' stem: the dedicated server's when it runs as enshrouded_server.exe
+    const bool server = _wcsicmp(file.c_str(), L"enshrouded_server.exe") == 0;
+    const std::wstring stem = server ? L"enshrouded_server" : L"enshrouded";
+    const std::string stem_a = server ? "enshrouded_server" : "enshrouded";
 
-    std::string out = "kfc=" + first_line(CreateFileW((dir + L"\\enshrouded.kfc").c_str(), GENERIC_READ, FILE_SHARE_READ,
+    std::string out = "kfc=" + first_line(CreateFileW((dir + L"\\" + stem + L".kfc").c_str(), GENERIC_READ, FILE_SHARE_READ,
                                                       nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)) + "\n";
-    out += "dat=" + first_line(CreateFileA("enshrouded_000.dat", GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                                           FILE_ATTRIBUTE_NORMAL, nullptr)) + "\n";
-    const DWORD a = GetFileAttributesW((dir + L"\\enshrouded.kfc_resources").c_str());
+    out += "dat=" + first_line(CreateFileA((stem_a + "_000.dat").c_str(), GENERIC_READ, FILE_SHARE_READ, nullptr,
+                                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr)) + "\n";
+    const DWORD a = GetFileAttributesW((dir + L"\\" + stem + L".kfc_resources").c_str());
     out += "attrs=" + (a == INVALID_FILE_ATTRIBUTES ? "error " + std::to_string(GetLastError()) : std::string("file"));
     out += "\n";
     std::string found;
     WIN32_FIND_DATAW fd;
-    const HANDLE f = FindFirstFileW((dir + L"\\enshrouded_*.dat").c_str(), &fd);
+    const HANDLE f = FindFirstFileW((dir + L"\\" + stem + L"_*.dat").c_str(), &fd);
     if (f != INVALID_HANDLE_VALUE) {
         do {
             if (!found.empty()) found += ",";

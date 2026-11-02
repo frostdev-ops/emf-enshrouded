@@ -392,9 +392,12 @@ TEST_CASE("content start: facts stop at the first no (a start without emf_conten
     f = emf::loader::collect_facts(io, emf::loader::PlayOnce::NoMods, false);
     CHECK(asked == std::vector<std::string>{"mode"});
     asked.clear();
-    f = emf::loader::collect_facts(io, emf::loader::PlayOnce::Normal, true);  // the server: no mods scanned
-    CHECK(emf::loader::decide_content(f).why.find("dedicated server") != std::string::npos);
-    CHECK(asked == std::vector<std::string>{"mode", "dll", "exists dbghelp.dll"});
+    f = emf::loader::collect_facts(io, emf::loader::PlayOnce::Normal, true);  // the server: the same questions
+    CHECK(f.server);
+    CHECK(emf::loader::decide_content(f).emf_owns);
+    seen.clear();
+    for (const auto& a : asked) seen += a + "; ";
+    CHECK(seen == "mode; dll; exists dbghelp.dll; mods; read creative.dll; base; ");
 
     // EML's or ShroudForge's dbghelp.dll there but no emf_content.dll: named, never read (it is up to 32 MB)
     asked.clear();
@@ -438,6 +441,18 @@ TEST_CASE("content splash: a window while the work runs on another thread, with 
     CHECK_FALSE(IsWindow(w));
     // a work that does not come back in time: false, and the work keeps what it needs
     CHECK_FALSE(emf::loader::run_with_splash(nullptr, [] { Sleep(1500); }, 100));
+}
+
+TEST_CASE("content splash: without a splash (the dedicated server) it only waits: no message loop, no window") {
+    MSG m;
+    PeekMessageW(&m, nullptr, 0, 0, PM_NOREMOVE);  // this thread gets its message queue
+    REQUIRE(PostThreadMessageW(GetCurrentThreadId(), WM_APP + 7, 1, 2));
+    DWORD worker = 0;
+    CHECK(emf::loader::run_with_splash(nullptr, [&] { worker = GetCurrentThreadId(); Sleep(200); }, 10000));
+    CHECK(worker != 0);
+    CHECK(worker != GetCurrentThreadId());
+    // the message is still there: nothing pumped this thread's queue
+    CHECK(PeekMessageW(&m, nullptr, WM_APP + 7, WM_APP + 7, PM_REMOVE));
 }
 
 TEST_CASE("content start: a current state but a shadow whose record does not match the game builds again") {
