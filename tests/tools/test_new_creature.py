@@ -381,6 +381,28 @@ class ModTests(Fixture):
         self.assertIn("beast_wolf: not added: ", text)
         self.assertIn("has no EnemyArsenalReference", text)
 
+    def test_a_dedicated_server_gets_everything_but_the_model(self):
+        """A dedicated server's data has no render data (no keen::RenderModel, no materials) but has skeletons, clips,
+        graphs, templates and the attack data: there the creature gets its skeleton (from the game graph's skeleton
+        record), its clips, the graph copy, the template (still naming the model, as the game's own templates do on a
+        server) and the attack copies; the model and its material are left out."""
+        built, text = self.run_mod({"MOCK_SERVER": "1"}, attacks={
+            "arsenal_guid": ARSENAL_COPY, "sequences": {SEQ_COMBO: {"guid": SEQ_COPY, "times": [[0, 0], [1, 2]]}}})
+        self.assertIn("beast_wolf: no render data here (a dedicated server): the model and its material are left out",
+                      text)
+        self.assertNotIn("not added", text)
+        self.assertNotIn("keen::RenderModel m-1", text)
+        self.assertIn("skeleton %s jointCount 5 names 5 parents 5 binds 5 aligned 8 poses 8 data 24 id %s"
+                      % (SKELETON, SKELETON), text)
+        self.assertEqual(text.count("clip copy "), len(built["clips"]) + 1)  # ours and the built-in zero offset
+        self.assertIn("graph %s hierarchy %s ours 8 left 0" % (GRAPH_COPY, SKELETON), text)
+        self.assertIn("template Beast_Wolf keen::ecs::ModelResource model m-1", text)
+        self.assertIn("template Beast_Wolf keen::ecs::AnimationGraphResourceComponent2 animationGraph %s" % GRAPH_COPY,
+                      text)
+        self.assertIn("template Beast_Wolf keen::ecs::EnemyArsenalReference arsenal %s" % ARSENAL_COPY, text)
+        self.assertIn("sequence collection %s %s %s\n" % (SEQ_COMBO, SEQ_KICK, SEQ_COPY), text)
+        self.assertIn("added beast_wolf: no model here (no render data), template Beast_Wolf t-1", text)
+
     def test_slots_point_at_our_joints(self):
         _, text = self.run_mod()
         slots = ["0"] * 36

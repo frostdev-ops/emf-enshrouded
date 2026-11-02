@@ -25,7 +25,7 @@ local resources = {
 }
 -- a creature on a skeleton of its own: the game skeleton, the game clips and the game graph it copies (the graph: a
 -- clip node per clip, and a blend space naming every clip and one more); MOCK_MISSING=<guid> leaves one out (a game
--- update that removed it)
+-- update that removed it: a clip, a graph or a source model)
 local missing = os.getenv("MOCK_MISSING") or ""
 -- a creature on a skeleton of its own (new_skeleton): its source model's game skeleton (3 joints), a game clip for
 -- each role, and the game graph: a clip node per role (the game's non-additive nodes name their clip as the additive
@@ -114,13 +114,20 @@ local function model(guid)
 		cloth = { hasSkinning = true },
 		materials = { { material = "mat-0" }, { material = "mat-1" } } } }
 end
+-- MOCK_SERVER=1: a dedicated server's data, which has no render data (no models, no materials) but has skeletons,
+-- clips, graphs, templates and the attack data
+local server = os.getenv("MOCK_SERVER") == "1"
 for _, c in ipairs(require("creatures")) do
-	resources["keen::RenderModel"][c.source_model_guid] = model(c.source_model_guid)
-	if new_skeleton[c.source_model_guid] then
-		resources["keen::RenderModel"][c.source_model_guid].data.hierarchy = MOCK_HIERARCHY
+	if not server and c.source_model_guid ~= missing then
+		resources["keen::RenderModel"][c.source_model_guid] = model(c.source_model_guid)
+		if new_skeleton[c.source_model_guid] then
+			resources["keen::RenderModel"][c.source_model_guid].data.hierarchy = MOCK_HIERARCHY
+		end
 	end
 end
-for _, g in ipairs({ "mat-0", "mat-1" }) do
+-- a model the packs do not use: the game has render data even when one source model is gone
+if not server then resources["keen::RenderModel"]["other-model"] = model("other-model") end
+for _, g in ipairs(server and {} or { "mat-0", "mat-1" }) do
 	resources["keen::RenderMaterialResource"][g] = { guid = g, data = { images = {
 		{ texture = texture("Material_x_albedo_map_0", "BC7_srgb_block", 2048) },
 		{ texture = texture("Material_x_normal_map_0", "BC5_unorm_block", 2048) },
@@ -164,13 +171,15 @@ local created = {}
 game = {
 	guid = { from_content_hash = function(h) return h end },
 	assets = {
-		get_resource = function(guid, typ) return resources[typ][guid] end,
+		get_resource = function(guid, typ) return (resources[typ] or {})[guid] end,
 		get_resources_by_type = function(typ)
 			if typ == "keen::ecs::TemplateResource" then return templates end
 			if typ == "keen::GuidRegistryResource" then return { { data = { guids = { "tpl-Animal_Wildlife_Dog_04_black_AG2" } } } } end
 			if typ == "keen::enemy::EnemyArsenalRegistryResource" then return { arsenal_registry } end
 			if typ == "keen::ActorSequenceCollectionResource" then return { sequence_collection } end
-			return {}
+			local list = {}
+			for _, r in pairs(resources[typ] or {}) do list[#list + 1] = r end
+			return list
 		end,
 		create_resource = function(value, typ, guid, part)
 			local r = { guid = guid, data = deepcopy(value) }
