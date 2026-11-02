@@ -152,6 +152,51 @@ TEST_CASE("look settings: a bad value falls back to the default and says so in o
     CHECK(problems.empty());
 }
 
+TEST_CASE("look settings: a font file may not be named like a Windows device (CON, NUL, COM1...), with any extension") {
+    for (const char* bad : {"file:CON.ttf", "file:nul.otf", "file:Com1.ttf", "file:LPT9.ttf", "file:aux.font.ttf",
+                            "file:PRN.TTF", "file:con .ttf"}) {
+        INFO(bad);
+        std::vector<std::string> p;
+        CHECK(read({{"hud.font", bad}}, &p).hud_font.kind == FontChoice::Kind::Serif);
+        CHECK(p.size() == 1);
+    }
+    for (const char* fine : {"file:CONSOLE.ttf", "file:com10.ttf", "file:Lpt.ttf", "file:icon.ttf", "file:nullable.otf"}) {
+        INFO(fine);
+        std::vector<std::string> p;
+        CHECK(read({{"hud.font", fine}}, &p).hud_font.kind == FontChoice::Kind::File);
+        CHECK(p.empty());
+    }
+}
+
+TEST_CASE("look settings: style=boxed alone is EMF's earlier look (console font, #dbdbcc, notes top left, Consolas tabs)") {
+    std::vector<std::string> problems;
+    const LookSettings s = read({{"hud.style", "boxed"}}, &problems);
+    CHECK(problems.empty());
+    CHECK(s.hud_font.kind == FontChoice::Kind::Console);
+    CHECK(s.hud_colour == 0xDBDBCCFFu);
+    CHECK(s.notes_place == NotesPlace::TopLeft);
+    CHECK(s.tabs_font.kind == FontChoice::Kind::Consolas);
+    CHECK(s.console_font.kind == FontChoice::Kind::Consolas);
+    // keys set on purpose win
+    const LookSettings t = read({{"hud.style", "boxed"},
+                                 {"hud.font", "serif"},
+                                 {"hud.colour", "#ffffff"},
+                                 {"hud.notes_place", "top_centre"},
+                                 {"overlay.tabs_font", "serif"}});
+    CHECK(t.hud_font.kind == FontChoice::Kind::Serif);
+    CHECK(t.hud_colour == 0xFFFFFFFFu);
+    CHECK(t.notes_place == NotesPlace::TopCentre);
+    CHECK(t.tabs_font.kind == FontChoice::Kind::Serif);
+    // a value that cannot be used falls back to boxed's default, and says so
+    const LookSettings u = read({{"hud.style", "boxed"}, {"hud.font", "comic"}}, &problems);
+    CHECK(u.hud_font.kind == FontChoice::Kind::Console);
+    REQUIRE(problems.size() == 1);
+    CHECK(problems[0].find("default console") != std::string::npos);
+    // game and plain keep the game look's defaults
+    CHECK(read({{"hud.style", "plain"}}).hud_font.kind == FontChoice::Kind::Serif);
+    CHECK(read({{"hud.style", "plain"}}).notes_place == NotesPlace::TopCentre);
+}
+
 TEST_CASE("look settings: colours are #rgb or #rrggbb, with or without the #, any case") {
     CHECK(read({{"hud.colour", "#fff"}}).hud_colour == 0xFFFFFFFFu);
     CHECK(read({{"hud.colour", "#c0b"}}).hud_colour == 0xCC00BBFFu);

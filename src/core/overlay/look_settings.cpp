@@ -23,6 +23,16 @@ std::string lower(std::string s) {
     return s;
 }
 
+// A Windows device name (CON, PRN, AUX, NUL, COM1-9, LPT1-9) before the first dot, with any extension: such a "file"
+// is a device, never a font.
+bool device_name(const std::string& name) {
+    std::string stem = lower(name.substr(0, name.find('.')));
+    while (!stem.empty() && stem.back() == ' ') stem.pop_back();
+    if (stem == "con" || stem == "prn" || stem == "aux" || stem == "nul") return true;
+    return stem.size() == 4 && (stem.rfind("com", 0) == 0 || stem.rfind("lpt", 0) == 0) && stem[3] >= '1' &&
+           stem[3] <= '9';
+}
+
 struct Reader {
     const Get& get;
     std::vector<std::string>* problems;
@@ -122,13 +132,14 @@ struct Reader {
             const std::string name = clean(v.substr(5));
             const std::string ext = name.size() > 4 ? lower(name.substr(name.size() - 4)) : std::string();
             const bool plain = !name.empty() && name.size() <= 120 && name[0] != '.' &&
-                               name.find_first_of("\\/:*?\"<>|") == std::string::npos;
+                               name.find_first_of("\\/:*?\"<>|") == std::string::npos && !device_name(name);
             if (plain && (ext == ".ttf" || ext == ".otf")) {
                 out = FontChoice{FontChoice::Kind::File, name};
                 return;
             }
             problem(section, key, v,
-                    std::string("file: needs the name of a .ttf or .otf file in emf\\fonts (no folders); the default ") +
+                    std::string("file: needs the name of a .ttf or .otf file in emf\\fonts (no folders, not a Windows "
+                                "device name such as CON or NUL); the default ") +
                         fallback + " is used");
             return;
         }
@@ -145,12 +156,18 @@ LookSettings read_look_settings(const std::function<std::string(const char* sect
     using K = FontChoice::Kind;
     if (const int i = r.choice("hud", "style", {{"game"}, {"boxed"}, {"plain"}}, "game"); i >= 0)
         s.style = static_cast<HudStyle>(i);
+    if (s.style == HudStyle::Boxed) {  // EMF's earlier look, unless these keys say otherwise
+        s.hud_font = {K::Console, {}};
+        s.hud_colour = 0xDBDBCCFFu;
+        s.notes_place = NotesPlace::TopLeft;
+        s.tabs_font = {K::Consolas, {}};
+    }
     r.font("hud", "font", {K::Serif, K::Console}, s.hud_font);
     r.number("hud", "size", 60, 200, s.hud_size);
     r.colour("hud", "colour", s.hud_colour);
     r.boolean("hud", "shadow", s.shadow);
     if (const int i = r.choice("hud", "notes_place", {{"top_centre", "top_center"}, {"top_left"}, {"right"}},
-                               "top_centre");
+                               s.notes_place == NotesPlace::TopLeft ? "top_left" : "top_centre");
         i >= 0)
         s.notes_place = static_cast<NotesPlace>(i);
     r.number("hud", "notes_seconds", 2, 20, s.notes_seconds);
