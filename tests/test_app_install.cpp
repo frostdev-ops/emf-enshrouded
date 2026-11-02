@@ -23,7 +23,8 @@ namespace {
 const char* kTools = "creative | Creative Mode | text:creative-mode-marker\n"
                      "eml | EML (Enshrouded Mod Loader) | text:EML_LOG_FILE_PATH\n"
                      "shroudforge | ShroudForge | text:shroudforge | beside:shroudforge | same-loader:dbghelp.dll\n"
-                     "greeneye | Greeneye Loader | text:greeneye | beside:greeneye\n";
+                     "greeneye | Greeneye Loader | text:greeneye | beside:greeneye\n"
+                     "ultimate-asi-loader | Ultimate ASI Loader | text:IsUltimateASILoader | chain-as:xinput9_1_0.dll\n";
 
 const char* kEmfMod = R"({"id":"clock","name":"Clock","version":"1.2.0","nexus_id":77})";
 
@@ -706,6 +707,21 @@ TEST_CASE("app install: a foreign dinput8.dll is never renamed to a proxy or sys
     part = part_of(p, "dll-dinput8");
     REQUIRE(part);
     CHECK(has_copy(*part, "winmm-mod.dll"));
+}
+
+TEST_CASE("app install: Ultimate ASI Loader as dinput8.dll is installed under the name it runs as (chain-as)") {
+    // it shows "This library isn't supported." and holds the game's start under any name but its proxy names (live,
+    // 10.0.2)
+    TempGame g(L"inst_ual");
+    emf_game(g);
+    Archive ual(L"inst_ual_zip");
+    ual.add(L"dinput8.dll", std::string("MZ ultimate asi loader IsUltimateASILoader\0 exports", 51));
+    const InstallPlan p = build_plan(ual.input(g, "Ultimate-ASI-Loader_x64.zip"));
+    const PlanPart* part = part_of(p, "dll-dinput8");
+    REQUIRE(part);
+    CHECK(has_copy(*part, "xinput9_1_0.dll"));  // a name it accepts, which the game itself never loads
+    CHECK_FALSE(has_copy(*part, "ultimate-asi-loader.dll"));
+    CHECK_FALSE(has_copy(*part, "xinput9_1_0-mod.dll"));
 }
 
 TEST_CASE("app install: the Nexus id comes from the file name's mod id, not the version digits") {

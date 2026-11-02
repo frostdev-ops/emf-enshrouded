@@ -18,6 +18,9 @@ struct KnownTool {
     std::vector<std::string> beside;       // a file or folder of its own next to the exe
     std::vector<std::string> same_loader;  // proxy names through which this one loader also runs
     std::vector<std::string> helpers;      // its proxy names that do not start it alone (helpers of its loader)
+    // the file name a renamed DLL of this tool gets instead of <word>.dll, for a tool that runs only under certain
+    // names (Ultimate ASI Loader stops the game with "This library isn't supported." under any other); lower case
+    std::string chain_as;
 };
 
 std::vector<KnownTool> parse_known_tools(const std::string& text);

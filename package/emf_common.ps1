@@ -56,7 +56,7 @@ function Test-EmfLoader([string]$Path) {
 $script:ChainFileName = "dinput8-chain.ini"
 
 # emf\known_tools.txt (the table EMF also reads at start-up): "word | name | text:<in its DLL> | beside:<...> |
-# same-loader:<another proxy name the same loader uses>" lines.
+# same-loader:<another proxy name the same loader uses> | chain-as:<the name a moved DLL of it gets>" lines.
 function Read-KnownTools([string]$Path) {
     $tools = @()
     foreach ($line in @(Read-Lines $Path)) {
@@ -67,7 +67,8 @@ function Read-KnownTools([string]$Path) {
         $rest = @($parts | Select-Object -Skip 2)
         $texts = @($rest | Where-Object { $_ -like "text:?*" } | ForEach-Object { $_.Substring(5) })
         $same = @($rest | Where-Object { $_ -like "same-loader:?*" } | ForEach-Object { $_.Substring(12) })
-        $tools += , @{ Word = $parts[0].ToLowerInvariant(); Texts = $texts; SameLoader = $same }
+        $chainAs = @($rest | Where-Object { $_ -like "chain-as:?*" } | ForEach-Object { $_.Substring(9).ToLowerInvariant() } | Select-Object -First 1)
+        $tools += , @{ Word = $parts[0].ToLowerInvariant(); Texts = $texts; SameLoader = $same; ChainAs = "$($chainAs)" }
     }
     return , $tools
 }
@@ -112,7 +113,8 @@ function Get-Sha256Hex([string]$Path) {
 }
 
 # What to do with another mod's dinput8.dll:
-#   Name       its new name: <tool>.dll (or <tool>-2.dll ...), dinput8-previous.dll for an unknown one
+#   Name       its new name: <tool>.dll (or <tool>-2.dll ...), dinput8-previous.dll for an unknown one; the tool's
+#              chain-as name for a tool that runs only under certain names (Ultimate ASI Loader: xinput9_1_0.dll)
 #   Identical  a file with the same bytes is already there under Name (no second copy is kept)
 #   RunsAs     the other proxy name through which the same loader already runs (known_tools.txt same-loader): the
 #              moved copy is kept aside, not started
@@ -124,7 +126,12 @@ function Get-MovePlan([string]$Dir, [string]$Proxy, $Tools = @()) {
     $listed = @(Get-ChainEntries $Dir)
     $plan = @{ Tool = $tool; Name = $null; Identical = $false; RunsAs = $null; SwitchOff = @(); Earlier = @() }
     $base = if ($tool) { $tool } else { "dinput8-previous" }
-    if (Test-ReservedDllName $base) { $base = "$base-mod" }  # Windows would load a dxgi.dll or winmm.dll as itself
+    $chainAs = @($Tools | Where-Object { $tool -and $_.Word -eq $tool -and $_.ChainAs -like "?*.dll" } | ForEach-Object { $_.ChainAs } | Select-Object -First 1)
+    if ($chainAs.Count) {
+        $base = $chainAs[0].Substring(0, $chainAs[0].Length - 4)  # a proxy name on purpose: the only names it runs under
+    } elseif (Test-ReservedDllName $base) {
+        $base = "$base-mod"  # Windows would load a dxgi.dll or winmm.dll as itself
+    }
     for ($i = 1; $i -lt 100 -and -not $plan.Name; $i++) {
         $name = if ($i -eq 1) { "$base.dll" } else { "$base-$i.dll" }
         $at = Join-Path $Dir $name

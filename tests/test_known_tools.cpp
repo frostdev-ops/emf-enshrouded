@@ -36,6 +36,16 @@ TEST_CASE("known tools: each line gives a word, a name and how the tool is recog
     CHECK(tools[2].texts.empty());
 }
 
+TEST_CASE("known tools: chain-as names the file a tool must have when EMF moves it aside (it runs only under its names)") {
+    const auto tools = parse_known_tools(
+        "ultimate-asi-loader | Ultimate ASI Loader | text:IsUltimateASILoader | chain-as:XInput9_1_0.dll\n"
+        "eml | EML (Enshrouded Mod Loader) | text:EML_LOG_FILE_PATH\n");
+    REQUIRE(tools.size() == 2);
+    CHECK(tools[0].chain_as == "xinput9_1_0.dll");
+    CHECK(tools[1].chain_as.empty());
+    CHECK(tool_for_dll_text(tools, std::string("MZ ... IsUltimateASILoader\0 ...", 31)) == "ultimate-asi-loader");
+}
+
 TEST_CASE("known tools: a DLL is the first tool whose text it contains (case ignored); else unknown") {
     const auto tools = parse_known_tools(kTable);
     CHECK(emf::core::tool_for_dll_text(tools, "...ShroudForge...EML_LOG_FILE_PATH...") == "shroudforge");

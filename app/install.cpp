@@ -1074,8 +1074,16 @@ InstallPlan build_plan(const PlanInput& in) {
             if (base.empty()) base = product_slug(dll_version_strings(bytes));
             if (base.empty()) base = archive_slug(in.archive);
             if (base.empty() || base == "dinput8") base = "dinput8-previous";
-            // never a loader's or Windows' own DLL name: the game would load the renamed file as that system DLL
-            for (int guard = 0; guard < 10 && reserved_dll_base(base); ++guard) base += "-mod";
+            // a tool that runs only under certain names (known_tools.txt chain-as) gets that name, a proxy name on
+            // purpose; any other never a loader's or Windows' own DLL name: the game would load the renamed file as that
+            // system DLL
+            std::string chain_as;
+            for (const auto& t : tools)
+                if (!tool.empty() && t.word == tool) chain_as = t.chain_as;
+            if (chain_as.size() > 4 && chain_as.compare(chain_as.size() - 4, 4, ".dll") == 0)
+                base = chain_as.substr(0, chain_as.size() - 4);
+            else
+                for (int guard = 0; guard < 10 && reserved_dll_base(base); ++guard) base += "-mod";
             const std::string src_hash = file_sha256(in.folder + L"\\" + wide(win(from_of(rel))));
             std::string chain_text;
             read_file(in.game + L"\\dinput8-chain.ini", chain_text, 1u << 20);

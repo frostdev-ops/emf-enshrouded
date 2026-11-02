@@ -95,6 +95,16 @@ function Test-InstallScripts([string]$scripts, [string]$gameTree) {
     & $inst -Game $foreign -From $gameTree | Out-Null
     Check (@(Get-ChildItem -LiteralPath $foreign -Filter "dinput8-previous*.dll").Count -eq 1 -and @((Get-Content -LiteralPath $chain) | Where-Object { $_ -eq "dinput8-previous.dll" }).Count -eq 1) "a reinstall moves nothing again and lists the DLL once"
 
+    # Ultimate ASI Loader as dinput8.dll runs only under its proxy names ("This library isn't supported." otherwise):
+    # known_tools.txt's chain-as gives it xinput9_1_0.dll, which it accepts and the game never loads itself
+    $ualDir = New-TempDir "ual [x]"
+    Write-File (Join-Path $ualDir "enshrouded.exe") "fake"
+    Write-File (Join-Path $ualDir "dinput8.dll") "MZ a fake Ultimate ASI Loader with its export IsUltimateASILoader"
+    $out = (& $inst -Game $ualDir -From $gameTree) -join "`n"
+    Check ((Test-Path -LiteralPath (Join-Path $ualDir "xinput9_1_0.dll")) -and -not (Test-Path -LiteralPath (Join-Path $ualDir "ultimate-asi-loader.dll")) -and -not (Test-Path -LiteralPath (Join-Path $ualDir "xinput9_1_0-mod.dll"))) "Ultimate ASI Loader's dinput8.dll is kept as xinput9_1_0.dll, the name it runs under ($out)"
+    Check ((Get-Content -LiteralPath (Join-Path $ualDir "dinput8-chain.ini")) -contains "xinput9_1_0.dll") "and EMF starts it from dinput8-chain.ini"
+    Remove-Item -LiteralPath $ualDir -Recurse -Force -ErrorAction SilentlyContinue
+
     # the other mod's installer puts a newer copy of the same tool over EMF's: the old copy is kept (never overwritten)
     # but switched off in the chain file, so only the newest runs (same tool = same EML marker here)
     $eml = New-TempDir "eml"

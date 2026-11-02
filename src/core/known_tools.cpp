@@ -79,13 +79,14 @@ std::vector<KnownTool> parse_known_tools(const std::string& text) {
             a = bar + 1;
         }
         if (parts.size() < 3 || parts[0].empty() || parts[1].empty()) continue;
-        KnownTool t{lower(parts[0]), parts[1], {}, {}, {}, {}};
+        KnownTool t{lower(parts[0]), parts[1], {}, {}, {}, {}, {}};
         for (size_t i = 2; i < parts.size(); ++i) {
             const std::string& p = parts[i];
             if (p.rfind("text:", 0) == 0 && p.size() > 5) t.texts.push_back(lower(p.substr(5)));
             else if (p.rfind("beside:", 0) == 0 && p.size() > 7) t.beside.push_back(p.substr(7));
             else if (p.rfind("same-loader:", 0) == 0 && p.size() > 12) t.same_loader.push_back(lower(p.substr(12)));
             else if (p.rfind("helper:", 0) == 0 && p.size() > 7) t.helpers.push_back(lower(p.substr(7)));
+            else if (p.rfind("chain-as:", 0) == 0 && p.size() > 9) t.chain_as = lower(p.substr(9));
         }
         if (t.texts.empty() && t.beside.empty()) continue;
         out.push_back(std::move(t));
