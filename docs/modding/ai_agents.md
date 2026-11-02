@@ -237,8 +237,10 @@ Put your test character in LOCAL character slot 1 and your test world in LOCAL w
   empty one older than a minute, is stale and taken over. To share another session's lock file (several agents on one PC),
   pass it with `-LockFile` or set `EMF_GAME_LOCK`.
 - **A marker in the game folder** (`emf\game_session.json`): EMF that `start` installed, and the `-Mods` folders it
-  made. `start` refuses an EMF it did not install (one a person installed), `-Mods` refuses to replace a
-  folder it did not make, and `stop` uninstalls only an install with the marker.
+  made. `start` refuses an EMF it did not install (one a person installed) and an `emf` folder without the marker
+  (the settings an uninstall keeps), `-Mods` refuses to replace a folder it did not make, and `stop` uninstalls only
+  an install with the marker. `start` writes the marker before it copies anything, so an install that fails part-way
+  is removed again (the files that were there before stay).
 
 **start**
 
@@ -249,7 +251,9 @@ Put your test character in LOCAL character slot 1 and your test world in LOCAL w
 2. Runs `save_guard.ps1 -Check` and stops when the Steam Cloud saves changed. Recording them again
    (`save_guard.ps1 -Record`) is the PC user's step after their own play; an agent stops and reports.
 3. Installs the dev build with the bridge on (`install_emf.ps1 -Bridge`), the `-Mods` folders (`template_lua` goes in
-   as its mod.json id, `my_first_mod`; `<folder>=<id>` names the target) and the marker.
+   as its mod.json id, `my_first_mod`; `<folder>=<id>` names the target) and the marker. `-Mods a,b`,
+   `-Mods 'a','b'` and `-Mods 'a,b'` all mean the two mods `a` and `b` (`powershell -File` hands the first two over
+   as the one string `a,b`); a `-Mods` folder that does not exist stops `start` before anything is installed (exit 4).
 4. Sets windowed mode, starts the game through Steam, and records it.
 5. Waits for the bridge and the main menu (the game's log line `[GameUi] Entered PreGame` after the renderer is ready,
    then a frame that is not black; a menu that stays black stops `start`, exit 1).
