@@ -1,6 +1,9 @@
 """Make an EML content mod that adds new RenderModels and creature templates that use them.
 
-  python tools/models/make_mod.py pack.json
+  python tools/models/make_mod.py pack.json [--leave-out <creature name>]...
+
+--leave-out builds the pack without that creature (one whose licence is not settled), its files removed from the out
+folder; the mod's description is the pack's and each kept creature's own "description" (its sentence and credit).
 
 pack.json:
   {
@@ -8,6 +11,7 @@ pack.json:
     "creatures": [
       {
         "name": "beast_wolf",                         # debugName of the new model; also the Lua module names
+        "description": "And a wolf.",                 # optional: added to the mod's description while it is in it
         "glb": "beast.glb",                           # a skinned glb (bones named jNNN...), or
         "game_dump": "<survey>/dump/pet_dog_01",      # a dumped game model (<stem>.json + .render.bin): round trip
         "hierarchy": "<survey>/hierarchies/<guid>.json",   # the skeleton the glb is skinned to (needed with glb)
@@ -831,11 +835,46 @@ def remove_stale(src, names, own=None):
                 os.remove(os.path.join(src, f))
 
 
+USAGE = "usage: make_mod.py <pack.json> [--leave-out <creature name>]..."
+
+
+def parse_args(argv):
+    """(the pack's path, the creature names to leave out) from make_mod's command line."""
+    if not argv or argv[0].startswith("--"):
+        raise SystemExit(USAGE)
+    leave, rest = [], argv[1:]
+    while rest:
+        if rest[0] != "--leave-out" or len(rest) < 2:
+            raise SystemExit(USAGE)
+        leave.append(rest[1])
+        rest = rest[2:]
+    return argv[0], leave
+
+
+def leave_out(pack, names):
+    """The pack without the creatures named (a build without a creature whose licence is not settled): a new top-level
+    dict over the same creature objects, whose description is the pack's and each kept creature's own "description"
+    (a creature's sentence and credit)."""
+    have = [c["name"] for c in pack["creatures"]]
+    unknown = [n for n in names if n not in have]
+    if unknown:
+        raise SystemExit("--leave-out %s: the pack has no such creature (it has %s)" % (", ".join(unknown),
+                                                                                       ", ".join(have)))
+    kept = [c for c in pack["creatures"] if c["name"] not in names]
+    parts = [pack.get("description", "New creatures made with EMF tools/models.")]
+    parts += [c["description"] for c in kept if c.get("description")]
+    return dict(pack, creatures=kept, description=" ".join(parts))
+
+
 def main():
-    pack_path = os.path.abspath(sys.argv[1])
+    pack_arg, leave = parse_args(sys.argv[1:])
+    pack_path = os.path.abspath(pack_arg)
     base = os.path.dirname(pack_path)
     with open(pack_path, encoding="utf-8") as f:
-        pack = json.load(f)
+        full = json.load(f)
+    pack = leave_out(full, leave)
+    if leave:
+        print("left out:", ", ".join(leave))
 
     def path(p):
         return p if os.path.isabs(p) else os.path.join(base, p)
@@ -930,12 +969,12 @@ def main():
     with open(os.path.join(out, "mod.json"), "w", encoding="utf-8") as f:
         json.dump({"id": pack["id"], "name": pack.get("title", pack["id"]), "version": pack.get("version", "0.1.0"),
                    "capabilities": ["patch"],
-                   "description": pack.get("description", "New creatures made with EMF tools/models."),
+                   "description": pack["description"],
                    "authors": pack.get("authors", ["EMF contributors"])}, f, indent=2)
         f.write("\n")
     if changed:
         with open(pack_path, "w", encoding="utf-8") as f:
-            json.dump(pack, f, indent=2)
+            json.dump(full, f, indent=2)
             f.write("\n")
         print("new GUIDs were written into", pack_path, "- keep them")
     print("mod written to", out)

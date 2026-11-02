@@ -90,6 +90,33 @@ class MakeModTests(unittest.TestCase):
         self.assertIn('{component = "keen::ecs::DamageMod", path = {"dataStorage", 3}, value = 1.5}', text)
         self.assertIn('{type = "keen::ecs::ScaleComponent", value = {uniformScale = 1.4}}', text)
 
+    def test_a_build_can_leave_creatures_out(self):
+        """--leave-out <name>: the pack built without that creature (a creature whose licence is not settled yet);
+        the mod's description is the pack's and each kept creature's own, and the pack's creatures are the same
+        objects, so GUIDs written into the kept ones reach the pack file."""
+        bear, wolf = dict(BEAR), dict(BEAR, name="beast_wolf", description="And a wolf (credit: someone).")
+        pack = {"id": "p", "description": "New beasts.", "creatures": [bear, wolf]}
+        kept = make_mod.leave_out(pack, [])
+        self.assertEqual([c["name"] for c in kept["creatures"]], ["beast_bear", "beast_wolf"])
+        self.assertEqual(kept["description"], "New beasts. And a wolf (credit: someone).")
+        kept = make_mod.leave_out(pack, ["beast_wolf"])
+        self.assertEqual([c["name"] for c in kept["creatures"]], ["beast_bear"])
+        self.assertEqual(kept["description"], "New beasts.")
+        self.assertIs(kept["creatures"][0], bear)
+        self.assertEqual(len(pack["creatures"]), 2)  # the pack itself keeps both
+        with self.assertRaises(SystemExit) as e:
+            make_mod.leave_out(pack, ["beast_lion"])
+        self.assertIn("beast_lion", str(e.exception))
+        self.assertIn("beast_bear, beast_wolf", str(e.exception))
+
+    def test_leave_out_names_come_from_the_command_line(self):
+        self.assertEqual(make_mod.parse_args(["pack.json"]), ("pack.json", []))
+        self.assertEqual(make_mod.parse_args(["pack.json", "--leave-out", "a", "--leave-out", "b"]),
+                         ("pack.json", ["a", "b"]))
+        for bad in ([], ["pack.json", "--leave-out"], ["pack.json", "--frobnicate"]):
+            with self.assertRaises(SystemExit, msg=str(bad)):
+                make_mod.parse_args(bad)
+
     def test_a_rebuild_removes_the_files_of_creatures_the_pack_no_longer_has(self):
         with tempfile.TemporaryDirectory() as d:
             for n in ("old_data.lua", "old_blob.lua", "old_albedo.lua", "kept_data.lua", "kept_blob.lua", "notes.txt"):
