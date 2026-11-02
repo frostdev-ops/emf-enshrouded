@@ -25,7 +25,9 @@ account features are switched off, and a tester setting switches them on ("Nexus
 
 - **Mods**, grouped by who loads them:
   - **EMF mods**: `emf\mods\<folder>\mod.json` and loose `emf\mods\*.dll`;
-  - **EML and ShroudForge mods**: `mods\<folder>\mod.json` and `mods\*.zip`;
+  - **EML and ShroudForge mods**: `mods\<folder>\mod.json` and `mods\*.zip`; when EMF builds them itself
+    (`emf_content.dll`, "EML content" below) the ones it builds are loaded by EMF ("EML content: built by EMF at the
+    start.") and the others "left out" with the loader's reason;
   - **DLL mods started by EMF**: the lines of `dinput8-chain.ini` that count for EMF's loader (before any section
     and in `[Chain]`; other sections are another tool's), with how each did at the last game start
     (`emf\chain_status.txt`). DLLs the installer renamed (`emf\moved.txt`) that the file does not list are shown
@@ -49,11 +51,12 @@ account features are switched off, and a tester setting switches them on ("Nexus
   that is switched off. An optional dependency that is missing or off is no reason.
 - **Warnings**: EMF not installed, a broken `mod.json`, a missing DLL, a mod that will not load, a chained DLL that did
   not start, an EML folder without `mod.json` (EML stops the game at start until it is fixed or switched off), EML mods
-  with no EML or ShroudForge to load them, a loader whose file name another tool took, and EMF's start-up report (the
+  with no EML, ShroudForge or `emf_content.dll` to load them (or with EMF's EML content set to off), a loader whose file
+  name another tool took, and EMF's start-up report (the
   same lines as `emf_core.log`). **Copy all** puts them on the clipboard for a bug report.
-- **EMF**: whether EMF is installed in the folder, its version, the **Nexus account** and the **Mod Manager Download
-  links** setting (with the Nexus features, below), and the end of `emf_core.log` and `emf_loader.log` (read while the
-  game writes them), each with a **Copy** button. Error texts in a mod's details have one too. The chip at the top
+- **EMF**: whether EMF is installed in the folder, its version, the **EML content** card (below), the **Nexus account**
+  and the **Mod Manager Download links** setting (with the Nexus features, below), and the end of `emf_core.log`,
+  `emf_loader.log` and `content.log` (read while the game writes them), each with a **Copy** button. Error texts in a mod's details have one too. The chip at the top
   ("Nexus: not logged in", or the account's name and Premium) opens the account.
 - **Play** starts the game through Steam (`steam://rungameid/1203620`); the arrow next to it also starts it once
   without the mods ("Play" below). Under Wine or Proton (Linux, the Steam Deck; EMF.exe tells by Wine's `ntdll.dll`,
@@ -764,6 +767,47 @@ named lock (`store_lock_name`) while it writes into the store; when another hold
 plain message instead of going on without it. When Windows does not say where `%LOCALAPPDATA%` is, EMF.exe keeps no
 backups (no `%TEMP%` stand-in) and the tab says so.
 
+## EML content
+
+The EMF tab's card **EML content** (`app/content_panel.cpp`, `app/bridge_content.cpp`, `app/ui/content.js`) shows how
+EMF's loader will handle the EML mods' content at the next "Play" ([engine_parts/content_loader.md](engine_parts/content_loader.md)):
+it runs the loader's own rules (its header-only `src/loader/content_*.h` and `eml_mods.h`) on the folder, reading sizes,
+times, the mods' `mod.json`, `emf\content\client\emf_content_state.json` and `shadow.txt`. It never loads
+`emf_content.dll` (that DLL is GPL; only the loader loads it, at the held start) and never writes a game file.
+
+- **The status**: **Ready** (the copy is current: the next start uses it without building), **Builds at the next
+  start** (with why, as far as the last build's mods and the files' times tell: never built, a mod new or changed, the
+  game or `emf_content.dll` changed, the copy gone, a build the game stopped in), **Failed** (the same files failed
+  before, with the message; EMF tries again when a mod, the game or `emf_content.dll` changes), **Off** (the loader's
+  reason: `[content] mode=off`, no EML mod EMF can build, no base), **Applied by** EML or ShroudForge, **Not installed**
+  (no `emf\emf_content.dll`). Under it, the line the loader will write to `emf_loader.log`. A dedicated server's folder
+  gets one line: "The dedicated server gets EML content in a later version of EMF."
+- **The mods**: the ones EMF builds (and whether the last build had them at this version) and the ones it leaves out,
+  each with the loader's reason (exports only, needs EML's runtime loader, a `.zip`, a name starting with a dot, an id
+  another folder took, a broken `mod.json`).
+- **The last build**: when, how long, its outcome, message and errors; `emf\content.log` is the log viewer's third
+  choice.
+- **When to apply**: `[content] mode=auto|on|off` in `emf\emf_core.ini` (other keys and sections are kept).
+- **Uses about N MB** with **Remove the copy**: the copy's own files (its hard links to the game's files take no space
+  and are not counted). Remove deletes `emf\content\client\` with the loader's `remove_tree`: a link is deleted as a
+  link, never opened, so the game's files keep their bytes. Refused when a folder on the way is a junction.
+- **Build again at the next start**: deletes `emf_content_state.json`, so the next start builds (after a failure, to
+  try the same files again).
+- **Let EMF load EML content** (with EML installed and `emf_content.dll` there): EML's `dbghelp.dll` (by
+  `known_tools.txt`; never ShroudForge's, which starts the game its own way) is renamed to `eml-dbghelp.dll`
+  (`eml-dbghelp-2.dll` when that is taken), recorded first in `emf\moved.txt` as
+  `set-aside<TAB>eml-dbghelp.dll<TAB>dbghelp.dll`, and never listed in `dinput8-chain.ini`. **Give EML's dbghelp.dll
+  back** renames it back and drops the record; it never replaces a `dbghelp.dll` that is there again. The package's
+  `uninstall.ps1` puts it back too, and keeps it set aside (with its record) while another `dbghelp.dll` is there.
+- **Patched in place**: when the game's `enshrouded.kfc` was patched by EML or ShroudForge (its `.kfc.bak` is of the
+  same game build), the card advises Steam's "Verify integrity of game files"; EMF builds from the `.bak` and never
+  restores game files itself.
+
+Every action is refused while the game runs from the folder (the controls are disabled with the reason) and in a
+server's folder. The page asks for the card when the EMF tab opens, after each action and when the game stops (a build
+may have run then). The Mods tab uses the same rules: with `emf_content.dll` and no other tool, EML mods are loaded by
+EMF or "left out" with the loader's reason, and the "nothing loads them" warning is only for a folder without it.
+
 ## Where it lives and how it finds the game
 
 The release package ships it as `game\emf\EMF.exe` with its page in `game\emf\ui\`, so installing EMF puts it in
@@ -889,6 +933,14 @@ player's, and counts only a stand-in game running from the folder shown.
   but restore writes into the save folders, `save-info.json` and its merge, and the Saves tab's commands with a fake
   host (the list and sizes, the starter at the first start, Back up now, Restore, Delete, the settings, why saves are
   busy).
+- `test_app_content_panel.cpp`, `test_app_content_bridge.cpp`: the EML content card against temp game folders with real
+  shadow copies made by the loader's `build_shadow`: every status, its reason line equal to the loader's
+  `decide_content(collect_facts())`, the reasons named for a build, a corrupt, empty, huge or odd state, the mods left
+  out, a patched `.kfc`, the copy's own bytes with a hard link, EML's and ShroudForge's `dbghelp.dll`, the cost on 2000
+  mod files, and the loader's constants it copies; the commands (all refused while the game runs; Remove the copy leaves
+  the game's linked files whole and refuses a junction; `[content] mode`; the take-over, its give-back and repeats, and
+  the package's `uninstall.ps1` putting EML's `dbghelp.dll` back byte for byte), `content.log` in the logs, and that no
+  app source loads a library and the process never has `emf_content.dll` after every command with a real DLL there.
 - `test_app_archive.cpp`: tar's listing read and checked, real unpacking of zips made with tar.exe in the test, and
   hand-made tar files with `..`, a symbolic link and a hard link (refused, nothing written outside), the size limit, a
   junction inside an unpack folder (refused, and deleting the folder leaves the junction's target alone), SHA-256.
@@ -1012,6 +1064,10 @@ player's, and counts only a stand-in game running from the folder shown.
   before-restore backup first, the backup stays, no temporary file left, the Steam files untouched), Delete of the
   starter cancelled (with its extra line) then confirmed, and, with a stand-in game running, Back up now and Restore
   locked and a restore sent anyway refused.
+  The EML content card, in a folder of its own with a stand-in `emf_content.dll` (never loaded), an EML mod whose name
+  is HTML, a mod left out, an earlier failed build and `content.log`, in the public build: the status words, the lists,
+  the last build and `content.log` as text, nothing ran, no Nexus request; When to apply writes `[content] mode=off`;
+  with a stand-in game running every control of the card is disabled with the reason.
   `-Capture <png> -Select emf:clock` also saves a picture; `-BrowseCapture docs\images\app-browse.png` makes the
   Browse picture above.
 
@@ -1038,7 +1094,9 @@ player's, and counts only a stand-in game running from the folder shown.
 | `app/bridge_profiles.cpp` | the page's profile commands (`profile_save`, `profile_switch`, `profile_rename`, `profile_delete`, `profile_export`, `profile_import`, `profile_import_save`) and the picker's data in the state |
 | `app/locate.cpp` | the Steam lookup, the game-running check, which links may open |
 | `app/bridge_saves.cpp`, `src/saves/` | the Saves tab's commands (`saves_list`, `saves_backup`, `saves_restore`, `saves_delete`, `saves_open`, `saves_auto`), the starter at the first start; the backup engine and `save-info.json` (shared with the core) |
-| `app/ui/` | the page (`saves.js`: the Saves tab) |
+| `app/content_panel.cpp` | the EML content card's model: the loader's own rules (`src/loader/content_*.h`, `eml_mods.h`) run on the folder for the next start; never loads `emf_content.dll` |
+| `app/bridge_content.cpp` | the card's commands (`content`, `content_rebuild`, `content_remove`, `content_mode`, `content_take_over`, `content_give_back`) |
+| `app/ui/` | the page (`saves.js`: the Saves tab; `content.js`: the EML content card) |
 
 The host sends a fresh state after each change and checks the folder every 3 seconds (a game start or stop shows up).
 That check reads the folder each time.

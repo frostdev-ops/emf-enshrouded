@@ -161,6 +161,31 @@ inherited one at every start, the core clears it once read):
 | `failed_again` | the same warning with "EMF tries again when a mod, the game or emf_content.dll changes.", no second backup |
 | `off` | only with `mode=on`: `EML content is off (<why>)` in the console |
 
+Before a start, EMF.exe's EMF tab shows the same with its card **EML content** (`app/content_panel.h`,
+[docs/app.md](../app.md#eml-content)). It runs these rules on the folder for the next "Play" with the loader's own
+headers: the facts in the order above, `decide_content`, the fingerprint (with the installed `emf_core.dll`'s version)
+and the state as a start judges them, and the redirect's `shadow.txt` check. So its status is what the next start will
+do:
+
+| The card | The next start |
+|---|---|
+| **Ready** | Current: the redirect, no build (`current`) |
+| **Builds at the next start** | Build: never built, a mod new or changed, the game or `emf_content.dll` changed, the copy gone or not matching, a build the game stopped in (tried once more). The state keeps only the fingerprint, so the cause is named as far as the state's mods and the files' times tell |
+| **Failed** | Failed before: the same files failed, or a build stopped the game twice (`failed_again`) |
+| **Off** | the decision's reason (`mode=off`, no EML mod EMF can build, no base) |
+| **Applied by <tool>** | another tool applies the content |
+| **Not installed** | no `emf\emf_content.dll` |
+
+It also lists the usable mods and the ones left out with this page's reasons, the last build from the state, the copy's
+own bytes (files with one name; its links to the game's files are not counted) and a base that is the `.kfc.bak` (the
+game's files were patched in place: Steam's "Verify integrity of game files" is advised, EMF never restores them). Its
+actions are refused while the game runs: `[content] mode`, deleting the state (as below), deleting the shadow with the
+loader's `remove_tree` (a link is deleted, never opened; only while `shadow_path_safe`), and E5's take-over: EML's
+`dbghelp.dll` (by `known_tools.txt`; never ShroudForge's) becomes `eml-dbghelp.dll`, recorded in `emf\moved.txt` as
+`set-aside<TAB>eml-dbghelp.dll<TAB>dbghelp.dll` so that EMF's uninstall puts it back; the card gives it back too. EMF.exe
+never loads `emf_content.dll` (a test pins it). The dedicated server's folder gets one line: EML content comes there in
+a later version.
+
 ## Settings and logs
 
 ```
