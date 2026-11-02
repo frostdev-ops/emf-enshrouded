@@ -141,6 +141,22 @@ class InPlaceTests(Fixture):
             self.assertAlmostEqual(z, 0.0, delta=1e-3)          # no travel along the ground
             self.assertAlmostEqual(y, 1.0 + 0.2 * frame / 60, delta=1e-3)  # the rise is kept
 
+    def test_a_clip_that_starts_away_from_its_spot_comes_back_over_it(self):
+        """The last part of a charge (the Minotaur's RamAttack) starts where the run before it ended, 3 m on, and
+        stays there: in place, the joint starts over its resting spot."""
+        gltf, binc = add_animation(rig.small_rig(os.path.join(self.tmp.name, "off.glb")),
+                                   [(2, "translation", "LINEAR", [0.0, 1.0], [(0.0, 0.03, 0.01), (0.0, 0.03, 0.01)])])
+        sk = ns.build(gltf, binc)
+        moved = gc.clip(gltf, binc, sk, "Move", HASH)
+        hips = lambda c, f: osk.world(ja.sample(c, f, sk["rest"]), sk["parents"])[1][1]
+        self.assertAlmostEqual(hips(moved, 0)[2], -3.0, delta=1e-3)  # 3 m away (the armature turns its y into -z)
+        c = gc.clip(gltf, binc, sk, "Move", HASH, in_place="Hips")
+        for frame in (0, 30, 60):
+            x, y, z = hips(c, frame)
+            self.assertAlmostEqual(x, 0.0, delta=1e-3)
+            self.assertAlmostEqual(z, 0.0, delta=1e-3)
+            self.assertAlmostEqual(y, 1.0, delta=1e-3)
+
     def test_the_joint_must_be_ours(self):
         with self.assertRaises(KeyError):
             gc.clip(self.gltf, self.binc, self.sk, "Move", HASH, in_place="Pelvis")
