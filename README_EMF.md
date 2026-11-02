@@ -40,6 +40,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `mods/handover/` | Hand-over (Lua, off by default): `/handover wood 20` gives items to the nearest other player; nothing is ever lost; `/handover.block` refuses them (see below) |
 | `mods/teleports/` | Waypoint Teleports: `/unstuck` and `/home` for every player, `tp`, `bring`, `tp.pos`, `tp.back` for admins (see below) |
 | `mods/bulk_craft/` | Bulk Craft (off by default): craft one by hand, then F8 at the station (or `/craft 25`, every player) crafts many through the game's own crafting, at the recipe's pace (see below) |
+| `mods/blessings/` | Flame Blessings (off by default): god mode, endless health, stamina and mana, no fall damage, per player and at once; the host's own in the Mods tab or on the F4 wheel, `/blessings` for admins on any player; shown on screen, told in chat, nothing saved (see below) |
 | `mods/beastmaster/` | Beastmaster (Lua, off by default): tame wolves, boars, sabretooths and hounds (bears and aurochs with the EMF creature packs: EML content, install EML or ShroudForge first), keep 8, call 2 to fight beside you; hold F3 for the beast wheel, `/beastmaster` for every player; rare wild pack beasts (see below) |
 | `mods/necromancer/` | Necromancer (Lua, off by default): raise up to 3 skeleton warriors that stay and follow you (a lich and a bone golem with the EMF creature packs: EML content, install EML or ShroudForge first), cast raging spirits (flaming skulls, 6 s); hold F2 for the summoning wheel, shared with Beastmaster; `/necromancer` for every player (see below) |
 | `mods/loot_scale/` | more materials per loot stack (x2 by default, off by default) by hooking the game's loot amount getter by its bytes; plants picked with E, chopping and mining (which never read that setting) get the difference after the game's PickupEvent, each with its own factor (0 = the same, so from 1.1.0 they follow the main factor); switching it off takes effect at the next start; factor 1 is the world's amounts at once for everything that follows it |
@@ -163,6 +164,7 @@ EMF's keys by default:
 | the key under Esc | the console (`key=` under `[overlay]` above) |
 | F2 | Necromancer: the summoning wheel |
 | F3 | Beastmaster: the beast wheel |
+| F4 | Flame Blessings: the blessings wheel (the host's own) |
 | F6 | Companion: calls it, then opens its order wheel |
 | F7 | Hand-over: the host's wheel |
 | F8 | Bulk Craft: the wheel at a crafting station |
@@ -585,6 +587,19 @@ an upgrade or a recipe with station requirements such as comfort or crafting pro
 crafting time and at least 0.5 s, carried over between orders (`pace = instant`: recipes without a crafting time all at
 once), at most 100 per order; it stops if a craft's materials did not leave your bag (base storage). Details:
 `mods/bulk_craft/README.md`; how the game's craft request works: `docs/engine_parts/inventory_crafting.md`.
+
+## The blessings mod (Flame Blessings)
+Installed switched off: switch it on in the Mods tab or EMF.exe, then restart. Cheats as plain switches, per player and
+at once: **god mode** (no damage, cannot die; the game's `CombatFlags.immune`, never saved, plus a refill), **endless
+health** (hits land and health refills after the step, so one very strong hit can still kill), **endless stamina**,
+**endless mana** and **no fall damage** (`DynamicFallDamage.fallStartAltitude` kept at the player's height). The host's
+own are Mods-tab settings and the **F4** wheel (with Fill me up and All off); admins (the console, `commands.txt`, the
+host's chat, `[chat] admins`) use `/blessings <god|refill|stamina|mana|nofall> <on|off> [#k|name]`, `heal`, `off` and
+`list` on any player, kept by account until that player leaves or the world closes. God mode wins over endless health.
+A line on the host's screen shows theirs, a chat line tells everyone ("[Blessings] Ember: god mode on for Ivar"), and
+switching the mod off puts every player's `immune` back. When a game update switches EMF's attribute functions off,
+endless health, stamina and mana say "not available on this game version". Free building is planned. Details:
+`mods/blessings/README.md`.
 
 ## The beastmaster mod (Beastmaster)
 Installed switched off: switch it on in the Mods tab or EMF.exe (it needs the `lua` mod 1.9). A Beastmaster class: tame

@@ -324,6 +324,7 @@ From the mods in the EMF zip (only while that mod runs):
 - craft.stop: stop your order [bulk_craft]
 - craft.list: what you can bulk-craft here [bulk_craft]
 - craft.teach <recipe hex> [player]: as if crafted by hand (host) [bulk_craft]
+- blessings <god|refill|stamina|mana|nofall> <on|off> [#k|name] | heal | off | list: Flame Blessings (admin) [blessings]
 - jobs: the villagers' jobs [villager_jobs]
 - job <villager> <chest> <recipe id hex>: give a villager a job (host) [villager_jobs]
 - job.stop <villager>: end a villager's job [villager_jobs]
