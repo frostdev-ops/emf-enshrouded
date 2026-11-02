@@ -110,15 +110,25 @@ bool attribute_layouts_checked(int build) {
 }
 
 const std::vector<AttrComponent>& attribute_components() {
-    static const std::vector<AttrComponent> k = {
-        {ecs::Health::kHash, "Health"}, {ecs::Stamina::kHash, "Stamina"}, {ecs::Mana::kHash, "Mana"}};
+    static const std::vector<AttrComponent> k = {{ecs::Health::kHash, "Health"},
+                                                 {ecs::Stamina::kHash, "Stamina"},
+                                                 {ecs::Mana::kHash, "Mana"},
+                                                 {ecs::Experience::kHash, "Experience"},
+                                                 {ecs::Level::kHash, "Level"}};
     return k;
+}
+
+AttrWrite attribute_write_rule(uint32_t id) {
+    if (id == kAttrXpPending) return AttrWrite::GiveOnly;
+    if (id == kAttrXp || id == kAttrXpRequired || id == kAttrLevel) return AttrWrite::ReadOnly;
+    return AttrWrite::Clamped;
 }
 
 const char* attr_status_text(AttrStatus s) {
     switch (s) {
         case AttrStatus::Ok: return "ok";
-        case AttrStatus::NoComponent: return "the entity has no Health, Stamina or Mana component that holds it";
+        case AttrStatus::NoComponent:
+            return "the entity has no Health, Stamina, Mana, Experience or Level component that holds it";
         case AttrStatus::NotInitialized: return "the component is not initialised yet";
         case AttrStatus::UnknownAttribute: return "the game's attribute registry does not know that id";
         case AttrStatus::OtherComponent: return "the attribute belongs to another component";

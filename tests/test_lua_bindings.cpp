@@ -638,6 +638,65 @@ TEST_CASE("lua 1.5: emf.health gives current and max; emf.attribute takes a name
     CHECK(r.fake.replies[2].find("unknown attribute 'speed'") != std::string::npos);
 }
 
+TEST_CASE("lua: emf.attribute names a player's XP and level (EMF API v22): xp_pending, xp, xp_required, level") {
+    Rig r(L"xp");
+    with_attributes(r.api);
+    r.fake.attrs[{1, EMF_ATTR_XP_PENDING}] = 40;
+    r.fake.attrs[{1, EMF_ATTR_XP}] = 1200;
+    r.fake.attrs[{1, EMF_ATTR_XP_REQUIRED}] = 3000;
+    r.fake.attrs[{1, EMF_ATTR_LEVEL}] = 7;
+    add_script(r.dir, "xp",
+               "emf.command('go', '', function(w)\n"
+               "  emf.reply(emf.attribute(w, 1, 'xp_pending') .. ' ' .. emf.attribute(w, 1, 'xp') .. ' ' ..\n"
+               "            emf.attribute(w, 1, 'xp_required') .. ' ' .. emf.attribute(w, 1, 'level'))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("xp.go");
+    REQUIRE(r.fake.replies.size() == 1);
+    CHECK(r.fake.replies[0] == "40 1200 3000 7");
+}
+
+TEST_CASE("lua 1.11: emf.xp_required, emf.level_cap and emf.set_level reach the core (EMF API v22)") {
+    Rig r(L"levels");
+    with_attributes(r.api);
+    with_levels(r.api);
+    add_script(r.dir, "lv",
+               "local function j(...) local t = {} for i = 1, select('#', ...) do t[#t + 1] = tostring((select(i, ...))) end return table.concat(t, ' ') end\n"
+               "emf.command('go', '', function(w)\n"
+               "  emf.reply(j(emf.xp_required(w, 4), emf.xp_required(w, 26), emf.level_cap(w)))\n"
+               "  emf.reply(j(emf.set_level(w, 7, 3), emf.set_level(w, 7, 5, 1200), emf.set_level(w, 7, 30)))\n"
+               "  local ok = pcall(emf.set_level, w, 7, -1)\n"
+               "  emf.reply(tostring(ok))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("lv.go");
+    REQUIRE(r.fake.replies.size() == 3);
+    CHECK(r.fake.replies[0] == "4000 nil 25");  // nil: no such level
+    CHECK(r.fake.replies[1] == "true true false");
+    CHECK(r.fake.replies[2] == "false");  // a negative level is an error
+    REQUIRE(r.fake.attr_adds.size() == 3);
+    CHECK(r.fake.attr_adds[1] == std::make_tuple(7u, 5u, 1200));
+}
+
+TEST_CASE("lua 1.11: on a core without levels emf.xp_required and emf.level_cap are nil, emf.set_level false") {
+    Rig r(L"nolevels");
+    with_attributes(r.api);
+    r.api.size = static_cast<uint32_t>(offsetof(EmfApi, player_xp_required));  // a v21 core
+    r.api.version = 21;
+    add_script(r.dir, "nl",
+               "emf.command('go', '', function(w)\n"
+               "  emf.reply(tostring(emf.xp_required(w, 4)) .. ' ' .. tostring(emf.level_cap(w)) .. ' ' ..\n"
+               "            tostring(emf.set_level(w, 7, 3)))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("nl.go");
+    REQUIRE(r.fake.replies.size() == 1);
+    CHECK(r.fake.replies[0] == "nil nil false");
+}
+
 TEST_CASE("lua 1.5: emf.attribute_add and emf.damage reach the core; a bad amount is an error") {
     Rig r(L"attradd");
     with_attributes(r.api);

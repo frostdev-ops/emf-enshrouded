@@ -1,13 +1,16 @@
 #pragma once
 // Flame Blessings' rules, without the game (tested in tests/test_blessings.cpp): the blessings one player has, the
-// /blessings command's words, the line on screen, the chat lines, and the roster of players an admin blessed.
+// /blessings command's words, the line on screen, the chat lines, the roster of players an admin blessed, and (1.1) the
+// game's level-up rule for XP and levels.
 //
 // Health is one of three: off, refill (hits land, health refills after the step) or god (no damage). God wins: refill
 // asked while god mode is on changes nothing, and taking refill away leaves god mode alone.
 // Players an admin blessed are kept by their account (emf::player_account), never by their entity id: a player who
 // leaves loses their blessings, and a new player who gets the same entity id starts with none.
 #include <algorithm>
+#include <climits>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <set>
 #include <string>
@@ -50,24 +53,52 @@ inline std::string label(const std::string& what) {
 
 constexpr const char* kUsage =
     "usage: blessings <god|refill|stamina|mana|nofall> <on|off> [#k|name], blessings heal [#k|name], "
-    "blessings off [#k|name], blessings list";
+    "blessings off [#k|name], blessings xp <n> [#k|name], blessings level <n|+n|-n|undo> [#k|name], "
+    "blessings list";
 
 inline std::string help_text() {
     return "Flame Blessings (the host and admins):\n"
            "blessings <god|refill|stamina|mana|nofall> <on|off> [#k|name]: one blessing on or off (yours without a name)\n"
            "blessings heal [#k|name]: fill up health, stamina and mana once\n"
            "blessings off [#k|name]: every blessing off\n"
+           "blessings xp <n> [#k|name]: give XP (the game levels up as usual)\n"
+           "blessings level <n|+n|-n|undo> [#k|name]: to level n, or up or down by n; undo: back to the level and XP "
+           "from before Flame Blessings' last XP or level change\n"
            "blessings list: who has blessings\n"
            "#k is the k-th player, lowest id first. EMF's other cheats: give, put, time, goto, stack";
 }
 
+constexpr int64_t kMaxXp = 100000000;   // one blessings xp at most (an attribute is a 32-bit number)
+constexpr int64_t kMaxLevelWord = 999;  // a level as typed (the game's cap is checked where the world runs)
+
 struct Command {
-    enum Kind { Help, List, Set, Heal, AllOff, Bad } kind = Bad;
-    std::string what;    // Set: god, refill, stamina, mana or nofall
-    bool on = false;     // Set
-    std::string target;  // "#k", a name, or "" (the sender)
-    std::string error;   // Bad: what to tell the sender
+    enum Kind { Help, List, Set, Heal, AllOff, Xp, Level, Undo, Bad } kind = Bad;
+    std::string what;       // Set: god, refill, stamina, mana or nofall
+    bool on = false;        // Set
+    int64_t amount = 0;     // Xp: the XP; Level: the level, or the change when relative
+    bool relative = false;  // Level: "+n" or "-n"
+    std::string target;     // "#k", a name, or "" (the sender)
+    std::string error;      // Bad: what to tell the sender
 };
+
+// A whole number as typed: an optional sign, then 1 to 9 digits. False for anything else.
+inline bool parse_number(const std::string& word, int64_t* out, bool* has_sign = nullptr) {
+    size_t i = 0;
+    bool neg = false;
+    if (!word.empty() && (word[0] == '+' || word[0] == '-')) {
+        neg = word[0] == '-';
+        i = 1;
+    }
+    if (i >= word.size() || word.size() - i > 9) return false;
+    int64_t v = 0;
+    for (size_t k = i; k < word.size(); ++k) {
+        if (word[k] < '0' || word[k] > '9') return false;
+        v = v * 10 + (word[k] - '0');
+    }
+    *out = neg ? -v : v;
+    if (has_sign) *has_sign = i == 1;
+    return true;
+}
 
 // The words after "blessings".
 inline Command parse_command(const std::vector<std::string>& words) {
@@ -99,6 +130,31 @@ inline Command parse_command(const std::vector<std::string>& words) {
     if (first == "heal" || first == "off") {
         c.kind = first == "heal" ? Command::Heal : Command::AllOff;
         c.target = rest_from(1);
+        return c;
+    }
+    if (first == "xp") {
+        if (words.size() < 2) return bad("");
+        bool sign = false;
+        if (!parse_number(words[1], &c.amount, &sign) || c.amount < 1 || c.amount > kMaxXp)
+            return bad("the XP is a whole number from 1 to " + std::to_string(kMaxXp));
+        c.kind = Command::Xp;
+        c.target = rest_from(2);
+        return c;
+    }
+    if (first == "level") {
+        if (words.size() < 2) return bad("");
+        if (lower(words[1]) == "undo") {
+            c.kind = Command::Undo;
+            c.target = rest_from(2);
+            return c;
+        }
+        if (!parse_number(words[1], &c.amount, &c.relative)) return bad("a level is a number, +n, -n or undo");
+        if (c.relative && (c.amount == 0 || c.amount > kMaxLevelWord || c.amount < -kMaxLevelWord))
+            return bad("a change is 1 to " + std::to_string(kMaxLevelWord) + " levels, up (+n) or down (-n)");
+        if (!c.relative && (c.amount < 1 || c.amount > kMaxLevelWord))
+            return bad("a level is 1 to " + std::to_string(kMaxLevelWord) + " (and no higher than the game's cap)");
+        c.kind = Command::Level;
+        c.target = rest_from(2);
         return c;
     }
     if (!is_blessing(first)) return bad("there is no blessing called " + words[0]);
@@ -153,13 +209,17 @@ inline std::string hud_text(const Blessings& b) {
     return names.empty() ? std::string() : "Blessings: " + joined(names);
 }
 
-// The chat line for every player. `what` is a blessing word, "heal" or "off" (all off).
+// A chat line for every player: "[Blessings] <sender>: <what was done>".
+inline std::string announce_line(const std::string& sender, const std::string& act) {
+    return "[Blessings] " + sender + ": " + act;
+}
+// The chat line for a blessing. `what` is a blessing word, "heal" or "off" (all off).
 inline std::string announce_text(const std::string& sender, const std::string& what, bool on, const std::string& target) {
     std::string act;
     if (what == "heal") act = "full heal for " + target;
     else if (what == "off") act = "all blessings off for " + target;
     else act = label(what) + (on ? " on for " : " off for ") + target;
-    return "[Blessings] " + sender + ": " + act;
+    return announce_line(sender, act);
 }
 
 // The "health" setting's values (mod.json): off, refill, god.
@@ -180,15 +240,16 @@ inline bool has(const Blessings& b, const std::string& what) {
     return false;
 }
 
-// The wheel: the five switches (with on or off on the second line), then Fill me up and All off.
-constexpr const char* kWheelWords[] = {"god", "refill", "stamina", "mana", "nofall", "heal", "off"};
-constexpr int kWheelSwitches = 5, kWheelHeal = 5, kWheelAllOff = 6;
+// The wheel: the five switches (with on or off on the second line), then Fill me up, Level up and All off (8: one page).
+constexpr const char* kWheelWords[] = {"god", "refill", "stamina", "mana", "nofall", "heal", "levelup", "off"};
+constexpr int kWheelSwitches = 5, kWheelHeal = 5, kWheelLevelUp = 6, kWheelAllOff = 7;
 inline std::vector<std::string> wheel_items(const Blessings& b) {
     static const char* const names[] = {"God mode", "Endless health", "Stamina", "Mana", "No fall damage"};
     std::vector<std::string> out;
     for (int i = 0; i < kWheelSwitches; ++i)
         out.push_back(std::string(names[i]) + (has(b, kWheelWords[i]) ? " (on)" : " (off)"));
     out.push_back("Fill me up");
+    out.push_back("Level up (+1)");
     out.push_back("All off");
     return out;
 }
@@ -203,6 +264,50 @@ inline Blessings wheel_toggle(Blessings b, int choice) {
         return b;
     }
     return apply(b, what, true);
+}
+
+// ---- 1.1: XP and levels (docs/modding/reference.md "v22: XP and level") ----
+// A player's level as the game keeps it: the level, XP towards the next one, XP given and not yet counted, and what the
+// next level needs.
+struct LevelState {
+    int32_t level = 0, xp = 0, pending = 0, need = 0;
+    bool operator==(const LevelState& o) const {
+        return level == o.level && xp == o.xp && pending == o.pending && need == o.need;
+    }
+};
+using XpCurve = std::function<uint32_t(uint32_t)>;  // the XP a level needs (the game's xpRequired); 0 = unknown
+
+// The state once the game has counted the pending XP, as its player_level program does over the next steps: below the
+// cap the pending XP goes into XP, then one level per step while XP reaches the requirement, the rest carried over; at
+// the cap pending XP is thrown away. A requirement of 0 (unknown) stops it.
+inline LevelState counted(LevelState s, uint32_t cap, const XpCurve& need_of) {
+    const auto below_cap = [&] { return cap == 0 || static_cast<uint32_t>(s.level) < cap; };
+    if (!below_cap()) {
+        s.pending = 0;
+        return s;
+    }
+    int64_t xp = static_cast<int64_t>(s.xp) + s.pending;
+    s.pending = 0;
+    for (int guard = 0; guard < 10000 && below_cap() && s.need > 0 && xp >= s.need; ++guard) {
+        xp -= s.need;
+        ++s.level;
+        s.need = static_cast<int32_t>(need_of(static_cast<uint32_t>(s.level)));
+    }
+    s.xp = static_cast<int32_t>((std::min)(xp, static_cast<int64_t>(INT32_MAX)));
+    return s;
+}
+
+// The XP that takes a counted state to the start of `target` (above its level): the rest of this level, then every
+// level on the way. -1 when it is not a raise or a requirement is unknown.
+inline int64_t xp_to_reach(const LevelState& s, uint32_t target, const XpCurve& need_of) {
+    if (s.level < 1 || target <= static_cast<uint32_t>(s.level) || s.need <= 0) return -1;
+    int64_t sum = static_cast<int64_t>(s.need) - s.xp;
+    for (uint32_t l = static_cast<uint32_t>(s.level) + 1; l < target; ++l) {
+        const uint32_t need = need_of(l);
+        if (need == 0) return -1;
+        sum += need;
+    }
+    return sum > 0 ? sum : -1;
 }
 
 // The players an admin blessed (the host's own blessings are settings), by account.

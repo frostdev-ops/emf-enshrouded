@@ -20,8 +20,19 @@ constexpr uint32_t kAttrStamina = 0x04B6AA8Bu;    // current stamina (Stamina co
 constexpr uint32_t kAttrMana = 0x6AA2574Eu;       // current mana (Mana component)
 constexpr uint32_t kAttrMaxStamina = 0xF443C410u;  // max stamina: network_stamina_attribute copies it to staminaMax
 constexpr uint32_t kAttrMaxMana = 0x17536777u;     // max mana: read as mana's pair by three game functions (Medium)
+// A player's XP and level (build 1283531, docs/research xp_levels): every XP source adds to pending XP in Experience;
+// the game's player_level program moves it into XP and levels up once per step while XP >= the requirement.
+constexpr uint32_t kAttrXpPending = 0x1D7DD102u;   // pending XP (Experience): what XP sources add to
+constexpr uint32_t kAttrXp = 0x8DCDDAF4u;          // XP towards the next level (Experience)
+constexpr uint32_t kAttrXpRequired = 0x04723F62u;  // XP the next level needs (Experience), from xpRequired(level)
+constexpr uint32_t kAttrLevel = 0x724BF568u;       // the level (Level)
 // The maximum of a current-value attribute (health, stamina, mana), or nothing.
 std::optional<uint32_t> max_attribute_of(uint32_t id);
+// How attribute_add may change an attribute: clamped to 0..max (health, stamina, mana; other ids as before), only
+// given (pending XP: positive amounts, no maximum), or not at all (XP, XP required and level, which player_level keeps
+// consistent: a write of one alone would break it).
+enum class AttrWrite { Clamped, GiveOnly, ReadOnly };
+AttrWrite attribute_write_rule(uint32_t id);
 // Whether the layouts these functions rely on (AttrInfo's slot, attrAdd, the HitCandidate) were checked for this known
 // build (its index in known_builds()): their signatures' RVAs are recorded for it. Unknown builds and builds whose exe
 // was not at hand (kRvaUnchecked) are not: a shifted offset must never turn a damage call into something else.
@@ -34,7 +45,7 @@ struct AttrComponent {
     uint32_t hash;  // types.json qualifiedHash
     const char* name;
 };
-const std::vector<AttrComponent>& attribute_components();  // Health, Stamina, Mana
+const std::vector<AttrComponent>& attribute_components();  // Health, Stamina, Mana, Experience, Level
 
 // attrFind's result: err 0 = found (0x1F = no such id), info = the registry's 32-byte entry (+0 rootId, +0xC u16 slot).
 struct AttrFindResult {

@@ -47,15 +47,20 @@ struct Info {
     uint16_t slot;
     uint8_t rest[18];
 };
-constexpr uint32_t kHealthRoot = 0xAAAA0001u, kStaminaRoot = 0xAAAA0002u;
+constexpr uint32_t kHealthRoot = 0xAAAA0001u, kStaminaRoot = 0xAAAA0002u, kXpRoot = 0xAAAA0003u, kLevelRoot = 0xAAAA0004u;
 Info g_info_health{kHealthRoot, {}, 0, {}}, g_info_max{kHealthRoot, {}, 7, {}}, g_info_stamina{kStaminaRoot, {}, 0, {}},
     g_info_max_stamina{kStaminaRoot, {}, 7, {}};
+// the Experience component's slots in these fakes: pending XP 0, XP 1, XP required 2; the Level component's level 0
+Info g_info_xp_pending{kXpRoot, {}, 0, {}}, g_info_xp{kXpRoot, {}, 1, {}}, g_info_xp_required{kXpRoot, {}, 2, {}},
+    g_info_level{kLevelRoot, {}, 0, {}};
 bool g_max_stamina_known = true;
 AttrFindResult* fake_find(AttrFindResult* out, uint32_t id, const void*) {
     std::memset(out, 0, sizeof *out);
     const Info* i = id == kAttrHealth ? &g_info_health : id == kAttrMaxHealth ? &g_info_max
                     : id == kAttrStamina ? &g_info_stamina
-                    : id == kAttrMaxStamina && g_max_stamina_known ? &g_info_max_stamina : nullptr;
+                    : id == kAttrMaxStamina && g_max_stamina_known ? &g_info_max_stamina
+                    : id == kAttrXpPending ? &g_info_xp_pending : id == kAttrXp ? &g_info_xp
+                    : id == kAttrXpRequired ? &g_info_xp_required : id == kAttrLevel ? &g_info_level : nullptr;
     if (!i) out->err = 0x1F;
     else out->info = reinterpret_cast<const uint8_t*>(i);
     return out;
@@ -63,8 +68,42 @@ AttrFindResult* fake_find(AttrFindResult* out, uint32_t id, const void*) {
 int g_add_calls = 0;
 void fake_add(void* comp, const void*, int32_t delta, uint32_t id) {
     ++g_add_calls;
+    if (id == kAttrXpPending || id == kAttrXp || id == kAttrXpRequired) {
+        static_cast<ecs::Experience*>(comp)->dataStorage[id == kAttrXpPending ? 0 : id == kAttrXp ? 1 : 2] += delta;
+        return;
+    }
+    if (id == kAttrLevel) {
+        static_cast<ecs::Level*>(comp)->dataStorage[0] += delta;
+        return;
+    }
     auto* h = static_cast<ecs::Health*>(comp);
     h->dataStorage[id == kAttrMaxHealth || id == kAttrMaxStamina ? 7 : 0] += delta;
+}
+// A player's Experience (pending, xp, required) and Level components, as the game keeps them.
+void put_xp(uint32_t entity, int32_t pending, int32_t xp, int32_t required, int32_t level) {
+    ecs::Experience e{};
+    e.rootId.value = kXpRoot;
+    e.storageOffset = 8;
+    e.flags = 1;
+    e.storageCount = 3;
+    e.dataStorage[0] = pending;
+    e.dataStorage[1] = xp;
+    e.dataStorage[2] = required;
+    g_comps[{ecs::Experience::kHash, entity}] = std::vector<uint8_t>(reinterpret_cast<uint8_t*>(&e),
+                                                                     reinterpret_cast<uint8_t*>(&e) + sizeof e);
+    ecs::Level l{};
+    l.rootId.value = kLevelRoot;
+    l.storageOffset = 8;
+    l.flags = 1;
+    l.storageCount = 2;
+    l.dataStorage[0] = level;
+    g_comps[{ecs::Level::kHash, entity}] = std::vector<uint8_t>(reinterpret_cast<uint8_t*>(&l),
+                                                                reinterpret_cast<uint8_t*>(&l) + sizeof l);
+}
+int32_t xp_slot(uint32_t entity, int slot) {
+    ecs::Experience e{};
+    std::memcpy(&e, g_comps[{ecs::Experience::kHash, entity}].data(), sizeof e);
+    return e.dataStorage[slot];
 }
 std::vector<std::vector<uint8_t>> g_pending;
 void* fake_alloc(void*, uint8_t) {
@@ -105,6 +144,12 @@ void put_position(uint32_t entity, double x, double y, double z) {
     g_comps[{ecs::CurrentTransform::kHash, entity}] = t;
 }
 
+// the game's xpRequired and maxPlayerLevel over the BalancingRegistry singleton (planted as g_balancing): level L needs
+// 1000 * L XP, the cap is 25
+int g_balancing = 0;
+uint32_t fake_xp_required(uint32_t level, const void* bal) { return bal == &g_balancing ? 1000u * level : 0u; }
+uint32_t fake_level_cap(const void* bal) { return bal == &g_balancing ? 25u : 0u; }
+
 struct Fixture {
     CoreState state;
     FakeWorld server;
@@ -125,8 +170,11 @@ struct Fixture {
             state.attr_add = fake_add;
             state.alloc_pending_hit = fake_alloc;
             state.damage_hooked = true;
+            state.xp_required = fake_xp_required;
+            state.level_cap = fake_level_cap;
         }
         ss.plant(server, "impact::AttributeRegistry", &registry);
+        ss.plant(server, "BalancingRegistry", &g_balancing);
         set_core_state(&state);
     }
     ~Fixture() { set_core_state(nullptr); }
@@ -236,6 +284,157 @@ TEST_CASE("attribute_add: inside a world callback it runs at once, clamped to 0.
     CHECK(overheal);
     CHECK(hurt);
     CHECK(g_add_calls == 3);
+}
+
+TEST_CASE("api v22: EMF_ATTR_XP_PENDING, _XP, _XP_REQUIRED and _LEVEL are the game's ids (Experience, Level)") {
+    CHECK(api_table()->version >= 22u);
+    CHECK(EMF_API_VERSION >= 22);
+    CHECK(EMF_ATTR_XP_PENDING == 0x1D7DD102u);
+    CHECK(EMF_ATTR_XP == 0x8DCDDAF4u);
+    CHECK(EMF_ATTR_XP_REQUIRED == 0x04723F62u);
+    CHECK(EMF_ATTR_LEVEL == 0x724BF568u);
+    CHECK(EMF_ATTR_XP_PENDING == kAttrXpPending);
+    CHECK(EMF_ATTR_LEVEL == kAttrLevel);
+}
+
+TEST_CASE("attribute_get: a player's XP, pending XP, XP for the next level and level, from Experience and Level") {
+    Fixture f;
+    put_xp(1, 40, 1200, 3000, 7);
+    const EmfApi* api = api_table();
+    int32_t pending = 0, xp = 0, required = 0, level = 0;
+    CHECK(api->attribute_get(f.w(), 1, EMF_ATTR_XP_PENDING, &pending));
+    CHECK(api->attribute_get(f.w(), 1, EMF_ATTR_XP, &xp));
+    CHECK(api->attribute_get(f.w(), 1, EMF_ATTR_XP_REQUIRED, &required));
+    CHECK(api->attribute_get(f.w(), 1, EMF_ATTR_LEVEL, &level));
+    CHECK(pending == 40);
+    CHECK(xp == 1200);
+    CHECK(required == 3000);
+    CHECK(level == 7);
+}
+
+TEST_CASE("attribute_add: XP is given as pending XP (no maximum; the game levels up); XP, required and level are read-only") {
+    Fixture f;
+    put_xp(1, 0, 1200, 3000, 7);
+    const EmfApi* api = api_table();
+    bool give = false, take = false, xp = false, required = false, level = false;
+    f.in_callback([&](EmfWorld* w) {
+        give = api->attribute_add(w, 1, EMF_ATTR_XP_PENDING, 2500);
+        take = api->attribute_add(w, 1, EMF_ATTR_XP_PENDING, -100);  // XP is only ever given
+        xp = api->attribute_add(w, 1, EMF_ATTR_XP, 10);
+        required = api->attribute_add(w, 1, EMF_ATTR_XP_REQUIRED, -10);
+        level = api->attribute_add(w, 1, EMF_ATTR_LEVEL, 1);
+    });
+    CHECK(give);
+    CHECK(xp_slot(1, 0) == 2500);  // the game's player_level moves it into XP and levels up on its next steps
+    CHECK_FALSE(take);
+    CHECK_FALSE(xp);
+    CHECK_FALSE(required);
+    CHECK_FALSE(level);
+    CHECK(xp_slot(1, 1) == 1200);
+    CHECK(xp_slot(1, 2) == 3000);
+    CHECK(g_add_calls == 1);
+}
+
+int32_t level_of(uint32_t entity) {
+    ecs::Level l{};
+    std::memcpy(&l, g_comps[{ecs::Level::kHash, entity}].data(), sizeof l);
+    return l.dataStorage[0];
+}
+
+TEST_CASE("api v22: player_xp_required and player_level_cap read the game's balancing table") {
+    Fixture f;
+    const EmfApi* api = api_table();
+    CHECK(api->size >= offsetof(EmfApi, player_level_set) + sizeof(api->player_level_set));
+    CHECK(api->player_xp_required(f.w(), 5) == 5000u);
+    CHECK(api->player_level_cap(f.w()) == 25u);
+    CHECK(api->player_xp_required(f.w(), 0) == 0u);   // no level 0
+    CHECK(api->player_xp_required(f.w(), 26) == 0u);  // past the cap
+    Fixture none(false);                              // the signatures not found on this build
+    CHECK(api->player_xp_required(none.w(), 5) == 0u);
+    CHECK(api->player_level_cap(none.w()) == 0u);
+}
+
+TEST_CASE("player_level_set: the level, XP, pending XP and requirement go together; 1..cap only") {
+    Fixture f;
+    put_xp(1, 300, 1200, 3000, 7);  // level 7, 1200 of 3000 XP, 300 XP given and not counted yet
+    const EmfApi* api = api_table();
+    bool lower = false, clamp = false, zero = false, over = false;
+    f.in_callback([&](EmfWorld* w) {
+        lower = api->player_level_set(w, 1, 4, 150);
+        CHECK(level_of(1) == 4);
+        CHECK(xp_slot(1, 1) == 150);   // XP into level 4
+        CHECK(xp_slot(1, 0) == 0);     // the pending XP is gone: it would level the player up again
+        CHECK(xp_slot(1, 2) == 4000);  // what player_level keeps for level 4: xpRequired(4), never 0
+        clamp = api->player_level_set(w, 1, 4, 99999);
+        CHECK(xp_slot(1, 1) == 3999);  // always below the requirement, or the next step levels up
+        zero = api->player_level_set(w, 1, 0, 0);
+        over = api->player_level_set(w, 1, 26, 0);
+    });
+    CHECK(lower);
+    CHECK(clamp);
+    CHECK_FALSE(zero);
+    CHECK_FALSE(over);
+    CHECK(level_of(1) == 4);
+}
+
+TEST_CASE("player_level_set: refused without the game's xpRequired, on a client world, for an entity without levels") {
+    Fixture none(false);
+    put_xp(1, 0, 10, 3000, 7);
+    const EmfApi* api = api_table();
+    bool no_fn = true, no_entity = true;
+    none.in_callback([&](EmfWorld* w) { no_fn = api->player_level_set(w, 1, 4, 0); });
+    CHECK_FALSE(no_fn);
+    CHECK(level_of(1) == 7);
+    Fixture f;
+    put_xp(1, 0, 10, 3000, 7);
+    f.in_callback([&](EmfWorld* w) { no_entity = api->player_level_set(w, 999, 4, 0); });
+    CHECK_FALSE(no_entity);
+}
+
+TEST_CASE("player_level_set: with the level cap unknown (MaxPlayerLevel not found) nothing is set and no XP is read") {
+    Fixture f;
+    f.state.level_cap = nullptr;  // xpRequired found, the cap not: "1..cap" cannot be checked
+    put_xp(1, 0, 10, 3000, 7);
+    const EmfApi* api = api_table();
+    CHECK(api->player_xp_required(f.w(), 5) == 0u);
+    bool high = true, normal = true;
+    f.in_callback([&](EmfWorld* w) {
+        high = api->player_level_set(w, 1, 500, 0);
+        normal = api->player_level_set(w, 1, 4, 0);
+    });
+    CHECK_FALSE(high);
+    CHECK_FALSE(normal);
+    CHECK(level_of(1) == 7);
+    CHECK(logged("level cap"));
+}
+
+TEST_CASE("player_level_set: outside a world callback a level outside 1..cap is refused at once, not queued") {
+    Fixture f;
+    put_xp(1, 0, 10, 3000, 7);
+    const EmfApi* api = api_table();
+    CHECK_FALSE(api->player_level_set(f.w(), 1, 0, 0));
+    CHECK_FALSE(api->player_level_set(f.w(), 1, 26, 0));
+    CHECK_FALSE(api->player_level_set(f.w(), 1, 3000000000u, 0));
+    CHECK(api->player_level_set(f.w(), 1, 4, 0));  // queued
+    CHECK(level_of(1) == 7);
+    f.step();
+    CHECK(level_of(1) == 4);
+    Fixture none(false);
+    put_xp(1, 0, 10, 3000, 7);
+    CHECK_FALSE(api->player_level_set(none.w(), 1, 4, 0));  // without xpRequired: refused at once
+}
+
+TEST_CASE("player_level_set: setting the level a player already has writes and logs nothing") {
+    Fixture f;
+    put_xp(1, 0, 150, 4000, 4);  // level 4, 150 of 4000 XP: what player_level_set(4, 150) makes
+    const EmfApi* api = api_table();
+    const int adds = g_add_calls;
+    g_lines.clear();
+    bool same = false;
+    f.in_callback([&](EmfWorld* w) { same = api->player_level_set(w, 1, 4, 150); });
+    CHECK(same);
+    CHECK(g_add_calls == adds);
+    CHECK_FALSE(logged("player_level_set"));
 }
 
 TEST_CASE("attribute_add: outside a world callback it waits for the server world's next step") {

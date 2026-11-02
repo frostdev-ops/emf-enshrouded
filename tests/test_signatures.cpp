@@ -238,7 +238,20 @@ TEST_CASE("signature table has the inventory transaction and readOther, optional
         CHECK(d->rva[1] == w.rva_1273043);
         CHECK_FALSE(d->required);
     }
-    CHECK(kSigCount == 51);
+    CHECK(kSigCount == 53);
+}
+
+TEST_CASE("signature table has XpRequired and MaxPlayerLevel (API v22 levels), optional, on both exes of 1283531") {
+    const SigDef* xp = find_signature("XpRequired");
+    REQUIRE(xp != nullptr);
+    CHECK(xp->rva[3] == 0xe97620u);  // the client
+    CHECK(xp->rva[4] == 0x93e880u);  // the dedicated server
+    CHECK_FALSE(xp->required);
+    const SigDef* cap = find_signature("MaxPlayerLevel");
+    REQUIRE(cap != nullptr);
+    CHECK(cap->rva[3] == 0xe99270u);
+    CHECK(cap->rva[4] == 0x9404f0u);
+    CHECK_FALSE(cap->required);
 }
 
 TEST_CASE("signature table has sendServerInfo (API v21 world settings: the game's resync), on both exes of 1273043") {

@@ -35,7 +35,9 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    `">=1.5"`. 1.6 adds `emf.tell`, `emf.broadcast`, `world:name`, `emf.on_chat` and `emf.request_save` (EMF API
    v19), and `emf.command(emf.id, ...)` makes the bare command `/<id>`: depend on `">=1.6"`. 1.7 adds `emf.teleport`
    (EMF API v20): depend on `">=1.7"`. 1.8 adds `world:template`: depend on `">=1.8"`. 1.9 adds wheel groups (`emf.wheel_section`, `emf.wheel_group`): depend on `">=1.9"`. 1.10 adds
-   `emf.world_settings` and `emf.on_world_setting_changed` (EMF API v21): depend on `">=1.10"`. Ranges are explained in [guide.md](guide.md), "Dependencies
+   `emf.world_settings` and `emf.on_world_setting_changed` (EMF API v21): depend on `">=1.10"`. 1.11 adds a
+   player's XP and level (`emf.xp_required`, `emf.level_cap`, `emf.set_level` and the attribute names `"xp_pending"`,
+   `"xp"`, `"xp_required"`, `"level"`; EMF API v22): depend on `">=1.11"`. Ranges are explained in [guide.md](guide.md), "Dependencies
    and version ranges".)
 
 3. Put `main.lua` next to it:
@@ -110,9 +112,12 @@ right away.
 | `emf.spawn(world, guid, x, y, z)` / `emf.destroy(world, id)` | spawns a template at a position in metres / removes an entity (host only) |
 | `emf.kill(world, id)` | (1.4) kills a creature without a hit: its current health becomes 0 (1.5: through the game's attribute code) and the game's death program sends `EntityDiedEvent` the next step; the corpse keeps its loot. No attacker, no kill credit (`emf.damage` gives one); never a player; host only. true / false |
 | `emf.health(world, id)` | (1.5) the current and maximum health: `local cur, max = emf.health(w, id)`; the game's attributes in a world you host, else the replicated `NetworkHealth`; nil when neither is there |
-| `emf.attribute(world, id, attr)` | (1.5) an attribute as the game reads it: `attr` is `"health"`, `"max_health"`, `"stamina"`, `"max_stamina"`, `"mana"`, `"max_mana"` or an attribute id; nil when the entity has none. Host only |
+| `emf.attribute(world, id, attr)` | (1.5) an attribute as the game reads it: `attr` is `"health"`, `"max_health"`, `"stamina"`, `"max_stamina"`, `"mana"`, `"max_mana"`, a player's `"xp_pending"`, `"xp"`, `"xp_required"` and `"level"` (1.11, EMF API v22), or an attribute id; nil when the entity has none. Give XP with `emf.attribute_add(w, player, "xp_pending", n)`: the game levels the player up itself (the other three are read-only). Host only |
 | `emf.attribute_add(world, id, attr, delta)` | (1.5) adds `delta` (a whole number) through the game's own attribute code: damage stops at 0, a heal of `"health"`, `"stamina"` or `"mana"` at its maximum (other heals are refused). Not a hit: no kill credit, no hit reaction. Host only. true / false |
 | `emf.damage(world, attacker, target, amount)` | (1.5) `amount` of true damage as a real game hit on the next step: a `HitEvent` (damage numbers, always a light reaction, aggro toward the attacker), the killing blow, kill credit and XP for `attacker` when it is a player (0 = no attacker, no aggro). The target must take hits (creatures and players) and not be immune. Host only. true / false |
+| `emf.xp_required(world, level)` | (1.11) the XP `level` needs before the next one (the game's own curve); nil outside 1..cap or when unknown. Host only |
+| `emf.level_cap(world)` | (1.11) the highest level a player can reach; nil when unknown. Host only |
+| `emf.set_level(world, player, level [, xp])` | (1.11) sets a player's level (1..cap) with `xp` (default 0) towards the next one: raises or lowers at once, without level-up events (to level up the game's way, give XP with `emf.attribute_add(w, player, "xp_pending", n)`). The skill points follow the level; after lowering, a skill tree that costs more points than the level gives is reset by the game at the next load. Saved with the character. Host only. true (done or queued) / false |
 | `emf.tell(world, id, text)` | (1.6) a chat line only player `id` sees, under their own name (in a game you host, a note for the host itself); `"\n"` splits lines, at most 10. Where players' chat is on: a dedicated server, or `[chat] players=1` in a game you host ([server.md](server.md)). A Lua mod may send 30 lines in 10 s. true when queued, false when refused (the log says why) |
 | `emf.broadcast(text)` | (1.6) the same line for every connected player (a note for the host of a game you host). true / false |
 | `emf.on_chat(fn)` | (1.6) `fn(world, account, entity, text)` for every chat line a player sends that is not an EMF command, on the server world after its next step; `account` as text ("0x" + 16 hex digits), `entity` 0 when unknown. Read-only: the line is shown as usual. false where players' chat is off |

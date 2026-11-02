@@ -84,12 +84,25 @@ const int kReg = 0;  // the registry object (its address is all the fake needs)
 
 }  // namespace
 
-TEST_CASE("attributes: Health, Stamina and Mana are the components EMF looks in, by their types.json hash") {
+TEST_CASE("attributes: Health, Stamina, Mana, Experience and Level are the components EMF looks in, by their hash") {
     const auto& c = attribute_components();
-    REQUIRE(c.size() == 3);
+    REQUIRE(c.size() == 5);
     CHECK(c[0].hash == ecs::Health::kHash);
     CHECK(c[1].hash == ecs::Stamina::kHash);
     CHECK(c[2].hash == ecs::Mana::kHash);
+    CHECK(c[3].hash == ecs::Experience::kHash);
+    CHECK(c[4].hash == ecs::Level::kHash);
+}
+
+TEST_CASE("attributes: how attribute_add may change each attribute") {
+    CHECK(attribute_write_rule(kAttrHealth) == AttrWrite::Clamped);
+    CHECK(attribute_write_rule(kAttrMana) == AttrWrite::Clamped);
+    CHECK(attribute_write_rule(0x12345678u) == AttrWrite::Clamped);  // another id of those components: as before
+    CHECK(attribute_write_rule(kAttrXpPending) == AttrWrite::GiveOnly);
+    // the game keeps these consistent itself (player_level); a write of one alone would break it
+    CHECK(attribute_write_rule(kAttrXp) == AttrWrite::ReadOnly);
+    CHECK(attribute_write_rule(kAttrXpRequired) == AttrWrite::ReadOnly);
+    CHECK(attribute_write_rule(kAttrLevel) == AttrWrite::ReadOnly);
 }
 
 TEST_CASE("attr_read: the registry gives the slot, the component the value (current and max health)") {

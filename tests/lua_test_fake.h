@@ -343,6 +343,18 @@ bool f_teleport(EmfWorld*, const EmfTeleport* t) {
 }
 // A v20 core (fake_api is older for the Lua host's teleport: without it emf.teleport answers false).
 void with_teleport(EmfApi& a) { a.teleport = f_teleport; }
+// v22 levels: 1000 XP per level, cap 25; player_level_set is recorded in attr_adds as (player, level, xp).
+uint32_t f_xp_required(EmfWorld*, uint32_t level) { return level >= 1 && level <= 25 ? 1000u * level : 0u; }
+uint32_t f_level_cap(EmfWorld*) { return 25u; }
+bool f_level_set(EmfWorld*, uint32_t player, uint32_t level, uint32_t xp) {
+    g->attr_adds.emplace_back(player, level, static_cast<int32_t>(xp));
+    return level >= 1 && level <= 25;
+}
+void with_levels(EmfApi& a) {
+    a.player_xp_required = f_xp_required;
+    a.player_level_cap = f_level_cap;
+    a.player_level_set = f_level_set;
+}
 const Fake::WsField* f_ws_find(const char* key) {
     if (!key) return nullptr;
     for (const auto& f : g->ws)
