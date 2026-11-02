@@ -31,6 +31,7 @@
 #include "saves/backup.h"
 #include "saves/save_info.h"
 #include "chat_commands.h"
+#include "emf_settings.h"
 #include "server_chat.h"
 #include "console.h"
 #include "content_status.h"
@@ -928,7 +929,13 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_builtin.center = &g_state->commands;
     g_builtin.player = [] { return emf::core::command_player(emf::core::api_table()->local_player()); };
     g_state->settings_backend = std::make_unique<emf::core::FileIniBackend>(dir + L"\\emf\\config");
-    g_state->settings = std::make_unique<emf::core::SettingsStore>(g_state->settings_backend.get());
+    g_state->core_settings_backend = std::make_unique<emf::core::CoreIniBackend>(dir + L"\\emf\\emf_core.ini");
+    g_state->settings_route = std::make_unique<emf::core::RoutingIniBackend>(g_state->core_settings_backend.get(),
+                                                                              g_state->settings_backend.get());
+    g_state->settings = std::make_unique<emf::core::SettingsStore>(g_state->settings_route.get());
+    // EMF's own settings (the console's Settings tab; `set emf hud.size 120`), kept in emf_core.ini
+    for (const auto& line : emf::core::declare_emf_settings(*g_state->settings, dir + L"\\emf\\fonts"))
+        emf::logf("%s", line.c_str());
     g_builtin.registry = &g_state->mods;
     g_builtin.settings = g_state->settings.get();
     if (!emf::core::add_builtin_commands(g_builtin)) emf::logf("commands: a built-in command could not be added");

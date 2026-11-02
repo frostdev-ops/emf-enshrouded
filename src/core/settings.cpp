@@ -125,6 +125,44 @@ bool FileIniBackend::write(const std::string& mod, const std::string& key, const
     return WritePrivateProfileStringW(wide(mod).c_str(), wide(key).c_str(), wide(value).c_str(), file.c_str()) != 0;
 }
 
+namespace {
+// "hud.size" -> ("hud", "size"); false without a '.' or with an empty part.
+bool split_core_key(const std::string& key, std::wstring* section, std::wstring* name) {
+    const size_t dot = key.find('.');
+    if (dot == std::string::npos || dot == 0 || dot + 1 >= key.size()) return false;
+    *section = wide(key.substr(0, dot));
+    *name = wide(key.substr(dot + 1));
+    return true;
+}
+}  // namespace
+
+std::optional<std::string> CoreIniBackend::read(const std::string&, const std::string& key) {
+    std::wstring section, name;
+    if (!split_core_key(key, &section, &name)) return std::nullopt;
+    wchar_t buf[1024];
+    const DWORD n = GetPrivateProfileStringW(section.c_str(), name.c_str(), L"\x01", buf, 1024, path_.c_str());
+    if (n == 1 && buf[0] == L'\x01') return std::nullopt;
+    std::string v = narrow(std::wstring(buf, n));
+    if (const size_t semi = v.find(';'); semi != std::string::npos) v.erase(semi);  // "140 ; bigger"
+    return trim(v);
+}
+
+bool CoreIniBackend::write(const std::string&, const std::string& key, const std::string& value) {
+    std::wstring section, name;
+    if (!split_core_key(key, &section, &name)) return false;
+    return WritePrivateProfileStringW(section.c_str(), name.c_str(), wide(value).c_str(), path_.c_str()) != 0;
+}
+
+std::optional<std::string> RoutingIniBackend::read(const std::string& mod, const std::string& key) {
+    IniBackend* b = mod == kEmfSettingsId ? emf_ : mods_;
+    return b ? b->read(mod, key) : std::nullopt;
+}
+
+bool RoutingIniBackend::write(const std::string& mod, const std::string& key, const std::string& value) {
+    IniBackend* b = mod == kEmfSettingsId ? emf_ : mods_;
+    return b && b->write(mod, key, value);
+}
+
 const SettingsStore::Entry* SettingsStore::find(const std::string& mod, const std::string& key) const {
     auto it = mods_.find(mod);
     if (it == mods_.end()) return nullptr;
@@ -171,7 +209,8 @@ bool SettingsStore::declare(const std::string& mod, SettingDef def, std::string*
     }
     // A value that had to be clamped or replaced is written back, so mods that read their ini themselves
     // (GetPrivateProfile*) see the value the Mods tab shows. Never for a live edit: it may be half-way.
-    if (!live && stored && trim(*stored) != value && backend_) backend_->write(mod, key, value);
+    // Keep (EMF's own emf_core.ini): what the player typed stays in the file.
+    if (!live && mode != Declare::Keep && stored && trim(*stored) != value && backend_) backend_->write(mod, key, value);
     if (why) *why = warning.empty() ? note : note.empty() ? warning : warning + "; " + note;  // worth a log line
     return true;
 }

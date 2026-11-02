@@ -400,6 +400,7 @@ const char* setting_type_name(SettingType t) {
         case SettingType::Key: return "key";
         case SettingType::Select: return "select";
         case SettingType::Color: return "color";
+        case SettingType::ScanCode: return "scan code";
         default: return "text";
     }
 }
@@ -544,6 +545,18 @@ const SettingOption* find_option(const SettingDef& d, const std::string& text) {
     return nullptr;
 }
 
+// A keyboard scan code 1-0x7F ("0x29", "41"), as the overlay reads [overlay] key, kept as "0x29".
+std::optional<std::string> scan_code_text(const std::string& text, std::string* why) {
+    const char* p = text.c_str();
+    char* end = nullptr;
+    const unsigned long v = text.empty() ? 0 : std::strtoul(p, &end, 0);
+    if (text.empty() || !end || *end != '\0' || v < 1 || v > 0x7F)
+        return fail(why, "a keyboard scan code from 0x01 to 0x7f (0x29 is the key under Esc)"), std::nullopt;
+    char b[8];
+    std::snprintf(b, sizeof b, "0x%02x", static_cast<unsigned>(v));
+    return std::string(b);
+}
+
 }  // namespace
 
 std::optional<std::string> setting_value(const SettingDef& d, const std::string& raw, bool clamp, std::string* why) {
@@ -616,6 +629,7 @@ std::optional<std::string> setting_value(const SettingDef& d, const std::string&
                 return fail(why, "at most " + std::to_string(d.max_length) + " characters"), std::nullopt;
             return raw;
         }
+        case SettingType::ScanCode: return scan_code_text(text, why);
     }
     return std::nullopt;
 }
@@ -763,6 +777,12 @@ std::string normalise_setting(SettingDef& d) {
             // manifest with one loaded before EMF 0.3.0 and still does
             if (v.size() > 256) return s + "default is longer than 256 bytes";
             break;
+        case SettingType::ScanCode: {
+            const auto c = scan_code_text(v, nullptr);
+            if (!c) return s + "default must be a scan code like 0x29";
+            v = *c;
+            break;
+        }
         case SettingType::Text:
             if (v.size() > 256) return s + "default is longer than 256 bytes";
             if (!valid_utf8(v)) {  // a mod.json saved in another encoding: before EMF 0.3.0 it loaded
@@ -814,6 +834,7 @@ std::string setting_shown_value(const SettingDef& d, const std::string& v) {
                 if (o.value == v) return o.label;
             return v;
         case SettingType::Key: return v.empty() ? "no key" : v;
+        case SettingType::ScanCode: return v == "0x29" ? "the key under Esc (0x29)" : "scan code " + v;
         default: return v;
     }
 }
@@ -1099,6 +1120,10 @@ ManifestResult parse_manifest(std::string_view json_text) {
     const Value* id = root.get("id");
     if (!id || !id->is(VT::String) || !valid_mod_id(id->s)) {
         r.error = "\"id\" is missing or not valid (1-48 of a-z 0-9 _ . -)";
+        return r;
+    }
+    if (id->s == kReservedEmfId) {
+        r.error = "\"id\": \"emf\" is EMF's own (its settings use it): give the mod another id";
         return r;
     }
     m.id = id->s;

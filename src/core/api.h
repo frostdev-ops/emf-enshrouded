@@ -67,6 +67,8 @@ struct CoreState {
     std::function<void(const std::string&)> notify;        // the overlay's top-of-screen note (null: log only)
     ModRegistry mods;                                    // every mod found in emf/mods and what became of it
     std::unique_ptr<IniBackend> settings_backend;         // emf/config/<mod>.ini
+    std::unique_ptr<IniBackend> core_settings_backend;    // emf/emf_core.ini, EMF's own settings (mod id "emf")
+    std::unique_ptr<IniBackend> settings_route;           // the store's backend: "emf" to the core ini, mods to theirs
     std::unique_ptr<SettingsStore> settings;             // mods' settings (v13; null until the core sets it up)
     struct SettingWatcher {
         std::string mod;  // "" = every mod
