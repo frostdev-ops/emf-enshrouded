@@ -613,18 +613,32 @@ if(EMF_CONTENT)
     ${CMAKE_SOURCE_DIR}/third_party/eml/crates/mod-loader-lua/definitions/*.lua)
   # WORKING_DIRECTORY src/content, so rust-toolchain.toml and .cargo/config.toml apply. The copy always runs, so the
   # DLL is newer than its inputs and ninja does not call cargo again when nothing changed.
+  # The version resource (src/content/emf_content.rc) with EMF's version: CMake compiles it, cargo links it (build.rs
+  # reads EMF_CONTENT_RES). The cargo tests get the same variable, so the two never relink the DLL without it.
+  set(EMF_CONTENT_RES ${CMAKE_BINARY_DIR}/content/emf_content.res)
+  add_custom_command(
+    OUTPUT ${EMF_CONTENT_RES}
+    COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/content
+    COMMAND ${CMAKE_RC_COMPILER} /nologo /DEMF_VERSION="${EMF_VERSION}" /DEMF_VER_MAJOR=${PROJECT_VERSION_MAJOR}
+      /DEMF_VER_MINOR=${PROJECT_VERSION_MINOR} /DEMF_VER_PATCH=${PROJECT_VERSION_PATCH} /fo ${EMF_CONTENT_RES}
+      ${EMF_CONTENT_SRC}/emf_content.rc
+    DEPENDS ${EMF_CONTENT_SRC}/emf_content.rc ${CMAKE_SOURCE_DIR}/VERSION
+    COMMENT "Compiling emf_content.dll's version resource"
+    VERBATIM)
+  set(EMF_CARGO_ENV CARGO_TARGET_DIR=${EMF_CARGO_TARGET_DIR} EMF_CONTENT_RES=${EMF_CONTENT_RES})
   add_custom_command(
     OUTPUT ${EMF_CONTENT_DLL}
-    COMMAND ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${EMF_CARGO_TARGET_DIR} ${CARGO} build --release --locked
+    COMMAND ${CMAKE_COMMAND} -E env ${EMF_CARGO_ENV} ${CARGO} build --release --locked
     COMMAND ${CMAKE_COMMAND} -E copy ${EMF_CARGO_TARGET_DIR}/release/emf_content.dll ${EMF_CONTENT_DLL}
     DEPENDS ${EMF_CONTENT_INPUTS} ${EMF_CONTENT_SRC}/Cargo.toml ${EMF_CONTENT_SRC}/Cargo.lock
-      ${EMF_CONTENT_SRC}/rust-toolchain.toml ${EMF_CONTENT_SRC}/.cargo/config.toml
+      ${EMF_CONTENT_SRC}/rust-toolchain.toml ${EMF_CONTENT_SRC}/.cargo/config.toml ${EMF_CONTENT_SRC}/build.rs
+      ${EMF_CONTENT_RES}
     WORKING_DIRECTORY ${EMF_CONTENT_SRC}
     COMMENT "Building emf_content.dll with cargo"
     VERBATIM)
   add_custom_target(emf_content ALL DEPENDS ${EMF_CONTENT_DLL})
   add_test(NAME emf_content_cargo_tests
-    COMMAND ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${EMF_CARGO_TARGET_DIR} ${CARGO} test --release --locked
+    COMMAND ${CMAKE_COMMAND} -E env ${EMF_CARGO_ENV} ${CARGO} test --release --locked
     WORKING_DIRECTORY ${EMF_CONTENT_SRC})
   target_compile_definitions(emf_tests PRIVATE EMF_CONTENT_DLL="${EMF_CONTENT_DLL}")
   add_dependencies(emf_tests emf_content)

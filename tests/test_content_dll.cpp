@@ -22,6 +22,8 @@
 #include "loader/module_threads.h"
 #include "test_scratch.h"
 
+#pragma comment(lib, "version.lib")  // GetFileVersionInfoW: the version resource test
+
 namespace {
 
 namespace json = emf::core::json;
@@ -274,6 +276,27 @@ TEST_CASE("content dll: abi is 1") {
     REQUIRE(dll.abi != nullptr);
     CHECK(dll.abi() == 1u);
     CHECK(dll.abi() == EMF_CONTENT_ABI);
+}
+
+// The licence (THIRD_PARTY_NOTICES.md, option A): Explorer's file properties name the DLL, EMF's version and the GPL.
+TEST_CASE("content dll: its version resource names it, EMF's version and the GPL") {
+    const std::wstring path = dll_path();
+    DWORD ignored = 0;
+    const DWORD size = GetFileVersionInfoSizeW(path.c_str(), &ignored);
+    REQUIRE(size > 0);
+    std::vector<char> info(size);
+    REQUIRE(GetFileVersionInfoW(path.c_str(), 0, size, info.data()));
+    const auto value = [&](const wchar_t* name) {
+        void* text = nullptr;
+        UINT len = 0;
+        const std::wstring key = std::wstring(L"\\StringFileInfo\\040904b0\\") + name;
+        if (!VerQueryValueW(info.data(), key.c_str(), &text, &len) || !text || len == 0) return std::string();
+        return utf8(std::wstring(static_cast<const wchar_t*>(text), len - 1));  // len counts the terminating zero
+    };
+    CHECK(value(L"FileDescription") == "EMF content builder for EML mods");
+    CHECK(value(L"LegalCopyright") == "Copyright (c) EML contributors and EMF contributors. GPL-3.0-or-later.");
+    CHECK(value(L"FileVersion") == EMF_VERSION);
+    CHECK(value(L"OriginalFilename") == "emf_content.dll");
 }
 
 TEST_CASE("content dll: an empty folder fails with a message and no crash") {
