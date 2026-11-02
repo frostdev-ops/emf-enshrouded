@@ -543,6 +543,11 @@ for _, c in ipairs(require("creatures")) do
 			if tostring(a.guid) == from then src = a end
 		end
 		assert(src, c.name .. ": the arsenal " .. from .. " is not in the registry (the game changed?)")
+		local seqs = {}
+		for old in pairs(c.attacks.sequences) do
+			seqs[old] = game.assets.get_resource(old, "keen::actor::ActorSequenceResource")
+			assert(seqs[old], c.name .. ": the sequence " .. old .. " was not found (the game changed?)")
+		end
 		table.insert(areg.data.arsenals, src)
 		local copy = areg.data.arsenals[#areg.data.arsenals]
 		copy.guid = c.attacks.arsenal_guid
@@ -570,9 +575,7 @@ for _, c in ipairs(require("creatures")) do
 			if ok then return x end
 		end
 		for old, s in pairs(c.attacks.sequences) do
-			local seq = game.assets.get_resource(old, "keen::actor::ActorSequenceResource")
-			assert(seq, c.name .. ": the sequence " .. old .. " was not found (the game changed?)")
-			local d = game.assets.create_resource(seq.data, "keen::actor::ActorSequenceResource", s.guid, 0).data
+			local d = game.assets.create_resource(seqs[old].data, "keen::actor::ActorSequenceResource", s.guid, 0).data
 			d.resourceId = s.guid
 			for _, sub in ipairs(d.subSequences) do
 				sub.length.value = moved(s.times, sub.length.value)

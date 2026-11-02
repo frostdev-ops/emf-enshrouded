@@ -333,6 +333,14 @@ class ModTests(Fixture):
         self.assertIn("beast_wolf: arsenal %s (a copy of %s): 1 of 2 attacks retimed" % (ARSENAL_COPY, MOCK_ARSENAL),
                       text)
 
+    def test_a_sequence_the_game_has_not_adds_nothing(self):
+        """A sequence the game no longer has stops the creature before the arsenal is copied."""
+        missing = "77777777-7777-4777-8777-777777777779"
+        _, text = self.run_mod(attacks={"arsenal_guid": ARSENAL_COPY,
+                                        "sequences": {missing: {"guid": SEQ_COPY, "times": [[0, 0], [1, 2]]}}})
+        self.assertIn("the sequence %s was not found" % missing, text)
+        self.assertNotIn("arsenal %s" % ARSENAL_COPY, text)
+
     def test_attacks_of_a_template_without_an_arsenal_are_logged(self):
         _, text = self.run_mod({"MOCK_NO_ARSENAL": "1"}, attacks={
             "arsenal_guid": ARSENAL_COPY, "sequences": {SEQ_COMBO: {"guid": SEQ_COPY, "times": [[0, 0], [1, 2]]}}})
