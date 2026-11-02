@@ -259,6 +259,13 @@ void build_progress(const std::string& text) {
         g_splash.line(text);
 }
 
+// The loader's line for emf_loader.log; on the server the EML content lines ("EML content: built 3 mods ...", "could
+// not be built ...", "the shadow copy is current ...") also go to its console, so an admin sees how a start went.
+void content_line(const std::string& line) {
+    loader_log(g_dir, line.c_str());
+    if (target().server && line.rfind("EML content", 0) == 0) server_console(line);
+}
+
 // Says why an entry point is not the usual start-up code: another tool's jump (and into which DLL), or unknown code.
 std::string describe_entry(const uint8_t* entry, const char* whose) {
     const uint64_t target = emf::loader::entry_jump_target(entry, [](uint64_t at, uint64_t* out) {
@@ -417,7 +424,7 @@ emf::loader::ContentPlan plan_this_start(emf::loader::PlayOnce play) {
             if (!broken.empty()) loader_log(g_dir, ("EML content: " + broken).c_str());
             return broken.empty();
         };
-        p.log = [](const std::string& line) { loader_log(g_dir, line.c_str()); };
+        p.log = [](const std::string& line) { content_line(line); };
         return emf::loader::plan_content(p);
     } catch (...) {
         loader_log(g_dir, "EML content: off (the loader ran out of memory while looking)");
@@ -491,7 +498,7 @@ emf::loader::StartSteps make_start_steps() {
         SetEnvironmentVariableW(emf::loader::kContentStatusVariable,
                                 emf::loader::cio::from_utf8(emf::loader::content_status_text(st)).c_str());
     };
-    s.log = [](const std::string& line) { loader_log(g_dir, line.c_str()); };
+    s.log = [](const std::string& line) { content_line(line); };
     // the dedicated server: no window, its console says it instead
     s.splash_begin = [](const std::string& text) {
         if (target().server)

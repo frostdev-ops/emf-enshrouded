@@ -137,8 +137,20 @@ struct ContentGame {
         std::wstring cmd = L"\"" + dir + L"\\" + stem + L".exe\"";
         STARTUPINFOW si{sizeof si};
         PROCESS_INFORMATION pi{};
-        REQUIRE(CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, FALSE, CREATE_NO_WINDOW, nullptr, dir.c_str(), &si,
-                               &pi));
+        // its standard output (what a dedicated server's console shows) goes to console.txt
+        SECURITY_ATTRIBUTES inherit{sizeof inherit, nullptr, TRUE};
+        const std::wstring console_file = dir + L"\\console.txt";
+        const HANDLE out = CreateFileW(console_file.c_str(), GENERIC_WRITE, FILE_SHARE_READ, &inherit, CREATE_ALWAYS,
+                                       FILE_ATTRIBUTE_NORMAL, nullptr);
+        REQUIRE(out != INVALID_HANDLE_VALUE);
+        si.dwFlags = STARTF_USESTDHANDLES;
+        si.hStdOutput = out;
+        si.hStdError = out;
+        si.hStdInput = nullptr;
+        const BOOL started = CreateProcessW(nullptr, cmd.data(), nullptr, nullptr, TRUE, CREATE_NO_WINDOW, nullptr,
+                                            dir.c_str(), &si, &pi);
+        CloseHandle(out);
+        REQUIRE(started);
         // a message box the loader shows is read and answered (OK) like a player would
         DWORD w = WAIT_TIMEOUT;
         for (int i = 0; i < 600 && w == WAIT_TIMEOUT; ++i) {
@@ -393,6 +405,10 @@ TEST_CASE("e2e content: the dedicated server builds from its own files into emf\
     CHECK(out.find("at_tls chain_standin.dll=no\n") != std::string::npos);  // on the held entry, not in DllMain
     CHECK(file_text(g.shadow + L"\\built.txt") == "seq=1 chain_loaded=no core_loaded=no entry_held=no\n");
     CHECK(g.box_text.empty());  // no message box and no splash on a server
+    // the server's console says what happens: the start of the build and how it ended
+    const std::string console = file_text(g.dir + L"\\console.txt");
+    INFO(console);
+    CHECK(before(console, "[EMF] EMF is preparing EML content", "[EMF] EML content: built 1 mod in "));
     CHECK(before(log, "EML content: EMF builds it from 1 mod; the base is enshrouded_server.kfc",
                  "a build is needed at this start (no earlier build)"));
     CHECK(before(log, "EML content: built 1 mod in ", "chain_standin.dll"));
@@ -426,4 +442,6 @@ TEST_CASE("e2e content: a server build whose DLL stays loaded: no message box; t
     CHECK(out.find("loaded emf_core.dll=no\n") != std::string::npos);
     CHECK(out.find("kfc=KFC4") != std::string::npos);  // its own data
     CHECK(g.loader_log().find("without the chained DLLs and without EMF's core") != std::string::npos);
+    // the console says it too (the line the client's message box would show)
+    CHECK(file_text(g.dir + L"\\console.txt").find("[EMF] EML content: ") != std::string::npos);
 }
