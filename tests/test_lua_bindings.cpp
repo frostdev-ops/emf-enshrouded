@@ -638,6 +638,25 @@ TEST_CASE("lua 1.5: emf.health gives current and max; emf.attribute takes a name
     CHECK(r.fake.replies[2].find("unknown attribute 'speed'") != std::string::npos);
 }
 
+TEST_CASE("lua: emf.attribute names a player's XP and level (EMF API v22): xp_pending, xp, xp_required, level") {
+    Rig r(L"xp");
+    with_attributes(r.api);
+    r.fake.attrs[{1, EMF_ATTR_XP_PENDING}] = 40;
+    r.fake.attrs[{1, EMF_ATTR_XP}] = 1200;
+    r.fake.attrs[{1, EMF_ATTR_XP_REQUIRED}] = 3000;
+    r.fake.attrs[{1, EMF_ATTR_LEVEL}] = 7;
+    add_script(r.dir, "xp",
+               "emf.command('go', '', function(w)\n"
+               "  emf.reply(emf.attribute(w, 1, 'xp_pending') .. ' ' .. emf.attribute(w, 1, 'xp') .. ' ' ..\n"
+               "            emf.attribute(w, 1, 'xp_required') .. ' ' .. emf.attribute(w, 1, 'level'))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("xp.go");
+    REQUIRE(r.fake.replies.size() == 1);
+    CHECK(r.fake.replies[0] == "40 1200 3000 7");
+}
+
 TEST_CASE("lua 1.5: emf.attribute_add and emf.damage reach the core; a bad amount is an error") {
     Rig r(L"attradd");
     with_attributes(r.api);

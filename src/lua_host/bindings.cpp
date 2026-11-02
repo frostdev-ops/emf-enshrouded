@@ -867,7 +867,14 @@ uint32_t attribute_arg(lua_State* L, int index) {
     if (n == "mana") return EMF_ATTR_MANA;
     if (n == "max_stamina") return EMF_ATTR_MAX_STAMINA;
     if (n == "max_mana") return EMF_ATTR_MAX_MANA;
-    luaL_error(L, "unknown attribute '%s' (health, max_health, stamina, max_stamina, mana, max_mana, or an attribute id)",
+    // a player's XP and level (EMF API v22): give XP with emf.attribute_add(w, id, "xp_pending", n); the rest read-only
+    if (n == "xp_pending") return EMF_ATTR_XP_PENDING;
+    if (n == "xp") return EMF_ATTR_XP;
+    if (n == "xp_required") return EMF_ATTR_XP_REQUIRED;
+    if (n == "level") return EMF_ATTR_LEVEL;
+    luaL_error(L,
+               "unknown attribute '%s' (health, max_health, stamina, max_stamina, mana, max_mana, xp_pending, xp, "
+               "xp_required, level, or an attribute id)",
                n.c_str());
     return 0;
 }

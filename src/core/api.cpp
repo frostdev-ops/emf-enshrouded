@@ -994,6 +994,7 @@ bool attribute_add_now(EmfWorld* w, uint32_t entity, uint32_t id, int32_t delta)
         int32_t m = 0;
         if (attr_read(g_state->attr_find, home.comp, home.size, home.registry, *max_id, &m) == AttrStatus::Ok) max = m;
     }
+    if (attribute_write_rule(id) == AttrWrite::GiveOnly) max = INT32_MAX;  // pending XP has no maximum of its own
     int32_t applied = 0, after = 0;
     const AttrStatus s = attr_add(g_state->attr_find, g_state->attr_add, home.comp, home.size, home.registry, id, delta,
                                   max, &applied, &after);
@@ -1038,6 +1039,16 @@ void defer_to_server(const DeferredCall& call, void (*fn)(EmfWorld*, const Defer
 
 bool api_attribute_add(EmfWorld* w, uint32_t entity, uint32_t id, int32_t delta) {
     if (!attributes_ready(w, "attribute_add", true)) return false;
+    // XP, XP required and level are the game's to keep consistent; XP is given through pending XP, never taken
+    const AttrWrite rule = attribute_write_rule(id);
+    if (rule == AttrWrite::ReadOnly || (rule == AttrWrite::GiveOnly && delta <= 0)) {
+        refuse_limited("attribute_add(" + std::to_string(entity) + ", " + hex32(id) + ", " + std::to_string(delta) +
+                       ") refused: " +
+                       (rule == AttrWrite::ReadOnly ? "that attribute is read-only (give XP with EMF_ATTR_XP_PENDING; the "
+                                                      "game levels up itself)"
+                                                    : "XP is only given (a positive amount of EMF_ATTR_XP_PENDING)"));
+        return false;
+    }
     if (dispatching_world() == w) return attribute_add_now(w, entity, id, delta);
     defer_to_server({w, g_state->server_session.load(), entity, id, 0, delta},
                     [](EmfWorld* world, const DeferredCall& c) { attribute_add_now(world, c.a, c.b, c.value); },

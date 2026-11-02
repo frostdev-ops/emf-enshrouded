@@ -730,6 +730,14 @@ inline std::optional<int32_t> attribute(World w, uint32_t entity, uint32_t attr)
 inline bool attribute_add(World w, uint32_t entity, uint32_t attr, int32_t delta) {
     return has_v18() && api()->attribute_add && api()->attribute_add(w.raw(), entity, attr, delta);
 }
+// v22: a player's XP and level are attributes too (EMF_ATTR_XP_PENDING, _XP, _XP_REQUIRED, _LEVEL in emf_api.h).
+inline bool has_v22() { return has_v18() && api()->version >= 22; }
+// Gives `amount` (> 0) XP to a player the way the game's own XP sources do: as pending XP, which the game counts on its
+// next steps and levels the player up from (with the level-up event and the skill points). Saved with the character.
+// False when refused, for amount <= 0, or on an older core.
+inline bool give_xp(World w, uint32_t player, int32_t amount) {
+    return amount > 0 && has_v22() && attribute_add(w, player, EMF_ATTR_XP_PENDING, amount);
+}
 // `amount` of true damage from attacker (a player gets the kill credit and XP; 0 = none) to target as a game hit,
 // applied on the next step with a HitEvent, a light hit reaction and aggro (see damage in emf_api.h). False when refused
 // or on an older core.

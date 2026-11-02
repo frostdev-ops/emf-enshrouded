@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 21 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 22 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 21
+#define EMF_API_VERSION 22
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -196,6 +196,15 @@ typedef struct EmfCommandDef {
 #define EMF_ATTR_MANA 0x6AA2574Eu       /* current mana (Mana) */
 #define EMF_ATTR_MAX_STAMINA 0xF443C410u /* maximum stamina (Stamina), computed by the game */
 #define EMF_ATTR_MAX_MANA 0x17536777u    /* maximum mana (Mana), computed by the game */
+/* v22: a player's XP and level (the Experience and Level components). Give XP with attribute_add of a positive amount
+ * of EMF_ATTR_XP_PENDING, as every XP source in the game does: on its next steps the game moves it into XP and levels
+ * the player up (once per step while XP reaches the requirement, with the rest carried over, a LevelUpEvent and the
+ * skill points that come with the level). Pending XP is thrown away at the level cap. The other three are read-only
+ * (attribute_add refuses them): the game keeps them consistent. XP and levels are saved with the character. */
+#define EMF_ATTR_XP_PENDING 0x1D7DD102u  /* XP given and not yet counted (Experience): the one XP attribute to add to */
+#define EMF_ATTR_XP 0x8DCDDAF4u          /* XP towards the next level (Experience) */
+#define EMF_ATTR_XP_REQUIRED 0x04723F62u /* XP the next level needs (Experience) */
+#define EMF_ATTR_LEVEL 0x724BF568u       /* the level (Level) */
 
 /* v19 on_chat: one chat line a player sent (not an EMF command). account = their account hash (as command_sender
  * reports it), entity = their player entity in the server world (0 if it could not be told), text = the line (UTF-8,

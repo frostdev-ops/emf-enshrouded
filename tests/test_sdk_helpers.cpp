@@ -545,6 +545,30 @@ TEST_CASE("emf::attribute_add and emf::damage pass through to the core (false on
     emf::api_ref() = &api;
 }
 
+TEST_CASE("emf::give_xp gives XP as pending XP on a v22 core (the game levels up itself); false on an older core") {
+    reset_v18();
+    static std::vector<std::vector<int64_t>> adds;
+    adds.clear();
+    static EmfApi api = v18_api();
+    api.attribute_add = [](EmfWorld*, uint32_t e, uint32_t id, int32_t d) {
+        adds.push_back({e, static_cast<int64_t>(id), d});
+        return true;
+    };
+    api.version = 22;
+    REQUIRE(emf::init(&api));
+    emf::World w(kW);
+    CHECK(emf::has_v22());
+    CHECK(emf::give_xp(w, 1, 500));
+    REQUIRE(adds.size() == 1);
+    CHECK(adds[0] == std::vector<int64_t>{1, static_cast<int64_t>(EMF_ATTR_XP_PENDING), 500});
+    CHECK_FALSE(emf::give_xp(w, 1, 0));  // nothing to give; XP is never taken
+    CHECK_FALSE(emf::give_xp(w, 1, -5));
+    api.version = 21;
+    CHECK_FALSE(emf::has_v22());
+    CHECK_FALSE(emf::give_xp(w, 1, 500));
+    CHECK(adds.size() == 1);
+}
+
 TEST_CASE("emf::kill on a v18 core: the current-health attribute goes to 0 through attribute_add; never a player") {
     reset_v18();
     static EmfApi api = v18_api();
