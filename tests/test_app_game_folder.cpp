@@ -275,6 +275,102 @@ TEST_CASE("app ShroudForge: a package where ShroudForge is not active is an EML 
     CHECK(a->note.find("ShroudForge") != std::string::npos);
 }
 
+// ---- EML mods EMF builds itself (emf_content.dll, docs/engine_parts/content_loader.md) ----
+
+namespace {
+std::string eml_mod(const std::string& id, const std::string& caps = R"(["patch"])") {
+    return R"({"id": ")" + id + R"(", "name": ")" + id + R"(", "version": "1.0.0", "capabilities": )" + caps + "}";
+}
+}  // namespace
+
+TEST_CASE("app EML content: with emf_content.dll and no other tool EMF builds the EML mods, the rest carry the loader's reason") {
+    TempGame g(L"emlcontent");
+    install_emf(g);
+    g.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    g.write(L"mods\\beasts\\mod.json", eml_mod("beasts"));
+    g.write(L"mods\\beasts_copy\\mod.json", eml_mod("beasts"));
+    g.write(L"mods\\npc_explorer\\mod.json", eml_mod("npc_explorer", R"(["export"])"));
+    g.write(L"mods\\live\\mod.json", eml_mod("live", R"(["patch", "runtime"])"));
+    g.write(L"mods\\packed.zip", "PK");
+    g.write(L"mods\\.sleeping\\mod.json", eml_mod("sleeping"));
+    const FolderState s = scan_game_folder(g.dir);
+    const ModEntry* beasts = find(s, "eml", "beasts");
+    REQUIRE(beasts);
+    CHECK(beasts->loaded_by == "EMF");
+    CHECK(beasts->note == "EML content: built by EMF at the start.");
+    CHECK(beasts->error.empty());
+    CHECK(beasts->can_toggle);
+    CHECK(beasts->enabled);
+    const auto left_out = [&](const char* id, const char* why) {
+        const ModEntry* m = find(s, "eml", id);
+        REQUIRE_MESSAGE(m, id);
+        CHECK_MESSAGE(m->loaded_by == "left out", id);
+        CHECK_MESSAGE(m->note.find(why) != std::string::npos, m->note);
+        CHECK_MESSAGE(m->error.empty(), m->error);
+    };
+    left_out("beasts_copy", "taken by the folder beasts");
+    left_out("npc_explorer", "only exports");
+    left_out("live", "runtime loader");
+    left_out("packed.zip", ".zip");
+    const ModEntry* sleeping = find(s, "eml", "sleeping");  // switched off: EMF's build skips it like EML does
+    REQUIRE(sleeping);
+    CHECK_FALSE(sleeping->enabled);
+    CHECK(sleeping->loaded_by == "EMF");
+    CHECK(sleeping->can_toggle);
+    CHECK_FALSE(has_warning(s, "warn", "neither EML nor ShroudForge"));
+}
+
+TEST_CASE("app EML content: a broken mod is an error, but never 'EML stops the game' when EMF builds") {
+    TempGame g(L"emlcontentbad");
+    install_emf(g);
+    g.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    g.write(L"mods\\bad\\mod.json", "{");
+    g.write(L"mods\\nested\\nested\\mod.json", eml_mod("nested"));
+    const FolderState s = scan_game_folder(g.dir);
+    REQUIRE(find(s, "eml", "bad"));
+    CHECK_FALSE(find(s, "eml", "bad")->error.empty());
+    REQUIRE(find(s, "eml", "nested"));
+    CHECK(find(s, "eml", "nested")->error.find("no mod.json") != std::string::npos);
+    CHECK(find(s, "eml", "nested")->error.find("EML stops") == std::string::npos);
+}
+
+TEST_CASE("app EML content: with EML next to the game, EML loads them as before") {
+    TempGame g(L"emlcontenteml");
+    install_emf(g);
+    g.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    g.write(L"dbghelp.dll", "MZ EML proxy EML_LOG_FILE_PATH");
+    g.write(L"mods\\beasts\\mod.json", eml_mod("beasts"));
+    g.write(L"mods\\npc_explorer\\mod.json", eml_mod("npc_explorer", R"(["export"])"));
+    const FolderState s = scan_game_folder(g.dir);
+    for (const char* id : {"beasts", "npc_explorer"}) {
+        const ModEntry* m = find(s, "eml", id);
+        REQUIRE(m);
+        CHECK(m->loaded_by == "EML");
+        CHECK(m->note.empty());
+    }
+    // EML's dinput8.dll started by EMF (dinput8-chain.ini) is EML too
+    TempGame c(L"emlcontentchain");
+    install_emf(c);
+    c.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    c.write(L"eml.dll", "MZ EML proxy EML_LOG_FILE_PATH");
+    c.write(L"dinput8-chain.ini", "[Chain]\r\neml.dll\r\n");
+    c.write(L"mods\\beasts\\mod.json", eml_mod("beasts"));
+    REQUIRE(find(scan_game_folder(c.dir), "eml", "beasts"));
+    CHECK(find(scan_game_folder(c.dir), "eml", "beasts")->loaded_by == "EML");
+}
+
+TEST_CASE("app EML content: [content] mode=off says that nothing loads them, and why") {
+    TempGame g(L"emlcontentoff");
+    install_emf(g);
+    g.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    g.write(L"emf\\emf_core.ini", "[content]\r\nmode=off\r\n");
+    g.write(L"mods\\beasts\\mod.json", eml_mod("beasts"));
+    const FolderState s = scan_game_folder(g.dir);
+    REQUIRE(find(s, "eml", "beasts"));
+    CHECK(find(s, "eml", "beasts")->loaded_by != "EMF");
+    CHECK(has_warning(s, "warn", "mode=off"));
+}
+
 // ---- DLL mods EMF starts (dinput8-chain.ini) ----
 
 TEST_CASE("app chain: dinput8-chain.ini entries with their status from emf\\chain_status.txt") {

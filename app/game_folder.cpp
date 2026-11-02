@@ -17,6 +17,7 @@
 #include "core/settings.h"
 #include "emf/emf_api.h"
 #include "loader/chain_list.h"
+#include "loader/content_owner.h"
 #include "loader/loader_id.h"
 #include "loader/play_once.h"
 #include "text.h"
@@ -328,6 +329,11 @@ struct Context {
     std::string modloader_proxy_as;  // the proxy name it runs as ("" when EMF starts it)
     bool chainloader_ini = false;    // its chainloader.ini is there (next to its DLL, else next to the game)
     std::vector<core::StartedDll> chainloader;  // what ModLoader Proxy starts from it (chainloader_entries)
+    // EMF's loader builds the EML mods' content itself (emf_content.dll, docs/engine_parts/content_loader.md), with the
+    // loader's own view of mods\ (eml_mods.h): which mods it builds and why it leaves the others out
+    bool emf_content = false;
+    loader::ModScan content_scan;
+    bool content_off = false;  // emf_content.dll is there and nothing else applies the content, but [content] mode=off
 };
 
 void warn(FolderState& s, const std::string& level, const std::string& text) { s.warnings.push_back({level, text}); }
@@ -567,6 +573,24 @@ void scan_eml_mods(FolderState& s, Context& c) {
             e.can_toggle = false;
             e.toggle_note = "ShroudForge is the active loader here: switch it in ShroudForge (F9).";
             if (off) e.note = "The name starts with '.', so it is skipped.";
+        } else if (c.emf_content) {
+            // EMF's loader builds it at the start, or leaves it out for the loader's reason (eml_mods.h)
+            e.loaded_by = "EMF";
+            e.enabled = !off;
+            e.can_toggle = true;
+            e.toggle_note = "Off renames it to ." + utf8(base) + " (EMF's content build skips names that start with '.', as EML "
+                            "does); on renames it back.";
+            if (!off) {
+                bool built = false;
+                for (const auto& u : c.content_scan.usable) built = built || u.folder == d.name;
+                if (built) {
+                    e.note = "EML content: built by EMF at the start.";
+                } else {
+                    e.loaded_by = "left out";
+                    for (const auto& [folder, why] : c.content_scan.skipped)
+                        if (folder == d.name && e.error.empty()) e.note = "Not built by EMF: " + why + ".";
+                }
+            }
         } else {
             e.loaded_by = "EML";
             e.enabled = !off;
@@ -1000,6 +1024,29 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
     if (!c.light) s.emf_version = exists(s.game + L"\\emf\\emf_core.dll") ? core_version(s.game + L"\\emf\\emf_core.dll") : "";
     s.shroudforge_active = sf_folder && runs("shroudforge") && !shroudforge_hands_to_eml(s.game);
     c.eml_loader = runs("eml") || runs("shroudforge");
+    // EMF builds the EML mods' content in the game's folder when EMF and emf_content.dll are installed and no other
+    // tool applies it: the loader's own check (content_owner.h other_content_tool: any dbghelp.dll, or EML's or
+    // ShroudForge's DLL in dinput8-chain.ini by its name or its text), then [content] mode
+    if (!c.light && !s.server && s.emf_installed && exists(s.game + L"\\emf\\emf_content.dll")) {
+        loader::ToolLook tool_look;
+        tool_look.exists = [&](const std::wstring& rel) { return exists(s.game + L"\\" + rel) && !is_dir(s.game + L"\\" + rel); };
+        tool_look.tool_name = [&](const std::wstring& rel) {
+            const std::string word = dll_tool(c, rel);
+            return word.empty() || word == "emf" ? std::string() : tool_display(c.tools, word);
+        };
+        tool_look.chain = c.chain_active;
+        if (!loader::other_content_tool(tool_look, true, true)) {
+            const std::wstring ini = s.game + L"\\emf\\emf_core.ini";
+            const auto mode = loader::content_mode([&](const wchar_t* section, const wchar_t* key) {
+                wchar_t buf[128] = {};
+                GetPrivateProfileStringW(section, key, L"", buf, 128, ini.c_str());
+                return std::wstring(buf);
+            });
+            c.content_off = mode == loader::ContentMode::Off;
+            c.emf_content = !c.content_off;
+            if (c.emf_content) c.content_scan = loader::scan_eml_mods(s.game + L"\\mods");
+        }
+    }
 
     scan_emf_mods(s, c);
     scan_eml_mods(s, c);
@@ -1020,7 +1067,10 @@ FolderState scan_mod_folder(const std::wstring& game_in, ScanDepth depth) {
         const char* group = m.source == "emf" ? "EMF mod" : m.source == "eml" ? "EML mod" : m.source == "chain" ? "DLL mod" : "mod";
         first.push_back({"warn", m.name + " (" + group + "): " + m.error});
     }
-    if (eml_mods && !c.eml_loader)
+    if (eml_mods && !c.eml_loader && c.content_off)
+        first.push_back({"warn", "There are EML mods in mods\\, but EMF's EML content is off ([content] mode=off in "
+                                 "emf\\emf_core.ini) and neither EML nor ShroudForge is next to the game, so nothing loads them."});
+    else if (eml_mods && !c.eml_loader && !c.emf_content)
         first.push_back({"warn", "There are EML mods in mods\\, but neither EML nor ShroudForge is next to the game, so nothing loads them."});
     s.warnings.insert(s.warnings.begin(), first.begin(), first.end());
     return s;
