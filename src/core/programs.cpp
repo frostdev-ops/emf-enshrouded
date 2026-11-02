@@ -5,7 +5,9 @@
 #include <array>
 #include <utility>
 
+#include "common/offsets.h"
 #include "common/seh.h"
+#include "common/world_offsets.h"
 #include "fault_report.h"
 
 namespace emf::core {
@@ -53,9 +55,12 @@ constexpr auto kTrampolines = make_trampolines(std::make_index_sequence<kMaxProg
 std::vector<ProgramInfo> list_programs(const uint8_t* world) {
     std::vector<ProgramInfo> out;
     uint16_t count = 0;
-    if (!world || !rd(world + kProgramCount, count) || count > kProgramMax) return out;
+    const WorldOffsets& wo = world_offsets();
+    if (!world || !wo.program_count || !wo.program_stride || !rd(world + wo.program_count, count) ||
+        count > off::kProgramMax)
+        return out;
     for (uint16_t i = 0; i < count; ++i) {
-        const uint8_t* e = world + kProgramTable + uint64_t(i) * kProgramStride;
+        const uint8_t* e = world + off::kProgramTable + uint64_t(i) * wo.program_stride;
         ProgramInfo p;
         p.index = i;
         const char* name = nullptr;

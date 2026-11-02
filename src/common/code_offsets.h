@@ -19,10 +19,13 @@ enum class CodeOffset : size_t {
     Save2Result,     // save state: 8-byte result of the last world job (byte 0: 0 = success)
     Save2WorldSlot,  // save state: u16 slot id of the running world
     InstWorldSlotFlag,  // GameServer instance: u8 "local world slot set"; the u16 slot id sits 2 bytes before it
-    StorageTickPeriod,  // entity storage: i64 ns per tick (world + kStorage + this = kTickPeriodNs)
-    StorageTick,        // entity storage: u32 current tick (world + kStorage + this = kTick)
+    StorageTickPeriod,  // entity storage: i64 ns per tick (world_offsets(): storage + this = tick_period_ns)
+    StorageTick,        // entity storage: u32 current tick (world_offsets(): storage + this = tick)
     InstSendSettingsFlag,  // GameServer instance: u8 "send the settings with the next ServerInfo" (cleared after)
     InstSettingsPtr,       // GameServer instance: pointer to the session's ecs::GameSettings (the server world's own)
+    WorldStorage,   // world: the entity storage (world_offsets.h shifts the world's block by its distance from the base)
+    ProgramCount,   // world: u16 number of ECS programs
+    ProgramStride,  // world: bytes per entry of the ECS program table (world+0x746350)
     _Count
 };
 constexpr size_t kCodeOffsetCount = static_cast<size_t>(CodeOffset::_Count);
@@ -63,8 +66,8 @@ std::array<ResolvedOffset, kCodeOffsetCount> resolve_code_offsets(const void* mo
 // Save2WorldSlot).
 bool is_usable(const ResolvedOffset& r, bool known_build);
 
-// The world's tick fields (offsets.h kTickPeriodNs / kTick) are where the compiled code expects them: always on a
-// known build; on an unknown build only if SimStep's code confirms both.
+// The world's tick fields are where EMF expects them inside the entity storage (+0x4C0 / +0x4DC, world_offsets.h):
+// always on a known build; on an unknown build only if SimStep's code confirms both.
 bool world_tick_offsets_ok(const std::array<ResolvedOffset, kCodeOffsetCount>& r, bool known_build);
 
 // emf_sigcheck's verdict for offset i: on a known build the scan must confirm the recorded value; on an unknown build

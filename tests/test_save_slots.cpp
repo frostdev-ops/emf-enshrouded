@@ -212,3 +212,12 @@ TEST_CASE("save slots: the recorder writes save-info.json at the menu and notes 
     r.on_pregame(pregame.data(), L::kMainMenuState, 0);
     CHECK(r.writes() == before);
 }
+
+TEST_CASE("save slots: the slot records are known on 1273043's and 1283531's game exes (their save2 is the same)") {
+    CHECK(slot_records_known(emf::known_build_index(1273043)));
+    CHECK(slot_records_known(emf::known_build_index(1283531)));
+    CHECK_FALSE(slot_records_known(emf::known_build_index(1273043, true)));  // the servers have no menu
+    CHECK_FALSE(slot_records_known(emf::known_build_index(1283531, true)));
+    CHECK_FALSE(slot_records_known(emf::known_build_index(1269579)));
+    CHECK_FALSE(slot_records_known(-1));
+}

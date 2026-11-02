@@ -21,8 +21,8 @@
 
 namespace emf::core {
 
-// waitForWorldJobs(world) (signature WaitWorldJobs): mov rcx, [world+0xE15D60] (the world's task group); jmp to the
-// task group's wait.
+// waitForWorldJobs(world) (signature WaitWorldJobs): mov rcx, [world+0xE15D60] (the world's task group; +0xE17960 on
+// build 1283531); jmp to the task group's wait.
 using WaitWorldJobsFn = void (*)(void* world);
 
 // Whether EMF waits before its tick work for a world of this kind: only the server world (kind 0), and only when the

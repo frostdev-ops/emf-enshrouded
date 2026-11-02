@@ -55,7 +55,7 @@ uintptr_t MenuStart::game_app() const { return app_.load(); }
 std::optional<std::string> MenuStart::session_world_name() const {
     const uintptr_t app = game_app();
     if (!app) return std::nullopt;
-    return read_name(app + L::kSessionName);
+    return read_name(app + deps_.app.session_name);
 }
 
 void MenuStart::note_character(void* pregame) {
@@ -217,7 +217,7 @@ std::optional<MenuStart::Pending> MenuStart::frame_a_locked(void* ui, uint64_t n
         return std::nullopt;
     }
     uint32_t mode = 0;
-    if (!read_u32(app + L::kMode, &mode) || mode != 0) {
+    if (!read_u32(app + deps_.app.mode, &mode) || mode != 0) {
         waiting_for_ = "the menu's session mode to be Lobby (it is " + std::to_string(mode) + ")";
         return std::nullopt;
     }
@@ -264,8 +264,9 @@ std::optional<MenuStart::Pending> MenuStart::frame_b_locked(void* ui, uint64_t n
     const bool read = app && save2 && read_u16(save2 + L::kSelectedCharacter, &sel_char) &&
                       read_u8(save2 + L::kSelectedCharacterValid, &char_valid) &&
                       read_u16(save2 + L::kSelectedWorld, &sel_world) &&
-                      read_u8(save2 + L::kSelectedWorldValid, &world_valid) && read_u16(app + L::kPlaySlot, &play) &&
-                      read_u8(app + L::kPlaySlotSet, &play_set) && read_u8(app + L::kAdventure, &adventure);
+                      read_u8(save2 + L::kSelectedWorldValid, &world_valid) &&
+                      read_u16(app + deps_.app.play_slot, &play) && read_u8(app + deps_.app.play_slot_set, &play_set) &&
+                      read_u8(app + deps_.app.adventure, &adventure);
     const uint16_t want_char = local_slot_id(req_.character), want_world = local_slot_id(req_.world);
     const bool taken = read && sel_char == want_char && char_valid && sel_world == want_world && world_valid &&
                        play == want_world && play_set == 1 && adventure == 0;
@@ -280,7 +281,7 @@ std::optional<MenuStart::Pending> MenuStart::frame_b_locked(void* ui, uint64_t n
         return finish_locked(false, "unavailable", "not at the main menu: a world is running");
     if (!menu_active_.load()) return finish_locked(false, "unavailable", "the main menu was left before the start");
     uint32_t mode = 0;
-    if (!read_u32(app + L::kMode, &mode) || mode != 0)
+    if (!read_u32(app + deps_.app.mode, &mode) || mode != 0)
         return finish_locked(false, "unavailable",
                              "the menu's session mode is " + std::to_string(mode) + ", not Lobby: not started");
     if (!area_posted_) {
@@ -296,7 +297,7 @@ std::optional<MenuStart::Pending> MenuStart::frame_b_locked(void* ui, uint64_t n
     if (!deps_.start(ui)) return std::nullopt;
     start_posted_ = true;
     start_posted_ms_ = now;
-    if (const auto name = read_name(app + L::kSessionName)) world_name_ = *name;
+    if (const auto name = read_name(app + deps_.app.session_name)) world_name_ = *name;
     deps_.log("load_world: offline start posted");
     step_ = Step::Started;
     waiting_for_ = "the world to run";
@@ -357,7 +358,7 @@ bool MenuStart::guard(uint8_t* result, uintptr_t save2) {
     if (!read_u8(save2 + L::kSelectedCharacter + 1, &char_storage) || char_storage != 0)
         why = "the selected character is not LOCAL storage";
     const uintptr_t app = game_app();
-    if (why.empty() && (!app || !read_u8(app + L::kPlaySlot + 1, &world_storage) || world_storage != 0))
+    if (why.empty() && (!app || !read_u8(app + deps_.app.play_slot + 1, &world_storage) || world_storage != 0))
         why = "the world to load is not LOCAL storage";
     std::string expect;
     bool test_refuse = false;
@@ -467,6 +468,26 @@ std::optional<std::string> session_world_name() {
 
 CharacterSelection current_character() { return g_menu ? g_menu->character() : CharacterSelection{}; }
 
+std::optional<menu_layout::AppLayout> menu_app_layout(int build_index) {
+    if (build_index < 0) return std::nullopt;
+    if (build_index == known_build_index(1273043u)) return menu_layout::kApp1273043;
+    if (build_index == known_build_index(1283531u)) return menu_layout::kApp1283531;
+    return std::nullopt;
+}
+
+std::string menu_queue_problem(const menu_layout::AppLayout& app, const uint8_t* code, size_t size) {
+    constexpr size_t kAt = 0x11;  // mov rbx, [rax+disp32]: 48 8B 98, then the disp32
+    if (!code || size < kAt + 7 || code[kAt] != 0x48 || code[kAt + 1] != 0x8B || code[kAt + 2] != 0x98)
+        return "postStart's code does not read the UI's command queue where EMF expects (mov rbx, [rax+disp32] at +0x11)";
+    uint32_t queue = 0;
+    std::memcpy(&queue, code + kAt + 3, 4);
+    if (queue == app.ui_command_queue) return {};
+    char line[128];
+    std::snprintf(line, sizeof line, "postStart reads the UI's command queue at +0x%x, the layout says +0x%x", queue,
+                  app.ui_command_queue);
+    return line;
+}
+
 bool install_menu_start(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index,
                         MenuStart::Deps deps, std::string* why) {
     auto fail = [why](const std::string& w) {
@@ -474,8 +495,8 @@ bool install_menu_start(const std::array<Resolved, kSigCount>& sigs, bool known_
         return false;
     };
     if (g_menu) return fail("already installed");
-    if (build_index != known_build_index(1273043u))
-        return fail("the menu's offsets are known for build 1273043's game exe only");
+    const auto app = menu_app_layout(build_index);
+    if (!app) return fail("the menu's offsets are known for the game exes of builds 1273043 and 1283531 only");
     auto addr = [&](Sig s) -> uintptr_t {
         const auto& r = sigs[static_cast<size_t>(s)];
         return is_usable(r, known_build) ? r.addr : 0;
@@ -485,6 +506,13 @@ bool install_menu_start(const std::array<Resolved, kSigCount>& sigs, bool known_
     const uintptr_t p_area = addr(Sig::PostSessionArea), p_start = addr(Sig::PostStart);
     if (!ui_frame || !menu || !check || !p_char || !p_world || !p_area || !p_start)
         return fail("a main-menu signature is not usable on this game build");
+    // the build's layout must be the one postStart's own code uses
+    uint8_t post_start_code[0x18] = {};
+    if (!emf::seh_read(reinterpret_cast<const void*>(p_start), post_start_code, sizeof post_start_code))
+        return fail("postStart's code could not be read");
+    if (const std::string problem = menu_queue_problem(*app, post_start_code, sizeof post_start_code); !problem.empty())
+        return fail(problem);
+    deps.app = *app;
     // the UI frame's first instruction `mov rcx, [rip+disp32]` (at +0xA, 7 bytes) names the UI context global
     int32_t disp = 0;
     if (!emf::seh_read(reinterpret_cast<const void*>(ui_frame + 0xA + 3), &disp, 4))
@@ -501,13 +529,14 @@ bool install_menu_start(const std::array<Resolved, kSigCount>& sigs, bool known_
         return post_area(reinterpret_cast<PostAreaFn>(p_area), ui, area);
     };
     deps.start = [p_start](void* ui) { return post_start(reinterpret_cast<PostStartFn>(p_start), ui); };
-    deps.queued_commands = [](void* ui) -> size_t {
+    const uint32_t queue_at = app->ui_command_queue;
+    deps.queued_commands = [queue_at](void* ui) -> size_t {
         uintptr_t data = 0, queue = 0;
         uint32_t count = 0;
         const auto rd = [](uintptr_t a, void* out, size_t n) {
             return a && emf::seh_read(reinterpret_cast<const void*>(a), out, n);
         };
-        if (!rd(reinterpret_cast<uintptr_t>(ui) + L::kUiData, &data, 8) || !rd(data + L::kUiCommandQueue, &queue, 8) ||
+        if (!rd(reinterpret_cast<uintptr_t>(ui) + L::kUiData, &data, 8) || !rd(data + queue_at, &queue, 8) ||
             !rd(queue + L::kQueueCount, &count, 4))
             return SIZE_MAX;
         return count;

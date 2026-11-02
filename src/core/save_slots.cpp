@@ -192,6 +192,11 @@ uint64_t hk_pregame_state(void* pregame, uint64_t state, uint64_t phase, void* c
 
 SaveInfoRecorder* save_info_recorder() { return g_recorder.get(); }
 
+bool slot_records_known(int build_index) {
+    return build_index >= 0 &&
+           (build_index == known_build_index(1273043u) || build_index == known_build_index(1283531u));
+}
+
 bool install_save_info(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index,
                        SaveInfoRecorder::Deps deps, std::string* why) {
     auto fail = [why](const std::string& w) {
@@ -199,7 +204,8 @@ bool install_save_info(const std::array<Resolved, kSigCount>& sigs, bool known_b
         return false;
     };
     if (g_recorder) return fail("already installed");
-    if (build_index != known_build_index(1273043u)) return fail("the slot records' offsets are known for build 1273043's game exe only");
+    if (!slot_records_known(build_index))
+        return fail("the slot records' offsets are known for the game exes of builds 1273043 and 1283531 only");
     const auto& r = sigs[static_cast<size_t>(Sig::PregameState)];
     if (!is_usable(r, known_build)) return fail("the pregame state signature is not usable on this game build");
     deps.read = [](uintptr_t a, void* out, size_t n) { return emf::seh_read(reinterpret_cast<const void*>(a), out, n); };

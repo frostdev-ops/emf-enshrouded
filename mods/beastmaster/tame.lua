@@ -44,6 +44,12 @@ function M.species_of(world, id)
 	return species.of(g.animationGraph, f.faction, sc and sc.uniformScale or nil)
 end
 
+-- The item a beast is fed: its setting (bait_<id>), or for a beast from species_extra.lua, its entry's bait; nil when
+-- it takes none.
+local function bait_of(self, sp)
+	return self.env.setting("bait_" .. sp.id) or sp.bait
+end
+
 -- The tameable beast the player looks at; with none under the crosshair, the nearest one within range (in a fight
 -- the beast is often at the player's side, under or beside the camera). `weak_first`: a beast beaten down to the
 -- taming threshold goes before a nearer healthy one.
@@ -151,8 +157,10 @@ function T:tame(world, player)
 	local cur, max = emf.health(world, id)
 	local pct = self.env.setting("tame_health_pct")
 	if not max or max <= 0 or cur * 100 > max * pct then
+		local bait = bait_of(self, sp)
+		if not bait then return string.format("The %s is too strong: bring it under %d %% health.", species.word(sp), pct) end
 		return string.format("The %s is too strong: bring it under %d %% health, or feed it its bait (%s) with "
-			.. "beastmaster.feed.", species.word(sp), pct, self.env.setting("bait_" .. sp.id))
+			.. "beastmaster.feed.", species.word(sp), pct, bait)
 	end
 	local secs = self.env.setting("tame_channel_s")
 	local ch = { id = id, sp = sp, mode = "defeat", ends = self.env.now(world) + secs }
@@ -177,6 +185,11 @@ function T:feed(world, player)
 	local sp = M.species_of(world, id)
 	local other = holder(self, id)
 	if other and other ~= player then return "Someone else is taming the " .. species.word(sp) .. "." end
+	local bait = bait_of(self, sp)
+	if not bait then
+		return string.format("The %s takes no bait: bring it under %d %% health to tame it.", species.word(sp),
+			self.env.setting("tame_health_pct"))
+	end
 	local now = self.env.now(world)
 	local ch = self.channels[player]
 	local fresh = not ch or ch.mode ~= "bait" or ch.id ~= id
@@ -186,7 +199,6 @@ function T:feed(world, player)
 		self.channels[player] = ch
 		hold(world, ch)
 	end
-	local bait = self.env.setting("bait_" .. sp.id)
 	local need = self.env.setting("feed_count")
 	-- emf.take raises an error for an item name the game does not know (a typo in the setting, a game update): that
 	-- must not stop the mod
@@ -205,6 +217,9 @@ function T:feed(world, player)
 	end)
 	if not called then
 		if fresh then self:drop(world, player) end  -- lets the beast go (its hold) too
+		if self.env.setting("bait_" .. sp.id) == nil then
+			return string.format("The game has no item named %s: check its bait in species_extra.lua.", tostring(bait))
+		end
 		return string.format("The game has no item named %s: check the setting bait_%s.", tostring(bait), sp.id)
 	end
 	if not ok then return "Feeding did not work just now; try again." end

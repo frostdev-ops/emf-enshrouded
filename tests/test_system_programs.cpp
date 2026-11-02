@@ -76,9 +76,25 @@ TEST_CASE("register_into stops when the world's program table is full") {
     static int one = 1;
     REQUIRE(sp.add("a", EMF_WORLD_SERVER, counting_cb, &one));
     FakeWorld w;
-    w.put<uint16_t>(kProgramCount, static_cast<uint16_t>(kProgramMax));
+    w.put<uint16_t>(emf::world_offsets().program_count, static_cast<uint16_t>(emf::off::kProgramMax));
     CHECK(sp.register_into(w.p(), fake_register) == 0);
     CHECK(g_registered.empty());
+}
+
+TEST_CASE("register_into adds nothing when the program table's layout is not known on this build") {
+    emf::WorldOffsets unknown = emf::kBaseWorldOffsets;
+    unknown.program_count = 0;
+    unknown.program_stride = 0;
+    emf::test::ScopedWorldOffsets none(unknown);
+    SystemPrograms sp;
+    sp.reset();
+    g_registered.clear();
+    static int one = 1;
+    REQUIRE(sp.add("a", EMF_WORLD_SERVER, counting_cb, &one));
+    FakeWorld w;
+    CHECK(sp.register_into(w.p(), fake_register) == 0);
+    CHECK(g_registered.empty());
+    sp.reset();
 }
 
 TEST_CASE("add rejects bad input, duplicates and a full pool") {
@@ -158,7 +174,7 @@ struct FakeCtx {
         uint32_t index, pad;
     } ctx{};
     explicit FakeCtx(uint8_t* world) {
-        uint8_t* storage = world + emf::off::kStorage;
+        uint8_t* storage = world + emf::world_offsets().storage;
         std::memcpy(job + emf::off::kJobStorage, &storage, 8);
         ctx.job = job;
     }
@@ -296,6 +312,39 @@ TEST_CASE("inside the mod callback the current program call knows ctx, world and
     REQUIRE(g_seen_call.out.has_value());
     CHECK(g_seen_call.out->size == 32);
     set_program_iter_begin(nullptr);
+    sp.reset();
+}
+
+TEST_CASE("with build 1283531's world offsets: the program count, the events and the call's world at their moved places") {
+    emf::WorldOffsets moved_offsets = emf::shifted_world_offsets(0xE179C0);
+    moved_offsets.program_count = 0xE16F50;
+    moved_offsets.program_stride = 0x1F28;
+    emf::test::ScopedWorldOffsets moved(moved_offsets);
+    SystemPrograms sp;
+    sp.reset();
+    g_registered.clear();
+    FakeWorld w(0x1C00);
+    w.put<uint16_t>(emf::off::kProgramCount, static_cast<uint16_t>(emf::off::kProgramMax));  // the base's place: not read
+    EventStore ev;
+    ev.attach(w);
+    ev.plant(w, "A_Event", 2, 24);
+    REQUIRE(sp.add(spec("probe", {"A_Event"}, {}, probing_cb)));
+    REQUIRE(sp.register_into(w.p(), fake_register) == 1);
+    set_program_iter_begin(fake_iter_begin);
+    g_seen_call = {};
+    FakeCtx ctx(w.p());  // job+0 = world + 0xE179C0
+    system_program_desc(0).update(ctx.p());
+    REQUIRE(g_seen_call.had_call);
+    CHECK(g_seen_call.call.world == w.p());
+    REQUIRE(g_seen_call.a.has_value());
+    CHECK(g_seen_call.a->size == 24);
+    set_program_iter_begin(nullptr);
+    sp.reset();
+    // the table full at the moved count: nothing more is registered
+    w.put<uint16_t>(0xE16F50, static_cast<uint16_t>(emf::off::kProgramMax));
+    g_registered.clear();
+    REQUIRE(sp.add("b", EMF_WORLD_SERVER, counting_cb, nullptr));
+    CHECK(sp.register_into(w.p(), fake_register) == 0);
     sp.reset();
 }
 

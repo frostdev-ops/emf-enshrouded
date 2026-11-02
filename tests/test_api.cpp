@@ -132,6 +132,23 @@ TEST_CASE("api: worlds, kind, tick and ECS time come from the tracked worlds") {
     CHECK(api->ecs_time_ns(as_world(server)) == 600ll * 16666667ll);
 }
 
+TEST_CASE("api: kind, tick and ECS time follow the start-up's world offsets (build 1283531: +0x1C00)") {
+    emf::test::ScopedWorldOffsets moved(emf::shifted_world_offsets(0xE179C0));
+    Fixture f;
+    FakeWorld server(0x1C00);
+    server.put<uint8_t>(off::kKind, 2);  // the base's places hold other things now
+    server.put<uint32_t>(off::kTick, 1);
+    server.put<int64_t>(off::kTickPeriodNs, 1);
+    server.put<uint8_t>(0xE179C8, 0);
+    server.put<uint32_t>(0xE17E9C, 600);
+    server.put<int64_t>(0xE17E80, 16666667);
+    f.state.tracker.on_tick(as_world(server), EMF_WORLD_SERVER, g_now);
+    const EmfApi* api = api_table();
+    CHECK(api->world_kind(as_world(server)) == EMF_WORLD_SERVER);
+    CHECK(api->world_tick(as_world(server)) == 600);
+    CHECK(api->ecs_time_ns(as_world(server)) == 600ll * 16666667ll);
+}
+
 TEST_CASE("api: local_player reads LocalPlayerData+4 from the client world; get_component passes size") {
     Fixture f;
     FakeWorld client;

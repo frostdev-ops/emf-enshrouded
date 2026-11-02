@@ -3,12 +3,15 @@
 EMF finds the engine functions it needs (the "signatures") and a few data offsets inside `enshrouded.exe` (or
 `enshrouded_server.exe`). A game update moves code around, so EMF checks which build it is running in at every start:
 
-- **A known build** (its SHA-256 is in EMF's table: 1269579 and 1273043, and the dedicated server of 1273043):
+- **A known build** (its SHA-256 is in EMF's table: 1269579, 1273043 and 1283531, and the dedicated servers of 1273043
+  and 1283531):
   every signature has a recorded address, and the data offsets are the recorded ones. The log says
   `game sha256 ... (known build 1273043)` and `signatures: 38 of 38 usable` (on the server
   `... usable (N not in this exe)`: client-only functions, such as the client world's setup, are not in the server exe).
 - **An unknown build** (the log says `UNKNOWN build: signatures only`): EMF searches each signature by its byte
-  pattern and uses those that match exactly once. Features whose
+  pattern and uses those that match exactly once. The world's own offsets come from the game's code too (the log
+  says `world offsets from code: storage +0x... (shift +0x...)`); when the code does not confirm them EMF stays idle,
+  as when a required signature is missing. Features whose
   signatures or offsets cannot be confirmed are turned off, each with a log line naming what is off (for example
   `world_tick` returns 0 and the `time` command refuses when the world's tick fields are not confirmed;
   `put_items` / `take_items` refuse when the inventory transaction is not usable). Everything else keeps working.
@@ -59,6 +62,22 @@ If a feature you need is off after an update, the useful information is the firs
 `<game>\emf\emf_core.log` (build hash, signature counts, what was turned off) and `emf_sigcheck`'s output. Adding a
 new build means recording its addresses in `src/common/signatures.cpp` (and the code offsets in
 `src/common/code_offsets.cpp`); `README_EMF.md` in the EMF source has the steps.
+
+## Game build 1283531 (EMF 0.3.5): what changed
+
+The game update of 2026-11-02 (build 1283531) stopped EMF 0.3.4: it stayed idle with "a required signature is
+missing". EMF 0.3.5 knows the new game and dedicated server exes. Nothing to change in a mod, but:
+
+- **Rebuild C++ mods** against the new headers if they use `enemy01::CombatSetup`, `enemy01::TargetSelectionSetup`,
+  `ecs::Enemy01BehaviorState` or `ecs::UiAutomaticTransferEvent`: those grew, so `get<T>` / `get_template<T>` give NULL
+  for them with the old headers (never wrong fields). New types: `enemy01::TargetSelectionBonusSettings` and the event
+  `ecs::ItemPerkChanged`. Every other component and event is unchanged, and Lua mods read fields by name.
+- **Patterns:** if your mod's patterns hold world offsets, note that every offset of the world after its ECS program
+  table moved by +0x1C00 (the entity storage from `world+0xE15DC0` to `+0xE179C0`). `emf_sigcheck --patterns` shows
+  whether yours still match once; `sim_rate` and `loot_scale` do.
+- Attributes, damage and teleport run on 1283531 (their game functions are unchanged), and so do `load_world` of the
+  debug bridge and the save backups' slot names (save-info.json): the game app's fields moved by 0x20, and EMF checks
+  that against the game's own code at start.
 
 ## Lua 1.9 (Necromancer): what is new
 

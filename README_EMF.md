@@ -1,6 +1,6 @@
 # EMF: Enshrouded Modding Framework
 
-Native code mods for Enshrouded (known builds 1269579 and 1273043; other builds run on signatures only), in the spirit of BepInEx + Jotunn.
+Native code mods for Enshrouded (known builds 1269579, 1273043 and 1283531; other builds run on signatures only), in the spirit of BepInEx + Jotunn.
 EMF loads your mod DLLs into the game, finds engine functions by byte signature, and gives mods a small,
 stable C API to read and change the game's ECS (entities, components, singletons) at a safe point every tick.
 
@@ -811,4 +811,6 @@ Rules:
   4. Add the exe's sha256 to `known_builds` and the new RVAs to every `SigDef::rva` in `src/common/signatures.cpp`, and
      the new values to every `kCodeOffsets` entry in `src/common/code_offsets.cpp` (the tests fail while one is missing).
   Build 1273043 was added this way: no component layout changed, but the save state moved by 0x10 (found in game;
-  EMF reads those offsets from code).
+  EMF reads those offsets from code). Build 1283531 too: every ECS program entry grew by 8 bytes, which moved the
+  world's block after the program table by +0x1C00; EMF now reads the entity storage's offset and the program table's
+  count and stride from code (`src/common/world_offsets.h`), and five types changed size (docs/ENGINE_MAP.md).
