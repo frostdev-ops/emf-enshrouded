@@ -229,3 +229,56 @@ def clip(gltf, binc, sk, name, hierarchy_hash, loop=False, fps=60, speed=1.0, in
     poses = [ns.pose(sk, ns.node_worlds(gltf, _frame(channels, start + (end - start) * f / n)), gltf)
              for f in range(n + 1)]
     return ja.encode(poses, sk["rest"], fps=fps, loop=loop, hierarchy_hash=hierarchy_hash)
+
+
+def _blend(a, b, s):
+    """Pose a turned s of the way into pose b: rotations by slerp, positions and scales in a straight line."""
+    return [(_slerp(qa, qb, s), tuple(x + (y - x) * s for x, y in zip(pa, pb)),
+             tuple(x + (y - x) * s for x, y in zip(sa, sb)))
+            for (qa, pa, sa), (qb, pb, sb) in zip(a, b)]
+
+
+def timeline(gltf, binc, sk, keys, hierarchy_hash, fps=60):
+    """A clip that times an animation's moments (a swing that must land when the game's attack hits, two swings in
+    one combo): keys [at, animation, time], seconds into the clip, the glb's animation and seconds into it; the
+    first at 0, each at or after the one before, the last at the clip's length. Between two keys forward through
+    one animation the clip plays that stretch of it, faster or slower; between any other two (back in time, another
+    animation) the first pose blends into the second, eased in and out (3u^2 - 2u^3); two keys at one moment cut."""
+    if len(keys) < 2:
+        raise ValueError("a timeline needs two keys or more")
+    if any(len(k) != 3 for k in keys):
+        raise ValueError("a timeline key is [at, animation, time]: %s" % ([k for k in keys if len(k) != 3][0],))
+    keys = [(float(at), name, float(t)) for at, name, t in keys]
+    ats = [k[0] for k in keys]
+    if ats[0] != 0.0:
+        raise ValueError("a timeline starts at 0, not %g" % ats[0])
+    if any(b < a for a, b in zip(ats, ats[1:])):
+        raise ValueError("a timeline's keys go forward in time: %s" % ats)
+    length = ats[-1]
+    if length <= 0.0:
+        raise ValueError("a timeline lasts longer than 0 s")
+    channels = {}
+    for _, name, _ in keys:
+        if name not in channels:
+            channels[name] = _channels(gltf, binc, name)
+    held = {}
+
+    def pose(name, t):
+        if (name, t) not in held:
+            ch = channels[name]
+            held[(name, t)] = ns.pose(sk, ns.node_worlds(gltf, _frame(ch, _span(ch)[0] + t)), gltf)
+        return held[(name, t)]
+
+    n = max(1, int(round(length * fps)))
+    poses = []
+    for f in range(n + 1):
+        t = length * f / n
+        i = max(i for i in range(len(keys) - 1) if ats[i] <= t)
+        (a0, n0, t0), (a1, n1, t1) = keys[i], keys[i + 1]
+        u = (t - a0) / (a1 - a0) if a1 > a0 else 1.0
+        if n0 == n1 and t1 >= t0:
+            ch = channels[n0]
+            poses.append(ns.pose(sk, ns.node_worlds(gltf, _frame(ch, _span(ch)[0] + t0 + (t1 - t0) * u)), gltf))
+        else:
+            poses.append(_blend(pose(n0, t0), pose(n1, t1), u * u * (3 - 2 * u)))
+    return ja.encode(poses, sk["rest"], fps=fps, loop=False, hierarchy_hash=hierarchy_hash)

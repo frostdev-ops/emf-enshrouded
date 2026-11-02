@@ -121,6 +121,22 @@ class BuildTests(Fixture):
         with self.assertRaises(SystemExit):
             nc.build(bad, self.glb)
 
+    def test_a_timeline_clip(self):
+        """timeline: [[at, animation, time], ...], a clip that times the animation's moments (gltf_clips.timeline:
+        a swing that lands when the game's attack hits); an animation the glb has not, or keys that do not go
+        forward, are pack mistakes with the creature's and the clip's names."""
+        cfg = config(clips={"move": {"timeline": [[0.0, "Move", 0.0], [0.5, "Move", 0.25], [2.0, "Move", 1.0]]},
+                            "stand": {"animation": "Move"}})
+        clips = {c["name"]: c["clip"] for c in nc.build(cfg, self.glb)["clips"]}
+        self.assertEqual((clips["move"]["frameCount"], clips["move"]["flags"]), (120, 0))
+        for keys, why in (([[0.0, "Move", 0.0], [1.0, "Fly", 1.0]], "'Fly', which the glb does not have"),
+                          ([[0.0, "Move", 0.0]], "two keys or more")):
+            bad = config(clips={"move": {"timeline": keys}, "stand": {"animation": "Move"}})
+            with self.assertRaises(SystemExit) as e:
+                nc.build(bad, self.glb, "minotaur")
+            self.assertIn("minotaur: clip move", str(e.exception))
+            self.assertIn(why, str(e.exception))
+
     def test_an_offset_clip(self):
         cfg = config(clips={"move": {"animation": "Move"}, "stand": {"animation": "Move"},
                             "look_left": {"offset": {"Head": ["y", 20]}}})

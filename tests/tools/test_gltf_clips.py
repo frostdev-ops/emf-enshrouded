@@ -201,6 +201,58 @@ class ClipTests(Fixture):
         self.assertEqual(gc.clip(self.gltf, self.binc, self.sk, "Move", HASH, fps=24)["frameCount"], 24)
 
 
+class TimelineTests(Fixture):
+    """timeline: a clip that times an animation's moments, keys [at, animation, time]: a swing that lands when a
+    game attack hits, two swings in one combo."""
+
+    def head_degrees(self, c, frame):
+        """The head's turn about y at a frame (the fixture turns it about y only)."""
+        pose = ja.sample_end(c, self.sk["rest"]) if frame is None else ja.sample(c, frame, self.sk["rest"])
+        q = osk.world(pose, self.sk["parents"])[2][0]
+        self.assertAlmostEqual(q[0], 0.0, delta=1e-4)
+        self.assertAlmostEqual(q[2], 0.0, delta=1e-4)
+        return math.degrees(2 * math.atan2(-q[1], q[3]))  # ja_mirror(about_y(deg))
+
+    def test_between_two_keys_forward_in_one_animation_it_plays_that_stretch(self):
+        """Move's first quarter over the first half second, the rest over the second half."""
+        c = gc.timeline(self.gltf, self.binc, self.sk, [[0.0, "Move", 0.0], [0.5, "Move", 0.25], [1.0, "Move", 1.0]],
+                        HASH)
+        self.assertEqual((c["frameCount"], c["flags"], c["hierarchyHash"], c["fps"]), (60, 0, HASH, 60))
+        for frame, t in ((0, 0.0), (15, 0.125), (30, 0.25), (45, 0.625)):
+            got = osk.world(ja.sample(c, frame, self.sk["rest"]), self.sk["parents"])
+            want = self.world(t)
+            for j in range(5):
+                self.assertTrue(rig.same_rotation(got[j][0], want[j][0], 1e-6), "frame %d joint %d" % (frame, j))
+                for a, b in zip(got[j][1], want[j][1]):
+                    self.assertAlmostEqual(a, b, delta=1e-3, msg="frame %d joint %d" % (frame, j))
+
+    def test_between_keys_that_do_not_play_forward_it_blends_eased(self):
+        """Back in time (a swing again from its start) or to another animation: the one pose blends into the other,
+        eased in and out (3u^2 - 2u^3), each held."""
+        c = gc.timeline(self.gltf, self.binc, self.sk, [[0.0, "Move", 1.0], [0.5, "Move", 1.0], [1.0, "Move", 0.0]],
+                        HASH)
+        for frame, deg in ((15, 150.0), (30, 150.0), (36, 150.0 - 60.0 * 0.104), (45, 120.0), (None, 90.0)):
+            self.assertAlmostEqual(self.head_degrees(c, frame), deg, delta=0.05, msg="frame %s" % frame)
+
+    def test_two_keys_at_one_moment_cut(self):
+        """Two keys at the same moment: the clip cuts from the one to the other there."""
+        c = gc.timeline(self.gltf, self.binc, self.sk,
+                        [[0.0, "Move", 0.0], [0.5, "Move", 0.5], [0.5, "Move", 0.0], [1.0, "Move", 0.5]], HASH)
+        for frame, deg in ((29, 119.0), (30, 90.0), (45, 105.0)):
+            self.assertAlmostEqual(self.head_degrees(c, frame), deg, delta=0.05, msg="frame %d" % frame)
+
+    def test_keys_start_at_zero_and_go_forward(self):
+        for keys in ([[0.0, "Move", 0.0]],
+                     [[0.1, "Move", 0.0], [1.0, "Move", 1.0]],
+                     [[0.0, "Move", 0.0], [0.6, "Move", 0.5], [0.4, "Move", 1.0]],
+                     [[0.0, "Move", 0.0], [0.0, "Move", 1.0]],
+                     [[0.0, "Move"], [1.0, "Move", 1.0]]):
+            with self.assertRaises(ValueError, msg=str(keys)):
+                gc.timeline(self.gltf, self.binc, self.sk, keys, HASH)
+        with self.assertRaises(KeyError):
+            gc.timeline(self.gltf, self.binc, self.sk, [[0.0, "Move", 0.0], [1.0, "Fly", 1.0]], HASH)
+
+
 @unittest.skipUnless(os.path.exists(WOLF), "the CC0 wolf is not in analysis/models/sources")
 class WolfTests(unittest.TestCase):
     @classmethod
