@@ -295,6 +295,14 @@ OverlayConfig read_overlay_config(const std::wstring& ini_path) {
         const unsigned long v = std::wcstoul(rows.c_str(), &end, 10);
         if (end && !*end) c.suggest_rows = std::clamp<size_t>(v, Suggester::kMinRows, Suggester::kMaxRows);
     }
+    c.look = read_look_settings(
+        [&ini_path](const char* section, const char* key) {
+            wchar_t buf[512] = {};
+            GetPrivateProfileStringW(std::wstring(section, section + std::strlen(section)).c_str(),
+                                     std::wstring(key, key + std::strlen(key)).c_str(), L"", buf, 512, ini_path.c_str());
+            return utf8(buf);
+        },
+        &c.look_problems);
     return c;
 }
 
@@ -344,6 +352,7 @@ ImGuiKey imgui_key(const KeyEvent& e) {
 bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
     if (!config.enabled || g_model || !deps.center || !deps.tracker) return false;
     g_deps = std::move(deps);
+    for (const auto& p : config.look_problems) log_line(("overlay: emf_core.ini " + p).c_str());
     g_mouse_speed = config.mouse_speed;
     g_ui.suggest = config.suggest;
     g_ui.suggester.set_rows(config.suggest_rows);

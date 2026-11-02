@@ -633,3 +633,8 @@ add_dependencies(emf_tests emf_standin_content emf_standin_content_abi2 emf_stan
 target_sources(emf_core_lib PRIVATE src/saves/backup.cpp src/saves/save_info.cpp src/core/save_slots.cpp src/core/save_commands.cpp)
 target_sources(emf_app_lib PRIVATE src/saves/backup.cpp src/saves/save_info.cpp app/bridge_saves.cpp src/common/sha256.cpp)
 target_sources(emf_tests PRIVATE tests/test_move_retry.cpp tests/test_save_backup.cpp tests/test_save_info.cpp tests/test_app_saves.cpp tests/test_save_slots.cpp tests/test_save_commands.cpp tests/test_save_fixes.cpp)
+
+# --- The in-game look (src/core/overlay/look_*.cpp): [hud] and the look keys of [overlay], the bundled fonts, the
+# game-style drawing ---
+target_sources(emf_core_lib PRIVATE src/core/overlay/look_settings.cpp)
+target_sources(emf_tests PRIVATE tests/test_look_settings.cpp)
