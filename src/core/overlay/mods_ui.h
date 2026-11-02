@@ -5,6 +5,7 @@
 // capture are unit-tested.
 #include <cstdint>
 #include <map>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -19,6 +20,20 @@ struct PendingEdit {
     std::string value;  // a slider's, number box's or colour's value while it is dragged or typed
     int frame = 0;      // the last ImGui frame its widget was drawn in
 };
+
+// EMF's console key (the Settings tab) being changed: the new key must be pressed twice, so a key that cannot be pressed
+// again (or was hit by mistake) is never saved.
+struct ScanCapture {
+    enum class Step { Idle, First, Confirm };
+    Step step = Step::Idle;
+    uint16_t scan = 0;    // Confirm: the key pressed first
+    std::string message;  // what the widget says ("press F1 again to confirm", why a key is refused)
+    std::string value;    // set once confirmed ("0x3b"); the widget saves it and clears it
+    int frame = 0;        // the last ImGui frame the widget was drawn in (a capture whose widget is gone is dropped)
+};
+// A key press while capturing: the value to save ("0x%02x") on the second press of the same key; Esc cancels; Enter,
+// extended keys (right Ctrl, the arrow block...) and keys without a scan code 1-0x7f are refused with a message.
+std::optional<std::string> scan_capture_key(ScanCapture& c, const KeyEvent& e);
 
 struct ModsUiState {
     std::string selected;               // the selected mod's source (folder or file: unique, ids may repeat)
@@ -36,6 +51,7 @@ struct ModsUiState {
     std::string captured;
     int capture_frame = 0;
     std::string capture_modifier;  // Shift, Ctrl or Alt held while waiting: bound if released alone
+    ScanCapture scan;              // the Settings tab's console key (it shares the key path with key binds)
 };
 
 // The list row's text and ImGui id: "Clock  1.1.0##clock\" (keyed by folder, so a copied folder with the same id
@@ -81,5 +97,9 @@ bool color_to_floats(const std::string& hex, float rgb[3]);
 std::string floats_to_color(const float rgb[3]);
 // Draws the tab's content into the current window (the console's).
 void draw_mods_tab(const std::vector<ModRecord>& mods, SettingsStore* settings, ModsUiState& ui);
+// One setting's widget (the Mods tab's and the Settings tab's): its label, help, "(next start)", greyed out while its
+// enabledWhen does not hold. `defs` are the mod's settings (for enabledWhen); `frame` is ImGui::GetFrameCount().
+void draw_setting(SettingsStore& s, const std::string& mod, const SettingDef& d, const std::vector<SettingDef>& defs,
+                  ModsUiState& ui, int frame);
 
 }  // namespace emf::core

@@ -214,8 +214,45 @@ ImVec4 line_colour(const ConsoleUiState& ui, LineKind kind) {
     }
 }
 
+int next_tab(int tab, bool has_mods, bool has_settings) {
+    for (int step = 1; step <= 3; ++step) {
+        const int t = (tab + step) % 3;
+        if (t == 0 || (t == 1 && has_mods) || (t == 2 && has_settings)) return t;
+    }
+    return 0;
+}
+
+void draw_look_preview(const TextLook& look, float width) {
+    ImFont* font = look.bold ? look.bold : look.font ? look.font : ImGui::GetFont();
+    const float size = font->FontSize;
+    const char* const hud = "12:30  A line on screen";
+    const char* const note = "A note looks like this";
+    ImDrawList* dl = ImGui::GetWindowDrawList();
+    const ImVec2 at = ImGui::GetCursorScreenPos();
+    const float pad = std::floor(size * 0.5f);
+    const ImVec2 note_size = font->CalcTextSizeA(size, FLT_MAX, 0.0f, note);
+    const float h = pad * 3.0f + size * 2.0f;
+    dl->AddRectFilled(at, ImVec2(at.x + width, at.y + h), IM_COL32(40, 48, 40, 255));  // a stand-in for the world
+    const ImVec2 note_at(at.x + (width - note_size.x) * 0.5f, at.y + pad);
+    if (look.style == HudStyle::Game) {
+        NoteBand band;
+        band.min = ImVec2(note_at.x - size * 2.0f, note_at.y - pad * 0.5f);
+        band.max = ImVec2(note_at.x + note_size.x + size * 2.0f, note_at.y + size + pad * 0.5f);
+        band.fade_left = band.fade_right = size * 2.0f;
+        band.text_min = note_at;
+        band.text_max = ImVec2(note_at.x + note_size.x, note_at.y + size);
+        draw_note_band(dl, band);
+    }
+    draw_look_text(dl, look, font, size, note_at, look.colour, note, note + std::strlen(note));
+    const ImVec2 hud_size = font->CalcTextSizeA(size, FLT_MAX, 0.0f, hud);
+    draw_look_text(dl, look, font, size, ImVec2(at.x + width - hud_size.x - pad, at.y + pad * 2.0f + size), look.colour,
+                   hud, hud + std::strlen(hud));
+    ImGui::Dummy(ImVec2(width, h));
+}
+
 void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSources& sources, ImVec2 display,
-                  const std::function<void(const std::string&)>& submit, const std::function<void()>& mods_tab) {
+                  const std::function<void(const std::string&)>& submit, const std::function<void()>& mods_tab,
+                  const std::function<void()>& settings_tab) {
     ui.wants_escape = false;  // set again below while the suggestions show
     ui.ghost_shown.clear();   // and the ghost text while it draws
     if (ui.open_fraction <= 0.0f) {
@@ -234,10 +271,10 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
                                    ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoFocusOnAppearing;
     ImGui::Begin("##emf_console", nullptr, flags);
 
-    if (mods_tab) {
+    if (mods_tab || settings_tab) {
         ImGuiIO& tio = ImGui::GetIO();
         if (tio.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Tab, false)) ui.switch_tab = true;
-        const int want = ui.switch_tab ? 1 - ui.tab : -1;
+        const int want = ui.switch_tab ? next_tab(ui.tab, bool(mods_tab), bool(settings_tab)) : -1;
         ui.switch_tab = false;
         if (ui.tabs_font) ImGui::PushFont(ui.tabs_font);  // the tab bar and the Mods tab ([overlay] tabs_font)
         if (ImGui::BeginTabBar("##emf_tabs")) {
@@ -246,17 +283,23 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
                 ui.tab = 0;
                 ImGui::EndTabItem();
             }
-            if (ImGui::BeginTabItem("Mods", nullptr, want == 1 ? ImGuiTabItemFlags_SetSelected : 0)) {
+            if (mods_tab && ImGui::BeginTabItem("Mods", nullptr, want == 1 ? ImGuiTabItemFlags_SetSelected : 0)) {
                 ui.tab = 1;
+                ImGui::EndTabItem();
+            }
+            if (settings_tab &&
+                ImGui::BeginTabItem("Settings", nullptr, want == 2 ? ImGuiTabItemFlags_SetSelected : 0)) {
+                ui.tab = 2;
                 ImGui::EndTabItem();
             }
             if (!ui.status.empty())  // a label on the right, not a tab (a click does nothing)
                 ImGui::TabItemButton(ui.status.c_str(), ImGuiTabItemFlags_Trailing | ImGuiTabItemFlags_NoTooltip);
             ImGui::EndTabBar();
         }
-        if (ui.tab == 1) {
+        if (ui.tab == 1 || ui.tab == 2) {
             ui.escape = false;
-            mods_tab();
+            if (ui.tab == 1 && mods_tab) mods_tab();
+            if (ui.tab == 2 && settings_tab) settings_tab();
             if (ui.tabs_font) ImGui::PopFont();
             ImGui::End();
             ImGui::PopStyleVar(2);

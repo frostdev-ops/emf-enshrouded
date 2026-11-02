@@ -89,6 +89,8 @@ void draw_number(SettingsStore& s, const std::string& mod, const SettingDef& d, 
     apply_setting_edit(s, mod, d.key, v, ui);
 }
 
+}  // namespace
+
 void draw_setting(SettingsStore& s, const std::string& mod, const SettingDef& d, const std::vector<SettingDef>& defs,
                   ModsUiState& ui, int frame) {
     const std::string value = s.get(mod, d.key);
@@ -203,6 +205,28 @@ void draw_setting(SettingsStore& s, const std::string& mod, const SettingDef& d,
                 apply_setting_edit(s, mod, d.key, buf, ui);
             break;
         }
+        case SettingType::ScanCode: {  // EMF's console key: two presses of the new key (capture_key_event)
+            ScanCapture& c = ui.scan;
+            if (c.step != ScanCapture::Step::Idle) c.frame = frame;
+            if (!c.value.empty()) {
+                const std::string v = c.value;
+                c.value.clear();
+                c.step = ScanCapture::Step::Idle;
+                apply_setting_edit(s, mod, d.key, v, ui);
+            }
+            const std::string label =
+                (c.step == ScanCapture::Step::Idle ? setting_shown_value(d, value) : c.message) + "###scan";
+            if (ImGui::Button(label.c_str(), ImVec2(ImGui::GetFontSize() * 22.0f, 0)) &&
+                c.step == ScanCapture::Step::Idle) {
+                c.step = ScanCapture::Step::First;
+                c.scan = 0;
+                c.message = "press the new console key (Esc: cancel)";
+                c.frame = frame;
+            }
+            ImGui::SameLine();
+            ImGui::TextUnformatted(d.label.c_str());
+            break;
+        }
     }
     if (d.type != SettingType::Key) tooltip(d, setting_shown_value(d, d.default_value));
     if (!d.live) {
@@ -221,8 +245,6 @@ void draw_setting(SettingsStore& s, const std::string& mod, const SettingDef& d,
     }
     ImGui::PopID();
 }
-
-}  // namespace
 
 std::string mod_row_label(const ModRecord& r) {
     return r.name + (r.version.empty() ? "" : "  " + r.version) + "##" + r.source;
@@ -360,7 +382,49 @@ std::string key_event_name(const KeyEvent& e) {
     return b;
 }
 
+std::optional<std::string> scan_capture_key(ScanCapture& c, const KeyEvent& e) {
+    if (!e.down || c.step == ScanCapture::Step::Idle) return std::nullopt;
+    UINT vk = e.vkey;
+    if (!vk) vk = MapVirtualKeyW(e.scan | (e.extended ? 0xE000 : 0), MAPVK_VSC_TO_VK_EX);
+    if (vk == VK_ESCAPE || (e.scan == 0x01 && !e.extended)) {
+        c.step = ScanCapture::Step::Idle;
+        c.message = "the console key stays as it was";
+        return std::nullopt;
+    }
+    char hex[8];
+    std::snprintf(hex, sizeof hex, "0x%02x", static_cast<unsigned>(e.scan));
+    const std::string name = key_event_name(e);
+    const std::string shown = name.empty() ? std::string(hex) : name;
+    if (e.extended || e.scan < 1 || e.scan > 0x7F) {
+        c.message = shown + " cannot open the console: choose another key (Esc: cancel)";
+        return std::nullopt;
+    }
+    if (e.scan == 0x1C) {
+        c.message = "Enter sends the command line: choose another key (Esc: cancel)";
+        return std::nullopt;
+    }
+    if (c.step == ScanCapture::Step::Confirm && e.scan == c.scan) {
+        c.step = ScanCapture::Step::Idle;
+        c.message.clear();
+        return std::string(hex);
+    }
+    c.scan = e.scan;  // the first press, or another key than the first: this one must be pressed again
+    c.step = ScanCapture::Step::Confirm;
+    c.message = "press " + shown + " again to confirm (Esc: cancel)";
+    return std::nullopt;
+}
+
 bool capture_key_event(ModsUiState& ui, const KeyEvent& e, int frame) {
+    if (ui.scan.step != ScanCapture::Step::Idle) {  // the Settings tab's console key
+        if (ui.scan.frame < frame - 1) {            // its widget is gone (another tab, the console closed)
+            ui.scan.step = ScanCapture::Step::Idle;
+            ui.scan.message.clear();
+            return false;
+        }
+        if (!e.down) return false;  // releases always reach ImGui
+        if (const auto v = scan_capture_key(ui.scan, e)) ui.scan.value = *v;
+        return true;
+    }
     if (!ui.capturing.empty() && ui.capture_frame < frame - 1) {  // its widget is gone: the keys belong to the console
         ui.capturing.clear();
         ui.captured.clear();

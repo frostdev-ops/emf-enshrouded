@@ -18,6 +18,7 @@
 #include "font_plan.h"
 #include "input_hook.h"
 #include "mods_ui.h"
+#include "settings_ui.h"
 #include "submit.h"
 #include "vk_overlay.h"
 #include "wheel_gate.h"
@@ -52,6 +53,7 @@ SRWLOCK g_status_lock = SRWLOCK_INIT;
 std::string g_status;   // overlay_set_status: the tab bar's status text
 CursorModel g_cursor;   // render thread: the console's mouse cursor
 ModsUiState g_mods_ui;  // render thread
+SettingsUiState g_settings_ui;  // render thread: the Settings tab
 float g_mouse_speed = 1.0f;
 // Mods' radial wheel: requested from any thread, opened and driven on the render thread.
 WheelModel g_wheel;  // render thread
@@ -307,13 +309,19 @@ void build(ImVec2 display) {
     if (g_router->open() || g_ui.open_fraction > 0.0f) refresh_sources();  // Tab completion: only for the console
     std::function<void()> mods_tab;
     if (g_deps.mods) mods_tab = [] { draw_mods_tab(g_deps.mods->list(), g_deps.settings, g_mods_ui); };
+    std::function<void()> settings_tab;
+    if (g_deps.settings)
+        settings_tab = [] {
+            draw_settings_tab(g_deps.settings, g_mods_ui, g_settings_ui,
+                              [] { draw_look_preview(text_look(), ImGui::GetContentRegionAvail().x); });
+        };
     AcquireSRWLockShared(&g_status_lock);
     g_ui.status = g_status;
     ReleaseSRWLockShared(&g_status_lock);
     draw_console(*g_model, g_ui, g_sources, display, [](const std::string& line) {
         submit_line(*g_deps.center, host_state(*g_deps.tracker, GetTickCount64()), line, g_deps.reply);
         g_model->save_history(g_history_path);
-    }, mods_tab);
+    }, mods_tab, settings_tab);
     g_router->set_esc_to_console(g_router->open() && g_ui.wants_escape);  // Esc hides the suggestions first
     const TextLook look = text_look();
     if (g_ui.open_fraction <= 0.0f) {
