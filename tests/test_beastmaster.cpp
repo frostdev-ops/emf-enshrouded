@@ -113,6 +113,26 @@ TEST_CASE("beastmaster: the roster names beasts uniquely, holds 8 per player, an
     CHECK(b.reply("beastmaster.list", 2, 0xBB).find("Grey") != std::string::npos);
 }
 
+TEST_CASE("beastmaster: a beast just tamed cannot fall for 5 s, then can again") {
+    // a swing it began as a wild beast can land on itself once it is an ally (seen in game: a tamed minotaur's
+    // three-punch combo, 2 of 3 tames, killed it just after the channel)
+    BeastRig b;
+    b.look(1, 0, 10.5, 0, 0);
+    b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);
+    auto& h = component<ecs::Health>(b.r.fake, 50);  // the game's Health storage: [0] health, [1] its minimum
+    REQUIRE(b.reply("beastmaster.tame").find("Taming") != std::string::npos);
+    b.seconds(1);
+    CHECK(h.dataStorage[1] == 0);   // the channel: as it was
+    b.seconds(3);                   // tamed, up to 50 % (50 of 100)
+    REQUIRE(b.reply("beastmaster.list").find("1. Wolf - wolf, out") != std::string::npos);
+    CHECK(h.dataStorage[1] == 50);  // its health cannot go under that
+    h.dataStorage[1] = 0;           // (the game may write it back)
+    b.seconds(2);
+    CHECK(h.dataStorage[1] == 50);  // still held
+    b.seconds(4);
+    CHECK(h.dataStorage[1] == 0);   // 5 s after: as before
+}
+
 TEST_CASE("beastmaster: species are known by animation graph and faction") {
     BeastRig b;
     CHECK(b.reply(std::string("beastmaster.species ") + kWolfGraph + " 6") == "wolf");   // WildBeast
@@ -484,6 +504,7 @@ TEST_CASE("beastmaster: a guest's /beastmaster call acts on the guest's own beas
 namespace {
 constexpr const char* kBearTemplate = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02";
 constexpr const char* kAurochsTemplate = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02";  // the beasts pack's
+constexpr const char* kMinotaurTemplate = "69120584-30ec-43e5-bd54-cce04295cdb6";  // the beasts pack's
 size_t logged(const Fake& f, const std::string& needle) {
     size_t n = 0;
     for (const auto& l : f.log) n += l.find(needle) != std::string::npos;
@@ -501,6 +522,7 @@ TEST_CASE("wild bears: one spawns 50-70 m from a player when none exists; none w
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));  // only the bear pack: the bear every time
     b.r.fake.missing_templates.insert(guid_bytes("d4c87337-8c53-41df-8488-8079046e1502"));  // (no beasts pack snake)
+    b.r.fake.missing_templates.insert(guid_bytes(kMinotaurTemplate));                         // (nor minotaur)
     no_rare_snakes(b.r.fake);
     b.spawnable(3);
     b.seconds(30);
@@ -862,7 +884,7 @@ TEST_CASE("beastmaster: a pack beast that cannot come says it needs the EMF crea
     CHECK(note.find("EML or ShroudForge") != std::string::npos);
 }
 
-TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs and snakes come (the missing bear is skipped)") {
+TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs, snakes and minotaurs come (the missing bear is skipped)") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
     no_rare_snakes(b.r.fake);
@@ -873,7 +895,7 @@ TEST_CASE("wild beasts: with only the beasts pack installed, wild aurochs and sn
         REQUIRE(b.r.fake.spawns.size() == before + 1);
         const std::string spawned = guid_text(b.r.fake.spawns.back().guid);
         const bool aurochs = spawned == kAurochsTemplate;
-        CHECK((aurochs || spawned == "d4c87337-8c53-41df-8488-8079046e1502"));  // the pack's aurochs or snake
+        CHECK((aurochs || spawned == "d4c87337-8c53-41df-8488-8079046e1502" || spawned == kMinotaurTemplate));
         const uint32_t id = 1234 + static_cast<uint32_t>(before);
         component<ecs::ScaleComponent>(b.r.fake, id).uniformScale = aurochs ? 1.3f : 1.0f;  // the pack's sizes
         CHECK(b.faction(id) == kWildBeast);
@@ -917,6 +939,7 @@ TEST_CASE("wild beasts: wild snakes come with the beasts pack, one at a time") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
     b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));
+    b.r.fake.missing_templates.insert(guid_bytes(kMinotaurTemplate));
     no_rare_snakes(b.r.fake);
     b.spawnable(8);
     for (int round = 0; round < 3; ++round) {
@@ -931,6 +954,50 @@ TEST_CASE("wild beasts: wild snakes come with the beasts pack, one at a time") {
         CHECK(b.r.fake.spawns.size() == before + 1);  // one at a time: it is still about
         b.r.fake.attrs[{id, EMF_ATTR_HEALTH}] = 0;     // killed
     }
+}
+
+// ---- the beasts pack's minotaur: a skeleton of its own, played by its own copy of the armoured Vukah elite's graph ----
+namespace {
+constexpr const char* kMinotaurGraph = "e0a47a97-379b-4384-8602-79eeeffc4a92";
+constexpr int kVukahFaction = 3;
+}  // namespace
+
+TEST_CASE("beastmaster: a minotaur is its own graph (Vukah): tamed with game meat, listed, called with the pack's template and the game's own health") {
+    BeastRig b;
+    CHECK(b.reply(std::string("beastmaster.species ") + kMinotaurGraph + " 3 1") == "minotaur");
+    CHECK(b.reply(std::string("beastmaster.species ") + kMinotaurGraph + " 6 1") == "unknown");  // not its faction
+    CHECK(b.r.fake.settings["beastmaster.bait_minotaur"] == "Food_T2_raw_bad_meat_Game");
+    b.beast(50, kMinotaurGraph, 0, 5, kVukahFaction, 20, 100);
+    component<ecs::ScaleComponent>(b.r.fake, 50).uniformScale = 1.0f;
+    b.look(1, 0, 10.5, 0, 0);
+    CHECK(b.reply("beastmaster.tame").find("Taming the minotaur") != std::string::npos);
+    b.seconds(4);
+    CHECK(b.noted("You tamed a minotaur: Minotaur"));
+    CHECK(b.reply("beastmaster.list").find("1. Minotaur - minotaur, out") != std::string::npos);
+    b.reply("beastmaster.dismiss all");
+    b.spawnable(1);
+    b.seconds(11);
+    CHECK(b.reply("beastmaster.call Minotaur").find("comes") != std::string::npos);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(guid_text(b.r.fake.spawns[0].guid) == kMinotaurTemplate);
+    auto& h = component<ecs::Health>(b.r.fake, 1234);
+    h.dataStorage[2] = 239;  // the armoured Vukah elite's base health at level 1
+    b.seconds(1);
+    CHECK(h.dataStorage[3] == 0);  // no more: an elite is tough already
+    CHECK(b.reply("beastmaster.give minotaur").find("minotaur") != std::string::npos);
+}
+
+TEST_CASE("wild beasts: a wild minotaur comes with the beasts pack, one at a time") {
+    BeastRig b({{"wild_bear_minutes", "1"}});
+    for (const char* t : {kBearTemplate, kAurochsTemplate, kSnakeTemplate}) b.r.fake.missing_templates.insert(guid_bytes(t));
+    no_rare_snakes(b.r.fake);
+    b.spawnable(4);
+    b.seconds(61);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(guid_text(b.r.fake.spawns[0].guid) == kMinotaurTemplate);
+    component<ecs::ScaleComponent>(b.r.fake, 1234).uniformScale = 1.0f;  // the template's own (seen in game: 1.00)
+    b.seconds(60);
+    CHECK(b.r.fake.spawns.size() == 1);  // still about
 }
 
 // ---- the beasts pack's rare snakes: crimson, golden king and albino, each its own copy of the snake's graph ----
@@ -1004,6 +1071,7 @@ TEST_CASE("wild beasts: a wild snake is now and then a rare one: albino 0.25 %, 
     RollRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
     b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));
+    b.r.fake.missing_templates.insert(guid_bytes(kMinotaurTemplate));
     b.spawnable(8);
     // the roll in [0, 1): albino under 0.0025, golden king under 0.0065, crimson under 0.0165, else a snake
     const std::vector<std::pair<double, const char*>> rounds = {
@@ -1023,7 +1091,8 @@ TEST_CASE("wild beasts: a wild snake is now and then a rare one: albino 0.25 %, 
 
     // a rare snake the game does not have (an older beasts pack) comes as a snake, with one log line
     RollRig old({{"wild_bear_minutes", "1"}});
-    for (const char* t : {kBearTemplate, kAurochsTemplate, kCrimsonTemplate}) old.r.fake.missing_templates.insert(guid_bytes(t));
+    for (const char* t : {kBearTemplate, kAurochsTemplate, kMinotaurTemplate, kCrimsonTemplate})
+        old.r.fake.missing_templates.insert(guid_bytes(t));
     old.spawnable(4);
     old.roll(0.012);
     old.seconds(61);
@@ -1036,6 +1105,7 @@ TEST_CASE("wild beasts: a wild albino snake keeps 5x the game's base health") {
     RollRig b({{"wild_bear_minutes", "1"}});
     b.r.fake.missing_templates.insert(guid_bytes(kBearTemplate));
     b.r.fake.missing_templates.insert(guid_bytes(kAurochsTemplate));
+    b.r.fake.missing_templates.insert(guid_bytes(kMinotaurTemplate));
     b.spawnable(1);
     b.roll(0.001);
     b.seconds(61);
@@ -1551,7 +1621,8 @@ TEST_CASE("beastmaster: a species_extra.lua that does not load or gives no list 
 
 TEST_CASE("wild beasts: a species_extra.lua beast with a pack comes as a wild beast too") {
     BeastRig b({{"wild_bear_minutes", "1"}});
-    for (const char* t : {kBearTemplate, kAurochsTemplate, kSnakeTemplate}) b.r.fake.missing_templates.insert(guid_bytes(t));
+    for (const char* t : {kBearTemplate, kAurochsTemplate, kSnakeTemplate, kMinotaurTemplate})
+        b.r.fake.missing_templates.insert(guid_bytes(t));
     no_rare_snakes(b.r.fake);
     extra_species(b, "return {\n" + entry("troll", "Troll", kTrollTemplate, kTrollGraph, ", pack = \"a private pack\"") + "}\n");
     b.spawnable(2);

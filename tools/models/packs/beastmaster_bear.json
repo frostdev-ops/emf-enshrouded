@@ -1,7 +1,7 @@
 {
   "id": "emf_beastmaster_bear",
   "title": "Beastmaster: the bear",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "out": "../../../analysis/models/mods/emf_beastmaster_bear",
   "description": "The bear for the Beastmaster mod: a realistic grizzly on a skeleton and animations of its own, big and tough. Wild bears appear now and then when Beastmaster is installed; tame one and call it. Bear model and animations: \"Realistic Animated Bear 3D Model\" by WildMesh 3D, licensed under CC BY 4.0 (used in the game with changes).",
   "authors": [
@@ -13,7 +13,8 @@
     "Credit (CC BY 4.0, required): \"Realistic Animated Bear 3D Model\" by WildMesh 3D (https://sketchfab.com/3d-models/realistic-animated-bear-3d-model-bffc3c87d2d148ff8533e1cc8a11c9f1); changes: its rig and animations on a game skeleton of its own, its three textures in one atlas, clips played in place and at other speeds.",
     "2.0: the bear on its own skeleton (37 joints and the root) from the WildMesh bear, played by a copy of the game wolf's graph; 1.0's was a Meshy bear on the game wolf's skeleton. The file is scaled unevenly above its joints (uneven_scale) and its inverse binds are in world space; its walk and run travel (root motion), played in place.",
     "Stats against the game wolf (Enemy_Wildbeast_wolf_earlygame): ScaleComponent 1.4 (skeleton 1/1.4: a 2.3 m grizzly); DamageMod multiplier x1.5; Movement walk and patrol x0.7 (1.61 m/s, the walk clip at 1.53x), run as the wolf's (6 m/s, the run clip at 0.73x), sneak, sprint, combat and flee x0.85. Health x2.5 comes from the Beastmaster mod at runtime.",
-    "Size (EML, 2026-11-01): the built mod is 12 MB of Lua, its biggest file beastmaster_bear_clips.lua 6.0 MB (the albedo at 1024)."
+    "Size (EML, 2026-11-01): the built mod is 12 MB of Lua, its biggest file beastmaster_bear_clips.lua 6.0 MB (the albedo at 1024).",
+    "2.1: the bear 1.35x wider across the body (new_skeleton widen: about its joints; the skeleton and the clips as they were), as the owner found the bear thin (2026-11-02): 2.0 was 0.89 m wide at 2.6 m long and 1.7 m tall in game, now about 1.2 m. Chosen from 1.0 / 1.2 / 1.35 side by side in game."
   ],
   "creatures": [
     {
@@ -221,7 +222,8 @@
           "HandPalmR": "RigRFLegAnkle_032"
         },
         "skeleton_guid": "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f04",
-        "graph_guid": "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f05"
+        "graph_guid": "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f05",
+        "widen": 1.35
       }
     }
   ]
