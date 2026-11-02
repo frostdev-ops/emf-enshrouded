@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <malloc.h>
 #include <map>
 
 // EMF's own copy of ImGui's stb_truetype (static: invisible outside this file), to check a font file before ImGui
@@ -148,12 +149,24 @@ bool tables_inside(const unsigned char* d, size_t size, size_t start) {
     return true;
 }
 
-// stb_truetype reads the font and draws two glyphs; a fault or a failed stb assert means it is no font to trust.
+// stb_truetype reads the font as ImGui will: the outline of every glyph EMF's ranges find, and two drawn. False for a
+// fault, a failed stb assert, or no glyph in the ranges at all (ImGui stops at an assert on a font without one).
 // (Plain data only here: __try allows no objects that need unwinding.)
-bool stb_reads(const unsigned char* data, int offset) {
+bool stb_reads_guarded(const unsigned char* data, int offset, DWORD* fault) {
     __try {
         stbtt_fontinfo info;
         if (!stbtt_InitFont(&info, data, offset)) return false;
+        int found = 0;
+        for (const ImWchar* r = kFontRanges; r[0] && r[1]; r += 2)
+            for (int c = r[0]; c <= r[1]; ++c) {
+                const int glyph = stbtt_FindGlyphIndex(&info, c);
+                if (!glyph) continue;
+                ++found;
+                stbtt_vertex* shape = nullptr;
+                stbtt_GetGlyphShape(&info, glyph, &shape);
+                if (shape) stbtt_FreeShape(&info, shape);
+            }
+        if (found == 0) return false;
         const float scale = stbtt_ScaleForPixelHeight(&info, 20.0f);
         for (int c : {int('A'), 0x416}) {
             const int glyph = stbtt_FindGlyphIndex(&info, c);
@@ -163,7 +176,27 @@ bool stb_reads(const unsigned char* data, int offset) {
             if (bmp) stbtt_FreeBitmap(bmp, nullptr);
         }
         return true;
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (*fault = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// After a caught stack overflow the guard page must be put back, or the next overflow ends the game.
+void after_fault(DWORD fault) {
+    if (fault == EXCEPTION_STACK_OVERFLOW) _resetstkoflw();
+}
+
+bool stb_reads(const unsigned char* data, int offset) {
+    DWORD fault = 0;
+    const bool ok = stb_reads_guarded(data, offset, &fault);
+    after_fault(fault);
+    return ok;
+}
+
+bool build_guarded(ImFontAtlas* atlas, DWORD* fault) {
+    __try {
+        return atlas->Build();
+    } __except (*fault = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
 }
@@ -172,20 +205,22 @@ bool stb_reads(const unsigned char* data, int offset) {
 
 bool font_bytes_ok(const unsigned char* data, size_t size) {
     if (!data || size < 1024 || size > kMaxFontBytes) return false;
-    size_t start = 0;
-    if (std::memcmp(data, "ttcf", 4) == 0) {  // a collection: ImGui takes its first font
-        if (be32(data + 8) == 0) return false;
-        start = be32(data + 12);
-    } else if (!stbtt__isfont(const_cast<unsigned char*>(data))) {
-        return false;
-    }
-    if (!tables_inside(data, size, start)) return false;
-    return stb_reads(data, static_cast<int>(start));
+    // where ImGui will look for the font (a collection: its first; only the collection versions stb_truetype reads)
+    const int start = stbtt_GetFontOffsetForIndex(data, 0);
+    if (start < 0 || !tables_inside(data, size, static_cast<size_t>(start))) return false;
+    return stb_reads(data, start);
 }
 
 bool font_file_ok(const std::wstring& path, size_t max_bytes) {
     std::vector<unsigned char> bytes;
     return read_font_file(path, max_bytes, bytes) && font_bytes_ok(bytes.data(), bytes.size());
+}
+
+bool guarded_atlas_build(ImFontAtlas& atlas) {
+    DWORD fault = 0;
+    const bool ok = build_guarded(&atlas, &fault);
+    after_fault(fault);
+    return ok;
 }
 
 OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vector<std::string>* problems) {
@@ -215,7 +250,8 @@ OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vec
                 cfg.FontDataOwnedByAtlas = true;
                 font = atlas.AddFontFromMemoryTTF(data, static_cast<int>(bytes.size()), f.pixel_size, &cfg, kFontRanges);
             } else if (problems) {
-                problems->push_back("font " + narrow(f.file) + ": could not be loaded, ImGui's own font is used");
+                const std::string line = "font " + narrow(f.file) + ": could not be loaded, ImGui's own font is used";
+                if (std::find(problems->begin(), problems->end(), line) == problems->end()) problems->push_back(line);
             }
         }
         if (!font) {
@@ -228,11 +264,15 @@ OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vec
     }
     for (auto& r : roles)
         if (!r) r = roles[0];  // a plan with fewer faces: the console's font
-    if (atlas.Fonts.Size == 0 || !atlas.Build()) {
-        if (atlas.Fonts.Size && problems) problems->push_back("the font atlas could not be built, ImGui's own font is used");
+    if (atlas.Fonts.Size == 0 || !guarded_atlas_build(atlas)) {
+        if (atlas.Fonts.Size && problems) {
+            const char* why = emf_imgui_last_assert();
+            problems->push_back(std::string("the font atlas could not be built, ImGui's own font is used") +
+                                (why && *why ? std::string(" (") + why + ")" : std::string()));
+        }
         atlas.Clear();
         ImFont* d = atlas.AddFontDefault();
-        atlas.Build();
+        guarded_atlas_build(atlas);
         for (auto& r : roles) r = d;
     }
     return OverlayFonts{roles[0], roles[1], roles[2], roles[3]};

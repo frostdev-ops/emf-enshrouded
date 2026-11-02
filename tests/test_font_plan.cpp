@@ -63,7 +63,130 @@ struct Headless {
     Headless() { ctx = ImGui::CreateContext(); }
     ~Headless() { ImGui::DestroyContext(ctx); }
 };
+
+void put16(std::vector<unsigned char>& v, uint32_t x) {
+    v.push_back(static_cast<unsigned char>(x >> 8));
+    v.push_back(static_cast<unsigned char>(x));
+}
+void put32(std::vector<unsigned char>& v, uint32_t x) {
+    put16(v, x >> 16);
+    put16(v, x & 0xFFFF);
+}
+void set32(std::vector<unsigned char>& v, size_t at, uint32_t x) {
+    for (int i = 0; i < 4; ++i) v[at + i] = static_cast<unsigned char>(x >> (24 - 8 * i));
+}
+uint32_t get32(const std::vector<unsigned char>& v, size_t at) {
+    return (uint32_t(v[at]) << 24) | (uint32_t(v[at + 1]) << 16) | (uint32_t(v[at + 2]) << 8) | v[at + 3];
+}
+
+// A small but complete TrueType font: two empty glyphs, its cmap (format 4) maps only `codepoint` to glyph 1.
+std::vector<unsigned char> tiny_font(uint16_t codepoint) {
+    std::vector<std::pair<const char*, std::vector<unsigned char>>> tables;
+    std::vector<unsigned char> cmap;
+    for (uint32_t x : {0u, 1u, 3u, 1u}) put16(cmap, x);  // version, one record: Microsoft Unicode BMP
+    put32(cmap, 12);
+    for (uint32_t x : {4u, 32u, 0u, 4u, 4u, 1u, 0u}) put16(cmap, x);  // format 4, length, language, two segments
+    for (uint32_t x : {uint32_t(codepoint), 0xFFFFu, 0u, uint32_t(codepoint), 0xFFFFu}) put16(cmap, x);  // ends, starts
+    for (uint32_t x : {(1u - codepoint) & 0xFFFFu, 1u, 0u, 0u}) put16(cmap, x);  // deltas, range offsets
+    tables.push_back({"cmap", cmap});
+    std::vector<unsigned char> head(54, 0);
+    set32(head, 0, 0x00010000);
+    set32(head, 12, 0x5F0F3CF5);
+    head[18] = 0x03;
+    head[19] = 0xE8;  // 1000 units per em; short loca
+    tables.push_back({"head", head});
+    std::vector<unsigned char> hhea(36, 0);
+    set32(hhea, 0, 0x00010000);
+    hhea[4] = 0x03;
+    hhea[5] = 0x20;  // ascender 800
+    hhea[6] = 0xFF;
+    hhea[7] = 0x38;  // descender -200
+    hhea[35] = 2;    // two metrics
+    tables.push_back({"hhea", hhea});
+    std::vector<unsigned char> hmtx;
+    for (uint32_t x : {500u, 0u, 500u, 0u}) put16(hmtx, x);
+    tables.push_back({"hmtx", hmtx});
+    std::vector<unsigned char> maxp;
+    put32(maxp, 0x00005000);
+    put16(maxp, 2);
+    tables.push_back({"maxp", maxp});
+    tables.push_back({"loca", std::vector<unsigned char>(6, 0)});
+    tables.push_back({"glyf", std::vector<unsigned char>(1200, 0)});
+    std::vector<unsigned char> font;
+    put32(font, 0x00010000);
+    for (uint32_t x : {uint32_t(tables.size()), 64u, 2u, 48u}) put16(font, x);
+    size_t at = 12 + 16 * tables.size();
+    std::vector<unsigned char> data;
+    for (const auto& [tag, t] : tables) {
+        for (int i = 0; i < 4; ++i) font.push_back(static_cast<unsigned char>(tag[i]));
+        put32(font, 0);  // checksum (not checked)
+        put32(font, static_cast<uint32_t>(at + data.size()));
+        put32(font, static_cast<uint32_t>(t.size()));
+        data.insert(data.end(), t.begin(), t.end());
+        while (data.size() % 4) data.push_back(0);
+    }
+    font.insert(font.end(), data.begin(), data.end());
+    return font;
+}
+
+// `font` inside a TrueType collection of `version` (its tables moved by the 16 bytes of the collection's header).
+std::vector<unsigned char> collection_of(std::vector<unsigned char> font, uint32_t version) {
+    const uint32_t n = (uint32_t(font[4]) << 8) | font[5];
+    for (uint32_t i = 0; i < n; ++i) set32(font, 12 + 16 * i + 8, get32(font, 12 + 16 * i + 8) + 16);
+    std::vector<unsigned char> ttc = {'t', 't', 'c', 'f'};
+    put32(ttc, version);
+    put32(ttc, 1);
+    put32(ttc, 16);
+    ttc.insert(ttc.end(), font.begin(), font.end());
+    return ttc;
+}
 }  // namespace
+
+TEST_CASE("font check: a font with no glyph in EMF's ranges is refused (ImGui stops on a font with none)") {
+    const std::vector<unsigned char> latin = tiny_font('A');
+    CHECK(font_bytes_ok(latin.data(), latin.size()));  // the same small font with an 'A' is fine
+    const std::vector<unsigned char> cjk = tiny_font(0x4E00);
+    CHECK_FALSE(font_bytes_ok(cjk.data(), cjk.size()));
+    Headless h;
+    Folder d(L"emf_test_fontrange");
+    write_file(d / L"Latin.ttf", latin);
+    write_file(d / L"Cjk.ttf", cjk);
+    ImFontAtlas atlas;
+    FontPlan plan;
+    plan.faces = {{FontRole::Console, d / L"Latin.ttf", 20.0f}, {FontRole::Tabs, d / L"Cjk.ttf", 20.0f},
+                  {FontRole::Hud, d / L"Cjk.ttf", 26.0f}, {FontRole::HudBold, d / L"Latin.ttf", 26.0f}};
+    std::vector<std::string> problems;
+    const OverlayFonts f = build_font_atlas(atlas, plan, &problems);  // never stops at ImGui's "no glyph" assert
+    CHECK(atlas.IsBuilt());
+    REQUIRE(f.console);
+    CHECK(f.console->FindGlyphNoFallback('A') != nullptr);
+    CHECK(problems.size() == 1);  // Cjk.ttf, once for both faces that wanted it
+}
+
+TEST_CASE("font check: a font collection is read as ImGui reads it: versions 1 and 2, not others") {
+    const std::vector<unsigned char> real = bytes_of(source_font(L"alegreya\\Alegreya-Regular.ttf"));
+    const auto v1 = collection_of(real, 0x00010000);
+    CHECK(font_bytes_ok(v1.data(), v1.size()));
+    const auto v2 = collection_of(real, 0x00020000);
+    CHECK(font_bytes_ok(v2.data(), v2.size()));
+    const auto v3 = collection_of(real, 0x00030000);  // stb_truetype finds no font in it: ImGui would stop
+    CHECK_FALSE(font_bytes_ok(v3.data(), v3.size()));
+}
+
+TEST_CASE("font atlas: a build that fails inside ImGui is caught, never a crash") {
+    Headless h;
+    ImFontAtlas atlas;
+    static const ImWchar kBackwards[] = {0x0050, 0x0020, 0};  // ImGui asserts on a range that runs backwards
+    ImFontConfig cfg;
+    cfg.SizePixels = 13.0f;
+    cfg.GlyphRanges = kBackwards;
+    atlas.AddFontDefault(&cfg);
+    CHECK_FALSE(guarded_atlas_build(atlas));
+    atlas.Clear();
+    atlas.AddFontDefault();
+    CHECK(guarded_atlas_build(atlas));
+    CHECK(atlas.IsBuilt());
+}
 
 TEST_CASE("font plan: the base size is the screen height / 54 within 13-40 px; size % scales it to whole pixels") {
     CHECK(base_pixel_size(1080) == doctest::Approx(20.0f));

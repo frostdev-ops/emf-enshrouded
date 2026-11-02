@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <algorithm>
+#include <malloc.h>
 #include <cstdio>
 #include <cstring>
 #include <optional>
@@ -19,12 +20,20 @@
 namespace emf::core {
 namespace {
 
-bool guarded_render(RenderFn render, VkQueue q, const VkPresentInfoKHR* info, VkSemaphore* sem, void* user) {
+bool render_guarded(RenderFn render, VkQueue q, const VkPresentInfoKHR* info, VkSemaphore* sem, void* user,
+                    DWORD* fault) {
     __try {
         return render(q, info, sem, user);
-    } __except (EXCEPTION_EXECUTE_HANDLER) {
+    } __except (*fault = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+
+bool guarded_render(RenderFn render, VkQueue q, const VkPresentInfoKHR* info, VkSemaphore* sem, void* user) {
+    DWORD fault = 0;
+    const bool ok = render_guarded(render, q, info, sem, user, &fault);
+    if (fault == EXCEPTION_STACK_OVERFLOW) _resetstkoflw();  // the guard page back: the next overflow is caught too
+    return ok;
 }
 
 }  // namespace

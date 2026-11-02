@@ -81,6 +81,9 @@ struct OverlayFonts {
     ImFont* hud = nullptr;
     ImFont* hud_bold = nullptr;
 };
+// atlas.Build() under a fault guard: an ImGui assert (EMF's raises an exception) or a fault while building gives false,
+// never a crash; the atlas must then be cleared.
+bool guarded_atlas_build(ImFontAtlas& atlas);
 // Clears `atlas` (between frames only) and adds the plan's faces, one ImFont per distinct file and size, each with
 // kFontRanges; the console's face is the atlas's first font (ImGui's default). A file that cannot be read or is not a
 // font becomes ImGui's built-in font at its size, with a line in *problems. Builds the atlas.
