@@ -946,7 +946,7 @@ try {
         $crates = Get-Content -LiteralPath (Join-Path $pkg "licenses\rust-crates.html") -Raw -Encoding UTF8
         Check (([regex]::Matches($crates, "<h2 ").Count -gt 50) -and ($crates -match "serde") -and ($crates -notmatch "mod-loader ")) "licenses\rust-crates.html lists the crates.io libraries inside emf_content.dll (not EML's own crates)"
         $readmeGpl = Get-Content -LiteralPath (Join-Path $pkg "README.txt") -Raw
-        Check (($readmeGpl -match "emf_content\.dll") -and ($readmeGpl -match [regex]::Escape("emf-enshrouded/tree/v$ver")) -and ($readmeGpl -notmatch "\{VERSION\}")) "README.txt names emf_content.dll's licence and links its source at the tag v$ver"
+        Check (($readmeGpl -match "emf_content\.dll") -and ($readmeGpl -match [regex]::Escape("emf-enshrouded/releases/tag/v$ver")) -and ($readmeGpl -match [regex]::Escape("EMF-$ver-source.zip")) -and ($readmeGpl -notmatch "\{VERSION\}")) "README.txt names emf_content.dll's licence and the release page and file of its complete source (EMF-$ver-source.zip)"
         $ofl = Join-Path $pkg "licenses\Alegreya-OFL.txt"
         Check ((Test-Path -LiteralPath $ofl) -and ((Get-Content -LiteralPath $ofl -Raw) -match "SIL OPEN FONT LICENSE Version 1\.1")) "licenses\Alegreya-OFL.txt is the OFL text"
         Check (-not (Test-Path (Join-Path $pkg "game\EMF.exe"))) "EMF.exe ships in game\emf\, never next to enshrouded.exe"
