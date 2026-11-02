@@ -15,6 +15,8 @@ local PLAYER_ALLY = 11
 --   model_viewer.stats <id>                           Health, DamageMod, Movement, Level storage and scale of one
 --   model_viewer.poke <id> <Component> <field> <v>    writes one field (experiments)
 --   model_viewer.push <id> <metres>                   teleports a creature that far along +x (leash tests)
+--   model_viewer.turn <id> <degrees>                  turns a creature where it stands (the game's teleport with a
+--                                                     yaw), to look at it from a side the camera cannot reach
 --   model_viewer.watch <id>                           records the hits to or from one creature (the first 40) and
 --   model_viewer.hits                                 its death; hits shows them
 emf.emits({"StartGuardingEvent", "AddThreatTargetEvent"})
@@ -207,6 +209,14 @@ emf.command("push", "<id> <metres>: move a creature that far along +x (the game'
 	local x, y, z = world:position(id)
 	if not x then emf.reply("no entity " .. tostring(id)) return end
 	emf.reply(emf.teleport(world, id, x + m, y + 1, z, { ground = true }) and "pushed" or "refused (see the log)")
+end)
+
+emf.command("turn", "<id> <degrees>: turn a creature where it stands (the game's teleport with a yaw)", function(world, args)
+	local id, deg = tonumber(args[1] or ""), tonumber(args[2] or "")
+	if not id or not deg then emf.reply("usage: model_viewer.turn <id> <degrees>") return end
+	local x, y, z = world:position(id)
+	if not x then emf.reply("no entity " .. tostring(id)) return end
+	emf.reply(emf.teleport(world, id, x, y, z, { yaw = deg }) and "turned" or "refused (see the log)")
 end)
 
 emf.command("clear", ": remove every ally and foe model_viewer spawned", function(world, args)
