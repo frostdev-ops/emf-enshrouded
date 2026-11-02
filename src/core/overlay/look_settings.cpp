@@ -178,6 +178,10 @@ LookSettings read_look_settings(const std::function<std::string(const char* sect
     r.number("overlay", "opacity", 30, 100, s.opacity);
     r.colour("overlay", "background", s.background);
     r.colour("overlay", "accent", s.accent);
+    r.colour("overlay", "colour_command", s.colour_command);
+    r.colour("overlay", "colour_reply", s.colour_reply);
+    r.colour("overlay", "colour_error", s.colour_error);
+    r.colour("overlay", "colour_success", s.colour_success);
     return s;
 }
 

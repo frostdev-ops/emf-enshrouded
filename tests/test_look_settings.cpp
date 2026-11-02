@@ -54,7 +54,28 @@ TEST_CASE("look settings: the defaults when nothing is set (game style, serif, w
     CHECK(s.opacity == 80);
     CHECK(s.background == 0x080A0EFFu);
     CHECK(s.accent == 0xC0B074FFu);
+    CHECK(s.colour_command == 0xFFFFFFFFu);  // the console's line colours (today's, console_ui.cpp)
+    CHECK(s.colour_reply == 0xB3BAC2FFu);
+    CHECK(s.colour_error == 0xFF7A73FFu);
+    CHECK(s.colour_success == 0x7DE887FFu);
     CHECK(s == LookSettings{});  // the struct's own defaults are the same
+}
+
+TEST_CASE("look settings: the console's line colours are read; a bad one falls back with a problem line") {
+    std::vector<std::string> problems;
+    const LookSettings s = read({{"overlay.colour_command", "#123456"},
+                                 {"overlay.colour_reply", "#abc"},
+                                 {"overlay.colour_error", "#ff0000"},
+                                 {"overlay.colour_success", "#00ff00"}},
+                                &problems);
+    CHECK(problems.empty());
+    CHECK(s.colour_command == 0x123456FFu);
+    CHECK(s.colour_reply == 0xAABBCCFFu);
+    CHECK(s.colour_error == 0xFF0000FFu);
+    CHECK(s.colour_success == 0x00FF00FFu);
+    const LookSettings bad = read({{"overlay.colour_error", "red"}}, &problems);
+    CHECK(bad.colour_error == 0xFF7A73FFu);
+    CHECK(problems.size() == 1);
 }
 
 TEST_CASE("look settings: every key is read") {

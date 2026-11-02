@@ -40,7 +40,15 @@ struct ConsoleUiState {
     float opacity = 0.80f;  // its background's
     ImVec4 background{0x08 / 255.0f, 0x0A / 255.0f, 0x0E / 255.0f, 1.0f};
     ImFont* tabs_font = nullptr;  // the tab bar and the Mods tab (null: the console's font)
+    // The lines' colours ([overlay] colour_command, _reply, _error, _success).
+    ImVec4 colour_command{1.0f, 1.0f, 1.0f, 1.0f};
+    ImVec4 colour_reply{0xB3 / 255.0f, 0xBA / 255.0f, 0xC2 / 255.0f, 1.0f};
+    ImVec4 colour_error{0xFF / 255.0f, 0x7A / 255.0f, 0x73 / 255.0f, 1.0f};
+    ImVec4 colour_success{0x7D / 255.0f, 0xE8 / 255.0f, 0x87 / 255.0f, 1.0f};
 };
+
+// The colour a line of this kind is drawn in.
+ImVec4 line_colour(const ConsoleUiState& ui, LineKind kind);
 
 // `mods_tab` (optional) draws the Mods tab's content; with it the console shows a tab bar (Console | Mods; Ctrl+Tab
 // switches).

@@ -399,6 +399,10 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
     g_ui.height = static_cast<float>(g_look.height) / 100.0f;
     g_ui.opacity = static_cast<float>(g_look.opacity) / 100.0f;
     g_ui.background = look_colour4(g_look.background);
+    g_ui.colour_command = look_colour4(g_look.colour_command);
+    g_ui.colour_reply = look_colour4(g_look.colour_reply);
+    g_ui.colour_error = look_colour4(g_look.colour_error);
+    g_ui.colour_success = look_colour4(g_look.colour_success);
     g_mouse_speed = config.mouse_speed;
     g_ui.suggest = config.suggest;
     g_ui.suggester.set_rows(config.suggest_rows);

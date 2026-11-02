@@ -41,6 +41,11 @@ struct LookSettings {
     int opacity = 80;                               // the console's background, % (30-100)
     uint32_t background = 0x080A0EFFu;
     uint32_t accent = 0xC0B074FFu;  // tabs, the selection, the scrollbar, the wheel's ring
+    // the console's lines: the commands typed, replies, errors and successes
+    uint32_t colour_command = 0xFFFFFFFFu;
+    uint32_t colour_reply = 0xB3BAC2FFu;
+    uint32_t colour_error = 0xFF7A73FFu;
+    uint32_t colour_success = 0x7DE887FFu;
     bool operator==(const LookSettings&) const = default;
 };
 

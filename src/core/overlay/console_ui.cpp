@@ -14,15 +14,6 @@ namespace {
 
 constexpr size_t kInputCap = 1024;
 
-ImVec4 colour(LineKind k) {
-    switch (k) {
-        case LineKind::Command: return ImVec4(1.00f, 1.00f, 1.00f, 1.0f);
-        case LineKind::Error: return ImVec4(1.00f, 0.48f, 0.45f, 1.0f);
-        case LineKind::Success: return ImVec4(0.49f, 0.91f, 0.53f, 1.0f);
-        default: return ImVec4(0.70f, 0.73f, 0.76f, 1.0f);
-    }
-}
-
 // The suggestions' colours: names light, argument hints a little dimmer, help grey, the argument being typed gold.
 const ImVec4 kSuggestName(0.86f, 0.88f, 0.90f, 1.0f);
 const ImVec4 kSuggestPicked(1.00f, 1.00f, 1.00f, 1.0f);
@@ -214,6 +205,15 @@ int input_callback(ImGuiInputTextCallbackData* d) {
 
 }  // namespace
 
+ImVec4 line_colour(const ConsoleUiState& ui, LineKind kind) {
+    switch (kind) {
+        case LineKind::Command: return ui.colour_command;
+        case LineKind::Error: return ui.colour_error;
+        case LineKind::Success: return ui.colour_success;
+        default: return ui.colour_reply;
+    }
+}
+
 void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSources& sources, ImVec2 display,
                   const std::function<void(const std::string&)>& submit, const std::function<void()>& mods_tab) {
     ui.wants_escape = false;  // set again below while the suggestions show
@@ -283,7 +283,7 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
         const auto lines = model.snapshot(static_cast<size_t>(clipper.DisplayStart),
                                           static_cast<size_t>(clipper.DisplayEnd - clipper.DisplayStart));
         for (const auto& [kind, text] : lines) {
-            ImGui::PushStyleColor(ImGuiCol_Text, colour(kind));
+            ImGui::PushStyleColor(ImGuiCol_Text, line_colour(ui, kind));
             ImGui::TextUnformatted(text.c_str(), text.c_str() + text.size());
             ImGui::PopStyleColor();
         }
