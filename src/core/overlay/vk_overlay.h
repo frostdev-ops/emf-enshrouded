@@ -23,7 +23,9 @@ VkResult present_through(VkQueue queue, const VkPresentInfoKHR* info, bool visib
 
 struct VkOverlayHooks {
     std::function<bool()> visible;                                  // draw this frame?
-    std::function<void(ImGuiIO&, float display_height)> fonts;      // add fonts (once, before the backend starts)
+    // (Re)builds the font atlas for a swapchain this high when it is due (the first frame, a new size); true when it
+    // did, so the backend uploads the new atlas. Called before every frame's NewFrame, never inside a frame.
+    std::function<bool(ImGuiIO&, float display_height)> fonts;
     std::function<void(ImGuiIO&)> before_frame;                     // feed input into ImGui
     std::function<void(ImVec2 display)> build;                      // ImGui calls between NewFrame and Render
     std::function<void()> turned_off;                               // drawing failed: the overlay is off for good

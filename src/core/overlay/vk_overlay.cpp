@@ -367,6 +367,8 @@ bool render(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* signal, vo
 
     ImGuiIO& io = ImGui::GetIO();
     io.DisplaySize = ImVec2(static_cast<float>(r.extent.width), static_cast<float>(r.extent.height));
+    // A swapchain of a new size: the text is sized for it, once, between frames (the atlas again, then its upload).
+    if (g_hooks.fonts && g_hooks.fonts(io, static_cast<float>(r.extent.height))) ImGui_ImplVulkan_CreateFontsTexture();
     LARGE_INTEGER now;
     QueryPerformanceCounter(&now);
     io.DeltaTime = std::clamp(static_cast<float>(now.QuadPart - g_last.QuadPart) / static_cast<float>(g_freq.QuadPart),

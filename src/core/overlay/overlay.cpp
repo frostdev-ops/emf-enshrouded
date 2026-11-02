@@ -9,10 +9,12 @@
 #include <cwchar>
 #include <memory>
 #include <optional>
+#include <set>
 
 #include "console_ui.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
+#include "font_plan.h"
 #include "input_hook.h"
 #include "mods_ui.h"
 #include "submit.h"
@@ -56,6 +58,12 @@ WheelModel g_wheel;  // render thread
 WheelGate g_wheel_gate([](bool on) {
     if (g_router) g_router->set_wheel(on);
 });
+LookSettings g_look;                // [hud] and the look keys of [overlay], read at start
+OverlayFonts g_fonts;               // render thread: the atlas's fonts (new pointers after each rebuild)
+FontRebuild g_font_rebuild;         // render thread
+std::set<std::string> g_font_told;  // render thread: the font problems already in the log
+
+void log_line(const char* s);
 
 // Runs just before a wheel's capture ends: closed while its hold key is still down (Esc, a click), the mod that
 // opened it must not take that key as a new press, so it stays hidden from mods until released.
@@ -93,17 +101,29 @@ std::string utf8(const std::wstring& w) {
     return s;
 }
 
-void setup_fonts(ImGuiIO& io, float height) {
-    const float size = std::clamp(height / 54.0f, 13.0f, 40.0f);
+// The fonts for a swapchain `height` pixels high (render thread, between frames): planned and built when the base size
+// is new (the first frame, a window resize), else nothing. True when the atlas was built again. A font that cannot be
+// used is said once in the log, however often the window changes size.
+bool setup_fonts(ImGuiIO& io, float height) {
+    const int h = static_cast<int>(height);
+    if (!g_font_rebuild.due(base_pixel_size(h))) return false;
     wchar_t windir[MAX_PATH] = {};
     GetWindowsDirectoryW(windir, MAX_PATH);
-    const std::wstring font = std::wstring(windir) + L"\\Fonts\\consola.ttf";
-    if (GetFileAttributesW(font.c_str()) != INVALID_FILE_ATTRIBUTES &&
-        io.Fonts->AddFontFromFileTTF(utf8(font).c_str(), size))
-        return;
-    ImFontConfig cfg;
-    cfg.SizePixels = size;
-    io.Fonts->AddFontDefault(&cfg);
+    const FontPaths paths{g_deps.emf_dir + L"\\fonts", std::wstring(windir) + L"\\Fonts\\consola.ttf"};
+    const FontPlan plan = plan_fonts(g_look, h, paths, [](const std::wstring& f) { return font_file_ok(f); });
+    std::vector<std::string> problems = plan.problems;
+    g_fonts = build_font_atlas(*io.Fonts, plan, &problems);
+    for (const auto& p : problems)
+        if (g_font_told.insert(p).second) log_line(("overlay: " + p).c_str());
+    static bool first = true;
+    if (first) {
+        first = false;
+        char msg[160];
+        std::snprintf(msg, sizeof(msg), "overlay: text at %.0f px (console) and %.0f px (on-screen), %d fonts",
+                      plan.face(FontRole::Console).pixel_size, plan.face(FontRole::Hud).pixel_size, io.Fonts->Fonts.Size);
+        log_line(msg);
+    }
+    return true;
 }
 
 void before_frame(ImGuiIO& io) {
@@ -353,6 +373,7 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
     if (!config.enabled || g_model || !deps.center || !deps.tracker) return false;
     g_deps = std::move(deps);
     for (const auto& p : config.look_problems) log_line(("overlay: emf_core.ini " + p).c_str());
+    g_look = config.look;
     g_mouse_speed = config.mouse_speed;
     g_ui.suggest = config.suggest;
     g_ui.suggester.set_rows(config.suggest_rows);

@@ -8,7 +8,7 @@ licence. Their full licence texts are next to their code in `third_party/`. The 
 |---|---|---|---|
 | [Dear ImGui](https://github.com/ocornut/imgui) (`third_party/imgui`) | the in-game console and Mods tab | MIT | yes, inside `emf_core.dll` |
 | ProggyClean font by Tristan Grimmer (embedded in Dear ImGui's `imgui_draw.cpp`) | ImGui's built-in fallback font | MIT | yes, inside `emf_core.dll` |
-| [stb](https://github.com/nothings/stb) by Sean Barrett: `imstb_truetype.h` 1.26, `imstb_rectpack.h`, `imstb_textedit.h` (bundled with Dear ImGui) | font rasterising, the font atlas, text editing | MIT or public domain (your choice) | yes, inside `emf_core.dll` |
+| [stb](https://github.com/nothings/stb) by Sean Barrett: `imstb_truetype.h` 1.26, `imstb_rectpack.h`, `imstb_textedit.h` (bundled with Dear ImGui) | font rasterising, the font atlas, checking font files, text editing | MIT or public domain (your choice) | yes, inside `emf_core.dll` |
 | [Lua 5.4](https://www.lua.org) (`third_party/lua`) | Lua mods | MIT | yes, inside the `lua` mod |
 | [MinHook](https://github.com/TsudaKageyu/minhook) (`third_party/minhook`), with Hacker Disassembler Engine | function hooks | BSD 2-Clause | yes, inside `emf_core.dll` |
 | [Vulkan-Headers](https://github.com/KhronosGroup/Vulkan-Headers) (`third_party/vulkan-headers`) | the overlay's Vulkan layer (headers only) | Apache-2.0 | headers compiled in |
