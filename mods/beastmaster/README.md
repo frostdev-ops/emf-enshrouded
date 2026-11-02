@@ -30,15 +30,21 @@ everything else works and those beasts are simply not there.
    out at the creature you look at, up to 40 m away; when you look at nothing, at the creature that hit you in the last
    10 s. When a beast's hit leaves a foe at 25 % health or less, you land the killing blow, so the XP and loot are
    yours.
-5. **They stay close.** A beast more than 40 m from you comes back after 3 s; one more than 80 m away comes back at
-   once.
-6. **A beast that falls** rests for 2 minutes at home, and then you can call it again. Its body is gone a second after,
+5. **They stay close.** A beast that chases something more than 45 m from you drops the chase and runs back; one more
+   than 60 m away for 3 s, or 120 m away at once, comes back beside you.
+6. **Modes**, for all your beasts at once: **Mode** on the wheel steps through them, or `/beastmaster mode <mode>`;
+   the line at the bottom left shows it ("Beasts (passive): ...").
+   - **Defending** (the first): they fight what attacks you or them, and what you send them at with Attack.
+   - **Passive:** they ignore fights and keep following you; Attack still sends them at a creature (for 20 s).
+   - **Aggressive:** they also go after hostile creatures within 25 m of you (never wildlife, farm animals, bosses or
+     players).
+7. **A beast that falls** rests for 2 minutes at home, and then you can call it again. Its body is gone a second after,
    so our own beasts never drop loot.
-7. **Dismiss** a beast to send it home: **Dismiss <name>** on the wheel (one for each beast that is out), **Dismiss
+8. **Dismiss** a beast to send it home: **Dismiss <name>** on the wheel (one for each beast that is out), **Dismiss
    all** (with two or more out), or `/beastmaster dismiss <name or number>`; `/beastmaster dismiss` alone sends every
    beast home. A dismissed beast waits at home: call it again whenever you like. Beasts that are out stay out when you
    reload the world, and they come back beside you, free of mana.
-8. **Building:** the game most likely does not let you build or place things next to a creature that runs the enemy
+9. **Building:** the game most likely does not let you build or place things next to a creature that runs the enemy
    AI (that is what its code suggests; not yet seen in game), and your beasts are such creatures. So while you, or
    another player within 20 m of them, hold something to build or place, your beasts that are out **step aside**:
    they leave for a moment and come back beside you, free, a few seconds after the building stops (the first time a
@@ -47,7 +53,7 @@ everything else works and those beasts are simply not there.
    the wheel, `/beastmaster aside` again, calling or taming a beast, or sending the last one home ends it.
    `/beastmaster list` shows them as "aside".
 
-**The wheel (hold F3):** Tame, Feed, Attack, **Come back** while your beasts stepped aside by `/beastmaster aside`,
+**The wheel (hold F3):** Tame, Feed, Attack, **Mode** (steps passive, defending, aggressive), **Come back** while your beasts stepped aside by `/beastmaster aside`,
 **Dismiss <name>** for each beast that is out (and **Dismiss all** with two or more out), then **Call <name>** for up
 to 6 beasts that are at home or resting; a resting one shows its time left. The labels are short so they fit the
 wheel; the mouse wheel turns the page when there are more than 8 items. With **Necromancer** installed too, F3 and F2
@@ -88,6 +94,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster dismiss` (or `dismiss all`) | send every beast that is out home |
 | `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
 | `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while someone builds next to them |
+| `/beastmaster mode [passive, defending or aggressive]` | how all your beasts fight; without a word, the mode now |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
 
@@ -107,7 +114,9 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Taming range (`tame_range_m`) | 8 m | |
 | Baits to tame by feeding (`feed_count`), Feeding window (`feed_window_s`) | 3, 10 s | |
 | Bait for wolves, hounds, boars, sabretooths, bears, aurochs, snakes, the rare snakes (`bait_<kind>`) | see above | an item's debug name (`items meat` in the console) |
-| Beasts come back from (`leash_m`), At once from (`leash_far_m`) | 40 m, 80 m | |
+| Beasts drop a chase at (`chase_m`) | 45 m | they turn from the fight and run back |
+| Beasts come back from (`leash_m`), At once from (`leash_far_m`) | 60 m, 120 m | |
+| Aggressive beasts go at foes within (`aggro_m`) | 25 m | |
 | You get your beasts' kills (`xp_credit`) | on | XP and loot for the owner |
 | Beasts step aside while someone builds next to them (`make_room`) | on | while you, or a player within 20 m of them, hold something to build or place, your beasts leave and come back after |
 | Rare wild bears, aurochs and snakes (`wild_bears`), About every (`wild_bear_minutes`) | on, 30 min | needs their pack |

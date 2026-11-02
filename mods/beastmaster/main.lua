@@ -48,6 +48,7 @@ local pack = pack_mod.new({
 	beasts = function() return beasts end,
 	save = save,
 	on_spawn = spawned,
+	mode = function(account) return beasts:mode(account) end,
 })
 
 -- rare wild bears, aurochs and snakes (with their content packs)
@@ -220,6 +221,39 @@ command("attack", ": your beasts out attack the creature you look at", function(
 	emf.reply(actions.attack(world, player, account))
 end)
 
+-- ---- modes: how all of a player's beasts fight ----
+local MODE_SAYS = {
+	passive = "Your beasts are passive: they ignore fights and follow you (Attack still sends them).",
+	defending = "Your beasts are defending: they fight what attacks you or them.",
+	aggressive = "Your beasts are aggressive: they also go after hostile creatures near you.",
+}
+local NEXT_MODE = { defending = "aggressive", aggressive = "passive", passive = "defending" }
+
+function actions.mode(world, player, account)
+	if not account then return "Your account is not known yet." end
+	local m = NEXT_MODE[beasts:mode(account)]
+	beasts:set_mode(account, m)
+	save()
+	return MODE_SAYS[m]
+end
+
+command("mode", "[passive, defending or aggressive]: how your beasts fight; nothing: the mode now", function(world, args)
+	local _, account = who(world)
+	if not account then
+		emf.reply("Your account is not known yet.")
+		return
+	end
+	local word = args[1] and args[1]:lower()
+	if not word then
+		emf.reply(MODE_SAYS[beasts:mode(account)])
+	elseif not beasts:set_mode(account, word) then
+		emf.reply("A mode is passive, defending or aggressive.")
+	else
+		save()
+		emf.reply(MODE_SAYS[word])
+	end
+end)
+
 command("aside", ": your beasts out step aside (leave for now) or come back; while you build they do it on their own",
 	function(world, args)
 		local player, account = who(world)
@@ -269,6 +303,7 @@ local function wheel_items(world)
 	add("Tame (weakened)", { action = "tame" })
 	add("Feed (bait)", { action = "feed" })
 	add("Attack", { action = "attack" })
+	if account then add("Mode: " .. beasts:mode(account):gsub("^%l", string.upper), { action = "mode" }) end
 	if account and pack:aside_by_command(account) then add("Come back", { action = "come_back" }) end
 	local list = account and beasts:list(account) or {}
 	local out = 0
@@ -345,7 +380,8 @@ local function update_hud(world)
 			parts[#parts + 1] = string.format("%s (rests %d:%02d)", b.name, math.floor(b.rest / 60), math.floor(b.rest % 60))
 		end
 	end
-	emf.hud("out", #parts > 0 and ("Beasts: " .. table.concat(parts, ", ")) or "", "bottom_left")
+	local head = account and string.format("Beasts (%s): ", beasts:mode(account)) or "Beasts: "
+	emf.hud("out", #parts > 0 and (head .. table.concat(parts, ", ")) or "", "bottom_left")
 	publish(world)  -- the shared wheel shows what the other class mod's key opens with
 end
 
