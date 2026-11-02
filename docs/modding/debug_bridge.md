@@ -188,7 +188,8 @@ console and answers with what happened:
 - `world.status`: `none` (main menu), `loading` (a world steps but does not run yet) or `running`. `kind`: `server`
   (a world you host), `client` (someone else's game) or `dedicated`. `slot`: the save slot of the world last loaded or
   saved. `name`: the world's display name (as the menu shows it) in a world this game hosts, read from the game's session
-  (gameApp+0x34FE8, which the main-menu hooks of `load_world` find: so only with those, on build 1273043's game exe;
+  (the game app's session name, which the main-menu hooks of `load_world` find: so only with those, on the game exe of
+  build 1273043 or 1283531;
   null on the dedicated server and in someone else's game).
 - One job on the world's next step reads the world's own values for every waiting request; the rest comes from what
   EMF tracks anyway.
@@ -330,7 +331,8 @@ world runs and the local player is in it:
   the start can still come out of the game's queue. `emf_core.log` says when the guard is off again.
 - The selection is the game's own (the command its character screen posts), so the menu shows that character
   afterwards, as after choosing it by hand.
-- Only on build 1273043's game exe (the offsets inside the game's menu objects are that build's), with the bridge on;
+- Only on the game exes of builds 1273043 and 1283531 (the offsets inside the game's menu objects are known for those;
+  on 1283531 the game app's are 0x20 later, which EMF checks in the game's code at start), with the bridge on;
   not on the dedicated server. `emf_core.log` says `load_world: on` or why it is off.
 - Tested in game: from the main menu the LOCAL test world ran with the LOCAL test character 12 s after the request,
   no clicks; a wrong `expect_name` and the empty world slot 9 were refused with nothing posted.
@@ -359,4 +361,4 @@ $b = ".\scripts\emf_bridge.ps1"
 - The bridge is not part of the mod API. Mods cannot use it, and the API version stays the same.
 - With the bridge on, EMF copies pickup, kill and hit events every step of the world you host (for `events`), and
   the game's swapchain images allow copying. Both cost little, and only while the bridge is on.
-- `load_world` starts LOCAL saves only, offline, from the main menu, on build 1273043's game exe.
+- `load_world` starts LOCAL saves only, offline, from the main menu, on the game exe of build 1273043 or 1283531.

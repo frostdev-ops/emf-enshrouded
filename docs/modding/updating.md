@@ -75,8 +75,9 @@ missing". EMF 0.3.5 knows the new game and dedicated server exes. Nothing to cha
 - **Patterns:** if your mod's patterns hold world offsets, note that every offset of the world after its ECS program
   table moved by +0x1C00 (the entity storage from `world+0xE15DC0` to `+0xE179C0`). `emf_sigcheck --patterns` shows
   whether yours still match once; `sim_rate` and `loot_scale` do.
-- Attributes, damage and teleport run on 1283531 (their game functions are unchanged). `load_world` of the debug bridge
-  and the save backups' slot names stay on 1273043's game exe for now.
+- Attributes, damage and teleport run on 1283531 (their game functions are unchanged), and so do `load_world` of the
+  debug bridge and the save backups' slot names (save-info.json): the game app's fields moved by 0x20, and EMF checks
+  that against the game's own code at start.
 
 ## Lua 1.9 (Necromancer): what is new
 
