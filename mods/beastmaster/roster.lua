@@ -1,12 +1,29 @@
--- Every player's collection of tamed beasts, kept with the world (one line per beast):
+-- Every player's collection of tamed beasts and their mode, kept with the world (one line per beast, one per mode):
 --   b <account> <species> <rest seconds left> <out 0|1> <name>
--- account is world:account's text ("0x" + 16 hex digits); the name is last and may hold spaces.
+--   m <account> <passive|defending|aggressive>
+-- account is world:account's text ("0x" + 16 hex digits); the name is last and may hold spaces. A player without an m
+-- line is defending.
 local M = {}
 local R = {}
 R.__index = R
 
+M.MODES = { "passive", "defending", "aggressive" }
+local MODE = { passive = true, defending = true, aggressive = true }
+
 function M.new()
-	return setmetatable({ by = {} }, R)
+	return setmetatable({ by = {}, modes = {} }, R)
+end
+
+-- How a player's beasts fight: passive, defending (the first) or aggressive.
+function R:mode(account)
+	return self.modes[account] or "defending"
+end
+
+-- Sets it; false for a word that is not a mode.
+function R:set_mode(account, mode)
+	if not MODE[mode] then return false end
+	self.modes[account] = mode ~= "defending" and mode or nil
+	return true
 end
 
 function R:list(account)
@@ -67,6 +84,10 @@ end
 
 function R:serialize()
 	local lines = {}
+	local moded = {}
+	for account in pairs(self.modes) do moded[#moded + 1] = account end
+	table.sort(moded)
+	for _, account in ipairs(moded) do lines[#lines + 1] = string.format("m %s %s", account, self.modes[account]) end
 	for _, account in ipairs(self:accounts()) do
 		for _, b in ipairs(self.by[account]) do
 			lines[#lines + 1] = string.format("b %s %s %d %d %s", account, b.species, math.max(0, math.ceil(b.rest)),
@@ -83,6 +104,8 @@ local RETIRED = { panther = "sabretooth" }
 function M.parse(text)
 	local r = M.new()
 	for line in (text or ""):gmatch("[^\r\n]+") do
+		local m_account, mode = line:match("^m (%S+) (%S+)$")
+		if m_account then r:set_mode(m_account, mode) end
 		local account, species, rest, out, name = line:match("^b (%S+) (%S+) (%d+) ([01]) (.+)$")
 		if account then
 			local list = r.by[account] or {}

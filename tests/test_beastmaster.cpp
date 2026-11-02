@@ -86,6 +86,7 @@ struct BeastRig : ModRig {
 };
 constexpr int kWildBeast = 6, kPlayerAlly = 11;
 constexpr uint32_t kDogBait = 0x4d0a0001;
+constexpr uint32_t kLeanMeat = 0x4d0a0002;  // the wolves' bait
 }  // namespace
 
 TEST_CASE("beastmaster: the roster names beasts uniquely, holds 8 per player, and comes back from the world's data") {
@@ -183,9 +184,26 @@ TEST_CASE("beastmaster: the channel breaks when you walk away (more than 8 m) or
     CHECK(b.reply("beastmaster.list").find("no beasts") != std::string::npos);
 }
 
+TEST_CASE("beastmaster: each beast's bait suits it and when you meet it: lean meat from level 1, the game's animal baits later") {
+    BeastRig b;
+    const std::map<std::string, std::string> want = {
+        {"wolf", "Food_T1_raw_bad_meat_LeanMeat"},  // wolves are there from level 1: goats, hares and rats drop it
+        {"boar", "Food_T1_raw_bad_meat_LeanMeat"},
+        {"snake", "Food_T1_raw_bad_meat_LeanMeat"},
+        {"hound", "Food_T2_Dog_Bait"},
+        {"sabretooth", "Food_T2_Cat_Bait"},
+        {"bear", "Food_T1_raw_fruit_Red_Berries"},
+        {"aurochs", "Food_T1_Goat_Bait"},
+        {"crimson_snake", "Food_T2_raw_bad_meat_Game"},
+        {"golden_snake", "Food_T3_Turkey_Bait"},
+        {"albino_snake", "Food_T5_Yak_Bait"},  // the rarest takes the hardest bait
+    };
+    for (const auto& [kind, item] : want) CHECK_MESSAGE(b.r.fake.settings["beastmaster.bait_" + kind] == item, kind);
+}
+
 TEST_CASE("beastmaster: a healthy beast is not tamed by defeat; with 3 baits it is tamed by feeding") {
     BeastRig b;
-    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    b.r.fake.item_names[kLeanMeat] = "Food_T1_raw_bad_meat_LeanMeat";
     b.look(1, 0, 10.5, 0, 0);
     b.beast(50, kWolfGraph, 0, 5, kWildBeast, 100, 100);
     CHECK(b.reply("beastmaster.tame").find("too strong") != std::string::npos);
@@ -193,7 +211,7 @@ TEST_CASE("beastmaster: a healthy beast is not tamed by defeat; with 3 baits it 
         b.reply("beastmaster.feed");
         REQUIRE(b.r.fake.takes.size() == static_cast<size_t>(i + 1));
         const EmfItemsRequest t = b.r.fake.takes.back();
-        CHECK(t.item == kDogBait);
+        CHECK(t.item == kLeanMeat);
         CHECK(t.count == 1u);
         CHECK(t.entity == 1u);
         t.cb(kServer, t.entity, t.item, t.count, 1, t.user);  // one bait was taken
@@ -350,10 +368,13 @@ void wolf_out(BeastRig& b) {
 }
 }  // namespace
 
-TEST_CASE("beastmaster: a beast 50 m away for 3 s, or 90 m away at once, is teleported beside its owner") {
+TEST_CASE("beastmaster: a beast 70 m away for 3 s, or 130 m away at once, is teleported beside its owner") {
     BeastRig b;
     wolf_out(b);
-    place(b.r.fake, 1234, 50, 10, 0);
+    place(b.r.fake, 1234, 50, 10, 0);  // within 60 m: never
+    b.seconds(4);
+    CHECK(teleports_of(b.r.fake, 1234) == 0);
+    place(b.r.fake, 1234, 70, 10, 0);
     b.seconds(1);
     CHECK(teleports_of(b.r.fake, 1234) == 0);  // not yet: 3 s
     b.seconds(3);
@@ -364,7 +385,7 @@ TEST_CASE("beastmaster: a beast 50 m away for 3 s, or 90 m away at once, is tele
     place(b.r.fake, 1234, 2, 10, 0);  // it arrived
     b.seconds(4);
     const size_t before = b.r.fake.teleports.size();
-    place(b.r.fake, 1234, 92, 10, 0);  // far at once
+    place(b.r.fake, 1234, 130, 10, 0);  // far at once
     b.seconds(1);
     CHECK(b.r.fake.teleports.size() == before + 1);
 }
@@ -448,6 +469,162 @@ TEST_CASE("beastmaster: the wheel lists the actions and up to 6 beasts to call; 
     CHECK(guid_text(b.r.fake.spawns[0].guid) == kWolfTemplate);
     CHECK(b.noted("Wolf the wolf comes"));
     CHECK(b.hud("out").find("Wolf (out)") != std::string::npos);
+}
+
+// ---- modes: passive, defending (the first), aggressive; one for all of a player's beasts ----
+namespace {
+// A creature at (x, 10, z): faction, alive (100 of 100).
+void creature(BeastRig& b, uint32_t id, double x, double z, int faction) {
+    place(b.r.fake, id, x, 10, z);
+    component<ecs::Faction>(b.r.fake, id).faction = static_cast<emf::gen::FactionType>(faction);
+    b.r.fake.attrs[{id, EMF_ATTR_HEALTH}] = 100;
+    b.r.fake.attrs[{id, EMF_ATTR_MAX_HEALTH}] = 100;
+    add_entity(b.r.fake, id);
+}
+constexpr int kVukahFoe = 3, kSkeletonFoe = 10, kWildlifeAnimal = 5, kFarmAnimal = 12;
+}  // namespace
+
+TEST_CASE("beastmaster: mode is defending at first; /beastmaster mode sets passive, defending or aggressive, kept with the world") {
+    BeastRig b;
+    CHECK(b.reply("beastmaster.mode").find("defending") != std::string::npos);
+    CHECK(b.reply("beastmaster.mode aggressive").find("aggressive") != std::string::npos);
+    CHECK(b.reply("beastmaster.mode").find("aggressive") != std::string::npos);
+    CHECK(b.reply("beastmaster.mode sleepy").find("passive, defending or aggressive") != std::string::npos);
+    CHECK(b.reply("beastmaster.mode").find("aggressive") != std::string::npos);  // unchanged
+    CHECK(b.reply("beastmaster.mode Passive").find("passive") != std::string::npos);
+    CHECK(b.reply("beastmaster.mode", 2, 0xBB).find("defending") != std::string::npos);  // each player their own
+    b.seconds(2);
+    CHECK(b.saved().find("m 0x00000000000000aa passive") != std::string::npos);
+    // the same world loads again: the mode comes back with the beasts
+    write(b.data, "m 0x00000000000000aa aggressive\nb 0x00000000000000aa wolf 0 0 Fang\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.reply("beastmaster.mode").find("aggressive") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("Fang") != std::string::npos);
+}
+
+TEST_CASE("beastmaster: the wheel's Mode item steps defending, aggressive, passive; the line at the bottom left names it") {
+    BeastRig b;
+    wolf_out(b);
+    b.seconds(2);
+    CHECK(b.hud("out").find("Beasts (defending): Wolf (out)") != std::string::npos);
+    for (const char* next : {"aggressive", "passive", "defending"}) {
+        CAPTURE(next);
+        b.r.fake.wheels.clear();
+        press(b, VK_F3);
+        REQUIRE(b.r.fake.wheels.size() == 1);
+        const auto w = b.r.fake.wheels[0];
+        const int mode = index_of(w.items, "Mode: ");
+        REQUIRE(mode >= 0);
+        w.cb(kClient, mode, w.user);
+        b.seconds(2);
+        CHECK(b.noted(std::string("Your beasts are ") + next));
+        CHECK(b.hud("out").find(std::string("Beasts (") + next + "): Wolf (out)") != std::string::npos);
+    }
+}
+
+TEST_CASE("beastmaster: aggressive beasts go at the nearest hostile creature within 25 m of their owner") {
+    BeastRig b;
+    wolf_out(b);
+    creature(b, 70, 0, 20, kSkeletonFoe);    // 20 m from the owner at (0, 10, 0)
+    creature(b, 71, 0, 12, kVukahFoe);       // 12 m: the nearest foe
+    creature(b, 72, 3, 3, kFarmAnimal);      // a farm animal: never
+    creature(b, 73, -3, 3, kWildlifeAnimal); // wildlife (a goat, a hare): never
+    creature(b, 74, 4, 0, 11);               // another ally: never
+    creature(b, 75, 0, 40, kSkeletonFoe);    // beyond 25 m: not yet
+    b.seconds(2);
+    CHECK(attacks(b).empty());               // defending: they go only at what attacks you or them
+    b.reply("beastmaster.mode aggressive");
+    b.seconds(2);
+    auto a = attacks(b);
+    REQUIRE(!a.empty());
+    CHECK(a.back() == std::make_pair(1234u, 71u));
+    for (const auto& [attacker, target] : a) CHECK((target == 70u || target == 71u));
+    b.r.fake.attrs[{71, EMF_ATTR_HEALTH}] = 0;  // dead: the next nearest
+    b.seconds(3);
+    CHECK(attacks(b).back() == std::make_pair(1234u, 70u));
+    b.reply("beastmaster.mode passive");
+    const size_t before = attacks(b).size();
+    b.seconds(3);
+    CHECK(attacks(b).size() == before);      // passive: none
+}
+
+TEST_CASE("beastmaster: aggressive beasts leave bosses and players alone") {
+    BeastRig b;
+    wolf_out(b);
+    creature(b, 80, 0, 10, kSkeletonFoe);
+    component<ecs::BossHealthBar>(b.r.fake, 80);  // a boss
+    b.reply("beastmaster.mode aggressive");
+    b.seconds(3);
+    CHECK(attacks(b).empty());
+}
+
+namespace {
+// What the game's AI of `id` fights: an alarmed aggro target and a chosen target, both `foe`.
+void fighting(BeastRig& b, uint32_t id, uint32_t foe) {
+    auto& a = component<ecs::DynamicAggro>(b.r.fake, id);
+    a.targets[0].state = ecs::AggroTargetState::Alarmed;
+    a.targets[0].aggro = 50.0f;
+    a.targets[0].entityId.id = foe;
+    component<ecs::SelectedTargets>(b.r.fake, id).targets[0].targetEntityId.id = foe;
+}
+// A component as it is now (component() makes a fresh one).
+template <class T>
+const T& now_of(BeastRig& b, uint32_t id) {
+    return *reinterpret_cast<const T*>(b.r.fake.components.at({T::kHash, id}).data());
+}
+bool still_fighting(BeastRig& b, uint32_t id) {
+    const auto& a = now_of<ecs::DynamicAggro>(b, id);
+    return a.targets[0].state != ecs::AggroTargetState::Unknown || a.targets[0].aggro != 0.0f ||
+           now_of<ecs::SelectedTargets>(b, id).targets[0].targetEntityId.id != 0;
+}
+}  // namespace
+
+TEST_CASE("beastmaster: passive beasts' aggro and chosen targets are cleared every step; defending ones are left to fight") {
+    BeastRig b;
+    wolf_out(b);
+    creature(b, 70, 0, 10, kSkeletonFoe);
+    fighting(b, 1234, 70);
+    b.seconds(2);
+    CHECK(still_fighting(b, 1234));  // defending: it fights
+    b.reply("beastmaster.mode passive");
+    b.seconds(1);
+    CHECK_FALSE(still_fighting(b, 1234));
+    fighting(b, 1234, 70);           // the game picks it again: cleared again
+    b.seconds(1);
+    CHECK_FALSE(still_fighting(b, 1234));
+}
+
+TEST_CASE("beastmaster: passive beasts still go where Attack sends them, for 20 s") {
+    BeastRig b;
+    wolf_out(b);
+    b.reply("beastmaster.mode passive");
+    creature(b, 70, 0, 10, kSkeletonFoe);
+    b.look(1, 0, 10.5, 0, 0);        // looking at it
+    REQUIRE(b.reply("beastmaster.attack").find("attack") != std::string::npos);
+    fighting(b, 1234, 70);
+    b.seconds(5);
+    CHECK(still_fighting(b, 1234));  // sent: left to fight
+    b.seconds(16);
+    CHECK_FALSE(still_fighting(b, 1234));  // 20 s on: passive again
+}
+
+TEST_CASE("beastmaster: a beast more than 45 m from its owner drops its chase and is told to guard them again, in any mode") {
+    BeastRig b;
+    wolf_out(b);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 1234).guardEntityId.id = 1;  // it guards its owner
+    creature(b, 70, 0, 60, kSkeletonFoe);
+    place(b.r.fake, 1234, 0, 10, 40);  // chasing, 40 m away: still within
+    fighting(b, 1234, 70);
+    b.seconds(2);
+    CHECK(still_fighting(b, 1234));
+    const size_t guards_before = b.guards().size();
+    place(b.r.fake, 1234, 0, 10, 50);  // 50 m: beyond 45
+    b.seconds(1);
+    CHECK_FALSE(still_fighting(b, 1234));
+    CHECK(b.guards().size() > guards_before);  // told to come back to its owner
+    CHECK(teleports_of(b.r.fake, 1234) == 0);  // it runs back: within 60 m it is not teleported
 }
 
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
@@ -605,7 +782,7 @@ TEST_CASE("beastmaster: /beastmaster <word> in the chat runs the players' comman
 
 TEST_CASE("beastmaster: with nothing under the crosshair, tame takes the nearest weakened beast within 8 m and feed the nearest beast") {
     BeastRig b;
-    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    b.r.fake.item_names[kLeanMeat] = "Food_T1_raw_bad_meat_LeanMeat";
     b.look(1, 0, 10.5, 0, 180);                              // looking away from them all (-z)
     b.beast(50, kWolfGraph, 3, 1, kWildBeast, 100, 100);    // beside you, healthy
     b.beast(51, kWolfGraph, -4, 2, kWildBeast, 20, 100);    // beside you, beaten down
@@ -713,7 +890,7 @@ TEST_CASE("beastmaster: no XP credit (no killing blow) on bosses, mini-bosses or
 
 TEST_CASE("beastmaster: a second tame or feed during a channel turns the first calmed beast wild again") {
     BeastRig b;
-    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    b.r.fake.item_names[kLeanMeat] = "Food_T1_raw_bad_meat_LeanMeat";
     b.look(1, 0, 10.5, 0, 0);
     b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);   // under the crosshair
     b.beast(51, kWolfGraph, 3, -2, kWildBeast, 20, 100);  // beside you
@@ -998,8 +1175,8 @@ TEST_CASE("beastmaster: the rare snakes are their own graphs: tamed with 3x, 4x 
     CHECK(b.reply(std::string("beastmaster.species ") + kGoldenGraph + " 6 1.25") == "golden_snake");
     CHECK(b.reply(std::string("beastmaster.species ") + kAlbinoGraph + " 6 1.35") == "albino_snake");
     CHECK(b.r.fake.settings["beastmaster.bait_crimson_snake"] == "Food_T2_raw_bad_meat_Game");
-    CHECK(b.r.fake.settings["beastmaster.bait_golden_snake"] == "Food_T2_raw_bad_meat_Game");
-    CHECK(b.r.fake.settings["beastmaster.bait_albino_snake"] == "Food_T2_Dog_Bait");
+    CHECK(b.r.fake.settings["beastmaster.bait_golden_snake"] == "Food_T3_Turkey_Bait");
+    CHECK(b.r.fake.settings["beastmaster.bait_albino_snake"] == "Food_T5_Yak_Bait");
     b.beast(50, kAlbinoGraph, 0, 5, kWildBeast, 20, 100);
     component<ecs::ScaleComponent>(b.r.fake, 50).uniformScale = 1.35f;
     b.look(1, 0, 10.5, 0, 0);
@@ -1245,7 +1422,7 @@ TEST_CASE("beastmaster: a beast that still runs off during the taming is put bac
 
 TEST_CASE("beastmaster: feeding holds the beast too, and lets it go when the feeding ends") {
     BeastRig b;
-    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    b.r.fake.item_names[kLeanMeat] = "Food_T1_raw_bad_meat_LeanMeat";
     b.beast(50, kWolfGraph, 0, 5, kWildBeast, 100, 100);
     set_move_mul(b.r.fake, 50, 1.0f);
     b.look(1, 0, 10.5, 0, 0);
@@ -1267,7 +1444,7 @@ TEST_CASE("beastmaster: a feed with an unknown bait name leaves the beast free t
 
 TEST_CASE("beastmaster: a beast in one player's taming cannot be fed or tamed by another, and is let go once") {
     BeastRig b;
-    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    b.r.fake.item_names[kLeanMeat] = "Food_T1_raw_bad_meat_LeanMeat";
     b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);
     set_move_mul(b.r.fake, 50, 1.0f);
     b.look(1, 0, 10.5, 0, 0);

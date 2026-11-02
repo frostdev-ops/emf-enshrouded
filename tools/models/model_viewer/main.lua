@@ -19,15 +19,44 @@ local PLAYER_ALLY = 11
 --                                                     yaw), to look at it from a side the camera cannot reach
 --   model_viewer.watch <id>                           records the hits to or from one creature (the first 40) and
 --   model_viewer.hits                                 its death; hits shows them
+--   model_viewer.calm <id> [off]                      clears a creature's aggro and chosen targets every step (for a
+--                                                     passive mode: does it stop fighting and keep following)
 emf.emits({"StartGuardingEvent", "AddThreatTargetEvent"})
 
 local spawned = {}
 local foes = {}
 local god = false
 local session = emf.session()
+local calmed = {}  -- entity id -> true: its aggro and chosen targets cleared every step
+
+-- Clears what a creature's AI fights: every aggro target's state and aggro, every chosen target.
+local function calm(world, id)
+	local a = world:get("DynamicAggro", id)
+	if a and a.targets then
+		for i = 1, #a.targets do
+			local t = a.targets[i]
+			if t.state ~= 0 then t.state = 0 end
+			if t.aggro ~= 0 then t.aggro = 0 end
+		end
+	end
+	local s = world:get("SelectedTargets", id)
+	if s and s.targets then
+		for i = 1, #s.targets do
+			local t = s.targets[i]
+			if t.targetEntityId ~= 0 then
+				t.targetEntityId = 0
+				t.targetRootEntityId = 0
+			end
+		end
+	end
+end
 
 emf.on_tick(function(world)
-	if not god or not world:is_server() then return end
+	if not world:is_server() then return end
+	for id in pairs(calmed) do
+		if world:position(id) then calm(world, id) else calmed[id] = nil end
+	end
+	if not god then return end
 	local player = emf.local_player()
 	if not player or player == 0 then return end
 	local cur, max = emf.health(world, player)
@@ -209,6 +238,14 @@ emf.command("push", "<id> <metres>: move a creature that far along +x (the game'
 	local x, y, z = world:position(id)
 	if not x then emf.reply("no entity " .. tostring(id)) return end
 	emf.reply(emf.teleport(world, id, x + m, y + 1, z, { ground = true }) and "pushed" or "refused (see the log)")
+end)
+
+emf.command("calm", "<id> [off]: clear a creature's aggro and chosen targets every step (passive tests)", function(world, args)
+	local id = tonumber(args[1] or "")
+	if not id then emf.reply("usage: model_viewer.calm <id> [off]") return end
+	if not world:position(id) then emf.reply("no entity " .. tostring(id)) return end
+	calmed[id] = args[2] ~= "off" or nil
+	emf.reply(string.format("%d: %s", id, calmed[id] and "calmed every step" or "left alone"))
 end)
 
 emf.command("turn", "<id> <degrees>: turn a creature where it stands (the game's teleport with a yaw)", function(world, args)

@@ -13,6 +13,11 @@ P.__index = P
 
 local PLAYER_ALLY = 11
 local PLAYER_SIDE = { [7] = true, [8] = true, [PLAYER_ALLY] = true }  -- Player, AutomatedPlayer, PlayerAlly
+-- The factions aggressive beasts go after: Fogger, Vukah, Scavenger, WildBeast, Skeleton, Cyclops, Drak, Ancients (never
+-- wildlife or farm animals: goats and hares, a player's animals)
+local HOSTILE = { [2] = true, [3] = true, [4] = true, [6] = true, [10] = true, [13] = true, [14] = true, [15] = true }
+local SENT_S = 20       -- a passive beast that Attack sent at a creature fights it this long
+local RECALL_S = 3      -- a beast that dropped a chase fights nothing this long while it comes back
 local STRAY_CHECKS = 3  -- a beast that guards someone else this many checks (seconds) in a row is not ours any more
 local REFUSALS = 3      -- a pack beast's call-back refused this many checks in a row: its pack is not in this game
 
@@ -36,6 +41,8 @@ function P:reset()
 	self.credited = {}   -- foes whose killing blow went to an owner already
 	self.strays = {}     -- entity id -> checks in a row it guarded someone else
 	self.refused = {}    -- beast -> checks in a row the game refused to bring it back
+	self.sent = {}       -- entity id -> until when Attack's order holds (a passive beast fights it until then)
+	self.recall = {}     -- entity id -> until when a beast that dropped a chase fights nothing
 	self.aside:reset()
 end
 
@@ -50,6 +57,29 @@ local function no_pack(sp)
 		sp.plural or (sp.id .. "s"))
 end
 local INSTALL = "Install EML first, then the packs, and restart the game."
+
+-- Clears what a beast's AI fights (every aggro target and every chosen target), so it turns from a fight: the game
+-- picks targets again from what it senses and what hits it, so a passive beast is cleared every step.
+local function calm(world, id)
+	local a = world:get("DynamicAggro", id)
+	if a and a.targets then
+		for i = 1, #a.targets do
+			local t = a.targets[i]
+			if t.state ~= 0 then t.state = 0 end
+			if t.aggro ~= 0 then t.aggro = 0 end
+		end
+	end
+	local s = world:get("SelectedTargets", id)
+	if s and s.targets then
+		for i = 1, #s.targets do
+			local t = s.targets[i]
+			if t.targetEntityId ~= 0 then
+				t.targetEntityId = 0
+				t.targetRootEntityId = 0
+			end
+		end
+	end
+end
 
 -- Still our beast: there, alive, and an ally.
 local function ours(world, id)
@@ -198,7 +228,10 @@ end
 function P:dismiss(world, account, beast)
 	if not beast.out then return beast.name .. " is not out." end
 	if beast.entity and ours(world, beast.entity) then emf.destroy(world, beast.entity) end
-	if beast.entity then self.ids[beast.entity] = nil end
+	if beast.entity then
+		self.ids[beast.entity] = nil
+		self.sent[beast.entity], self.recall[beast.entity] = nil, nil
+	end
 	beast.entity = nil
 	beast.out = false
 	if self:out_count(account) == 0 then self.aside:release(account) end  -- none left to step aside
@@ -209,14 +242,43 @@ end
 -- beastmaster.attack: every beast of `account` that is out attacks `target`.
 function P:attack(world, account, target)
 	local n = 0
+	local now = self.env.now(world)
 	for _, b in ipairs(self.env.beasts():list(account)) do
 		if b.out and b.entity and ours(world, b.entity) then
+			self.sent[b.entity] = now + SENT_S
 			emf.emit("server", "AddThreatTargetEvent",
 				{ attackerId = b.entity, targetId = target, threatValue = 1000, threatPoolId = 0 })
 			n = n + 1
 		end
 	end
 	return n
+end
+
+-- The nearest living hostile creature (HOSTILE) within `range` metres of `owner`, never a boss or a player; nil when
+-- there is none.
+local function nearest_foe(world, owner, range)
+	local ox, oy, oz = world:position(owner)
+	if not ox then return nil end
+	local best, best_d
+	for _, id in ipairs(world:entities()) do
+		local f = world:get("Faction", id)
+		if f and HOSTILE[f.faction] and not world:get("PlayerState", id) then
+			local x, y, z = world:position(id)
+			local d = x and math.sqrt((x - ox) ^ 2 + (y - oy) ^ 2 + (z - oz) ^ 2)
+			if d and d <= range and (not best_d or d < best_d) and not world:get("Boss", id)
+				and not world:get("BossHealthBar", id) then
+				local cur = emf.health(world, id)
+				if cur and cur > 0 then best, best_d = id, d end
+			end
+		end
+	end
+	return best
+end
+
+-- Aggressive beasts: every beast of `account` that is out goes at the nearest hostile creature near its owner.
+function P:hunt(world, account, owner)
+	local foe = nearest_foe(world, owner, self.env.setting("aggro_m"))
+	if foe then self:attack(world, account, foe) end
 end
 
 -- XP credit: when our beast's hit leaves a foe at or under 25 % health, its owner lands the killing blow (a real game
@@ -240,6 +302,7 @@ end
 
 function P:on_died(id)
 	self.credited[id] = nil
+	self.sent[id], self.recall[id] = nil, nil
 	local e = self.ids[id]
 	if not e then return end
 	self.ids[id] = nil
@@ -259,6 +322,12 @@ function P:leash(world, owner, b, now)
 	if not ox or not bx then return end
 	local d = math.sqrt((ox - bx) ^ 2 + (oy - by) ^ 2 + (oz - bz) ^ 2)
 	local s = self.env.setting
+	-- beyond chase_m it drops its chase and runs back: it fights nothing for RECALL_S and guards its owner again
+	if d > s("chase_m") and d <= s("leash_m") and now >= (self.recall[b.entity] or 0) then
+		self.recall[b.entity] = now + RECALL_S
+		calm(world, b.entity)
+		emf.emit("server", "StartGuardingEvent", { guardingEntityId = b.entity, guardedEntityId = owner })
+	end
 	if d <= s("leash_m") then
 		self.far[b.entity] = nil
 		return
@@ -325,6 +394,11 @@ function P:step(world)
 			-- no loot from our own beasts; only while it is still a body (the game may have given the id away)
 			if world:position(id) and (not cur or cur <= 0) then emf.destroy(world, id) end
 		end
+	end
+	-- every step: passive beasts (unless Attack sent them) and beasts coming back from a chase fight nothing
+	for id, e in pairs(self.ids) do
+		local passive = self.env.mode and self.env.mode(e.account) == "passive" and now >= (self.sent[id] or 0)
+		if passive or now < (self.recall[id] or 0) then calm(world, id) end
 	end
 	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now
 	if now < self.next_check then return end
@@ -395,6 +469,9 @@ function P:step(world)
 					end
 				end
 			end
+		end
+		if owner and not away and self.env.mode and self.env.mode(account) == "aggressive" and self:out_count(account) > 0 then
+			self:hunt(world, account, owner)
 		end
 		if stepped and why == "build" and self.aside:first(account, why) then
 			self.env.tell(world, owner, "Your beasts step aside while you build (the game most likely blocks building "
