@@ -73,6 +73,54 @@ M.list = {
 local by_id = {}
 for _, s in ipairs(M.list) do by_id[s.id] = s end
 
+-- More beasts from species_extra.lua beside this file, when there is one: it returns a list of entries like the ones
+-- above (a creature pack that cannot be shared, a modder's own creature). Each needs id, name, template and graph
+-- (GUID text); bait: the item it is fed (the beasts above have settings for theirs). An entry without those, or with
+-- an id that is taken, is skipped; the skips, what was added and a file that does not load are logged.
+local NEEDED = { "id", "name", "template", "graph" }
+
+local function why_not(s)
+	if type(s) ~= "table" then return "not a table" end
+	for _, key in ipairs(NEEDED) do
+		if type(s[key]) ~= "string" or s[key] == "" then return "it has no " .. key end
+	end
+	if by_id[s.id:lower()] then return "the id " .. s.id .. " is taken" end
+	return nil
+end
+
+local function add_extra()
+	local ok, extra = pcall(require, "species_extra")
+	if not ok then
+		if not tostring(extra):find("module 'species_extra' not found", 1, true) then
+			emf.log("species_extra.lua did not load: " .. tostring(extra))
+		end
+		return
+	end
+	if type(extra) ~= "table" then
+		emf.log("species_extra.lua gave no list of beasts")
+		return
+	end
+	local added = {}
+	for i, s in ipairs(extra) do
+		local why = why_not(s)
+		if why then
+			local named = type(s) == "table" and type(s.id) == "string" and s.id ~= "" and " (" .. s.id .. ")" or ""
+			emf.log(string.format("species_extra.lua: entry %d%s skipped: %s", i, named, why))
+		else
+			s.id, s.graph = s.id:lower(), s.graph:lower()
+			if type(s.also) == "string" then s.also = s.also:lower() end
+			M.list[#M.list + 1] = s
+			by_id[s.id] = s
+			added[#added + 1] = s.id
+		end
+	end
+	if #added > 0 then
+		emf.log(string.format("species_extra.lua: %d beast%s added (%s)", #added, #added == 1 and "" or "s",
+			table.concat(added, ", ")))
+	end
+end
+add_extra()
+
 -- How a text names a kind (a species or its id): "albino snake", its name in lower case.
 function M.word(sp)
 	if type(sp) == "string" then sp = by_id[sp] or { name = sp } end

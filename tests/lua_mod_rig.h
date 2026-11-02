@@ -165,9 +165,12 @@ struct ModRig {
         for (const auto& d : others_data) DeleteFileW(d.c_str());
     }
     // Copies the shipped mod `mid` into the mods folder and lists it as a script mod, its settings at their defaults.
+    // The folder is emptied first: a file an earlier test of this run added there (a species_extra.lua) must not load.
     void add_mod(const std::string& mid) {
         const std::wstring w(mid.begin(), mid.end());
         const std::wstring to = r.dir + L"\\" + w;
+        std::error_code gone;
+        std::filesystem::remove_all(to, gone);
         CreateDirectoryW(to.c_str(), nullptr);
         const std::filesystem::path src = std::filesystem::path(EMF_SOURCE_DIR) / "mods" / mid;
         for (const auto& e : std::filesystem::directory_iterator(src))
