@@ -85,18 +85,21 @@ struct ContentGame : TempGame {
     loader::BaseChoice base() const {
         return loader::choose_base(loader::read_base_file(at(L"enshrouded.kfc")), loader::read_base_file(at(L"enshrouded.kfc.bak")));
     }
-    std::string fingerprint() const {
+    // `spelled`: the game folder's path as the loader got it ("" = as this test has it)
+    std::string fingerprint(const std::wstring& spelled = L"") const {
+        const std::wstring d = spelled.empty() ? dir : spelled;
         return loader::content_fingerprint(loader::collect_fingerprint_input(
-            dir, "enshrouded", base(), loader::scan_eml_mods(at(L"mods")).usable, at(L"emf\\emf_content.dll"), kVersion));
+            d, "enshrouded", base(), loader::scan_eml_mods(at(L"mods")).usable, loader::cio::join(d, L"emf\\emf_content.dll"),
+            kVersion));
     }
     // What a good build leaves: the shadow copy (the loader's build_shadow), its record and a state with this
-    // folder's fingerprint.
-    void built(int code = 0, const std::string& message = "", int ago = 3600) const {
+    // folder's fingerprint (computed from the path as `spelled`).
+    void built(int code = 0, const std::string& message = "", int ago = 3600, const std::wstring& spelled = L"") const {
         const auto r = loader::build_shadow(dir, shadow(), "enshrouded", base(), loader::scan_eml_mods(at(L"mods")).usable);
         REQUIRE_MESSAGE(r.ok, r.why);
         if (code == 0) REQUIRE(loader::cio::write_file_atomic(shadow() + L"\\shadow.txt", r.record));
         loader::ContentState s;
-        s.fingerprint = fingerprint();
+        s.fingerprint = fingerprint(spelled);
         s.code = code;
         s.message = message;
         s.mods = {"beasts 1.0.0"};

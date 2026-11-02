@@ -6,14 +6,15 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cctype>
 #include <cstdio>
 #include <map>
+#include <regex>
 
 #include "core/json.h"
 #include "core/known_tools.h"
 #include "game_folder.h"
-#include "json_out.h"
 #include "loader/chain_list.h"
 #include "loader/content_base.h"
 #include "loader/content_fingerprint.h"
@@ -22,7 +23,6 @@
 #include "loader/content_state.h"
 #include "loader/eml_mods.h"
 #include "loader/file_hooks.h"  // shadow_facts: the redirect's own check of shadow.txt
-#include "saves/backup.h"       // size_text
 
 #ifndef EMF_VERSION
 #define EMF_VERSION "dev"
@@ -111,9 +111,39 @@ std::string copy_problem(const std::wstring& game, const std::wstring& shadow, u
     return ld::shadow_intact(game, shadow, kFileName, dat_count);
 }
 
+// The known-tools table the loader reads: the folder's emf\known_tools.txt only (never EMF.exe's own copy).
+std::vector<core::KnownTool> folder_tools(const std::wstring& game) {
+    return core::parse_known_tools(cio::read_file(game + L"\\emf\\known_tools.txt", 1u << 20).value_or(std::string()));
+}
+
+// The tool word of a DLL in the game folder by that table ("" without it).
+std::string folder_tool_word(const std::wstring& game, const std::wstring& rel) {
+    return is_file(game + L"\\emf\\known_tools.txt") ? dll_tool_word(game, rel) : std::string();
+}
+
+// A folder in mods\ that is no EML mod at all, as the Mods tab sees it: one without mod.json whose name starts with a
+// dot (.git, an editor's folder) or that holds a DLL (a Shroudtopia mod).
+bool not_a_mod(const std::wstring& mods_dir, const std::wstring& folder) {
+    const std::wstring path = cio::join(mods_dir, folder);
+    const cio::Stat st = cio::stat(path);
+    if (!st.dir || is_file(cio::join(path, L"mod.json"))) return false;
+    if (!folder.empty() && folder[0] == L'.') return true;
+    for (const auto& e : ld::detail::list_dir(path))
+        if (!(e.attrs & FILE_ATTRIBUTE_DIRECTORY) && ld::detail::ends_with_ci(e.name, L".dll")) return true;
+    return false;
+}
+
+// The mods the loader leaves out, as the card lists them.
+std::vector<ContentPanel::LeftOut> left_out_of(const std::wstring& mods_dir, const ld::ModScan& scan) {
+    std::vector<ContentPanel::LeftOut> out;
+    for (const auto& [folder, why] : scan.skipped)
+        if (!not_a_mod(mods_dir, folder)) out.push_back({cio::to_utf8(folder), why});
+    return out;
+}
+
 // What changed since the last build, as far as the state and the files' times tell (the state keeps only the
 // fingerprint, not what went into it).
-std::vector<std::string> changes(const ld::ContentState& state, const ld::FingerprintInput& in,
+std::vector<std::string> changes(const std::wstring& game, const ld::ContentState& state, const ld::FingerprintInput& in,
                                  const std::vector<ContentPanel::Mod>& mods) {
     std::vector<std::string> out;
     std::map<std::string, std::string> built;  // id -> version
@@ -141,10 +171,15 @@ std::vector<std::string> changes(const ld::ContentState& state, const ld::Finger
                 out.push_back((names.count(m.id) ? names[m.id] : m.id) + " changed");
                 break;
             }
-    bool game = false;
-    for (const auto* f : {&in.base, &in.game_kfc, &in.resources, &in.exe}) game = game || (f->exists && f->written > at);
-    if (game) out.push_back("the game changed (a Steam update or a file check)");
+    bool game_changed = false;
+    for (const auto* f : {&in.base, &in.game_kfc, &in.resources, &in.exe}) game_changed = game_changed || (f->exists && f->written > at);
+    if (game_changed) out.push_back("the game changed (a Steam update or a file check)");
     if (in.dll.exists && in.dll.written > at) out.push_back("emf_content.dll changed");
+    for (const wchar_t* f : {L"\\emf\\emf_core.dll", L"\\dinput8.dll"})
+        if (cio::stat(game + f).written > at) {
+            out.push_back("EMF was updated");
+            break;
+        }
     return out;
 }
 
@@ -165,7 +200,9 @@ std::vector<std::string> content_set_aside_names(const std::wstring& game) {
         if (line.rfind(head, 0) != 0) continue;
         const size_t tab = line.find('\t', head.size());
         if (tab == std::string::npos || _stricmp(line.c_str() + tab + 1, "dbghelp.dll") != 0) continue;
-        names.push_back(line.substr(head.size(), tab - head.size()));
+        const std::string name = line.substr(head.size(), tab - head.size());
+        static const std::regex kName("eml-dbghelp(-[0-9]+)?\\.dll", std::regex::icase);
+        if (std::regex_match(name, kName)) names.push_back(name);  // never another file a hand-edited record names
     }
     return names;
 }
@@ -192,7 +229,40 @@ const char* take_over_name(TakeOver t) {
     return "none";
 }
 
-ContentPanel content_panel(const std::wstring& game, bool server_folder) {
+std::string content_take_over_problem(const std::wstring& game) {
+    if (!is_file(game + L"\\dbghelp.dll")) return "There is no dbghelp.dll in the game folder, so there is nothing to set aside.";
+    const std::string word = folder_tool_word(game, L"dbghelp.dll");
+    if (word == "shroudforge")
+        return "This dbghelp.dll is ShroudForge's. ShroudForge starts the game its own way, so EMF never sets it aside: switch "
+               "EML content off in ShroudForge, or remove ShroudForge with its own uninstaller.";
+    if (word != "eml") return "EMF sets aside only EML's dbghelp.dll, and EMF does not know this one as EML's.";
+    if (!is_file(game + L"\\emf\\emf_content.dll"))
+        return "emf_content.dll is not installed, so EMF could not build the EML content in EML's place.";
+    const std::wstring ini = game + L"\\emf\\emf_core.ini";
+    const auto mode = ld::content_mode([&](const wchar_t* section, const wchar_t* key) {
+        wchar_t buf[128] = {};
+        GetPrivateProfileStringW(section, key, L"", buf, 128, ini.c_str());
+        return std::wstring(buf);
+    });
+    if (mode == ld::ContentMode::Off)
+        return "When to apply is Off, so EMF would not build the EML content: set it to Automatic or On first.";
+    // EML's or ShroudForge's DLL in dinput8-chain.ini would still apply it (the loader's own check, dbghelp.dll aside)
+    const auto tools = folder_tools(game);
+    ld::ToolLook look;
+    look.exists = [](const std::wstring&) { return false; };
+    look.tool_name = [&](const std::wstring& rel) {
+        const std::string w = folder_tool_word(game, rel);
+        for (const auto& t : tools)
+            if (t.word == w && !w.empty() && w != "emf") return t.name;
+        return std::string();
+    };
+    look.chain = ld::parse_chain_list(cio::read_file(game + L"\\dinput8-chain.ini", 1u << 20).value_or(std::string()));
+    if (const auto other = ld::other_content_tool(look, false, true))
+        return *other + " would still apply the EML content, so EMF would build nothing: take it out of dinput8-chain.ini first.";
+    return {};
+}
+
+ContentPanel content_panel(const std::wstring& game, bool server_folder, bool disk_use) {
     ContentPanel p;
     if (server_folder) {
         p.status = ContentStatus::ServerLater;
@@ -211,11 +281,11 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder) {
         return std::wstring(buf);
     });
     p.mode = f.mode == ld::ContentMode::Off ? "off" : f.mode == ld::ContentMode::On ? "on" : "auto";
-    const auto tools = core::parse_known_tools(known_tools_table(game));
+    const auto tools = folder_tools(game);
     ld::ToolLook look;
     look.exists = [&](const std::wstring& rel) { return is_file(game + L"\\" + rel); };
     look.tool_name = [&](const std::wstring& rel) {
-        const std::string word = dll_tool_word(game, rel);
+        const std::string word = folder_tool_word(game, rel);
         if (word.empty() || word == "emf") return std::string();
         for (const auto& t : tools)
             if (t.word == word) return t.name;
@@ -251,7 +321,8 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder) {
         ContentPanel::LastBuild b;
         b.code = state->code;
         b.message = state->message;
-        b.errors = state->errors;
+        b.errors.assign(state->errors.begin(), state->errors.begin() + (std::min)(state->errors.size(), kMaxErrors));
+        b.errors_more = state->errors.size() - b.errors.size();
         b.mods = state->mods;
         b.ms = state->ms;
         b.built_at = state->built_at;
@@ -268,18 +339,39 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder) {
             for (const auto& s : state->mods) x.built = x.built || s == m.id + " " + m.version;
         p.mods.push_back(std::move(x));
     }
-    for (const auto& [folder, why] : f.mods.skipped) p.left_out.push_back({cio::to_utf8(folder), why});
+    p.left_out = left_out_of(game + L"\\mods", f.mods);
     const cio::Stat shadow_stat = cio::stat(shadow);
     p.copy_there = shadow_stat.exists && shadow_stat.dir;
-    if (p.copy_there && ld::shadow_path_safe(game, shadow)) p.copy_bytes = own_bytes(shadow, 0);
+    if (disk_use && p.copy_there && ld::shadow_path_safe(game, shadow)) p.copy_bytes = own_bytes(shadow, 0);
 
     // ---- EML's dbghelp.dll and EMF (E5), and a patch in place ----
     for (const auto& name : content_set_aside_names(game))
         if (p.set_aside.empty() && is_file(game + L"\\" + cio::from_utf8(name))) p.set_aside = name;
     if (!p.set_aside.empty())
         p.take_over = TakeOver::Given;
-    else if (p.dll.present && is_file(game + L"\\dbghelp.dll") && dll_tool_word(game, L"dbghelp.dll") == "eml")
+    else if (p.dll.present && content_take_over_problem(game).empty())
         p.take_over = TakeOver::Offer;
+    if (p.take_over == TakeOver::Offer && f.mods.usable.empty() && f.mods.skipped.empty()) {
+        // what taking over would change, for the player's consent (display only: the loader does not look now)
+        const ld::ModScan scan = ld::scan_eml_mods(game + L"\\mods");
+        for (const auto& m : scan.usable) {
+            ContentPanel::Mod x;
+            x.folder = cio::to_utf8(m.folder);
+            x.id = m.id;
+            x.version = m.version;
+            x.name = mod_name(game + L"\\mods\\" + m.folder);
+            if (x.name.empty()) x.name = m.id;
+            p.mods.push_back(std::move(x));
+        }
+        p.left_out = left_out_of(game + L"\\mods", scan);
+        for (const auto& l : p.left_out) {
+            // EML leaves out a name starting with a dot and a junction too: those do not stop working
+            const std::wstring w = cio::from_utf8(l.folder);
+            if (!w.empty() && w[0] == L'.') continue;
+            if (cio::stat(game + L"\\mods\\" + w).reparse) continue;
+            p.take_over_loses.push_back(l);
+        }
+    }
     if (!f.other_tool) {
         const ld::BaseChoice base = f.base.ok || !f.base.why.empty()
                                         ? f.base
@@ -350,38 +442,14 @@ ContentPanel content_panel(const std::wstring& game, bool server_folder) {
         builds(state_file ? "EMF's record of the last build (emf_content_state.json) could not be read"
                           : "EMF has not built it yet");
     } else {
-        std::vector<std::string> what = changes(*state, in, p.mods);
+        std::vector<std::string> what = changes(game, *state, in, p.mods);
         std::string why;
         for (const auto& w : what) why += (why.empty() ? "" : "; ") + w;
-        if (why.empty()) why = "the game, a mod or emf_content.dll changed since the last build";
+        if (why.empty()) why = "the game, a mod, emf_content.dll or EMF itself (an update) changed since the last build";
         why[0] = static_cast<char>(std::toupper(static_cast<unsigned char>(why[0])));
         builds(why);
     }
     return p;
-}
-
-std::string content_panel_json(const ContentPanel& p) {
-    std::vector<std::string> mods, left;
-    for (const auto& m : p.mods)
-        mods.push_back(Obj().str("folder", m.folder).str("id", m.id).str("name", m.name).str("version", m.version)
-                           .boolean("built", m.built).text());
-    for (const auto& l : p.left_out) left.push_back(Obj().str("folder", l.folder).str("why", l.why).text());
-    std::string last = "null";
-    if (p.last_build) {
-        const auto& b = *p.last_build;
-        last = Obj().num("code", b.code).str("message", b.message).strs("errors", b.errors).strs("mods", b.mods)
-                   .num("ms", static_cast<double>(b.ms)).str("built_at", b.built_at).text();
-    }
-    return Obj()
-        .str("status", content_status_name(p.status)).str("headline", p.headline).str("detail", p.detail).str("why", p.why)
-        .str("mode", p.mode)
-        .raw("dll", Obj().boolean("present", p.dll.present).num("size", static_cast<double>(p.dll.size))
-                        .str("size_text", saves::size_text(p.dll.size)).num("time", static_cast<double>(p.dll.time)).text())
-        .raw("mods", json_list(mods)).raw("left_out", json_list(left)).raw("last_build", last)
-        .boolean("copy_there", p.copy_there).num("copy_bytes", static_cast<double>(p.copy_bytes))
-        .str("copy_text", saves::size_text(p.copy_bytes)).boolean("patched_in_place", p.patched_in_place)
-        .str("take_over", take_over_name(p.take_over)).str("other_tool", p.other_tool).str("set_aside", p.set_aside)
-        .text();
 }
 
 }  // namespace emf::app

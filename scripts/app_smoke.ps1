@@ -51,7 +51,8 @@
 # - the EML content card on the EMF tab, in a folder with emf_content.dll (a stand-in file, never loaded), one EML mod
 #   with an HTML name, a mod left out, an earlier failed build and content.log, in the public build: the status words,
 #   the lists, the last build and content.log as text, nothing runs, no Nexus request; When to apply writes [content]
-#   mode; with a stand-in game running every control of the card is disabled, with the reason;
+#   mode; with a stand-in game running every control of the card is disabled, with the reason; with EML's dbghelp.dll
+#   there the take-over is offered with the mods it would cost (one that needs EML's runtime loader);
 # - without the WebView2 runtime EMF.exe says so and exits 1;
 # - EMF.exe imports none of the proxy DLL names mods put next to the game.
 # The runs are off-screen and never take the focus. Never touches the real game folder (--game, EMF_TEST_NO_STEAM) or
@@ -822,7 +823,7 @@ try {
         Write-File "emf\content.log" "[emf] building EML content`r`n[error] <img src=x onerror=`"window.__x=1`">the log's own line`r`n"
         $dllBefore = Get-Content -LiteralPath (Join-Path $game "emf\emf_content.dll") -Raw
         $cW = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<150){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; var pr={}; window.emfProbe=pr; var t=function(id){return (document.getElementById(id)||{}).textContent||'';}; var items=function(id){return [...document.querySelectorAll('#'+id+' li')].map(function(x){return x.textContent;});}; var ctl=function(){return [...document.querySelectorAll('#content-card button, #content-card select')];};"
-        $js = $cW + " W(function(){return !!document.getElementById('content-mode');},function(){ pr.title=!document.getElementById('content-title').hidden; pr.headline=t('content-headline'); pr.detail=t('content-detail'); pr.built=items('content-built'); pr.left=items('content-left'); pr.last=t('content-last'); pr.mode=document.getElementById('content-mode').value; pr.disabled=ctl().filter(function(b){return b.disabled;}).length; document.querySelector('.seg[data-log=content]').click(); W(function(){return /the log's own line/.test(t('log'));},function(){ pr.log=t('log'); var s=document.getElementById('content-mode'); s.value='off'; s.dispatchEvent(new Event('change',{bubbles:true})); W(function(){return t('content-headline')==='Off';},function(){ pr.after=t('content-headline'); pr.imgs=document.querySelectorAll('img').length; pr.inline=document.querySelectorAll('script:not([src])').length; pr.ran=!!window.__x; window.emfDone=true; }); }); });"
+        $js = $cW + " W(function(){return !!document.getElementById('content-mode');},function(){ pr.title=!document.getElementById('content-title').hidden; pr.headline=t('content-headline'); pr.detail=t('content-detail'); pr.built=items('content-built'); pr.builtTitle=t('content-built-title'); pr.left=items('content-left'); pr.last=t('content-last'); pr.mode=document.getElementById('content-mode').value; pr.disabled=ctl().filter(function(b){return b.disabled;}).length; document.querySelector('.seg[data-log=content]').click(); W(function(){return /the log's own line/.test(t('log'));},function(){ pr.log=t('log'); var s=document.getElementById('content-mode'); s.value='off'; s.dispatchEvent(new Event('change',{bubbles:true})); W(function(){return t('content-headline')==='Off';},function(){ pr.after=t('content-headline'); pr.imgs=document.querySelectorAll('img').length; pr.inline=document.querySelectorAll('script:not([src])').length; pr.ran=!!window.__x; window.emfDone=true; }); }); });"
         $env:EMF_TEST_APPDATA = New-AppData (Join-Path $runTemp ("appdata content " + [guid]::NewGuid().ToString("N").Substring(0, 8))) $false
         try {
             $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "15000")
@@ -835,6 +836,7 @@ try {
         Check ($null -ne $pc -and $pc.detail -like "*<img src=x*Beasts is new*") "EML content: the detail names the new mod, its HTML name as text"
         Check ($null -ne $pc -and $null -ne $pc.built -and @($pc.built).Count -eq 1 -and @($pc.built)[0] -like "*<img src=x*Beasts*1.0.0*") "EML content: the mod EMF builds is listed with its name as text ($(if ($pc) { @($pc.built) -join ' | ' }))"
         Check ($null -ne $pc -and $null -ne $pc.left -and @($pc.left).Count -eq 1 -and @($pc.left)[0] -like "*npc_explorer*only exports*") "EML content: the mod EMF leaves out is listed with the loader's reason ($(if ($pc) { @($pc.left) -join ' | ' }))"
+        Check ($null -ne $pc -and $pc.builtTitle -eq "Built by EMF") "EML content: while EMF owns the content its list is Built by EMF ($(if ($pc) { $pc.builtTitle }))"
         Check ($null -ne $pc -and $pc.last -like "*a mod failed*" -and $pc.last -like "*<script>*" -and $pc.last -like "*4.2 s*") "EML content: the last build shows its message, its errors (as text) and its time ($(if ($pc) { $pc.last }))"
         Check ($null -ne $pc -and $pc.mode -eq "auto" -and $pc.disabled -eq 0) "EML content: When to apply shows auto, and nothing is disabled while the game is closed"
         Check ($null -ne $pc -and $pc.log -like "*<img src=x*the log's own line*") "EML content: content.log is the third log choice, shown as text"
@@ -857,6 +859,19 @@ try {
         }
         $pr2 = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
         Check ($run.Code -eq 0 -and $null -ne $pr2 -and $pr2.total -ge 2 -and $pr2.disabled -eq $pr2.total -and $pr2.running -like "*Close the game*") "EML content: while the game runs every control of the card is disabled, with the reason ($(if ($pr2) { $pr2 | ConvertTo-Json -Compress }))"
+
+        # EML next to the game (its dbghelp.dll) with a mod that needs EML's runtime loader: the take-over says what it
+        # costs before the player agrees, and the list is what EMF would build
+        Write-File "emf\emf_core.ini" "[content]`r`nmode=auto`r`n"
+        Write-File "dbghelp.dll" "EML stand-in EML_LOG_FILE_PATH"
+        Write-File "mods\live\mod.json" '{"id": "live", "name": "Live Map", "version": "1.0.0", "capabilities": ["patch", "runtime"]}'
+        $js = $cW + " W(function(){return !!document.getElementById('content-take-over');},function(){ pr.headline=t('content-headline'); pr.builtTitle=t('content-built-title'); pr.loses=items('content-loses'); pr.note=t('content-loses-note'); window.emfDone=true; });"
+        $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "15000")
+        $pr3 = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+        $pr3Text = if ($pr3) { $pr3 | ConvertTo-Json -Compress } else { "the page script did not run" }
+        Check ($run.Code -eq 0 -and $null -ne $pr3 -and $pr3.headline -like "Applied by EML*" -and $pr3.builtTitle -eq "EMF would build") "EML content: with EML there the card offers the take-over, and lists what EMF would build ($pr3Text)"
+        Check ($null -ne $pr3 -and $pr3.note -like "*stop working until you give EML*dbghelp.dll back*" -and (@($pr3.loses) -join '|') -like "*live*runtime loader*" -and (@($pr3.loses) -join '|') -like "*npc_explorer*") "EML content: the offer names the mods that stop working until EML's dbghelp.dll is given back"
+        Check ((Get-Content -LiteralPath (Join-Path $game "dbghelp.dll") -Raw) -eq "EML stand-in EML_LOG_FILE_PATH") "EML content: looking at the offer changed nothing"
     } finally {
         if ($Keep) { "content card folder kept: $game" } else { Remove-Item -LiteralPath $game -Recurse -Force -ErrorAction SilentlyContinue }
         $game = $mainGame

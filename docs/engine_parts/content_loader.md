@@ -139,7 +139,8 @@ touching the `.kfc`); otherwise it is built again.
  "chain_checked": ["creative.dll\t1000\t1340..."], "attempts": 0, "reported": true}
 ```
 
-The fingerprint covers, by size and last write time: the base (and which file it is), the game's own `.kfc`,
+The fingerprint covers, by size and last write time (and names relative to the game folder, never the folder's own path,
+which the loader and EMF.exe may spell differently): the base (and which file it is), the game's own `.kfc`,
 `.kfc_resources` and exe, the base's container count and the game folder's `.dat` count, `emf_content.dll`, each usable
 mod sorted by id (id, version, every file's relative path, size and time), and EMF's version. The shadow is current
 only when the state's fingerprint equals this start's, its build worked (code 0, unloaded, not cut) and the shadow is
@@ -180,7 +181,9 @@ It also lists the usable mods and the ones left out with this page's reasons, th
 own bytes (files with one name; its links to the game's files are not counted) and a base that is the `.kfc.bak` (the
 game's files were patched in place: Steam's "Verify integrity of game files" is advised, EMF never restores them). Its
 actions are refused while the game runs: `[content] mode`, deleting the state (as below), deleting the shadow with the
-loader's `remove_tree` (a link is deleted, never opened; only while `shadow_path_safe`), and E5's take-over: EML's
+loader's `remove_tree` (a link is deleted, never opened; only while `shadow_path_safe`), and E5's take-over (offered
+only when it can work: `emf_content.dll` there, `mode` not off, no EML or ShroudForge DLL chained; it first lists the
+EML mods that would stop working, such as those that need EML's runtime loader): EML's
 `dbghelp.dll` (by `known_tools.txt`; never ShroudForge's) becomes `eml-dbghelp.dll`, recorded in `emf\moved.txt` as
 `set-aside<TAB>eml-dbghelp.dll<TAB>dbghelp.dll` so that EMF's uninstall puts it back; the card gives it back too. EMF.exe
 never loads `emf_content.dll` (a test pins it). The dedicated server's folder gets one line: EML content comes there in

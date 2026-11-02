@@ -17,10 +17,13 @@
 #include "content_panel.h"
 #include "core/json.h"
 #include "json_out.h"
+#include "locate.h"
+#include "server_bridge.h"
 #include "loader/content_io.h"
 #include "loader/content_shadow.h"
 #include "loader/content_state.h"
 #include "loader/file_redirect.h"
+#include "saves/backup.h"  // size_text
 #include "text.h"
 
 namespace emf::app {
@@ -107,14 +110,7 @@ Outcome take_over(const std::wstring& game) {
     for (const auto& name : content_set_aside_names(game))
         if (is_file(game + L"\\" + wide(name)))
             return refuse("EMF has set EML's dbghelp.dll aside already (it is " + name + " now): give that one back first.");
-    if (!is_file(dbghelp)) return refuse("There is no dbghelp.dll in the game folder, so there is nothing to set aside.");
-    const std::string word = dll_tool_word(game, L"dbghelp.dll");
-    if (word == "shroudforge")
-        return refuse("This dbghelp.dll is ShroudForge's. ShroudForge starts the game its own way, so EMF never sets it aside: "
-                      "switch EML content off in ShroudForge, or remove ShroudForge with its own uninstaller.");
-    if (word != "eml") return refuse("EMF sets aside only EML's dbghelp.dll, and EMF does not know this one as EML's.");
-    if (!is_file(game + L"\\emf\\emf_content.dll"))
-        return refuse("emf_content.dll is not installed, so EMF could not build the EML content in EML's place.");
+    if (const std::string why = content_take_over_problem(game); !why.empty()) return refuse(why);  // as the card offers it
     std::wstring name;
     for (int i = 1; i < 100 && name.empty(); ++i) {
         const std::wstring n = i == 1 ? L"eml-dbghelp.dll" : L"eml-dbghelp-" + std::to_wstring(i) + L".dll";
@@ -161,39 +157,79 @@ Outcome give_back(const std::wstring& game) {
 
 }  // namespace
 
+std::string content_panel_json(const ContentPanel& p) {
+    std::vector<std::string> mods, left, loses;
+    for (const auto& m : p.mods)
+        mods.push_back(Obj().str("folder", m.folder).str("id", m.id).str("name", m.name).str("version", m.version)
+                           .boolean("built", m.built).text());
+    for (const auto& l : p.left_out) left.push_back(Obj().str("folder", l.folder).str("why", l.why).text());
+    for (const auto& l : p.take_over_loses) loses.push_back(Obj().str("folder", l.folder).str("why", l.why).text());
+    std::string last = "null";
+    if (p.last_build) {
+        const auto& b = *p.last_build;
+        last = Obj().num("code", b.code).str("message", b.message).strs("errors", b.errors)
+                   .num("errors_more", static_cast<double>(b.errors_more)).strs("mods", b.mods)
+                   .num("ms", static_cast<double>(b.ms)).str("built_at", b.built_at).text();
+    }
+    return Obj()
+        .str("status", content_status_name(p.status)).str("headline", p.headline).str("detail", p.detail).str("why", p.why)
+        .str("mode", p.mode)
+        .raw("dll", Obj().boolean("present", p.dll.present).num("size", static_cast<double>(p.dll.size))
+                        .str("size_text", saves::size_text(p.dll.size)).num("time", static_cast<double>(p.dll.time)).text())
+        .raw("mods", json_list(mods)).raw("left_out", json_list(left)).raw("last_build", last)
+        .boolean("copy_there", p.copy_there).num("copy_bytes", static_cast<double>(p.copy_bytes))
+        .str("copy_text", saves::size_text(p.copy_bytes)).boolean("patched_in_place", p.patched_in_place)
+        .str("take_over", take_over_name(p.take_over)).str("other_tool", p.other_tool).str("set_aside", p.set_aside)
+        .raw("take_over_loses", json_list(loses))
+        .text();
+}
+
 std::optional<std::vector<std::string>> Bridge::handle_content(const std::string& cmd, const core::json::Value& m) {
     if (cmd != "content" && cmd != "content_rebuild" && cmd != "content_remove" && cmd != "content_mode" &&
         cmd != "content_take_over" && cmd != "content_give_back")
         return std::nullopt;
     const std::wstring game = host_.game();
-    const bool found = !game.empty() && is_game_folder(game);
-    const bool server = found && !exists(game + L"\\enshrouded.exe");
-    Outcome out{true, {}, {}};
-    if (!found) {
-        out = refuse("Choose the game's folder first.");
-    } else if (cmd != "content") {
-        const std::string running = host_.running_reason();
-        if (!running.empty())
-            out = refuse("Close the game first: EMF changes nothing for EML content while it runs (" + running + ").");
-        else if (server)
-            out = refuse("The dedicated server gets EML content in a later version of EMF.");
-        else if (cmd == "content_rebuild")
-            out = rebuild(game);
-        else if (cmd == "content_remove")
-            out = remove_copy(game);
-        else if (cmd == "content_mode")
-            out = set_mode(game, m);
-        else if (cmd == "content_take_over")
-            out = take_over(game);
-        else
-            out = give_back(game);
+    // nothing may end EMF.exe from here (the UI thread): out of memory, say, is an answer like any other
+    try {
+        const bool found = !game.empty() && is_game_folder(game);
+        const bool server = found && !exists(game + L"\\enshrouded.exe");
+        const Value* meant = m.get("game");  // the folder the page showed when the player clicked
+        Outcome out{true, {}, {}};
+        if (!found) {
+            out = refuse("Choose the game's folder first.");
+        } else if (cmd != "content") {
+            const std::string running = host_.running_reason();
+            if (!running.empty())
+                out = refuse("Close the game first: EMF changes nothing for EML content while it runs (" + running + ").");
+            else if (busy_ || desk_->installing())  // as the profile commands: a switch, an install or an unpack runs
+                out = refuse("EMF is busy (switching, installing or unpacking). Wait a moment, then try again.");
+            else if (meant && meant->is(VT::String) && !(path_inside(game, wide(meant->s)) && path_inside(wide(meant->s), game)))
+                out = refuse("The folder changed since the card was drawn: look at it again first.");
+            else if (server)
+                out = refuse("The dedicated server gets EML content in a later version of EMF.");
+            else if (cmd == "content_rebuild")
+                out = rebuild(game);
+            else if (cmd == "content_remove")
+                out = remove_copy(game);
+            else if (cmd == "content_mode")
+                out = set_mode(game, m);
+            else if (cmd == "content_take_over")
+                out = take_over(game);
+            else
+                out = give_back(game);
+        }
+        const std::string panel = found ? content_panel_json(content_panel(game, server)) : std::string("null");
+        std::vector<std::string> replies{Obj().str("type", "content").str("cmd", cmd).str("game", utf8(game))
+                                             .boolean("ok", out.ok).str("why", out.why).str("text", out.text)
+                                             .raw("panel", panel).text()};
+        if (out.ok && cmd != "content")
+            if (auto s = state_if_changed(false)) replies.push_back(*s);  // the Mods tab may read differently now
+        return replies;
+    } catch (const std::exception&) {
+        return std::vector<std::string>{Obj().str("type", "content").str("cmd", cmd).str("game", utf8(game)).boolean("ok", false)
+                                            .str("why", "EMF could not look at the EML content (out of memory?). Try again.")
+                                            .str("text", "").raw("panel", "null").text()};
     }
-    const std::string panel = found ? content_panel_json(content_panel(game, server)) : std::string("null");
-    std::vector<std::string> replies{Obj().str("type", "content").str("cmd", cmd).boolean("ok", out.ok).str("why", out.why)
-                                         .str("text", out.text).raw("panel", panel).text()};
-    if (out.ok && cmd != "content")
-        if (auto s = state_if_changed(false)) replies.push_back(*s);  // the Mods tab may read differently now
-    return replies;
 }
 
 }  // namespace emf::app

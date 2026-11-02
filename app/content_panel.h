@@ -37,7 +37,7 @@ const char* take_over_name(TakeOver t);  // "none", "offer", "given"
 struct ContentPanel {
     ContentStatus status = ContentStatus::NotInstalled;
     std::string headline, detail;
-    std::string why;  // decide_content's reason for the next start (emf_loader.log has it after "EML content: ")
+    std::string why;  // decide_content's reason for the next start (emf_loader.log words its own line around it)
     std::string mode = "auto";  // [content] mode: auto, on or off
     struct Dll {
         bool present = false;
@@ -56,7 +56,8 @@ struct ContentPanel {
     struct LastBuild {
         int code = 0;
         std::string message;
-        std::vector<std::string> errors, mods;
+        std::vector<std::string> errors, mods;  // errors: the first kMaxErrors
+        size_t errors_more = 0;                 // how many more the state lists
         uint64_t ms = 0;
         std::string built_at;  // UTC, "YYYY-MM-DDTHH:MM:SSZ"
     };
@@ -67,10 +68,16 @@ struct ContentPanel {
     TakeOver take_over = TakeOver::None;
     std::string other_tool;  // OtherTool: the tool as players know it
     std::string set_aside;   // Given: the name EML's dbghelp.dll has now (in the game folder)
+    // Offer: the EML mods EML loads now that EMF would leave out (needs EML's runtime loader, a .zip, exports only, ...):
+    // they stop working until EML's dbghelp.dll is given back. Its mods and left_out are then what EMF would build.
+    std::vector<LeftOut> take_over_loses;
 };
 
-// The panel for `game` at its next start; `server_folder`: a dedicated server's folder (ServerLater).
-ContentPanel content_panel(const std::wstring& game, bool server_folder);
+constexpr size_t kMaxErrors = 20;  // the last build's errors the card lists
+
+// The panel for `game` at its next start; `server_folder`: a dedicated server's folder (ServerLater). `disk_use`: walk
+// the copy for its own bytes (the Mods tab's scan, every few seconds, does not).
+ContentPanel content_panel(const std::wstring& game, bool server_folder, bool disk_use = true);
 // The panel as a JSON object for the page (every text as data).
 std::string content_panel_json(const ContentPanel& p);
 
@@ -78,5 +85,10 @@ std::string content_panel_json(const ContentPanel& p);
 // lines, next to the installer's "moved<TAB><name>" lines), so that EMF's uninstall (package/uninstall.ps1) puts it
 // back. The names those lines give (in the game folder), whether or not the file is still there.
 std::vector<std::string> content_set_aside_names(const std::wstring& game);
+
+// "" when EMF can take over from EML in `game` (E5): its dbghelp.dll is EML's (by the folder's emf\known_tools.txt, as
+// the loader reads it), emf_content.dll is installed, [content] mode is not off, and no EML or ShroudForge DLL in
+// dinput8-chain.ini would still apply the content; else why not, for the player.
+std::string content_take_over_problem(const std::wstring& game);
 
 }  // namespace emf::app

@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "app/bridge.h"
+#include "app/text.h"
 #include "app_content_files.h"
 #include "core/json.h"
 #include "loader/content_shadow.h"
@@ -37,8 +38,24 @@ struct ContentHost : BridgeHost {
     std::wstring steam_game() override { return {}; }
     bool copy_text(const std::string&) override { return true; }
     std::optional<std::wstring> pick_archive() override { return std::nullopt; }
+    // work runs at once and its messages are kept in `async_out`; with `defer` it waits in `queued` until run_queued()
+    bool defer = false;
+    std::vector<std::function<Done()>> queued;
+    std::vector<std::string> async_out;
     void run_async(std::function<Done()> work) override {
-        if (Done d = work()) d();
+        if (defer) {
+            queued.push_back(std::move(work));
+            return;
+        }
+        if (Done d = work())
+            for (auto& m : d()) async_out.push_back(m);
+    }
+    void run_queued() {
+        auto q = std::move(queued);
+        queued.clear();
+        for (auto& w : q)
+            if (Done d = w())
+                for (auto& m : d()) async_out.push_back(m);
     }
 };
 
@@ -86,6 +103,13 @@ DWORD run(std::wstring cmd) {
 void junction(const std::wstring& at, const std::wstring& to) {
     REQUIRE(run(L"cmd.exe /c mklink /J \"" + at + L"\" \"" + to + L"\"") == 0);
     REQUIRE((GetFileAttributesW(at.c_str()) & FILE_ATTRIBUTE_REPARSE_POINT) != 0);
+}
+
+// `s` inside a JSON string.
+std::string json_escape(const std::string& s) {
+    std::string out;
+    for (const char c : s) out += c == '\\' ? std::string("\\\\") : c == '"' ? std::string("\\\"") : std::string(1, c);
+    return out;
 }
 
 const char* kEmlProxy = "MZ EML dbghelp proxy EML_LOG_FILE_PATH \x01\x02 bytes";
@@ -405,4 +429,85 @@ TEST_CASE("app content bridge: the logs carry emf\\content.log as text") {
         return;
     }
     FAIL("no logs reply");
+}
+
+// ---- the review's fixes ----
+
+TEST_CASE("app content bridge: a take-over that could not work is refused: [content] mode=off, EML's dinput8.dll chained") {
+    ContentGame g(L"cb_takeover_cannot");
+    g.write(L"dbghelp.dll", kEmlProxy);
+    g.write(L"emf\\emf_core.ini", "[content]\r\nmode=off\r\n");
+    ContentHost host;
+    host.dir = g.dir;
+    Bridge bridge(host);
+    auto v = content_reply(bridge.handle(R"({"cmd":"content_take_over"})"));
+    CHECK_FALSE(at(v, "ok").b);
+    CHECK(has(at(v, "why").s, "Off"));
+    CHECK(file_bytes(g.at(L"dbghelp.dll")) == kEmlProxy);
+    g.write(L"emf\\emf_core.ini", "[content]\r\nmode=auto\r\n");
+    g.write(L"eml.dll", "MZ EML proxy EML_LOG_FILE_PATH");
+    g.write(L"dinput8-chain.ini", "[Chain]\r\neml.dll\r\n");
+    v = content_reply(bridge.handle(R"({"cmd":"content_take_over"})"));
+    CHECK_FALSE(at(v, "ok").b);
+    CHECK(has(at(v, "why").s, "dinput8-chain.ini"));
+    CHECK(file_bytes(g.at(L"dbghelp.dll")) == kEmlProxy);
+    CHECK_FALSE(g.has(L"emf\\moved.txt"));
+}
+
+TEST_CASE("app content bridge: a hand-edited set-aside record that names another file moves nothing, nor does uninstall") {
+    ContentGame g(L"cb_badrecord");
+    g.write(L"creative.dll", "creative mode");
+    g.write(L"x.dll", "x");
+    const std::string record =
+        "set-aside\tcreative.dll\tdbghelp.dll\r\nset-aside\t..\\x.dll\tdbghelp.dll\r\nset-aside\tdinput8.dll\tdbghelp.dll\r\n";
+    g.write(L"emf\\moved.txt", record);
+    ContentHost host;
+    host.dir = g.dir;
+    Bridge bridge(host);
+    CHECK_FALSE(at(content_reply(bridge.handle(R"({"cmd":"content_give_back"})")), "ok").b);
+    CHECK(file_bytes(g.at(L"creative.dll")) == "creative mode");
+    CHECK_FALSE(g.has(L"dbghelp.dll"));
+    wchar_t sys[MAX_PATH];
+    const UINT n = GetSystemDirectoryW(sys, MAX_PATH);
+    const std::wstring ps = std::wstring(sys, n) + L"\\WindowsPowerShell\\v1.0\\powershell.exe";
+    const std::wstring script = std::filesystem::path(EMF_SOURCE_DIR "/package/uninstall.ps1").make_preferred().wstring();
+    CHECK(run(L"\"" + ps + L"\" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File \"" + script + L"\" -Game \"" +
+              g.dir + L"\"") == 0);
+    CHECK(file_bytes(g.at(L"creative.dll")) == "creative mode");
+    CHECK(file_bytes(g.at(L"x.dll")) == "x");
+    CHECK_FALSE(g.has(L"dbghelp.dll"));
+}
+
+TEST_CASE("app content bridge: actions wait while EMF is busy switching a profile or installing") {
+    ContentGame g(L"cb_busy");
+    g.built();
+    ContentHost host;
+    host.dir = g.dir;
+    Bridge bridge(host);
+    (void)bridge.handle(R"({"cmd":"profile_save","name":"Smoke"})");
+    REQUIRE(g.has(L"emf\\profiles\\smoke.json"));
+    host.defer = true;
+    (void)bridge.handle(R"({"cmd":"profile_switch","slug":"smoke"})");
+    REQUIRE(host.queued.size() == 1);
+    const auto v = content_reply(bridge.handle(R"({"cmd":"content_rebuild"})"));
+    CHECK_FALSE(at(v, "ok").b);
+    CHECK(has(at(v, "why").s, "busy"));
+    CHECK(g.has(L"emf\\content\\client\\emf_content_state.json"));
+    host.run_queued();
+    CHECK(at(content_reply(bridge.handle(R"({"cmd":"content_rebuild"})")), "ok").b);
+}
+
+TEST_CASE("app content bridge: the reply names its folder, and an action meant for another folder is refused") {
+    ContentGame g(L"cb_folder");
+    g.built();
+    ContentHost host;
+    host.dir = g.dir;
+    Bridge bridge(host);
+    auto v = content_reply(bridge.handle(R"({"cmd":"content"})"));
+    CHECK(at(v, "game").s == emf::app::utf8(g.dir));
+    v = content_reply(bridge.handle(R"({"cmd":"content_remove","game":"C:\\Some\\Other\\Enshrouded"})"));
+    CHECK_FALSE(at(v, "ok").b);
+    CHECK(g.has(L"emf\\content\\client\\enshrouded.kfc"));
+    v = content_reply(bridge.handle(R"({"cmd":"content_rebuild","game":")" + json_escape(emf::app::utf8(g.dir)) + R"("})"));
+    CHECK(at(v, "ok").b);
 }

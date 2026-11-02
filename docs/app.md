@@ -780,12 +780,16 @@ times, the mods' `mod.json`, `emf\content\client\emf_content_state.json` and `sh
   game or `emf_content.dll` changed, the copy gone, a build the game stopped in), **Failed** (the same files failed
   before, with the message; EMF tries again when a mod, the game or `emf_content.dll` changes), **Off** (the loader's
   reason: `[content] mode=off`, no EML mod EMF can build, no base), **Applied by** EML or ShroudForge, **Not installed**
-  (no `emf\emf_content.dll`). Under it, the loader's decision for the next start (`decide_content`'s reason, the same
-  words `emf_loader.log` will have after "EML content: "). A dedicated server's folder
-  gets one line: "The dedicated server gets EML content in a later version of EMF."
+  (no `emf\emf_content.dll`). Under it, the loader's decision for the next start (`decide_content`'s reason;
+  `emf_loader.log` words a start that uses or builds the copy in its own way). A dedicated server's folder gets one
+  line: "The dedicated server gets EML content in a later version of EMF." Every status is checked against the loader's
+  own `plan_content` on the same folders, also when the loader got the folder's path spelled another way (the
+  fingerprint holds no path of the folder itself).
 - **The mods**: the ones EMF builds (and whether the last build had them at this version) and the ones it leaves out,
   each with the loader's reason (exports only, needs EML's runtime loader, a `.zip`, a name starting with a dot, an id
-  another folder took, a broken `mod.json`).
+  another folder took, a broken `mod.json`); `.git` and DLL mod folders without `mod.json` are no EML mods, as on the
+  Mods tab. The list says "Built by EMF" only while EMF owns the content, otherwise "EMF would build". The last build's
+  errors are cut at 20, with the count of the rest.
 - **The last build**: when, how long, its outcome, message and errors; `emf\content.log` is the log viewer's third
   choice.
 - **When to apply**: `[content] mode=auto|on|off` in `emf\emf_core.ini` (other keys and sections are kept).
@@ -794,20 +798,29 @@ times, the mods' `mod.json`, `emf\content\client\emf_content_state.json` and `sh
   link, never opened, so the game's files keep their bytes. Refused when a folder on the way is a junction.
 - **Build again at the next start**: deletes `emf_content_state.json`, so the next start builds (after a failure, to
   try the same files again).
-- **Let EMF load EML content** (with EML installed and `emf_content.dll` there): EML's `dbghelp.dll` (by
-  `known_tools.txt`; never ShroudForge's, which starts the game its own way) is renamed to `eml-dbghelp.dll`
-  (`eml-dbghelp-2.dll` when that is taken), recorded first in `emf\moved.txt` as
-  `set-aside<TAB>eml-dbghelp.dll<TAB>dbghelp.dll`, and never listed in `dinput8-chain.ini`. **Give EML's dbghelp.dll
-  back** renames it back and drops the record; it never replaces a `dbghelp.dll` that is there again. The package's
-  `uninstall.ps1` puts it back too, and keeps it set aside (with its record) while another `dbghelp.dll` is there.
+- **Let EMF load EML content**, offered (and allowed) only when it can work: the `dbghelp.dll` is EML's by the
+  folder's own `emf\known_tools.txt` (as the loader reads it; never ShroudForge's, which starts the game its own way),
+  `emf_content.dll` is there, When to apply is not Off, and no EML or ShroudForge DLL in `dinput8-chain.ini` would
+  still apply the content. Before the player agrees, the card lists the EML mods EML loads now that EMF would leave
+  out (above all those that need EML's runtime loader, and `.zip` mods): they stop working until EML's `dbghelp.dll`
+  is given back. It is renamed to `eml-dbghelp.dll` (`eml-dbghelp-2.dll` when that is taken), recorded first in
+  `emf\moved.txt` as `set-aside<TAB>eml-dbghelp.dll<TAB>dbghelp.dll`, and never listed in `dinput8-chain.ini`. **Give
+  EML's dbghelp.dll back** renames it back and drops the record; it never replaces a `dbghelp.dll` that is there again.
+  The package's `uninstall.ps1` puts it back too, and keeps it set aside (with its record) while another `dbghelp.dll`
+  is there. A record is EMF's only for the names EMF gives (`eml-dbghelp.dll`, `eml-dbghelp-<n>.dll`): a hand-edited
+  line that names another file moves nothing, in EMF.exe or in the uninstall.
 - **Patched in place**: when the game's `enshrouded.kfc` was patched by EML or ShroudForge (its `.kfc.bak` is of the
   same game build), the card advises Steam's "Verify integrity of game files"; EMF builds from the `.bak` and never
   restores game files itself.
 
-Every action is refused while the game runs from the folder (the controls are disabled with the reason) and in a
-server's folder. The page asks for the card when the EMF tab opens, after each action and when the game stops (a build
-may have run then). The Mods tab uses the same rules: with `emf_content.dll` and no other tool, EML mods are loaded by
-EMF or "left out" with the loader's reason, and the "nothing loads them" warning is only for a folder without it.
+Every action is refused while the game runs from the folder (the controls are disabled with the reason), while EMF
+is busy (a profile switch, an install or an unpack), in a server's folder, and when the page's card was about another
+folder (each action names the folder the card showed; the page starts the card afresh when the folder shown changes).
+The card is worked out on the UI thread, like the folder scan (a pack of 2000 files takes about 25 ms). The page asks
+for it when the EMF tab opens, after each action and when the game stops (a build may have run then). The Mods tab
+follows the card: while the next start builds or uses the copy, EML mods are loaded by EMF or "left out" with the
+loader's reason; after a failed build they are "not built", with a warning naming the failure; when EMF builds nothing
+(When to apply is Off, no base, no EML mod it can build) the warning says why and that nothing loads them.
 
 ## Where it lives and how it finds the game
 
@@ -1068,7 +1081,8 @@ player's, and counts only a stand-in game running from the folder shown.
   The EML content card, in a folder of its own with a stand-in `emf_content.dll` (never loaded), an EML mod whose name
   is HTML, a mod left out, an earlier failed build and `content.log`, in the public build: the status words, the lists,
   the last build and `content.log` as text, nothing ran, no Nexus request; When to apply writes `[content] mode=off`;
-  with a stand-in game running every control of the card is disabled with the reason.
+  with a stand-in game running every control of the card is disabled with the reason; with EML's `dbghelp.dll` there
+  the take-over is offered, listing what EMF would build and the mods that would stop working.
   `-Capture <png> -Select emf:clock` also saves a picture; `-BrowseCapture docs\images\app-browse.png` makes the
   Browse picture above.
 

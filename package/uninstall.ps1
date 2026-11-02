@@ -129,11 +129,12 @@ foreach ($name in $movedNames) {
     "put $name back as dinput8.dll"
 }
 # EML's dbghelp.dll that EMF.exe set aside ("set-aside<TAB><name><TAB>dbghelp.dll", app/bridge_content.cpp) goes back to
-# its name, unless a dbghelp.dll is there again: then it stays set aside, and so does the record of it.
+# its name, unless a dbghelp.dll is there again: then it stays set aside, and so does the record of it. Only the names
+# EMF.exe gives it (eml-dbghelp.dll, eml-dbghelp-2.dll, ...): a hand-edited record never moves another file.
 $aside = @()
 foreach ($line in @($recordLines | Where-Object { $_ -like "set-aside`t*" })) {
     $parts = $line.Split("`t")
-    if ($parts.Count -ne 3 -or $parts[2] -ne "dbghelp.dll" -or $parts[1] -notmatch '^[^\\/:]+\.dll$') { continue }
+    if ($parts.Count -ne 3 -or $parts[2] -ne "dbghelp.dll" -or $parts[1] -notmatch '^eml-dbghelp(-\d+)?\.dll$') { continue }
     $at = Join-Path $Game $parts[1]
     if (-not (Test-Path -LiteralPath $at -PathType Leaf)) { continue }
     $to = Join-Path $Game "dbghelp.dll"

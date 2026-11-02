@@ -596,7 +596,8 @@ add_test(NAME emf_tests COMMAND emf_tests)
 # rules, in EMF.exe and in the core (the console's "profile" command). ---
 # app/profiles.cpp reads the game folder with EMF.exe's own scan (app/game_folder.cpp, which the core builds too; the
 # install records stay in EMF.exe: app/game_folder_installs.cpp) and switches through set_mod_enabled.
-target_sources(emf_core_lib PRIVATE src/core/profiles.cpp app/game_folder.cpp app/profiles.cpp src/core/profile_commands.cpp
+# The list of EML mods follows the EML content card (app/content_panel.cpp, built here too; it never loads emf_content.dll).
+target_sources(emf_core_lib PRIVATE src/core/profiles.cpp app/game_folder.cpp app/content_panel.cpp app/profiles.cpp src/core/profile_commands.cpp
   src/core/overlay/profiles_ui.cpp)
 target_include_directories(emf_core_lib PRIVATE ${CMAKE_SOURCE_DIR})
 target_sources(emf_app_lib PRIVATE src/core/profiles.cpp app/game_folder_installs.cpp app/profiles.cpp app/bridge_profiles.cpp)

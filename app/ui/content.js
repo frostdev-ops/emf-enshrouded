@@ -10,6 +10,7 @@ const content = {
   asked: false,    // a panel was asked for since the tab opened
   drawn: '',       // what the card was last drawn from
   running: false,  // the game ran at the last state: when it stops, the panel is asked for again (a build may have run)
+  game: null,      // the folder the card is about: another one shown (the folder switch) starts the card afresh
 };
 const CONTENT_BADGE = {
   ready: ['ok', 'Ready'], builds_next: ['warn', 'Builds next'], failed: ['bad', 'Failed'], off: ['quiet', 'Off'],
@@ -20,6 +21,12 @@ const CONTENT_MODES = [
   ['on', 'On', 'The same, and the game’s console says why when EMF does not build it.'],
   ['off', 'Off', 'EMF never builds EML content.'],
 ];
+
+// One folder however its path ends or is cased (the host's spelling and the scan's may differ).
+function contentSameFolder(a, b) {
+  const norm = (x) => String(x || '').replace(/[\\/]+$/, '').toLowerCase();
+  return norm(a) === norm(b);
+}
 
 function contentAsk() {
   content.asked = true;
@@ -45,7 +52,7 @@ function contentButton(id, label, cmd, title, extra) {
   const running = contentRunning();
   return el('button', {
     class: 'ghost small', type: 'button', id, disabled: !!running, title: running ? 'Close the game first: ' + running : title,
-    onclick: () => send(Object.assign({ cmd }, extra || {})),
+    onclick: () => send(Object.assign({ cmd, game: content.game }, extra || {})),  // the host refuses another folder
   }, label);
 }
 
@@ -85,19 +92,19 @@ function renderContent() {
     'aria-describedby': 'content-mode-help' },
   CONTENT_MODES.map(([value, label]) => el('option', { value }, label)));
   mode.value = p.mode;
-  mode.addEventListener('change', () => send({ cmd: 'content_mode', mode: mode.value }));
+  mode.addEventListener('change', () => send({ cmd: 'content_mode', mode: mode.value, game: content.game }));
   const help = (CONTENT_MODES.find((m) => m[0] === p.mode) || CONTENT_MODES[0])[2];
   kids.push(el('div', { class: 'content-row' }, el('label', { for: 'content-mode' }, 'When to apply'), mode,
     el('span', { class: 'muted small', id: 'content-mode-help' }, help)));
 
-  // the mods
+  // the mods: what EMF builds, or (content off, another tool) what it would build
   if (p.mods.length) {
-    kids.push(el('h4', {}, 'Built by EMF'));
+    kids.push(el('h4', { id: 'content-built-title' }, owns ? 'Built by EMF' : 'EMF would build'));
     kids.push(el('ul', { class: 'content-list', id: 'content-built' }, p.mods.map((m) =>
       el('li', {}, el('span', { class: 'content-name' }, m.name), ' ' + m.version,
         m.built ? null : el('span', { class: 'muted small' }, ' — not built yet')))));
   }
-  if (p.left_out.length) {
+  if (p.left_out.length && p.take_over !== 'offer') {  // with the offer, the mods it would cost are listed there
     kids.push(el('h4', {}, 'Left out'));
     kids.push(el('ul', { class: 'content-list', id: 'content-left' }, p.left_out.map((l) =>
       el('li', {}, el('span', { class: 'content-name mono' }, l.folder), ': ' + l.why))));
@@ -112,7 +119,8 @@ function renderContent() {
       el('p', {}, [contentWhen(b.built_at), 'took ' + contentSeconds(b.ms), what, b.mods.length ? b.mods.length + (b.mods.length === 1 ? ' mod' : ' mods') : '']
         .filter(Boolean).join(' · ')),
       b.message ? el('p', { class: b.code === 0 ? 'muted' : 'd-error' }, el('span', {}, b.message)) : null,
-      b.errors.length ? el('ul', { class: 'content-list errors' }, b.errors.map((e) => el('li', { class: 'mono' }, e))) : null));
+      b.errors.length ? el('ul', { class: 'content-list errors' }, b.errors.map((e) => el('li', { class: 'mono' }, e)),
+        b.errors_more ? el('li', { class: 'muted' }, '… and ' + b.errors_more + ' more (emf\\content.log has them all)') : null) : null));
   }
 
   // the patched game files
@@ -129,6 +137,12 @@ function renderContent() {
       el('p', {}, 'EML is installed and applies the content of the EML mods. EMF can do it instead, without EML: it renames ' +
         'EML’s dbghelp.dll to eml-dbghelp.dll (nothing is deleted). Give it back here at any time; uninstalling EMF ' +
         'puts it back too.'),
+      p.take_over_loses.length ? [
+        el('p', { class: 'sheet-warn', role: 'note', id: 'content-loses-note' },
+          'These EML mods stop working until you give EML’s dbghelp.dll back: EMF leaves them out.'),
+        el('ul', { class: 'content-list', id: 'content-loses' }, p.take_over_loses.map((l) =>
+          el('li', {}, el('span', { class: 'content-name mono' }, l.folder), ': ' + l.why))),
+      ] : null,
       contentButton('content-take-over', 'Let EMF load EML content', 'content_take_over', 'Set EML’s dbghelp.dll aside')));
   } else if (p.take_over === 'given') {
     kids.push(el('div', { class: 'content-take' },
@@ -153,10 +167,18 @@ function renderContent() {
 function contentOnMessage(m) {
   if (!m || typeof m !== 'object') return;
   if (m.type === 'content') {
+    if (state && !contentSameFolder(m.game, state.game)) return;  // about a folder that is not shown any more
     content.data = m;
+    content.drawn = '';  // drawn again: a refused When to apply shows the stored value again
     if (m.cmd !== 'content') toast(m.ok ? m.text : m.why, !m.ok);
     renderContent();
   } else if (m.type === 'state') {
+    if (!contentSameFolder(m.game, content.game) || content.game === null) {  // another folder: nothing of the last one's card stays, nor acts on it
+      content.game = m.game;
+      content.data = null;
+      content.asked = false;
+      content.drawn = '';
+    }
     const running = !!m.game_running;
     if (content.running && !running) content.asked = false;  // the game stopped: a build may have run
     content.running = running;

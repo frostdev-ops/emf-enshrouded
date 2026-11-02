@@ -5,6 +5,7 @@
 #include <doctest.h>
 
 #include <algorithm>
+#include <filesystem>
 #include <fstream>
 #include <iterator>
 
@@ -16,7 +17,9 @@
 #include "core/mods.h"
 #include "core/settings.h"
 #include "app/text.h"
+#include "app_content_files.h"
 #include "app_test_files.h"
+#include "content_fixtures.h"
 #include "test_scratch.h"
 
 using namespace emf::app;
@@ -278,6 +281,15 @@ TEST_CASE("app ShroudForge: a package where ShroudForge is not active is an EML 
 // ---- EML mods EMF builds itself (emf_content.dll, docs/engine_parts/content_loader.md) ----
 
 namespace {
+// emf_content.dll and the game's data the loader builds from (a KFC4 header with 2 containers)
+void content_data(const TempGame& g) {
+    g.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    g.write(L"enshrouded.kfc", content_fixtures::kfc_bytes("7|r|t", 2));
+    g.write(L"enshrouded.kfc_resources", "resources");
+    g.write(L"enshrouded_000.dat", "dat 0");
+    g.write(L"enshrouded_001.dat", "dat 1");
+}
+
 std::string eml_mod(const std::string& id, const std::string& caps = R"(["patch"])") {
     return R"({"id": ")" + id + R"(", "name": ")" + id + R"(", "version": "1.0.0", "capabilities": )" + caps + "}";
 }
@@ -286,7 +298,7 @@ std::string eml_mod(const std::string& id, const std::string& caps = R"(["patch"
 TEST_CASE("app EML content: with emf_content.dll and no other tool EMF builds the EML mods, the rest carry the loader's reason") {
     TempGame g(L"emlcontent");
     install_emf(g);
-    g.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    content_data(g);
     g.write(L"mods\\beasts\\mod.json", eml_mod("beasts"));
     g.write(L"mods\\beasts_copy\\mod.json", eml_mod("beasts"));
     g.write(L"mods\\npc_explorer\\mod.json", eml_mod("npc_explorer", R"(["export"])"));
@@ -323,7 +335,7 @@ TEST_CASE("app EML content: with emf_content.dll and no other tool EMF builds th
 TEST_CASE("app EML content: a broken mod is an error, but never 'EML stops the game' when EMF builds") {
     TempGame g(L"emlcontentbad");
     install_emf(g);
-    g.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    content_data(g);
     g.write(L"mods\\bad\\mod.json", "{");
     g.write(L"mods\\nested\\nested\\mod.json", eml_mod("nested"));
     const FolderState s = scan_game_folder(g.dir);
@@ -337,7 +349,7 @@ TEST_CASE("app EML content: a broken mod is an error, but never 'EML stops the g
 TEST_CASE("app EML content: with EML next to the game, EML loads them as before") {
     TempGame g(L"emlcontenteml");
     install_emf(g);
-    g.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    content_data(g);
     g.write(L"dbghelp.dll", "MZ EML proxy EML_LOG_FILE_PATH");
     g.write(L"mods\\beasts\\mod.json", eml_mod("beasts"));
     g.write(L"mods\\npc_explorer\\mod.json", eml_mod("npc_explorer", R"(["export"])"));
@@ -351,7 +363,7 @@ TEST_CASE("app EML content: with EML next to the game, EML loads them as before"
     // EML's dinput8.dll started by EMF (dinput8-chain.ini) is EML too
     TempGame c(L"emlcontentchain");
     install_emf(c);
-    c.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    content_data(c);
     c.write(L"eml.dll", "MZ EML proxy EML_LOG_FILE_PATH");
     c.write(L"dinput8-chain.ini", "[Chain]\r\neml.dll\r\n");
     c.write(L"mods\\beasts\\mod.json", eml_mod("beasts"));
@@ -362,13 +374,38 @@ TEST_CASE("app EML content: with EML next to the game, EML loads them as before"
 TEST_CASE("app EML content: [content] mode=off says that nothing loads them, and why") {
     TempGame g(L"emlcontentoff");
     install_emf(g);
-    g.write(L"emf\\emf_content.dll", "emf_content stand-in");
+    content_data(g);
     g.write(L"emf\\emf_core.ini", "[content]\r\nmode=off\r\n");
     g.write(L"mods\\beasts\\mod.json", eml_mod("beasts"));
     const FolderState s = scan_game_folder(g.dir);
     REQUIRE(find(s, "eml", "beasts"));
     CHECK(find(s, "eml", "beasts")->loaded_by != "EMF");
     CHECK(has_warning(s, "warn", "mode=off"));
+}
+
+TEST_CASE("app EML content: without a base to build from the loader builds nothing, and the Mods tab says why") {
+    TempGame g(L"emlcontentnobase");
+    install_emf(g);
+    content_data(g);
+    std::filesystem::remove(g.at(L"enshrouded.kfc"));
+    g.write(L"mods\\beasts\\mod.json", eml_mod("beasts"));
+    const FolderState s = scan_game_folder(g.dir);
+    REQUIRE(find(s, "eml", "beasts"));
+    CHECK(find(s, "eml", "beasts")->loaded_by != "EMF");
+    CHECK(find(s, "eml", "beasts")->note.find("built by EMF") == std::string::npos);
+    CHECK(has_warning(s, "warn", "enshrouded.kfc is not in the game folder"));
+}
+
+TEST_CASE("app EML content: after a failed build with the same files the Mods tab says it failed, with a warning") {
+    app_content_test::ContentGame g(L"emlcontentfailed");
+    g.built(1, "a mod could not be read");
+    const FolderState s = scan_game_folder(g.dir);
+    const ModEntry* m = find(s, "eml", "beasts");
+    REQUIRE(m);
+    CHECK(m->loaded_by != "EMF");
+    CHECK(m->note.find("failed") != std::string::npos);
+    CHECK(has_warning(s, "warn", "a mod could not be read"));
+    CHECK_FALSE(has_warning(s, "warn", "neither EML nor ShroudForge"));
 }
 
 // ---- DLL mods EMF starts (dinput8-chain.ini) ----

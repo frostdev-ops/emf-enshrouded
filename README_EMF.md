@@ -101,7 +101,8 @@ out" with the same reason), the last build (when, how long, its errors) and the 
 is the log viewer's third choice. Its actions, all refused while the game runs: **When to apply** (`[content] mode`),
 **Build again at the next start** (deletes `emf\content\client\emf_content_state.json`), **Remove the copy** (deletes
 `emf\content\client\`: its links are deleted as links, so the game's files stay whole; refused when a folder on the way
-is a junction) and, with EML installed, **Let EMF load EML content**: EML's `dbghelp.dll` (never ShroudForge's) is
+is a junction) and, with EML installed, **Let EMF load EML content** (it first lists the EML mods that stop working
+until you give EML back, such as those that need EML's runtime loader): EML's `dbghelp.dll` (never ShroudForge's) is
 renamed to `eml-dbghelp.dll` and recorded in `emf\moved.txt`. **Give EML's dbghelp.dll back** reverses it, and EMF's
 uninstall puts it back too (unless a `dbghelp.dll` is there again: then it stays set aside, and so does its record).
 When the game's `enshrouded.kfc` was patched in place by EML or ShroudForge, the card advises Steam's "Verify integrity
