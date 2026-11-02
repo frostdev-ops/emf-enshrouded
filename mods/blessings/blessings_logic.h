@@ -162,6 +162,49 @@ inline std::string announce_text(const std::string& sender, const std::string& w
     return "[Blessings] " + sender + ": " + act;
 }
 
+// The "health" setting's values (mod.json): off, refill, god.
+inline Health health_of(const std::string& value) {
+    if (value == "god") return Health::God;
+    if (value == "refill") return Health::Refill;
+    return Health::Off;
+}
+inline const char* health_value(Health h) { return h == Health::God ? "god" : h == Health::Refill ? "refill" : "off"; }
+
+// Whether a blessing word is on.
+inline bool has(const Blessings& b, const std::string& what) {
+    if (what == "god") return b.health == Health::God;
+    if (what == "refill") return b.health == Health::Refill;
+    if (what == "stamina") return b.stamina;
+    if (what == "mana") return b.mana;
+    if (what == "nofall") return b.nofall;
+    return false;
+}
+
+// The wheel: the five switches (with on or off on the second line), then Fill me up and All off.
+constexpr const char* kWheelWords[] = {"god", "refill", "stamina", "mana", "nofall", "heal", "off"};
+constexpr int kWheelSwitches = 5, kWheelHeal = 5, kWheelAllOff = 6;
+inline std::vector<std::string> wheel_items(const Blessings& b) {
+    static const char* const names[] = {"God mode", "Endless health", "Endless stamina", "Endless mana", "No fall damage"};
+    std::vector<std::string> out;
+    for (int i = 0; i < kWheelSwitches; ++i)
+        out.push_back(std::string(names[i]) + (has(b, kWheelWords[i]) ? " (on)" : " (off)"));
+    out.push_back("Fill me up");
+    out.push_back("All off");
+    return out;
+}
+// A switch picked on the wheel (0-4): it turns over. The wheel picks the health mode, so Endless health while god mode
+// is on switches to endless health.
+inline Blessings wheel_toggle(Blessings b, int choice) {
+    if (choice < 0 || choice >= kWheelSwitches) return b;
+    const std::string what = kWheelWords[choice];
+    if (has(b, what)) return apply(b, what, false);
+    if (what == "refill") {
+        b.health = Health::Refill;
+        return b;
+    }
+    return apply(b, what, true);
+}
+
 // The players an admin blessed (the host's own blessings are settings), by account.
 struct Roster {
     std::map<uint64_t, Blessings> by_account;

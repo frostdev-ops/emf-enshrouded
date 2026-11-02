@@ -20,12 +20,13 @@ TEST_CASE("shipped mods: no two mods take the same key by default") {
     }
 }
 
-TEST_CASE("shipped mods: the wheels sit on the free F-keys: Necromancer F2, Beastmaster F3, Companion F6, Hand-over F7, "
-          "Bulk Craft F8") {
+TEST_CASE("shipped mods: the wheels sit on the free F-keys: Necromancer F2, Beastmaster F3, Flame Blessings F4, "
+          "Companion F6, Hand-over F7, Bulk Craft F8") {
     const auto keys = game_bindings::shipped_keys();
     auto owner = [&keys](uint32_t vk) { return keys.count(vk) ? keys.at(vk).front() : std::string("(nobody)"); };
     CHECK(owner(VK_F2) == "necromancer.wheel_key");
     CHECK(owner(VK_F3) == "beastmaster.wheel_key");
+    CHECK(owner(VK_F4) == "blessings.wheel_key");
     CHECK(owner(VK_F6) == "companion.key");
     CHECK(owner(VK_F7) == "handover.key");
     CHECK(owner(VK_F8) == "bulk_craft.key");
@@ -36,6 +37,12 @@ TEST_CASE("shipped mods: the wheels sit on the free F-keys: Necromancer F2, Beas
 TEST_CASE("bulk_craft: the wheel key is F8 by default, a key the game leaves free (U is its slow walk)") {
     const std::string key = game_bindings::manifest_default("mods/bulk_craft/mod.json", "key");
     CHECK(key == "F8");
+    CHECK_FALSE(game_bindings::is_game_key(key));
+}
+
+TEST_CASE("blessings: the wheel key is F4 by default, a key the game leaves free") {
+    const std::string key = game_bindings::manifest_default("mods/blessings/mod.json", "wheel_key");
+    CHECK(key == "F4");
     CHECK_FALSE(game_bindings::is_game_key(key));
 }
 

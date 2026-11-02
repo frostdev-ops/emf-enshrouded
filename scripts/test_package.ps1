@@ -847,6 +847,12 @@ try {
                          "mods/bulk_craft/bc_recipes.h", "mods/bulk_craft/bulk_craft.cpp") |
                          Where-Object { $z.n -notcontains "$($z.p)/$_" })
             Check ($missing.Count -eq 0) "$($z.p).zip has Bulk Craft (missing: $($missing -join ', '))"
+            # Flame Blessings (DLL + mod.json, installed switched off, and its source with the README)
+            $missing = @(@("game/emf/mods/blessings/blessings.dll", "game/emf/mods/blessings/mod.json",
+                         "mods/blessings/README.md", "mods/blessings/blessings_logic.h", "mods/blessings/blessings_glue.h",
+                         "mods/blessings/blessings.cpp") |
+                         Where-Object { $z.n -notcontains "$($z.p)/$_" })
+            Check ($missing.Count -eq 0) "$($z.p).zip has Flame Blessings (missing: $($missing -join ', '))"
             # Villager Jobs and Night Raids (DLL + mod.json + their source), Beastmaster and Necromancer (Lua), all switched off
             $missing = @(@("game/emf/mods/villager_jobs/villager_jobs.dll", "game/emf/mods/villager_jobs/mod.json",
                          "game/emf/mods/raids/raids.dll", "game/emf/mods/raids/mod.json", "mods/raids/README.md",
@@ -918,6 +924,7 @@ try {
         Check (-not (Test-Path (Join-Path $pkg "template\build"))) "the template has no build folder"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\big_stacks\mod.json") -Raw) -match '"enabled": false') "big_stacks is off by default"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\bulk_craft\mod.json") -Raw) -match '"enabled": false') "bulk_craft is off by default"
+        Check ((Get-Content (Join-Path $pkg "game\emf\mods\blessings\mod.json") -Raw) -match '"enabled": false') "Flame Blessings is off by default"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\companion\mod.json") -Raw) -match '"enabled": false') "Companion is off by default"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\life_skills\mod.json") -Raw) -match '"enabled": false') "Life Skills is off by default"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\kill_counter\mod.json") -Raw) -match '"enabled": false') "Kill Counter is off by default"
