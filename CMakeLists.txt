@@ -383,7 +383,7 @@ target_link_libraries(emf_app PRIVATE emf_app_lib ${CMAKE_SOURCE_DIR}/third_part
 target_compile_definitions(emf_app PRIVATE EMF_VERSION="${EMF_VERSION}" EMF_VER_MAJOR=${PROJECT_VERSION_MAJOR}
   EMF_VER_MINOR=${PROJECT_VERSION_MINOR} EMF_VER_PATCH=${PROJECT_VERSION_PATCH})
 set_target_properties(emf_app PROPERTIES OUTPUT_NAME EMF RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/app)
-foreach(f index.html app.css app.js saves.js)
+foreach(f index.html app.css app.js saves.js content.js)
   configure_file(app/ui/${f} ${CMAKE_BINARY_DIR}/app/ui/${f} COPYONLY)
 endforeach()
 configure_file(src/core/known_tools.txt ${CMAKE_BINARY_DIR}/app/known_tools.txt COPYONLY)  # for folders without EMF
@@ -598,7 +598,8 @@ add_test(NAME emf_tests COMMAND emf_tests)
 # rules, in EMF.exe and in the core (the console's "profile" command). ---
 # app/profiles.cpp reads the game folder with EMF.exe's own scan (app/game_folder.cpp, which the core builds too; the
 # install records stay in EMF.exe: app/game_folder_installs.cpp) and switches through set_mod_enabled.
-target_sources(emf_core_lib PRIVATE src/core/profiles.cpp app/game_folder.cpp app/profiles.cpp src/core/profile_commands.cpp
+# The list of EML mods follows the EML content card (app/content_panel.cpp, built here too; it never loads emf_content.dll).
+target_sources(emf_core_lib PRIVATE src/core/profiles.cpp app/game_folder.cpp app/content_panel.cpp app/profiles.cpp src/core/profile_commands.cpp
   src/core/overlay/profiles_ui.cpp)
 target_include_directories(emf_core_lib PRIVATE ${CMAKE_SOURCE_DIR})
 target_sources(emf_app_lib PRIVATE src/core/profiles.cpp app/game_folder_installs.cpp app/profiles.cpp app/bridge_profiles.cpp)
@@ -646,3 +647,9 @@ foreach(f alegreya/Alegreya-Regular.ttf alegreya/Alegreya-Bold.ttf cascadia/Casc
   get_filename_component(name ${f} NAME)
   configure_file(third_party/fonts/${f} ${CMAKE_BINARY_DIR}/dist/emf/fonts/${name} COPYONLY)
 endforeach()
+
+# --- EML content in EMF.exe (docs/engine_parts/content_loader.md "What the player sees"): the card on the EMF tab,
+# computed with the loader's own header-only rules (src/loader/content_*.h, eml_mods.h). EMF.exe never loads
+# emf_content.dll: only the loader does, at the held start. ---
+target_sources(emf_app_lib PRIVATE app/content_panel.cpp app/bridge_content.cpp)
+target_sources(emf_tests PRIVATE tests/test_app_content_panel.cpp tests/test_app_content_bridge.cpp)

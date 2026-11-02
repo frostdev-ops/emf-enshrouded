@@ -172,5 +172,8 @@ Change edit_chain_file(const std::wstring& game, const std::function<std::option
 Change write_file_whole(const std::wstring& path, const std::string& bytes, const std::string& shown);
 // The known-tools table for a folder: its emf\known_tools.txt, else the copy next to EMF.exe.
 std::string known_tools_table(const std::wstring& game);
+// The tool a DLL in the game folder (`rel`: "dbghelp.dll") belongs to, by that table: its word ("eml", "shroudforge";
+// "emf" for EMF's own loader), "" when unknown or not there. Read once per change of the file.
+std::string dll_tool_word(const std::wstring& game, const std::wstring& rel);
 
 }  // namespace emf::app

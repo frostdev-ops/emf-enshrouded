@@ -89,6 +89,24 @@ says so, about 30 s), unloads the DLL, and only then starts the chained DLLs and
 changed loads no DLL. Without `emf_content.dll` it writes one line and does what it did before. `[content] mode=auto`
 (the default), `on` (the console also says why content is off) or `off` (never) in `emf\emf_core.ini`; the build's own
 log is `emf\content.log`.
+EML content in EMF.exe ([docs/app.md](docs/app.md#eml-content)): the EMF tab's card **EML content** says who applies the
+EML mods' content at the next start and why, by the loader's own rules (it reads sizes, times and the last build's
+record; it never loads `emf_content.dll` and never writes a game file): **Ready** (the copy is current: the next start
+uses it without building), **Builds at the next start** (and why: never built, a mod new or changed, the game or
+`emf_content.dll` changed, the copy gone), **Failed** (the same files failed before, with the message: EMF tries again
+when a mod, the game or `emf_content.dll` changes), **Off** (the loader's reason), **Applied by EML** or **ShroudForge**,
+or **Not installed**; a dedicated server's folder gets one line (it gets EML content in a later version). The card lists
+the mods EMF builds and the ones it leaves out with the loader's reason (the Mods tab says "loaded by EMF" or "left
+out" with the same reason), the last build (when, how long, its errors) and the copy's disk use, and `emf\content.log`
+is the log viewer's third choice. Its actions, all refused while the game runs: **When to apply** (`[content] mode`),
+**Build again at the next start** (deletes `emf\content\client\emf_content_state.json`), **Remove the copy** (deletes
+`emf\content\client\`: its links are deleted as links, so the game's files stay whole; refused when a folder on the way
+is a junction) and, with EML installed, **Let EMF load EML content** (it first lists the EML mods that stop working
+until you give EML back, such as those that need EML's runtime loader): EML's `dbghelp.dll` (never ShroudForge's) is
+renamed to `eml-dbghelp.dll` and recorded in `emf\moved.txt`. **Give EML's dbghelp.dll back** reverses it, and EMF's
+uninstall puts it back too (unless a `dbghelp.dll` is there again: then it stays set aside, and so does its record).
+When the game's `enshrouded.kfc` was patched in place by EML or ShroudForge, the card advises Steam's "Verify integrity
+of game files"; EMF never restores game files itself.
 `docs/modding/other_mods.md` has the details for authors of DLL mods.
 Logs: `<game>\emf\emf_core.log` (framework + mods), `<game>\emf\emf_loader.log` (the loader: chain-loaded DLLs and a
 core that fails to load).

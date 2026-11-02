@@ -48,6 +48,11 @@
 # - the Saves tab against fake save folders: the starter backup at the first start and the list, Back up now, Pick
 #   files... (the hint, the named files), restoring one Local file (the Steam Cloud warning for a Steam file), Delete
 #   cancelled then confirmed, and the refusal while a stand-in game runs;
+# - the EML content card on the EMF tab, in a folder with emf_content.dll (a stand-in file, never loaded), one EML mod
+#   with an HTML name, a mod left out, an earlier failed build and content.log, in the public build: the status words,
+#   the lists, the last build and content.log as text, nothing runs, no Nexus request; When to apply writes [content]
+#   mode; with a stand-in game running every control of the card is disabled, with the reason; with EML's dbghelp.dll
+#   there the take-over is offered with the mods it would cost (one that needs EML's runtime loader);
 # - without the WebView2 runtime EMF.exe says so and exits 1;
 # - EMF.exe imports none of the proxy DLL names mods put next to the game.
 # The runs are off-screen and never take the focus. Never touches the real game folder (--game, EMF_TEST_NO_STEAM) or
@@ -781,6 +786,96 @@ try {
     } finally {
         foreach ($n in @("EMF_TEST_STEAM_ROOT", "EMF_TEST_SAVED_GAMES", "EMF_TEST_APPDATA")) { Remove-Item "Env:\$n" -ErrorAction SilentlyContinue }
         Remove-Item -LiteralPath $savesRoot -Recurse -Force -ErrorAction SilentlyContinue
+    }
+
+    # 11. the EML content card on the EMF tab (app/ui/content.js, app/bridge_content.cpp), in a folder of its own: EMF
+    # with emf_content.dll (a stand-in file: EMF.exe never loads it), the game's data (a KFC4 header), one EML mod whose
+    # name is HTML, a mod EMF leaves out, an earlier build with other files that failed with HTML in its message and its
+    # errors, and content.log with HTML in it. The public build (no tester switch): the card, its status words, the
+    # lists, the last build and content.log as text, nothing runs, no Nexus request; When to apply writes [content]
+    # mode through the page; while a stand-in game runs from the folder every control of the card is disabled, with
+    # the reason.
+    $mainGame = $game
+    $mainOut = $out
+    $game = Join-Path $realTemp ("emf app smoke content " + [guid]::NewGuid().ToString("N").Substring(0, 8))
+    $out = Join-Path $game "smoke.json"
+    try {
+        Write-File "enshrouded.exe" "fake"
+        Write-File "dinput8.dll" "EMF-LOADER-7d3c9f EMF-PLAY-ONCE-1 fake"
+        Write-File "emf\emf_core.dll" ("emf_core $version" + [char]0)
+        Copy-In "src\core\known_tools.txt" "emf\known_tools.txt"
+        Write-File "emf\emf_content.dll" "emf_content stand-in: EMF.exe never loads it"
+        $kfc = New-Object byte[] 64  # a KFC4 header: version "7|r|t", 2 containers (docs/engine_parts/content_loader.md)
+        [BitConverter]::GetBytes([uint32]0x3443464B).CopyTo($kfc, 0)
+        [BitConverter]::GetBytes([uint32]53).CopyTo($kfc, 4)
+        [BitConverter]::GetBytes([uint32]32).CopyTo($kfc, 16)
+        [BitConverter]::GetBytes([uint32]5).CopyTo($kfc, 20)
+        [BitConverter]::GetBytes([uint32]40).CopyTo($kfc, 24)
+        [BitConverter]::GetBytes([uint32]2).CopyTo($kfc, 28)
+        [System.Text.Encoding]::ASCII.GetBytes("7|r|t").CopyTo($kfc, 48)
+        [System.IO.File]::WriteAllBytes((Join-Path $game "enshrouded.kfc"), $kfc)
+        Write-File "enshrouded.kfc_resources" "resources"
+        Write-File "enshrouded_000.dat" "dat 0"
+        Write-File "enshrouded_001.dat" "dat 1"
+        Write-File "mods\beasts\mod.json" '{"id": "beasts", "name": "<img src=x onerror=\"window.__x=1\">Beasts", "version": "1.0.0", "capabilities": ["patch"]}'
+        Write-File "mods\npc_explorer\mod.json" '{"id": "npc_explorer", "name": "NPC Explorer", "version": "1.0.0", "capabilities": ["export"]}'
+        Write-File "emf\content\client\emf_content_state.json" '{"fingerprint": "sha256:an earlier set of files", "code": 1, "message": "<img src=x onerror=\"window.__x=1\">a mod failed", "mods": [], "errors": ["mods\\beasts\\main.lua: <script>window.__x=1</script>"], "ms": 4200, "built_at": "2026-11-01T20:00:00Z", "unloaded": true, "truncated": false}'
+        Write-File "emf\content.log" "[emf] building EML content`r`n[error] <img src=x onerror=`"window.__x=1`">the log's own line`r`n"
+        $dllBefore = Get-Content -LiteralPath (Join-Path $game "emf\emf_content.dll") -Raw
+        $cW = "var W=function(c,f,n){n=n||0;if(c()){f();}else if(n<150){setTimeout(function(){W(c,f,n+1);},100);}else{f();}}; var pr={}; window.emfProbe=pr; var t=function(id){return (document.getElementById(id)||{}).textContent||'';}; var items=function(id){return [...document.querySelectorAll('#'+id+' li')].map(function(x){return x.textContent;});}; var ctl=function(){return [...document.querySelectorAll('#content-card button, #content-card select')];};"
+        $js = $cW + " W(function(){return !!document.getElementById('content-mode');},function(){ pr.title=!document.getElementById('content-title').hidden; pr.headline=t('content-headline'); pr.detail=t('content-detail'); pr.built=items('content-built'); pr.builtTitle=t('content-built-title'); pr.left=items('content-left'); pr.last=t('content-last'); pr.mode=document.getElementById('content-mode').value; pr.disabled=ctl().filter(function(b){return b.disabled;}).length; document.querySelector('.seg[data-log=content]').click(); W(function(){return /the log's own line/.test(t('log'));},function(){ pr.log=t('log'); var s=document.getElementById('content-mode'); s.value='off'; s.dispatchEvent(new Event('change',{bubbles:true})); W(function(){return t('content-headline')==='Off';},function(){ pr.after=t('content-headline'); pr.imgs=document.querySelectorAll('img').length; pr.inline=document.querySelectorAll('script:not([src])').length; pr.ran=!!window.__x; window.emfDone=true; }); }); });"
+        $env:EMF_TEST_APPDATA = New-AppData (Join-Path $runTemp ("appdata content " + [guid]::NewGuid().ToString("N").Substring(0, 8))) $false
+        try {
+            $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "15000")
+        } finally {
+            Remove-Item Env:\EMF_TEST_APPDATA -ErrorAction SilentlyContinue
+        }
+        $pc = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+        $pcText = if ($pc) { $pc | ConvertTo-Json -Compress -Depth 4 } else { "the page script did not run" }
+        Check ($run.Code -eq 0 -and $null -ne $pc -and $pc.title -and $pc.headline -eq "Builds at the next start") "EML content: the EMF tab's card says Builds at the next start ($pcText)"
+        Check ($null -ne $pc -and $pc.detail -like "*<img src=x*Beasts is new*") "EML content: the detail names the new mod, its HTML name as text"
+        Check ($null -ne $pc -and $null -ne $pc.built -and @($pc.built).Count -eq 1 -and @($pc.built)[0] -like "*<img src=x*Beasts*1.0.0*") "EML content: the mod EMF builds is listed with its name as text ($(if ($pc) { @($pc.built) -join ' | ' }))"
+        Check ($null -ne $pc -and $null -ne $pc.left -and @($pc.left).Count -eq 1 -and @($pc.left)[0] -like "*npc_explorer*only exports*") "EML content: the mod EMF leaves out is listed with the loader's reason ($(if ($pc) { @($pc.left) -join ' | ' }))"
+        Check ($null -ne $pc -and $pc.builtTitle -eq "Built by EMF") "EML content: while EMF owns the content its list is Built by EMF ($(if ($pc) { $pc.builtTitle }))"
+        Check ($null -ne $pc -and $pc.last -like "*a mod failed*" -and $pc.last -like "*<script>*" -and $pc.last -like "*4.2 s*") "EML content: the last build shows its message, its errors (as text) and its time ($(if ($pc) { $pc.last }))"
+        Check ($null -ne $pc -and $pc.mode -eq "auto" -and $pc.disabled -eq 0) "EML content: When to apply shows auto, and nothing is disabled while the game is closed"
+        Check ($null -ne $pc -and $pc.log -like "*<img src=x*the log's own line*") "EML content: content.log is the third log choice, shown as text"
+        Check ($null -ne $pc -and $pc.after -eq "Off") "EML content: choosing Off in When to apply turns the card to Off ($(if ($pc) { $pc.after }))"
+        $iniText = if (Test-Path -LiteralPath (Join-Path $game "emf\emf_core.ini")) { Get-Content -LiteralPath (Join-Path $game "emf\emf_core.ini") -Raw } else { "" }
+        Check ($iniText -match "(?m)^mode=off") "EML content: and writes [content] mode=off into emf\emf_core.ini ($($iniText.Trim() -replace "`r`n", ' | '))"
+        Check ($null -ne $pc -and $pc.imgs -eq 0 -and $pc.inline -eq 0 -and -not $pc.ran) "EML content: the HTML in the mod's name, the state and content.log stays text: no <img>, nothing ran"
+        Check ($null -ne $run.R -and $run.R.nexus_requests -eq 0) "EML content: no Nexus request ($(if ($run.R) { $run.R.nexus_requests }))"
+        Check ((Get-Content -LiteralPath (Join-Path $game "emf\emf_content.dll") -Raw) -eq $dllBefore -and (Get-Content -LiteralPath (Join-Path $game "enshrouded_000.dat") -Raw) -eq "dat 0") "EML content: emf_content.dll and the game's files are as they were"
+
+        # a stand-in game (ping.exe as enshrouded.exe) running from the folder: the card's controls are disabled, with why
+        Copy-Item -LiteralPath (Join-Path $env:SystemRoot "System32\PING.EXE") -Destination (Join-Path $game "enshrouded.exe") -Force
+        $stand = Start-Process -FilePath (Join-Path $game "enshrouded.exe") -ArgumentList @("-n", "30", "127.0.0.1") -WindowStyle Hidden -PassThru
+        try {
+            $js = $cW + " W(function(){return !!document.getElementById('content-mode')&&state&&state.game_running;},function(){ pr.total=ctl().length; pr.disabled=ctl().filter(function(b){return b.disabled;}).length; pr.running=t('content-running'); window.emfDone=true; });"
+            $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "15000")
+        } finally {
+            if (-not $stand.HasExited) { $stand.Kill() }
+            $null = $stand.WaitForExit(5000)
+        }
+        $pr2 = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+        Check ($run.Code -eq 0 -and $null -ne $pr2 -and $pr2.total -ge 2 -and $pr2.disabled -eq $pr2.total -and $pr2.running -like "*Close the game*") "EML content: while the game runs every control of the card is disabled, with the reason ($(if ($pr2) { $pr2 | ConvertTo-Json -Compress }))"
+
+        # EML next to the game (its dbghelp.dll) with a mod that needs EML's runtime loader: the take-over says what it
+        # costs before the player agrees, and the list is what EMF would build
+        Write-File "emf\emf_core.ini" "[content]`r`nmode=auto`r`n"
+        Write-File "dbghelp.dll" "EML stand-in EML_LOG_FILE_PATH"
+        Write-File "mods\live\mod.json" '{"id": "live", "name": "Live Map", "version": "1.0.0", "capabilities": ["patch", "runtime"]}'
+        $js = $cW + " W(function(){return !!document.getElementById('content-take-over');},function(){ pr.headline=t('content-headline'); pr.builtTitle=t('content-built-title'); pr.loses=items('content-loses'); pr.note=t('content-loses-note'); window.emfDone=true; });"
+        $run = Invoke-Smoke -Eval $js -More @("--page", "emf", "--probe-wait", "15000")
+        $pr3 = if ($run.R -and $run.R.probe) { $run.R.probe.probe } else { $null }
+        $pr3Text = if ($pr3) { $pr3 | ConvertTo-Json -Compress } else { "the page script did not run" }
+        Check ($run.Code -eq 0 -and $null -ne $pr3 -and $pr3.headline -like "Applied by EML*" -and $pr3.builtTitle -eq "EMF would build") "EML content: with EML there the card offers the take-over, and lists what EMF would build ($pr3Text)"
+        Check ($null -ne $pr3 -and $pr3.note -like "*stop working until you give EML*dbghelp.dll back*" -and (@($pr3.loses) -join '|') -like "*live*runtime loader*" -and (@($pr3.loses) -join '|') -like "*npc_explorer*") "EML content: the offer names the mods that stop working until EML's dbghelp.dll is given back"
+        Check ((Get-Content -LiteralPath (Join-Path $game "dbghelp.dll") -Raw) -eq "EML stand-in EML_LOG_FILE_PATH") "EML content: looking at the offer changed nothing"
+    } finally {
+        if ($Keep) { "content card folder kept: $game" } else { Remove-Item -LiteralPath $game -Recurse -Force -ErrorAction SilentlyContinue }
+        $game = $mainGame
+        $out = $mainOut
     }
 
     # 7. without the WebView2 runtime (WebView2 looks in a folder that does not exist) EMF.exe says so and exits 1; a

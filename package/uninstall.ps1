@@ -1,6 +1,7 @@
 # Removes EMF from the game folder: EMF's dinput8.dll and the emf folder, and the desktop shortcut install.cmd made.
 # Your settings (emf\config and emf\emf_core.ini) and mod profiles (emf\profiles) stay unless -All. Another mod's
-# dinput8.dll that EMF renamed (emf\moved.txt) is put back.
+# dinput8.dll that EMF renamed (emf\moved.txt) is put back, and so is EML's dbghelp.dll that EMF.exe set aside ("Let
+# EMF load EML content").
 # EMF.exe's Nexus API key and downloads (%LOCALAPPDATA%\EMF) and its saved nxm:// setting (HKCU\Software\EMF\NxmBackup)
 # stay unless -All; the saved setting also stays while a copy of EMF still opens nxm:// links (it needs it to give them
 # back). When this folder's EMF.exe opens nxm:// links, it gives them back first.
@@ -127,11 +128,30 @@ foreach ($name in $movedNames) {
     Remove-ChainEntry $Game $name $createdChain
     "put $name back as dinput8.dll"
 }
+# EML's dbghelp.dll that EMF.exe set aside ("set-aside<TAB><name><TAB>dbghelp.dll", app/bridge_content.cpp) goes back to
+# its name, unless a dbghelp.dll is there again: then it stays set aside, and so does the record of it. Only the names
+# EMF.exe gives it (eml-dbghelp.dll, eml-dbghelp-2.dll, ...): a hand-edited record never moves another file.
+$aside = @()
+foreach ($line in @($recordLines | Where-Object { $_ -like "set-aside`t*" })) {
+    $parts = $line.Split("`t")
+    if ($parts.Count -ne 3 -or $parts[2] -ne "dbghelp.dll" -or $parts[1] -notmatch '^eml-dbghelp(-\d+)?\.dll$') { continue }
+    $at = Join-Path $Game $parts[1]
+    if (-not (Test-Path -LiteralPath $at -PathType Leaf)) { continue }
+    $to = Join-Path $Game "dbghelp.dll"
+    if (Test-Path -LiteralPath $to) {
+        "left $($parts[1]) (EML's dbghelp.dll, set aside by EMF.exe) as it is: there is a dbghelp.dll in the game folder again"
+        $aside += $line
+        continue
+    }
+    Move-Item -LiteralPath $at -Destination $to
+    "put $($parts[1]) back as dbghelp.dll (EML's, set aside by EMF.exe): EML loads the EML mods again"
+}
 if ($left.Count) {  # keep the record of what is still renamed, also with -All
     [array]::Reverse($left)
     if ($createdChain) { $left += "created`t$($script:ChainFileName)" }
-    Write-Lines $movedRecord $left
 }
+$left += $aside
+if ($left.Count) { Write-Lines $movedRecord $left }
 if (Test-Path -LiteralPath $emf) {
     foreach ($item in Get-ChildItem -LiteralPath $emf -Force) {
         if ($item.Name -eq "moved.txt" -and $left.Count) { continue }  # other mods' files are still renamed

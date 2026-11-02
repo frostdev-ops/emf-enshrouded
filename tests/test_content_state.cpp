@@ -154,6 +154,41 @@ TEST_CASE("fingerprint: collected from the game folder, the mods and the dll") {
     std::filesystem::remove_all(game);
 }
 
+TEST_CASE("fingerprint: the same however the game folder's path is spelled (letter case, a trailing backslash)") {
+    // EMF.exe gets the folder from --game, the picker or Steam, the loader from GetModuleFileNameW: the spelling may
+    // differ, the folder does not
+    const std::wstring game = test_scratch::temp_path(L"emf_content_fp_spelling");
+    test_scratch::remove_at_exit(game);
+    put_file(game + L"\\enshrouded.exe", "exe");
+    put_file(game + L"\\enshrouded.kfc", kfc_bytes("1|a|b", 2));
+    put_file(game + L"\\enshrouded.kfc_resources", "resources");
+    put_file(game + L"\\enshrouded_000.dat", "0");
+    put_file(game + L"\\enshrouded_001.dat", "1");
+    put_file(game + L"\\emf\\emf_content.dll", "dll");
+    put_file(game + L"\\mods\\beasts\\mod.json", R"({"id": "beasts", "name": "B", "version": "1.0.0"})");
+    emf::loader::BaseChoice base;
+    base.ok = true;
+    base.dat_count = 2;
+    emf::loader::EmlMod m;
+    m.folder = L"beasts";
+    m.id = "beasts";
+    m.version = "1.0.0";
+    const auto fp = [&](const std::wstring& dir) {
+        return content_fingerprint(emf::loader::collect_fingerprint_input(dir, "enshrouded", base, {m},
+                                                                          dir + L"\\emf\\emf_content.dll", "0.4.0"));
+    };
+    std::wstring upper = game;
+    for (auto& c : upper) c = static_cast<wchar_t>(towupper(c));
+    CHECK(fp(upper) == fp(game));
+    CHECK(fp(game + L"\\") == fp(game));
+    const auto in = emf::loader::collect_fingerprint_input(game, "enshrouded", base, {m}, game + L"\\emf\\emf_content.dll", "0.4.0");
+    CHECK(in.base.name == "enshrouded.kfc");  // which file it is, not where the folder is
+    base.use_bak = true;
+    CHECK(emf::loader::collect_fingerprint_input(game, "enshrouded", base, {m}, game + L"\\emf\\emf_content.dll", "0.4.0")
+              .base.name == "enshrouded.kfc.bak");
+    std::filesystem::remove_all(game);
+}
+
 namespace {
 emf::loader::ContentState sample_state() {
     emf::loader::ContentState s;
