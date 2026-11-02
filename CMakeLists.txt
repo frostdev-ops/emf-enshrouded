@@ -37,6 +37,7 @@ add_library(emf_common STATIC
   src/common/seh.cpp
   src/common/signatures.cpp
   src/common/code_offsets.cpp
+  src/common/world_offsets.cpp
   src/common/world_view.cpp
   src/common/log.cpp
   src/common/hooks.cpp
@@ -83,6 +84,22 @@ add_library(emf_standin_mod SHARED
   src/proxy/dinput8.def)
 set_target_properties(emf_standin_mod PROPERTIES OUTPUT_NAME dinput8 RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin
   ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/standin)
+
+# --- Stand-in for emf_content.dll (the content loader's tests only; not shipped): the same two exports, doing what the
+# build folder's standin.txt says (tools/standin_content/standin_content.cpp); a second build says it has ABI 2 ---
+foreach(abi 1 2)
+  set(_standin emf_standin_content)
+  set(_dir standin_content)
+  if(abi EQUAL 2)
+    set(_standin emf_standin_content_abi2)
+    set(_dir standin_content_abi2)
+  endif()
+  add_library(${_standin} SHARED tools/standin_content/standin_content.cpp src/core/json.cpp)
+  target_include_directories(${_standin} PRIVATE src)
+  target_compile_definitions(${_standin} PRIVATE STANDIN_ABI=${abi})
+  set_target_properties(${_standin} PROPERTIES OUTPUT_NAME emf_content RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/${_dir}
+    ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib/${_dir})
+endforeach()
 
 # --- Offline signature check ---
 add_executable(emf_sigcheck tools/sigcheck/main.cpp)
@@ -196,7 +213,15 @@ add_library(emf_loader SHARED
   src/loader/dllmain.cpp
   src/proxy/dinput8_proxy.cpp
   src/proxy/dinput8.def
-  src/loader/loader.rc)
+  src/loader/loader.rc
+  src/core/json.cpp  # the content loader reads EML mods' mod.json and its own state file
+  src/common/sha256.cpp  # its fingerprint (EMF's own SHA-256: no Windows crypto in the game's process)
+  src/core/known_tools.cpp)  # which tool a dbghelp.dll or a chained DLL belongs to (another tool may apply EML content)
+target_include_directories(emf_loader PRIVATE src)
+# The content build's small window (content_splash.h) is the loader's only use of user32 and gdi32: they load on first
+# use, on the held entry point, so a start without EML content (and the dedicated server) loads nothing more than before
+target_link_options(emf_loader PRIVATE /DELAYLOAD:USER32.dll /DELAYLOAD:GDI32.dll)
+target_link_libraries(emf_loader PRIVATE delayimp)
 # Version information in the file's properties (the resource compiler gets these definitions too)
 target_compile_definitions(emf_loader PRIVATE EMF_VERSION="${EMF_VERSION}" EMF_VER_MAJOR=${PROJECT_VERSION_MAJOR}
   EMF_VER_MINOR=${PROJECT_VERSION_MINOR} EMF_VER_PATCH=${PROJECT_VERSION_PATCH})
@@ -250,6 +275,8 @@ emf_mod(sleep mods/sleep/sleep.cpp)
 emf_mod(teleports mods/teleports/teleports.cpp)
 # --- bulk_craft mod (Bulk Craft: repeat a hand-crafted recipe N times through the game's own craft) ---
 emf_mod(bulk_craft mods/bulk_craft/bulk_craft.cpp)
+# --- blessings mod (Flame Blessings: god mode, endless health/stamina/mana, no fall damage; F4 wheel, /blessings) ---
+emf_mod(blessings mods/blessings/blessings.cpp)
 
 # --- examples/hello: the first mod of docs/modding/README.md (built to prove it compiles; not installed) ---
 add_library(hello SHARED examples/hello/hello.cpp)
@@ -356,7 +383,7 @@ target_link_libraries(emf_app PRIVATE emf_app_lib ${CMAKE_SOURCE_DIR}/third_part
 target_compile_definitions(emf_app PRIVATE EMF_VERSION="${EMF_VERSION}" EMF_VER_MAJOR=${PROJECT_VERSION_MAJOR}
   EMF_VER_MINOR=${PROJECT_VERSION_MINOR} EMF_VER_PATCH=${PROJECT_VERSION_PATCH})
 set_target_properties(emf_app PROPERTIES OUTPUT_NAME EMF RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/app)
-foreach(f index.html app.css app.js saves.js)
+foreach(f index.html app.css app.js saves.js content.js)
   configure_file(app/ui/${f} ${CMAKE_BINARY_DIR}/app/ui/${f} COPYONLY)
 endforeach()
 configure_file(src/core/known_tools.txt ${CMAKE_BINARY_DIR}/app/known_tools.txt COPYONLY)  # for folders without EMF
@@ -379,6 +406,18 @@ add_executable(emf_standin_game tools/standin_game/main.cpp)
 target_link_libraries(emf_standin_game PRIVATE emf_loader)
 set_target_properties(emf_standin_game PROPERTIES OUTPUT_NAME standin_game
   RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin_game)
+# The same stand-in with the real client's entry shape: Steam's DRM stub in a ".bind" section (held for a content build),
+# and with another tool's jump at the entry instead (never held) (tools/standin_game/entry_stub.cpp)
+foreach(_entry bind jump)
+  add_executable(emf_standin_game_${_entry} tools/standin_game/main.cpp tools/standin_game/entry_stub.cpp)
+  target_link_libraries(emf_standin_game_${_entry} PRIVATE emf_loader)
+  target_link_options(emf_standin_game_${_entry} PRIVATE /ENTRY:standin_entry)
+  if(_entry STREQUAL "jump")
+    target_compile_definitions(emf_standin_game_${_entry} PRIVATE STANDIN_ENTRY_JUMP)
+  endif()
+  set_target_properties(emf_standin_game_${_entry} PROPERTIES OUTPUT_NAME standin_game_${_entry}
+    RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/standin_game)
+endforeach()
 
 # --- Tests ---
 enable_testing()
@@ -391,6 +430,7 @@ add_executable(emf_tests
   tests/test_pe_image.cpp
   tests/test_signatures.cpp
   tests/test_code_offsets.cpp
+  tests/test_world_offsets.cpp
   tests/test_world_view.cpp
   tests/test_runtime.cpp
   tests/test_game_imports.cpp
@@ -476,6 +516,7 @@ add_executable(emf_tests
   tests/test_teleports_glue.cpp
   tests/test_bulk_craft.cpp
   tests/test_bulk_craft_glue.cpp
+  tests/test_blessings.cpp
   tests/test_lua_round2.cpp
   tests/test_bounty.cpp
   tests/test_lua_take_back.cpp
@@ -521,6 +562,14 @@ add_executable(emf_tests
   tests/test_chain_load.cpp
   tests/test_file_redirect.cpp
   tests/test_file_hooks.cpp
+  tests/test_content_loader.cpp
+  tests/test_module_threads.cpp
+  tests/test_content_build.cpp
+  tests/test_content_state.cpp
+  tests/test_content_shadow.cpp
+  tests/test_content_start.cpp
+  tests/test_content_e2e.cpp
+  tests/test_content_status.cpp
   tests/test_known_tools.cpp
   tests/test_vk_overlay_device.cpp
   tests/test_app_game_folder.cpp
@@ -596,7 +645,8 @@ target_sources(emf_tests PRIVATE tests/test_content_dll.cpp tests/test_module_th
 # rules, in EMF.exe and in the core (the console's "profile" command). ---
 # app/profiles.cpp reads the game folder with EMF.exe's own scan (app/game_folder.cpp, which the core builds too; the
 # install records stay in EMF.exe: app/game_folder_installs.cpp) and switches through set_mod_enabled.
-target_sources(emf_core_lib PRIVATE src/core/profiles.cpp app/game_folder.cpp app/profiles.cpp src/core/profile_commands.cpp
+# The list of EML mods follows the EML content card (app/content_panel.cpp, built here too; it never loads emf_content.dll).
+target_sources(emf_core_lib PRIVATE src/core/profiles.cpp app/game_folder.cpp app/content_panel.cpp app/profiles.cpp src/core/profile_commands.cpp
   src/core/overlay/profiles_ui.cpp)
 target_include_directories(emf_core_lib PRIVATE ${CMAKE_SOURCE_DIR})
 target_sources(emf_app_lib PRIVATE src/core/profiles.cpp app/game_folder_installs.cpp app/profiles.cpp app/bridge_profiles.cpp)
@@ -625,9 +675,28 @@ target_link_libraries(herald PRIVATE winhttp)
 target_sources(emf_tests PRIVATE tests/test_herald.cpp tests/test_herald_dll.cpp)
 add_dependencies(emf_tests herald)
 add_dependencies(emf_tests emf_core emf_loader)  # test_game_imports reads their import tables
+add_dependencies(emf_tests emf_standin_content emf_standin_content_abi2 emf_standin_mod emf_standin_game_bind
+  emf_standin_game_jump)  # the content loader's tests
 
 # --- Save backups (docs/saves.md). src/saves/ is shared by EMF.exe (the Saves tab, the starter backup) and
 # the core (automatic backups at game start, the console's saves.* commands, save-info.json from the game's menu). ---
 target_sources(emf_core_lib PRIVATE src/saves/backup.cpp src/saves/save_info.cpp src/core/save_slots.cpp src/core/save_commands.cpp)
 target_sources(emf_app_lib PRIVATE src/saves/backup.cpp src/saves/save_info.cpp app/bridge_saves.cpp src/common/sha256.cpp)
-target_sources(emf_tests PRIVATE tests/test_save_backup.cpp tests/test_save_info.cpp tests/test_app_saves.cpp tests/test_save_slots.cpp tests/test_save_commands.cpp tests/test_save_fixes.cpp)
+target_sources(emf_tests PRIVATE tests/test_move_retry.cpp tests/test_save_backup.cpp tests/test_save_info.cpp tests/test_app_saves.cpp tests/test_save_slots.cpp tests/test_save_commands.cpp tests/test_save_fixes.cpp)
+
+# --- The in-game look (src/core/overlay/look_*.cpp): [hud] and the look keys of [overlay], the bundled fonts, the
+# game-style drawing ---
+target_sources(emf_core_lib PRIVATE src/core/overlay/look_settings.cpp src/core/overlay/font_plan.cpp
+  src/core/overlay/look_layout.cpp)
+target_sources(emf_tests PRIVATE tests/test_look_settings.cpp tests/test_font_plan.cpp tests/test_look_layout.cpp)
+# The bundled fonts (third_party/fonts/README.md), unmodified, installed to <game>\emf\fonts\
+foreach(f alegreya/Alegreya-Regular.ttf alegreya/Alegreya-Bold.ttf cascadia/CascadiaMono-Regular.ttf)
+  get_filename_component(name ${f} NAME)
+  configure_file(third_party/fonts/${f} ${CMAKE_BINARY_DIR}/dist/emf/fonts/${name} COPYONLY)
+endforeach()
+
+# --- EML content in EMF.exe (docs/engine_parts/content_loader.md "What the player sees"): the card on the EMF tab,
+# computed with the loader's own header-only rules (src/loader/content_*.h, eml_mods.h). EMF.exe never loads
+# emf_content.dll: only the loader does, at the held start. ---
+target_sources(emf_app_lib PRIVATE app/content_panel.cpp app/bridge_content.cpp)
+target_sources(emf_tests PRIVATE tests/test_app_content_panel.cpp tests/test_app_content_bridge.cpp)

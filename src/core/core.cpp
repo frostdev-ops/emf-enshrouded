@@ -21,6 +21,7 @@
 #include "common/seh.h"
 #include "common/sha256.h"
 #include "common/signatures.h"
+#include "common/world_offsets.h"
 #include "common/world_view.h"
 #include "fault_report.h"
 #include "builtin_commands.h"
@@ -32,6 +33,7 @@
 #include "chat_commands.h"
 #include "server_chat.h"
 #include "console.h"
+#include "content_status.h"
 #include "inventory.h"
 #include "teleport.h"
 #include "world_settings_glue.h"
@@ -75,6 +77,9 @@ std::vector<emf::core::LoadedMod> g_mods;
 // Open once emf_core_start is done (mods loaded, or EMF stays idle). The dedicated server sets up its world during
 // start-up; that setup waits here so mods' programs and event subscriptions reach the world.
 emf::core::ReadyGate g_mods_ready;
+// EML content at this start (content_status.h): set once in emf_core_start; its notice is shown when a world loads
+emf::core::ContentLines g_content_lines;
+std::atomic<bool> g_content_notice_said{false};
 constexpr auto kModsReadyTimeout = std::chrono::seconds(30);
 emf::core::BuiltinContext g_builtin;                     // the core's own commands
 emf::core::ProfileCommandContext g_profiles;             // "profile": mod profiles
@@ -313,6 +318,9 @@ uint8_t* hk_load_savegame_step(uint8_t* out, uint8_t* inst) {
         const int faults = g_state->load_events.fire(slot);
         emf::logf("world loaded (slot 0x%04x)%s", slot, faults ? ", a load callback faulted" : "");
         if (auto* info = emf::core::save_info_recorder()) info->on_world_loaded(slot);  // save-info.json
+        // EML content could not be applied at this start: said once on screen, when the first world is there
+        if (!g_content_lines.notice.empty() && !g_content_notice_said.exchange(true) && g_state->notify)
+            g_state->notify(g_content_lines.notice);
     }
     return r;
 }
@@ -397,14 +405,19 @@ std::wstring widen(const std::string& s) {
 // min_minutes), the starter backup when there is none yet. It runs on its own thread, so EMF's start does not wait; the
 // game is still starting then (logos, loading), long before a world can write a save, and a file that changes while it
 // is copied is copied again or named. Never in the dedicated server (its world lives in its own savegame folder).
-void start_auto_backup(const std::wstring& dir) {
-    const emf::saves::AutoSettings settings = emf::saves::read_auto_settings(dir + L"\\emf\\emf_core.ini");
-    std::thread([settings] {
+// `label`: a backup EML content asks for when it could not be built (mod items vanish when a world loads without their
+// mod): min_minutes does not hold that one back.
+void start_auto_backup(const std::wstring& dir, const char* label = nullptr) {
+    emf::saves::AutoSettings settings = emf::saves::read_auto_settings(dir + L"\\emf\\emf_core.ini");
+    if (label) settings.min_minutes = 0;
+    const std::string why = label ? label : "";
+    std::thread([settings, why] {
         try {
             const ULONGLONG t0 = GetTickCount64();
             const auto roots = emf::saves::with_app_data(emf::saves::default_roots(false), emf::saves::default_app_data());
             emf::saves::BackupOptions o;
             o.made_by = "game";
+            o.label = why;
             o.emf_version = EMF_VERSION;
             o.info = emf::saves::read_save_info(roots.info).slots;
             const auto a = emf::saves::auto_backup(roots, settings, o);
@@ -483,10 +496,15 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     if (debug_bridge) emf::log_ring_enable(5000);
     emf::logf("%s starting (game dir %s)", kVersion, utf8(dir).c_str());
     {
+        // EML content at this start, as the loader set it before it started the core (content_status.h)
+        g_content_lines = emf::core::content_lines(emf::core::read_content_status(),
+                                                   emf::saves::read_auto_settings(dir + L"\\emf\\emf_core.ini").on);
+        if (!g_content_lines.console.empty()) emf::logf("%s", g_content_lines.console.c_str());
         wchar_t self[MAX_PATH];
         GetModuleFileNameW(nullptr, self, MAX_PATH);
         const std::wstring exe_name = std::wstring(self).substr(std::wstring(self).find_last_of(L"\\/") + 1);
-        if (_wcsicmp(exe_name.c_str(), L"enshrouded_server.exe") != 0) start_auto_backup(dir);  // first: before any save
+        if (_wcsicmp(exe_name.c_str(), L"enshrouded_server.exe") != 0)  // first: before any save
+            start_auto_backup(dir, g_content_lines.backup ? emf::core::kContentBackupLabel : nullptr);
     }
     std::thread([dir] {
         try {
@@ -566,6 +584,17 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         emf::logf("a required signature is missing: EMF stays idle, no mods loaded");
         return;
     }
+    // Struct offsets read from instructions in the located functions (common/code_offsets.h), before any hook: the
+    // world's own offsets first (build 1283531 moved the world's block by +0x1C00; common/world_offsets.h).
+    const auto code_offsets = emf::resolve_code_offsets(GetModuleHandleW(nullptr), g_state->sigs, build);
+    for (const auto& note : emf::unconfirmed_offset_notes(code_offsets)) emf::logf("%s", note.c_str());
+    const emf::WorldOffsetPlan world_plan = emf::plan_world_offsets(code_offsets, known);
+    emf::logf("%s", world_plan.line.c_str());
+    if (!world_plan.ok) {
+        emf::logf("the world's offsets are not known on this game build: EMF stays idle, no mods loaded");
+        return;
+    }
+    emf::set_world_offsets(world_plan.offsets);
     // Before EMF's tick work on the server world: the game's own wait for that world's jobs (core/world_jobs.h).
     {
         const auto& wait = g_state->sigs[static_cast<size_t>(emf::Sig::WaitWorldJobs)];
@@ -645,7 +674,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         return;
     }
     const auto& reg = g_state->sigs[static_cast<size_t>(emf::Sig::RegisterProgram)];
-    if (emf::is_usable(reg, known) &&
+    if (emf::is_usable(reg, known) && world_plan.program_table &&
         emf::core::install_emf_hook("RegisterProgram", reg.addr, reinterpret_cast<void*>(&hk_register_program),
                                     reinterpret_cast<void**>(&o_register_program))) {
         emf::logf("registerProgram hooked (program hooks available)");
@@ -804,11 +833,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         emf::logf("%s %s", what, ok ? "hooked" : "NOT hooked (event unavailable)");
     };
     // on_save needs two save-state offsets read from save2WriteWorld's code (they moved in build 1273043).
-    const auto code_offsets = emf::resolve_code_offsets(GetModuleHandleW(nullptr), g_state->sigs, build);
     const auto& result_off = code_offsets[static_cast<size_t>(emf::CodeOffset::Save2Result)];
     const auto& slot_off = code_offsets[static_cast<size_t>(emf::CodeOffset::Save2WorldSlot)];
     const auto& load_flag = code_offsets[static_cast<size_t>(emf::CodeOffset::InstWorldSlotFlag)];
-    for (const auto& note : emf::unconfirmed_offset_notes(code_offsets)) emf::logf("%s", note.c_str());
     g_state->tick_offsets_ok = emf::world_tick_offsets_ok(code_offsets, known);
     if (!g_state->tick_offsets_ok)
         emf::logf("the world's tick fields are not confirmed in SimStep's code: world_tick, ecs_time_ns and the time "
@@ -991,6 +1018,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
                     emf::logf("[note] %s", s.c_str());
                     emf::core::overlay_notify(s);
                 };
+                // how EML content went at this start, in the console's scrollback
+                if (!g_content_lines.console.empty())
+                    if (auto* console = emf::core::overlay_console()) console->add_line(g_content_lines.console);
             }
         } else {
             emf::logf("overlay: off ([overlay] enabled=0)");

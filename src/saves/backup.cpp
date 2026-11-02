@@ -14,6 +14,7 @@
 
 #include "common/sha256.h"
 #include "core/json.h"
+#include "common/move_retry.h"
 
 #pragma comment(lib, "shell32.lib")
 #pragma comment(lib, "ole32.lib")
@@ -911,7 +912,7 @@ BackupResult make_backup(const SaveRoots& roots, const BackupOptions& o) {
         const std::string id = n == 1 ? base : base + "_" + std::to_string(n);
         const std::wstring final_dir = roots.store + L"\\" + wide(id);
         if (GetFileAttributesW(final_dir.c_str()) != INVALID_FILE_ATTRIBUTES) continue;
-        if (MoveFileExW(tmp.c_str(), final_dir.c_str(), 0)) {
+        if (move_retrying(tmp, final_dir, 0)) {  // a scanner may still hold a file in it for a moment
             b.id = id;
             r.ok = true;
             r.backup = std::move(b);
@@ -1306,7 +1307,7 @@ RestoreResult restore_backup(const SaveRoots& roots, const RestoreOptions& o) {
             CloseHandle(h);
         }
         if (file_sha256(tmp) != f.sha256) return stop("EMF's copy of " + who + " did not match the backup (a disk problem?).");
-        if (!MoveFileExW(tmp.c_str(), target.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+        if (!move_retrying(tmp, target, MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
             return stop("EMF could not put " + who + " in place: " + win_error(GetLastError()) + ".");
         if (file_sha256(target) != f.sha256) return stop(who + " does not match the backup after restoring it.");
         r.restored.push_back(file_label(*b, f) + " (" + storage_label(f.storage) + ")");

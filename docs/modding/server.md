@@ -91,9 +91,9 @@ deny=loot.toggle, champion.where
 
 **Defaults of the shipped mods on a server:** Night Raids is on, but every world starts without raids (`raids.world
 on`); Loot Magnet, Wandering Champion, Bounty Board, Grave Keeper, Sleep Through the Day, Server Herald, Hand-over,
-Waypoint Teleports, Bulk Craft, Beastmaster and Necromancer are installed switched off: set `enabled=1` in
+Waypoint Teleports, Bulk Craft, Flame Blessings, Beastmaster and Necromancer are installed switched off: set `enabled=1` in
 `emf\config\<id>.ini` (`loot_magnet`, `champion`, `bounty`, `grave`, `sleep`, `herald`, `handover`, `teleports`,
-`bulk_craft`, `beastmaster`, `necromancer`; section `[<id>]`), or switch
+`bulk_craft`, `blessings`, `beastmaster`, `necromancer`; section `[<id>]`), or switch
 them on in EMF.exe, then restart the server. Quick Stack's
 chest machines work on a server too: an admin marks chests with `/qs.mark sort` (the nearest chest within 3 m); its
 recyclers stay off until `recycler=1`. A

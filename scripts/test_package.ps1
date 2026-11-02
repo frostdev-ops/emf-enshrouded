@@ -701,7 +701,7 @@ try {
             Copy-Item -LiteralPath $f.FullName -Destination $to
         }
         Copy-Item -LiteralPath (Join-Path $realBuild "emf_sigcheck.exe") -Destination (Join-Path $fb "emf_sigcheck.exe")
-        foreach ($f in @("EMF.exe", "ui\index.html", "ui\app.css", "ui\app.js", "ui\saves.js")) {  # EMF.exe and its page
+        foreach ($f in @("EMF.exe", "ui\index.html", "ui\app.css", "ui\app.js", "ui\saves.js", "ui\content.js")) {  # EMF.exe and its page
             New-Item -ItemType Directory -Force (Split-Path (Join-Path $fb "app\$f")) | Out-Null
             Copy-Item -LiteralPath (Join-Path $realBuild "app\$f") -Destination (Join-Path $fb "app\$f")
         }
@@ -817,6 +817,15 @@ try {
         $fnames = @($zf.Entries | ForEach-Object { $_.FullName })
         $zf.Dispose()
         Check (($fnames -contains "EMF-$ver/LICENSE.txt") -and ($fnames -contains "EMF-$ver/licenses/THIRD_PARTY_NOTICES.md") -and ($mnames -contains "EMF-$ver-manual/LICENSE.txt")) "both zips carry EMF's MIT licence and the third-party notices"
+        # the bundled fonts (third_party\fonts, SIL OFL 1.1) install to game\emf\fonts\; their licences are in licenses\
+        foreach ($z in @(@{n = $fnames; p = "EMF-$ver"}, @{n = $mnames; p = "EMF-$ver-manual"})) {
+            $missing = @(@("game/emf/fonts/Alegreya-Regular.ttf", "game/emf/fonts/Alegreya-Bold.ttf",
+                         "game/emf/fonts/CascadiaMono-Regular.ttf", "licenses/Alegreya-OFL.txt",
+                         "licenses/CascadiaMono-OFL.txt") | Where-Object { $z.n -notcontains "$($z.p)/$_" })
+            Check ($missing.Count -eq 0) "$($z.p).zip has the bundled fonts in game\emf\fonts\ and their licences (missing: $($missing -join ', '))"
+            $extra = @($z.n | Where-Object { $_ -match "/game/emf/fonts/." -and $_ -notmatch "/(Alegreya-Regular|Alegreya-Bold|CascadiaMono-Regular)\.ttf$" })
+            Check ($extra.Count -eq 0) "$($z.p).zip has no other files in game\emf\fonts\ ($($extra -join ', '))"
+        }
         # in both downloads: Loot Magnet (DLL + mod.json), Wandering Champion (Lua)
         foreach ($z in @(@{n = $fnames; p = "EMF-$ver"}, @{n = $mnames; p = "EMF-$ver-manual"})) {
             $missing = @(@("game/emf/mods/loot_magnet/loot_magnet.dll",
@@ -847,6 +856,12 @@ try {
                          "mods/bulk_craft/bc_recipes.h", "mods/bulk_craft/bulk_craft.cpp") |
                          Where-Object { $z.n -notcontains "$($z.p)/$_" })
             Check ($missing.Count -eq 0) "$($z.p).zip has Bulk Craft (missing: $($missing -join ', '))"
+            # Flame Blessings (DLL + mod.json, installed switched off, and its source with the README)
+            $missing = @(@("game/emf/mods/blessings/blessings.dll", "game/emf/mods/blessings/mod.json",
+                         "mods/blessings/README.md", "mods/blessings/blessings_logic.h", "mods/blessings/blessings_glue.h",
+                         "mods/blessings/blessings.cpp") |
+                         Where-Object { $z.n -notcontains "$($z.p)/$_" })
+            Check ($missing.Count -eq 0) "$($z.p).zip has Flame Blessings (missing: $($missing -join ', '))"
             # Villager Jobs and Night Raids (DLL + mod.json + their source), Beastmaster and Necromancer (Lua), all switched off
             $missing = @(@("game/emf/mods/villager_jobs/villager_jobs.dll", "game/emf/mods/villager_jobs/mod.json",
                          "game/emf/mods/raids/raids.dll", "game/emf/mods/raids/mod.json", "mods/raids/README.md",
@@ -898,11 +913,22 @@ try {
                          "game\emf\mods\loot_magnet\loot_magnet.dll",
                          "game\emf\mods\champion\main.lua", "game\emf\mods\champion\README.md",
                          "mods\loot_magnet\magnet_logic.h",
-                         "docs\components.txt", "docs\saves.md", "game\emf\EMF.exe", "game\emf\ui\index.html", "game\emf\ui\app.js", "game\emf\ui\saves.js",
+                         "docs\components.txt", "docs\saves.md", "game\emf\EMF.exe", "game\emf\ui\index.html", "game\emf\ui\app.js", "game\emf\ui\saves.js", "game\emf\ui\content.js",
                          "game\emf\ui\app.css", "licenses\WebView2-LICENSE.txt", "game\emf\tools\emf_scenario.py",
                          "game\emf\tools\emf_mcp.py", "docs\modding\llms.txt", "docs\modding\ai_agents.md")) {
             Check (Test-Path (Join-Path $pkg $f)) "package has $f"
         }
+        # the fonts ship unmodified (third_party\fonts\README.md records their SHA-256), and the notices name them
+        foreach ($f in @("alegreya\Alegreya-Regular.ttf", "alegreya\Alegreya-Bold.ttf", "cascadia\CascadiaMono-Regular.ttf")) {
+            $shipped = Join-Path $pkg ("game\emf\fonts\" + (Split-Path $f -Leaf))
+            $source = Join-Path $repo "third_party\fonts\$f"
+            $same = (Test-Path -LiteralPath $shipped) -and ((Get-FileHash -LiteralPath $shipped).Hash -eq (Get-FileHash -LiteralPath $source).Hash)
+            Check $same "the package's game\emf\fonts\$(Split-Path $f -Leaf) is third_party\fonts\$f, unmodified"
+        }
+        $notices = Get-Content -LiteralPath (Join-Path $pkg "licenses\THIRD_PARTY_NOTICES.md") -Raw
+        Check (($notices -match "Alegreya") -and ($notices -match "Cascadia Mono") -and ($notices -match "OFL")) "THIRD_PARTY_NOTICES.md names Alegreya and Cascadia Mono and their licence (SIL OFL 1.1)"
+        $ofl = Join-Path $pkg "licenses\Alegreya-OFL.txt"
+        Check ((Test-Path -LiteralPath $ofl) -and ((Get-Content -LiteralPath $ofl -Raw) -match "SIL OPEN FONT LICENSE Version 1\.1")) "licenses\Alegreya-OFL.txt is the OFL text"
         Check (-not (Test-Path (Join-Path $pkg "game\EMF.exe"))) "EMF.exe ships in game\emf\, never next to enshrouded.exe"
         # every relative link in the packaged engine map points at a file the package has
         $map = Join-Path $pkg "docs\ENGINE_MAP.md"
@@ -918,6 +944,7 @@ try {
         Check (-not (Test-Path (Join-Path $pkg "template\build"))) "the template has no build folder"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\big_stacks\mod.json") -Raw) -match '"enabled": false') "big_stacks is off by default"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\bulk_craft\mod.json") -Raw) -match '"enabled": false') "bulk_craft is off by default"
+        Check ((Get-Content (Join-Path $pkg "game\emf\mods\blessings\mod.json") -Raw) -match '"enabled": false') "Flame Blessings is off by default"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\companion\mod.json") -Raw) -match '"enabled": false') "Companion is off by default"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\life_skills\mod.json") -Raw) -match '"enabled": false') "Life Skills is off by default"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\kill_counter\mod.json") -Raw) -match '"enabled": false') "Kill Counter is off by default"

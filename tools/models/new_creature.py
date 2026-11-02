@@ -7,14 +7,20 @@ The pack names, per creature:
   skeleton_guid  the skeleton's GUID (fixed forever; the clips' GUIDs follow from it and their names)
   graph, graph_guid   the game's animation graph and its copy's GUID
   clips          our clips: {name: {"animation": the glb's animation, "loop": true for a looping clip,
-                 "speed": faster above 1}}, or {name: {"made": {"from": an animation (else the rest pose), "at":
+                 "speed": faster above 1, "in_place": the joint that carries a walk forward when the animation
+                 travels (root motion: its travel along the ground is taken out, gltf_clips.clip)}}, or {name: {"made": {"from": an animation (else the rest pose), "at":
                  seconds into it, "keys": made_clips.py's key turns, "loop": ...}}} (a death or flinch the file lacks), or
                  {name: {"additive_zero": true}}: an additive clip that adds nothing (every joint unturned,
                  unmoved, scale 0: an additive layer adds scales, as the game's offset clips show), for the graph's
                  additive layers whose game clips are offsets (the wolf's leaning), or {name: {"offset": {joint:
                  [axis, degrees]}}}: an offset that turns those joints (made_clips.offset; the game wolf's lean turns
-                 its neck and head about 50 degrees into a turn)
-  model_glb      optional: the model from this glb instead (a copy on the skeleton, new_skeleton.write_glb, then
+                 its neck and head about 50 degrees into a turn), or {name: {"snake": {"head": the first joint of
+                 a snake's spine chain, "keys": snake_clips.py's keys, "length": seconds, "travel": waves along the
+                 body over the clip, "loop": ...}}}: a snake's clip from its body curve (slither, rear, strike,
+                 roll), or {name: {"timeline": [[at, animation, time], ...]}}: a clip that times the glb's
+                 animations (gltf_clips.timeline: a swing stretched to land when the game's attack hits, two swings
+                 joined into one combo)
+  model_glb     optional: the model from this glb instead (a copy on the skeleton, new_skeleton.write_glb, then
                  retextured; its bones named jNNN_<name>)
   roles          {game clip GUID: our clip name}: which of our clips plays where the graph plays that game clip
   default_role   our clip for every other game clip the graph plays: every clip reference of the copy is ours (a
@@ -23,6 +29,10 @@ The pack names, per creature:
                  the built-in zero offset (_additive_zero) where its role names a whole pose
   slots          {slot: our joint name}: the graph's attachment slots (gamegltf.SLOTS: Root, Head, Chest, Pelvis,
                  FootL, ...); a slot not named points at the root
+  uneven_scale   optional, true: the file is scaled unevenly above its joints (an FBX export's 1.2 x 1.2 x 1.1):
+                 fold that into the joints' positions, each joint taking the nearest rotation (new_skeleton.decompose)
+  yaw            optional: degrees the file is turned about the vertical first (glTF's, counter-clockwise seen from
+                 above): a creature lying along +x faces the game's forward with -90
 """
 import os
 import re
@@ -37,6 +47,7 @@ import gltf_in  # noqa: E402
 import joint_animation  # noqa: E402
 import made_clips  # noqa: E402
 import new_skeleton  # noqa: E402
+import snake_clips  # noqa: E402
 
 GUID = re.compile(r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
 ZERO = "_additive_zero"  # the built-in offset that adds nothing
@@ -95,7 +106,8 @@ def build(cfg, glb_path, creature="creature"):
     slots: 36 joint indices}."""
     check(cfg, creature)
     gltf, binc = gltf_in.read_glb(glb_path)
-    sk = new_skeleton.build(gltf, binc, scale=float(cfg["scale"]))
+    sk = new_skeleton.build(gltf, binc, scale=float(cfg["scale"]), uneven=bool(cfg.get("uneven_scale")),
+                            yaw=float(cfg.get("yaw", 0.0)))
     hier = new_skeleton.hierarchy(sk, cfg["skeleton_guid"])
     slots = [0] * len(gamegltf.SLOTS)
     for slot, joint in cfg["slots"].items():
@@ -118,6 +130,16 @@ def build(cfg, glb_path, creature="creature"):
                 raise SystemExit("%s: clip %s: %s" % (creature, name, e))
             out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
             continue
+        if spec.get("snake"):
+            sn = spec["snake"]
+            try:
+                clip = snake_clips.clip(sk, sn.get("head", ""), sn.get("keys", []), float(sn.get("length", 1.0)),
+                                        travel=float(sn.get("travel", 0.0)), loop=bool(sn.get("loop")),
+                                        hierarchy_hash=new_skeleton.clip_hash(hier))
+            except (KeyError, ValueError) as e:
+                raise SystemExit("%s: clip %s: %s" % (creature, name, e.args[0] if e.args else e))
+            out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
+            continue
         if spec.get("made"):
             made = spec["made"]
             if made.get("from") and made["from"] not in have:
@@ -132,11 +154,27 @@ def build(cfg, glb_path, creature="creature"):
                 raise SystemExit("%s: clip %s: %s" % (creature, name, e))
             out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
             continue
+        if "timeline" in spec:
+            keys = spec["timeline"]
+            missing = [k[1] for k in keys if len(k) > 1 and k[1] not in have]
+            if missing:
+                raise SystemExit("%s: clip %s plays %r, which the glb does not have (%s)"
+                                 % (creature, name, missing[0], ", ".join(have)))
+            try:
+                clip = gltf_clips.timeline(gltf, binc, sk, keys, new_skeleton.clip_hash(hier))
+            except ValueError as e:
+                raise SystemExit("%s: clip %s: %s" % (creature, name, e))
+            out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
+            continue
         if spec.get("animation") not in have:
             raise SystemExit("%s: clip %s plays %r, which the glb does not have (%s)"
                              % (creature, name, spec.get("animation"), ", ".join(have)))
-        clip = gltf_clips.clip(gltf, binc, sk, spec["animation"], new_skeleton.clip_hash(hier),
-                               loop=bool(spec.get("loop")), speed=float(spec.get("speed", 1.0)))
+        try:
+            clip = gltf_clips.clip(gltf, binc, sk, spec["animation"], new_skeleton.clip_hash(hier),
+                                   loop=bool(spec.get("loop")), speed=float(spec.get("speed", 1.0)),
+                                   in_place=spec.get("in_place"))
+        except (KeyError, ValueError) as e:
+            raise SystemExit("%s: clip %s: %s" % (creature, name, e.args[0] if e.args else e))
         out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
     zero = {"name": ZERO, "guid": clip_guid(cfg["skeleton_guid"], ZERO), "clip": zero_clip(sk, hier)}
     return {"sk": sk, "hierarchy": hier, "clips": out, "zero": zero, "slots": slots}

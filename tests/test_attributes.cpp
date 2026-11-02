@@ -393,9 +393,13 @@ TEST_CASE("attr_read: the max of current health, stamina and mana by id; other a
     CHECK_FALSE(max_attribute_of(0x12345678u));
 }
 
-TEST_CASE("attributes: attributes, attribute_add and damage only on a build whose layouts were checked (1273043 and its server)") {
+TEST_CASE("attributes: attributes, attribute_add and damage only on a build whose layouts were checked (1273043, 1283531)") {
     CHECK(attribute_layouts_checked(emf::known_build_index(1273043u)));
     CHECK(attribute_layouts_checked(emf::known_build_index(1273043u, true)));
+    // 1283531: attrFind's and attrAdd's bodies are the old ones; allocPendingHit only gained a NULL return when its
+    // list is full (guarded_alloc handles NULL); HitCandidate, HitEvent and Health kept their layouts
+    CHECK(attribute_layouts_checked(emf::known_build_index(1283531u)));
+    CHECK(attribute_layouts_checked(emf::known_build_index(1283531u, true)));
     CHECK_FALSE(attribute_layouts_checked(emf::known_build_index(1269579u)));  // the exe was not at hand: unchecked
     CHECK_FALSE(attribute_layouts_checked(-1));                                // an unknown build (a game update)
     CHECK_FALSE(attribute_layouts_checked(99));

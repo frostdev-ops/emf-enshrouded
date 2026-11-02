@@ -53,18 +53,37 @@ TEST_CASE("WorldView on an invalid pointer does not crash") {
     CHECK(v.entity_ids().empty());
 }
 
-TEST_CASE("WorldView reads kind, tick, tick length and state at the engine offsets") {
+TEST_CASE("WorldView reads kind, tick and state at the engine offsets") {
     FakeWorld w;
     w.put<uint8_t>(off::kState, 2);
     w.put<uint8_t>(off::kKind, 2);
     w.put<uint32_t>(off::kTick, 4551);
-    w.put<int64_t>(off::kTickLengthNs, 33333333);
     WorldView v(w.p());
     CHECK(v.state() == 2);
     CHECK(v.kind() == static_cast<uint8_t>(WorldKind::Client));
     CHECK(v.tick() == 4551);
-    CHECK(v.tick_length_ns() == 33333333);
     CHECK(WorldView::from_storage(w.p() + off::kStorage).raw() == w.p());
+}
+
+TEST_CASE("WorldView follows the world offsets the start-up set (build 1283531: the block +0x1C00)") {
+    test::ScopedWorldOffsets moved(shifted_world_offsets(0xE179C0));
+    FakeWorld w(0x1C00);
+    w.put<uint8_t>(off::kKind, 0);  // the base's places hold something else now
+    w.put<uint32_t>(off::kTick, 1);
+    w.put<uint8_t>(0xE179C8, 2);  // kind
+    w.put<uint32_t>(0xE17E9C, 4551);  // tick
+    WorldView v(w.p());
+    CHECK(v.kind() == static_cast<uint8_t>(WorldKind::Client));
+    CHECK(v.tick() == 4551);
+    CHECK(WorldView::from_storage(w.p() + 0xE179C0).raw() == w.p());
+    MapStore ms;
+    test::plant_entities(w, ms, {5u, 9u});
+    CHECK(v.entity_count() == 2);
+    CHECK(v.entity_ids().size() == 2);
+    test::FakeRegistry reg;
+    reg.attach(w, {0x027ac564u});  // *(world + 0xE179C0)
+    CHECK(v.has_dynamic_component(0x027ac564u) == std::optional<bool>(true));
+    CHECK(v.template_component_size(0x027ac564u) == std::nullopt);  // read from that registry: no template map there
 }
 
 TEST_CASE("singleton() finds an object by FNV-1a name through the singleton map") {

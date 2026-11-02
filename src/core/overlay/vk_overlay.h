@@ -23,7 +23,12 @@ VkResult present_through(VkQueue queue, const VkPresentInfoKHR* info, bool visib
 
 struct VkOverlayHooks {
     std::function<bool()> visible;                                  // draw this frame?
-    std::function<void(ImGuiIO&, float display_height)> fonts;      // add fonts (once, before the backend starts)
+    // Whether the font atlas must be built again for a swapchain this high (asked before every frame).
+    std::function<bool(float display_height)> fonts_due;
+    // Builds the font atlas for a swapchain this high: once when ImGui starts, then whenever fonts_due says so, between
+    // frames, after EMF's earlier frames are done with the old atlas; the new one is then uploaded.
+    std::function<void(ImGuiIO&, float display_height)> fonts;
+    std::function<void(ImGuiStyle&)> style;  // the theme, once, on ImGui's dark one
     std::function<void(ImGuiIO&)> before_frame;                     // feed input into ImGui
     std::function<void(ImVec2 display)> build;                      // ImGui calls between NewFrame and Render
     std::function<void()> turned_off;                               // drawing failed: the overlay is off for good

@@ -1,6 +1,7 @@
 #include <doctest.h>
 
 #include <atomic>
+#include <thread>
 #include <vector>
 
 #include "core/overlay/vk_overlay.h"
@@ -64,4 +65,36 @@ TEST_CASE("present_through: a faulting draw still presents and disables the over
     CHECK(present_through(nullptr, &info, true, &disabled, render_faults, nullptr, fake_present) == VK_SUCCESS);
     CHECK(g_renders == 1);  // disabled: not tried again
     CHECK(g_pl.calls == 2);
+}
+
+namespace {
+#pragma warning(push)
+#pragma warning(disable : 4717)  // recursive on all paths: that is the point
+int g_depth_sink = 0;
+int too_deep(int n) {
+    volatile char pad[1024];
+    pad[0] = static_cast<char>(n);
+    return too_deep(n + 1) + pad[0];
+}
+#pragma warning(pop)
+bool render_overflows(VkQueue, const VkPresentInfoKHR*, VkSemaphore*, void*) {
+    ++g_renders;
+    g_depth_sink = too_deep(0);
+    return true;
+}
+}  // namespace
+
+TEST_CASE("present_through: a draw that overflows the stack is caught, and so is the next one (the guard page is back)") {
+    // in a thread of its own: a second overflow without the guard page put back would end the process
+    int presented = 0;
+    std::thread t([&] {
+        const VkPresentInfoKHR info = game_info();
+        for (int i = 0; i < 2; ++i) {
+            std::atomic<bool> disabled{false};
+            presented += present_through(nullptr, &info, true, &disabled, render_overflows, nullptr, fake_present) ==
+                         VK_SUCCESS;
+        }
+    });
+    t.join();
+    CHECK(presented == 2);
 }

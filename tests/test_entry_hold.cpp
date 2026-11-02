@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <cstring>
+#include <string>
 
 #include "loader/entry_hold.h"
 
@@ -146,4 +147,44 @@ TEST_CASE("entry hold: the loader's line says how EMF's start-up ended") {
     CHECK(no_export.find("no emf_core_start") != std::string::npos);
     CHECK(no_export.find("until emf_core started") == std::string::npos);
     CHECK(hold_message(false, CoreOutcome::Running, 20000).find("emf_core is still starting") != std::string::npos);
+}
+
+TEST_CASE("entry hold: the game client's entry point, when it cannot be held for the content build, says why too") {
+    uint8_t rel[16] = {0xE9, 0x10, 0x00, 0x00, 0x00};
+    const std::string patched = emf::loader::entry_not_usual(rel, 0x7ff812340000ull, "winmm.dll", "the game's");
+    CHECK(patched.find("the game's entry point is not the usual start-up code: another tool patched it: it jumps into "
+                       "winmm.dll") == 0);
+    CHECK(patched.find("world setup") == std::string::npos);
+    const uint8_t code[16] = {0x48, 0x89, 0x5C, 0x24, 0x08, 0x55, 0x56, 0x57};
+    CHECK(emf::loader::entry_not_usual(code, 0, "", "the game's").find("its first bytes are 48 89 5c") != std::string::npos);
+    // the server's line stays as it was
+    CHECK(emf::loader::entry_not_held_message(rel, 0x7ff812340000ull, "winmm.dll") ==
+          emf::loader::entry_not_usual(rel, 0x7ff812340000ull, "winmm.dll", "the server's") +
+              "; not held, so mods may load after its world setup");
+}
+
+TEST_CASE("entry hold: Steam's DRM stub in its .bind section is held too, another tool's jump never") {
+    using emf::loader::entry_holdable;
+    const uint8_t msvc[18] = {0x48, 0x83, 0xEC, 0x28, 0xE8, 0x11, 0x22, 0x33, 0x44,
+                              0x48, 0x83, 0xC4, 0x28, 0xE9, 0x55, 0x66, 0x77, 0x88};
+    CHECK(entry_holdable(msvc, ".text"));
+    // the game client of 1273043: SteamStub at the entry, "call $+5; push rax; push rbx; push rcx; push rdx; ..."
+    const uint8_t steam[16] = {0xE8, 0x00, 0x00, 0x00, 0x00, 0x50, 0x53, 0x51, 0x52, 0x56, 0x57, 0x55, 0x41, 0x50};
+    CHECK(entry_holdable(steam, ".bind"));
+    CHECK_FALSE(entry_holdable(steam, ".text"));  // those bytes elsewhere: not Steam's stub
+    const uint8_t rel[16] = {0xE9, 0x10, 0x00, 0x00, 0x00};
+    const uint8_t ind[16] = {0xFF, 0x25, 0x00, 0x00, 0x00, 0x00};
+    const uint8_t rax[16] = {0x48, 0xB8, 0x88, 0x77, 0x66, 0x55, 0x44, 0x33, 0x22, 0x11, 0xFF, 0xE0};
+    for (const uint8_t* jump : {rel, ind, rax}) {
+        CHECK_FALSE(entry_holdable(jump, ".bind"));
+        CHECK_FALSE(entry_holdable(jump, ".text"));
+    }
+    CHECK_FALSE(entry_holdable(nullptr, ".bind"));
+}
+
+TEST_CASE("entry hold: the section that holds an address of the exe") {
+    const auto* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    CHECK(emf::loader::section_of(base, nt->OptionalHeader.AddressOfEntryPoint) == ".text");
+    CHECK(emf::loader::section_of(base, 0x7FFFFFF0u).empty());
 }

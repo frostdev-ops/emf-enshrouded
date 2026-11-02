@@ -8,6 +8,7 @@
 #include "common/fnv.h"
 #include "common/offsets.h"
 #include "common/seh.h"
+#include "common/world_offsets.h"
 #include "common/world_view.h"
 
 namespace emf::core {
@@ -43,12 +44,12 @@ uint32_t event_hash(std::string_view short_name) {
 std::optional<EventType> find_event(const uint8_t* world, std::string_view short_name) {
     if (!world || short_name.empty()) return std::nullopt;
     const uint32_t hash = event_hash(short_name);
-    const auto index = WorldView(const_cast<uint8_t*>(world)).map_u16(off::kEventMap, hash);
+    const auto index = WorldView(const_cast<uint8_t*>(world)).map_u16(world_offsets().event_map, hash);
     if (!index) return std::nullopt;
     const uint8_t* table = nullptr;
     const uint8_t* desc = nullptr;
     uint32_t size = 0, desc_hash = 0;
-    if (!rd(world + off::kEventTypes, table) || !table) return std::nullopt;
+    if (!rd(world + world_offsets().event_types, table) || !table) return std::nullopt;
     if (!rd(table + size_t(*index) * off::kEventTypeStride, desc) || !desc) return std::nullopt;
     if (!rd(desc + off::kTypeDescSize, size) || !rd(desc + off::kTypeDescHash, desc_hash)) return std::nullopt;
     if (desc_hash != hash || size == 0) return std::nullopt;

@@ -631,6 +631,20 @@ TEST_CASE("beastmaster: a bear is the wolf's graph at 1.4x scale (the pack's Sca
     CHECK(b.reply("beastmaster.tame").find("Taming the wolf") != std::string::npos);
 }
 
+TEST_CASE("beastmaster: the bear pack 2's bear is its own graph (its own skeleton) at 1.4x; the older pack's is the wolf's") {
+    constexpr const char* kBearGraph = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f05";
+    BeastRig b;
+    CHECK(b.reply(std::string("beastmaster.species ") + kBearGraph + " 6 1.4") == "bear");
+    CHECK(b.reply(std::string("beastmaster.species ") + kWolfGraph + " 6 1.4") == "bear");  // the bear pack 1.0
+    CHECK(b.reply(std::string("beastmaster.species ") + kWolfGraph + " 6 1") == "wolf");
+    b.beast(60, kBearGraph, 2, 2, kWildBeast, 20, 100);
+    component<ecs::ScaleComponent>(b.r.fake, 60).uniformScale = 1.4f;
+    b.look(1, 0, 10.5, 0, 45);
+    CHECK(b.reply("beastmaster.tame").find("Taming the bear") != std::string::npos);
+    b.seconds(4);
+    CHECK(b.reply("beastmaster.list").find("1. Bear - bear, out") != std::string::npos);
+}
+
 TEST_CASE("beastmaster: a creature that gets a dead wild bear's id is not a bear") {
     BeastRig b({{"wild_bear_minutes", "1"}});
     b.spawnable(1);
@@ -1428,4 +1442,120 @@ TEST_CASE("beastmaster: building is noticed in the step it starts; aside off whi
     CHECK(off != "Your beasts come back.");
     b.reply("beastmaster.give boar");
     CHECK(b.reply("beastmaster.call Boar").find("a few seconds after you stop building") != std::string::npos);
+}
+
+// ---- species_extra.lua: more beasts from a file beside Beastmaster's own (a creature pack that cannot be shared, a
+// modder's own creature), read when the mod starts. The GUIDs here are made up. ----
+namespace {
+constexpr const char* kTrollGraph = "7e0d1c2b-3a4f-4b5c-8d6e-0f1a2b3c4d05";
+constexpr const char* kTrollTemplate = "7e0d1c2b-3a4f-4b5c-8d6e-0f1a2b3c4d02";
+constexpr const char* kOgreGraph = "7e0d1c2b-3a4f-4b5c-8d6e-0f1a2b3c4d15";
+constexpr const char* kOgreTemplate = "7e0d1c2b-3a4f-4b5c-8d6e-0f1a2b3c4d12";
+constexpr int kVukah = 3;
+
+// Writes species_extra.lua beside the copied mod and lets the host reload it (`step`: a later write needs a later one),
+// then plays a second so the world's data reaches the reloaded mod (as edit_main).
+void extra_species(BeastRig& b, const std::string& lua, int step = 1) {
+    write_later(b.folder + L"\\species_extra.lua", lua, step);
+    b.host->check_reload_now();
+    REQUIRE_MESSAGE(b.host->status(b.id) == "running", b.host->status(b.id));
+    b.seconds(1);
+}
+
+std::string entry(const char* id, const char* name, const char* tpl, const char* graph, const std::string& more = "") {
+    return std::string("\t{ id = \"") + id + "\", name = \"" + name + "\", template = \"" + tpl + "\", graph = \"" +
+           graph + "\"" + more + " },\n";
+}
+}  // namespace
+
+TEST_CASE("beastmaster: a species_extra.lua beside the mod adds its beasts: known by graph and faction, tamed, listed, called with its template and health") {
+    BeastRig b;
+    CHECK(b.reply(std::string("beastmaster.species ") + kTrollGraph + " 3") == "unknown");
+    extra_species(b, "return {\n" + entry("troll", "Troll", kTrollTemplate, kTrollGraph,
+                                          ", plural = \"trolls\", factions = { [3] = true }, health_mul = 3") + "}\n");
+    CHECK(b.reply(std::string("beastmaster.species ") + kTrollGraph + " 3") == "troll");
+    CHECK(b.reply(std::string("beastmaster.species ") + kTrollGraph + " 6") == "unknown");  // not its faction
+    CHECK(b.reply(std::string("beastmaster.species ") + kWolfGraph + " 6") == "wolf");       // the mod's own stay
+    b.beast(50, kTrollGraph, 0, 5, kVukah, 20, 100);
+    b.look(1, 0, 10.5, 0, 0);
+    CHECK(b.reply("beastmaster.tame").find("Taming the troll") != std::string::npos);
+    b.seconds(4);
+    CHECK(b.noted("You tamed a troll: Troll"));
+    CHECK(b.reply("beastmaster.list").find("1. Troll - troll, out") != std::string::npos);
+    b.reply("beastmaster.dismiss all");
+    b.spawnable(1);
+    b.seconds(11);
+    CHECK(b.reply("beastmaster.call 1").find("comes") != std::string::npos);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(guid_text(b.r.fake.spawns[0].guid) == kTrollTemplate);
+    auto& h = component<ecs::Health>(b.r.fake, 1234);
+    h.dataStorage[2] = 40;
+    b.seconds(1);
+    CHECK(h.dataStorage[3] == 80);  // 40 + 80 = 120 = 3 x 40
+    CHECK(b.reply("beastmaster.give troll").find("troll") != std::string::npos);
+}
+
+TEST_CASE("beastmaster: a species_extra.lua beast is fed the bait its entry names; one without bait takes none") {
+    BeastRig b;
+    b.r.fake.item_names[kDogBait] = "Food_T2_Dog_Bait";
+    extra_species(b, "return {\n" + entry("troll", "Troll", kTrollTemplate, kTrollGraph, ", bait = \"Food_T2_Dog_Bait\"") +
+                         entry("ogre", "Ogre", kOgreTemplate, kOgreGraph) + "}\n");
+    b.beast(50, kOgreGraph, 0, 5, kVukah, 100, 100);   // ahead (+z)
+    b.beast(51, kTrollGraph, 5, 0, kVukah, 100, 100);  // to the right (+x)
+    b.look(1, 0, 10.5, 0, 0);
+    CHECK(b.reply("beastmaster.tame") == "The ogre is too strong: bring it under 25 % health.");
+    CHECK(b.reply("beastmaster.feed") == "The ogre takes no bait: bring it under 25 % health to tame it.");
+    CHECK(b.r.fake.takes.empty());
+    b.look(1, 0, 10.5, 0, 90);
+    CHECK(b.reply("beastmaster.tame").find("feed it its bait (Food_T2_Dog_Bait)") != std::string::npos);
+    CHECK(b.reply("beastmaster.feed") == "You offer the troll some Food_T2_Dog_Bait.");
+    REQUIRE(b.r.fake.takes.size() == 1);
+    CHECK(b.r.fake.takes.back().item == kDogBait);
+}
+
+TEST_CASE("beastmaster: a species_extra.lua beast whose bait the game does not know points at its entry") {
+    BeastRig b;
+    extra_species(b, "return {\n" + entry("ogre", "Ogre", kOgreTemplate, kOgreGraph, ", bait = \"No_Such_Item\"") + "}\n");
+    b.beast(50, kOgreGraph, 0, 5, kVukah, 100, 100);
+    b.look(1, 0, 10.5, 0, 0);
+    CHECK(b.reply("beastmaster.feed") == "The game has no item named No_Such_Item: check its bait in species_extra.lua.");
+}
+
+TEST_CASE("beastmaster: species_extra.lua entries without id, name, template or graph, or with a taken id, are skipped with a log line") {
+    BeastRig b;
+    CHECK(logged(b.r.fake, "species_extra") == 0);  // no file: nothing to say
+    extra_species(b, "return {\n" + entry("wolf", "Grey wolf", kTrollTemplate, kTrollGraph) +
+                         "\t{ name = \"Nameless\", template = \"" + kOgreTemplate + "\", graph = \"" + kOgreGraph + "\" },\n" +
+                         "\t{ id = \"ghost\", name = \"Ghost\", template = \"" + kOgreTemplate + "\" },\n" +
+                         "\t\"ogre\",\n" +
+                         entry("troll", "Troll", kTrollTemplate, "7E0D1C2B-3A4F-4B5C-8D6E-0F1A2B3C4D05") + "}\n");
+    CHECK(logged(b.r.fake, "species_extra.lua: entry 1 (wolf) skipped: the id wolf is taken") == 1);
+    CHECK(logged(b.r.fake, "species_extra.lua: entry 2 skipped: it has no id") == 1);
+    CHECK(logged(b.r.fake, "species_extra.lua: entry 3 (ghost) skipped: it has no graph") == 1);
+    CHECK(logged(b.r.fake, "species_extra.lua: entry 4 skipped: not a table") == 1);
+    CHECK(logged(b.r.fake, "species_extra.lua: 1 beast added (troll)") == 1);
+    CHECK(b.reply(std::string("beastmaster.species ") + kTrollGraph + " 3") == "troll");  // its graph in any case
+    CHECK(b.reply(std::string("beastmaster.species ") + kWolfGraph + " 6") == "wolf");
+    CHECK(b.reply("beastmaster.give ghost").find("no species ghost") != std::string::npos);
+}
+
+TEST_CASE("beastmaster: a species_extra.lua that does not load or gives no list is logged; the mod runs on with its own beasts") {
+    BeastRig b;
+    extra_species(b, "return {\n\t{ id = \"troll\",\n");  // cut short
+    CHECK(logged(b.r.fake, "species_extra.lua did not load:") == 1);
+    CHECK(b.reply(std::string("beastmaster.species ") + kWolfGraph + " 6") == "wolf");
+    extra_species(b, "return 5\n", 2);
+    CHECK(logged(b.r.fake, "species_extra.lua gave no list of beasts") == 1);
+    CHECK(b.reply("beastmaster.give wolf").find("added") != std::string::npos);
+}
+
+TEST_CASE("wild beasts: a species_extra.lua beast with a pack comes as a wild beast too") {
+    BeastRig b({{"wild_bear_minutes", "1"}});
+    for (const char* t : {kBearTemplate, kAurochsTemplate, kSnakeTemplate}) b.r.fake.missing_templates.insert(guid_bytes(t));
+    no_rare_snakes(b.r.fake);
+    extra_species(b, "return {\n" + entry("troll", "Troll", kTrollTemplate, kTrollGraph, ", pack = \"a private pack\"") + "}\n");
+    b.spawnable(2);
+    b.seconds(61);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(guid_text(b.r.fake.spawns.back().guid) == kTrollTemplate);
 }

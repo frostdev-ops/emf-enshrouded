@@ -15,6 +15,7 @@
 #include "console_model.h"
 #include "imgui.h"
 #include "input_router.h"
+#include "look_settings.h"
 
 namespace emf::core {
 
@@ -25,11 +26,13 @@ struct OverlayConfig {
     float mouse_speed = 1.0f;     // the console's cursor: pixels per mouse count
     bool suggest = true;          // suggestions as you type in the console (off: Tab completes as before)
     size_t suggest_rows = 8;      // at most this many suggestions (3-12)
+    LookSettings look;            // [hud] and the look keys of [overlay] (look_settings.h)
+    std::vector<std::string> look_problems;  // values in them that could not be used, one line each (for the log)
 };
 
 // [overlay] enabled=0|1 (default 1), key=<scan code, decimal or 0x hex, 1-0x7F> (default 0x29), chat=0|1 (default 1),
 // mouse_speed=<0.1-10> (default 1), suggest=0|1 (default 1), suggest_rows=<3-12> (default 8; more or fewer are kept
-// within 3-12). A "; comment" after a value on the same line is not part of it.
+// within 3-12), and the look (read_look_settings). A "; comment" after a value on the same line is not part of it.
 OverlayConfig read_overlay_config(const std::wstring& ini_path);
 
 // The ImGui key for a console key event (ImGuiKey_None if the console does not use it).
@@ -56,12 +59,14 @@ struct OverlayDeps {
 
 bool start_overlay(const OverlayConfig& config, OverlayDeps deps);
 ConsoleModel* overlay_console();  // null until started
-// Shows the replies that follow (a command typed into the game's chat) for `ms` at the top of the screen.
-void overlay_show_replies(uint64_t ms = 6000);
+// Shows the replies that follow (a command typed into the game's chat) for `ms` (0: [hud] notes_seconds) where notes
+// show.
+void overlay_show_replies(uint64_t ms = 0);
 // Opens a mod's radial wheel (API v10). False when the overlay is not running or cannot draw, the console is open, or
 // another wheel is open. Any thread; the input is captured at once, the wheel appears on the next frame.
 bool overlay_open_wheel(const WheelRequest& request);
-// A line at the top of the screen for a few seconds, also kept in the console. Any thread.
+// A note for [hud] notes_seconds where [hud] notes_place says (top centre by default), also kept in the console. Any
+// thread.
 void overlay_notify(const std::string& text);
 
 // What the debug bridge's state reports about the overlay. Any thread.

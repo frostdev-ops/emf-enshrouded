@@ -146,6 +146,9 @@
     <div class="narrow">
       <h2 class="page-title">EMF</h2>
       <div class="card install" id="install"></div>
+      <!-- EML content: who applies the EML mods' content at the next start, the last build, the copy (content.js) -->
+      <h3 class="section-title" id="content-title" hidden>EML content</h3>
+      <div class="card content-card" id="content-card" aria-labelledby="content-title" hidden></div>
       <h3 class="section-title" id="account-title" hidden>Nexus account</h3>
       <div class="card account" id="account" aria-labelledby="account-title" hidden></div>
       <h3 class="section-title" id="nxm-title" hidden>Mod Manager Download links</h3>
@@ -155,6 +158,7 @@
         <div class="segmented" role="tablist" aria-label="Log file">
           <button type="button" class="seg" data-log="core" aria-selected="true">emf_core.log</button>
           <button type="button" class="seg" data-log="loader" aria-selected="false">emf_loader.log</button>
+          <button type="button" class="seg" data-log="content" aria-selected="false" title="What the last EML content build did">content.log</button>
         </div>
         <button class="ghost small" id="logs-refresh" type="button">Refresh</button>
         <button class="ghost small" id="logs-copy" type="button" title="Copy this log, for a bug report">Copy</button>
@@ -192,5 +196,6 @@
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <script src="app.js"></script>
 <script src="saves.js"></script>
+<script src="content.js"></script>
 </body>
 </html>

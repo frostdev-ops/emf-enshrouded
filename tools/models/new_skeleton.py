@@ -86,18 +86,43 @@ def _quat(r):
     return tuple(c / n for c in q)
 
 
-def decompose(m, what="a node"):
-    """(rotation, position, uniform scale) of a world matrix; a scale that differs per axis or mirrors is refused."""
+def _det3(a):
+    return (a[0][0] * (a[1][1] * a[2][2] - a[1][2] * a[2][1]) - a[0][1] * (a[1][0] * a[2][2] - a[1][2] * a[2][0])
+            + a[0][2] * (a[1][0] * a[2][1] - a[1][1] * a[2][0]))
+
+
+def _polar(a):
+    """The rotation nearest to a 3x3 matrix (its polar factor: a = R P, P symmetric), by Newton's iteration."""
+    r = [row[:] for row in a]
+    for _ in range(60):
+        d = _det3(r)
+        inv_t = [[(r[(i + 1) % 3][(j + 1) % 3] * r[(i + 2) % 3][(j + 2) % 3]
+                   - r[(i + 1) % 3][(j + 2) % 3] * r[(i + 2) % 3][(j + 1) % 3]) / d for j in range(3)] for i in range(3)]
+        nxt = [[0.5 * (r[i][j] + inv_t[i][j]) for j in range(3)] for i in range(3)]
+        done = max(abs(nxt[i][j] - r[i][j]) for i in range(3) for j in range(3)) < 1e-13
+        r = nxt
+        if done:
+            break
+    return r
+
+
+def decompose(m, what="a node", uneven=False):
+    """(rotation, position, uniform scale) of a world matrix; a scale that differs per axis is refused, or with
+    uneven=True taken as the nearest rotation (the polar factor) and the even scale of the same volume; a mirror is
+    refused."""
     cols = [[m[r][c] for r in range(3)] for c in range(3)]
     lens = [math.sqrt(sum(v * v for v in col)) for col in cols]
-    if min(lens) <= 0 or max(lens) / min(lens) - 1 > 1e-4:
-        raise ValueError("%s is scaled unevenly (%s): only a uniform scale can be folded into a skeleton"
-                         % (what, ", ".join("%.4g" % v for v in lens)))
-    r = [[m[i][c] / lens[c] for c in range(3)] for i in range(3)]
-    det = (r[0][0] * (r[1][1] * r[2][2] - r[1][2] * r[2][1]) - r[0][1] * (r[1][0] * r[2][2] - r[1][2] * r[2][0])
-           + r[0][2] * (r[1][0] * r[2][1] - r[1][1] * r[2][0]))
-    if det < 0:
+    if min(lens) <= 0:
+        raise ValueError("%s has a zero scale" % what)
+    a = [[m[i][c] for c in range(3)] for i in range(3)]
+    if _det3(a) < 0:
         raise ValueError("%s is mirrored: a skeleton cannot hold a mirror" % what)
+    if max(lens) / min(lens) - 1 > 1e-4:
+        if not uneven:
+            raise ValueError("%s is scaled unevenly (%s): only a uniform scale can be folded into a skeleton (a pack "
+                             "can allow it: uneven_scale)" % (what, ", ".join("%.4g" % v for v in lens)))
+        return _quat(_polar(a)), (m[0][3], m[1][3], m[2][3]), _det3(a) ** (1.0 / 3.0)
+    r = [[m[i][c] / lens[c] for c in range(3)] for i in range(3)]
     return _quat(r), (m[0][3], m[1][3], m[2][3]), sum(lens) / 3
 
 
@@ -109,23 +134,58 @@ def mesh_world(gltf, skin=0):
     raise ValueError("no mesh is skinned to skin %d" % skin)
 
 
+def _likeness(a, b):
+    """How far apart two world matrices are in scale and turn (0: the same scale and turn)."""
+    sa, sb = abs(_det3(a)) ** (1.0 / 3.0), abs(_det3(b)) ** (1.0 / 3.0)
+    if sa <= 0 or sb <= 0:
+        return float("inf")
+    turn = sum((a[i][c] / sa - b[i][c] / sb) ** 2 for i in range(3) for c in range(3))
+    return abs(math.log(sa / sb)) + turn
+
+
 def bind_worlds(gltf, binc, skin=0):
-    """{joint node: its world matrix at the bind pose}: the pose in which the skinned mesh stands as its node puts
-    it (mesh world times the inverse of the joint's inverse bind). A file's nodes may hold another pose (a frame of
-    an animation); without inverse binds the nodes' pose is the bind pose."""
+    """{joint node: its world matrix at the bind pose}. Files hold inverse binds two ways: relative to the skinned
+    mesh node (Blender's: the bind pose is the mesh world times each inverse bind's inverse) or in world space, the
+    mesh node's own transform ignored (glTF's spec; Sketchfab's files, their mesh under a scaled FBX node). The
+    reading whose joints are turned and scaled as the file's joint nodes are is taken: the rest must stand in the
+    space the animations move the nodes in. A file's nodes may hold another pose (a frame of an animation); without
+    inverse binds the nodes' pose is the bind pose."""
     s = gltf["skins"][skin]
+    worlds = node_worlds(gltf)
     if "inverseBindMatrices" not in s:
-        worlds = node_worlds(gltf)
         return {n: worlds[n] for n in s["joints"]}
     mesh = mesh_world(gltf, skin)
-    ibm = [gltf_in.mat_from_colmajor(v) for v in gltf_in.accessor(gltf, binc, s["inverseBindMatrices"])]
-    return {n: gltf_in.mat_mul(mesh, gltf_in.mat_inv_affine(m)) for n, m in zip(s["joints"], ibm)}
+    ibm = [gltf_in.mat_inv_affine(gltf_in.mat_from_colmajor(v))
+           for v in gltf_in.accessor(gltf, binc, s["inverseBindMatrices"])]
+    relative = {n: gltf_in.mat_mul(mesh, m) for n, m in zip(s["joints"], ibm)}
+    absolute = dict(zip(s["joints"], ibm))
+    off_rel = sum(min(_likeness(relative[n], worlds[n]), 10.0) for n in s["joints"])
+    off_abs = sum(min(_likeness(absolute[n], worlds[n]), 10.0) for n in s["joints"])
+    binds = absolute if off_abs < off_rel else relative
+    # a helper joint no vertex follows may carry a meaningless inverse bind (Sketchfab's _rootJoint: the identity,
+    # 85 times off its node's scale): it rests where its node stands
+    for n in s["joints"]:
+        ratio = abs(_det3(binds[n])) / max(abs(_det3(worlds[n])), 1e-300)
+        if not 0.125 < ratio < 8.0:  # more than twice or less than half the node's scale
+            binds[n] = worlds[n]
+    return binds
 
 
-def build(gltf, binc, skin=0, scale=1.0):
+def yaw_matrix(degrees):
+    """A turn about glTF's vertical (counter-clockwise seen from above) as a 4 x 4 matrix."""
+    a = math.radians(degrees or 0.0)
+    c, s = math.cos(a), math.sin(a)
+    return [[c, 0.0, s, 0.0], [0.0, 1.0, 0.0, 0.0], [-s, 0.0, c, 0.0], [0.0, 0.0, 0.0, 1.0]]
+
+
+def build(gltf, binc, skin=0, scale=1.0, uneven=False, yaw=0.0):
     """The skeleton of a glTF skin: names (the root's "root", then the nodes' names), nodes (the glTF node of each
     joint, None at the root), parents (None at the root), rest (per joint local rotation, position, scale in game
-    space: the bind pose), scale and rest_scale (each joint's world scale in the file at the bind pose, for poses)."""
+    space: the bind pose), scale and rest_scale (each joint's world scale in the file at the bind pose, for poses).
+    uneven: a scale that differs per axis above the joints (an FBX export's) is folded into the positions, each joint
+    taking the nearest rotation (decompose); refused without. yaw: degrees the creature is turned about the vertical
+    (glTF's, counter-clockwise seen from above) before it becomes ours: a file facing +x faces the game's forward with
+    -90; its poses and its copy (write_glb) turn alike."""
     nodes = gltf["nodes"]
     joints = set(gltf["skins"][skin]["joints"])
     order, parents = [None], [None]
@@ -143,8 +203,8 @@ def build(gltf, binc, skin=0, scale=1.0):
         raise ValueError("skin joints outside the scene: %s" % ", ".join(nodes[n].get("name", str(n)) for n in missing))
     worlds = bind_worlds(gltf, binc, skin)
     sk = {"names": ["root"] + [nodes[n].get("name") or "joint%d" % n for n in order[1:]], "nodes": order,
-          "parents": parents, "scale": scale,
-          "rest_scale": [1.0] + [decompose(worlds[n], nodes[n].get("name", str(n)))[2] for n in order[1:]]}
+          "parents": parents, "scale": scale, "uneven": bool(uneven), "yaw": float(yaw or 0.0),
+          "rest_scale": [1.0] + [decompose(worlds[n], nodes[n].get("name", str(n)), uneven)[2] for n in order[1:]]}
     sk["rest"] = pose(sk, worlds, gltf)
     return sk
 
@@ -155,10 +215,12 @@ def pose(sk, worlds, gltf=None):
     file's world (positions times the skeleton's scale), its scale relative to its scale at rest. The root keeps the
     game root's rest."""
     out, placed = [ROOT_REST], [(ROOT_REST[0], (0.0, 0.0, 0.0), 1.0)]
+    turn = yaw_matrix(sk["yaw"]) if sk.get("yaw") else None
     for j in range(1, len(sk["nodes"])):
         n = sk["nodes"][j]
         what = gltf["nodes"][n].get("name", str(n)) if gltf else str(n)
-        q, p, s = decompose(worlds[n], what)
+        m = gltf_in.mat_mul(turn, worlds[n]) if turn else worlds[n]
+        q, p, s = decompose(m, what, sk.get("uneven", False))
         q = gamegltf.mirror_quat(q)
         p = tuple(v * sk["scale"] for v in gamegltf.mirror_vec(p))
         s = s / sk["rest_scale"][j]
@@ -268,6 +330,8 @@ def write_glb(gltf, binc, sk, path, skin=0):
     else:
         file_ibm = [[[1.0 if r == c else 0.0 for c in range(4)] for r in range(4)] for _ in src_skin["joints"]]
     to_world = [gltf_in.mat_mul(worlds[node], m) for node, m in zip(src_skin["joints"], file_ibm)]
+    if sk.get("yaw"):
+        to_world = [gltf_in.mat_mul(yaw_matrix(sk["yaw"]), m) for m in to_world]
     k = sk["scale"]
 
     scene_nodes = [0]

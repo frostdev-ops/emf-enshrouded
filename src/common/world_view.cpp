@@ -5,6 +5,7 @@
 #include "fnv.h"
 #include "offsets.h"
 #include "seh.h"
+#include "world_offsets.h"
 
 namespace emf {
 namespace {
@@ -60,14 +61,15 @@ void* call_guarded_tpl(GetTemplateComponentFn fn, uint8_t* world, uint32_t hash,
 }  // namespace
 
 WorldView WorldView::from_storage(void* storage) {
-    return WorldView(static_cast<uint8_t*>(storage) - off::kStorage);
+    return WorldView(static_cast<uint8_t*>(storage) - world_offsets().storage);
 }
 
 uint8_t WorldView::state() const { return rd<uint8_t>(world_ + off::kState); }
-uint8_t WorldView::kind() const { return rd<uint8_t>(world_ + off::kKind); }
-uint32_t WorldView::tick() const { return rd<uint32_t>(world_ + off::kTick); }
-int64_t WorldView::tick_length_ns() const { return rd<int64_t>(world_ + off::kTickLengthNs); }
-uint32_t WorldView::entity_count() const { return rd<uint32_t>(world_ + off::kEntityMap + off::kMapCount); }
+uint8_t WorldView::kind() const { return rd<uint8_t>(world_ + world_offsets().kind); }
+uint32_t WorldView::tick() const { return rd<uint32_t>(world_ + world_offsets().tick); }
+uint32_t WorldView::entity_count() const {
+    return rd<uint32_t>(world_ + world_offsets().entity_map + off::kMapCount);
+}
 uint64_t WorldView::singleton_count() const { return rd<uint64_t>(world_ + off::kSingletonCount); }
 
 std::optional<uint16_t> WorldView::map_u16(uint32_t map_offset, uint32_t key) const {
@@ -87,7 +89,7 @@ std::optional<uint16_t> WorldView::map_u16(uint32_t map_offset, uint32_t key) co
 
 std::optional<bool> WorldView::has_dynamic_component(uint32_t hash) const {
     if (!world_) return std::nullopt;
-    const uint8_t* reg = rd<const uint8_t*>(world_ + off::kStorage);
+    const uint8_t* reg = rd<const uint8_t*>(world_ + world_offsets().storage);
     if (!reg) return std::nullopt;
     MapHeader h;
     if (!read_map(reg + off::kRegistryDynamicMap, h) || !h.keys) return std::nullopt;
@@ -101,7 +103,7 @@ std::optional<bool> WorldView::has_dynamic_component(uint32_t hash) const {
 
 std::optional<uint32_t> WorldView::template_component_size(uint32_t hash) const {
     if (!world_) return std::nullopt;
-    const uint8_t* reg = rd<const uint8_t*>(world_ + off::kStorage);
+    const uint8_t* reg = rd<const uint8_t*>(world_ + world_offsets().storage);
     if (!reg) return std::nullopt;
     MapHeader h;
     if (!read_map(reg + off::kRegistryTemplateMap, h) || !h.values) return std::nullopt;
@@ -139,7 +141,7 @@ void* WorldView::singleton(std::string_view name) const {
 std::vector<uint32_t> WorldView::entity_ids() const {
     std::vector<uint32_t> ids;
     MapHeader h;
-    if (!read_map(world_ + off::kEntityMap, h)) return ids;
+    if (!read_map(world_ + world_offsets().entity_map, h)) return ids;
     std::vector<uint64_t> bits((h.capacity + 63) / 64);
     std::vector<uint32_t> keys(h.capacity);
     if (!seh_read(h.bits, bits.data(), bits.size() * 8)) return ids;

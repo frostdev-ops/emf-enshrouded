@@ -1,3 +1,6 @@
 # Batch files need CRLF: cmd misreads labels in LF-only files.
 *.cmd text eol=crlf
 *.bat text eol=crlf
+# Fonts are binary: never touched by line-ending conversion.
+*.ttf binary
+*.otf binary

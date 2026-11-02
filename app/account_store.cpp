@@ -1,4 +1,5 @@
 #include "account_store.h"
+#include "common/move_retry.h"
 
 #include <windows.h>
 #include <dpapi.h>
@@ -83,7 +84,7 @@ bool save_account(const std::wstring& path, const StoredAccount& a) {
     const BOOL ok = WriteFile(h, blob->data(), static_cast<DWORD>(blob->size()), &put, nullptr) && put == blob->size() &&
                     FlushFileBuffers(h);
     CloseHandle(h);
-    if (!ok || !MoveFileExW(lp(tmp).c_str(), lp(path).c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
+    if (!ok || !emf::move_retrying(lp(tmp), lp(path), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH)) {
         DeleteFileW(lp(tmp).c_str());
         return false;
     }

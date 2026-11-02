@@ -2,6 +2,8 @@
 --   template:   the game template a call spawns (it runs the enemy AI, which follows StartGuardingEvent)
 --   graph:      the animation graph a wild creature of that kind runs (its template data on the server world:
 --               world:template("AnimationGraphResourceComponent2", id).animationGraph; render models are client-side)
+--   also:       another graph that is this kind too (the bear pack 2's bear runs its own graph copy, the older
+--               pack's ran the wolf's)
 --   factions:   when several kinds share a graph: the factions that make it this kind (the wolf's graph is also the
 --               scavengers' hound's)
 --               a beast on a skeleton of its own (the beasts pack's snake) runs its own copy of a game graph: its
@@ -32,11 +34,13 @@ M.list = {
 		graph = "9c1b120e-4901-495c-9cc0-5de134fbe140" },
 	{ id = "hound", name = "Hound", template = "87575915-bc75-4611-ab71-0cd4e79535b1",
 		graph = WOLF_GRAPH, factions = { [SCAVENGER] = true } },
-	-- the bear pack (tools/models/packs/beastmaster_bear.json); GUIDs fixed forever
+	-- the bear pack (tools/models/packs/beastmaster_bear.json); GUIDs fixed forever. Pack 2.0: a bear on a skeleton
+	-- of its own with its own graph copy; 1.0's bear ran the wolf's graph (both at 1.4x)
 	{ id = "bear", name = "Bear", template = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02",
 		model = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f01", pack = "the bear pack (emf_beastmaster_bear)", health_mul = 2.5,
 		plural = "bears",
-		graph = WOLF_GRAPH, factions = { [WILDBEAST] = true }, min_scale = BEAR_SCALE },
+		graph = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f05", also = WOLF_GRAPH,
+		factions = { [WILDBEAST] = true }, min_scale = BEAR_SCALE },
 	-- the beasts pack (tools/models/packs/beastmaster_beasts.json); GUIDs fixed forever
 	{ id = "aurochs", name = "Aurochs", template = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02",
 		model = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f01", pack = PACK, health_mul = 3,
@@ -68,6 +72,54 @@ M.list = {
 
 local by_id = {}
 for _, s in ipairs(M.list) do by_id[s.id] = s end
+
+-- More beasts from species_extra.lua beside this file, when there is one: it returns a list of entries like the ones
+-- above (a creature pack that cannot be shared, a modder's own creature). Each needs id, name, template and graph
+-- (GUID text); bait: the item it is fed (the beasts above have settings for theirs). An entry without those, or with
+-- an id that is taken, is skipped; the skips, what was added and a file that does not load are logged.
+local NEEDED = { "id", "name", "template", "graph" }
+
+local function why_not(s)
+	if type(s) ~= "table" then return "not a table" end
+	for _, key in ipairs(NEEDED) do
+		if type(s[key]) ~= "string" or s[key] == "" then return "it has no " .. key end
+	end
+	if by_id[s.id:lower()] then return "the id " .. s.id .. " is taken" end
+	return nil
+end
+
+local function add_extra()
+	local ok, extra = pcall(require, "species_extra")
+	if not ok then
+		if not tostring(extra):find("module 'species_extra' not found", 1, true) then
+			emf.log("species_extra.lua did not load: " .. tostring(extra))
+		end
+		return
+	end
+	if type(extra) ~= "table" then
+		emf.log("species_extra.lua gave no list of beasts")
+		return
+	end
+	local added = {}
+	for i, s in ipairs(extra) do
+		local why = why_not(s)
+		if why then
+			local named = type(s) == "table" and type(s.id) == "string" and s.id ~= "" and " (" .. s.id .. ")" or ""
+			emf.log(string.format("species_extra.lua: entry %d%s skipped: %s", i, named, why))
+		else
+			s.id, s.graph = s.id:lower(), s.graph:lower()
+			if type(s.also) == "string" then s.also = s.also:lower() end
+			M.list[#M.list + 1] = s
+			by_id[s.id] = s
+			added[#added + 1] = s.id
+		end
+	end
+	if #added > 0 then
+		emf.log(string.format("species_extra.lua: %d beast%s added (%s)", #added, #added == 1 and "" or "s",
+			table.concat(added, ", ")))
+	end
+end
+add_extra()
 
 -- How a text names a kind (a species or its id): "albino snake", its name in lower case.
 function M.word(sp)
@@ -104,7 +156,7 @@ function M.of(graph, faction, scale)
 	graph = tostring(graph):lower()
 	scale = scale or 1
 	for _, s in ipairs(M.list) do
-		if s.graph == graph and (not s.factions or s.factions[faction])
+		if (s.graph == graph or s.also == graph) and (not s.factions or s.factions[faction])
 			and (not s.min_scale or scale >= s.min_scale) and (not s.max_scale or scale < s.max_scale) then
 			return s
 		end

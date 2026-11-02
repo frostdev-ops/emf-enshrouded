@@ -20,6 +20,12 @@ pack.json:
         "texture": {"albedo_dir": "tex/wolf", "slot": 0, "flat_size": 128},  # optional: our albedo (albedo_mipNN.png)
         "template_add": [{"type": "ScaleComponent", "value": {"uniformScale": 1.4}}],  # optional: whole components
         "template_set": {"DamageMod": {"dataStorage[2]": {"mul": 1.5}}},  # optional: fields (a value or {"mul": n})
+        "attacks": {                                  # optional: its own copy of the source template's arsenal
+          "arsenal_guid": "...",                      #   FIXED forever
+          "sequences": {"<attack sequence guid>": {   #   attacks that play a copy of their sequence, every event
+            "guid": "...",                            #   moved by [old s, new s] anchors from [0, 0] (after the last:
+            "times": [[0, 0], [0.53, 0.94], [2.4, 3.03]]}}  # by its shift): hits that land when our swings do
+        },
         "own_proportions": {                          # optional: a skeleton of its own (own_creature.py), with
           "sidecar": "panther_own.json",              #   blender/fit_to_game_skeleton.py --own-proportions's sidecar
           "skeleton_guid": "...",                     #   the skeleton copy's GUID (FIXED forever)
@@ -521,6 +527,88 @@ for _, c in ipairs(require("creatures")) do
 		if not done then log(c.name .. ": the template has no " .. e.component .. " (the game changed?): not set") end
 	end
 
+	-- 3b) attacks: a copy of the template's arsenal (the game's own creatures keep theirs) whose attacks play copies
+	-- of their sequences with every event moved by the anchors, so the hits land when this creature's swings do
+	if c.attacks then
+		local ref
+		for _, comp in ipairs(tpl.components) do
+			if comp.type == "keen::ecs::EnemyArsenalReference" then ref = comp.value end
+		end
+		assert(ref, c.name .. ": the source template has no EnemyArsenalReference (no attacks to retime)")
+		local areg = game.assets.get_resources_by_type("keen::enemy::EnemyArsenalRegistryResource")[1]
+		assert(areg, c.name .. ": the game has no enemy arsenal registry (the game changed?)")
+		local from = tostring(ref.arsenal)
+		local src
+		for _, a in ipairs(areg.data.arsenals) do
+			if tostring(a.guid) == from then src = a end
+		end
+		assert(src, c.name .. ": the arsenal " .. from .. " is not in the registry (the game changed?)")
+		local seqs = {}
+		for old in pairs(c.attacks.sequences) do
+			seqs[old] = game.assets.get_resource(old, "keen::actor::ActorSequenceResource")
+			assert(seqs[old], c.name .. ": the sequence " .. old .. " was not found (the game changed?)")
+		end
+		table.insert(areg.data.arsenals, src)
+		local copy = areg.data.arsenals[#areg.data.arsenals]
+		copy.guid = c.attacks.arsenal_guid
+		assert(tostring(src.guid) == from, c.name .. ": copying the arsenal changed the game's own")
+		local retimed = 0
+		for _, atk in ipairs(copy.attacks) do
+			local s = c.attacks.sequences[tostring(atk.description.actionSequence)]
+			if s then
+				atk.description.actionSequence = s.guid
+				retimed = retimed + 1
+			end
+		end
+		local function moved(times, t)
+			local last = times[#times]
+			if t >= last[1] then return t + (last[2] - last[1]) end
+			for i = 1, #times - 1 do
+				local a, b = times[i], times[i + 1]
+				if t < b[1] then
+					return math.floor(a[2] + ((t - a[1]) * (b[2] - a[2]) + (b[1] - a[1]) // 2) // (b[1] - a[1]))
+				end
+			end
+		end
+		local function field(v, k)  -- an event without the field (a proxy may raise instead of giving nil)
+			local ok, x = pcall(function() return v[k] end)
+			if ok then return x end
+		end
+		for old, s in pairs(c.attacks.sequences) do
+			local d = game.assets.create_resource(seqs[old].data, "keen::actor::ActorSequenceResource", s.guid, 0).data
+			d.resourceId = s.guid
+			for _, sub in ipairs(d.subSequences) do
+				sub.length.value = moved(s.times, sub.length.value)
+				for _, ev in ipairs(sub.events) do
+					local tm, dur = field(ev.value, "time"), field(ev.value, "duration")
+					if tm then
+						local t = tm.value
+						local nt = moved(s.times, t)
+						if dur then dur.value = moved(s.times, t + dur.value) - nt end
+						tm.value = nt
+					end
+				end
+			end
+		end
+		-- the game plays only the sequences its actor sequence collection lists: list each copy where its source is
+		local coll = game.assets.get_resources_by_type("keen::ActorSequenceCollectionResource")[1]
+		local listed = 0
+		if coll then
+			local has = {}
+			for _, g in ipairs(coll.data.sequences) do has[tostring(g)] = true end
+			for old, s in pairs(c.attacks.sequences) do
+				if has[old] then
+					table.insert(coll.data.sequences, s.guid)
+					listed = listed + 1
+				end
+			end
+		end
+		log(string.format("%%s: %%d sequence copies listed in the game's sequence collection", c.name, listed))
+		ref.arsenal = c.attacks.arsenal_guid
+		log(string.format("%%s: arsenal %%s (a copy of %%s): %%d of %%d attacks retimed", c.name,
+			c.attacks.arsenal_guid, from, retimed, #copy.attacks))
+	end
+
 	-- 4) the GUID registry: if the game lists the source template there, list ours too
 	if registry and registered[tostring(source.guid)] then
 		table.insert(registry.data.guids, c.template_guid)
@@ -565,6 +653,8 @@ def listing_entry(c):
     if c.get("template_set"):
         entry["template_set"] = [set_entry(component_type(comp), field_path(f), v)
                                  for comp, fields in c["template_set"].items() for f, v in fields.items()]
+    if c.get("attacks") is not None:
+        entry["attacks"] = attacks_entry(c["name"], c["attacks"])
     if c.get("own_proportions"):
         op = c["own_proportions"]
         missing = [k for k in OWN_KEYS if not op.get(k)]
@@ -588,6 +678,29 @@ def listing_entry(c):
 
 
 OWN_KEYS = ("sidecar", "skeleton_guid", "reference_clip", "clips", "graph", "graph_guid")
+
+
+def attacks_entry(name, a):
+    """A creature's "attacks" for the mod: the arsenal copy's GUID, and per source sequence (GUID, lower case) its
+    copy's GUID and the time anchors in nanoseconds (the game's unit), checked: from [0, 0], both columns forward."""
+    if not a.get("arsenal_guid"):
+        raise SystemExit("%s: attacks needs \"arsenal_guid\" (the arsenal copy's GUID, fixed forever)" % name)
+    if not a.get("sequences"):
+        raise SystemExit("%s: attacks needs \"sequences\" ({source sequence GUID: {guid, times}})" % name)
+    out = {}
+    for old, s in a["sequences"].items():
+        key = old.lower()
+        if not new_creature.GUID.match(key):
+            raise SystemExit("%s: attacks: %r is not a sequence GUID" % (name, old))
+        if not s.get("guid"):
+            raise SystemExit("%s: attacks: the copy of %s needs a \"guid\" (fixed forever)" % (name, key))
+        times = [[int(round(float(o) * 1e9)), int(round(float(n) * 1e9))] for o, n in s.get("times", [])]
+        if len(times) < 2 or times[0] != [0, 0]:
+            raise SystemExit("%s: attacks: the times of %s start at [0, 0] and have two anchors or more" % (name, key))
+        if any(o1 <= o0 or n1 <= n0 for (o0, n0), (o1, n1) in zip(times, times[1:])):
+            raise SystemExit("%s: attacks: the times of %s go forward in both columns" % (name, key))
+        out[key] = {"guid": s["guid"], "times": times}
+    return {"arsenal_guid": a["arsenal_guid"], "sequences": out}
 
 
 def check_texture_slot(name, slot, groups):

@@ -1,6 +1,8 @@
 #pragma once
-// Holds the game's main thread at the exe's entry point until EMF has started. Used on the dedicated server only: it
-// sets up its world within a second of starting, and EMF must hook that setup and load the mods first.
+// Holds the game's main thread at the exe's entry point until EMF has started. The dedicated server is held at every
+// start: it sets up its world within a second of starting, and EMF must hook that setup and load the mods first. The
+// game client is held only for a start that builds EML content (content_start.h): the build runs there, before the
+// chained DLLs, EMF's core and any game code.
 //
 // hold_entry() replaces the first 12 bytes of the entry point with "mov rax, <stub>; jmp rax" (rax is free at an
 // entry point; rcx, the argument, is kept). The stub runs on the main thread, waits, calls release_entry() to put the
@@ -60,6 +62,32 @@ inline bool entry_is_msvc_startup(const uint8_t* e) {
     return e && std::memcmp(e, head, 5) == 0 && std::memcmp(e + 9, mid, 5) == 0;
 }
 
+// The name of the section of a loaded image (`base`) that holds `rva`; "" when none does.
+inline std::string section_of(const uint8_t* base, uint32_t rva) {
+    if (!base) return {};
+    const auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS*>(base + reinterpret_cast<const IMAGE_DOS_HEADER*>(base)->e_lfanew);
+    const IMAGE_SECTION_HEADER* s = IMAGE_FIRST_SECTION(nt);
+    for (WORD i = 0; i < nt->FileHeader.NumberOfSections; ++i, ++s) {
+        const DWORD size = s->Misc.VirtualSize ? s->Misc.VirtualSize : s->SizeOfRawData;
+        if (rva >= s->VirtualAddress && rva < s->VirtualAddress + size) {
+            const char* n = reinterpret_cast<const char*>(s->Name);
+            return std::string(n, strnlen(n, IMAGE_SIZEOF_SHORT_NAME));
+        }
+    }
+    return {};
+}
+
+// True for an entry point the loader may hold: MSVC's start-up code, or Steam's DRM stub (SteamStub, the game client
+// of 1273043), which sits in a section named ".bind" and starts "call $+5; push rax; push rbx; push rcx; push rdx"
+// (E8 00 00 00 00 50 53 51 52). Both run unchanged once release_entry() has put their first 12 bytes back. Another
+// tool's jump (E9, FF 25, mov/jmp) is never held: that tool holds the start itself.
+inline bool entry_holdable(const uint8_t* e, const std::string& section) {
+    static const uint8_t steam[9] = {0xE8, 0x00, 0x00, 0x00, 0x00, 0x50, 0x53, 0x51, 0x52};
+    if (!e) return false;
+    if (entry_is_msvc_startup(e)) return true;
+    return section == ".bind" && std::memcmp(e, steam, sizeof steam) == 0;
+}
+
 // Where a jump at the entry point leads: "jmp rel32", "jmp [rip+disp32]" (the address read with `read8(address, &out)`,
 // which must read memory safely), "mov rax, imm64; jmp rax" (EMF's own hold) or "mov r11, imm64; jmp r11"; 0 for
 // anything else. Another tool that holds the start (ShroudForge's winmm.dll) leaves such a jump.
@@ -82,10 +110,10 @@ uint64_t entry_jump_target(const uint8_t* e, Read8 read8) {
     return 0;
 }
 
-// The loader's line when the server's entry point is not MSVC's start-up code, with why: another tool's jump (into
-// `module` when it is known, else to `target`), or else its first bytes.
-inline std::string entry_not_held_message(const uint8_t* e, uint64_t target, const std::string& module) {
-    std::string s = "the server's entry point is not the usual start-up code: ";
+// Why an entry point is not MSVC's start-up code: another tool's jump (into `module` when it is known, else to
+// `target`), or else its first bytes. `whose`: "the server's", "the game's".
+inline std::string entry_not_usual(const uint8_t* e, uint64_t target, const std::string& module, const char* whose) {
+    std::string s = std::string(whose) + " entry point is not the usual start-up code: ";
     if (target) {
         char where[32];
         std::snprintf(where, sizeof where, "0x%llx", static_cast<unsigned long long>(target));
@@ -100,7 +128,12 @@ inline std::string entry_not_held_message(const uint8_t* e, uint64_t target, con
         }
         s += " (a game build EMF does not know, or another tool's code)";
     }
-    return s + "; not held, so mods may load after its world setup";
+    return s;
+}
+
+// The loader's line when the server's entry point is not MSVC's start-up code, with why.
+inline std::string entry_not_held_message(const uint8_t* e, uint64_t target, const std::string& module) {
+    return entry_not_usual(e, target, module, "the server's") + "; not held, so mods may load after its world setup";
 }
 
 inline uint8_t* exe_entry_point() {

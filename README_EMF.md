@@ -1,6 +1,6 @@
 # EMF: Enshrouded Modding Framework
 
-Native code mods for Enshrouded (known builds 1269579 and 1273043; other builds run on signatures only), in the spirit of BepInEx + Jotunn.
+Native code mods for Enshrouded (known builds 1269579, 1273043 and 1283531; other builds run on signatures only), in the spirit of BepInEx + Jotunn.
 EMF loads your mod DLLs into the game, finds engine functions by byte signature, and gives mods a small,
 stable C API to read and change the game's ECS (entities, components, singletons) at a safe point every tick.
 
@@ -18,7 +18,8 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 |---|---|
 | `src/common/` | scanner, signatures (37), code offsets (5), MinHook wrapper, Keen hash map reader, safe world reader, logger |
 | `src/probe/` | `emf_probe`: read-only test DLL (logs worlds, player position, villager states) |
-| `src/loader/` + `src/proxy/` | `dinput8.dll` loader: forwards DirectInput to Windows, starts `emf/emf_core.dll` |
+| `src/loader/` + `src/proxy/` | `dinput8.dll` loader: forwards DirectInput to Windows, starts `emf/emf_core.dll`; builds EML content into a shadow copy when `emf/emf_content.dll` is installed (`content_*.h`) |
+| `tools/standin_game/`, `tools/standin_content/`, `tools/standin_mod/` | stand-ins for the game exe, `emf_content.dll` and a chained DLL mod, for the loader's tests (never shipped) |
 | `src/core/` | `emf_core.dll`: hooks the ECS sim step, runs mod callbacks, program hooks, mod programs (with engine events), spawn, items, save/load events, developer commands, the in-game console (`overlay/`: Dear ImGui through a Vulkan layer), loads mods |
 | `app/` | `EMF.exe`, the desktop mod manager: a WebView2 page in a Win32 window ([docs/app.md](docs/app.md)) |
 | `src/saves/` | save backups: the engine shared by EMF.exe's Saves tab and the core's automatic backups and `saves.*` commands, and `save-info.json` ([docs/saves.md](docs/saves.md)) |
@@ -41,6 +42,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `mods/handover/` | Hand-over (Lua, off by default): `/handover wood 20` gives items to the nearest other player; nothing is ever lost; `/handover.block` refuses them (see below) |
 | `mods/teleports/` | Waypoint Teleports: `/unstuck` and `/home` for every player, `tp`, `bring`, `tp.pos`, `tp.back` for admins (see below) |
 | `mods/bulk_craft/` | Bulk Craft (off by default): craft one by hand, then F8 at the station (or `/craft 25`, every player) crafts many through the game's own crafting, at the recipe's pace (see below) |
+| `mods/blessings/` | Flame Blessings (off by default): god mode, endless health, stamina and mana, no fall damage, per player and at once; the host's own in the Mods tab or on the F11 wheel, `/blessings` for admins on any player; shown on screen, told in chat, nothing saved (see below) |
 | `mods/beastmaster/` | Beastmaster (Lua, off by default): tame wolves, boars, sabretooths and hounds (bears and aurochs with the EMF creature packs: EML content, install EML or ShroudForge first), keep 8, call 2 to fight beside you; hold F3 for the beast wheel, `/beastmaster` for every player; rare wild pack beasts (see below) |
 | `mods/necromancer/` | Necromancer (Lua, off by default): raise up to 3 skeleton warriors that stay and follow you (a lich and a bone golem with the EMF creature packs: EML content, install EML or ShroudForge first), cast raging spirits (flaming skulls, 6 s); hold F2 for the summoning wheel, shared with Beastmaster; `/necromancer` for every player (see below) |
 | `mods/loot_scale/` | more materials per loot stack (x2 by default, off by default) by hooking the game's loot amount getter by its bytes; plants picked with E, chopping and mining (which never read that setting) get the difference after the game's PickupEvent, each with its own factor (0 = the same, so from 1.1.0 they follow the main factor); switching it off takes effect at the next start; factor 1 is the world's amounts at once for everything that follows it |
@@ -81,6 +83,32 @@ Before that the loader takes EMF.exe's one-shot flag `emf\play_once.txt` ("Play 
 mods", `src/loader/play_once.h`): it deletes the file at once and, for that one start, starts no core (and with "without
 any mods" no chained DLL either). A flag older than ten minutes, one it cannot delete and the dedicated server are
 ignored, so EMF never stays off.
+EML content (the loader, `src/loader/content_*.h`, [docs/engine_parts/content_loader.md](docs/engine_parts/content_loader.md)):
+with `emf\emf_content.dll` installed and EML mods in `<game>\mods\` that no other tool applies, the loader builds them
+into a shadow copy of the game's data (`emf\content\client\`, hard links and copies; the game's files are never written)
+and sends the game's data opens there. A start that needs a build holds the game's entry point, builds (a small window
+says so, about 30 s), unloads the DLL, and only then starts the chained DLLs and the core; a start where nothing
+changed loads no DLL. Without `emf_content.dll` it writes one line and does what it did before. `[content] mode=auto`
+(the default), `on` (the console also says why content is off) or `off` (never) in `emf\emf_core.ini`; the build's own
+log is `emf\content.log`.
+EML content in EMF.exe ([docs/app.md](docs/app.md#eml-content)): the EMF tab's card **EML content** says who applies the
+EML mods' content at the next start and why, by the loader's own rules (it reads sizes, times and the last build's
+record; it never loads `emf_content.dll` and never writes a game file): **Ready** (the copy is current: the next start
+uses it without building), **Builds at the next start** (and why: never built, a mod new or changed, the game or
+`emf_content.dll` changed, the copy gone), **Failed** (the same files failed before, with the message: EMF tries again
+when a mod, the game or `emf_content.dll` changes), **Off** (the loader's reason), **Applied by EML** or **ShroudForge**,
+or **Not installed**; a dedicated server's folder gets one line (it gets EML content in a later version). The card lists
+the mods EMF builds and the ones it leaves out with the loader's reason (the Mods tab says "loaded by EMF" or "left
+out" with the same reason), the last build (when, how long, its errors) and the copy's disk use, and `emf\content.log`
+is the log viewer's third choice. Its actions, all refused while the game runs: **When to apply** (`[content] mode`),
+**Build again at the next start** (deletes `emf\content\client\emf_content_state.json`), **Remove the copy** (deletes
+`emf\content\client\`: its links are deleted as links, so the game's files stay whole; refused when a folder on the way
+is a junction) and, with EML installed, **Let EMF load EML content** (it first lists the EML mods that stop working
+until you give EML back, such as those that need EML's runtime loader): EML's `dbghelp.dll` (never ShroudForge's) is
+renamed to `eml-dbghelp.dll` and recorded in `emf\moved.txt`. **Give EML's dbghelp.dll back** reverses it, and EMF's
+uninstall puts it back too (unless a `dbghelp.dll` is there again: then it stays set aside, and so does its record).
+When the game's `enshrouded.kfc` was patched in place by EML or ShroudForge, the card advises Steam's "Verify integrity
+of game files"; EMF never restores game files itself.
 `docs/modding/other_mods.md` has the details for authors of DLL mods.
 Logs: `<game>\emf\emf_core.log` (framework + mods), `<game>\emf\emf_loader.log` (the loader: chain-loaded DLLs and a
 core that fails to load).
@@ -138,7 +166,44 @@ key=0x29       ; the key's scan code (0x29 = the key under Esc)
 chat=1         ; 0 turns chat commands off (below)
 suggest=1      ; 0: no suggestions as you type (Tab still completes)
 suggest_rows=8 ; at most this many suggestions (3 to 12)
+font=consolas  ; the console's font: consolas, cascadia, serif or file:<name>.ttf
+tabs_font=serif  ; the tab bar and the Mods tab: serif, consolas, cascadia or file:<name>.ttf
+text_size=100  ; the console's text size, 60 to 200 (%)
+height=50      ; the console's height, 25 to 90 (% of the screen)
+opacity=80     ; how solid its background is, 30 to 100 (%)
+background=#080a0e  ; its background colour
+accent=#c0b074 ; the tabs, the selection, the scrollbar and the wheels' ring
+
+[hud]
+style=game     ; game (serif, soft shadow, no box), boxed (EMF's earlier look) or plain (the text alone)
+font=serif     ; on-screen text and wheels: serif, console (the console's font) or file:<name>.ttf
+size=100       ; on-screen text size, 60 to 200 (%)
+colour=#fffff4 ; notes, and lines whose mod chose no colour of its own
+shadow=1       ; 0: no shadow (style=game)
+notes_place=top_centre  ; top_centre (under the compass), top_left or right
+notes_seconds=6  ; how long a note stays, 2 to 20 seconds
 ```
+**The look.** EMF's on-screen text (the clock, Life Skills, Flame Blessings and the other mods' lines, notes such as
+Sleep Through the Day's, and the wheels) uses a book serif in warm white with a soft shadow, like the game's own text
+(lines and notes in bold); notes show top centre under the compass on a dark band that fades at both ends, at most
+three rows each. `[hud]` changes that, `[overlay]` changes the console. Colours are `#rrggbb` or `#rgb`; sizes are a
+percentage of the size EMF picks for the screen: on-screen text is the screen's height / 38 (28 px at 1080p), the
+console's text its height / 54 (20 px at 1080p), and serif tabs 1.3 times the console's text (26 px at 1080p). The
+text is sized again when the window's size has stayed the same for a moment. EMF reads these keys when the game
+starts and never writes them; a value it cannot use falls back to its default and a number out of range is kept
+inside its range, each with one line in `emf_core.log`. `style=boxed` alone gives EMF's earlier look: dark boxes at
+the console's size, the console's font, `#dbdbcc` and notes top left (the keys you set still apply).
+
+**Fonts.** EMF ships Alegreya (the serif) and Cascadia Mono in `<game>\emf\fonts\` (both under the SIL Open Font
+License, in the zip's `licenses\`); Consolas comes from Windows. To use a font of your own, put its `.ttf` or `.otf`
+in `<game>\emf\fonts\` and set `font=file:<its file name>`; use only fonts from a source you trust. A font that is
+missing or is not a font EMF can read is skipped with a line in the log: then the bundled one, then Consolas, then the
+console's built-in font.
+
+**HDR.** With the game's HDR on, EMF does not convert its colours yet: the screen reads them as HDR values, so
+bright ones (the warm white text, channel values above about 150) look very bright. A darker `colour=` (for example
+`#969690`) tones the text down.
+
 How it draws: the console is a Vulkan layer (`VK_LAYER_EMF_console`, manifest `<game>\emf\vk\`). EMF's `dinput8.dll`
 enables it for the game process only; nothing is written to the registry and other games do not see it. It works next
 to RivaTuner/RTSS, the Steam overlay and the Discord overlay.
@@ -159,6 +224,7 @@ EMF's keys by default:
 | F6 | Companion: calls it, then opens its order wheel |
 | F7 | Hand-over: the host's wheel |
 | F8 | Bulk Craft: the wheel at a crafting station |
+| F11 | Flame Blessings: the blessings wheel (the host's own; not F4, since Alt+F4 closes the game) |
 | L | Quick Stack: tap to put things into nearby chests, hold at a chest for its wheel (the game also uses L: voice-over playback) |
 | K | Villager Jobs: a job for the villager you look at |
 | E | Bounty Board (from 1.2): reads the board you look at (E is also the game's interact key; the board itself has no game action) |
@@ -579,6 +645,20 @@ crafting time and at least 0.5 s, carried over between orders (`pace = instant`:
 once), at most 100 per order; it stops if a craft's materials did not leave your bag (base storage). Details:
 `mods/bulk_craft/README.md`; how the game's craft request works: `docs/engine_parts/inventory_crafting.md`.
 
+## The blessings mod (Flame Blessings)
+Installed switched off: switch it on in the Mods tab or EMF.exe, then restart. Cheats as plain switches, per player and
+at once: **god mode** (health can't drop: the minimum of the player's `Health` held at its maximum, never saved, plus
+a refill and no fall damage; players have no `CombatFlags`), **endless health** (hits land and health refills after the
+step, so one very strong hit can still kill), **endless stamina**, **endless mana** and **no fall damage**
+(`DynamicFallDamage.fallStartAltitude` kept no higher than the player). The host's
+own are Mods-tab settings and the **F11** wheel (with Fill me up and All off); admins (the console, `commands.txt`, the
+host's chat, `[chat] admins`) use `/blessings <god|refill|stamina|mana|nofall> <on|off> [#k|name]`, `heal`, `off` and
+`list` on any player, kept by account until that player leaves or the world closes. God mode wins over endless health.
+A line on the host's screen shows theirs, a chat line tells everyone ("[Blessings] Ember: god mode on for Ivar"), and
+switching the mod off puts every player's minimum health back. When a game update switches EMF's attribute functions
+off, god mode, endless health, stamina and mana say "not available on this game version". Free building is planned. Details:
+`mods/blessings/README.md`.
+
 ## The beastmaster mod (Beastmaster)
 Installed switched off: switch it on in the Mods tab or EMF.exe (it needs the `lua` mod 1.9). A Beastmaster class: tame
 a wild wolf, boar, sabretooth, hound or bear by beating it under 25 % health (`/beastmaster tame`, a 3 s channel within
@@ -733,4 +813,6 @@ Rules:
   4. Add the exe's sha256 to `known_builds` and the new RVAs to every `SigDef::rva` in `src/common/signatures.cpp`, and
      the new values to every `kCodeOffsets` entry in `src/common/code_offsets.cpp` (the tests fail while one is missing).
   Build 1273043 was added this way: no component layout changed, but the save state moved by 0x10 (found in game;
-  EMF reads those offsets from code).
+  EMF reads those offsets from code). Build 1283531 too: every ECS program entry grew by 8 bytes, which moved the
+  world's block after the program table by +0x1C00; EMF now reads the entity storage's offset and the program table's
+  count and stride from code (`src/common/world_offsets.h`), and five types changed size (docs/ENGINE_MAP.md).

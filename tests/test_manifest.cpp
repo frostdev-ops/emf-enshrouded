@@ -322,6 +322,30 @@ TEST_CASE("manifest: Night Raids, Loot Magnet and Wandering Champion parse with 
     }
 }
 
+TEST_CASE("manifest: Flame Blessings parses with every setting clean, installed switched off, on API v19") {
+    std::ifstream f(std::string(EMF_SOURCE_DIR) + "/mods/blessings/mod.json", std::ios::binary);
+    REQUIRE(f.good());
+    std::stringstream ss;
+    ss << f.rdbuf();
+    auto r = parse_manifest(ss.str());
+    REQUIRE_MESSAGE(r.manifest, r.error);
+    CHECK(r.manifest->id == "blessings");
+    CHECK(r.manifest->name == "Flame Blessings");
+    CHECK(r.manifest->dll == "blessings.dll");
+    CHECK(r.manifest->emf == 19);
+    CHECK_FALSE(r.manifest->enabled_default);
+    std::vector<std::string> keys;
+    for (const auto& s : r.manifest->settings) {
+        CAPTURE(s.key);
+        CHECK(s.problem.empty());
+        CHECK(s.warning.empty());
+        CHECK(s.live);  // every one applies at once
+        keys.push_back(s.key);
+    }
+    CHECK(keys == std::vector<std::string>{"health", "stamina", "mana", "no_fall_damage", "wheel_key", "hud", "corner",
+                                           "announce"});
+}
+
 TEST_CASE("manifest: ShroudForge's \"dependencies\" is read as \"depends\"; both at once is refused") {
     auto r = parse_manifest(R"({"id": "x", "version": "1", "dependencies": [{"id": "helper-mod", "version": "^1.2.0"},
         {"id": "extra", "version": ">=2.0.0, <3.0.0", "optional": true}]})");

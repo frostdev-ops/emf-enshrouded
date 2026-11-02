@@ -13,9 +13,10 @@ FOR PLAYERS
    Nothing happens, or Discord's overlay opens too? Discord's overlay lock is often Shift and the key under Esc:
    give it another key in Discord's settings (Game Overlay).
 5. Optional: emf\EMF.exe in the game folder is EMF's mod manager: every installed mod with switches and settings,
-   clash warnings, installing mods you downloaded and save backups. Windows may say "Windows protected your PC" the
-   first time (EMF.exe is not signed): click "More info", then "Run anyway". You can also do without it: switches and
-   settings are in the game's console too.
+   clash warnings, installing mods you downloaded and save backups. Its EMF tab also says whether EMF builds your EML
+   mods (EML content) at the next start, which ones and why not, with emf\content.log. Windows may say "Windows
+   protected your PC" the first time (EMF.exe is not signed): click "More info", then "Run anyway". You can also do
+   without it: switches and settings are in the game's console too.
 
 Switching mods on or off, and their settings: open the console and click its Mods tab (or press Ctrl+Tab). Pick a
 mod to switch it on or off (from the next game start) and to change its settings. Or type  set <mod> <key> <value>
@@ -47,6 +48,9 @@ Included mods:
                  switch it on in the Mods tab and restart the game)
   bulk_craft     craft one by hand, then F8 at the station (or /craft 25) crafts many through the game's own
                  crafting, at the recipe's pace, from what you carry (OFF by default; see mods\bulk_craft\README.md)
+  blessings      Flame Blessings: god mode, endless health, stamina and mana, no fall damage; your own in the Mods
+                 tab or on the F11 wheel, /blessings for admins on any player; nothing is saved (OFF by default;
+                 see mods\blessings\README.md)
   beastmaster    tame wild beasts and call them to fight beside you; hold F3 for the beast wheel, /beastmaster for
                  every player (a Lua mod; OFF by default; the bear and the aurochs are in the EMF creature packs
                  download, which is EML content: install EML or ShroudForge first; see
