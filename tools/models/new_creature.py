@@ -33,6 +33,8 @@ The pack names, per creature:
                  fold that into the joints' positions, each joint taking the nearest rotation (new_skeleton.decompose)
   yaw            optional: degrees the file is turned about the vertical first (glTF's, counter-clockwise seen from
                  above): a creature lying along +x faces the game's forward with -90
+  widen          optional: the model this much wider across the body (widen, below); the skeleton and the clips
+                 stay as they are
 """
 import os
 import re
@@ -77,6 +79,9 @@ def check(cfg, creature):
         if ours not in clips:
             raise SystemExit("%s: new_skeleton role %s names the clip %r, which is not in clips (%s)"
                              % (creature, game, ours, ", ".join(sorted(clips))))
+    w = cfg.get("widen", 1.0)
+    if isinstance(w, bool) or not isinstance(w, (int, float)) or w <= 0:
+        raise SystemExit("%s: new_skeleton widen is %r: a number above 0 (1.2: a fifth wider)" % (creature, w))
 
 
 def roles(cfg):
@@ -180,13 +185,42 @@ def build(cfg, glb_path, creature="creature"):
     return {"sk": sk, "hierarchy": hier, "clips": out, "zero": zero, "slots": slots}
 
 
-def model_groups(glb_path, built, material_count=None, warn=print, model_glb=None):
+def widen(groups, hier, factor):
+    """The groups (gltf_in.load_groups') with every vertex moved across the body (x) away from the point its joints
+    stand at, weighted as its skin is, by factor: a body on the spine gets broader, a leg on its own joints thicker
+    without moving off them. Up and forward stay; normals and tangents follow the stretch. New groups."""
+    xs = [gltf_in.mat_inv_affine(gamegltf.inverse_bind_rows(e))[0][3]
+          for e in hier["skinToJointMatrices"][:hier["jointCount"]]]
+
+    def unit(v):
+        n = sum(c * c for c in v) ** 0.5 or 1.0
+        return tuple(c / n for c in v)
+
+    out = []
+    for g in groups:
+        g = dict(g)
+        pos = []
+        for p, (js, ws) in zip(g["pos"], g["skin"]):
+            mid = sum(w * xs[j] for j, w in zip(js, ws)) / (sum(ws) or 1.0)
+            pos.append((mid + (p[0] - mid) * factor, p[1], p[2]))
+        g["pos"] = pos
+        g["nrm"] = [unit((n[0] / factor, n[1], n[2])) for n in g["nrm"]]
+        g["tan"] = [unit((t[0] * factor, t[1], t[2])) + (t[3],) for t in g["tan"]]
+        out.append(g)
+    return out
+
+
+def model_groups(glb_path, built, material_count=None, warn=print, model_glb=None, widen_by=1.0):
     """The model on the skeleton, as gltf_in.load_groups gives it (game space, our joint indices): from model_glb
-    when given (a copy on the skeleton), else from the glb."""
+    when given (a copy on the skeleton), else from the glb; widened by widen_by (widen)."""
     if model_glb:
-        return gltf_in.load_groups(model_glb, built["hierarchy"], material_count=material_count, warn=warn)
-    gltf, binc = gltf_in.read_glb(glb_path)
-    with tempfile.TemporaryDirectory() as tmp:
-        path = os.path.join(tmp, "model.glb")
-        new_skeleton.write_glb(gltf, binc, built["sk"], path)
-        return gltf_in.load_groups(path, built["hierarchy"], material_count=material_count, warn=warn)
+        groups, report = gltf_in.load_groups(model_glb, built["hierarchy"], material_count=material_count, warn=warn)
+    else:
+        gltf, binc = gltf_in.read_glb(glb_path)
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, "model.glb")
+            new_skeleton.write_glb(gltf, binc, built["sk"], path)
+            groups, report = gltf_in.load_groups(path, built["hierarchy"], material_count=material_count, warn=warn)
+    if widen_by != 1.0:
+        groups = widen(groups, built["hierarchy"], widen_by)
+    return groups, report

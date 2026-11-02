@@ -41,7 +41,8 @@ pack.json:
           "roles": {"<game clip guid>": "walk"},      #   our clip wherever the graph plays that game clip
           "default_role": "walk",                     #   our clip for every other game clip of the graph
           "slots": {"Head": "Head", "Pelvis": "Hips"},#   the graph's slots: our joints (others: the root)
-          "model_glb": "wolf_palette.glb"             #   optional: the model from a retextured copy (new_creature.py)
+          "model_glb": "wolf_palette.glb",            #   optional: the model from a retextured copy (new_creature.py)
+          "widen": 1.2                                #   optional: the model this much wider across the body
         }
       }
     ]
@@ -845,10 +846,13 @@ def main():
         elif c.get("new_skeleton"):
             built_new = new_creature.build(c["new_skeleton"], path(c["glb"]), c["name"])
             model_glb = c["new_skeleton"].get("model_glb")
+            widen_by = float(c["new_skeleton"].get("widen", 1.0))
             groups, report = new_creature.model_groups(path(c["glb"]), built_new,
                                                        material_count=len(source["materials"]),
-                                                       model_glb=path(model_glb) if model_glb else None)
-            print("%s: model on the new skeleton, rest difference %.2g" % (c["name"], report["max_rest_difference"]))
+                                                       model_glb=path(model_glb) if model_glb else None,
+                                                       widen_by=widen_by)
+            print("%s: model on the new skeleton, rest difference %.2g, %.2f times as wide"
+                  % (c["name"], report["max_rest_difference"], widen_by))
             palette = None
         else:
             groups, _ = gltf_in.load_groups(path(c["glb"]), rm.load_record(path(c["hierarchy"])),
