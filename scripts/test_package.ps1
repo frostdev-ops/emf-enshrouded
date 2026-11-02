@@ -705,6 +705,12 @@ try {
             New-Item -ItemType Directory -Force (Split-Path (Join-Path $fb "app\$f")) | Out-Null
             Copy-Item -LiteralPath (Join-Path $realBuild "app\$f") -Destination (Join-Path $fb "app\$f")
         }
+        # emf_content.dll (built from EML, GPL-3.0-or-later): a build without it (EMF_CONTENT off) makes no release
+        $msg = ""
+        try { & (Join-Path $repo "scripts\package.ps1") -Build $fb -Out $fbOut | Out-Null } catch { $msg = $_.Exception.Message }
+        Check (($msg -match "emf_content\.dll") -and ($msg -match "EMF_CONTENT")) "package.ps1 refuses a build without emf_content.dll and says how to build it ($msg)"
+        New-Item -ItemType Directory -Force (Join-Path $fb "content") | Out-Null
+        Copy-Item -LiteralPath (Join-Path $realBuild "content\emf_content.dll") -Destination (Join-Path $fb "content\emf_content.dll")
         $msg = ""
         try { & (Join-Path $repo "scripts\package.ps1") -Build $fb -Out $fbOut | Out-Null } catch { $msg = $_.Exception.Message }
         $fbZip = Join-Path $fbOut "EMF-$ver.zip"
@@ -817,6 +823,12 @@ try {
         $fnames = @($zf.Entries | ForEach-Object { $_.FullName })
         $zf.Dispose()
         Check (($fnames -contains "EMF-$ver/LICENSE.txt") -and ($fnames -contains "EMF-$ver/licenses/THIRD_PARTY_NOTICES.md") -and ($mnames -contains "EMF-$ver-manual/LICENSE.txt")) "both zips carry EMF's MIT licence and the third-party notices"
+        # emf_content.dll in both downloads, with EML's licence (the GPL-3.0) and the page of its Rust libraries
+        foreach ($z in @(@{n = $fnames; p = "EMF-$ver"}, @{n = $mnames; p = "EMF-$ver-manual"})) {
+            $missing = @(@("game/emf/emf_content.dll", "licenses/EML-LICENSE.txt", "licenses/rust-crates.html") |
+                Where-Object { $z.n -notcontains "$($z.p)/$_" })
+            Check ($missing.Count -eq 0) "$($z.p).zip has emf_content.dll, EML's licence and the Rust libraries' page (missing: $($missing -join ', '))"
+        }
         # the bundled fonts (third_party\fonts, SIL OFL 1.1) install to game\emf\fonts\; their licences are in licenses\
         foreach ($z in @(@{n = $fnames; p = "EMF-$ver"}, @{n = $mnames; p = "EMF-$ver-manual"})) {
             $missing = @(@("game/emf/fonts/Alegreya-Regular.ttf", "game/emf/fonts/Alegreya-Bold.ttf",
@@ -901,7 +913,7 @@ try {
         Expand-Archive -LiteralPath $zip.FullName -DestinationPath $x
         $pkg = Join-Path $x "EMF-$ver"
         foreach ($f in @("install.cmd", "install.ps1", "uninstall.cmd", "uninstall.ps1", "emf_common.ps1", "README.txt",
-                         "game\dinput8.dll", "game\emf\emf_core.dll", "game\emf\vk\VkLayer_EMF_console.json", "game\emf\known_tools.txt",
+                         "game\dinput8.dll", "game\emf\emf_core.dll", "game\emf\emf_content.dll", "game\emf\vk\VkLayer_EMF_console.json", "game\emf\known_tools.txt",
                          "game\emf\mods\clock\clock.dll", "game\emf\mods\clock\mod.json", "sdk\include\emf\emf.hpp",
                          "sdk\include\emf\generated\components.hpp", "template\CMakeLists.txt", "template\src\mymod.cpp",
                          "template_lua\mod.json", "template_lua\main.lua", "template_lua\README.md", "docs\modding\first_mod.md",
@@ -927,6 +939,14 @@ try {
         }
         $notices = Get-Content -LiteralPath (Join-Path $pkg "licenses\THIRD_PARTY_NOTICES.md") -Raw
         Check (($notices -match "Alegreya") -and ($notices -match "Cascadia Mono") -and ($notices -match "OFL")) "THIRD_PARTY_NOTICES.md names Alegreya and Cascadia Mono and their licence (SIL OFL 1.1)"
+        # emf_content.dll's licence (option A): the notices, the GPL text, the Rust libraries and the README's source line
+        Check (($notices -match "Enshrouded Mod Loader") -and ($notices -match "emf_content\.dll") -and ($notices -match "GPL-3\.0-or-later")) "THIRD_PARTY_NOTICES.md says emf_content.dll is built from EML under the GPL-3.0-or-later"
+        $gpl = Get-Content -LiteralPath (Join-Path $pkg "licenses\EML-LICENSE.txt") -Raw
+        Check (($gpl -match "GNU GENERAL PUBLIC LICENSE") -and ($gpl -match "Version 3, 29 June 2007")) "licenses\EML-LICENSE.txt is the GPL-3.0 text"
+        $crates = Get-Content -LiteralPath (Join-Path $pkg "licenses\rust-crates.html") -Raw -Encoding UTF8
+        Check (([regex]::Matches($crates, "<h2 ").Count -gt 50) -and ($crates -match "serde") -and ($crates -notmatch "mod-loader ")) "licenses\rust-crates.html lists the crates.io libraries inside emf_content.dll (not EML's own crates)"
+        $readmeGpl = Get-Content -LiteralPath (Join-Path $pkg "README.txt") -Raw
+        Check (($readmeGpl -match "emf_content\.dll") -and ($readmeGpl -match [regex]::Escape("emf-enshrouded/tree/v$ver")) -and ($readmeGpl -notmatch "\{VERSION\}")) "README.txt names emf_content.dll's licence and links its source at the tag v$ver"
         $ofl = Join-Path $pkg "licenses\Alegreya-OFL.txt"
         Check ((Test-Path -LiteralPath $ofl) -and ((Get-Content -LiteralPath $ofl -Raw) -match "SIL OPEN FONT LICENSE Version 1\.1")) "licenses\Alegreya-OFL.txt is the OFL text"
         Check (-not (Test-Path (Join-Path $pkg "game\EMF.exe"))) "EMF.exe ships in game\emf\, never next to enshrouded.exe"
