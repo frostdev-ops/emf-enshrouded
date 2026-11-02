@@ -31,6 +31,11 @@ Copy-Item (Join-Path $Dist "emf\known_tools.txt") (Join-Path $Game "emf\known_to
 # The in-game console's Vulkan layer manifest (names ..\emf_core.dll; only EMF's loader enables it, for the game only)
 New-Item -ItemType Directory -Force (Join-Path $Game "emf\vk") | Out-Null
 Copy-Item (Join-Path $Dist "emf\vk\*.json") (Join-Path $Game "emf\vk") -Force
+# The overlay's bundled fonts (third_party\fonts)
+if (Test-Path (Join-Path $Dist "emf\fonts")) {
+    New-Item -ItemType Directory -Force (Join-Path $Game "emf\fonts") | Out-Null
+    Copy-Item (Join-Path $Dist "emf\fonts\*.ttf") (Join-Path $Game "emf\fonts") -Force
+}
 # Folder mods: emf\mods\<id>\<id>.dll + mod.json. A loose <id>.dll left by an older install would load twice.
 Get-ChildItem (Join-Path $Dist "emf\mods") -Directory -ErrorAction SilentlyContinue | ForEach-Object {
     $to = Join-Path $Game "emf\mods\$($_.Name)"

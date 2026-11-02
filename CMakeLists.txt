@@ -638,3 +638,8 @@ target_sources(emf_tests PRIVATE tests/test_move_retry.cpp tests/test_save_backu
 # game-style drawing ---
 target_sources(emf_core_lib PRIVATE src/core/overlay/look_settings.cpp)
 target_sources(emf_tests PRIVATE tests/test_look_settings.cpp)
+# The bundled fonts (third_party/fonts/README.md), unmodified, installed to <game>\emf\fonts\
+foreach(f alegreya/Alegreya-Regular.ttf alegreya/Alegreya-Bold.ttf cascadia/CascadiaMono-Regular.ttf)
+  get_filename_component(name ${f} NAME)
+  configure_file(third_party/fonts/${f} ${CMAKE_BINARY_DIR}/dist/emf/fonts/${name} COPYONLY)
+endforeach()
