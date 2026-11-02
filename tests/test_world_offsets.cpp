@@ -172,6 +172,18 @@ TEST_CASE("world offsets plan: an unknown build whose program table is not confi
                     "RegisterProgram's code (hook_program and register_program are off)");
 }
 
+TEST_CASE("world offsets plan: an unknown build's program table must fit: entries that hold a name, the count after them") {
+    auto r = unknown(0xE179C0);  // count +0xE16F50
+    r[kStride] = found(0x10);    // too short for an entry (EMF reads its name at +0x10 / +0x18): a stray match
+    CHECK_FALSE(plan_world_offsets(r, false).program_table);
+    r[kStride] = found(0x1F40);  // 0x380 entries of 0x1F40 end at +0xE19350, past the count
+    CHECK_FALSE(plan_world_offsets(r, false).program_table);
+    r[kStride] = found(0x1F28);  // build 1283531's: the table ends at +0xE13F50, before the count
+    CHECK(plan_world_offsets(r, false).program_table);
+    // a known build's records are taken as they are
+    CHECK(plan_world_offsets(build_1283531(), true).program_table);
+}
+
 TEST_CASE("world offsets: the base until set, then what the start-up set") {
     CHECK(world_offsets().storage == kBaseWorldOffsets.storage);
     {

@@ -72,6 +72,10 @@ WorldOffsetPlan plan_world_offsets(const std::array<ResolvedOffset, kCodeOffsetC
     const ResolvedOffset& count = code[static_cast<size_t>(CodeOffset::ProgramCount)];
     const ResolvedOffset& stride = code[static_cast<size_t>(CodeOffset::ProgramStride)];
     p.program_table = is_usable(count, known_build) && is_usable(stride, known_build);
+    if (p.program_table && !known_build) {  // a stray match must not walk the table wrongly: entries hold a name
+        const uint64_t table_end = uint64_t(off::kProgramTable) + uint64_t(off::kProgramMax) * stride.value;
+        p.program_table = stride.value >= 0x20 && table_end <= count.value;
+    }
     p.offsets.program_count = p.program_table ? count.value : 0;
     p.offsets.program_stride = p.program_table ? stride.value : 0;
 
