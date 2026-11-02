@@ -17,8 +17,10 @@ The pack names, per creature:
                  its neck and head about 50 degrees into a turn), or {name: {"snake": {"head": the first joint of
                  a snake's spine chain, "keys": snake_clips.py's keys, "length": seconds, "travel": waves along the
                  body over the clip, "loop": ...}}}: a snake's clip from its body curve (slither, rear, strike,
-                 roll)
-  model_glb      optional: the model from this glb instead (a copy on the skeleton, new_skeleton.write_glb, then
+                 roll), or {name: {"timeline": [[at, animation, time], ...]}}: a clip that times the glb's
+                 animations (gltf_clips.timeline: a swing stretched to land when the game's attack hits, two swings
+                 joined into one combo)
+  model_glb     optional: the model from this glb instead (a copy on the skeleton, new_skeleton.write_glb, then
                  retextured; its bones named jNNN_<name>)
   roles          {game clip GUID: our clip name}: which of our clips plays where the graph plays that game clip
   default_role   our clip for every other game clip the graph plays: every clip reference of the copy is ours (a
@@ -148,6 +150,18 @@ def build(cfg, glb_path, creature="creature"):
             try:
                 clip = made_clips.make(sk, base, made.get("keys", []), loop=bool(made.get("loop")),
                                        hierarchy_hash=new_skeleton.clip_hash(hier))
+            except ValueError as e:
+                raise SystemExit("%s: clip %s: %s" % (creature, name, e))
+            out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})
+            continue
+        if "timeline" in spec:
+            keys = spec["timeline"]
+            missing = [k[1] for k in keys if len(k) > 1 and k[1] not in have]
+            if missing:
+                raise SystemExit("%s: clip %s plays %r, which the glb does not have (%s)"
+                                 % (creature, name, missing[0], ", ".join(have)))
+            try:
+                clip = gltf_clips.timeline(gltf, binc, sk, keys, new_skeleton.clip_hash(hier))
             except ValueError as e:
                 raise SystemExit("%s: clip %s: %s" % (creature, name, e))
             out.append({"name": name, "guid": clip_guid(cfg["skeleton_guid"], name), "clip": clip})

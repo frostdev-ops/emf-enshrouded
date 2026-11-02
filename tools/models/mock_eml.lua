@@ -127,14 +127,38 @@ for _, g in ipairs({ "mat-0", "mat-1" }) do
 		{ texture = texture("Material_x_material_map_0", "BC1_RGB_unorm_block", 2048) },
 		{ texture = texture("Material_x_height_map_0", "BC4_unorm_block", 4096) } } } }
 end
+-- the source templates' attacks: an arsenal in the registry (EML copies a value put into a game array: so does the
+-- mock's array) with a combo (hits at 0.53 s for 0.10 s and 0.92 s for 0.08 s, a sound at 2.5 s) and a kick;
+-- MOCK_NO_ARSENAL=1: templates without an EnemyArsenalReference
+local MOCK_ARSENAL = "66666666-6666-4666-8666-666666666666"
+local SEQ_COMBO, SEQ_KICK = "77777777-7777-4777-8777-777777777771", "77777777-7777-4777-8777-777777777772"
+local SEQ = "keen::actor::ActorSequenceResource"
+local function event(kind, t, d) return { type = kind, value = { time = { value = t }, duration = { value = d } } } end
+resources[SEQ] = {
+	[SEQ_COMBO] = { guid = SEQ_COMBO, data = { resourceId = SEQ_COMBO, subSequences = { { length = { value = 2400000000 },
+		events = { event("keen::actor::SetAnimationEvent", 0, 0), event("keen::actor::SpawnImpact", 530000000, 100000000),
+			event("keen::actor::SpawnImpact", 920000000, 80000000), event("keen::SfxNotifierEvent", 2500000000, 0) } } } } },
+	[SEQ_KICK] = { guid = SEQ_KICK, data = { resourceId = SEQ_KICK, subSequences = { { length = { value = 1500000000 },
+		events = { event("keen::actor::SpawnImpact", 700000000, 100000000) } } } } },
+}
+local arsenals = setmetatable({ { guid = MOCK_ARSENAL, attacks = {
+	{ guid = "attack-1", description = { actionSequence = SEQ_COMBO } },
+	{ guid = "attack-2", description = { actionSequence = SEQ_KICK } } } } },
+	{ __newindex = function(t, k, v) rawset(t, k, deepcopy(v)) end })
+local arsenal_registry = { guid = "arsenal-registry", data = { arsenals = arsenals } }
+-- the game's list of every actor sequence (the game plays only the sequences listed there)
+local sequence_collection = { guid = "sequence-collection", data = { sequences = { SEQ_COMBO, SEQ_KICK } } }
 local templates = {}
 for _, c in ipairs(require("creatures")) do
-	templates[#templates + 1] = { guid = "tpl-" .. c.source_template, data = { name = c.source_template,
-		components = { { type = "keen::ecs::ModelResource", value = { model = "old" } }, { type = "keen::ecs::Faction", value = {} },
-			{ type = "keen::ecs::AnimationGraphResourceComponent2", value = { animationGraph = "source-graph" } },
-			-- the game wolf's attribute storage (DamageMod: value, base, multiplier, adder; Movement: 18 speeds)
-			{ type = "keen::ecs::DamageMod", value = { dataStorage = { 0, 0.5, 1, 0 } } },
-			{ type = "keen::ecs::Movement", value = { dataStorage = { 0, 1, 0.5, 2.3, 6, 10, 1.8, 0, 2.3, 3.6, 1, 1, 2, 3.5, 2, 3.5, 1, 1 } } } } } }
+	local comps = { { type = "keen::ecs::ModelResource", value = { model = "old" } }, { type = "keen::ecs::Faction", value = {} },
+		{ type = "keen::ecs::AnimationGraphResourceComponent2", value = { animationGraph = "source-graph" } },
+		-- the game wolf's attribute storage (DamageMod: value, base, multiplier, adder; Movement: 18 speeds)
+		{ type = "keen::ecs::DamageMod", value = { dataStorage = { 0, 0.5, 1, 0 } } },
+		{ type = "keen::ecs::Movement", value = { dataStorage = { 0, 1, 0.5, 2.3, 6, 10, 1.8, 0, 2.3, 3.6, 1, 1, 2, 3.5, 2, 3.5, 1, 1 } } } }
+	if os.getenv("MOCK_NO_ARSENAL") ~= "1" then
+		comps[#comps + 1] = { type = "keen::ecs::EnemyArsenalReference", value = { arsenal = MOCK_ARSENAL } }
+	end
+	templates[#templates + 1] = { guid = "tpl-" .. c.source_template, data = { name = c.source_template, components = comps } }
 end
 local created = {}
 game = {
@@ -144,6 +168,8 @@ game = {
 		get_resources_by_type = function(typ)
 			if typ == "keen::ecs::TemplateResource" then return templates end
 			if typ == "keen::GuidRegistryResource" then return { { data = { guids = { "tpl-Animal_Wildlife_Dog_04_black_AG2" } } } } end
+			if typ == "keen::enemy::EnemyArsenalRegistryResource" then return { arsenal_registry } end
+			if typ == "keen::ActorSequenceCollectionResource" then return { sequence_collection } end
 			return {}
 		end,
 		create_resource = function(value, typ, guid, part)
@@ -217,6 +243,26 @@ local function show_template(t)
 end
 for _, t in ipairs(templates) do show_template(t) end
 for _, t in pairs(resources["keen::ecs::TemplateResource"]) do show_template(t) end
+-- arsenals ("arsenal <guid> sequences <each attack's sequence>") and sequences ("sequence <guid> id <resourceId>
+-- length <ns> events <Type>@<time>+<duration> ...")
+for _, a in ipairs(arsenals) do
+	local seqs = {}
+	for _, atk in ipairs(a.attacks) do seqs[#seqs + 1] = tostring(atk.description.actionSequence) end
+	print(string.format("arsenal %s sequences %s", tostring(a.guid), table.concat(seqs, " ")))
+end
+local listed = {}
+for _, g in ipairs(sequence_collection.data.sequences) do listed[#listed + 1] = tostring(g) end
+print("sequence collection " .. table.concat(listed, " "))
+for g, r in pairs(resources[SEQ]) do
+	for _, sub in ipairs(r.data.subSequences) do
+		local evs = {}
+		for _, ev in ipairs(sub.events) do
+			evs[#evs + 1] = string.format("%s@%d+%d", ev.type:match("([^:]+)$"), ev.value.time.value, ev.value.duration.value)
+		end
+		print(string.format("sequence %s id %s length %d events %s", g, tostring(r.data.resourceId), sub.length.value,
+			table.concat(evs, " ")))
+	end
+end
 for g, r in pairs(resources["keen::RenderModel"]) do
 	print(string.format("model %s cloth %s", g, r.data.cloth == nil and "none" or "kept"))
 	if r.data.hierarchy then print(string.format("model %s hierarchy %s", g, tostring(r.data.hierarchy))) end
