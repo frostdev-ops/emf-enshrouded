@@ -331,7 +331,7 @@ world runs and the local player is in it:
   the start can still come out of the game's queue. `emf_core.log` says when the guard is off again.
 - The selection is the game's own (the command its character screen posts), so the menu shows that character
   afterwards, as after choosing it by hand.
-- Only on the game exes of builds 1273043 and 1283531 (the offsets inside the game's menu objects are known for those;
+- Only on the game exes of builds 1273043, 1283531 and 1285601 (the offsets inside the game's menu objects are known for those;
   on 1283531 the game app's are 0x20 later, which EMF checks in the game's code at start), with the bridge on;
   not on the dedicated server. `emf_core.log` says `load_world: on` or why it is off.
 - Tested in game: from the main menu the LOCAL test world ran with the LOCAL test character 12 s after the request,
