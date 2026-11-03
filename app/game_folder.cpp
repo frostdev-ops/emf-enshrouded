@@ -1279,9 +1279,13 @@ Change set_mod_setting(const std::wstring& game_in, const std::string& id, const
 
 // ---- dinput8-chain.ini lines ----
 
+// The note above a new [EMF] section (the installer's Add-ChainEntry writes the same).
+const char* const kEmfChainNote =
+    "; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader.";
+
 namespace {
 // Calls fn(line_start, body) for each line that counts, as the loader reads the file: lines before any section and
-// lines in [Chain] (other sections are another tool's). body is the line without its line break (and without the BOM
+// lines in [Chain] and [EMF] (other sections are another tool's). body is the line without its line break (and without the BOM
 // on the first line).
 template <class Fn>
 void each_chain_line(const std::string& text, Fn fn) {
@@ -1297,7 +1301,7 @@ void each_chain_line(const std::string& text, Fn fn) {
         from = nl == std::string::npos ? text.size() : nl + 1;
         const std::string t = loader::trim_chain(body);
         if (!t.empty() && t[0] == '[') {
-            counted = _stricmp(t.c_str(), "[chain]") == 0;
+            counted = _stricmp(t.c_str(), "[chain]") == 0 || _stricmp(t.c_str(), "[emf]") == 0;
             continue;
         }
         if (counted) fn(start, body);
@@ -1375,20 +1379,18 @@ std::optional<std::string> add_chain_line(const std::string& text, const std::ws
         lines.push_back({from, loader::trim_chain(body)});
         from = nlat == std::string::npos ? text.size() : nlat + 1;
     }
+    // EMF's lines go into its own [EMF] section: only EMF's loader reads it (ShroudForge reports [Chain] lines outside
+    // mods\<folder>\ as failed); a new [EMF] comes at the end, after a note for players
     int header = -1;
-    bool sections = false;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (lines[i].trimmed.empty() || lines[i].trimmed[0] != '[') continue;
-        sections = true;
-        if (_stricmp(lines[i].trimmed.c_str(), "[chain]") == 0) header = static_cast<int>(i);
-    }
+    for (size_t i = 0; i < lines.size(); ++i)
+        if (_stricmp(lines[i].trimmed.c_str(), "[emf]") == 0) header = static_cast<int>(i);
     const auto at_end = [&](const std::string& add) {
         std::string out = text;
         if (!out.empty() && out.back() != '\n') out += nl;
         return out + add;
     };
-    if (header < 0 && !sections) return at_end(name + nl);  // no sections: the whole file counts
-    if (header < 0) return at_end(nl + "[Chain]" + nl + name + nl);
+    if (header < 0)
+        return at_end((text.empty() ? "" : nl) + std::string(kEmfChainNote) + nl + "[EMF]" + nl + name + nl);
     size_t at = static_cast<size_t>(header) + 1;
     while (at < lines.size() && !(!lines[at].trimmed.empty() && lines[at].trimmed[0] == '[')) ++at;
     while (at > static_cast<size_t>(header) + 1 && lines[at - 1].trimmed.empty()) --at;  // before the section's blank lines

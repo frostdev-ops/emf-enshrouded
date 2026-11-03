@@ -1542,7 +1542,6 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
             for (const auto& o : chain_off)
                 if (auto r = switch_chain_line(t, wide(o), false)) t = *r, any = true;
             if (!any) return std::nullopt;
-            if (text.empty() && !chain_existed) t = "[Chain]\r\n" + t;  // a new file names its section, as the installer's
             return t;
         }, &created);
         if (!c.ok) return undo(c.error);
