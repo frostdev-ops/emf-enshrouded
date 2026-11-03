@@ -15,6 +15,10 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 mod-loader = { path = "../../third_party/eml/crates/mod-loader", features = ["lua"] }
+# portraits (src/portraits): EML's archive reader, record mapping and texture decoding, as mod-loader uses them
+kfc = { path = "../../third_party/eml/crates/kfc", features = ["resource", "content"] }
+half = "2.6.0"
+png = "0.17.16"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 tracing = "0.1.41"

@@ -15,6 +15,8 @@ use std::path::Path;
 use std::sync::{Mutex, TryLockError};
 use std::time::Instant;
 
+pub mod portraits;
+
 use mod_loader::ModEnvironment;
 use mod_loader::lua::{RunArgs, RunOptions};
 use serde::{Deserialize, Serialize};
