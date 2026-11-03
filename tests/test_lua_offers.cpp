@@ -99,6 +99,7 @@ TEST_CASE("lua 1.14: a reload removes the script's offers on the next server ste
     r.run_command("rl.go 5000");
     REQUIRE(r.fake.offers.size() == 1u);
     const Fake::Off o = r.fake.offers[0];
+    Sleep(20);  // a newer modification time than the load saw
     write(r.dir + L"\\rl\\main.lua", "emf.log('reloaded')\n");
     host.check_reload_now();
     CHECK(r.fake.offers_removed.empty());  // not from the reload: the removal needs the server world
