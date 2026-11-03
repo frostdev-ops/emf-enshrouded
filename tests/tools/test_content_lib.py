@@ -22,6 +22,15 @@ class ContentLibTests(unittest.TestCase):
         self.assertIn("FIXED FOREVER", text)
         self.assertIn("loader.is_server", text)
 
+    def test_add_item_sets_the_level_range(self):
+        # A loot item's range is wide (the Bronze Sword: 1..55) and a craft picks a level inside it (33 for a level-3
+        # character, live on build 1285601); crafted vanilla items have one level (the own crafting weapons: 3..3).
+        text = (REPO / "content" / "lib" / "emf_content.lua").read_text(encoding="utf-8")
+        self.assertIn("def.level", text)
+        self.assertIn("itemLevelRange", text)
+        example = (REPO / "content" / "emberbrand" / "src" / "mod.lua").read_text(encoding="utf-8")
+        self.assertRegex(example, r"\blevel\s*=\s*\d+")
+
 
 if __name__ == "__main__":
     unittest.main()

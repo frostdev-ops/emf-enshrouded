@@ -77,7 +77,10 @@ local function item_registry() return game.assets.get_resources_by_type("keen::I
 
 -- Adds an item copied from another (its model, icon, animations and perks), then your changes.
 --   guid, name_guid: fixed GUIDs of your own; debug_name: what EMF's "items" and "give" use; name: what players see;
---   clone_of: the source item's GUID; edit(item): optional changes to the copy (fields of keen::ItemInfo).
+--   clone_of: the source item's GUID; edit(item): optional changes to the copy (fields of keen::ItemInfo);
+--   level: the item's level (a number, or {min, max}). Set it for gear you craft: a loot item's range is wide (the
+--   Bronze Sword: 1 to 55) and a craft picks a level inside it; the game's crafted items have one level (its own
+--   crafting weapons: 3). nil keeps the copied item's range.
 -- Returns the item's id.
 function M.add_item(def)
 	for _, k in ipairs({"guid", "name_guid", "debug_name", "name", "clone_of"}) do
@@ -91,6 +94,15 @@ function M.add_item(def)
 	item.objectId = def.guid
 	item.name = def.name_guid
 	item.debugName = def.debug_name
+	if def.level then
+		local lo, hi = def.level, def.level
+		if type(def.level) == "table" then lo, hi = def.level[1], def.level[2] or def.level[1] end
+		if type(lo) ~= "number" or type(hi) ~= "number" or lo < 1 or hi < lo then
+			fail("add_item: level is a number of at least 1, or {min, max} with min <= max")
+		end
+		item.itemLevelRange.minLevel = math.floor(lo)
+		item.itemLevelRange.maxLevel = math.floor(hi)
+	end
 	if def.edit then def.edit(item) end
 	if not loader.is_server then  -- the icon (a UiTextureResource under the item's own GUID) and the name
 		local icon = game.assets.get_resource(def.icon_of or def.clone_of, "keen::UiTextureResource")
@@ -211,7 +223,9 @@ function M.add_recipe(def)
 				break
 			end
 		end
-		if not placed then fail("add_recipe: no menu group %s in workshop %d", tostring(def.menu and def.menu.group), workshop) end
+		if not placed then
+			fail("add_recipe: no menu group %s in workshop %d", tostring(def.menu and def.menu.group), workshop)
+		end
 	end
 	return id
 end

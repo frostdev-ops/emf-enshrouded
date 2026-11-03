@@ -24,6 +24,7 @@ local WEAPONS      = "2632c31c-37fe-48f6-b788-dfa649065edb" -- the own crafting 
 local item = content.add_item{
 	guid = ITEM_GUID, name_guid = NAME_GUID, debug_name = DEBUG_NAME, name = "Emberbrand",
 	clone_of = BRONZE_SWORD,
+	level = 3,  -- as the own crafting's other weapons (the Bronze Sword's range is 1 to 55: a craft would pick in it)
 	edit = function(it)
 		it.damageSetup.dmgMod = 1.75                          -- the Bronze Sword: 1.0
 		it.damageSetup.distribution.magicalFireDamage = 0.5   -- and some fire

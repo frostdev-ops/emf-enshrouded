@@ -16,13 +16,16 @@ EMF's helper (below) and is about 40 lines.
 ```lua
 local content = require("emf_content")
 content.add_item{guid = ..., name_guid = ..., debug_name = "Weapon_..._Mine", name = "My Sword", clone_of = <item GUID>,
-                 edit = function(item) item.damageSetup.dmgMod = 1.5 end}
+                 level = 3, edit = function(item) item.damageSetup.dmgMod = 1.5 end}
 content.add_recipe{guid = ..., debug_name = "Craft_Mine", output = {<item GUID>, 1}, inputs = {{<item GUID>, 5}},
                    like = "Consumable_Tool_Campfire_PK", menu = {group = "<group GUID>"}}
 content.finish()   -- once, at the end: writes the names back
 ```
 
-- `add_item` copies an item (model, icon, animations, perks), registers it and gives it its name.
+- `add_item` copies an item (model, icon, animations, perks), registers it and gives it its name. `level` (a number
+  or `{min, max}`) sets its level range: set it for gear players craft. A loot item's range is wide (the Bronze Sword:
+  1 to 55) and a craft picks a level inside it (33 for a level-3 character in a test); the game's crafted items have
+  one level (its own crafting weapons: 3).
 - `add_recipe` adds the recipe **and lists it in the crafting menu**. The menu is not built from the recipe table but
   from a fixed tree in the game's UI data (per workshop: groups, sets, recipes); a recipe that is not in that tree
   never shows. `like` names a vanilla recipe whose station, unlock and duration are copied (the campfire: the
