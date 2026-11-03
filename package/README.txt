@@ -64,7 +64,7 @@ Other mods and loaders (Creative Mode, Auto Loot Plus, XHL mods, EML, ShroudForg
   - Mods that use their own file name (EML's dbghelp.dll, Shroudweave's winmm.dll, Greeneye's dbgcore.dll, Aldrich
     Mod Menu's POWRPROF.dll) simply run next to EMF.
   - A mod that also wants the name dinput8.dll (Creative Mode, Auto Loot Plus, XHL-Core, ...) is renamed by
-    install.cmd (for example to dinput8-previous.dll) and listed in dinput8-chain.ini; EMF starts it during the
+    install.cmd (for example to dinput8-previous.dll) and listed in dinput8-chain.ini under [EMF]; EMF starts it during the
     game's start-up, as it would have started on its own. install.cmd says what it moved. (ShroudForge's dinput8.dll
     is kept aside but not started: ShroudForge already runs through its dbghelp.dll.)
   - Installing such a mod AFTER EMF overwrites EMF's dinput8.dll: run install.cmd again and it moves that mod too.

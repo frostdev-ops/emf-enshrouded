@@ -422,7 +422,7 @@ try {
         Check ($null -ne $p6 -and $p6.title -eq "Installed") "Install reports Installed ($(if ($p6) { $p6.title }))"
         Check ((Test-Path -LiteralPath (Join-Path $game "autolootplus.dll")) -and (Test-Path -LiteralPath (Join-Path $game "mods\auto-loot-plus\src\mod.lua"))) "the files are in the game folder (autolootplus.dll, mods\auto-loot-plus\)"
         $chain = Get-Content -LiteralPath (Join-Path $game "dinput8-chain.ini") -Raw
-        Check ($chain -eq "[Chain]`r`n; creative.dll`r`nautolootplus.dll`r`n") "autolootplus.dll is listed inside [Chain] ($($chain.Trim() -replace "`r`n", ' | '))"
+        Check ($chain -eq "[Chain]`r`n; creative.dll`r`n`r`n; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader.`r`n[EMF]`r`nautolootplus.dll`r`n") "autolootplus.dll is listed inside [EMF], the section only EMF reads ($($chain.Trim() -replace "`r`n", ' | '))"
         Check (Test-Path -LiteralPath (Join-Path $game "emf\installed_mods\nexus-170.json")) "the install is recorded in emf\installed_mods\nexus-170.json"
         $backup = @(Get-ChildItem -LiteralPath (Join-Path $game "emf\backup") -Recurse -File -ErrorAction SilentlyContinue | Where-Object { $_.FullName -like "*\mods\auto-loot-plus\mod.json" })
         Check ($backup.Count -ge 1) "the mod's old file that was there moved to emf\backup\ first"

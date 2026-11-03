@@ -155,12 +155,12 @@ std::optional<std::string> switch_chain_line(const std::string& text, const std:
 // DLLs switched off with "; " in front of their line (lines the chain parser skips), each once.
 std::vector<std::wstring> switched_off_chain_entries(const std::string& text);
 // dinput8-chain.ini text with `dll` added, as the installer's Add-ChainEntry does: a switched-off line for it is
-// switched on again; otherwise the name goes after the last line of [Chain] (before its blank lines), at the end of a
-// file without sections, or into a new [Chain] section at the end. The file's own line breaks are used; every other
-// byte stays. nullopt when it is listed already.
+// switched on again where it is; otherwise the name goes after the last line of [EMF] (before its blank lines), or
+// into a new [EMF] section at the end under EMF's note ([EMF] is EMF's own: ShroudForge reads only [Chain]). The file's
+// own line breaks are used; every other byte stays. nullopt when it is listed already.
 std::optional<std::string> add_chain_line(const std::string& text, const std::wstring& dll);
-// The text without the lines that name `dll`, switched on or off (lines that count: before any section and in
-// [Chain]). nullopt when no line names it.
+// The text without the lines that name `dll`, switched on or off (lines that count: before any section, in [Chain] and
+// in [EMF]); an [EMF] left empty goes with its note. nullopt when no line names it.
 std::optional<std::string> remove_chain_line(const std::string& text, const std::wstring& dll);
 
 // Changes dinput8-chain.ini: `edit` gets its text as UTF-8 ("" when there is no file) and returns the new text, or

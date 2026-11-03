@@ -219,7 +219,8 @@ target_compile_definitions(emf_nexus PRIVATE EMF_VERSION="${EMF_VERSION}")
 add_library(emf_loader SHARED
   src/loader/dllmain.cpp
   src/proxy/dinput8_proxy.cpp
-  src/proxy/dinput8.def
+  src/loader/dinput8_host.cpp  # ShroudForge's dinput8 chain host (dinput8_provider.h)
+  src/loader/dinput8_loader.def  # the proxy's exports, DirectInput8Create through the host, ShroudforgeSetDinput8Provider
   src/loader/loader.rc
   src/core/json.cpp  # the content loader reads EML mods' mod.json and its own state file
   src/common/sha256.cpp  # its fingerprint (EMF's own SHA-256: no Windows crypto in the game's process)
@@ -576,6 +577,7 @@ add_executable(emf_tests
   tests/test_world_jobs.cpp
   tests/test_entry_hold.cpp
   tests/test_chain_list.cpp
+  tests/test_dinput8_provider.cpp
   tests/test_chain_load.cpp
   tests/test_file_redirect.cpp
   tests/test_file_hooks.cpp

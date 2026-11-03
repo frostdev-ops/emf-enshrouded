@@ -76,8 +76,9 @@ powershell -ExecutionPolicy Bypass -File scripts\uninstall_probe.ps1            
 The developer scripts (these, `install_probe.ps1`, `content_test.ps1`, `game_session.ps1`) and `verify.sh` find the
 game through Steam's library folders (`scripts\find_game.ps1`); `-Game <folder>` or `EMF_GAME_DIR` names another one.
 `install_emf.ps1` (developer install) refuses to overwrite a `dinput8.dll` that is not EMF's. The player installer
-(`package/install.ps1`) renames another mod's `dinput8.dll` instead, lists it in `dinput8-chain.ini` and records it in
-`emf\moved.txt`; EMF's loader starts every DLL listed in `dinput8-chain.ini` from its `DllMain`, before the core
+(`package/install.ps1`) renames another mod's `dinput8.dll` instead, lists it in the `[EMF]` section of
+`dinput8-chain.ini` and records it in `emf\moved.txt`; EMF's loader starts every DLL listed in `dinput8-chain.ini`
+(`[Chain]` and `[EMF]`) from its `DllMain`, before the core
 (`src/loader/chain_list.h`, `chain_load.h`; results in `emf\emf_loader.log` and `emf\chain_status.txt`).
 Before that the loader takes EMF.exe's one-shot flag `emf\play_once.txt` ("Play without EMF mods" or "without any
 mods", `src/loader/play_once.h`): it deletes the file at once and, for that one start, starts no core (and with "without

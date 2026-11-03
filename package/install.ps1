@@ -80,6 +80,25 @@ function Install-Emf([string]$Dir, [string]$Source) {
         }
         throw
     }
+    # EMF 0.3.x listed the DLLs it renamed (emf\moved.txt) and the DLL mods EMF.exe installed (emf\installed_mods\*.json,
+    # "chain") in [Chain]; they go into EMF's own [EMF] (ShroudForge reads only [Chain]). Only now, with the new loader
+    # in place (it reads both): a failed install keeps the old loader, which reads only [Chain]. A failure here leaves
+    # the lines where they are, which still works.
+    $movedToEmf = @()
+    try {
+        $emfNames = @($recordBefore | Where-Object { $_ -like "moved`t*" } | ForEach-Object { $_.Substring(6) })
+        $records = Join-Path $Dir "emf\installed_mods"
+        if (Test-Path -LiteralPath $records) {
+            foreach ($r in @(Get-ChildItem -LiteralPath $records -Filter "*.json" -File)) {
+                try { $emfNames += @((Get-Content -LiteralPath $r.FullName -Raw | ConvertFrom-Json).chain | Where-Object { $_ }) }
+                catch { }  # a record that cannot be read: its lines stay in [Chain]
+            }
+        }
+        $movedToEmf = @(Move-ChainEntriesToEmf $Dir $emfNames)
+    } catch {
+        "Could not move EMF's own lines in $($script:ChainFileName) to [EMF] ($($_.Exception.Message)): they stay " +
+            "in [Chain], where EMF still starts them (ShroudForge shows them as failed)."
+    }
     if ($plan) {
         if ($plan.RunsAs) {
             "Another mod's dinput8.dll was renamed to $($plan.Name) and is not started: the same tool already runs " +
@@ -99,6 +118,19 @@ function Install-Emf([string]$Dir, [string]$Source) {
             "Note: $($script:ChainFileName) also still starts $old, an earlier dinput8.dll EMF could not identify. If " +
                 "$($plan.Name) is a newer copy of the same mod, switch $old off: put '; ' in front of its line."
         }
+    }
+    if ($movedToEmf.Count) {
+        "EMF's own lines in $($script:ChainFileName) ($($movedToEmf -join ', ')) moved from [Chain] to [EMF], the " +
+            "section only EMF reads: other chain loaders such as ShroudForge read only [Chain]."
+    }
+    $sfHere = (Test-Path -LiteralPath (Join-Path $Dir "shroudforge")) -or
+        ((Test-Path -LiteralPath (Join-Path $Dir "dbghelp.dll")) -and
+            (Get-DllToolName (Join-Path $Dir "dbghelp.dll") (Read-KnownTools (Join-Path $Source "emf\known_tools.txt"))) -eq "shroudforge")
+    $rootLines = @(Get-ChainGameRootEntries $Dir)
+    if ($sfHere -and $rootLines.Count) {
+        "ShroudForge reads [Chain] in $($script:ChainFileName) too and shows $($rootLines -join ', ') there as failed " +
+            "(it wants each DLL in its own folder under mods\). EMF still starts them: leave them where they are " +
+            "(moving one into mods\ can break it, for example Ultimate ASI Loader's plugins)."
     }
     $notes
     # EMF is installed now: a problem with the shortcut is said, never an install failure

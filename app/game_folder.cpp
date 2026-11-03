@@ -1279,9 +1279,13 @@ Change set_mod_setting(const std::wstring& game_in, const std::string& id, const
 
 // ---- dinput8-chain.ini lines ----
 
+// The note above a new [EMF] section (the installer's Add-ChainEntry writes the same).
+const char* const kEmfChainNote =
+    "; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader.";
+
 namespace {
 // Calls fn(line_start, body) for each line that counts, as the loader reads the file: lines before any section and
-// lines in [Chain] (other sections are another tool's). body is the line without its line break (and without the BOM
+// lines in [Chain] and [EMF] (other sections are another tool's). body is the line without its line break (and without the BOM
 // on the first line).
 template <class Fn>
 void each_chain_line(const std::string& text, Fn fn) {
@@ -1297,7 +1301,7 @@ void each_chain_line(const std::string& text, Fn fn) {
         from = nl == std::string::npos ? text.size() : nl + 1;
         const std::string t = loader::trim_chain(body);
         if (!t.empty() && t[0] == '[') {
-            counted = _stricmp(t.c_str(), "[chain]") == 0;
+            counted = _stricmp(t.c_str(), "[chain]") == 0 || _stricmp(t.c_str(), "[emf]") == 0;
             continue;
         }
         if (counted) fn(start, body);
@@ -1375,26 +1379,60 @@ std::optional<std::string> add_chain_line(const std::string& text, const std::ws
         lines.push_back({from, loader::trim_chain(body)});
         from = nlat == std::string::npos ? text.size() : nlat + 1;
     }
+    // EMF's lines go into its own [EMF] section: only EMF's loader reads it (ShroudForge reports [Chain] lines outside
+    // mods\<folder>\ as failed); a new [EMF] comes at the end, after a note for players
     int header = -1;
-    bool sections = false;
-    for (size_t i = 0; i < lines.size(); ++i) {
-        if (lines[i].trimmed.empty() || lines[i].trimmed[0] != '[') continue;
-        sections = true;
-        if (_stricmp(lines[i].trimmed.c_str(), "[chain]") == 0) header = static_cast<int>(i);
-    }
+    for (size_t i = 0; i < lines.size(); ++i)
+        if (_stricmp(lines[i].trimmed.c_str(), "[emf]") == 0) header = static_cast<int>(i);
     const auto at_end = [&](const std::string& add) {
         std::string out = text;
         if (!out.empty() && out.back() != '\n') out += nl;
         return out + add;
     };
-    if (header < 0 && !sections) return at_end(name + nl);  // no sections: the whole file counts
-    if (header < 0) return at_end(nl + "[Chain]" + nl + name + nl);
+    if (header < 0)
+        return at_end((text.empty() ? "" : nl) + std::string(kEmfChainNote) + nl + "[EMF]" + nl + name + nl);
     size_t at = static_cast<size_t>(header) + 1;
     while (at < lines.size() && !(!lines[at].trimmed.empty() && lines[at].trimmed[0] == '[')) ++at;
     while (at > static_cast<size_t>(header) + 1 && lines[at - 1].trimmed.empty()) --at;  // before the section's blank lines
     if (at >= lines.size()) return at_end(name + nl);
     return text.substr(0, lines[at].start) + name + nl + text.substr(lines[at].start);
 }
+
+namespace {
+// An [EMF] with no line left goes, with EMF's note just above it and one blank line before that: a file EMF added
+// [EMF] to is as it was once EMF's last line is out.
+std::string drop_empty_emf_section(const std::string& text) {
+    struct Line {
+        size_t start, end;  // end: after the line break
+        std::string trimmed;
+    };
+    std::vector<Line> lines;
+    for (size_t from = 0; from < text.size();) {
+        const size_t nlat = text.find('\n', from);
+        const size_t end = nlat == std::string::npos ? text.size() : nlat + 1;
+        std::string body = text.substr(from, end - from);
+        if (from == 0 && body.compare(0, 3, "\xEF\xBB\xBF") == 0) body.erase(0, 3);
+        lines.push_back({from, end, loader::trim_chain(body)});
+        from = end;
+    }
+    for (size_t h = 0; h < lines.size(); ++h) {
+        if (_stricmp(lines[h].trimmed.c_str(), "[emf]") != 0) continue;
+        size_t end = h + 1;
+        bool empty = true;
+        for (; end < lines.size() && !(!lines[end].trimmed.empty() && lines[end].trimmed[0] == '['); ++end)
+            empty = empty && lines[end].trimmed.empty();
+        if (!empty) return text;
+        size_t from = h;
+        if (from > 0 && lines[from - 1].trimmed == kEmfChainNote) --from;
+        if (from > 0 && lines[from - 1].trimmed.empty()) --from;
+        // a BOM on the first line stays
+        const size_t cut = from == 0 && text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : lines[from].start;
+        const size_t until = end < lines.size() ? lines[end].start : text.size();
+        return text.substr(0, cut) + text.substr(until);
+    }
+    return text;
+}
+}  // namespace
 
 std::optional<std::string> remove_chain_line(const std::string& text, const std::wstring& dll) {
     std::vector<std::pair<size_t, size_t>> drop;  // (line start, length with its line break)
@@ -1407,7 +1445,7 @@ std::optional<std::string> remove_chain_line(const std::string& text, const std:
     if (drop.empty()) return std::nullopt;
     std::string out = text;
     for (auto it = drop.rbegin(); it != drop.rend(); ++it) out.erase(it->first, it->second);
-    return out;
+    return drop_empty_emf_section(out);
 }
 
 }  // namespace emf::app

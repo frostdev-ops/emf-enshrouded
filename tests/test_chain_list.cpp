@@ -71,3 +71,16 @@ TEST_CASE("chain list: EMF's own dinput8.dll is never chained (it would be loadi
 TEST_CASE("chain list: a non-ASCII name in UTF-8 is read as UTF-8") {
     CHECK(parse_chain_list("m\xC3\xB6" "d.dll\n") == Names{L"m\u00F6d.dll"});
 }
+
+TEST_CASE("chain list: an [EMF] section counts too (the DLLs EMF renamed; other chain loaders read only [Chain])") {
+    const char* text =
+        "[Chain]\n"
+        "a.dll\n"
+        "[EMF]\n"
+        "b.dll\n"
+        "[Other]\n"
+        "c.dll\n"
+        "[emf]\n"
+        "d.dll\n";
+    CHECK(parse_chain_list(text) == Names{L"a.dll", L"b.dll", L"d.dll"});
+}

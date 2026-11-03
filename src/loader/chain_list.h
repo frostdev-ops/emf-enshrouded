@@ -1,10 +1,12 @@
 #pragma once
 // dinput8-chain.ini: the DLL mods that one dinput8.dll starts for the others, because only one file can be called
-// dinput8.dll. XHL-Core and Auto Loot Plus read the same file ("[Chain]", one DLL name per line); EMF's installer adds
-// the mods it renames. (chainloader.ini is ModLoader Proxy's own file, with settings such as delayed loading: EMF
+// dinput8.dll. XHL-Core, Auto Loot Plus and ShroudForge read the same file ("[Chain]", one DLL name per line);
+// EMF's installer lists the mods it renames in its own [EMF] section, which only EMF's loader reads (ShroudForge 1.7.7
+// wants every [Chain] line inside mods\<folder>\ and reports the others as failed). (chainloader.ini is ModLoader Proxy's own file, with settings such as delayed loading: EMF
 // leaves it to ModLoader Proxy, which it starts.)
 //
-// Lines in [Chain] (and lines before any section) count when, after a comment and an optional "key=" are removed, they
+// Lines in [Chain] and [EMF] (and lines before any section) count when, after a comment and an optional "key=" are
+// removed, they
 // name a .dll inside the game folder. Other sections are another tool's business. Absolute paths, drives, UNC paths
 // and ".." are refused (a chain file must not reach outside the game), and so is "dinput8.dll" (EMF's loader itself).
 // The file may be UTF-8 (with or without BOM), the ANSI code page or UTF-16LE with BOM; at most kMaxChainEntries count.
@@ -74,14 +76,15 @@ inline std::vector<std::wstring> parse_chain_list(const std::string& raw) {
     std::vector<std::wstring> out;
     size_t from = 0;
     if (text.compare(0, 3, "\xEF\xBB\xBF") == 0) from = 3;
-    bool counted = true;  // before any section, or in [Chain]
+    bool counted = true;  // before any section, or in [Chain] or [EMF]
     while (from < text.size() && out.size() < kMaxChainEntries) {
         size_t to = text.find('\n', from);
         if (to == std::string::npos) to = text.size();
         std::string line = trim_chain(text.substr(from, to - from));
         from = to + 1;
         if (!line.empty() && line[0] == '[') {
-            counted = _stricmp(trim_chain(line).c_str(), "[chain]") == 0;
+            const std::string section = trim_chain(line);
+            counted = _stricmp(section.c_str(), "[chain]") == 0 || _stricmp(section.c_str(), "[emf]") == 0;
             continue;
         }
         if (!counted || line.empty() || line[0] == ';' || line[0] == '#' || line.compare(0, 2, "//") == 0) continue;

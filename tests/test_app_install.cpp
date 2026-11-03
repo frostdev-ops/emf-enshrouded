@@ -480,7 +480,9 @@ TEST_CASE("app install: a DLL mod in a UTF-16 dinput8-chain.ini; a file that app
     const std::string after = g.read(L"dinput8-chain.ini");
     REQUIRE(after.compare(0, 2, "\xFF\xFE") == 0);  // still UTF-16
     const std::wstring text(reinterpret_cast<const wchar_t*>(after.data() + 2), (after.size() - 2) / 2);
-    CHECK(text == L"[Chain]\r\nother.dll\r\ncreative.dll\r\n\r\n[Settings]\r\ndelay=1\r\n");
+    // the player's [Chain] stays as it was; EMF's line goes into a new [EMF] at the end
+    CHECK(text == L"[Chain]\r\nother.dll\r\n\r\n[Settings]\r\ndelay=1\r\n\r\n"
+                  L"; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader.\r\n[EMF]\r\ncreative.dll\r\n");
     const auto rec = read_install_record(g.dir, "mod");
     REQUIRE(rec);
     CHECK(rec->chain == std::vector<std::string>{"creative.dll"});
@@ -503,7 +505,8 @@ TEST_CASE("app install: uninstall removes exactly what was installed; changed fi
     a.add(L"mods\\cm\\src\\mod.lua");
     const InstallPlan p = build_plan(a.input(g, "CreativeMode.zip"));
     REQUIRE(apply_plan(g.dir, p).ok);
-    CHECK(g.read(L"dinput8-chain.ini") == "[Chain]\n; creative.dll\ncreative-2.dll\n");
+    // the older copy is switched off where it is; the new one goes into [EMF]
+    CHECK(g.read(L"dinput8-chain.ini") == "[Chain]\n; creative.dll\n\n; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader.\n[EMF]\ncreative-2.dll\n");
     g.write(L"creative.ini", "[x]\nchanged by the player");
     g.write(L"mods\\cm\\notes.txt", "the player's");
 
@@ -515,7 +518,7 @@ TEST_CASE("app install: uninstall removes exactly what was installed; changed fi
     CHECK(g.has(L"mods\\cm\\notes.txt"));  // not the install's
     CHECK(g.read(L"creative.ini") == "[x]\nchanged by the player");
     CHECK(g.read(L"creative.dll") == "MZ creative-mode-marker OLD");
-    CHECK(g.read(L"dinput8-chain.ini") == "[Chain]\ncreative.dll\n");  // its line out, the old copy on again
+    CHECK(g.read(L"dinput8-chain.ini") == "[Chain]\ncreative.dll\n");  // its line out (and the empty [EMF]), the old copy on again
     std::string said;
     for (const auto& l : r.done) said += l + "\n";
     CHECK(said.find("creative.ini") != std::string::npos);
@@ -539,33 +542,48 @@ TEST_CASE("app install: a record that points outside the game folder is not foll
     CHECK(outside.read(L"victim.txt") == "abc");
 }
 
-TEST_CASE("app install: dinput8-chain.ini lines are added inside [Chain] and taken out again, as the installer does") {
-    // no sections: at the end
-    CHECK(*add_chain_line("a.dll\r\n", L"b.dll") == "a.dll\r\nb.dll\r\n");
-    CHECK(*add_chain_line("a.dll", L"b.dll") == "a.dll\r\nb.dll\r\n");
-    CHECK(*add_chain_line("", L"b.dll") == "b.dll\r\n");
-    // in [Chain], before its blank lines and the next section; LF files keep LF
-    CHECK(*add_chain_line("[Chain]\na.dll\n\n[Other]\nx=1\n", L"b.dll") == "[Chain]\na.dll\nb.dll\n\n[Other]\nx=1\n");
-    CHECK(*add_chain_line("\xEF\xBB\xBF[Chain]\r\na.dll\r\n", L"b.dll") == "\xEF\xBB\xBF[Chain]\r\na.dll\r\nb.dll\r\n");
-    // sections but no [Chain]: a new one at the end
-    CHECK(*add_chain_line("[Other]\r\nx=1\r\n", L"b.dll") == "[Other]\r\nx=1\r\n\r\n[Chain]\r\nb.dll\r\n");
-    // listed already (case ignored), or switched off: on again
+// the note and the section a new [EMF] gets (CRLF in a CRLF or new file)
+const std::string kChainHeader =
+    "; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader.\r\n[EMF]\r\n";
+
+TEST_CASE("app install: dinput8-chain.ini lines go into [EMF] and are taken out again, as the installer does") {
+    // [EMF] holds the DLLs EMF renamed: EMF's loader starts it, other chain loaders (ShroudForge) read only [Chain]
+    CHECK(*add_chain_line("", L"b.dll") == kChainHeader + std::string("b.dll\r\n"));
+    CHECK(*add_chain_line("a.dll\r\n", L"b.dll") == "a.dll\r\n\r\n" + kChainHeader + std::string("b.dll\r\n"));
+    CHECK(*add_chain_line("a.dll", L"b.dll") == "a.dll\r\n\r\n" + kChainHeader + std::string("b.dll\r\n"));
+    // a file with sections but no [EMF]: a new one at the end; LF files keep LF
+    CHECK(*add_chain_line("[Chain]\na.dll\n\n[Other]\nx=1\n", L"b.dll") ==
+          "[Chain]\na.dll\n\n[Other]\nx=1\n\n; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader.\n[EMF]\nb.dll\n");
+    // in [EMF], before its blank lines and the next section
+    CHECK(*add_chain_line("[Chain]\r\na.dll\r\n[EMF]\r\nc.dll\r\n\r\n[Other]\r\nx=1\r\n", L"b.dll") ==
+          "[Chain]\r\na.dll\r\n[EMF]\r\nc.dll\r\nb.dll\r\n\r\n[Other]\r\nx=1\r\n");
+    CHECK(*add_chain_line("\xEF\xBB\xBF[emf]\r\na.dll\r\n", L"b.dll") == "\xEF\xBB\xBF[emf]\r\na.dll\r\nb.dll\r\n");
+    // listed already in a section that counts (case ignored), or switched off: on again where it is
     CHECK_FALSE(add_chain_line("[Chain]\r\nB.DLL\r\n", L"b.dll"));
+    CHECK_FALSE(add_chain_line("[EMF]\r\nB.DLL\r\n", L"b.dll"));
     CHECK(*add_chain_line("[Chain]\r\n; b.dll\r\n", L"b.dll") == "[Chain]\r\nb.dll\r\n");
+    CHECK(*add_chain_line("[EMF]\r\n; b.dll\r\n", L"b.dll") == "[EMF]\r\nb.dll\r\n");
     // a name only in another section does not count
-    CHECK(*add_chain_line("[Chain]\r\n\r\n[Other]\r\nb.dll\r\n", L"b.dll") == "[Chain]\r\nb.dll\r\n\r\n[Other]\r\nb.dll\r\n");
+    CHECK(*add_chain_line("[Other]\r\nb.dll\r\n", L"b.dll") == "[Other]\r\nb.dll\r\n\r\n" + kChainHeader + std::string("b.dll\r\n"));
 
     CHECK(*remove_chain_line("[Chain]\r\na.dll\r\nb.dll\r\n; b.dll\r\nc.dll\r\n", L"b.dll") == "[Chain]\r\na.dll\r\nc.dll\r\n");
+    // the last line out of [EMF]: the section, its note and the blank line before it go too (the file as it was)
+    CHECK(*remove_chain_line("[Chain]\r\na.dll\r\n[EMF]\r\nb.dll\r\n", L"b.dll") == "[Chain]\r\na.dll\r\n");
+    CHECK(*remove_chain_line("a.dll\r\n\r\n" + kChainHeader + "b.dll\r\n", L"b.dll") == "a.dll\r\n");
+    CHECK(*remove_chain_line(kChainHeader + "b.dll\r\nc.dll\r\n", L"b.dll") == kChainHeader + "c.dll\r\n");
+    CHECK(*remove_chain_line(kChainHeader + "b.dll\r\n\r\n[Other]\r\nx=1\r\n", L"b.dll") == "[Other]\r\nx=1\r\n");
     CHECK(*remove_chain_line("\xEF\xBB\xBF" "b.dll\nc.dll", L"b.dll") == "\xEF\xBB\xBF" "c.dll");
     CHECK_FALSE(remove_chain_line("[Chain]\r\na.dll\r\n[Other]\r\nb.dll\r\n", L"b.dll"));
+    CHECK(*switch_chain_line("[EMF]\r\nb.dll\r\n", L"b.dll", false) == "[EMF]\r\n; b.dll\r\n");
+    CHECK(switched_off_chain_entries("[EMF]\r\n; b.dll\r\n") == std::vector<std::wstring>{L"b.dll"});
 
-    // a new file names its section
+    // a new file: the note and [EMF]
     TempGame g(L"inst_chain_new");
     emf_game(g);
     Archive a(L"inst_chain_new_a");
     a.add(L"dinput8.dll", "MZ creative-mode-marker");
     REQUIRE(apply_plan(g.dir, build_plan(a.input(g))).ok);
-    CHECK(g.read(L"dinput8-chain.ini") == "[Chain]\r\ncreative.dll\r\n");
+    CHECK(g.read(L"dinput8-chain.ini") == kChainHeader + std::string("creative.dll\r\n"));
 }
 
 // ---- edge cases ----

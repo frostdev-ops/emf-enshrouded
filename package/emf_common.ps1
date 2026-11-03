@@ -54,6 +54,10 @@ function Test-EmfLoader([string]$Path) {
 # it back. Nothing EMF moves is ever overwritten or deleted.
 
 $script:ChainFileName = "dinput8-chain.ini"
+# EMF lists the DLLs it renames in its own [EMF] section, which only EMF's loader reads: ShroudForge 1.7.7 reads [Chain]
+# too and reports every line there outside mods\<folder>\ as failed. The note goes above a new [EMF] (EMF.exe writes
+# the same, app/game_folder.cpp kEmfChainNote).
+$script:EmfChainNote = "; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader."
 
 # emf\known_tools.txt (the table EMF also reads at start-up): "word | name | text:<in its DLL> | beside:<...> |
 # same-loader:<another proxy name the same loader uses> | chain-as:<the name a moved DLL of it gets>" lines.
@@ -192,13 +196,21 @@ function Write-ChainFile($File, [string[]]$Lines) {
     [System.IO.File]::WriteAllText($File.Path, (($Lines -join "`r`n") + "`r`n"), $File.Encoding)
 }
 
-# Indexes of the lines that count: lines before any section and lines in [Chain] (the loader reads only those).
-function Get-ChainLineIndexes([string[]]$Lines) {
-    $in = $true
+# Indexes of the lines that count: lines before any section and lines in [Chain] and [EMF] (the loader reads only
+# those). -Section "Chain" gives only the lines another chain loader reads too (before any section and [Chain]), "EMF"
+# only the lines in [EMF].
+function Get-ChainLineIndexes([string[]]$Lines, [string]$Section = "") {
+    $in = "pre"
     for ($i = 0; $i -lt $Lines.Count; $i++) {
         $t = $Lines[$i].Trim()
-        if ($t.StartsWith("[")) { $in = ($t -ieq "[Chain]"); continue }
-        if ($in) { $i }
+        if ($t.StartsWith("[")) {
+            $in = if ($t -ieq "[Chain]") { "chain" } elseif ($t -ieq "[EMF]") { "emf" } else { "" }
+            continue
+        }
+        if (-not $in) { continue }
+        if ($Section -eq "Chain" -and $in -eq "emf") { continue }
+        if ($Section -eq "EMF" -and $in -ne "emf") { continue }
+        $i
     }
 }
 
@@ -211,12 +223,13 @@ function Get-ChainEntries([string]$Dir) {
     }
 }
 
-# Adds $Name inside [Chain] (once; a switched-off line for it is switched on again). Returns @{ Added; Created }.
+# Adds $Name inside [EMF] (once; a switched-off line for it is switched on again where it is). Returns
+# @{ Added; Created }.
 function Add-ChainEntry([string]$Dir, [string]$Name) {
     $f = Read-ChainFile $Dir
     $lines = @($f.Lines)
     if (-not $f.Exists) {
-        Write-ChainFile $f @("[Chain]", $Name)  # XHL-Core documents the section this way
+        Write-ChainFile $f @($script:EmfChainNote, "[EMF]", $Name)
         return @{ Added = $true; Created = $true }
     }
     $idx = @(Get-ChainLineIndexes $lines)
@@ -230,11 +243,11 @@ function Add-ChainEntry([string]$Dir, [string]$Name) {
         }
     }
     $header = -1
-    for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i].Trim() -ieq "[Chain]") { $header = $i } }
-    if ($header -lt 0 -and @($lines | Where-Object { $_.Trim().StartsWith("[") }).Count -eq 0) {
-        $at = $lines.Count  # no sections at all: the whole file counts
-    } elseif ($header -lt 0) {
-        $lines += @("", "[Chain]"); $at = $lines.Count
+    for ($i = 0; $i -lt $lines.Count; $i++) { if ($lines[$i].Trim() -ieq "[EMF]") { $header = $i } }
+    if ($header -lt 0) {
+        while ($lines.Count -and $lines[-1].Trim() -eq "") { $lines = @($lines | Select-Object -First ($lines.Count - 1)) }
+        if ($lines.Count) { $lines += "" }
+        $lines += @($script:EmfChainNote, "[EMF]"); $at = $lines.Count
     } else {
         $at = $header + 1
         while ($at -lt $lines.Count -and -not $lines[$at].Trim().StartsWith("[")) { $at++ }
@@ -244,6 +257,76 @@ function Add-ChainEntry([string]$Dir, [string]$Name) {
     $after = @(); if ($at -lt $lines.Count) { $after = @($lines[$at..($lines.Count - 1)]) }
     Write-ChainFile $f (@($before) + $Name + @($after))
     return @{ Added = $true; Created = $false }
+}
+
+# Moves the lines naming $Names (on or switched off) from [Chain] and the lines before any section into [EMF], each
+# as it was (an install over EMF 0.3.x, which listed the DLLs it renamed in [Chain]). Returns the names it moved.
+function Move-ChainEntriesToEmf([string]$Dir, [string[]]$Names) {
+    $f = Read-ChainFile $Dir
+    if (-not $f.Exists -or -not $Names.Count) { return @() }
+    $moving = @()
+    $drop = @()
+    foreach ($i in @(Get-ChainLineIndexes $f.Lines "Chain")) {
+        $t = $f.Lines[$i].Trim()
+        $off = $t.StartsWith(";")
+        $n = if ($off) { $t.TrimStart(";").Trim() } else { $t }
+        foreach ($name in $Names) {
+            if ($n -ieq $name) { $drop += $i; $moving += @{ Name = $name; Off = $off }; break }
+        }
+    }
+    if (-not $moving.Count) { return @() }
+    $left = @(for ($i = 0; $i -lt $f.Lines.Count; $i++) { if ($drop -notcontains $i) { $f.Lines[$i] } })
+    Write-ChainFile $f $left
+    foreach ($m in $moving) {
+        [void](Add-ChainEntry $Dir $m.Name)
+        if ($m.Off) { Set-ChainEntryOn $Dir $m.Name $false }
+    }
+    return @($moving | ForEach-Object { $_.Name })
+}
+
+# Moves every line left in [EMF] (on or switched off, as it is) into [Chain] and drops the empty [EMF] with its note:
+# once EMF is uninstalled nothing reads [EMF], and a chain loader put back as dinput8.dll reads [Chain]. Returns the
+# lines moved.
+function Move-EmfEntriesToChain([string]$Dir) {
+    $f = Read-ChainFile $Dir
+    if (-not $f.Exists) { return @() }
+    $body = @(Get-ChainLineIndexes $f.Lines "EMF")
+    $moving = @()
+    foreach ($i in $body) {
+        $t = $f.Lines[$i].Trim()
+        if ($t -and $t.TrimStart(";").Trim() -match "\.dll$") { $moving += $t }
+    }
+    $keep = @(for ($i = 0; $i -lt $f.Lines.Count; $i++) { if ($body -notcontains $i) { $f.Lines[$i] } })
+    $keep = @(Remove-EmptyEmfSection $keep)
+    if ($moving.Count) {
+        $header = -1
+        for ($i = 0; $i -lt $keep.Count; $i++) { if ($keep[$i].Trim() -ieq "[Chain]") { $header = $i } }
+        if ($header -lt 0) {
+            while ($keep.Count -and $keep[-1].Trim() -eq "") { $keep = @($keep | Select-Object -First ($keep.Count - 1)) }
+            if ($keep.Count) { $keep += "" }
+            $keep += "[Chain]"
+            $keep += $moving
+        } else {
+            $at = $header + 1
+            while ($at -lt $keep.Count -and -not $keep[$at].Trim().StartsWith("[")) { $at++ }
+            while ($at -gt $header + 1 -and $keep[$at - 1].Trim() -eq "") { $at-- }
+            $before = @(); if ($at -gt 0) { $before = @($keep[0..($at - 1)]) }
+            $after = @(); if ($at -lt $keep.Count) { $after = @($keep[$at..($keep.Count - 1)]) }
+            $keep = @($before) + $moving + @($after)
+        }
+    }
+    if ($moving.Count -or $keep.Count -ne $f.Lines.Count) { Write-ChainFile $f $keep }
+    return $moving
+}
+
+# Game-root DLLs (no folder in their line) that a player listed in [Chain] or before any section: ShroudForge 1.7.7
+# reads those lines too and reports them as failed (it wants mods\<folder>\); EMF still starts them.
+function Get-ChainGameRootEntries([string]$Dir) {
+    $f = Read-ChainFile $Dir
+    foreach ($i in @(Get-ChainLineIndexes $f.Lines "Chain")) {
+        $t = $f.Lines[$i].Trim()
+        if ($t -and -not $t.StartsWith(";") -and -not $t.StartsWith("#") -and $t -match "\.dll$" -and $t -notmatch "[\\/]") { $t }
+    }
 }
 
 # Switches $Name off (';' in front) or on again in the chain file.
@@ -259,6 +342,25 @@ function Set-ChainEntryOn([string]$Dir, [string]$Name, [bool]$On) {
     Write-ChainFile $f $lines
 }
 
+# An [EMF] with no line left goes, with EMF's note just above it and one blank line before that: a file EMF added [EMF]
+# to is as it was once EMF's last line is out.
+function Remove-EmptyEmfSection([string[]]$Lines) {
+    $h = -1
+    for ($i = 0; $i -lt $Lines.Count; $i++) { if ($Lines[$i].Trim() -ieq "[EMF]") { $h = $i } }
+    if ($h -lt 0) { return $Lines }
+    $end = $h + 1
+    while ($end -lt $Lines.Count -and -not $Lines[$end].Trim().StartsWith("[")) {
+        if ($Lines[$end].Trim() -ne "") { return $Lines }
+        $end++
+    }
+    $from = $h
+    if ($from -gt 0 -and $Lines[$from - 1].Trim() -ceq $script:EmfChainNote) { $from-- }
+    if ($from -gt 0 -and $Lines[$from - 1].Trim() -eq "") { $from-- }
+    $out = @()
+    for ($i = 0; $i -lt $Lines.Count; $i++) { if ($i -lt $from -or $i -ge $end) { $out += $Lines[$i] } }
+    return $out
+}
+
 # Takes $Name (on or switched off) out of the chain file; with $DeleteIfEmpty also removes the file once it lists no
 # DLL.
 function Remove-ChainEntry([string]$Dir, [string]$Name, [bool]$DeleteIfEmpty) {
@@ -267,6 +369,7 @@ function Remove-ChainEntry([string]$Dir, [string]$Name, [bool]$DeleteIfEmpty) {
     $drop = @(Get-ChainLineIndexes $f.Lines | Where-Object {
             $t = $f.Lines[$_].Trim(); ($t -ieq $Name) -or ($t.StartsWith(";") -and $t.TrimStart(";").Trim() -ieq $Name) })
     $left = @(for ($i = 0; $i -lt $f.Lines.Count; $i++) { if ($drop -notcontains $i) { $f.Lines[$i] } })
+    $left = @(Remove-EmptyEmfSection $left)
     $entries = @($left | Where-Object { $_.Trim() -match "\.dll$" })
     if ($DeleteIfEmpty -and $entries.Count -eq 0) { Remove-Item -LiteralPath $f.Path -Force; return }
     Write-ChainFile $f $left
