@@ -9,6 +9,7 @@ local health_mod = require("health")
 local wild_mod = require("wild")
 local rare_mod = require("rare")
 local loyalty = require("loyalty")
+local slots = require("slots")
 
 emf.emits({ "StartGuardingEvent", "AddThreatTargetEvent" })
 
@@ -266,6 +267,24 @@ command("aside", ": your beasts out step aside (leave for now) or come back; whi
 		local player, account = who(world)
 		emf.reply(account and pack:toggle_aside(world, account, player) or "Your account is not known yet.")
 	end)
+
+-- The level of a player's character.
+local function level_of(world, player)
+	local l = player and world:get("Level", player)
+	return l and l.dataStorage and l.dataStorage[1] or 0
+end
+
+command("slots", ": your active slots (how many beasts can be out) and when the next one opens", function(world, args)
+	local player = who(world)
+	local lvl = level_of(world, player)
+	local n = slots.unlocked(lvl, setting)
+	local next_slot, next_level = slots.next(lvl, setting)
+	if next_slot then
+		emf.reply(string.format("Active slots: %d (slot %d at level %d)", n, next_slot, next_level))
+	else
+		emf.reply(string.format("Active slots: %d", n))
+	end
+end)
 
 command("rename", "<name or number> <new name>: rename one of your beasts (1-20 characters)", function(world, args)
 	local _, account = who(world)

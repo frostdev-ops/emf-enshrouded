@@ -2,6 +2,8 @@
 --   b <account> <species> <rest seconds left> <out 0|1> <name>
 --   m <account> <passive|defending|aggressive>
 --   y <account> <loyalty points> <name>   (a beast with points; none: 0)
+--   a <account> <name>                    (an active beast: in one of its owner's active slots)
+--   s 1                                   (the world has had a stable: from then on only active beasts are called)
 -- account is world:account's text ("0x" + 16 hex digits); the name is last and may hold spaces. A player without an m
 -- line is defending.
 local M = {}
@@ -12,7 +14,16 @@ M.MODES = { "passive", "defending", "aggressive" }
 local MODE = { passive = true, defending = true, aggressive = true }
 
 function M.new()
-	return setmetatable({ by = {}, modes = {} }, R)
+	return setmetatable({ by = {}, modes = {}, has_stable = false }, R)
+end
+
+-- Whether the world has had a stable (it stays so).
+function R:stabled()
+	return self.has_stable
+end
+
+function R:set_stabled()
+	self.has_stable = true
 end
 
 -- How a player's beasts fight: passive, defending (the first) or aggressive.
@@ -111,8 +122,10 @@ function R:serialize()
 	for _, account in ipairs(self:accounts()) do
 		for _, b in ipairs(self.by[account]) do
 			if (b.points or 0) > 0 then lines[#lines + 1] = string.format("y %s %d %s", account, b.points, b.name) end
+			if b.active then lines[#lines + 1] = string.format("a %s %s", account, b.name) end
 		end
 	end
+	if self.has_stable then lines[#lines + 1] = "s 1" end
 	return table.concat(lines, "\n")
 end
 
@@ -123,9 +136,13 @@ local RETIRED = { panther = "sabretooth" }
 function M.parse(text)
 	local r = M.new()
 	local loyal = {}  -- y lines, applied once every beast is read
+	local active = {}  -- a lines, the same
 	for line in (text or ""):gmatch("[^\r\n]+") do
 		local y_account, points, y_name = line:match("^y (%S+) (%d+) (.+)$")
 		if y_account then loyal[#loyal + 1] = { y_account, tonumber(points), y_name } end
+		local a_account, a_name = line:match("^a (%S+) (.+)$")
+		if a_account then active[#active + 1] = { a_account, a_name } end
+		if line == "s 1" then r.has_stable = true end
 		local m_account, mode = line:match("^m (%S+) (%S+)$")
 		if m_account then r:set_mode(m_account, mode) end
 		local account, species, rest, out, name = line:match("^b (%S+) (%S+) (%d+) ([01]) (.+)$")
@@ -139,6 +156,11 @@ function M.parse(text)
 	for _, y in ipairs(loyal) do  -- by name only (a name that looks like a number is not a place in the list)
 		for _, b in ipairs(r.by[y[1]] or {}) do
 			if b.name == y[3] then b.points = y[2] end
+		end
+	end
+	for _, a in ipairs(active) do
+		for _, b in ipairs(r.by[a[1]] or {}) do
+			if b.name == a[2] then b.active = true end
 		end
 	end
 	return r

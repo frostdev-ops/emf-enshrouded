@@ -916,6 +916,42 @@ TEST_CASE("loyalty: when the game sets a beast's damage multiplier again (a resc
     CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(2.3));  // not again on top of itself
 }
 
+// ---- the stable: active slots, the Beasts window ----
+TEST_CASE("stable: active flags and the stabled flag are kept with the world; an older save loads with none active, not stabled") {
+    BeastRig b;
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\nb 0x00000000000000aa boar 0 0 Tusk\n"
+                  "a 0x00000000000000aa Tusk\ns 1\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    b.reply("beastmaster.mode passive");  // a change: the world's data is written
+    b.seconds(1);
+    CHECK(b.saved().find("a 0x00000000000000aa Tusk") != std::string::npos);
+    CHECK(b.saved().find("a 0x00000000000000aa Fang") == std::string::npos);
+    CHECK(b.saved().find("s 1") != std::string::npos);
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\n");  // a 1.5.0 save
+    b.r.fake.session = 3;
+    fire_load(1);
+    b.seconds(1);
+    b.reply("beastmaster.mode aggressive");
+    b.seconds(1);
+    CHECK(b.saved().find("\na ") == std::string::npos);
+    CHECK(b.saved().find("s 1") == std::string::npos);
+}
+
+TEST_CASE("stable: one active slot at the start, more at levels 10, 20 and 30; a level of 0 turns a slot off") {
+    BeastRig b;
+    component<ecs::Level>(b.r.fake, 1).dataStorage[0] = 5;
+    CHECK(b.reply("beastmaster.slots").find("Active slots: 1 (slot 2 at level 10)") != std::string::npos);
+    component<ecs::Level>(b.r.fake, 1).dataStorage[0] = 25;
+    CHECK(b.reply("beastmaster.slots").find("Active slots: 3 (slot 4 at level 30)") != std::string::npos);
+    component<ecs::Level>(b.r.fake, 1).dataStorage[0] = 30;
+    CHECK(b.reply("beastmaster.slots").find("Active slots: 4") != std::string::npos);
+    BeastRig off({{"slot3_level", "0"}});
+    component<ecs::Level>(off.r.fake, 1).dataStorage[0] = 25;
+    CHECK(off.reply("beastmaster.slots").find("Active slots: 2 (slot 4 at level 30)") != std::string::npos);
+}
+
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
     BeastRig b;
     b.reply("beastmaster.give wolf");
