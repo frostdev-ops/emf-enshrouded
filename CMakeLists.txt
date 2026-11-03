@@ -188,6 +188,8 @@ add_library(emf_core_lib STATIC
   src/core/overlay/window_ui.cpp
   src/core/overlay/png_decode.cpp
   src/core/overlay/image_store.cpp
+  src/core/net/net_line.cpp
+  src/core/net/net_peers.cpp
   src/core/overlay/submit.cpp
   src/core/overlay/input_router.cpp
   src/core/overlay/input_hook.cpp
@@ -519,6 +521,8 @@ add_executable(emf_tests
   tests/test_content_portraits.cpp
   tests/test_portraits_attempts.cpp
   tests/test_image_store.cpp
+  tests/test_net_line.cpp
+  tests/test_net_peers.cpp
   tests/test_pattern_find.cpp
   tests/test_hook_table.cpp
   tests/test_hook_chain_real.cpp
