@@ -185,6 +185,7 @@ add_library(emf_core_lib STATIC
   src/core/overlay/window_gate.cpp
   src/core/overlay/wheel_ui.cpp
   src/core/overlay/window_ui.cpp
+  src/core/overlay/png_decode.cpp
   src/core/overlay/submit.cpp
   src/core/overlay/input_router.cpp
   src/core/overlay/input_hook.cpp
@@ -196,7 +197,7 @@ add_library(emf_core_lib STATIC
   src/core/overlay/vk_layer.cpp
   src/core/overlay/overlay.cpp)
 target_include_directories(emf_core_lib PUBLIC src sdk/include)
-target_link_libraries(emf_core_lib PUBLIC emf_common imgui)
+target_link_libraries(emf_core_lib PUBLIC emf_common imgui windowscodecs ole32)  # WIC: PNG pictures in mod windows
 target_compile_definitions(emf_core_lib PUBLIC EMF_VERSION="${EMF_VERSION}")
 # --- emf_bridge_fake: the debug bridge's protocol with made-up game data, for testing bridge clients
 # without the game (scripts/bridge_clients_test.ps1; not installed) ---
@@ -504,6 +505,7 @@ add_executable(emf_tests
   tests/test_mods_ui.cpp
   tests/test_settings_ui.cpp
   tests/test_window_ui.cpp
+  tests/test_png_decode.cpp
   tests/test_pattern_find.cpp
   tests/test_hook_table.cpp
   tests/test_hook_chain_real.cpp
