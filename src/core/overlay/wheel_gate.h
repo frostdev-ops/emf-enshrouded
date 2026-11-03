@@ -12,16 +12,18 @@ namespace emf::core {
 
 class WheelGate {
 public:
-    enum class Refusal { None, NotReady, NoWindow, ConsoleOpen, Empty, Busy };
+    enum class Refusal { None, NotReady, NoWindow, ConsoleOpen, Empty, Busy, WindowOpen };
     // capture(true) when a request is accepted, capture(false) when it is handed back.
     explicit WheelGate(std::function<void(bool)> capture) : capture_(std::move(capture)) {}
 
     // Any thread. None = accepted (input is captured from now on). overlay_ready is asked under the lock, so a request
     // racing the overlay turning off is either refused or handed back by turned_off.
+    // mod_window_open: a mod's window (API v24) has the input; a wheel waits for it to close.
     Refusal request(const WheelRequest& r, const std::function<bool()>& overlay_ready, bool window_hooked,
-                    bool console_open);
-    Refusal request(const WheelRequest& r, bool overlay_ready, bool window_hooked, bool console_open) {
-        return request(r, [overlay_ready] { return overlay_ready; }, window_hooked, console_open);
+                    bool console_open, bool mod_window_open = false);
+    Refusal request(const WheelRequest& r, bool overlay_ready, bool window_hooked, bool console_open,
+                    bool mod_window_open = false) {
+        return request(r, [overlay_ready] { return overlay_ready; }, window_hooked, console_open, mod_window_open);
     }
     // Any thread: the game window lost the keyboard. Marks a pending or open wheel for cancelling (nothing otherwise,
     // so an old focus loss never reaches a later wheel).

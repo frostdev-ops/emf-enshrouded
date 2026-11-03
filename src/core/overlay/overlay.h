@@ -3,6 +3,7 @@
 // command center. Started by the core when [overlay] enabled is not 0 in emf\emf_core.ini.
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -11,6 +12,7 @@
 #include "core/mod_registry.h"
 #include "core/settings.h"
 #include "core/wheel_request.h"
+#include "core/window_request.h"
 #include "core/world_tracker.h"
 #include "console_model.h"
 #include "imgui.h"
@@ -56,6 +58,9 @@ struct OverlayDeps {
     std::function<void(const char*)> log;
     // A wheel closed: its request and the choice (-1 = cancelled). Called on the render thread.
     std::function<void(const WheelRequest&, int)> wheel_done;
+    // A mod window's event (API v24): EMF_UI_CLICK / _RIGHT_CLICK with the widget's key, or EMF_UI_CLOSED with the
+    // reason. Render thread (or the caller's, for ui.click and window_close).
+    std::function<void(const WindowRequest&, uint32_t kind, const std::string& key, uint32_t reason)> window_event;
     const HudModel* hud = nullptr;  // the mods' on-screen lines (API v12); drawn while the console is closed
     const ModRegistry* mods = nullptr;  // the Mods tab (null: no tab)
     SettingsStore* settings = nullptr;  // mods' settings, changed in the Mods tab
@@ -69,6 +74,18 @@ void overlay_show_replies(uint64_t ms = 0);
 // Opens a mod's radial wheel (API v10). False when the overlay is not running or cannot draw, the console is open, or
 // another wheel is open. Any thread; the input is captured at once, the wheel appears on the next frame.
 bool overlay_open_wheel(const WheelRequest& request);
+// A mod's window (API v24), any thread. Open: false with *why when refused (the overlay cannot draw, the window is not
+// hooked, a wheel or another window is open); `replaced`: the window with the same id it replaced. Update: false when
+// that id is not open. Close: false when not open; `closed`: the window closed.
+bool overlay_open_window(WindowRequest r, std::optional<WindowRequest>* replaced, std::string* why);
+bool overlay_update_window(const WindowRequest& contents);
+bool overlay_close_window(const std::string& id, std::optional<WindowRequest>* closed);
+// The open window (ui.windows), nothing when none.
+std::optional<WindowRequest> overlay_window();
+// ui.click: the same event as a click on the widget `key` of the open window. False with *why when there is none.
+bool overlay_click_window(const std::string& key, bool right, std::string* why);
+// ui.close: the window closed as by the player (CLOSED, BY_PLAYER). False when none is open.
+bool overlay_close_window_by_player();
 // A note for [hud] notes_seconds where [hud] notes_place says (top centre by default), also kept in the console. Any
 // thread.
 void overlay_notify(const std::string& text);
@@ -78,6 +95,7 @@ struct OverlayStatus {
     bool running = false;  // started, and the Vulkan layer can draw
     bool console_open = false;
     bool wheel_open = false;
+    std::string window;  // the id of a mod's open window (API v24), "" when none
 };
 OverlayStatus overlay_status();
 // A short status shown at the right end of the console's tab bar ("debug bridge on"). Any thread.

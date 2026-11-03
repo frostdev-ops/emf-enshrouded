@@ -27,6 +27,8 @@ constexpr uint32_t kCommandSenderV15Size = EMF_FIELD_END(EmfCommandSender, pad);
 constexpr uint32_t kCommandDefV17Size = EMF_FIELD_END(EmfCommandDef, user);
 constexpr uint32_t kTeleportV20Size = EMF_FIELD_END(EmfTeleport, user);
 constexpr uint32_t kComponentChangeV23Size = EMF_FIELD_END(EmfComponentChange, user);
+constexpr uint32_t kWindowDefV24Size = EMF_FIELD_END(EmfWindowDef, user);
+constexpr uint32_t kUiEventV24Size = EMF_FIELD_END(EmfUiEvent, flags);
 // The API table itself, by the version that last appended to it (a mod checks api->size against these).
 constexpr uint32_t kApiV17Size = EMF_FIELD_END(EmfApi, register_command_ex);
 constexpr uint32_t kApiV18Size = EMF_FIELD_END(EmfApi, damage);
@@ -35,6 +37,7 @@ constexpr uint32_t kApiV20Size = EMF_FIELD_END(EmfApi, teleport);
 constexpr uint32_t kApiV21Size = EMF_FIELD_END(EmfApi, world_setting_info);
 constexpr uint32_t kApiV22Size = EMF_FIELD_END(EmfApi, player_level_set);
 constexpr uint32_t kApiV23Size = EMF_FIELD_END(EmfApi, change_component);
+constexpr uint32_t kApiV24Size = EMF_FIELD_END(EmfApi, window_close);
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
 // then read it only when size covers it and update the sizeof here.
@@ -84,10 +87,23 @@ static_assert(offsetof(EmfApi, player_xp_required) == kApiV21Size && offsetof(Em
 static_assert(kApiV22Size == 616, "EmfApi size (v22)");
 static_assert(offsetof(EmfApi, change_component) == kApiV22Size,
               "EmfApi layout (v23 appends change_component after player_level_set)");
-static_assert(kApiV23Size == 624 && sizeof(EmfApi) == kApiV23Size, "EmfApi size (v23)");
+static_assert(kApiV23Size == 624, "EmfApi size (v23)");
+static_assert(offsetof(EmfApi, window_open) == kApiV23Size,
+              "EmfApi layout (v24 appends window_open, window_update, window_close after change_component)");
+static_assert(kApiV24Size == 648 && sizeof(EmfApi) == kApiV24Size, "EmfApi size (v24)");
 static_assert(kComponentChangeV23Size == 48 && sizeof(EmfComponentChange) == 48 &&
                   offsetof(EmfComponentChange, data) == 16 && offsetof(EmfComponentChange, cb) == 32,
               "EmfComponentChange layout (v23)");
+static_assert(sizeof(EmfUiWidget) == 56 && offsetof(EmfUiWidget, key) == 8 && offsetof(EmfUiWidget, count) == 32 &&
+                  offsetof(EmfUiWidget, rgba) == 40 && offsetof(EmfUiWidget, item) == 48,
+              "EmfUiWidget layout (v24)");
+static_assert(kUiEventV24Size == 40 && sizeof(EmfUiEvent) == 40 && offsetof(EmfUiEvent, window) == 8 &&
+                  offsetof(EmfUiEvent, reason) == 32,
+              "EmfUiEvent layout (v24)");
+static_assert(kWindowDefV24Size == 72 && sizeof(EmfWindowDef) == 72 && offsetof(EmfWindowDef, widgets) == 24 &&
+                  offsetof(EmfWindowDef, width) == 48 && offsetof(EmfWindowDef, world_kind) == 52 &&
+                  offsetof(EmfWindowDef, cb) == 56,
+              "EmfWindowDef layout (v24)");
 static_assert(sizeof(EmfWorldSettingInfo) == 72 && offsetof(EmfWorldSettingInfo, key) == 8 &&
                   offsetof(EmfWorldSettingInfo, min) == 32 && offsetof(EmfWorldSettingInfo, flags) == 64,
               "EmfWorldSettingInfo layout (v21)");

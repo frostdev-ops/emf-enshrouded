@@ -175,12 +175,15 @@ add_library(emf_core_lib STATIC
   src/core/overlay/console_model.cpp
   src/core/overlay/console_suggest.cpp
   src/core/overlay/wheel_model.cpp
+  src/core/overlay/window_model.cpp
   src/core/overlay/hud_model.cpp
   src/core/overlay/cursor_model.cpp
   src/core/overlay/mods_ui.cpp
   src/core/overlay/settings_ui.cpp
   src/core/overlay/wheel_gate.cpp
+  src/core/overlay/window_gate.cpp
   src/core/overlay/wheel_ui.cpp
+  src/core/overlay/window_ui.cpp
   src/core/overlay/submit.cpp
   src/core/overlay/input_router.cpp
   src/core/overlay/input_hook.cpp
@@ -452,8 +455,10 @@ add_executable(emf_tests
   tests/test_teleport.cpp
   tests/test_api_teleport.cpp
   tests/test_wheel_model.cpp
+  tests/test_window_model.cpp
   tests/test_hud_model.cpp
   tests/test_wheel_gate.cpp
+  tests/test_window_gate.cpp
   tests/test_aim.cpp
   tests/test_keys.cpp
   tests/test_mod_keys.cpp
@@ -483,6 +488,7 @@ add_executable(emf_tests
   tests/test_components_api.cpp
   tests/test_component_service.cpp
   tests/test_api_components.cpp
+  tests/test_api_windows.cpp
   tests/test_world_settings.cpp
   tests/test_world_settings_state.cpp
   tests/test_world_settings_file.cpp
@@ -493,6 +499,7 @@ add_executable(emf_tests
   tests/test_api_settings.cpp
   tests/test_mods_ui.cpp
   tests/test_settings_ui.cpp
+  tests/test_window_ui.cpp
   tests/test_pattern_find.cpp
   tests/test_hook_table.cpp
   tests/test_hook_chain_real.cpp
@@ -506,6 +513,7 @@ add_executable(emf_tests
   tests/test_lua_bindings.cpp
   tests/test_lua_template.cpp
   tests/test_lua_wheel_group.cpp
+  tests/test_lua_windows.cpp
   tests/test_beastmaster.cpp
   tests/test_necromancer.cpp
   tests/test_lua_examples.cpp

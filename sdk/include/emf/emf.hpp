@@ -913,4 +913,162 @@ inline bool reset_world_setting(const char* key = nullptr, bool persist = false)
     return has_v21() && api()->world_setting_reset && api()->world_setting_reset(key, persist ? EMF_WS_PERSIST : 0u);
 }
 
+// ---- v24: mod windows (reference.md "v24") ----
+inline bool has_v24() {
+    return api() && api()->version >= 24 && api()->size >= offsetof(EmfApi, window_close) + sizeof(api()->window_close);
+}
+namespace ui {
+// A window event: kind EMF_UI_CLICK / _RIGHT_CLICK (key: the widget's) or EMF_UI_CLOSED (reason: EMF_UI_BY_*; the last
+// one; with flags EMF_UI_NO_WORLD the World is empty).
+struct Event {
+    uint32_t kind = 0;
+    std::string window, key;
+    uint32_t reason = 0;
+    uint32_t flags = 0;
+};
+// A window built in order, top to bottom: `same_line()` puts the next widget on the line of the one before.
+//   emf::ui::Window w("mymod.stable", "Beasts");
+//   w.heading("Active").slot("active.1", "Wolf").same_line().slot("active.2", "Slot 2", 0, EMF_UI_EMPTY);
+//   w.open(EMF_WORLD_SERVER, [](emf::World world, const emf::ui::Event& e) { ... });
+// Later: w.clear(), add the new contents, w.update() (false when the player closed it).
+class Window {
+public:
+    Window(std::string id, std::string title) : id_(std::move(id)), title_(std::move(title)) {}
+    Window& heading(std::string text) { return add(EMF_UI_HEADING, {}, std::move(text), 0); }
+    Window& text(std::string text, uint32_t rgba = 0) {
+        add(EMF_UI_TEXT, {}, std::move(text), 0);
+        items_.back().w.rgba = rgba;
+        return *this;
+    }
+    Window& button(std::string key, std::string text, uint32_t flags = 0) {
+        return add(EMF_UI_BUTTON, std::move(key), std::move(text), flags);
+    }
+    Window& row(std::string key, std::string text, uint32_t flags = 0) {
+        return add(EMF_UI_ROW, std::move(key), std::move(text), flags);
+    }
+    Window& slot(std::string key, std::string text, uint32_t count = 0, uint32_t flags = 0) {
+        add(EMF_UI_SLOT, std::move(key), std::move(text), flags);
+        items_.back().w.count = count;
+        return *this;
+    }
+    Window& bar(std::string text, float fraction) {
+        add(EMF_UI_BAR, {}, std::move(text), 0);
+        const float f = fraction < 0.0f ? 0.0f : (fraction > 1.0f ? 1.0f : fraction);
+        items_.back().w.value = static_cast<uint32_t>(f * 1000.0f + 0.5f);
+        return *this;
+    }
+    Window& separator() { return add(EMF_UI_SEPARATOR, {}, {}, 0); }
+    Window& same_line() {
+        same_line_ = true;
+        return *this;
+    }
+    Window& tooltip(std::string text) {  // for the widget added last
+        if (!items_.empty()) items_.back().tooltip = std::move(text);
+        return *this;
+    }
+    Window& place(uint32_t p) {
+        place_ = p;
+        return *this;
+    }
+    Window& width(float text_heights) {
+        width_ = text_heights;
+        return *this;
+    }
+    Window& close_key(uint32_t vk) {
+        close_key_ = vk;
+        return *this;
+    }
+    Window& clear() {  // the widgets only (id, title, place, width and close key stay)
+        items_.clear();
+        same_line_ = false;
+        return *this;
+    }
+    const std::string& id() const { return id_; }
+
+    // Opens it; f(World, const Event&) runs after the next step of a world of `kind` for each event, and is deleted
+    // after CLOSED. False when refused (logged) or on an older core.
+    template <class F>
+    bool open(uint8_t kind, F f) const {
+        if (!has_v24() || !api()->window_open) return false;
+        std::vector<EmfUiWidget> widgets;
+        EmfWindowDef d = def(widgets);
+        d.world_kind = kind;
+        auto* holder = new F(std::move(f));
+        d.cb = [](EmfWorld* world, const EmfUiEvent* e, void* u) {
+            F* fn = static_cast<F*>(u);
+            Event ev;
+            ev.kind = e->kind;
+            ev.window = e->window ? e->window : "";
+            ev.key = e->key ? e->key : "";
+            ev.reason = e->reason;
+            ev.flags = e->flags;
+            try {
+                (*fn)(World(world), ev);
+            } catch (const std::exception& x) {
+                EMF_LOG("emf::ui", "a window callback threw: %s", x.what());
+            } catch (...) {
+                EMF_LOG("emf::ui", "a window callback threw an unknown C++ exception");
+            }
+            if (e->kind == EMF_UI_CLOSED) delete fn;
+        };
+        d.user = holder;
+        if (api()->window_open(&d)) return true;
+        delete holder;
+        return false;
+    }
+    // The current contents for the open window (its callback stays). False when it is not open.
+    bool update() const {
+        if (!has_v24() || !api()->window_update) return false;
+        std::vector<EmfUiWidget> widgets;
+        const EmfWindowDef d = def(widgets);
+        return api()->window_update(&d);
+    }
+
+private:
+    struct Item {
+        EmfUiWidget w{};
+        std::string key, text, tooltip;
+    };
+    Window& add(uint32_t type, std::string key, std::string text, uint32_t flags) {
+        Item it;
+        it.w.type = type;
+        it.w.flags = flags | (same_line_ ? EMF_UI_SAME_LINE : 0u);
+        same_line_ = false;
+        it.key = std::move(key);
+        it.text = std::move(text);
+        items_.push_back(std::move(it));
+        return *this;
+    }
+    EmfWindowDef def(std::vector<EmfUiWidget>& out) const {
+        out.clear();
+        for (const auto& it : items_) {
+            EmfUiWidget w = it.w;
+            w.key = it.key.empty() ? nullptr : it.key.c_str();
+            w.text = it.text.c_str();
+            w.tooltip = it.tooltip.empty() ? nullptr : it.tooltip.c_str();
+            out.push_back(w);
+        }
+        EmfWindowDef d{};
+        d.size = sizeof d;
+        d.id = id_.c_str();
+        d.title = title_.c_str();
+        d.widgets = out.data();
+        d.count = static_cast<uint32_t>(out.size());
+        d.widget_size = sizeof(EmfUiWidget);
+        d.close_key = close_key_;
+        d.place = place_;
+        d.width = width_;
+        return d;
+    }
+    std::string id_, title_;
+    std::vector<Item> items_;
+    bool same_line_ = false;
+    uint32_t place_ = EMF_UI_PLACE_CENTRE;
+    float width_ = 0.0f;
+    uint32_t close_key_ = 0;
+};
+// Closes the window `id` (its callback gets CLOSED, BY_MOD). False when it is not open or on an older core.
+inline bool close(const char* id) { return has_v24() && api()->window_close && api()->window_close(id); }
+}  // namespace ui
+
 }  // namespace emf

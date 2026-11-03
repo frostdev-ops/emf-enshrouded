@@ -140,6 +140,9 @@ bool apply_key(const KeyEvent& e, Route r, bool raw) {
             if (g_cb.console_key) g_cb.console_key(e);
             return false;
         case Route::Swallow: return true;
+        case Route::CloseWindow:
+            if (g_cb.close_window) g_cb.close_window();
+            return true;
     }
     return false;
 }

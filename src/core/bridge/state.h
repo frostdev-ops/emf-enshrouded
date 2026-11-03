@@ -41,6 +41,7 @@ struct StateSnapshot {
     bool overlay_running = false;
     bool console_open = false;
     bool wheel_open = false;
+    std::string window;  // the id of a mod's open window (API v24), "" when none
     std::vector<HudLine> hud;
     std::vector<ModRecord> mods;
     size_t hooks_total = 0, hooks_emf = 0, hooks_mods = 0;

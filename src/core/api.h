@@ -4,6 +4,7 @@
 #include <functional>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -24,6 +25,7 @@
 #include "settings.h"
 #include "system_programs.h"
 #include "wheel_request.h"
+#include "window_request.h"
 #include "emf/emf_api.h"
 #include "world_tracker.h"
 
@@ -67,6 +69,11 @@ struct CoreState {
     std::string components_off;                         // why change_component is off
     std::atomic<uint32_t> server_session{0};            // +1 per server world set up (API v9 server_session)
     std::function<bool(const WheelRequest&)> open_wheel;   // the overlay's wheel (null: no overlay)
+    // The overlay's mod window (API v24; null: no overlay): open (replaced: the window it replaced; why: a refusal),
+    // new contents for the open one, close by id (closed: the window closed).
+    std::function<bool(WindowRequest, std::optional<WindowRequest>*, std::string*)> open_window;
+    std::function<bool(const WindowRequest&)> update_window;
+    std::function<bool(const std::string&, std::optional<WindowRequest>*)> close_window;
     std::function<void(const std::string&)> notify;        // the overlay's top-of-screen note (null: log only)
     ModRegistry mods;                                    // every mod found in emf/mods and what became of it
     std::unique_ptr<IniBackend> settings_backend;         // emf/config/<mod>.ini
@@ -141,6 +148,10 @@ CoreState* core_state();
 const EmfApi* api_table();
 // Hands a wheel's result to the mod: its callback runs after the next step of a world of request.world_kind.
 void post_wheel_choice(const WheelRequest& request, int choice);
+// Hands a window event (EMF_UI_CLICK / _RIGHT_CLICK / _CLOSED) to the mod: its callback runs after the next step of a
+// world of request.world_kind; a CLOSED with no such world running is delivered at once (NULL world, EMF_UI_NO_WORLD)
+// and a click then is dropped. Any thread.
+void post_window_event(const WindowRequest& request, uint32_t kind, const std::string& key, uint32_t reason);
 // Tells the on_setting_changed callbacks about the settings changed since the last call (the sim step calls it
 // after each world's step, on that world's thread).
 void pump_setting_changes(EmfWorld* world);

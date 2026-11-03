@@ -66,6 +66,7 @@ TEST_CASE("bridge state: a running world with the player, the overlay, mods, hoo
     s.client_steps = StateSnapshot::Steps{590, std::nullopt};
     s.presents = 5000;
     s.frame_ms = 16.6;
+    s.window = "beastmaster.stable";
     const auto v = parse(state_json(s));
     const json::Value& world = *v.get("world");
     CHECK(world.get("status")->s == "running");
@@ -82,6 +83,7 @@ TEST_CASE("bridge state: a running world with the player, the overlay, mods, hoo
     const json::Value& overlay = *v.get("overlay");
     CHECK(overlay.get("console_open")->b);
     CHECK_FALSE(overlay.get("wheel_open")->b);
+    CHECK(overlay.get("window")->s == "beastmaster.stable");  // a mod's open window (API v24), "" when none
     REQUIRE(overlay.get("hud")->arr.size() == 1);
     CHECK(overlay.get("hud")->arr[0].get("text")->s == "13:15");
     CHECK(overlay.get("hud")->arr[0].get("place")->n == 1);

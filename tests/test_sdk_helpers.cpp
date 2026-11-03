@@ -688,3 +688,131 @@ TEST_CASE("emf::kill falls back to slot 0 (confirmed in game) only when the attr
     CHECK(g_attr_adds.empty());
     CHECK(w.get<gen::Health>(500)->dataStorage[0] == 0);  // the old path wrote slot 0
 }
+
+TEST_CASE("emf::ui::Window builds the widgets in order; open keeps f until CLOSED; false on a v23 core (v24)") {
+    reset_v18();
+    struct Seen {
+        std::string id, title;
+        std::vector<EmfUiWidget> widgets;
+        std::vector<std::string> keys, texts, tips;
+        uint32_t widget_size, close_key, place;
+        float width;
+        uint8_t kind;
+        EmfUiCallback cb;
+        void* user;
+    };
+    static std::vector<Seen> opened;
+    static std::vector<std::string> updates, closes;
+    opened.clear();
+    updates.clear();
+    closes.clear();
+    static EmfApi api = v18_api();
+    api.window_open = [](const EmfWindowDef* d) {
+        Seen s{d->id, d->title ? d->title : "", {}, {}, {}, {}, d->widget_size, d->close_key, d->place, d->width,
+               d->world_kind, d->cb, d->user};
+        for (uint32_t i = 0; i < d->count; ++i) {
+            const EmfUiWidget& w = d->widgets[i];
+            s.widgets.push_back(w);
+            s.keys.emplace_back(w.key ? w.key : "");
+            s.texts.emplace_back(w.text ? w.text : "");
+            s.tips.emplace_back(w.tooltip ? w.tooltip : "");
+        }
+        opened.push_back(s);
+        return true;
+    };
+    api.window_update = [](const EmfWindowDef* d) {
+        updates.emplace_back(d->count ? d->widgets[d->count - 1].text : "");
+        return true;
+    };
+    api.window_close = [](const char* id) {
+        closes.emplace_back(id);
+        return true;
+    };
+    REQUIRE(emf::init(&api));
+    CHECK(emf::has_v24());
+    emf::ui::Window w("test.stable", "Beasts");
+    w.heading("Active 1/3")
+        .slot("active.1", "Wolf 2", 3)
+        .tooltip("Level 12, ready")
+        .same_line()
+        .slot("active.2", "Slot 2", 0, EMF_UI_EMPTY)
+        .separator()
+        .row("beast.Boar", "Boar (out)", EMF_UI_SELECTED)
+        .button("call", "Call")
+        .same_line()
+        .button("release", "Release", EMF_UI_DISABLED)
+        .bar("Wolf 2", 0.8f)
+        .text("hello", 0x112233ffu)
+        .place(EMF_UI_PLACE_RIGHT)
+        .width(30)
+        .close_key('B');
+    static int calls = 0;
+    static std::string last_key;
+    static uint32_t last_kind = 0;
+    calls = 0;
+    CHECK(w.open(EMF_WORLD_CLIENT, [](emf::World, const emf::ui::Event& e) {
+        ++calls;
+        last_key = e.key;
+        last_kind = e.kind;
+    }));
+    REQUIRE(opened.size() == 1u);
+    const Seen& s = opened[0];
+    CHECK(s.id == "test.stable");
+    CHECK(s.title == "Beasts");
+    CHECK(s.widget_size == sizeof(EmfUiWidget));
+    CHECK(s.kind == EMF_WORLD_CLIENT);
+    CHECK(s.close_key == 'B');
+    CHECK(s.place == EMF_UI_PLACE_RIGHT);
+    CHECK(s.width == 30.0f);
+    REQUIRE(s.widgets.size() == 9u);
+    const uint32_t types[] = {EMF_UI_HEADING, EMF_UI_SLOT, EMF_UI_SLOT, EMF_UI_SEPARATOR, EMF_UI_ROW,
+                              EMF_UI_BUTTON,  EMF_UI_BUTTON, EMF_UI_BAR, EMF_UI_TEXT};
+    for (size_t i = 0; i < 9; ++i) CHECK(s.widgets[i].type == types[i]);
+    CHECK(s.widgets[1].count == 3u);
+    CHECK(s.tips[1] == "Level 12, ready");
+    CHECK(s.widgets[2].flags == (EMF_UI_SAME_LINE | EMF_UI_EMPTY));
+    CHECK(s.widgets[4].flags == EMF_UI_SELECTED);
+    CHECK(s.widgets[6].flags == (EMF_UI_SAME_LINE | EMF_UI_DISABLED));
+    CHECK(s.widgets[7].value == 800u);
+    CHECK(s.widgets[8].rgba == 0x112233ffu);
+    CHECK(s.keys[0].empty());
+    CHECK(s.keys[5] == "call");
+    CHECK(s.texts[4] == "Boar (out)");
+    // a click, then CLOSED (the last event: f is deleted after it)
+    EmfUiEvent ev{};
+    ev.size = sizeof ev;
+    ev.kind = EMF_UI_CLICK;
+    ev.window = "test.stable";
+    ev.key = "call";
+    ev.from_key = "";
+    s.cb(kW, &ev, s.user);
+    CHECK(calls == 1);
+    CHECK(last_key == "call");
+    ev.kind = EMF_UI_CLOSED;
+    ev.key = "";
+    s.cb(nullptr, &ev, s.user);
+    CHECK(calls == 2);
+    CHECK(last_kind == EMF_UI_CLOSED);
+    // new contents, and closing
+    w.text("more");
+    CHECK(w.update());
+    REQUIRE(updates.size() == 1u);
+    CHECK(updates[0] == "more");
+    CHECK(emf::ui::close("test.stable"));
+    REQUIRE(closes.size() == 1u);
+    CHECK(closes[0] == "test.stable");
+    // an exception from f does not escape into EMF
+    CHECK(w.open(EMF_WORLD_SERVER, [](emf::World, const emf::ui::Event&) { throw 1; }));
+    CHECK_NOTHROW(opened.back().cb(nullptr, &ev, opened.back().user));
+    // a v23 core
+    static EmfApi old = api;
+    old.size = static_cast<uint32_t>(offsetof(EmfApi, window_open));
+    old.version = 23;
+    emf::api_ref() = &old;
+    CHECK_FALSE(emf::has_v24());
+    CHECK_FALSE(w.open(EMF_WORLD_SERVER, [](emf::World, const emf::ui::Event&) {}));
+    CHECK_FALSE(w.update());
+    CHECK_FALSE(emf::ui::close("test.stable"));
+    CHECK(opened.size() == 2u);
+    emf::api_ref() = &api;
+}

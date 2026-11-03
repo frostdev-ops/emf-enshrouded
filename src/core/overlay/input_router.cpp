@@ -29,6 +29,42 @@ Route InputRouter::decide(const KeyEvent& e) {
         }
         return game_down_[index(e)] ? Route::Both : Route::Console;  // the game gets the releases of keys it saw
     }
+    if (window_ && !open_) {  // a mod's window captures; the console key still opens the console over it
+        if (e.down) {
+            if (held) return Route::Swallow;  // auto-repeat of the key that toggled or closed
+            // an auto-repeat of a key held since before the window opened (the key that opened it): not a press; its
+            // release reaches the game, which saw it go down
+            if (game_down_[index(e)]) return Route::Swallow;
+            const uint16_t skip = window_skip_vk_.load();
+            if (skip && e.vkey == skip) {  // the press that opened the window, handled here only now
+                window_skip_vk_ = 0;
+                held_ = e.scan;  // its repeats and its release go nowhere
+                return Route::Swallow;
+            }
+            const uint16_t close_vk = window_close_vk_.load();
+            if (esc || (close_vk && e.vkey == close_vk)) {
+                held_ = e.scan;  // its repeats and its release go nowhere
+                // still down when the window has closed: a mod polling it (the one that opens the window on that
+                // key) must not see a new press, so it reads as up until released
+                if (!esc) hidden_vk_ = close_vk;
+                return Route::CloseWindow;
+            }
+            if (toggle) {
+                open_ = true;
+                esc_to_console_ = false;
+                swallow_char_ = true;
+                held_ = e.scan;
+                return Route::Toggle;
+            }
+            return Route::Console;
+        }
+        if (e.vkey && e.vkey == window_skip_vk_.load()) window_skip_vk_ = 0;  // released: its next press closes
+        if (held) {
+            held_ = 0;
+            return Route::Swallow;
+        }
+        return game_down_[index(e)] ? Route::Both : Route::Console;
+    }
     if (e.down) {
         if (held) {  // auto-repeat of the key that toggled: one press, one toggle
             swallow_char_ = true;  // and the repeat's character is not typed
@@ -68,7 +104,7 @@ Route InputRouter::legacy_key(const KeyEvent& e) {
 }
 
 Route InputRouter::character(wchar_t) {
-    if (wheel_ && !open_) return Route::Swallow;  // nothing types while a wheel is open
+    if ((wheel_ || window_) && !open_) return Route::Swallow;  // nothing types while a wheel or a window is open
     if (swallow_char_) {
         swallow_char_ = false;
         return Route::Swallow;

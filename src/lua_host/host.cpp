@@ -742,6 +742,11 @@ void Host::Impl::unload(Script& s) {
     for (const auto& id : s.hud)
         if (api->hud_set) api->hud_set(id.c_str(), "", 0, 0);
     s.hud.clear();
+    // its open window closes too (an id is only kept after a v24 core opened it); a copy: the CLOSED edits the set
+    const std::set<std::string> windows(s.windows.begin(), s.windows.end());
+    s.windows.clear();
+    for (const auto& id : windows)
+        if (api->window_close) api->window_close(id.c_str());
     drop_sections(s.id);  // before the state (and its pick functions) goes
     lua_close(s.L);
     s.L = nullptr;

@@ -299,6 +299,41 @@ TEST_CASE("InputRouter wheel: mouse movement and presses are kept from the game,
     CHECK(r.mouse(MouseKind::Wheel) == Route::Console);
 }
 
+TEST_CASE("InputRouter window: keys go to the overlay; Esc and the close key close it; the console opens over it") {
+    constexpr uint16_t kB = 0x30;  // the B key's scan code; its virtual key is 'B'
+    InputRouter r;
+    CHECK(r.key(down(kW)) == Route::Game);  // W held while the window opens
+    r.set_window(true, 'B');
+    CHECK(r.window());
+    CHECK(r.capturing());
+    CHECK_FALSE(r.open());
+    CHECK(r.key(down(kA)) == Route::Console);  // the overlay sees it, the game does not
+    CHECK(r.key(up(kA)) == Route::Console);
+    CHECK(r.key(up(kW)) == Route::Both);  // W's release still reaches the game
+    CHECK(r.character(L'a') == Route::Swallow);  // nothing types into a window (phase 1)
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);  // the close key, on its press
+    CHECK(r.key(down(kB, 'B')) == Route::Swallow);      // its auto-repeat does nothing more
+    CHECK(r.key(up(kB, 'B')) == Route::Swallow);        // and the game never saw it go down
+    CHECK(r.key(down(kEsc)) == Route::CloseWindow);
+    CHECK(r.key(up(kEsc)) == Route::Swallow);
+    // the console key opens the console over the window; Esc closes the console first, then the window
+    CHECK(r.key(down(kTilde)) == Route::Toggle);
+    CHECK(r.open());
+    CHECK(r.key(up(kTilde)) == Route::Swallow);
+    CHECK(r.key(down(kA)) == Route::Console);
+    CHECK(r.character(L'a') == Route::Console);  // typing goes to the console
+    CHECK(r.key(down(kEsc)) == Route::Toggle);
+    CHECK_FALSE(r.open());
+    CHECK(r.key(up(kEsc)) == Route::Swallow);
+    CHECK(r.key(down(kEsc)) == Route::CloseWindow);
+    CHECK(r.key(up(kEsc)) == Route::Swallow);
+    CHECK(r.mouse(MouseKind::Move) == Route::Swallow);
+    CHECK(r.mouse(MouseKind::ButtonUp) == Route::Game);
+    r.set_window(false);
+    CHECK_FALSE(r.capturing());
+    CHECK(r.key(down(kB, 'B')) == Route::Game);  // no window: B is the game's again
+}
+
 TEST_CASE("InputRouter wheel: key messages copy the raw decision; presses are swallowed while it captures") {
     InputRouter r;
     r.set_wheel(true);
@@ -337,4 +372,51 @@ TEST_CASE("InputRouter: a wheel's hold key still down after the wheel closed sta
     KeyEvent up_k{0x25, 'K', false, false};
     r.key(up_k);  // the release seen through raw input ends it too
     CHECK_FALSE(r.hiding());
+}
+
+TEST_CASE("InputRouter window: the close key is hidden from mods until released (it never reopens the window)") {
+    constexpr uint16_t kB = 0x30;
+    InputRouter r;
+    r.set_window(true, 'B');
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);
+    r.set_window(false);  // the overlay closed it
+    CHECK(r.hidden_from_mods('B', true));  // still down: mods polling it see it up, not a new press
+    CHECK(r.key(up(kB, 'B')) == Route::Swallow);
+    CHECK_FALSE(r.hidden_from_mods('B', false));
+    CHECK_FALSE(r.hidden_from_mods('B', true));  // a later press is a press again
+}
+
+TEST_CASE("InputRouter window: auto-repeats of the key that opened it are repeats, not a close; its release reaches the game") {
+    constexpr uint16_t kB = 0x30;
+    InputRouter r;
+    CHECK(r.key(down(kB, 'B')) == Route::Game);  // B opened the window (a mod's on_key)
+    r.set_window(true, 'B');
+    CHECK(r.key(down(kB, 'B')) == Route::Swallow);  // held past the repeat delay: not the close key
+    CHECK(r.key(down(kB, 'B')) == Route::Swallow);
+    CHECK(r.window());
+    CHECK(r.key(up(kB, 'B')) == Route::Both);  // the game saw it go down: it sees it go up
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);  // the next press closes it
+}
+
+TEST_CASE("InputRouter window: opened while its close key is down, that press does not close it (it opened it)") {
+    // the mod polled the key down and opened the window before the window thread handled the key's own press
+    constexpr uint16_t kB = 0x30;
+    InputRouter r;
+    r.set_window(true, 'B', true);
+    CHECK(r.key(down(kB, 'B')) == Route::Swallow);  // the press that opened it
+    CHECK(r.window());
+    CHECK(r.key(up(kB, 'B')) == Route::Swallow);    // the game never saw it go down
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);  // the next press closes it
+    CHECK(r.key(up(kB, 'B')) == Route::Swallow);
+    r.set_window(true, 'B', false);  // opened with the key up: its first press closes it
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);
+}
+
+TEST_CASE("InputRouter window: opened while its close key is down after the game saw the press; its release ends that") {
+    constexpr uint16_t kB = 0x30;
+    InputRouter r;
+    CHECK(r.key(down(kB, 'B')) == Route::Game);  // the window thread handled the press first
+    r.set_window(true, 'B', true);
+    CHECK(r.key(up(kB, 'B')) == Route::Both);  // the game saw it go down
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);  // so the next press closes it
 }

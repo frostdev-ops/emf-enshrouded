@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 23
+#define EMF_API_VERSION 24
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -315,6 +315,77 @@ typedef struct EmfComponentChange {
     EmfComponentCallback cb;   /* optional: once, on the server world's thread, after the step that applied it */
     void* user;
 } EmfComponentChange;
+
+/* v24 mod windows: a window EMF's overlay draws from a mod's description (window_open); one at a time takes the mouse
+ * and keyboard. Widgets, in order, top to bottom: */
+#define EMF_UI_TEXT      0u /* a line of text; wraps at the window's width */
+#define EMF_UI_HEADING   1u /* a heading */
+#define EMF_UI_BUTTON    2u /* a button: a click sends EMF_UI_CLICK with its key */
+#define EMF_UI_ROW       3u /* a list row, full width: "Name (detail)" shows the detail dim at the right; clickable */
+#define EMF_UI_SLOT      4u /* an item-like square (about 3 lines high): its text, a count in the corner */
+#define EMF_UI_BAR       5u /* a bar filled to value/1000, its text on it */
+#define EMF_UI_SEPARATOR 6u
+/* EmfUiWidget.flags */
+#define EMF_UI_SAME_LINE 0x01u /* on the line of the widget before (slots in a row, buttons side by side) */
+#define EMF_UI_DISABLED  0x02u /* drawn dim, no events */
+#define EMF_UI_SELECTED  0x04u /* lit: a selected row or slot, a "tab" button */
+#define EMF_UI_DIM       0x08u
+#define EMF_UI_EMPTY     0x10u /* slot: the empty look */
+#define EMF_UI_LOCKED    0x20u /* slot: the locked look */
+typedef struct EmfUiWidget {   /* no size field: EmfWindowDef.widget_size is the array's stride */
+    uint32_t type;             /* EMF_UI_* */
+    uint32_t flags;
+    const char* key;           /* 1-48 bytes, sent back in events ("call:Wolf 2"); NULL or "" = no events */
+    const char* text;          /* up to 256 bytes, or NULL */
+    const char* tooltip;       /* shown while the pointer rests on it, or NULL; up to 512 bytes */
+    uint32_t count;            /* slot: the number in its corner (0 = none) */
+    uint32_t value;            /* bar: 0..1000 (more is 1000) */
+    uint32_t rgba;             /* text colour 0xRRGGBBAA, 0 = the look's */
+    uint32_t icon;             /* reserved (icons come later): 0 */
+    uint32_t item;             /* reserved (game item icons come later): 0 */
+    uint32_t pad;
+} EmfUiWidget;
+#define EMF_UI_PLACE_CENTRE 0u
+#define EMF_UI_PLACE_LEFT   1u
+#define EMF_UI_PLACE_RIGHT  2u /* e.g. beside the game's open inventory */
+/* EmfUiEvent.kind */
+#define EMF_UI_CLICK       1u
+#define EMF_UI_RIGHT_CLICK 2u
+#define EMF_UI_CLOSED      3u /* always the last event of an opened window: free `user` now */
+/* EmfUiEvent.reason (EMF_UI_CLOSED) */
+#define EMF_UI_BY_PLAYER   0u /* Esc, the close key, the window's X */
+#define EMF_UI_BY_MOD      1u /* window_close, or window_open with the same id replaced it */
+#define EMF_UI_BY_CORE     2u /* the world ended, the overlay turned off, the mod was turned off */
+/* EmfUiEvent.flags */
+#define EMF_UI_NO_WORLD    0x1u /* CLOSED with no world running: world is NULL; only free your data */
+typedef struct EmfUiEvent {
+    uint32_t size;             /* sizeof(EmfUiEvent) of the core */
+    uint32_t kind;             /* EMF_UI_CLICK / _RIGHT_CLICK / _CLOSED */
+    const char* window;        /* the window's id; valid during the call */
+    const char* key;           /* the widget's key ("" for CLOSED) */
+    const char* from_key;      /* reserved (drag and drop comes later): "" */
+    uint32_t reason;           /* CLOSED: EMF_UI_BY_* */
+    uint32_t flags;            /* EMF_UI_NO_WORLD */
+} EmfUiEvent;
+typedef void (*EmfUiCallback)(EmfWorld* world, const EmfUiEvent* event, void* user);
+typedef struct EmfWindowDef {
+    uint32_t size;             /* sizeof(EmfWindowDef) */
+    uint32_t flags;            /* none yet: 0 */
+    const char* id;            /* 1-48 of A-Z a-z 0-9 _ . -, starting with the mod's id and a dot ("beastmaster.stable") */
+    const char* title;         /* up to 64 bytes, or NULL */
+    const EmfUiWidget* widgets;
+    uint32_t count;            /* 0..256 */
+    uint32_t widget_size;      /* sizeof(EmfUiWidget) as the mod was built: the core steps through the array by it and
+                                  reads fields past it as 0 */
+    uint32_t close_key;        /* a keyboard key's generic virtual-key code that also closes it (the key that opened
+                                  it; acts on a press), 0 = Esc only; no mouse buttons, no VK_LSHIFT-style codes */
+    uint32_t place;            /* EMF_UI_PLACE_* */
+    float width;               /* in text heights (the console's text size scales it); 0 = about 28 */
+    uint8_t world_kind;        /* events run after the next step of a world of this kind (SERVER or CLIENT) */
+    uint8_t pad[3];
+    EmfUiCallback cb;          /* window_open only; window_update keeps the first */
+    void* user;
+} EmfWindowDef;
 
 /* v13 mod_info: what the loader found */
 #define EMF_MOD_LOADED 0u
@@ -757,6 +828,21 @@ typedef struct EmfApi {
      * why) on the server world's thread; when the world ended first (a new world, the menu) it answers _FAILED with a
      * NULL world, on the thread that ended it. False (logged) when refused at once; cb is not called then. */
     bool (*change_component)(EmfWorld* world, const EmfComponentChange* change);
+
+    /* ---- v24: mod windows (EmfWindowDef above; reference.md "v24") ---- */
+    /* Opens a window drawn by EMF's overlay (copied, every string too). With the open window's id it replaces it (that
+     * window's cb gets CLOSED, BY_MOD). One window at a time: false (logged) while another id is open, a wheel is open,
+     * the overlay is off or cannot draw (always on a dedicated server), no world of def->world_kind runs (a client in
+     * someone else's game has no server world), or the definition is bad. It may
+     * open while the console is open: it shows under the console and gets the input when the console closes. Events
+     * (CLICK, RIGHT_CLICK, the last one CLOSED) reach cb after the next step of a world of def->world_kind, on its
+     * thread; CLOSED with no world running comes at once with EMF_UI_NO_WORLD and a NULL world. Any thread. */
+    bool (*window_open)(const EmfWindowDef* def);
+    /* New contents for the open window def->id (cb and user are ignored; the scroll stays). False when it is not open,
+     * for example because the player closed it: it never reopens a window. Any thread. */
+    bool (*window_update)(const EmfWindowDef* def);
+    /* Closes the window `id`; its cb gets CLOSED (BY_MOD). False when it is not open. Any thread. */
+    bool (*window_close)(const char* id);
 } EmfApi;
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);

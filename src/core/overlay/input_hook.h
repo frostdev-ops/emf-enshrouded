@@ -19,6 +19,7 @@ struct InputCallbacks {
     // While a wheel captures (InputRouter::wheel): raw mouse movement, RI_MOUSE_* button flags and wheel notches.
     std::function<void(float dx, float dy, uint16_t buttons, float wheel)> overlay_mouse;
     std::function<void()> focus_lost;  // the game window lost the keyboard (alt-tab, another window)
+    std::function<void()> close_window;  // Esc or the close key of a mod's window (Route::CloseWindow)
 };
 
 // Starts a thread that waits for the game window (class "localWindowClass" of this process) and subclasses it, and

@@ -24,6 +24,8 @@
 #include "wheel_gate.h"
 #include "wheel_model.h"
 #include "wheel_ui.h"
+#include "window_gate.h"
+#include "window_ui.h"
 
 namespace emf::core {
 namespace {
@@ -61,12 +63,29 @@ WheelModel g_wheel;  // render thread
 WheelGate g_wheel_gate([](bool on) {
     if (g_router) g_router->set_wheel(on);
 });
+// A mod's window (API v24): the gate takes it from any thread; the render thread draws its copy.
+WindowGate g_window_gate([](bool on, uint16_t close_vk) {
+    // the close key down now (the key that opened it): that press must not close it (InputRouter::set_window)
+    const bool down = on && close_vk && (GetAsyncKeyState(close_vk) & 0x8000) != 0;
+    if (g_router) g_router->set_window(on, close_vk, down);
+});
+std::optional<WindowRequest> g_window;          // render thread: the copy drawn
+uint64_t g_window_seen = ~0ull;                 // render thread: the gate's version of that copy
+WindowUiState g_window_ui;                      // render thread
+bool g_window_was_open = false;                 // render thread: the pointer is placed on open, freed on close
+std::atomic<bool> g_window_close_asked{false};  // Esc or the close key (the window thread)
 LookSettings g_look;                // [hud] and the look keys of [overlay], read at start
 OverlayFonts g_fonts;               // render thread: the atlas's fonts (new pointers after each rebuild)
 FontRebuild g_font_rebuild;         // render thread
 std::set<std::string> g_font_told;  // render thread: the font problems already in the log
 
 void log_line(const char* s);
+bool world_live();
+
+// A window handed back by the gate gets its CLOSED (exactly once per window).
+void window_closed(const std::optional<WindowRequest>& r, uint32_t reason) {
+    if (r && g_deps.window_event) g_deps.window_event(*r, EMF_UI_CLOSED, "", reason);
+}
 
 // Runs just before a wheel's capture ends: closed while its hold key is still down (Esc, a click), the mod that
 // opened it must not take that key as a new press, so it stays hidden from mods until released.
@@ -172,14 +191,23 @@ void before_frame(ImGuiIO& io) {
         g_wheel.cancel();
         finish_wheel(-1);
     }
+    // a mod's window: closed by Esc or its key, or by the world ending (the main menu); then the copy to draw
+    if (g_window_close_asked.exchange(false)) window_closed(g_window_gate.finish(), EMF_UI_BY_PLAYER);
+    if (g_window_gate.busy() && !world_live()) window_closed(g_window_gate.turned_off(), EMF_UI_BY_CORE);
+    if (g_window_gate.version() != g_window_seen) {
+        g_window_seen = g_window_gate.version();
+        g_window = g_window_gate.current();
+    }
+    const bool window_open = g_window.has_value();
     std::vector<InputEvent> events;
     AcquireSRWLockExclusive(&g_queue_lock);
     events.swap(g_queue);
     ReleaseSRWLockExclusive(&g_queue_lock);
     // One pointer: in the game's menus the Windows pointer shows, and the console follows it (no arrow of its own);
-    // in play it is hidden and the console's arrow moves with the raw mouse. Looked at only while the console is open.
+    // in play it is hidden and the console's arrow moves with the raw mouse. Looked at only while the console or a mod's
+    // window is open.
     PointerSource pointer = PointerSource::Own;
-    if (g_router->open()) {
+    if (g_router->open() || window_open) {
         const WindowsPointer wp = read_windows_pointer();
         pointer = pointer_source(wp.showing, wp.in_front, absolute_mouse_seen());
         if (pointer == PointerSource::Windows) {
@@ -190,6 +218,17 @@ void before_frame(ImGuiIO& io) {
             }
         }
     }
+    if (window_open != g_window_was_open && !g_router->open()) {
+        if (window_open) {  // the pointer starts where the console's arrow was
+            g_cursor.set_display(io.DisplaySize);
+            if (pointer == PointerSource::Own) io.AddMousePosEvent(g_cursor.pos().x, g_cursor.pos().y);
+        } else {  // no hover or held button stays behind
+            io.AddMouseButtonEvent(0, false);
+            io.AddMouseButtonEvent(1, false);
+            io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+        }
+    }
+    g_window_was_open = window_open;
     for (const auto& e : events) {
         if (g_wheel.is_open() && (e.kind == InputEvent::Key || e.kind == InputEvent::Mouse)) {  // the wheel's input
             std::optional<int> result;
@@ -236,8 +275,8 @@ void before_frame(ImGuiIO& io) {
                 break;
             case InputEvent::Char: io.AddInputCharacterUTF16(static_cast<ImWchar16>(e.ch)); break;
             case InputEvent::Wheel: io.AddMouseWheelEvent(0.0f, e.wheel); break;
-            case InputEvent::Mouse:  // the console's cursor (a wheel's input is handled above)
-                if (!g_router->open()) break;
+            case InputEvent::Mouse:  // the console's or a window's cursor (a wheel's input is handled above)
+                if (!g_router->open() && !window_open) break;
                 if (pointer == PointerSource::Own) {  // with the Windows pointer the position came from it above
                     g_cursor.set_display(io.DisplaySize);
                     g_cursor.move(e.dx, e.dy, g_mouse_speed);
@@ -251,7 +290,7 @@ void before_frame(ImGuiIO& io) {
         }
     }
     // EMF's arrow only where the game hides the Windows pointer (play); in its menus that pointer is the one
-    io.MouseDrawCursor = g_router->open() && pointer == PointerSource::Own;
+    io.MouseDrawCursor = (g_router->open() || window_open) && pointer == PointerSource::Own;
     // Slide: ~0.15 s down or up.
     const float target = g_router->open() ? 1.0f : 0.0f;
     const float step = io.DeltaTime * 7.0f;
@@ -327,6 +366,15 @@ TextLook text_look() {
 }
 
 void build(ImVec2 display) {
+    if (g_window) {  // under the console: drawn first, and without input while the console is open
+        const auto click = draw_window(*g_window, g_window_ui, !g_router->open(), display, text_look());
+        if (click && g_deps.window_event)
+            g_deps.window_event(*g_window, click->right ? EMF_UI_RIGHT_CLICK : EMF_UI_CLICK, click->key, 0);
+        if (g_window_ui.close_clicked) {
+            g_window_ui.close_clicked = false;
+            window_closed(g_window_gate.finish(), EMF_UI_BY_PLAYER);
+        }
+    }
     if (g_router->open() || g_ui.open_fraction > 0.0f) refresh_sources();  // Tab completion: only for the console
     std::function<void()> mods_tab;
     if (g_deps.mods) mods_tab = [] { draw_mods_tab(g_deps.mods->list(), g_deps.settings, g_mods_ui); };
@@ -497,6 +545,7 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
         e.wheel = d;
         push(e);
     };
+    cb.close_window = [] { g_window_close_asked = true; };
     cb.focus_lost = [] {
         g_wheel_gate.focus_lost();
         push(InputEvent{InputEvent::FocusLost});  // the console forgets held keys and buttons
@@ -527,7 +576,7 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
     VkOverlayHooks hooks;
     hooks.visible = [] {
         return g_router->open() || g_ui.open_fraction > 0.0f || GetTickCount64() < g_toast_until.load() ||
-               g_wheel_gate.busy() ||
+               g_wheel_gate.busy() || g_window_gate.busy() ||
                (g_deps.hud && show_hud(g_router->open(), !g_deps.hud->empty(), world_live()));
     };
     hooks.fonts_due = fonts_due;
@@ -539,6 +588,7 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
         g_router->set_open(false);
         g_wheel.cancel();
         hand_back(g_wheel_gate.turned_off(hide_held_key), -1);
+        window_closed(g_window_gate.turned_off(), EMF_UI_BY_CORE);
     };
     set_vulkan_overlay(std::move(hooks));
     char msg[200];
@@ -560,10 +610,11 @@ void overlay_show_replies(uint64_t ms) {
 bool overlay_open_wheel(const WheelRequest& request) {
     if (!g_model || !g_router) return false;
     const std::function<bool()> ready = [] { return vulkan_overlay_ready(); };  // judged under the gate's lock
-    const auto why = g_wheel_gate.request(request, ready, window_hooked(), g_router->open());
+    const auto why = g_wheel_gate.request(request, ready, window_hooked(), g_router->open(), g_window_gate.busy());
     if (why == WheelGate::Refusal::None) return true;
     static const char* const kWhy[] = {"", "the overlay cannot draw yet", "the game window is not hooked (no input)",
-                                       "the console is open", "no entries", "another wheel is open"};
+                                       "the console is open", "no entries", "another wheel is open",
+                                       "a mod's window is open"};
     log_line((std::string("wheel refused: ") + kWhy[static_cast<int>(why)]).c_str());
     return false;
 }
@@ -581,7 +632,55 @@ OverlayStatus overlay_status() {
     s.running = vulkan_overlay_ready();
     s.console_open = g_router->open();
     s.wheel_open = g_wheel_gate.busy();
+    if (auto w = g_window_gate.current()) s.window = w->id;
     return s;
+}
+
+bool overlay_open_window(WindowRequest r, std::optional<WindowRequest>* replaced, std::string* why) {
+    if (!g_model || !g_router) {
+        if (why) *why = "the overlay is not running";
+        return false;
+    }
+    const std::function<bool()> ready = [] { return vulkan_overlay_ready(); };  // judged under the gate's lock
+    const auto refusal = g_window_gate.open(std::move(r), ready, window_hooked(), g_wheel_gate.busy(), replaced);
+    if (refusal == WindowGate::Refusal::None) return true;
+    static const char* const kWhy[] = {"", "the overlay cannot draw yet", "the game window is not hooked (no input)",
+                                       "a wheel is open", "another window is open"};
+    if (why) *why = kWhy[static_cast<int>(refusal)];
+    return false;
+}
+
+bool overlay_update_window(const WindowRequest& contents) { return g_window_gate.update(contents); }
+
+bool overlay_close_window(const std::string& id, std::optional<WindowRequest>* closed) {
+    return g_window_gate.close(id, closed);
+}
+
+std::optional<WindowRequest> overlay_window() { return g_window_gate.current(); }
+
+bool overlay_click_window(const std::string& key, bool right, std::string* why) {
+    const auto w = g_window_gate.current();
+    if (!w) {
+        if (why) *why = "no window is open";
+        return false;
+    }
+    for (const auto& x : w->widgets) {
+        if (x.key != key || (x.type != EMF_UI_BUTTON && x.type != EMF_UI_ROW && x.type != EMF_UI_SLOT)) continue;
+        if (x.flags & EMF_UI_DISABLED) {
+            if (why) *why = key + " is disabled";
+            return false;
+        }
+        if (g_deps.window_event) g_deps.window_event(*w, right ? EMF_UI_RIGHT_CLICK : EMF_UI_CLICK, key, 0);
+        return true;
+    }
+    if (why) *why = "no button, row or slot with the key " + key;
+    return false;
+}
+
+bool overlay_close_window_by_player() {
+    const auto r = g_window_gate.finish();
+    window_closed(r, EMF_UI_BY_PLAYER);
+    return r.has_value();
 }
 
 void overlay_set_status(const std::string& text) {
