@@ -190,6 +190,7 @@ add_library(emf_core_lib STATIC
   src/core/overlay/image_store.cpp
   src/core/net/net_line.cpp
   src/core/net/net_peers.cpp
+  src/core/net/net_service.cpp
   src/core/overlay/submit.cpp
   src/core/overlay/input_router.cpp
   src/core/overlay/input_hook.cpp
@@ -523,6 +524,7 @@ add_executable(emf_tests
   tests/test_image_store.cpp
   tests/test_net_line.cpp
   tests/test_net_peers.cpp
+  tests/test_net_service.cpp
   tests/test_pattern_find.cpp
   tests/test_hook_table.cpp
   tests/test_hook_chain_real.cpp
