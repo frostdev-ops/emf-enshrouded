@@ -30,7 +30,7 @@ emf::add_command("mymod.rabbit", ": a rabbit next to you", [](emf::World w, cons
 });
 ```
 
-Spawned entities are **not saved** with the world (villagers excepted). Props that need a surface (feeders, some
+Spawned entities are **not saved** with the world (villagers excepted; props spawned inside a base's build zone are saved like placed objects). Props that need a surface (feeders, some
 furniture) vanish where they cannot attach.
 
 ## React to the game's events (a kill, a hit, a pickup)

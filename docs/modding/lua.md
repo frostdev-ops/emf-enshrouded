@@ -39,7 +39,8 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    player's XP and level (`emf.xp_required`, `emf.level_cap`, `emf.set_level` and the attribute names `"xp_pending"`,
    `"xp"`, `"xp_required"`, `"level"`; EMF API v22): depend on `">=1.11"`. 1.12 adds `emf.add_component`,
    `emf.remove_component` (EMF API v23) and components spawned with `emf.spawn`: depend on `">=1.12"`. 1.13 adds
-   mod windows (`emf.window`, `emf.window_update`, `emf.window_close`; EMF API v24): depend on `">=1.13"`. Ranges are explained in [guide.md](guide.md), "Dependencies
+   mod windows (`emf.window`, `emf.window_update`, `emf.window_close`; EMF API v24): depend on `">=1.13"`. 1.14 adds
+   E prompts (`emf.offer`, `emf.spawn_offer`, `emf.offer_remove`; EMF API v25): depend on `">=1.14"`. Ranges are explained in [guide.md](guide.md), "Dependencies
    and version ranges".)
 
 3. Put `main.lua` next to it:
@@ -139,6 +140,9 @@ right away.
 | `emf.window(id, def, fn)` | (1.13) opens a window EMF's overlay draws (one at a time; it takes the mouse and keyboard; Esc, its `close_key` or its X close it); true when it opened. `id` gets your mod's id in front (`"stable"` is `"beastmaster.stable"`). `def`: `title`, `width` (in text heights, about 28 by default), `place` (`"centre"`, `"left"`, `"right"`), `close_key` (a key name, for example `emf.setting("stable_key")`), `world` (`"server"` when you host, else `"client"`: where `fn` runs), `rows` = a list, top to bottom, each one of `{text = ...}`, `{heading = ...}`, `{button = key, text = ...}`, `{row = key, text = "Name (detail)"}`, `{slot = key, text = ..., count = n}`, `{bar = text, value = 0..1}`, `{separator = true}`, with any of `same_line`, `selected`, `disabled`, `dim`, `empty`, `locked` (true), `tooltip` and `color` (`"#rrggbb"`). `fn(world, ev)`: `ev.kind` is `"click"`, `"right_click"` or, last, `"closed"` (with `ev.reason` `"player"`, `"mod"` or `"core"`); `ev.key` is the clicked row's key. A reload closes the script's window. An unknown row kind or field is an error. false (logged) while another window or a wheel is open, with no world of its kind, without the overlay (a dedicated server). `close_key = ""` (a key setting left unset) is no close key |
 | `emf.window_update(id, def)` | (1.13) new contents for your open window (`fn` stays); false when it is not open (the player closed it): it never reopens one |
 | `emf.window_close(id)` | (1.13) closes your window (`fn` gets `"closed"`, reason `"mod"`); false when it is not open |
+| `emf.offer(world, id [, opts] [, fn])` | (1.14) the game's own "E <verb>" prompt on entity `id` of the server world you host; `fn(world, player, entity)` runs when any player presses E there. `opts`: `verb` (`"Use"` (default), `"Open"`, `"Talk"`, `"Read"`, `"Sit"`, `"Sleep"`, `"Pet"`, `"Touch"`, `"Activate"`, `"Press"`, `"Enter"`, `"Inspect"`, `"Take"`, `"Collect"`, `"Rest"`, `"Release"` or a loca id), `text` (your own words: for now the prompt shows "E" with no word), `sequence` (`"touch"`, `"button"`), `range`, `low_priority`, `build_mode`. false for a player or an entity with the game's or another mod's offer. Offer again after a load; a reload takes the script's offers off. Host only (reference.md "v25") |
+| `emf.spawn_offer(world, guid, x, y, z [, opts] [, fn])` | (1.14) spawns a template with an offer on it (`emf.offer`'s options); the entity id, or nil. The prop may stay in the save without its offer: after a load offer it again, don't spawn another |
+| `emf.offer_remove(world, id)` | (1.14) takes your script's offer off the entity; false when it has none of yours |
 | `emf.emits(names [, kind])` / `emf.emit(kind, name, fields)` | send engine events (see below) |
 
 ### Moving items

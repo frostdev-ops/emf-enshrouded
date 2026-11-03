@@ -108,9 +108,11 @@ bool ComponentService::request(const ComponentChangeRequest& r, std::string* why
         ledger_session_ = cur;
     }
     const bool added_before = added_.count({r.mod, r.entity, r.hash}) != 0;
-    const std::string policy = check_change(r.op, r.hash, static_cast<uint32_t>(r.data.size()), !r.data.empty(),
-                                            r.flags, added_before);
-    const std::string value = r.op == ComponentOp::Add
+    // EMF's own requests (E prompts) are not a mod's: no list, but an add brings the component's bytes
+    const std::string policy =
+        r.internal ? (r.op == ComponentOp::Add && (r.data.empty() || r.data.size() > 4096) ? "an internal add brings its bytes" : "")
+                   : check_change(r.op, r.hash, static_cast<uint32_t>(r.data.size()), !r.data.empty(), r.flags, added_before);
+    const std::string value = !r.internal && r.op == ComponentOp::Add
                                   ? check_data(r.hash, r.data.empty() ? nullptr : r.data.data(),
                                                static_cast<uint32_t>(r.data.size()))
                                   : std::string();

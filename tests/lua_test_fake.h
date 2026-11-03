@@ -117,6 +117,19 @@ struct Fake {
         void* user = nullptr;
     };
     std::vector<Win> windows, window_updates;
+    struct Off {  // a v25 offer the host asked for
+        EmfWorld* world;
+        uint32_t entity;
+        EmfOffer o;
+        std::string text;
+        EmfOfferCallback cb;
+        void* user;
+    };
+    std::vector<Off> offers;
+    std::vector<uint32_t> offers_removed;
+    bool offer_ok = true;
+    bool offer_remove_ok = true;  // false: the core had dropped the offer already
+    uint32_t next_offer_spawn = 9000;
     std::vector<std::string> windows_closed;
     // v21 world settings: two settings, what set and reset were asked (key as passed, "" for NULL; flags), the
     // change listeners; ws_world false = no hosted world (every call answers false)
@@ -417,6 +430,28 @@ bool f_window_update(const EmfWindowDef* d) {
 bool f_window_close(const char* id) {
     g->windows_closed.emplace_back(id);
     return true;
+}
+uint32_t f_spawn_offer(EmfWorld* w, const uint8_t*, double, double, double, const EmfOffer* o, EmfOfferCallback cb,
+                       void* user) {
+    if (!g->offer_ok) return 0;
+    const uint32_t id = g->next_offer_spawn++;
+    g->offers.push_back({w, id, *o, o->text ? o->text : "", cb, user});
+    return id;
+}
+bool f_offer(EmfWorld* w, uint32_t entity, const EmfOffer* o, EmfOfferCallback cb, void* user) {
+    if (!g->offer_ok) return false;
+    g->offers.push_back({w, entity, *o, o->text ? o->text : "", cb, user});
+    return true;
+}
+bool f_offer_remove(EmfWorld*, uint32_t entity) {
+    g->offers_removed.push_back(entity);
+    return g->offer_remove_ok;
+}
+// A v25 core (fake_api leaves the offer calls out: emf.offer answers false without them).
+void with_offers(EmfApi& a) {
+    a.spawn_offer = f_spawn_offer;
+    a.offer = f_offer;
+    a.offer_remove = f_offer_remove;
 }
 // A v24 core (fake_api leaves the window calls out: emf.window answers false without them).
 void with_windows(EmfApi& a) {

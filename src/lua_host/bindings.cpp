@@ -1,6 +1,7 @@
 #include "host_impl.h"
 
 #include <algorithm>
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 #include <cstring>
@@ -2343,7 +2344,296 @@ int l_wheel_group(lua_State* L) {
     return 1;
 }
 
+// ---- lua 1.14: E prompts (API v25) ----
+bool has_v25(const EmfApi* a) {
+    return a && a->version >= 25 && a->size >= offsetof(EmfApi, offer_remove) + sizeof(a->offer_remove) && a->offer;
+}
+
+// One offer's Lua function, alive while the core may call it (until the offer is removed or replaced). To the core
+// every script is one owner (the Lua host); the host keeps which script offered which entity.
+struct OfferSlot {
+    Host::Impl* host;
+    std::string id;
+    int ref;          // the Lua function (LUA_NOREF: none)
+    uint64_t load;    // the script's load counter when offered (a reload drops the calls)
+    uint32_t session;  // the server session it was offered in
+};
+
+uint32_t session_now(const EmfApi* a) { return a && a->server_session ? a->server_session() : 0; }
+
+void offer_cb_body(EmfWorld* w, uint32_t player, uint32_t entity, void* user) {
+    auto* slot = static_cast<OfferSlot*>(user);
+    if (!slot || slot->ref == LUA_NOREF) return;
+    Script* s = slot->host->find(slot->id);
+    if (!s) return;
+    std::lock_guard<std::recursive_mutex> l(s->m);
+    if (!s->L || s->paused || slot->load != s->loads) return;
+    lua_rawgeti(s->L, LUA_REGISTRYINDEX, slot->ref);
+    push_world(s->L, *s, w);
+    lua_pushinteger(s->L, player);
+    lua_pushinteger(s->L, entity);
+    call_lua(*s, 3);
+    ++s->generation;
+}
+
+// Called by EMF: nothing may escape into the game.
+void offer_cb(EmfWorld* w, uint32_t player, uint32_t entity, void* user) {
+    try {
+        offer_cb_body(w, player, entity, user);
+    } catch (...) {
+    }
+}
+
+void free_offer_slot(OfferSlot* slot) {
+    if (!slot) return;
+    if (Script* s = slot->host->find(slot->id)) {
+        std::lock_guard<std::recursive_mutex> l(s->m);
+        if (s->L && slot->load == s->loads && slot->ref != LUA_NOREF) luaL_unref(s->L, LUA_REGISTRYINDEX, slot->ref);
+    }
+    delete slot;
+}
+
+struct VerbName {
+    const char* name;
+    uint32_t id;
+};
+constexpr VerbName kVerbs[] = {
+    {"use", EMF_VERB_USE},         {"open", EMF_VERB_OPEN},     {"talk", EMF_VERB_TALK},   {"read", EMF_VERB_READ},
+    {"sit", EMF_VERB_SIT},         {"sleep", EMF_VERB_SLEEP},   {"pet", EMF_VERB_PET},     {"touch", EMF_VERB_TOUCH},
+    {"activate", EMF_VERB_ACTIVATE}, {"press", EMF_VERB_PRESS}, {"enter", EMF_VERB_ENTER}, {"inspect", EMF_VERB_INSPECT},
+    {"take", EMF_VERB_TAKE},       {"collect", EMF_VERB_COLLECT}, {"rest", EMF_VERB_REST}, {"release", EMF_VERB_RELEASE},
+};
+
+// The options table {verb = "Open" | id, text = "...", sequence = "touch" | "button" | id, range = m, low_priority = b,
+// build_mode = b} as an EmfOffer; an unknown key or verb name is an error. `text` keeps the words alive for the call.
+EmfOffer offer_options(lua_State* L, int opts, std::string& text) {
+    EmfOffer o{};
+    o.size = sizeof o;
+    if (!opts) return o;
+    lua_pushnil(L);
+    while (lua_next(L, opts)) {
+        if (lua_type(L, -2) != LUA_TSTRING) luaL_error(L, "emf.offer: the options' keys are names");
+        const std::string key = lua_tostring(L, -2);
+        if (key == "verb") {
+            if (lua_type(L, -1) == LUA_TNUMBER) {
+                o.verb = static_cast<uint32_t>(lua_tointeger(L, -1));
+            } else {
+                std::string name = luaL_checkstring(L, -1);
+                for (auto& c : name) c = static_cast<char>(tolower(static_cast<unsigned char>(c)));
+                o.verb = 0;
+                for (const auto& v : kVerbs)
+                    if (name == v.name) o.verb = v.id;
+                if (!o.verb) luaL_error(L, "emf.offer: no verb named %s (Use, Open, Talk, Read, Sit, Sleep, Pet, Touch, Activate, Press, Enter, Inspect, Take, Collect, Rest, Release, or a loca id)", lua_tostring(L, -1));
+            }
+        } else if (key == "text") {
+            size_t n = 0;
+            const char* t = luaL_checklstring(L, -1, &n);
+            if (n == 0 || n > 63) luaL_error(L, "emf.offer: text must be 1 to 63 bytes");
+            text.assign(t, n);
+        } else if (key == "sequence") {  // only the neutral ones: a script never plays an arbitrary sequence for players
+            const std::string seq = luaL_checkstring(L, -1);
+            if (seq == "touch") o.sequence = EMF_SEQUENCE_TOUCH;
+            else if (seq == "button") o.sequence = EMF_SEQUENCE_BUTTON;
+            else luaL_error(L, "emf.offer: sequence is \"touch\" or \"button\"");
+        } else if (key == "range") {
+            const lua_Integer m = luaL_checkinteger(L, -1);
+            if (m < 1 || m > 255) luaL_error(L, "emf.offer: range is 1 to 255 metres");
+            o.range_m = static_cast<uint8_t>(m);
+        } else if (key == "low_priority") {
+            if (lua_toboolean(L, -1)) o.flags |= EMF_OFFER_LOW_PRIORITY;
+        } else if (key == "build_mode") {
+            if (lua_toboolean(L, -1)) o.flags |= EMF_OFFER_BUILD_MODE;
+        } else {
+            luaL_error(L, "emf.offer: no option named %s", key.c_str());
+        }
+        lua_pop(L, 1);
+    }
+    return o;
+}
+
+// The arguments after the position: an options table and/or a function, in that order (both may be left out).
+void offer_tail(lua_State* L, int first, int& opts, int& fn) {
+    opts = fn = 0;
+    for (int i = first; i <= first + 1; ++i) {
+        if (lua_istable(L, i) && !opts && !fn) opts = i;
+        else if (lua_isfunction(L, i) && !fn) fn = i;
+        else if (!lua_isnoneornil(L, i)) luaL_error(L, "emf.offer: an options table and a function were expected");
+    }
+}
+
+// A slot for a new offer of script s (the function at fn, if any).
+OfferSlot* new_offer_slot(lua_State* L, Script* s, int fn) {
+    auto* slot = new OfferSlot{s->host, s->id, LUA_NOREF, s->loads, session_now(s->host->api)};
+    if (fn) {
+        lua_pushvalue(L, fn);
+        slot->ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    }
+    return slot;
+}
+
+// The slot of `entity` in this session: another script's refuses (nullptr in *other's id), one of an older session is
+// forgotten (the core forgot it with that world).
+bool entity_free_for(Host::Impl& h, Script* s, uint32_t entity, OfferSlot** mine) {
+    std::lock_guard<std::mutex> g(h.m);
+    *mine = nullptr;
+    auto it = h.offer_slots.find(entity);
+    if (it == h.offer_slots.end()) return true;
+    auto* os = static_cast<OfferSlot*>(it->second);
+    if (os->session != session_now(h.api)) return true;
+    if (os->id != s->id) return false;
+    *mine = os;
+    return true;
+}
+
+// The core took the offer: the slot is the entity's now (a slot it replaced is freed; a queued removal of the entity
+// from the script's last load no longer applies).
+void keep_offer_slot(Host::Impl& h, Script* s, uint32_t entity, OfferSlot* slot) {
+    OfferSlot* old = nullptr;
+    {
+        std::lock_guard<std::mutex> g(h.m);
+        auto it = h.offer_slots.find(entity);
+        if (it != h.offer_slots.end() && it->second != slot) old = static_cast<OfferSlot*>(it->second);
+        h.offer_slots[entity] = slot;
+        h.offer_drops.erase(std::remove_if(h.offer_drops.begin(), h.offer_drops.end(),
+                                           [&](const std::pair<uint32_t, void*>& d) { return d.first == entity; }),
+                            h.offer_drops.end());
+    }
+    s->offers.insert(entity);
+    if (old) free_offer_slot(old);
+}
+
+// emf.offer(world, id [, opts] [, fn(world, player, entity)]) (lua 1.14): true when the core took it.
+int l_offer(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const auto entity = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    int opts = 0, fn = 0;
+    offer_tail(L, 3, opts, fn);
+    std::string text;
+    EmfOffer o = offer_options(L, opts, text);
+    if (!text.empty()) o.text = text.c_str();
+    const EmfApi* a = s->host->api;
+    if (!has_v25(a)) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    OfferSlot* mine = nullptr;
+    if (!entity_free_for(*s->host, s, entity, &mine)) {
+        if (a->log) a->log(s->id.c_str(), "emf.offer(%u) refused: another Lua mod's offer is on it", entity);
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    OfferSlot* slot = new_offer_slot(L, s, fn);
+    if (!a->offer(w, entity, &o, offer_cb, slot)) {
+        free_offer_slot(slot);
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    keep_offer_slot(*s->host, s, entity, slot);
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+// emf.spawn_offer(world, guid, x, y, z [, opts] [, fn]) (lua 1.14): the entity id, or nil.
+int l_spawn_offer(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const char* g = luaL_checkstring(L, 2);
+    uint8_t guid[16];
+    if (!emf::parse_guid(g, guid)) return luaL_error(L, "%s is not a GUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)", g);
+    const double x = luaL_checknumber(L, 3), y = luaL_checknumber(L, 4), z = luaL_checknumber(L, 5);
+    int opts = 0, fn = 0;
+    offer_tail(L, 6, opts, fn);
+    std::string text;
+    EmfOffer o = offer_options(L, opts, text);
+    if (!text.empty()) o.text = text.c_str();
+    const EmfApi* a = s->host->api;
+    if (!has_v25(a) || !a->spawn_offer) {
+        lua_pushnil(L);
+        return 1;
+    }
+    OfferSlot* slot = new_offer_slot(L, s, fn);
+    const uint32_t id = a->spawn_offer(w, guid, x, y, z, &o, offer_cb, slot);
+    if (!id) {
+        free_offer_slot(slot);
+        lua_pushnil(L);
+        return 1;
+    }
+    keep_offer_slot(*s->host, s, id, slot);
+    lua_pushinteger(L, id);
+    return 1;
+}
+
+// emf.offer_remove(world, id) (lua 1.14): true when this script's offer was there.
+int l_offer_remove(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const auto entity = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    const EmfApi* a = s->host->api;
+    Host::Impl& h = *s->host;
+    OfferSlot* mine = nullptr;
+    if (!has_v25(a) || !a->offer_remove || !entity_free_for(h, s, entity, &mine) || !mine) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    const bool ok = a->offer_remove(w, entity);
+    {  // taken off, or the core had dropped it already (the entity went): either way the slot is done
+        std::lock_guard<std::mutex> g(h.m);
+        h.offer_slots.erase(entity);
+    }
+    s->offers.erase(entity);
+    free_offer_slot(mine);
+    lua_pushboolean(L, ok);
+    return 1;
+}
+
 }  // namespace
+
+// Called by Host::Impl::unload: the script's offers are taken off on the next server step (only a world call may).
+void queue_script_offers(Host::Impl& h, Script& s) {
+    std::lock_guard<std::mutex> g(h.m);
+    for (const uint32_t e : s.offers) {
+        auto it = h.offer_slots.find(e);
+        if (it != h.offer_slots.end() && static_cast<OfferSlot*>(it->second)->id == s.id)
+            h.offer_drops.push_back({e, it->second});
+    }
+    s.offers.clear();
+}
+
+// On every server step (Host::tick_body): the queued removals, and a new session forgets the old one's slots.
+void run_offer_drops(Host::Impl& h, EmfWorld* w) {
+    const uint32_t session = session_now(h.api);
+    std::vector<std::pair<uint32_t, void*>> drops;
+    std::vector<OfferSlot*> stale;
+    {
+        std::lock_guard<std::mutex> g(h.m);
+        // the core forgot an ended world's offers: so do we (their entity ids mean other entities now)
+        for (auto it = h.offer_slots.begin(); it != h.offer_slots.end();) {
+            auto* os = static_cast<OfferSlot*>(it->second);
+            if (os->session != session) {
+                stale.push_back(os);
+                it = h.offer_slots.erase(it);
+            } else {
+                ++it;
+            }
+        }
+        drops.swap(h.offer_drops);
+    }
+    for (OfferSlot* os : stale) free_offer_slot(os);
+    for (auto& [e, p] : drops) {
+        bool still = false;
+        {
+            std::lock_guard<std::mutex> g(h.m);
+            auto it = h.offer_slots.find(e);
+            still = it != h.offer_slots.end() && it->second == p;
+            if (still) h.offer_slots.erase(it);
+        }
+        if (!still) continue;
+        if (has_v25(h.api) && h.api->offer_remove) h.api->offer_remove(w, e);
+        free_offer_slot(static_cast<OfferSlot*>(p));
+    }
+}
+
 
 void push_world(lua_State* L, Script& s, EmfWorld* world) {
     auto* w = static_cast<WorldUD*>(lua_newuserdatauv(L, sizeof(WorldUD), 0));
@@ -2364,6 +2654,7 @@ void open_bindings(lua_State* L, Script&) {
                                    {"xp_required", l_xp_required}, {"level_cap", l_level_cap}, {"set_level", l_set_level},
                                    {"add_component", l_add_component}, {"remove_component", l_remove_component},
                                    {"window", l_window}, {"window_update", l_window_update}, {"window_close", l_window_close},
+                                   {"offer", l_offer}, {"spawn_offer", l_spawn_offer}, {"offer_remove", l_offer_remove},
                                    {"tell", l_tell},       {"broadcast", l_broadcast}, {"on_chat", l_on_chat},
                                    {"request_save", l_request_save}, {"teleport", l_teleport},
                                    {"on_world_setting_changed", l_on_world_setting_changed},

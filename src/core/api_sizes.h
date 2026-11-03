@@ -29,6 +29,7 @@ constexpr uint32_t kTeleportV20Size = EMF_FIELD_END(EmfTeleport, user);
 constexpr uint32_t kComponentChangeV23Size = EMF_FIELD_END(EmfComponentChange, user);
 constexpr uint32_t kWindowDefV24Size = EMF_FIELD_END(EmfWindowDef, user);
 constexpr uint32_t kUiEventV24Size = EMF_FIELD_END(EmfUiEvent, flags);
+constexpr uint32_t kOfferV25Size = EMF_FIELD_END(EmfOffer, reserved);
 // The API table itself, by the version that last appended to it (a mod checks api->size against these).
 constexpr uint32_t kApiV17Size = EMF_FIELD_END(EmfApi, register_command_ex);
 constexpr uint32_t kApiV18Size = EMF_FIELD_END(EmfApi, damage);
@@ -38,6 +39,7 @@ constexpr uint32_t kApiV21Size = EMF_FIELD_END(EmfApi, world_setting_info);
 constexpr uint32_t kApiV22Size = EMF_FIELD_END(EmfApi, player_level_set);
 constexpr uint32_t kApiV23Size = EMF_FIELD_END(EmfApi, change_component);
 constexpr uint32_t kApiV24Size = EMF_FIELD_END(EmfApi, window_close);
+constexpr uint32_t kApiV25Size = EMF_FIELD_END(EmfApi, offer_remove);
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
 // then read it only when size covers it and update the sizeof here.
@@ -90,7 +92,13 @@ static_assert(offsetof(EmfApi, change_component) == kApiV22Size,
 static_assert(kApiV23Size == 624, "EmfApi size (v23)");
 static_assert(offsetof(EmfApi, window_open) == kApiV23Size,
               "EmfApi layout (v24 appends window_open, window_update, window_close after change_component)");
-static_assert(kApiV24Size == 648 && sizeof(EmfApi) == kApiV24Size, "EmfApi size (v24)");
+static_assert(kApiV24Size == 648, "EmfApi size (v24)");
+static_assert(offsetof(EmfApi, spawn_offer) == kApiV24Size,
+              "EmfApi layout (v25 appends spawn_offer, offer, offer_remove after window_close)");
+static_assert(kApiV25Size == 672 && sizeof(EmfApi) == kApiV25Size, "EmfApi size (v25)");
+static_assert(kOfferV25Size == 24 && sizeof(EmfOffer) == 24 && offsetof(EmfOffer, text) == 8 &&
+                  offsetof(EmfOffer, sequence) == 16 && offsetof(EmfOffer, range_m) == 20,
+              "EmfOffer layout (v25)");
 static_assert(kComponentChangeV23Size == 48 && sizeof(EmfComponentChange) == 48 &&
                   offsetof(EmfComponentChange, data) == 16 && offsetof(EmfComponentChange, cb) == 32,
               "EmfComponentChange layout (v23)");

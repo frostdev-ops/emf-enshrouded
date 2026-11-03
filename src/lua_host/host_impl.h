@@ -59,6 +59,7 @@ struct Script {
     std::map<std::string, std::vector<int>> events;    // "<kind>:<EventName>" -> functions
     std::set<std::string> hud;                         // full HUD ids shown
     std::multiset<std::string> windows;                // full ids of the mod windows it opened (lua 1.13); closed on unload
+    std::set<uint32_t> offers;                         // entities it put an offer on (lua 1.14); removed after unload
     std::vector<KeyWatch> keys;                        // emf.on_key
     std::vector<int> chat_cbs;                         // emf.on_chat (lua 1.6)
     std::vector<int> ws_cbs;                           // emf.on_world_setting_changed (lua 1.10)
@@ -131,6 +132,9 @@ struct Host::Impl {
     std::atomic<int> moves{0};                           // emf.move requests in flight (each holds one place in the item queue)
     std::function<uint64_t()> now_ms;                    // the clock of the chat limit and time limit (tests replace it)
     uint64_t (*file_clock)() = nullptr;                  // the world-data files' clock (nullptr: GetTickCount64)
+    // lua 1.14 offers: to the core every script is one owner, so the host keeps which script offered which entity
+    std::map<uint32_t, void*> offer_slots;               // entity -> its OfferSlot (bindings.cpp)
+    std::vector<std::pair<uint32_t, void*>> offer_drops;  // (entity, slot) of an unloaded script: off on the next step
 
     Script* find(const std::string& id);
     bool load(Script& s);
@@ -153,5 +157,9 @@ void finish_load(Host::Impl& h);
 // Text of a value for logging (tostring).
 std::string to_text(lua_State* L, int index);
 std::string utf8(const std::wstring& w);
+
+// lua 1.14 offers (bindings.cpp): unload queues a script's offers; every server step removes the queued ones.
+void queue_script_offers(Host::Impl& h, Script& s);
+void run_offer_drops(Host::Impl& h, EmfWorld* w);
 
 }  // namespace emf::lua

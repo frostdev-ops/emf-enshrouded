@@ -747,6 +747,7 @@ void Host::Impl::unload(Script& s) {
     s.windows.clear();
     for (const auto& id : windows)
         if (api->window_close) api->window_close(id.c_str());
+    queue_script_offers(*this, s);  // its offers come off on the next server step (only a world call may)
     drop_sections(s.id);  // before the state (and its pick functions) goes
     lua_close(s.L);
     s.L = nullptr;
@@ -905,6 +906,8 @@ void Host::tick_body(EmfWorld* world) {
         }
         ++s->generation;
     }
+    // after the scripts' ticks: a reloaded script that offered again kept its entities; the rest come off
+    if (server) run_offer_drops(h, world);
 }
 
 void Host::check_reload_now() {

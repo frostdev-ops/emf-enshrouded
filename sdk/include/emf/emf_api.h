@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 23 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 25 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 24
+#define EMF_API_VERSION 25
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -428,6 +428,45 @@ typedef struct EmfProgramDef {
                                        (program_write_other), or NULL. At most 16. Per-entity components only, as for
                                        other_read. A component may be in both lists. */
 } EmfProgramDef;
+
+/* v25 E prompts: the game's own "E <verb>" prompt on an entity a mod spawns or names, and a callback when a player
+ * (the host, a joined player, anyone on a dedicated server) accepts it (reference.md "v25"). An offer is the three
+ * components the game adds to its own objects at run time (InteractionOfferRuntime, ClientInteractionOffer,
+ * CheckPlayerInRange); none of them is saved, so an uninstalled mod leaves plain entities behind. */
+/* The game's own verbs (loca tag ids): every player sees the word, with or without EMF. */
+#define EMF_VERB_USE      0x26437C13u
+#define EMF_VERB_OPEN     0x0C2E4515u
+#define EMF_VERB_TALK     0xD9861C4Bu
+#define EMF_VERB_READ     0x631937DCu
+#define EMF_VERB_SIT      0xDFB7E778u
+#define EMF_VERB_SLEEP    0xC4E0F1CBu
+#define EMF_VERB_PET      0x6D5B6297u
+#define EMF_VERB_TOUCH    0x18A9222Cu
+#define EMF_VERB_ACTIVATE 0x811C5D9Eu
+#define EMF_VERB_PRESS    0x6F362030u
+#define EMF_VERB_ENTER    0x785FF179u
+#define EMF_VERB_INSPECT  0x260798EBu
+#define EMF_VERB_TAKE     0x33E582F6u
+#define EMF_VERB_COLLECT  0x9095E8BDu
+#define EMF_VERB_REST     0x62F329EBu
+#define EMF_VERB_RELEASE  0xAE94F76Au
+/* What the player does on E (an action sequence's hash). */
+#define EMF_SEQUENCE_TOUCH  0x3E5189BFu /* Interaction_TouchDevice: a short touch, no screen (the default) */
+#define EMF_SEQUENCE_BUTTON 0xAF614FD8u /* Interaction_ButtonPress */
+#define EMF_OFFER_LOW_PRIORITY 1u /* another target near the crosshair wins a tie */
+#define EMF_OFFER_BUILD_MODE   2u /* offered in build mode too */
+typedef struct EmfOffer {
+    uint32_t size;      /* sizeof(EmfOffer) */
+    uint32_t verb;      /* EMF_VERB_* (any loca tag id); 0 = "Use" */
+    const char* text;   /* or the mod's own words (UTF-8, at most 63 bytes): for now the prompt shows no word ("E"
+                           alone; it still works); NULL = verb */
+    uint32_t sequence;  /* EMF_SEQUENCE_*; 0 = EMF_SEQUENCE_TOUCH */
+    uint8_t range_m;    /* the game considers it when a player is this near; 0 = 32 */
+    uint8_t flags;      /* EMF_OFFER_* */
+    uint16_t reserved;
+} EmfOffer;
+/* A player accepted the offer on `entity`: on the server world's thread, for every player (`player` is their entity). */
+typedef void (*EmfOfferCallback)(EmfWorld* world, uint32_t player, uint32_t entity, void* user);
 
 typedef struct EmfApi {
     uint32_t version; /* EMF_API_VERSION of the core */
@@ -843,6 +882,21 @@ typedef struct EmfApi {
     bool (*window_update)(const EmfWindowDef* def);
     /* Closes the window `id`; its cb gets CLOSED (BY_MOD). False when it is not open. Any thread. */
     bool (*window_close)(const char* id);
+
+    /* ---- v25: E prompts (EmfOffer above; reference.md "v25") ---- */
+    /* Spawns a template (spawn_ex's rules: from a world callback on the server world) with an offer on it. The entity
+     * id, or 0 (logged). A spawned prop may stay in the world save, without its offer: after a load, offer it again
+     * rather than spawning a second one. */
+    uint32_t (*spawn_offer)(EmfWorld* world, const uint8_t template_guid[16], double x, double y, double z,
+                            const EmfOffer* offer, EmfOfferCallback cb, void* user);
+    /* Puts an offer on an entity of the server world (from a world callback on it): it shows after a few steps. Refused
+     * (false, logged): a player, an entity without a position, one with an offer of the game's own (a chest, a bench),
+     * one with another mod's offer, your own with other options. The entity needs a collider, or no prompt shows.
+     * EMF drops the offer (silently) when the entity goes or loses it, and never puts it back by itself: offer again
+     * when your mod finds the entity, and after a load. */
+    bool (*offer)(EmfWorld* world, uint32_t entity, const EmfOffer* offer, EmfOfferCallback cb, void* user);
+    /* Takes the mod's offer off the entity. False when it has none of this mod's. */
+    bool (*offer_remove)(EmfWorld* world, uint32_t entity);
 } EmfApi;
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);
