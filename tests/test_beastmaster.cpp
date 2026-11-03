@@ -768,6 +768,61 @@ TEST_CASE("loyalty: a beast heals 5 % of its maximum health a second, 5 s after 
     CHECK_FALSE(healed(b, 1234));                 // full: nothing more
 }
 
+TEST_CASE("loyalty: a hostile foe the beast hit in the last 30 s dies: a point; wildlife, farm animals and old hits give none") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give boar");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    next_beast(b, 1235);
+    b.seconds(11);
+    REQUIRE(b.reply("beastmaster.call Boar").find("comes") != std::string::npos);
+    creature(b, 70, 0, 10, kSkeletonFoe);
+    deliver(b.r.fake, "HitEvent", hit_event(1234, 70));
+    deliver(b.r.fake, "HitEvent", hit_event(1235, 70));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(70));
+    b.seconds(1);
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Wolf") != std::string::npos);  // both took part: a point each
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Boar") != std::string::npos);
+    creature(b, 72, 3, 3, kFarmAnimal);  // a farm animal: no point
+    deliver(b.r.fake, "HitEvent", hit_event(1234, 72));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(72));
+    creature(b, 71, 0, 12, kSkeletonFoe);  // hit 31 s before it dies: no point
+    deliver(b.r.fake, "HitEvent", hit_event(1234, 71));
+    b.seconds(31);
+    deliver(b.r.fake, "EntityDiedEvent", died_event(71));
+    creature(b, 73, 0, 14, kSkeletonFoe);  // it only hit the wolf: no point
+    deliver(b.r.fake, "HitEvent", hit_event(73, 1234));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(73));
+    b.seconds(1);
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Wolf") != std::string::npos);
+}
+
+TEST_CASE("loyalty: the tenth point brings loyalty 2: the owner hears it, the beast is stronger at once and stays so") {
+    BeastRig b({{"rest_s", "5"}});
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    for (uint32_t i = 0; i < 10; ++i) {
+        if (i == 9) CHECK(b.reply("beastmaster.list").find("loyalty 1,") != std::string::npos);
+        creature(b, 100 + i, 0, 10, kSkeletonFoe);
+        deliver(b.r.fake, "HitEvent", hit_event(1234, 100 + i));
+        deliver(b.r.fake, "EntityDiedEvent", died_event(100 + i));
+        b.seconds(1);
+    }
+    CHECK(b.noted("Wolf's loyalty grows: 2."));
+    CHECK(b.reply("beastmaster.list").find("loyalty 2,") != std::string::npos);
+    const double damage = 1.15 * (1 + 0.2 / 9);
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(damage));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(1234));  // it falls
+    next_beast(b, 1235);
+    b.seconds(12);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(b.reply("beastmaster.list").find("loyalty 2,") != std::string::npos);
+    CHECK(now_of<ecs::DamageMod>(b, 1235).dataStorage[2] == doctest::Approx(damage));
+}
+
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
     BeastRig b;
     b.reply("beastmaster.give wolf");

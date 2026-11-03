@@ -21,6 +21,7 @@ local SENT_S = 20       -- a passive beast that Attack sent at a creature fights
 local RECALL_S = 3      -- a beast that dropped a chase fights nothing this long while it comes back
 local HEAL_AFTER_S = 5  -- a beast heals between fights: this long after its last hit to or from it,
 local HEAL_SHARE = 0.05 -- this share of its maximum health a second
+local KILL_HIT_S = 30   -- a foe a beast hit this long before it dies counts as its kill (a loyalty point)
 local STRAY_CHECKS = 3  -- a beast that guards someone else this many checks (seconds) in a row is not ours any more
 local REFUSALS = 3      -- a pack beast's call-back refused this many checks in a row: its pack is not in this game
 
@@ -48,6 +49,7 @@ function P:reset()
 	self.recall = {}     -- entity id -> until when a beast that dropped a chase fights nothing
 	self.base = {}       -- entity id -> {damage, scale}: its template's damage multiplier and size, before role and loyalty
 	self.fought = {}     -- entity id -> when it last hit or was hit (it heals HEAL_AFTER_S after that)
+	self.hits = {}       -- hostile creature id -> {beast entity id -> when it hit it} (loyalty for the kill)
 	self.aside:reset()
 end
 
@@ -320,6 +322,11 @@ function P:on_hit(world, source, target)
 		local now = self.env.now(world)
 		if self.ids[source] then self.fought[source] = now end
 		if self.ids[target] then self.fought[target] = now end
+		local f = self.ids[source] and world:get("Faction", target)
+		if f and HOSTILE[f.faction] and not world:get("PlayerState", target) then
+			self.hits[target] = self.hits[target] or {}
+			self.hits[target][source] = now
+		end
 	end
 	if not self.env.setting("xp_credit") then return end
 	local e = self.ids[source]
@@ -337,7 +344,31 @@ function P:on_hit(world, source, target)
 	emf.damage(world, owner, target, cur)
 end
 
-function P:on_died(id)
+-- A loyalty point for the beast of entity `e`: a new loyalty is told to its owner and makes it stronger at once.
+function P:gain(world, e)
+	local b = e.beast
+	local pace = self.env.setting("loyalty_pace")
+	local before = loyalty.level(b.points, pace)
+	b.points = (b.points or 0) + 1
+	local after = loyalty.level(b.points, pace)
+	self.env.save()
+	if after > before then
+		local owner = self:owner(world, e.account)
+		if owner then self.env.tell(world, owner, string.format("%s's loyalty grows: %d.", b.name, after)) end
+		if b.entity then self:strengthen(world, b.entity, b) end
+	end
+end
+
+function P:on_died(id, world)
+	local hitters = self.hits[id]
+	self.hits[id] = nil
+	if hitters and world then
+		local now = self.env.now(world)
+		for entity, at in pairs(hitters) do
+			local e = self.ids[entity]
+			if e and now - at <= KILL_HIT_S then self:gain(world, e) end
+		end
+	end
 	self.credited[id] = nil
 	self.sent[id], self.recall[id], self.base[id], self.fought[id] = nil, nil, nil, nil
 	local e = self.ids[id]
@@ -440,6 +471,13 @@ function P:step(world)
 	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now
 	if now < self.next_check then return end
 	self.next_check = now + 1
+	-- hits on foes that did not die within KILL_HIT_S count for nothing any more
+	for target, hitters in pairs(self.hits) do
+		for entity, at in pairs(hitters) do
+			if now - at > KILL_HIT_S then hitters[entity] = nil end
+		end
+		if next(hitters) == nil then self.hits[target] = nil end
+	end
 	local present = players(world)
 	self.aside:set_players(present)
 	for _, e in ipairs(self.fallen) do

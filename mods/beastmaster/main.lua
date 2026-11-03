@@ -419,7 +419,7 @@ end)
 
 emf.on_event("EntityDiedEvent", function(world, e)
 	taming:on_died(e.deadEntityId)
-	pack:on_died(e.deadEntityId)
+	pack:on_died(e.deadEntityId, world)
 	rare:on_died(world, e.deadEntityId)
 end)
 
