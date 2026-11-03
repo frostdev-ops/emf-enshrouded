@@ -108,7 +108,7 @@ the **Loyalty grows** setting changes the pace). Each loyalty makes it a little 
 has 20 % more health and damage and is 1.25x its size. The strength comes at once; the size the next time you call it
 (the game draws a creature at the size it is made with). `/beastmaster list` shows it; a new loyalty is told to you.
 
-**The wheel (hold F3):** Tame, Feed, Attack, **Mode** (steps passive, defending, aggressive), **Come back** while your beasts stepped aside by `/beastmaster aside`,
+**The wheel (hold F3):** Tame, Feed, Attack, **Mode** (steps passive, defending, aggressive), **Stable: animal bed** while your world has no stable (it says what to build), **Come back** while your beasts stepped aside by `/beastmaster aside`,
 **Dismiss <name>** for each beast that is out (and **Dismiss all** with two or more out), then **Call <name>** for up
 to 6 beasts that are at home or resting (once your world has a stable: the active ones); a resting one shows its time
 left. The labels are short so they fit the
