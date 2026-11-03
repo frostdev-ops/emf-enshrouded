@@ -96,7 +96,7 @@ TEST_CASE("beastmaster: the roster names beasts uniquely, holds 8 per player, an
     CHECK(ninth.find("8") != std::string::npos);
     CHECK(ninth.find("added") == std::string::npos);
     const std::string list = b.reply("beastmaster.list");
-    CHECK(list.find("1. Wolf - wolf, at home") != std::string::npos);
+    CHECK(list.find("1. Wolf - wolf, loyalty 1, at home") != std::string::npos);
     CHECK(list.find("2. Wolf 2 - wolf") != std::string::npos);
     CHECK(list.find("8. Wolf 8 - wolf") != std::string::npos);
     b.seconds(2);
@@ -125,7 +125,7 @@ TEST_CASE("beastmaster: a beast just tamed cannot fall for 5 s, then can again")
     b.seconds(1);
     CHECK(h.dataStorage[1] == 0);   // the channel: as it was
     b.seconds(3);                   // tamed, up to 50 % (50 of 100)
-    REQUIRE(b.reply("beastmaster.list").find("1. Wolf - wolf, out") != std::string::npos);
+    REQUIRE(b.reply("beastmaster.list").find("1. Wolf - wolf, loyalty 1, out") != std::string::npos);
     CHECK(h.dataStorage[1] == 50);  // its health cannot go under that
     h.dataStorage[1] = 0;           // (the game may write it back)
     b.seconds(2);
@@ -161,7 +161,7 @@ TEST_CASE("beastmaster: a wolf at 20 % health in front of you is tamed after a 3
     for (const auto& g : b.guards()) CHECK(g == std::make_pair(50u, 1u));
     CHECK(b.added(50, EMF_ATTR_HEALTH, 30));  // up to 50 %
     CHECK(b.noted("You tamed a wolf: Wolf"));
-    CHECK(b.reply("beastmaster.list").find("1. Wolf - wolf, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("1. Wolf - wolf, loyalty 1, out") != std::string::npos);
 }
 
 TEST_CASE("beastmaster: the channel breaks when you walk away (more than 8 m) or the beast dies") {
@@ -257,7 +257,7 @@ TEST_CASE("beastmaster: calling a wolf costs 15 % mana, spawns it beside you as 
     CHECK(b.r.fake.components[{ecs::Level::kHash, 1234}][8] == 10);  // the owner's level (dataStorage[0])
     const auto g = b.guards();
     CHECK(std::find(g.begin(), g.end(), std::make_pair(1234u, 1u)) != g.end());
-    CHECK(b.reply("beastmaster.list").find("1. Wolf - wolf, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("1. Wolf - wolf, loyalty 1, out") != std::string::npos);
     CHECK(b.reply("beastmaster.call Wolf 2").find("out already") != std::string::npos);
     CHECK(b.r.fake.spawns.size() == 1);
 }
@@ -280,7 +280,7 @@ TEST_CASE("beastmaster: at most 2 out; a 10 s cooldown; too little mana gives a 
     CHECK(b.r.fake.spawns.size() == 2);
 }
 
-TEST_CASE("beastmaster: a beast that dies rests 120 s, its body is removed, and it can be called again after") {
+TEST_CASE("beastmaster: a beast that dies rests 60 s, its body is removed, and it can be called again after") {
     BeastRig b;
     b.reply("beastmaster.give wolf");
     b.spawnable(2);
@@ -289,9 +289,9 @@ TEST_CASE("beastmaster: a beast that dies rests 120 s, its body is removed, and 
     b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 0;
     b.seconds(2);
     CHECK(contains(b.r.fake.destroyed, 1234));  // no loot from our own beasts
-    CHECK(b.reply("beastmaster.list").find("rests 1:5") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("rests 0:5") != std::string::npos);
     CHECK(b.reply("beastmaster.call Wolf").find("rests") != std::string::npos);
-    b.seconds(120);
+    b.seconds(60);
     CHECK(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
     CHECK(b.r.fake.spawns.size() == 2);
 }
@@ -322,7 +322,7 @@ TEST_CASE("beastmaster: a remembered id that now names another entity is dropped
     b.seconds(2);
     CHECK(b.faction(1234) == 4);  // never written back to ours
     CHECK_FALSE(contains(b.r.fake.destroyed, 1234));
-    CHECK(b.reply("beastmaster.list").find("1. Wolf - wolf, at home") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("1. Wolf - wolf, loyalty 1, at home") != std::string::npos);
 }
 
 TEST_CASE("beastmaster: a guest who leaves loses their beasts from the world but keeps them in the roster") {
@@ -627,6 +627,277 @@ TEST_CASE("beastmaster: a beast more than 45 m from its owner drops its chase an
     CHECK(teleports_of(b.r.fake, 1234) == 0);  // it runs back: within 60 m it is not teleported
 }
 
+// ---- loyalty: grows with the kills a beast takes part in; kept with the world ----
+TEST_CASE("loyalty: a beast's loyalty and name are kept with the world; an older save loads at loyalty 1") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    CHECK(b.reply("beastmaster.loyalty Wolf 3").find("3") != std::string::npos);
+    CHECK(b.reply("beastmaster.rename Wolf Grey Fang").find("Grey Fang") != std::string::npos);
+    b.seconds(2);
+    CHECK(b.saved().find("y 0x00000000000000aa 30 Grey Fang") != std::string::npos);  // 10 + 20 points
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Grey Fang\ny 0x00000000000000aa 30 Grey Fang\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.reply("beastmaster.list").find("1. Grey Fang - wolf, loyalty 3, at home") != std::string::npos);
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\n");  // a save from before loyalty
+    b.r.fake.session = 3;
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.reply("beastmaster.list").find("1. Fang - wolf, loyalty 1, at home") != std::string::npos);
+}
+
+TEST_CASE("loyalty: the admin loyalty command is for the host's console only") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    CHECK(b.reply("beastmaster.loyalty Wolf 11").find("1-10") != std::string::npos);
+    CHECK(b.reply("beastmaster.loyalty Wolf 5", 1, 0xAA).find("console") != std::string::npos);  // from the chat
+    CHECK(b.reply("beastmaster.list").find("loyalty 1,") != std::string::npos);
+}
+
+TEST_CASE("loyalty: rename takes 1-20 characters and no name the collection has") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give wolf");  // Wolf, Wolf 2
+    CHECK(b.reply("beastmaster.rename 1 Rex").find("Rex") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("1. Rex - wolf") != std::string::npos);
+    CHECK(b.reply("beastmaster.rename Rex wolf 2").find("taken") != std::string::npos);
+    CHECK(b.reply("beastmaster.rename 2").find("1-20") != std::string::npos);
+    CHECK(b.reply("beastmaster.rename 2 " + std::string(21, 'a')).find("1-20") != std::string::npos);
+    CHECK(b.reply("beastmaster.rename 9 Max").find("No such beast") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("2. Wolf 2 - wolf") != std::string::npos);
+}
+
+namespace {
+// A component as it is now, to change (component() makes a fresh one).
+template <class T>
+T& live_of(BeastRig& b, uint32_t id) {
+    return *reinterpret_cast<T*>(b.r.fake.components.at({T::kHash, id}).data());
+}
+// The creature the next call spawns (id): its template's damage multiplier 1, its base health 100, optionally a scale.
+void next_beast(BeastRig& b, uint32_t id, float scale = 0.0f) {
+    b.spawnable(1);
+    component<ecs::DamageMod>(b.r.fake, id).dataStorage[2] = 1.0f;
+    component<ecs::Health>(b.r.fake, id).dataStorage[2] = 100;
+    if (scale > 0.0f) component<ecs::ScaleComponent>(b.r.fake, id).uniformScale = scale;
+}
+}  // namespace
+
+TEST_CASE("loyalty: a called wolf has its role, 1.2x health and 1.15x damage; at loyalty 10 1.44x and 1.38x") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(now_of<ecs::Health>(b, 1234).dataStorage[3] == 20);  // the adder: 100 x 0.2
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15));
+    b.reply("beastmaster.dismiss all");
+    b.reply("beastmaster.loyalty Wolf 10");
+    next_beast(b, 1235);
+    b.seconds(11);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(now_of<ecs::Health>(b, 1235).dataStorage[3] == 44);  // 100 x 1.2 x 1.2 - 100
+    CHECK(now_of<ecs::DamageMod>(b, 1235).dataStorage[2] == doctest::Approx(1.38));
+}
+
+TEST_CASE("loyalty: a tamed bear's health is its role (2.2x), not the wild bear's 2.5x") {
+    BeastRig b;
+    b.reply("beastmaster.give bear");
+    next_beast(b, 1234, 1.4f);
+    REQUIRE(b.reply("beastmaster.call Bear").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(now_of<ecs::Health>(b, 1234).dataStorage[3] == 120);
+    CHECK(now_of<ecs::ScaleComponent>(b, 1234).uniformScale == doctest::Approx(1.4));  // loyalty 1: its own size
+}
+
+TEST_CASE("loyalty: a bear grows with its loyalty (1.25x at 10); a beast without a ScaleComponent is left as it is") {
+    BeastRig b;
+    b.reply("beastmaster.give bear");
+    b.reply("beastmaster.loyalty Bear 10");
+    next_beast(b, 1234, 1.4f);
+    REQUIRE(b.reply("beastmaster.call Bear").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(now_of<ecs::ScaleComponent>(b, 1234).uniformScale == doctest::Approx(1.75));
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.loyalty Wolf 10");
+    next_beast(b, 1235);
+    b.seconds(11);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(b.r.fake.components.count({ecs::ScaleComponent::kHash, 1235u}) == 0);
+}
+
+TEST_CASE("loyalty: a beast out follows its owner's level, also when the owner levels up") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    CHECK(now_of<ecs::Level>(b, 1234).dataStorage[0] == 10);  // its owner's
+    component<ecs::DynamicEnemyScaling>(b.r.fake, 1234).nextUpdateTime.value = 999;
+    live_of<ecs::Level>(b, 1).dataStorage[0] = 11;  // the owner levels up
+    b.seconds(2);
+    CHECK(now_of<ecs::Level>(b, 1234).dataStorage[0] == 11);
+    CHECK(now_of<ecs::DynamicEnemyScaling>(b, 1234).nextUpdateTime.value == 0);  // the game rescales it
+}
+
+namespace {
+bool healed(BeastRig& b, uint32_t id) {
+    for (const auto& [e, a, d] : b.r.fake.attr_adds)
+        if (e == id && a == EMF_ATTR_HEALTH && d > 0) return true;
+    return false;
+}
+}  // namespace
+
+TEST_CASE("loyalty: a beast heals 5 % of its maximum health a second, 5 s after its last hit") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(6);
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 40;  // 40 of 100, hurt in a fight
+    deliver(b.r.fake, "HitEvent", hit_event(60, 1234));
+    b.r.fake.attr_adds.clear();
+    b.seconds(3);
+    CHECK_FALSE(healed(b, 1234));                 // 3 s after its last hit: not yet
+    b.seconds(3);
+    CHECK(b.added(1234, EMF_ATTR_HEALTH, 5));     // 5 % of 100
+    b.r.fake.attr_adds.clear();
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 100;
+    b.seconds(2);
+    CHECK_FALSE(healed(b, 1234));                 // full: nothing more
+}
+
+TEST_CASE("loyalty: a hostile foe the beast hit in the last 30 s dies: a point; wildlife, farm animals and old hits give none") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give boar");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    next_beast(b, 1235);
+    b.seconds(11);
+    REQUIRE(b.reply("beastmaster.call Boar").find("comes") != std::string::npos);
+    creature(b, 70, 0, 10, kSkeletonFoe);
+    deliver(b.r.fake, "HitEvent", hit_event(1234, 70));
+    deliver(b.r.fake, "HitEvent", hit_event(1235, 70));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(70));
+    b.seconds(1);
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Wolf") != std::string::npos);  // both took part: a point each
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Boar") != std::string::npos);
+    creature(b, 72, 3, 3, kFarmAnimal);  // a farm animal: no point
+    deliver(b.r.fake, "HitEvent", hit_event(1234, 72));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(72));
+    creature(b, 71, 0, 12, kSkeletonFoe);  // hit 31 s before it dies: no point
+    deliver(b.r.fake, "HitEvent", hit_event(1234, 71));
+    b.seconds(31);
+    deliver(b.r.fake, "EntityDiedEvent", died_event(71));
+    creature(b, 73, 0, 14, kSkeletonFoe);  // it only hit the wolf: no point
+    deliver(b.r.fake, "HitEvent", hit_event(73, 1234));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(73));
+    b.seconds(1);
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Wolf") != std::string::npos);
+}
+
+TEST_CASE("loyalty: the tenth point brings loyalty 2: the owner hears it, the beast is stronger at once and stays so") {
+    BeastRig b({{"rest_s", "5"}});
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    for (uint32_t i = 0; i < 10; ++i) {
+        if (i == 9) CHECK(b.reply("beastmaster.list").find("loyalty 1,") != std::string::npos);
+        creature(b, 100 + i, 0, 10, kSkeletonFoe);
+        deliver(b.r.fake, "HitEvent", hit_event(1234, 100 + i));
+        deliver(b.r.fake, "EntityDiedEvent", died_event(100 + i));
+        b.seconds(1);
+    }
+    CHECK(b.noted("Wolf's loyalty grows: 2."));
+    CHECK(b.reply("beastmaster.list").find("loyalty 2,") != std::string::npos);
+    const double damage = 1.15 * (1 + 0.2 / 9);
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(damage));
+    deliver(b.r.fake, "EntityDiedEvent", died_event(1234));  // it falls
+    next_beast(b, 1235);
+    b.seconds(12);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(b.reply("beastmaster.list").find("loyalty 2,") != std::string::npos);
+    CHECK(now_of<ecs::DamageMod>(b, 1235).dataStorage[2] == doctest::Approx(damage));
+}
+
+TEST_CASE("loyalty: a beast that falls rests 60 s, so it is back for the next fight but not in this one") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    deliver(b.r.fake, "EntityDiedEvent", died_event(1234));
+    CHECK(b.reply("beastmaster.list").find("rests 1:00") != std::string::npos);
+    CHECK(b.r.fake.settings["beastmaster.loyalty_pace"] == "1");
+}
+
+TEST_CASE("loyalty: a name that is a number or 'all' is refused (beasts are called and sent home by number, and all)") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    for (const char* name : {"2", "007", "1e0", "all", "ALL"}) {
+        CAPTURE(name);
+        CHECK(b.reply(std::string("beastmaster.rename Wolf ") + name).find("number") != std::string::npos);
+    }
+    CHECK(b.reply("beastmaster.list").find("1. Wolf - wolf") != std::string::npos);
+}
+
+TEST_CASE("loyalty: a y line belongs to the beast of that name, also a name that looks like a number (an older save)") {
+    BeastRig b;
+    write(b.data, "b 0x00000000000000aa wolf 0 0 2\nb 0x00000000000000aa boar 0 0 Fang\ny 0x00000000000000aa 30 2\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    const std::string list = b.reply("beastmaster.list");
+    CHECK(list.find("1. 2 - wolf, loyalty 3") != std::string::npos);
+    CHECK(list.find("2. Fang - boar, loyalty 1") != std::string::npos);
+}
+
+TEST_CASE("loyalty: a beast on an entity id the game gave out before gets its own template's damage, not the old beast's") {
+    BeastRig b;
+    b.reply("beastmaster.give bear");
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234, 1.4f);
+    component<ecs::DamageMod>(b.r.fake, 1234).dataStorage[2] = 1.5f;  // the pack bear's template
+    REQUIRE(b.reply("beastmaster.call Bear").find("comes") != std::string::npos);
+    b.seconds(1);
+    component<ecs::Faction>(b.r.fake, 1234).faction = static_cast<emf::gen::FactionType>(6);  // the id names another creature now
+    b.seconds(2);
+    b.r.fake.next_spawn_id = 1234;  // the game gives the id out again: to the wolf
+    next_beast(b, 1234);
+    b.seconds(11);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15));
+}
+
+TEST_CASE("loyalty: a beast the game will neither bring back nor call again leaves the mod running") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.r.fake.teleport_ok = false;
+    b.r.fake.spawn_fails = true;
+    place(b.r.fake, 1234, 130, 10, 0);  // far: it is brought back, and both ways fail
+    b.seconds(3);
+    CHECK(b.reply("beastmaster.mode").find("defending") != std::string::npos);  // the mod still answers
+}
+
+TEST_CASE("loyalty: when the game sets a beast's damage multiplier again (a rescale), its role and loyalty go on top") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    REQUIRE(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15));
+    live_of<ecs::DamageMod>(b, 1234).dataStorage[2] = 2.0f;  // the game's rescale (a world's enemy damage factor)
+    b.seconds(2);
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(2.3));
+    b.seconds(2);
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(2.3));  // not again on top of itself
+}
+
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
     BeastRig b;
     b.reply("beastmaster.give wolf");
@@ -644,8 +915,8 @@ TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all com
     b.seconds(1);
     CHECK(b.noted("Wolf goes home"));
     const std::string list = b.reply("beastmaster.list");
-    CHECK(list.find("Wolf - wolf, at home") != std::string::npos);
-    CHECK(list.find("Boar - boar, out") != std::string::npos);
+    CHECK(list.find("Wolf - wolf, loyalty 1, at home") != std::string::npos);
+    CHECK(list.find("Boar - boar, loyalty 1, out") != std::string::npos);
     press(b, VK_F3);  // one out: its own item, no Dismiss all
     REQUIRE(b.r.fake.wheels.size() == 2);
     CHECK(index_of(b.r.fake.wheels[1].items, "Dismiss Boar") >= 0);
@@ -738,7 +1009,7 @@ TEST_CASE("wild bears: one spawns 50-70 m from a player when none exists; none w
 
 // Health's attribute storage (seen in game): [0] health, [1] min, [2] Health_Max_Base (the game sets it from the level),
 // [3] Health_Max_Adder, ..., [7] the maximum (base + adder, computed by the game).
-TEST_CASE("beastmaster: a bear's health adder keeps its maximum at 2.5x the game's base, also after a level change; a wolf keeps its own") {
+TEST_CASE("beastmaster: a called bear's health adder keeps its maximum at its role, 2.2x the game's base, also after a level change; a wolf at 1.2x") {
     BeastRig b;
     b.reply("beastmaster.give bear");
     b.reply("beastmaster.give wolf");
@@ -750,15 +1021,15 @@ TEST_CASE("beastmaster: a bear's health adder keeps its maximum at 2.5x the game
     CHECK(bear.dataStorage[3] == 0);  // no base yet: nothing to multiply
     bear.dataStorage[2] = 34;         // the game's base at level 1 (the earlygame wolf's)
     b.seconds(1);
-    CHECK(bear.dataStorage[3] == 51);  // 34 + 51 = 85 = 2.5 x 34
+    CHECK(bear.dataStorage[3] == 41);  // 34 x 1.2 = 40.8: 75 = 2.2 x 34 (a tamed bear's role, not the wild 2.5)
     bear.dataStorage[2] = 65;          // the game rescaled it to a new level
     b.seconds(2);
-    CHECK(bear.dataStorage[3] == 98);  // 65 x 1.5 = 97.5
+    CHECK(bear.dataStorage[3] == 78);  // 65 x 1.2
     wolf.dataStorage[2] = 34;
     b.seconds(11);
     CHECK(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
     b.seconds(2);
-    CHECK(wolf.dataStorage[3] == 0);
+    CHECK(wolf.dataStorage[3] == 7);  // 34 x 0.2 = 6.8: the wolf's role, 1.2x
 }
 
 TEST_CASE("beastmaster: /beastmaster <word> in the chat runs the players' commands; no word or an unknown one lists them") {
@@ -823,7 +1094,7 @@ TEST_CASE("beastmaster: a bear is the wolf's graph at 1.4x scale (the pack's Sca
     b.look(1, 0, 10.5, 0, 45);
     CHECK(b.reply("beastmaster.tame").find("Taming the bear") != std::string::npos);
     b.seconds(4);
-    CHECK(b.reply("beastmaster.list").find("1. Bear - bear, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("1. Bear - bear, loyalty 1, out") != std::string::npos);
     b.beast(70, kWolfGraph, -2, 2, kWildBeast, 20, 100);  // a game wolf: still a wolf
     CHECK(b.reply("beastmaster.tame").find("Taming the wolf") != std::string::npos);
 }
@@ -839,7 +1110,7 @@ TEST_CASE("beastmaster: the bear pack 2's bear is its own graph (its own skeleto
     b.look(1, 0, 10.5, 0, 45);
     CHECK(b.reply("beastmaster.tame").find("Taming the bear") != std::string::npos);
     b.seconds(4);
-    CHECK(b.reply("beastmaster.list").find("1. Bear - bear, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("1. Bear - bear, loyalty 1, out") != std::string::npos);
 }
 
 TEST_CASE("beastmaster: a creature that gets a dead wild bear's id is not a bear") {
@@ -932,9 +1203,9 @@ TEST_CASE("beastmaster: a remembered id that now guards someone else is not ours
     b.seconds(1);
     component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 1234).guardEntityId.id = 999;  // another entity's guard now
     b.seconds(2);
-    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, out") != std::string::npos);  // not at the first look
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, loyalty 1, out") != std::string::npos);  // not at the first look
     b.seconds(2);
-    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, at home") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, loyalty 1, at home") != std::string::npos);
     b.r.fake.destroyed.clear();
     b.reply("beastmaster.dismiss all");
     CHECK(!contains(b.r.fake.destroyed, 1234));
@@ -1010,7 +1281,7 @@ TEST_CASE("beastmaster: an aurochs is the boar graph at 1.2x or more (WildBeast)
     b.look(1, 0, 10.5, 0, 0);
     CHECK(b.reply("beastmaster.tame").find("Taming the aurochs") != std::string::npos);
     b.seconds(4);
-    CHECK(b.reply("beastmaster.list").find("1. Aurochs - aurochs, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("1. Aurochs - aurochs, loyalty 1, out") != std::string::npos);
     // called: the pack's template, with 3x health
     b.reply("beastmaster.dismiss all");
     b.spawnable(1);
@@ -1021,7 +1292,7 @@ TEST_CASE("beastmaster: an aurochs is the boar graph at 1.2x or more (WildBeast)
     auto& h = component<ecs::Health>(b.r.fake, 1234);
     h.dataStorage[2] = 40;
     b.seconds(1);
-    CHECK(h.dataStorage[3] == 80);  // 40 + 80 = 120 = 3 x 40
+    CHECK(h.dataStorage[3] == 40);  // 40 + 40 = 80 = 2 x 40: a tamed aurochs' role (a wild one has 3x)
 }
 
 TEST_CASE("beastmaster: a beast whose pack is missing goes home with one note; it is not called again every second") {
@@ -1034,7 +1305,7 @@ TEST_CASE("beastmaster: a beast whose pack is missing goes home with one note; i
     size_t notes = 0;
     for (const auto& n : b.r.fake.notes) notes += n.find("Aurochs") != std::string::npos;
     CHECK(notes == 1);
-    CHECK(b.reply("beastmaster.list").find("Aurochs - aurochs, at home") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("Aurochs - aurochs, loyalty 1, at home") != std::string::npos);
     CHECK(b.reply("beastmaster.call Aurochs").find("pack") != std::string::npos);
 }
 
@@ -1087,7 +1358,7 @@ constexpr const char* kSnakeGraph = "d4c87337-8c53-41df-8488-8079046e1505";
 constexpr const char* kSnakeTemplate = "d4c87337-8c53-41df-8488-8079046e1502";
 }  // namespace
 
-TEST_CASE("beastmaster: a snake is its own graph (WildBeast): tamed, listed, called with the pack's template and 2x health") {
+TEST_CASE("beastmaster: a snake is its own graph (WildBeast): tamed, listed, called with the pack's template and its role's health") {
     BeastRig b;
     CHECK(b.reply(std::string("beastmaster.species ") + kSnakeGraph + " 6 1") == "snake");
     CHECK(b.reply(std::string("beastmaster.species ") + kSnakeGraph + " 6") == "snake");
@@ -1096,7 +1367,7 @@ TEST_CASE("beastmaster: a snake is its own graph (WildBeast): tamed, listed, cal
     b.look(1, 0, 10.5, 0, 0);
     CHECK(b.reply("beastmaster.tame").find("Taming the snake") != std::string::npos);
     b.seconds(4);
-    CHECK(b.reply("beastmaster.list").find("1. Snake - snake, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("1. Snake - snake, loyalty 1, out") != std::string::npos);
     b.reply("beastmaster.dismiss all");
     b.spawnable(1);
     b.seconds(11);
@@ -1106,7 +1377,7 @@ TEST_CASE("beastmaster: a snake is its own graph (WildBeast): tamed, listed, cal
     auto& h = component<ecs::Health>(b.r.fake, 1234);
     h.dataStorage[2] = 40;
     b.seconds(1);
-    CHECK(h.dataStorage[3] == 40);  // 40 + 40 = 80 = 2 x 40
+    CHECK(h.dataStorage[3] == 8);  // 40 x 0.2: a tamed snake's role, 1.2x (a wild one has 2x)
     CHECK(b.reply("beastmaster.give snake").find("snake") != std::string::npos);
 }
 
@@ -1169,7 +1440,7 @@ struct RollRig : BeastRig {
 };
 }  // namespace
 
-TEST_CASE("beastmaster: the rare snakes are their own graphs: tamed with 3x, 4x and 5x health, fed game meat or dog bait") {
+TEST_CASE("beastmaster: the rare snakes are their own graphs: tamed, called with their role's health, fed their baits") {
     BeastRig b;
     CHECK(b.reply(std::string("beastmaster.species ") + kCrimsonGraph + " 6 1.15") == "crimson_snake");
     CHECK(b.reply(std::string("beastmaster.species ") + kGoldenGraph + " 6 1.25") == "golden_snake");
@@ -1183,7 +1454,7 @@ TEST_CASE("beastmaster: the rare snakes are their own graphs: tamed with 3x, 4x 
     CHECK(b.reply("beastmaster.tame").find("Taming the albino snake") != std::string::npos);
     b.seconds(4);
     CHECK(b.noted("You tamed an albino snake: Albino snake"));
-    CHECK(b.reply("beastmaster.list").find("1. Albino snake - albino_snake, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("1. Albino snake - albino_snake, loyalty 1, out") != std::string::npos);
     b.reply("beastmaster.dismiss all");
     b.spawnable(1);
     b.seconds(11);
@@ -1193,7 +1464,7 @@ TEST_CASE("beastmaster: the rare snakes are their own graphs: tamed with 3x, 4x 
     auto& h = component<ecs::Health>(b.r.fake, 1234);
     h.dataStorage[2] = 40;
     b.seconds(1);
-    CHECK(h.dataStorage[3] == 160);  // 40 + 160 = 200 = 5 x 40
+    CHECK(h.dataStorage[3] == 8);  // 40 x 0.2: a tamed albino snake's role, 1.2x (a wild one has 5x)
     for (const char* id : {"crimson_snake", "golden_snake"}) CHECK(b.reply(std::string("beastmaster.give ") + id).find(id) != std::string::npos);
 }
 
@@ -1351,7 +1622,7 @@ TEST_CASE("beastmaster: an aurochs that was out comes back after its first call-
     b.seconds(2);
     REQUIRE(b.r.fake.spawns.size() == 1);
     CHECK(guid_text(b.r.fake.spawns[0].guid) == kAurochsTemplate);
-    CHECK(b.reply("beastmaster.list").find("Aurochs - aurochs, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("Aurochs - aurochs, loyalty 1, out") != std::string::npos);
     size_t notes = 0;
     for (const auto& x : b.r.fake.notes) notes += x.find("Aurochs") != std::string::npos;
     CHECK(notes == 0);
@@ -1492,7 +1763,7 @@ TEST_CASE("beastmaster: beasts step aside while their owner builds and come back
     b.seconds(2);
     CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 1234u) != b.r.fake.destroyed.end());
     CHECK(notes_with(b.r.fake, "step aside while you build") == 1);
-    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, aside") != std::string::npos);  // still out: it comes back
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, loyalty 1, aside") != std::string::npos);  // still out: it comes back
     CHECK(b.hud("out").find("Wolf (aside)") != std::string::npos);
     b.seconds(11);
     CHECK(b.r.fake.spawns.size() == 1);  // not while building
@@ -1559,7 +1830,7 @@ TEST_CASE("beastmaster: an aside by the command ends with the last beast gone ho
     b.look(1, 0, 10.5, 0, 0);
     CHECK(b.reply("beastmaster.tame").find("Taming") != std::string::npos);
     b.seconds(5);
-    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, loyalty 1, out") != std::string::npos);
     CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 50u) == b.r.fake.destroyed.end());  // stays
     CHECK(b.hud("out").find("Wolf (out)") != std::string::npos);
     // aside with a beast out, then a tame: the tamed one stays and the others come back
@@ -1586,7 +1857,7 @@ TEST_CASE("beastmaster: while aside by the command the wheel has Come back and t
     CHECK(b.reply("beastmaster.aside").find("Come back") != std::string::npos);  // says how
     b.seconds(2);
     const std::string list = b.reply("beastmaster.list");
-    CHECK(list.find("Wolf - wolf, aside") != std::string::npos);
+    CHECK(list.find("Wolf - wolf, loyalty 1, aside") != std::string::npos);
     CHECK(list.find("/beastmaster aside") != std::string::npos);
     press(b, VK_F3);
     REQUIRE(b.r.fake.wheels.size() == 2);
@@ -1598,7 +1869,7 @@ TEST_CASE("beastmaster: while aside by the command the wheel has Come back and t
     CHECK(b.noted("Your beasts come back"));
     b.seconds(2);
     CHECK(b.r.fake.spawns.size() == 2);
-    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, loyalty 1, out") != std::string::npos);
 }
 
 TEST_CASE("beastmaster: beasts also step aside while another player builds within 20 m of them, and come back when that player is gone") {
@@ -1669,7 +1940,7 @@ TEST_CASE("beastmaster: a species_extra.lua beside the mod adds its beasts: know
     BeastRig b;
     CHECK(b.reply(std::string("beastmaster.species ") + kTrollGraph + " 3") == "unknown");
     extra_species(b, "return {\n" + entry("troll", "Troll", kTrollTemplate, kTrollGraph,
-                                          ", plural = \"trolls\", factions = { [3] = true }, health_mul = 3") + "}\n");
+                                          ", plural = \"trolls\", factions = { [3] = true }, health_mul = 3, role_health = 3") + "}\n");
     CHECK(b.reply(std::string("beastmaster.species ") + kTrollGraph + " 3") == "troll");
     CHECK(b.reply(std::string("beastmaster.species ") + kTrollGraph + " 6") == "unknown");  // not its faction
     CHECK(b.reply(std::string("beastmaster.species ") + kWolfGraph + " 6") == "wolf");       // the mod's own stay
@@ -1678,7 +1949,7 @@ TEST_CASE("beastmaster: a species_extra.lua beside the mod adds its beasts: know
     CHECK(b.reply("beastmaster.tame").find("Taming the troll") != std::string::npos);
     b.seconds(4);
     CHECK(b.noted("You tamed a troll: Troll"));
-    CHECK(b.reply("beastmaster.list").find("1. Troll - troll, out") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("1. Troll - troll, loyalty 1, out") != std::string::npos);
     b.reply("beastmaster.dismiss all");
     b.spawnable(1);
     b.seconds(11);

@@ -3,8 +3,9 @@
 -- guest who returns), and taking them out of the world while their owner is away or they step aside (aside.lua: while
 -- a player builds next to them, or after beastmaster.aside).
 -- M.new(env) where env has: setting(key), now(world), tell(world, player, text), beasts() (the roster), save(),
--- and optionally on_spawn(world, id, species) after a beast was put into the world.
+-- and optionally on_spawn(world, id, species, health_mul) after a beast was put into the world or its loyalty grew.
 local species = require("species")
+local loyalty = require("loyalty")
 local aside_mod = require("aside")
 
 local M = {}
@@ -18,6 +19,9 @@ local PLAYER_SIDE = { [7] = true, [8] = true, [PLAYER_ALLY] = true }  -- Player,
 local HOSTILE = { [2] = true, [3] = true, [4] = true, [6] = true, [10] = true, [13] = true, [14] = true, [15] = true }
 local SENT_S = 20       -- a passive beast that Attack sent at a creature fights it this long
 local RECALL_S = 3      -- a beast that dropped a chase fights nothing this long while it comes back
+local HEAL_AFTER_S = 5  -- a beast heals between fights: this long after its last hit to or from it,
+local HEAL_SHARE = 0.05 -- this share of its maximum health a second
+local KILL_HIT_S = 30   -- a foe a beast hit this long before it dies counts as its kill (a loyalty point)
 local STRAY_CHECKS = 3  -- a beast that guards someone else this many checks (seconds) in a row is not ours any more
 local REFUSALS = 3      -- a pack beast's call-back refused this many checks in a row: its pack is not in this game
 
@@ -43,6 +47,9 @@ function P:reset()
 	self.refused = {}    -- beast -> checks in a row the game refused to bring it back
 	self.sent = {}       -- entity id -> until when Attack's order holds (a passive beast fights it until then)
 	self.recall = {}     -- entity id -> until when a beast that dropped a chase fights nothing
+	self.base = {}       -- entity id -> {damage, scale}: its template's damage multiplier and size, before role and loyalty
+	self.fought = {}     -- entity id -> when it last hit or was hit (it heals HEAL_AFTER_S after that)
+	self.hits = {}       -- hostile creature id -> {beast entity id -> when it hit it} (loyalty for the kill)
 	self.aside:reset()
 end
 
@@ -122,7 +129,9 @@ function P:spawn(world, owner, account, beast)
 	local scaling = world:get("DynamicEnemyScaling", id)
 	if scaling then scaling.nextUpdateTime = 0 end  -- the game rescales health and damage to the new level
 	emf.emit("server", "StartGuardingEvent", { guardingEntityId = id, guardedEntityId = owner })
-	if self.env.on_spawn then self.env.on_spawn(world, id, sp) end
+	self:fresh(id)
+	self.fought[id] = self.env.now(world)
+	self:strengthen(world, id, beast)
 	beast.entity = id
 	beast.out = true
 	self.ids[id] = { account = account, beast = beast }
@@ -130,11 +139,56 @@ function P:spawn(world, owner, account, beast)
 end
 
 -- A beast the player just tamed (already an ally in the world).
-function P:adopt(account, beast, id)
+-- A fresh entity for a beast: whatever was kept for an earlier creature on the same id (the game gives ids out again)
+-- goes.
+function P:fresh(id)
+	self.base[id], self.sent[id], self.recall[id], self.fought[id] = nil, nil, nil, nil
+end
+
+-- When the game sets a beast's damage multiplier again (its rescale to a level), its role and loyalty go on top of the
+-- game's new value.
+function P:keep_damage(world, id, beast)
+	local base = self.base[id]
+	local dm = base and base.wrote and world:get("DamageMod", id)
+	if dm and dm.dataStorage and math.abs(dm.dataStorage[3] - base.wrote) > 1e-4 then
+		base.damage = dm.dataStorage[3]
+		self:strengthen(world, id, beast)
+	end
+end
+
+-- A beast out as strong as its role and loyalty: its health through the health watch (on_spawn with the multiplier),
+-- its DamageMod multiplier and its ScaleComponent (when it has one) against its template's, kept from the first time.
+function P:strengthen(world, id, beast)
+	local sp = species.by_id(beast.species)
+	local role_health, role_damage = species.role(sp)
+	local lvl = loyalty.level(beast.points, self.env.setting("loyalty_pace"))
+	local f = loyalty.factor(lvl)
+	local base = self.base[id]
+	if not base then
+		local dm, sc = world:get("DamageMod", id), world:get("ScaleComponent", id)
+		base = { damage = dm and dm.dataStorage and dm.dataStorage[3] or nil, scale = sc and sc.uniformScale or nil }
+		self.base[id] = base
+	end
+	if self.env.on_spawn then self.env.on_spawn(world, id, sp, role_health * f) end
+	local dm = base.damage and world:get("DamageMod", id)
+	if dm and dm.dataStorage then
+		base.wrote = base.damage * role_damage * f
+		dm.dataStorage[3] = base.wrote
+	end
+	local sc = base.scale and world:get("ScaleComponent", id)
+	if sc then sc.uniformScale = base.scale * loyalty.size(lvl) end
+end
+
+function P:adopt(account, beast, id, world)
 	beast.entity = id
 	beast.out = true
 	self.ids[id] = { account = account, beast = beast }
 	self.aside:release(account)  -- it stays, and the beasts that stepped aside by the command come back
+	if world then
+		self:fresh(id)
+		self.fought[id] = self.env.now(world)
+		self:strengthen(world, id, beast)
+	end
 end
 
 -- The entity ids of `account`'s beasts in the world (where another player's building counts).
@@ -230,7 +284,8 @@ function P:dismiss(world, account, beast)
 	if beast.entity and ours(world, beast.entity) then emf.destroy(world, beast.entity) end
 	if beast.entity then
 		self.ids[beast.entity] = nil
-		self.sent[beast.entity], self.recall[beast.entity] = nil, nil
+		self.sent[beast.entity], self.recall[beast.entity], self.base[beast.entity] = nil, nil, nil
+		self.fought[beast.entity] = nil
 	end
 	beast.entity = nil
 	beast.out = false
@@ -281,9 +336,20 @@ function P:hunt(world, account, owner)
 	if foe then self:attack(world, account, foe) end
 end
 
+-- Every hit to or from our beast is noted (it heals HEAL_AFTER_S after the last one).
 -- XP credit: when our beast's hit leaves a foe at or under 25 % health, its owner lands the killing blow (a real game
 -- hit: kill credit, XP and loot go to the owner). Once per foe; never on players or allies.
 function P:on_hit(world, source, target)
+	if self.ids[source] or self.ids[target] then
+		local now = self.env.now(world)
+		if self.ids[source] then self.fought[source] = now end
+		if self.ids[target] then self.fought[target] = now end
+		local f = self.ids[source] and world:get("Faction", target)
+		if f and HOSTILE[f.faction] and not world:get("PlayerState", target) then
+			self.hits[target] = self.hits[target] or {}
+			self.hits[target][source] = now
+		end
+	end
 	if not self.env.setting("xp_credit") then return end
 	local e = self.ids[source]
 	if not e or self.credited[target] then return end
@@ -300,9 +366,33 @@ function P:on_hit(world, source, target)
 	emf.damage(world, owner, target, cur)
 end
 
-function P:on_died(id)
+-- A loyalty point for the beast of entity `e`: a new loyalty is told to its owner and makes it stronger at once.
+function P:gain(world, e)
+	local b = e.beast
+	local pace = self.env.setting("loyalty_pace")
+	local before = loyalty.level(b.points, pace)
+	b.points = (b.points or 0) + 1
+	local after = loyalty.level(b.points, pace)
+	self.env.save()
+	if after > before then
+		local owner = self:owner(world, e.account)
+		if owner then self.env.tell(world, owner, string.format("%s's loyalty grows: %d.", b.name, after)) end
+		if b.entity then self:strengthen(world, b.entity, b) end
+	end
+end
+
+function P:on_died(id, world)
+	local hitters = self.hits[id]
+	self.hits[id] = nil
+	if hitters and world then
+		local now = self.env.now(world)
+		for entity, at in pairs(hitters) do
+			local e = self.ids[entity]
+			if e and now - at <= KILL_HIT_S then self:gain(world, e) end
+		end
+	end
 	self.credited[id] = nil
-	self.sent[id], self.recall[id] = nil, nil
+	self.sent[id], self.recall[id], self.base[id], self.fought[id] = nil, nil, nil, nil
 	local e = self.ids[id]
 	if not e then return end
 	self.ids[id] = nil
@@ -403,6 +493,13 @@ function P:step(world)
 	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now
 	if now < self.next_check then return end
 	self.next_check = now + 1
+	-- hits on foes that did not die within KILL_HIT_S count for nothing any more
+	for target, hitters in pairs(self.hits) do
+		for entity, at in pairs(hitters) do
+			if now - at > KILL_HIT_S then hitters[entity] = nil end
+		end
+		if next(hitters) == nil then self.hits[target] = nil end
+	end
 	local present = players(world)
 	self.aside:set_players(present)
 	for _, e in ipairs(self.fallen) do
@@ -447,6 +544,21 @@ function P:step(world)
 						self.env.save()
 					else
 						self:leash(world, owner, b, now)
+						-- its level follows its owner's (a level up while it is out); the leash may have let it go
+						local lvl, mine = b.entity and world:get("Level", b.entity), level_of(world, owner)
+						if lvl and mine and lvl.dataStorage[1] ~= mine then
+							lvl.dataStorage[1] = mine
+							local scaling = world:get("DynamicEnemyScaling", b.entity)
+							if scaling then scaling.nextUpdateTime = 0 end
+						end
+						if b.entity then
+							self:keep_damage(world, b.entity, b)
+							-- between fights it heals
+							local cur, max = emf.health(world, b.entity)
+							if cur and max and cur > 0 and cur < max and now - (self.fought[b.entity] or now) >= HEAL_AFTER_S then
+								emf.attribute_add(world, b.entity, "health", math.min(math.ceil(max * HEAL_SHARE), max - cur))
+							end
+						end
 						if guard ~= owner then
 							emf.emit("server", "StartGuardingEvent", { guardingEntityId = b.entity, guardedEntityId = owner })
 						end
