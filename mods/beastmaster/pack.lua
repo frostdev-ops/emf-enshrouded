@@ -63,13 +63,13 @@ local function plural(n, word)
 	return string.format("%d %s%s", n, word, n == 1 and "" or "s")
 end
 
--- Why a pack beast cannot come. The game has no such creature when its pack is missing and also when EML (or
--- ShroudForge), which loads the packs at game start, is missing; the mod cannot tell the two apart, so it names both.
+-- Why a pack beast cannot come: the game has no such creature (its pack is not installed, or its content was not built
+-- at the game's start).
 local function no_pack(sp)
-	return string.format("%s come with the EMF creature packs, and those need EML or ShroudForge to load",
-		sp.plural or (sp.id .. "s"))
+	return string.format("%s come with the EMF creature packs", sp.plural or (sp.id .. "s"))
 end
-local INSTALL = "Install EML first, then the packs, and restart the game."
+local INSTALL = "Install them with EMF.exe (Install a downloaded file) and restart the game; EMF.exe's EML content " ..
+	"card says whether they were built."
 
 -- Clears what a beast's AI fights (every aggro target and every chosen target), so it turns from a fight: the game
 -- picks targets again from what it senses and what hits it, so a passive beast is cleared every step.

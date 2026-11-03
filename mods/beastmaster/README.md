@@ -7,9 +7,9 @@ they fall, and are kept with the world. Their kills are yours: XP and loot.
 
 It needs the `lua` mod 1.13 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
 (the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs and the snake come in the **EMF creature packs**
-download (the **bear pack** and the **beasts pack**, below). The packs are EML content: **install EML (or ShroudForge)
-first**, because it loads them when the game starts; copying the pack folders alone does nothing. Without them
-everything else works and those beasts are simply not there.
+download (the **bear pack** and the **beasts pack**, below): install them with EMF.exe ("Install a downloaded file")
+and EMF builds them when the game starts (no EML needed; with EML or ShroudForge installed, the card on EMF.exe's EMF
+page says who applies them). Without them everything else works and those beasts are simply not there.
 
 ## How it goes
 
@@ -193,9 +193,9 @@ realistic grizzly on a skeleton and animations of its own (it walks, runs, rears
 when it dies), played by a copy of the game wolf's animation graph and AI. Bear model and animations: "Realistic Animated
 Bear 3D Model" by WildMesh 3D, licensed under CC BY 4.0 (used in the game with changes). Pack 1.0's bear, made with
 Meshy on the game wolf's skeleton, is still known to Beastmaster. It is in
-the **EMF creature packs** download on EMF's Nexus page. It needs **EML (or ShroudForge) installed first**, which loads
-it when the game starts; then install the pack with EMF.exe ("Install a downloaded file") or like any EML mod (the
-`mods` folder next to the game, run through EML's `emm.exe`). The template sets the size
+the **EMF creature packs** download on EMF's Nexus page. Install it with EMF.exe ("Install a downloaded file") or put
+its folder in the `mods` folder next to the game; EMF builds it when the game starts (it is EML content: EML or
+ShroudForge can apply it too). The template sets the size
 (`ScaleComponent` 1.4), the damage (DamageMod multiplier x1.5) and the speeds (walk 1.6 m/s, run 6 m/s as a wolf's,
 the rest x0.85). The health (x2.5) comes from
 Beastmaster when it spawns a bear: the game's template has no base health of its own.
@@ -219,9 +219,10 @@ An EML data patch with new beasts:
   its own copy of the skeleton and graph; sizes 1.15, 1.25 and 1.35, damage x1.6, x1.8 and x2.0; the health (x3, x4,
   x5) comes from Beastmaster. With an older beasts pack that lacks them, a wild snake is always a plain one.
 
-Installed (EML first) and rebuilt like the bear pack (`tools/models/packs/beastmaster_beasts.json`). Without the pack,
-or without EML to load it, an aurochs or snake in your collection stays at home: calling it says that it needs the EMF creature
-packs and EML (or ShroudForge), and one that was out when you saved goes home with one note when you load.
+Installed and rebuilt like the bear pack (`tools/models/packs/beastmaster_beasts.json`). Without the pack (or when its
+content was not built), an aurochs or snake in your collection stays at home: calling it says that it comes with the
+EMF creature packs and how to install them, and one that was out when you saved goes home with one note when you
+load.
 
 ## More beasts: `species_extra.lua` (for modders)
 

@@ -152,13 +152,13 @@ local function forget(self, account, id)
 	end
 end
 
--- Why a pack creature cannot rise. The game has no such creature when its pack is missing and also when EML (or
--- ShroudForge), which loads the packs at game start, is missing; the mod cannot tell the two apart, so it names both.
+-- Why a pack creature cannot rise: the game has no such creature (its pack is not installed, or its content was not
+-- built at the game's start).
 local function no_pack(kind)
-	return string.format("%s come with the EMF creature packs, and those need EML or ShroudForge to load",
-		kind.plural:lower())
+	return string.format("%s come with the EMF creature packs", kind.plural:lower())
 end
-local INSTALL = "Install EML first, then the packs, and restart the game."
+local INSTALL = "Install them with EMF.exe (Install a downloaded file) and restart the game; EMF.exe's EML content " ..
+	"card says whether they were built."
 
 -- The number of `account`'s minions of `kind` in the world.
 local function out_of_kind(self, account, kind)

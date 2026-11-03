@@ -137,8 +137,8 @@ function W:step(world)
 			break
 		end
 		self.off[c.id] = true
-		emf.log(string.format("wild %s are off: the game has no %s (it comes with the EMF creature packs, %s, which "
-			.. "need EML or ShroudForge to load)", c.plural, c.id, c.pack))
+		emf.log(string.format("wild %s are off: the game has no %s (it comes with the EMF creature packs, %s)",
+			c.plural, c.id, c.pack))
 	end
 	if not sp then return end
 	self.id, self.sp = id, sp

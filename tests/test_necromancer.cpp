@@ -397,7 +397,7 @@ TEST_CASE("beastmaster + necromancer: the wheel keys are not the game's own keys
         keys.push_back(vk);
     }
     CHECK(keys[0] != keys[1]);  // each mod's key (one wheel or two)
-    // the player docs (the zip's README.txt too) name the new keys, and that the packs need EML first
+    // the player docs (the zip's README.txt too) name the new keys, and that EMF builds the packs (no EML needed)
     for (const char* doc : {"README_EMF.md", "package/README.txt", "mods/beastmaster/README.md", "mods/necromancer/README.md"}) {
         std::string text = slurp((std::filesystem::path(EMF_SOURCE_DIR) / doc).wstring());
         std::transform(text.begin(), text.end(), text.begin(), [](char c) { return static_cast<char>(std::tolower(c)); });
@@ -405,7 +405,10 @@ TEST_CASE("beastmaster + necromancer: the wheel keys are not the game's own keys
             CHECK_MESSAGE(text.find(old) == std::string::npos, (std::string(doc) + ": " + old));
         CHECK_MESSAGE(text.find("f3") != std::string::npos, std::string(doc));
         CHECK_MESSAGE(text.find("f2") != std::string::npos, std::string(doc));
-        CHECK_MESSAGE(text.find("install eml") != std::string::npos, std::string(doc));
+        CHECK_MESSAGE(text.find("emf builds") != std::string::npos, std::string(doc));
+        for (const char* old : {"install eml or shroudforge first", "install eml (or shroudforge) first", "which need eml",
+                                "eml (or shroudforge) installed first", "install eml first"})
+            CHECK_MESSAGE(text.find(old) == std::string::npos, (std::string(doc) + ": " + old));
     }
     // the old keys open nothing now
     NecroRig n({}, {"beastmaster"});
@@ -638,14 +641,15 @@ TEST_CASE("necromancer: without the undead pack the lich is refused with a note,
     CHECK(n.reply("necromancer.list").find("Liches 1/1") != std::string::npos);  // kept: it comes back with the pack
 }
 
-TEST_CASE("necromancer: a lich or golem that cannot rise says it needs the EMF creature packs, which load through EML or ShroudForge") {
+TEST_CASE("necromancer: a lich or golem that cannot rise says it comes with the EMF creature packs and how to install them") {
     NecroRig n;
-    n.r.fake.spawn_fails = true;  // no lich in this game: no pack, or no EML to load it (the mod cannot tell which)
+    n.r.fake.spawn_fails = true;  // no lich in this game: no pack, or its content was not built
     for (const char* kind : {"lich", "golem"}) {
         const std::string raise = n.reply(std::string("necromancer.raise ") + kind);
         CHECK_MESSAGE(raise.find("EMF creature packs") != std::string::npos, raise);
-        CHECK_MESSAGE(raise.find("EML or ShroudForge") != std::string::npos, raise);
-        CHECK_MESSAGE(raise.find("Install EML first") != std::string::npos, raise);
+        CHECK_MESSAGE(raise.find("Install them with EMF.exe") != std::string::npos, raise);
+        CHECK_MESSAGE(raise.find("need EML") == std::string::npos, raise);  // EMF builds the packs itself (0.4.0)
+        CHECK_MESSAGE(raise.find("Install EML") == std::string::npos, raise);
         CHECK_MESSAGE(raise.find("emf_necromancer") == std::string::npos, raise);  // no folder names
     }
     write(n.data, "k 0x00000000000000aa lich 1\n");
@@ -657,7 +661,7 @@ TEST_CASE("necromancer: a lich or golem that cannot rise says it needs the EMF c
         if (x.find("ich") != std::string::npos) note = x;
     CHECK(note.find("stays saved") != std::string::npos);
     CHECK(note.find("EMF creature packs") != std::string::npos);
-    CHECK(note.find("EML or ShroudForge") != std::string::npos);
+    CHECK(note.find("EML") == std::string::npos);
 }
 
 // ---- kinds (the undead pack): the Bone Golem ----

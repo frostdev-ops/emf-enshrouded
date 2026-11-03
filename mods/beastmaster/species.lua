@@ -12,7 +12,7 @@
 --               (the bear pack's bear runs the wolf's graph at 1.4x: seen in game, game wolves have no ScaleComponent;
 --               the beasts pack's aurochs runs the boar's graph at 1.3x).
 --               M.of takes the first that fits, in list order
---   pack:       the content pack (an EML data patch) the beast comes from, named for notes; a game without that pack
+--   pack:       the content pack (an EML data patch, built by EMF at the game's start) the beast comes from, named for notes; a game without that pack
 --               has no such template: the call fails, a wild one never comes
 --   health_mul: a wild one's health, times the game's base health (health.lua); the pack's template sets size, damage
 --               and speed

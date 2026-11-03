@@ -43,8 +43,8 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `mods/teleports/` | Waypoint Teleports: `/unstuck` and `/home` for every player, `tp`, `bring`, `tp.pos`, `tp.back` for admins (see below) |
 | `mods/bulk_craft/` | Bulk Craft (off by default): craft one by hand, then F8 at the station (or `/craft 25`, every player) crafts many through the game's own crafting, at the recipe's pace (see below) |
 | `mods/blessings/` | Flame Blessings (off by default): god mode, endless health, stamina and mana, no fall damage, per player and at once; the host's own in the Mods tab or on the F11 wheel, `/blessings` for admins on any player; shown on screen, told in chat, nothing saved (see below) |
-| `mods/beastmaster/` | Beastmaster (Lua, off by default): tame wolves, boars, sabretooths and hounds (bears and aurochs with the EMF creature packs: EML content, install EML or ShroudForge first), keep 8, call 2 to fight beside you; hold F3 for the beast wheel, `/beastmaster` for every player; rare wild pack beasts (see below) |
-| `mods/necromancer/` | Necromancer (Lua, off by default): raise up to 3 skeleton warriors that stay and follow you (a lich and a bone golem with the EMF creature packs: EML content, install EML or ShroudForge first), cast raging spirits (flaming skulls, 6 s); hold F2 for the summoning wheel, shared with Beastmaster; `/necromancer` for every player (see below) |
+| `mods/beastmaster/` | Beastmaster (Lua, off by default): tame wolves, boars, sabretooths and hounds (bears, aurochs and snakes with the EMF creature packs, which EMF builds itself), keep 8, call as many as your active slots (1-4, by level), choose them at a stable (the game's animal bed: E); hold F3 for the beast wheel, `/beastmaster` for every player; rare wild pack beasts (see below) |
+| `mods/necromancer/` | Necromancer (Lua, off by default): raise up to 3 skeleton warriors that stay and follow you (a lich and a bone golem with the EMF creature packs, which EMF builds itself), cast raging spirits (flaming skulls, 6 s); hold F2 for the summoning wheel, shared with Beastmaster; `/necromancer` for every player (see below) |
 | `mods/loot_scale/` | more materials per loot stack (x2 by default, off by default) by hooking the game's loot amount getter by its bytes; plants picked with E, chopping and mining (which never read that setting) get the difference after the game's PickupEvent, each with its own factor (0 = the same, so from 1.1.0 they follow the main factor); switching it off takes effect at the next start; factor 1 is the world's amounts at once for everything that follows it |
 | `content/emberbrand/` | an example of a new item (an EML data patch; [docs/modding/content.md](docs/modding/content.md)) |
 | `mods/event_log/` | logs gameplay events on the host (deaths, hits, pickups, crafts, xp, building) with `on_event` |
@@ -686,12 +686,12 @@ has one, only active beasts are called. Send them at
 what you look at (`/beastmaster attack`), dismiss one or all; a beast that falls rests 2 minutes. While you build,
 your beasts step aside and come back after (`/beastmaster aside` does it by hand). Your beasts' kills give you XP and
 loot. Hold **F3** for the beast wheel (the host; B is the game's backpack key); every player has `/beastmaster` in the
-chat. The bear and the aurochs come in the **EMF creature packs** download, which is EML content: install EML (or
-ShroudForge) first, which loads the packs at game start; copying the pack folders alone does nothing. The bear pack
+chat. The bear and the aurochs come in the **EMF creature packs** download (EML content, which EMF builds when the
+game starts: install the packs with EMF.exe, no EML needed). The bear pack
 (`emf_beastmaster_bear`, a new model on the game wolf's skeleton): 1.4x the size, 2.5x the health, 1.5x the damage, a
 little slower. The beasts pack (`emf_beastmaster_beasts`) adds the aurochs (a huge horned bull on the boar's skeleton:
 1.3x, 3x health). Now and then a wild one of the packs' beasts appears 50-70 m from a player. Without the packs (or
-without EML) those beasts are refused with a note that says so. Details: `mods/beastmaster/README.md`; the model
+when they were not built) those beasts are refused with a note that says how to install them. Details: `mods/beastmaster/README.md`; the model
 tools: `tools/models/`.
 
 ## The necromancer mod (Necromancer)
@@ -702,7 +702,7 @@ for 6 s (at most 10). `attack`, `gather`, `dismiss` (one kind or all), `aside`, 
 yours (never on bosses); while you build, your undead step aside and come back after. Hold **F2** for the wheel (V is
 the game's crafting key): with Beastmaster installed, F2 and F3 open one "Summons" wheel with both classes' sections
 (Lua 1.9 wheel groups; `shared_wheel` off gives a mod its own wheel). The undead pack (`emf_necromancer_undead`, in the
-**EMF creature packs** download: EML content, so install EML or ShroudForge first) adds a lich (`/necromancer raise
+**EMF creature packs** download, which EMF builds when the game starts) adds a lich (`/necromancer raise
 lich`, 40 % mana, one; on the skeleton mage) and a bone golem (`raise golem`, 60 %, one; 3 m, on the Vukah elite, 2x
 health). Details: `mods/necromancer/README.md`.
 
