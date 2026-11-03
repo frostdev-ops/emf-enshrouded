@@ -1300,7 +1300,9 @@ TEST_CASE("stable: a beast tamed with no free slot leaves: home before a stable,
     tame_wolf(free);
     CHECK(noted(free, "You tamed a wolf: Wolf"));
     CHECK_FALSE(contains(free.r.fake.destroyed, 50));
-    CHECK(free.saved().find("a 0x00000000000000aa Wolf") != std::string::npos);
+    const std::string kept = free.saved();
+    CAPTURE(kept);
+    CHECK(kept.find("a 0x00000000000000aa Wolf") != std::string::npos);
     CHECK(free.reply("beastmaster.list").find("2. Wolf - wolf, loyalty 1, out") != std::string::npos);
 }
 
