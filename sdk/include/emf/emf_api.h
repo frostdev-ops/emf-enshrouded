@@ -832,7 +832,8 @@ typedef struct EmfApi {
     /* ---- v24: mod windows (EmfWindowDef above; reference.md "v24") ---- */
     /* Opens a window drawn by EMF's overlay (copied, every string too). With the open window's id it replaces it (that
      * window's cb gets CLOSED, BY_MOD). One window at a time: false (logged) while another id is open, a wheel is open,
-     * the overlay is off or cannot draw (always on a dedicated server), no world runs, or the definition is bad. It may
+     * the overlay is off or cannot draw (always on a dedicated server), no world of def->world_kind runs (a client in
+     * someone else's game has no server world), or the definition is bad. It may
      * open while the console is open: it shows under the console and gets the input when the console closes. Events
      * (CLICK, RIGHT_CLICK, the last one CLOSED) reach cb after the next step of a world of def->world_kind, on its
      * thread; CLOSED with no world running comes at once with EMF_UI_NO_WORLD and a NULL world. Any thread. */

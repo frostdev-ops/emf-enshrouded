@@ -32,9 +32,15 @@ Route InputRouter::decide(const KeyEvent& e) {
     if (window_ && !open_) {  // a mod's window captures; the console key still opens the console over it
         if (e.down) {
             if (held) return Route::Swallow;  // auto-repeat of the key that toggled or closed
+            // an auto-repeat of a key held since before the window opened (the key that opened it): not a press; its
+            // release reaches the game, which saw it go down
+            if (game_down_[index(e)]) return Route::Swallow;
             const uint16_t close_vk = window_close_vk_.load();
             if (esc || (close_vk && e.vkey == close_vk)) {
                 held_ = e.scan;  // its repeats and its release go nowhere
+                // still down when the window has closed: a mod polling it (the one that opens the window on that
+                // key) must not see a new press, so it reads as up until released
+                if (!esc) hidden_vk_ = close_vk;
                 return Route::CloseWindow;
             }
             if (toggle) {

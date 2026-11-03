@@ -1868,9 +1868,9 @@ void lua_window(lua_State* L, Script& s, const char* id, int t, LuaWindow* out) 
     lua_pop(L, 1);
     lua_getfield(L, t, "close_key");
     if (!lua_isnil(L, -1)) {
-        const std::string k = luaL_checkstring(L, -1);
-        d.close_key = emf::keys::parse_key(std::wstring(k.begin(), k.end()));
-        if (!d.close_key) luaL_error(L, "%s is not a key", k.c_str());
+        const std::string k = luaL_checkstring(L, -1);  // "": a key setting left unset, no close key
+        d.close_key = k.empty() ? 0u : emf::keys::parse_key(std::wstring(k.begin(), k.end()));
+        if (!k.empty() && !d.close_key) luaL_error(L, "%s is not a key", k.c_str());
     }
     lua_pop(L, 1);
     const EmfApi* a = s.host->api;

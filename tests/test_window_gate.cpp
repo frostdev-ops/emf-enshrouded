@@ -116,3 +116,36 @@ TEST_CASE("WindowGate: close, finish, turned_off and close_mod hand the window b
     for (const auto& c : g.captures) (c.first ? ons : offs)++;
     CHECK(ons == offs);  // capture never outlives a window
 }
+
+TEST_CASE("WindowGate: each window gets an open token; a replacement and every hand-back clear it; update keeps it") {
+    Rig g;
+    REQUIRE(g.open("bm.stable") == WindowGate::Refusal::None);
+    const auto first = g.gate.current()->open;
+    REQUIRE(static_cast<bool>(first));
+    CHECK(first->load());
+    std::optional<WindowRequest> replaced;
+    REQUIRE(g.open("bm.stable", "T2", 0, &replaced) == WindowGate::Refusal::None);
+    REQUIRE(replaced);
+    CHECK_FALSE(first->load());  // a click for the old window is dropped from now on
+    const auto second = g.gate.current()->open;
+    REQUIRE(static_cast<bool>(second));
+    const bool new_token = second.get() != first.get();
+    CHECK(new_token);
+    CHECK(second->load());
+    WindowRequest contents;
+    contents.id = "bm.stable";
+    REQUIRE(g.gate.update(contents));
+    const bool same_token = g.gate.current()->open.get() == second.get();
+    CHECK(same_token);
+    std::optional<WindowRequest> closed;
+    REQUIRE(g.gate.close("bm.stable", &closed));
+    CHECK_FALSE(second->load());
+    REQUIRE(g.open("bm.stable") == WindowGate::Refusal::None);
+    auto t = g.gate.current()->open;
+    REQUIRE(g.gate.finish());
+    CHECK_FALSE(t->load());
+    REQUIRE(g.open("bm.stable") == WindowGate::Refusal::None);
+    t = g.gate.current()->open;
+    REQUIRE(g.gate.turned_off());
+    CHECK_FALSE(t->load());
+}

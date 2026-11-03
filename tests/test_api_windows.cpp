@@ -145,7 +145,7 @@ TEST_CASE("window_open: a good window reaches the overlay with the caller's modu
         Fixture f(false);  // the main menu: no world runs
         Def d;
         CHECK_FALSE(api_table()->window_open(&d.def));
-        CHECK(logged("no world"));
+        CHECK(logged("no server world"));
         CHECK(f.opened.empty());
     }
 }
@@ -230,4 +230,31 @@ TEST_CASE("window_update: new contents for the open window; false when it is not
     Def other("test.other");
     CHECK_FALSE(api_table()->window_update(&other.def));
     CHECK(g_lines.size() == lines);
+}
+
+TEST_CASE("window events: a click for a window that closed is dropped, never delivered after its CLOSED") {
+    Fixture f;
+    WindowRequest r;
+    r.id = "test.stable";
+    r.world_kind = EMF_WORLD_SERVER;
+    r.cb = record;
+    r.open = std::make_shared<std::atomic<bool>>(true);
+    post_window_event(r, EMF_UI_CLICK, "call", 0);  // queued for the next step
+    r.open->store(false);                           // then the gate hands the window back...
+    post_window_event(r, EMF_UI_CLOSED, "", EMF_UI_BY_MOD);  // ...and its CLOSED follows
+    post_window_event(r, EMF_UI_CLICK, "call", 0);  // a click from a stale copy
+    f.step();
+    REQUIRE(g_seen.size() == 1u);
+    CHECK(g_seen[0].kind == EMF_UI_CLOSED);
+}
+
+TEST_CASE("window_open: refused when no world of the asked kind runs (its events would never come)") {
+    Fixture f;  // only a server world runs
+    Def d;
+    d.def.world_kind = EMF_WORLD_CLIENT;
+    CHECK_FALSE(api_table()->window_open(&d.def));
+    CHECK(logged("client"));
+    CHECK(f.opened.empty());
+    d.def.world_kind = EMF_WORLD_SERVER;
+    CHECK(api_table()->window_open(&d.def));
 }

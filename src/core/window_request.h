@@ -1,6 +1,8 @@
 #pragma once
 // A mod's window (API v24 window_open / window_update), as the core copies it: every string owned here.
+#include <atomic>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -27,6 +29,9 @@ struct WindowRequest {
     EmfUiCallback cb = nullptr;
     void* user = nullptr;
     std::string mod;        // the module that opened it (its file name), for logs and for closing a mod's window
+    // True while this window (this open, not its id) is the open one; the gate clears it when it hands the window
+    // back, before its CLOSED is posted. A click is delivered only while it is still true (never after CLOSED).
+    std::shared_ptr<std::atomic<bool>> open;
 };
 
 constexpr size_t kMaxWindowWidgets = 256;

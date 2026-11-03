@@ -1539,7 +1539,12 @@ bool api_window_open(const EmfWindowDef* def) {
     std::string why;
     if (!copy_window_def(def, false, &r, &why)) return refuse_window(r.mod, "window_open", why);
     if (!g_state->open_window) return refuse_window(r.mod, "window_open", "the in-game overlay is off (or no screen)");
-    if (!api_server_world() && !api_client_world()) return refuse_window(r.mod, "window_open", "no world runs");
+    if (!g_state->tracker.latest(r.world_kind, now()))
+        return refuse_window(r.mod, "window_open",
+                             r.world_kind == EMF_WORLD_SERVER
+                                 ? "no server world runs (in someone else's game pass EMF_WORLD_CLIENT): its events "
+                                   "would never come"
+                                 : "no client world runs: its events would never come");
     const std::string mod = r.mod;
     std::optional<WindowRequest> replaced;
     if (!g_state->open_window(std::move(r), &replaced, &why)) return refuse_window(mod, "window_open", why);
@@ -1918,7 +1923,9 @@ struct WindowJob {
     void* user;
     std::string id, key;
     uint32_t kind, reason;
+    std::shared_ptr<std::atomic<bool>> open;  // the window's token: a click is delivered only while it is set
 };
+bool click_for_closed_window(const WindowJob& j) { return j.kind != EMF_UI_CLOSED && j.open && !j.open->load(); }
 void deliver_window_event(EmfWorld* w, const WindowJob& j, uint32_t flags) {
     EmfUiEvent e{};
     e.size = sizeof e;
@@ -1935,13 +1942,16 @@ void deliver_window_event(EmfWorld* w, const WindowJob& j, uint32_t flags) {
 
 void post_window_event(const WindowRequest& request, uint32_t kind, const std::string& key, uint32_t reason) {
     if (!g_state || !request.cb) return;
-    WindowJob job{request.cb, request.user, request.id, key, kind, reason};
+    WindowJob job{request.cb, request.user, request.id, key, kind, reason, request.open};
+    if (click_for_closed_window(job)) return;  // its CLOSED is posted or delivered already: `user` may be freed
     if (!g_state->tracker.latest(request.world_kind, now())) {  // no step would come: CLOSED now, a click is dropped
         if (kind == EMF_UI_CLOSED) deliver_window_event(nullptr, job, EMF_UI_NO_WORLD);
+        else log_once("a mod window's click was dropped: no world of its kind runs");
         return;
     }
     g_state->dispatcher.post(request.world_kind, [](EmfWorld* w, void* u) {
         std::unique_ptr<WindowJob> j(static_cast<WindowJob*>(u));
+        if (click_for_closed_window(*j)) return;  // the window closed after this click was queued
         deliver_window_event(w, *j, 0);
     }, new WindowJob(std::move(job)));
 }

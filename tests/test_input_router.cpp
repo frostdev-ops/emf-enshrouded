@@ -373,3 +373,27 @@ TEST_CASE("InputRouter: a wheel's hold key still down after the wheel closed sta
     r.key(up_k);  // the release seen through raw input ends it too
     CHECK_FALSE(r.hiding());
 }
+
+TEST_CASE("InputRouter window: the close key is hidden from mods until released (it never reopens the window)") {
+    constexpr uint16_t kB = 0x30;
+    InputRouter r;
+    r.set_window(true, 'B');
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);
+    r.set_window(false);  // the overlay closed it
+    CHECK(r.hidden_from_mods('B', true));  // still down: mods polling it see it up, not a new press
+    CHECK(r.key(up(kB, 'B')) == Route::Swallow);
+    CHECK_FALSE(r.hidden_from_mods('B', false));
+    CHECK_FALSE(r.hidden_from_mods('B', true));  // a later press is a press again
+}
+
+TEST_CASE("InputRouter window: auto-repeats of the key that opened it are repeats, not a close; its release reaches the game") {
+    constexpr uint16_t kB = 0x30;
+    InputRouter r;
+    CHECK(r.key(down(kB, 'B')) == Route::Game);  // B opened the window (a mod's on_key)
+    r.set_window(true, 'B');
+    CHECK(r.key(down(kB, 'B')) == Route::Swallow);  // held past the repeat delay: not the close key
+    CHECK(r.key(down(kB, 'B')) == Route::Swallow);
+    CHECK(r.window());
+    CHECK(r.key(up(kB, 'B')) == Route::Both);  // the game saw it go down: it sees it go up
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);  // the next press closes it
+}

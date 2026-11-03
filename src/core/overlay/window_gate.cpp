@@ -9,8 +9,12 @@ WindowGate::Refusal WindowGate::open(WindowRequest r, const std::function<bool()
     if (!overlay_ready || !overlay_ready()) return Refusal::NotReady;
     if (!window_hooked) return Refusal::NoWindow;  // no keyboard or mouse for it: it could not be closed
     if (wheel_busy) return Refusal::WheelBusy;
-    if (req_ && replaced) *replaced = std::move(req_);
+    if (req_) {
+        req_->open->store(false);  // before its CLOSED is posted: a click for it is dropped from now on
+        if (replaced) *replaced = std::move(req_);
+    }
     const uint16_t vk = r.close_vk;
+    r.open = std::make_shared<std::atomic<bool>>(true);
     req_ = std::move(r);
     ++version_;
     if (capture_) capture_(true, vk);
@@ -25,6 +29,7 @@ bool WindowGate::update(const WindowRequest& contents) {
     next.user = req_->user;
     next.mod = req_->mod;
     next.world_kind = req_->world_kind;  // events keep going where the open asked
+    next.open = req_->open;              // the same window
     const bool new_key = next.close_vk != req_->close_vk;
     req_ = std::move(next);
     ++version_;
@@ -35,6 +40,7 @@ bool WindowGate::update(const WindowRequest& contents) {
 std::optional<WindowRequest> WindowGate::close_locked() {
     std::optional<WindowRequest> out = std::move(req_);
     req_.reset();
+    if (out && out->open) out->open->store(false);
     ++version_;
     if (capture_) capture_(false, 0);
     return out;

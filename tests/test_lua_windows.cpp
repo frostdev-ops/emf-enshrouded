@@ -125,6 +125,20 @@ TEST_CASE("lua 1.13: window_update and window_close take the short id; bad rows 
     CHECK(old.fake.replies[0] == "false");
 }
 
+TEST_CASE("lua 1.13: an empty close_key (a key setting left unset) is no close key, not an error") {
+    Rig r(L"luawin5");
+    with_windows(r.api);
+    add_script(r.dir, "we", "emf.command('go', '', function(w) emf.reply(tostring(emf.window('x', {close_key = '', rows = {}}, function() end))) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("we.go");
+    REQUIRE(r.fake.replies.size() == 1);
+    CHECK(r.fake.replies[0] == "true");
+    REQUIRE(r.fake.windows.size() == 1u);
+    CHECK(r.fake.windows[0].close_key == 0u);
+    CHECK(host.status("we") == "running");
+}
+
 TEST_CASE("lua 1.13: a reload closes the script's open window; its late events reach nobody") {
     Rig r(L"luawin4");
     with_windows(r.api);
