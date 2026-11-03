@@ -21,6 +21,7 @@ local last_hit = {}           -- player entity -> {id, at}: what hit them last (
 local taming                  -- the taming channels (made below; reset with each world)
 local window                  -- the Beasts window (made below)
 local on_first_stable         -- the world's first stable was found or marked (made below)
+local release_asked = {}      -- account -> {name, at}: a release by chat asked once (reset with each world)
 local next_hud = 0            -- when the HUD line is written next (reset with each world: the clock may restart)
 
 local function setting(key)
@@ -87,6 +88,7 @@ emf.on_world_data(function(world, text)
 	beasts = roster.parse(text)
 	stables:load(text)
 	window:reset()
+	release_asked = {}
 	pack:reset()
 	health:reset()
 	wild:reset()
@@ -123,17 +125,45 @@ local function state_text(b, aside)
 	return "at home"
 end
 
+-- ---- the stable's actions (the Beasts window, and the chat for players who joined); each returns what it did ----
+local stable_do = {}
+
+function stable_do.make_active(world, account, player, b)
+	if b.active then return b.name .. " is active already." end
+	local n = 0
+	for _, x in ipairs(beasts:list(account)) do
+		if x.active then n = n + 1 end
+	end
+	if n >= open_slots(world, player) then return "No free active slot: store a beast first." end
+	b.active = true
+	save()
+	return b.name .. " is active."
+end
+
+function stable_do.store(world, account, b)
+	if not b.active then return b.name .. " is in the stable already." end
+	b.active = false
+	if b.out then pack:dismiss(world, account, b) end
+	save()
+	return b.name .. " goes to the stable."
+end
+
+function stable_do.release(world, account, b)
+	pack:release(world, account, b)
+	return b.name .. " is gone: you let it go."
+end
+
 -- the Beasts window (the host, at a stable)
 local STABLE_REACH_M = 4  -- E opens the window with a stable under the crosshair this close
 window = window_mod.new({
 	setting = setting,
 	now = now,
 	beasts = function() return beasts end,
-	save = save,
 	level = level_of,
 	state = function(b, account) return state_text(b, pack:is_aside(account)) end,
-	dismiss = function(world, account, b) return pack:dismiss(world, account, b) end,
-	release = function(world, account, b) return pack:release(world, account, b) end,
+	make_active = stable_do.make_active,
+	store = stable_do.store,
+	release = stable_do.release,
 })
 
 emf.on_key("stable_key", function(world)
@@ -154,8 +184,8 @@ command("list", ": your beasts", function(world, args)
 	local lines = { string.format("Your beasts (%d/%d):", #list, setting("collection_max")) }
 	local aside = pack:is_aside(account)
 	for i, b in ipairs(list) do
-		lines[#lines + 1] = string.format("%d. %s - %s, loyalty %d, %s", i, b.name, b.species, loyalty_of(b),
-			state_text(b, aside))
+		lines[#lines + 1] = string.format("%d. %s - %s, loyalty %d, %s%s", i, b.name, b.species, loyalty_of(b),
+			state_text(b, aside), (beasts:stabled() and b.active) and ", active" or "")
 	end
 	if pack:aside_by_command(account) then
 		lines[#lines + 1] = "They stepped aside: Come back on the wheel or /beastmaster aside brings them back."
@@ -362,6 +392,48 @@ command("rename", "<name or number> <new name>: rename one of your beasts (1-20 
 	save()
 	emf.reply(string.format("%s is now called %s.", old, b.name))
 end)
+
+-- At a stable, by chat (players who joined have no window): active, store, release (asked twice).
+local CHAT_STABLE_M = 10    -- within this of a stable
+local CHAT_CONFIRM_S = 10   -- release: the same command again within this
+
+local function stable_command(word, help, fn)
+	command(word, help, function(world, args)
+		local player, account = who(world)
+		if not account then
+			emf.reply("Your account is not known yet.")
+			return
+		end
+		local b = beasts:find(account, table.concat(args, " "))
+		if not b then
+			emf.reply("No such beast (beastmaster.list shows yours).")
+			return
+		end
+		if not (player and stables:near(world, player, CHAT_STABLE_M)) then
+			emf.reply(string.format("Go to a stable (within %d m) to do that.", CHAT_STABLE_M))
+			return
+		end
+		emf.reply(fn(world, player, account, b))
+	end)
+end
+
+stable_command("active", "<name or number>: make a beast active (at a stable): it can be called",
+	function(world, player, account, b) return stable_do.make_active(world, account, player, b) end)
+
+stable_command("store", "<name or number>: put a beast into the stable (at a stable)",
+	function(world, player, account, b) return stable_do.store(world, account, b) end)
+
+stable_command("release", "<name or number>: let a beast go for good (at a stable; type it twice)",
+	function(world, player, account, b)
+		local t = now(world)
+		local asked = release_asked[account]
+		if asked and asked.name == b.name and t - asked.at <= CHAT_CONFIRM_S then
+			release_asked[account] = nil
+			return stable_do.release(world, account, b)
+		end
+		release_asked[account] = { name = b.name, at = t }
+		return string.format("Type the same command again within %d s to let %s go for good.", CHAT_CONFIRM_S, b.name)
+	end)
 
 local WORDS_HELP = " (call takes a name or number; dismiss a name, a number, or nothing for all)"
 emf.command(emf.id, "<word>: " .. table.concat(word_list, ", ") .. WORDS_HELP,

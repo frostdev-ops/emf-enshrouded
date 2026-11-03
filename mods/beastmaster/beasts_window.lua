@@ -1,8 +1,9 @@
 -- The Beasts window (the host presses E at a stable): the active slots and the stable (every beast of the collection),
 -- with Make active, Store and Release for the selected beast. Release asks for a second click within CONFIRM_S. The
 -- window is drawn again after every click, and once a second when what it shows changed (a beast fell, rests, came).
--- M.new(env) where env has: setting(key), now(world), beasts() (the roster), save(), level(world, player),
--- state(beast, account) ("out", "at home", "rests 1:20"), dismiss(world, account, beast), release(world, account, beast).
+-- M.new(env) where env has: setting(key), now(world), beasts() (the roster), level(world, player), state(beast, account)
+-- ("out", "at home", "rests 1:20"), and the stable's actions, each returning what it did: make_active(world, account,
+-- player, beast), store(world, account, beast), release(world, account, beast).
 local species = require("species")
 local loyalty = require("loyalty")
 local slots = require("slots")
@@ -159,36 +160,12 @@ function W:select(b)
 	self.note = nil
 end
 
-function W:make_active(world, b)
-	if b.active then
-		self.note = b.name .. " is active already."
-	elseif #self:active_list() >= self:open_slots(world) then
-		self.note = "No free active slot: store a beast first."
-	else
-		b.active = true
-		self.env.save()
-		self.note = b.name .. " is active."
-	end
-end
-
-function W:store(world, b)
-	if not b.active then
-		self.note = b.name .. " is in the stable already."
-		return
-	end
-	b.active = false
-	if b.out then self.env.dismiss(world, self.account, b) end
-	self.env.save()
-	self.note = b.name .. " goes to the stable."
-end
-
 function W:release(world, b)
 	local now = self.env.now(world)
 	local c = self.confirm
 	if c and c.name == b.name and now - c.at <= CONFIRM_S then
-		self.env.release(world, self.account, b)
 		self.selected, self.confirm = nil, nil
-		self.note = b.name .. " is gone: you let it go."
+		self.note = self.env.release(world, self.account, b)
 		return
 	end
 	self.confirm = { name = b.name, at = now }
@@ -213,10 +190,10 @@ function W:on_event(world, ev)
 		if b then self:select(b) end
 	elseif sel and key == "make_active" then
 		self.confirm = nil
-		self:make_active(world, sel)
+		self.note = self.env.make_active(world, self.account, self.player, sel)
 	elseif sel and key == "store" then
 		self.confirm = nil
-		self:store(world, sel)
+		self.note = self.env.store(world, self.account, sel)
 	elseif sel and key == "release" then
 		self:release(world, sel)
 	end

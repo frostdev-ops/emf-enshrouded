@@ -1340,6 +1340,58 @@ TEST_CASE("stable: a 1.5.0 save: beasts out beyond the slots go home, all stay c
         CHECK(three.saved().find(std::string("a 0x00000000000000aa ") + name) != std::string::npos);
     CHECK(three.saved().find("a 0x00000000000000aa Rex") == std::string::npos);
 }
+
+namespace {
+// Player 2's beasts from a save: Grey (wolf, active), Hog (boar); a built stable 3 m from player 2 (at 30, 10, 0).
+void guest_at_stable(BeastRig& b) {
+    write(b.data, "b 0x00000000000000bb wolf 0 0 Grey\nb 0x00000000000000bb boar 0 0 Hog\n"
+                  "a 0x00000000000000bb Grey\ns 1\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    flame_altar(b, 900, 30, 0);
+    stable_prop(b, 961, 33, 10, 0);
+    b.seconds(32);  // the next search of the world finds it
+}
+}  // namespace
+
+TEST_CASE("stable: a joined player makes a beast active and stores it by chat near a stable; away from one they are told to go to a stable") {
+    BeastRig b;
+    guest_at_stable(b);
+    CHECK(b.reply("beastmaster.active Hog", 2, 0xBB) == "Hog is active.");
+    CHECK(b.saved().find("a 0x00000000000000bb Hog") != std::string::npos);
+    CHECK(b.reply("beastmaster.list", 2, 0xBB).find("2. Hog - boar, loyalty 1, at home, active") != std::string::npos);
+    CHECK(b.reply("beastmaster.active 2", 2, 0xBB) == "Hog is active already.");
+    CHECK(b.reply("beastmaster.store 1", 2, 0xBB) == "Grey goes to the stable.");
+    CHECK(b.reply("beastmaster store Grey", 2, 0xBB) == "Grey is in the stable already.");  // a word of /beastmaster
+    CHECK(b.saved().find("a 0x00000000000000bb Grey") == std::string::npos);
+    place(b.r.fake, 2, 60, 10, 0);  // 27 m from it
+    CHECK(b.reply("beastmaster.active Grey", 2, 0xBB) == "Go to a stable (within 10 m) to do that.");
+    CHECK(b.reply("beastmaster.active Wolfie", 2, 0xBB) == "No such beast (beastmaster.list shows yours).");
+}
+
+TEST_CASE("stable: chat release needs the same command again within 10 s") {
+    BeastRig b;
+    guest_at_stable(b);
+    CHECK(b.reply("beastmaster.release Hog", 2, 0xBB) == "Type the same command again within 10 s to let Hog go for good.");
+    b.seconds(11);  // too late: asks again
+    CHECK(b.reply("beastmaster.release Hog", 2, 0xBB) == "Type the same command again within 10 s to let Hog go for good.");
+    CHECK(b.reply("beastmaster.release Grey", 2, 0xBB).rfind("Type the same command again", 0) == 0);  // another beast
+    CHECK(b.reply("beastmaster.release Hog", 2, 0xBB).rfind("Type the same command again", 0) == 0);   // asks again
+    CHECK(b.reply("beastmaster.release Hog", 2, 0xBB) == "Hog is gone: you let it go.");
+    CHECK(b.saved().find("Hog") == std::string::npos);
+    CHECK(b.reply("beastmaster.release Hog", 2, 0xBB) == "No such beast (beastmaster.list shows yours).");
+}
+
+TEST_CASE("stable: a release asked before the world loaded again needs asking again") {
+    BeastRig b;
+    guest_at_stable(b);
+    REQUIRE(b.reply("beastmaster.release Hog", 2, 0xBB).rfind("Type the same command again", 0) == 0);
+    b.r.fake.session = 3;  // the world loads again (its data as saved), within the 10 s
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.reply("beastmaster.release Hog", 2, 0xBB).rfind("Type the same command again", 0) == 0);
+    CHECK(b.saved().find("Hog") != std::string::npos);
+}
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
     BeastRig b;
     b.reply("beastmaster.give wolf");
