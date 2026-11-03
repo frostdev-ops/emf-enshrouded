@@ -6,7 +6,33 @@ before the game reads them. EMF's own tools then work with the new item like wit
 `take`, mods).
 
 `content\emberbrand\` is a complete example: a new sword, the **Emberbrand** (a Bronze Sword with more damage and some
-fire), with its own name in every language. Read `src\mod.lua`; it is about 90 lines with comments.
+fire), with its own name in every language, and a recipe for it in the crafting menu. Read `src\mod.lua`: it uses
+EMF's helper (below) and is about 40 lines.
+
+## The helper: `emf_content.lua`
+
+`content\lib\emf_content.lua` does the steps below for you. Copy it into your mod's `src` folder, next to `mod.lua`, and:
+
+```lua
+local content = require("emf_content")
+content.add_item{guid = ..., name_guid = ..., debug_name = "Weapon_..._Mine", name = "My Sword", clone_of = <item GUID>,
+                 edit = function(item) item.damageSetup.dmgMod = 1.5 end}
+content.add_recipe{guid = ..., debug_name = "Craft_Mine", output = {<item GUID>, 1}, inputs = {{<item GUID>, 5}},
+                   like = "Consumable_Tool_Campfire_PK", menu = {group = "<group GUID>"}}
+content.finish()   -- once, at the end: writes the names back
+```
+
+- `add_item` copies an item (model, icon, animations, perks), registers it and gives it its name.
+- `add_recipe` adds the recipe **and lists it in the crafting menu**. The menu is not built from the recipe table but
+  from a fixed tree in the game's UI data (per workshop: groups, sets, recipes); a recipe that is not in that tree
+  never shows. `like` names a vanilla recipe whose station, unlock and duration are copied (the campfire: the
+  player's own crafting, known once you have had wood logs); `unlock = "always"` or `unlock = {item = <GUID>}`
+  overrides the unlock; `menu = {group = ..., set = 1}` picks the place (`content.menu_groups(0)` lists the own
+  crafting menu's groups; Emberbrand uses the weapons group `2632c31c-37fe-48f6-b788-dfa649065edb`). Without `menu`
+  the recipe goes where the copied one is.
+- `add_text(id, text)` adds a line to the English text table; `add_prompt_words("My words")` adds the words of an E
+  prompt of your own (`emf.offer{text = "My words"}`, EMF API v25).
+- The UI parts (menu, icons, text) are skipped on the dedicated server for you.
 
 ## What a new item needs
 
@@ -31,10 +57,9 @@ All four come from the example, and the game stops or shows nothing if one is mi
 - **Game updates** replace the data files. EML's loader (`dbghelp.dll`) patches again at the next start; if you
   patch offline with `emm.exe`, run it again after every update **before loading a world**, or the item is unknown
   and the game deletes saved copies when it next touches them.
-- **Recipes do not work.** The example also adds a recipe (a copy of the campfire's, 5 wood logs), and it is in
-  the game's recipe table, but the crafting menu does not list it: the menu seems to show recipes that knowledge
-  unlocks, not every recipe whose requirement passes. Hand items out with EMF (`give`, `put`) or your own mod.
-  (`docs/engine_parts/re_content.md` has the details.)
+- **A recipe needs its menu entry.** The game's recipe table alone is not enough: the crafting menu lists only the
+  recipes in its own tree (the helper's `add_recipe` adds both). The server never checks the unlock when crafting:
+  every lock is the menu's.
 - **The dedicated server has no render or UI data.** Its files (`enshrouded_server.*`) carry no models, meshes,
   textures, icons (`keen::UiTextureResource` is not even a type there) or text tables, and EML tells your script with
   `loader.is_server`. Make those parts conditional (`if not loader.is_server then ... end`) and keep the rest (items,
