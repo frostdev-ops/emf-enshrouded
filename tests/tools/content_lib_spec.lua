@@ -61,6 +61,8 @@ end
 local knowledge
 local resources = {}  -- [type .. "|" .. guid] = data
 local registry = {itemRefs = {}, dbgNames = {}}
+local recipe_registry = {recipes = {}}
+local ui_bundle = {menu = {crafting = {recipes = {workshops = {}, trees = {}}}}}
 _G.loader = {is_server = false, features = {patch = true}}
 _G.game = {
 	guid = {hash = function(g)
@@ -72,6 +74,8 @@ _G.game = {
 		get_resources_by_type = function(t)
 			if t == "keen::GameKnowledgeResource" then return {{data = knowledge}} end
 			if t == "keen::ItemRegistryResource" then return {{data = registry}} end
+			if t == "keen::RecipeRegistryResource" then return {{data = recipe_registry}} end
+			if t == "keen::FbUiBundle" then return {{data = ui_bundle}} end
 			error("the fake has no " .. t)
 		end,
 		get_resource = function(guid, t)
@@ -226,6 +230,50 @@ test("an item that places nothing cannot be copied as a placeable", function()
 	loader.is_server = false
 	eq(ok, false, "ok")
 	assert(tostring(err):find("places nothing"), err)
+end)
+
+-- recipes: the campfire in the own crafting menu's supplies group, second set (the first, "Unassorted", is empty)
+local CAMPFIRE_ID = 0xE00B95DA
+local function recipe_world()
+	knowledge = {playerKnowledge = make_map(16, {{CAMPFIRE_ID, "Flags", 3}}), worldKnowledge = make_map(8, {})}
+	recipe_registry = {recipes = {{
+		debugName = "Consumable_Tool_Campfire_PK", recipeGuid = "c", recipeId = {value = CAMPFIRE_ID},
+		workshopId = {value = 0}, requiresSheltered = false,
+		output = {{itemRef = "o", item = {value = 1}, count = 1}},
+		input = {{itemStack = {itemRef = "i", item = {value = 2}, count = 3},
+			inputItemCategory = {categoryRef = "x", category = {value = 9}, count = 0}}},
+		completionRequirementQuery = {knowledgeOrQueryId = {value = CAMPFIRE_ID}},
+		knowledgeRequirement = {knowledgeOrQueryId = {value = 77}, compareValue = 1},
+	}}}
+	ui_bundle = {menu = {crafting = {recipes = {workshops = {{value = 0}}, trees = {{groups = {
+		{groupId = "g-weapons", sets = {{entries = {{value = 0x51}}}}},
+		{groupId = "g-supplies", sets = {{entries = {}}, {entries = {{value = 0x111}, {value = CAMPFIRE_ID},
+			{value = 0x222}}}}},
+	}}}}}}}
+	return ui_bundle.menu.crafting.recipes.trees[1].groups
+end
+local WOOD = "3f4093ae-75ed-4e5d-bd0b-784ba83b88f5"
+
+test("a recipe without a menu place is listed right after the recipe it copies, in that recipe's set", function()
+	local groups = recipe_world()
+	local id = M.add_recipe{guid = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e25", debug_name = "Craft_Table",
+		output = {TABLE.guid, 1}, inputs = {{WOOD, 4}}}
+	local supplies = groups[2]
+	eq(#supplies.sets[1].entries, 0, "the empty first set stays empty")
+	eq(#supplies.sets[2].entries, 4, "the campfire's set")
+	eq(supplies.sets[2].entries[3].value, id, "right after the campfire")
+	eq(supplies.sets[2].entries[4].value, 0x222, "the next one moved on")
+	assert(find(knowledge.playerKnowledge, id), "the recipe's knowledge entry")
+end)
+
+test("a recipe with a menu group goes into that group's set 1, or the set named", function()
+	local groups = recipe_world()
+	local a = M.add_recipe{guid = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e31", debug_name = "Craft_A",
+		output = {TABLE.guid, 1}, inputs = {{WOOD, 1}}, menu = {group = "g-weapons"}}
+	eq(groups[1].sets[1].entries[2].value, a, "weapons, set 1, at the end")
+	local b = M.add_recipe{guid = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e32", debug_name = "Craft_B",
+		output = {TABLE.guid, 1}, inputs = {{WOOD, 1}}, menu = {group = "g-supplies", set = 2}}
+	eq(groups[2].sets[2].entries[4].value, b, "supplies, set 2, at the end")
 end)
 
 io.write(string.format("%d of %d passed\n", ran - failures, ran))

@@ -33,7 +33,7 @@ content.finish()   -- once, at the end: writes the names back
   player's own crafting, known once you have had wood logs); `unlock = "always"` or `unlock = {item = <GUID>}`
   overrides the unlock; `menu = {group = ..., set = 1}` picks the place (`content.menu_groups(0)` lists the own
   crafting menu's groups; Emberbrand uses the weapons group `2632c31c-37fe-48f6-b788-dfa649065edb`). Without `menu`
-  the recipe goes where the copied one is.
+  the recipe is listed right after the copied one.
 - `add_placeable` adds an object players place in their base (below).
 - `add_text(id, text)` adds a line to the English text table.
 - `add_prompt_words("My words")` adds the words of an E prompt of your own: a Lua mod's

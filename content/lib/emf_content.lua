@@ -299,10 +299,10 @@ end
 -- Adds a recipe, listed in the crafting menu.
 --   guid: fixed; debug_name; output = {guid, count}; inputs = {{guid, count}, ...} (1 to 4);
 --   like: a vanilla recipe's debugName whose settings (station, unlock, duration) are copied (default: the campfire,
---   own crafting, known from the start);
+--   own crafting, known once you have had wood logs);
 --   unlock: "always", {item = guid} (once the player has had that item) or nil (the copied recipe's);
---   menu = {group = "<groupId GUID>", set = 1}: where it is listed (see M.menu_groups); nil: the first set of the
---   copied recipe's group.
+--   menu = {group = "<groupId GUID>", set = 1}: where it is listed, at the end of that set (see M.menu_groups); nil:
+--   right after the copied recipe.
 -- Returns the recipe's id.
 function M.add_recipe(def)
 	for _, k in ipairs({"guid", "debug_name", "output", "inputs"}) do
@@ -353,28 +353,31 @@ function M.add_recipe(def)
 		local tree = menu_tree(workshop)
 		if not tree then fail("add_recipe: the crafting menu has no tree for workshop %d", workshop) end
 		local placed = false
-		for _, g in ipairs(tree.groups) do
-			local wanted = def.menu and def.menu.group
-			local here = false
-			if wanted then
-				here = g.groupId == wanted
-			else  -- the copied recipe's group
+		if def.menu then  -- the group named, its set 1 or the set named, at the end
+			for _, g in ipairs(tree.groups) do
+				if g.groupId == def.menu.group then
+					local set = g.sets[def.menu.set or 1]
+					if not set then fail("add_recipe: the group %s has no set %d", def.menu.group, def.menu.set or 1) end
+					table.insert(set.entries, {value = id})
+					placed = true
+					break
+				end
+			end
+		else  -- right after the copied recipe, in its set
+			for _, g in ipairs(tree.groups) do
 				for _, s in ipairs(g.sets) do
-					for _, e in ipairs(s.entries) do
-						if e.value == source.recipeId.value then here = true end
+					for i, e in ipairs(s.entries) do
+						if not placed and e.value == source.recipeId.value then
+							table.insert(s.entries, i + 1, {value = id})
+							placed = true
+						end
 					end
 				end
 			end
-			if here then
-				local set = g.sets[(def.menu and def.menu.set) or 1]
-				if not set then fail("add_recipe: the group has no set %d", def.menu.set) end
-				table.insert(set.entries, {value = id})
-				placed = true
-				break
-			end
 		end
 		if not placed then
-			fail("add_recipe: no menu group %s in workshop %d", tostring(def.menu and def.menu.group), workshop)
+			fail("add_recipe: %s in workshop %d", def.menu and ("no menu group " .. tostring(def.menu.group))
+				or ("the menu does not list " .. like), workshop)
 		end
 	end
 	return id
