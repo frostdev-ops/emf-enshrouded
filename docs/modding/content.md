@@ -6,8 +6,9 @@ before the game reads them. EMF's own tools then work with the new item like wit
 `take`, mods).
 
 `content\emberbrand\` is a complete example: a new sword, the **Emberbrand** (a Bronze Sword with more damage and some
-fire), with its own name in every language, and a recipe for it in the crafting menu. Read `src\mod.lua`: it uses
-EMF's helper (below) and is about 40 lines.
+fire), and a table to place in your base, the **Ember Table** (a Workbench copy that crafts nothing), each with its own
+name in every language and a recipe in the crafting menu. Read `src\mod.lua`: it uses EMF's helper (below) and is
+about 70 lines.
 
 ## The helper: `emf_content.lua`
 
@@ -33,9 +34,40 @@ content.finish()   -- once, at the end: writes the names back
   overrides the unlock; `menu = {group = ..., set = 1}` picks the place (`content.menu_groups(0)` lists the own
   crafting menu's groups; Emberbrand uses the weapons group `2632c31c-37fe-48f6-b788-dfa649065edb`). Without `menu`
   the recipe goes where the copied one is.
-- `add_text(id, text)` adds a line to the English text table; `add_prompt_words("My words")` adds the words of an E
-  prompt of your own (`emf.offer{text = "My words"}`, EMF API v25).
+- `add_placeable` adds an object players place in their base (below).
+- `add_text(id, text)` adds a line to the English text table.
+- `add_prompt_words("My words")` adds the words of an E prompt of your own: a Lua mod's
+  `emf.offer(w, id, {text = "My words"}, fn)` (EMF API v25) then shows "E My words". Without a content mod that adds
+  them, such a prompt shows "E" with an empty label (checked in game: "E Beasts").
+- New items and recipes also get their entries in the game's knowledge tables ("has had this item", "has crafted this
+  recipe"), copied from the source item's and the copied recipe's. Without them the menu keeps the new recipe marked
+  as new after crafting, and a recipe unlocked by your new item never unlocks. The helper checks those tables' layout
+  first and stops the build with a message if a game update changed it.
 - The UI parts (menu, icons, text) are skipped on the dedicated server for you.
+
+## Placeable objects
+
+```lua
+content.add_placeable{guid = <item GUID>, template_guid = <object GUID>, name_guid = ..., debug_name = "Prop_Mine",
+                      name = "My Table", description_guid = ..., description = "...",
+                      clone_of = "2f04a05f-697d-489b-a32f-76bb3439f5bc",   -- the Workbench's item
+                      strip = {content.STATION_PARTS, content.PROMPT_PARTS}}
+content.add_recipe{guid = ..., debug_name = "Craft_Prop_Mine", output = {<item GUID>, 1}, inputs = {...}}
+```
+
+- A placed object is a game **entity** made from a template (`keen::ecs::TemplateResource`). `add_placeable` copies
+  the template of the object `clone_of` places (its model, collider and behaviour) and the placing item, and points
+  the new item at the new template. No code is needed to place, save, load or pick it up.
+- `strip` removes parts of the copy. `content.STATION_PARTS` makes a Workbench copy stop being a crafting station
+  (and a "Workbench nearby" for other recipes, and a place villagers work). `content.PROMPT_PARTS` removes the game's
+  E prompt (without it, E would still run the Workbench's crafting animation). A Lua mod can then put its own prompt
+  on a placed one with `emf.offer`. A name the template does not have is an error, so a typo can't leave a second
+  Workbench behind.
+- It is saved when placed **inside a base** (outside, the game refuses to place it). Picking it up gives the item back.
+- The save keeps it by `template_guid`: that GUID is fixed forever like the item's.
+- **Removing the mod deletes placed objects for good.** When a world loads, the game silently drops every saved object
+  whose template it doesn't know, and the next autosave (30 s) writes the world without them; reinstalling the mod
+  doesn't bring them back. Placing items in inventories are deleted too.
 
 ## What a new item needs
 
@@ -55,8 +87,10 @@ All four come from the example, and the game stops or shows nothing if one is mi
 - **Everyone needs the same patch.** Each game builds its tables from its own files: the host and every player need
   the same content mod (with the same GUIDs). Nothing checks this; from the game's code, a player without it sees
   "[Invalid Item Stack]" (not tested with two players).
-- **Removing the mod removes the items.** From the game's code: it deletes stacks of unknown items when it next
-  touches them (not tested). Take the items out first, and never remove it while one is equipped.
+- **Removing the mod removes the items and placed objects.** From the game's code: it deletes stacks of unknown items
+  when it next touches them (not tested), and drops placed objects of unknown templates at the world's load (gone
+  after the next autosave). Take the items out and pick the objects up first, and never remove it while one is
+  equipped.
 - **Game updates** replace the data files. EML's loader (`dbghelp.dll`) patches again at the next start; if you
   patch offline with `emm.exe`, run it again after every update **before loading a world**, or the item is unknown
   and the game deletes saved copies when it next touches them.

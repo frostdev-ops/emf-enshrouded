@@ -1,5 +1,7 @@
 """content/lib/emf_content.lua is the helper EML content mods copy into their src; the examples carry an exact copy."""
 import pathlib
+import shutil
+import subprocess
 import unittest
 
 REPO = pathlib.Path(__file__).resolve().parents[2]
@@ -30,6 +32,16 @@ class ContentLibTests(unittest.TestCase):
         self.assertIn("itemLevelRange", text)
         example = (REPO / "content" / "emberbrand" / "src" / "mod.lua").read_text(encoding="utf-8")
         self.assertRegex(example, r"\blevel\s*=\s*\d+")
+
+
+@unittest.skipUnless(shutil.which("lua"), "needs a Lua 5.4 interpreter (lua)")
+class ContentLibLuaTests(unittest.TestCase):
+    def test_knowledge_tables(self):
+        # The game's knowledge tables are static hash maps; a wrong insert breaks every lookup (content_lib_spec.lua)
+        spec = REPO / "tests" / "tools" / "content_lib_spec.lua"
+        lib = REPO / "content" / "lib" / "emf_content.lua"
+        run = subprocess.run([shutil.which("lua"), str(spec), str(lib)], capture_output=True, text=True, timeout=60)
+        self.assertEqual(run.returncode, 0, run.stdout + run.stderr)
 
 
 if __name__ == "__main__":

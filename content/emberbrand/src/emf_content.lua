@@ -71,6 +71,83 @@ function M.finish()
 	keenglish = nil
 end
 
+-- ---- knowledge ----
+-- The game keeps what a player knows ("has had this item", "has crafted this recipe") and what a world knows in two
+-- static hash maps of keen::GameKnowledgeResource: playerKnowledge (16384 buckets) and worldKnowledge (8192). Each
+-- bucket i is {start, count} into keys and values, which are stored bucket after bucket; a key's bucket is
+-- key & (buckets - 1). Every vanilla ItemId and RecipeId has a player entry. A new item or recipe gets a copy of its
+-- source's entry, both sides (the server keeps the flags).
+
+local function knowledge() return game.assets.get_resources_by_type("keen::GameKnowledgeResource")[1].data end
+
+-- true, or false and why, when the map is not laid out as above (the game changed: nothing is inserted then).
+function M._knowledge_check(map)
+	local n = #map.entries
+	if n == 0 or n & (n - 1) ~= 0 then return false, "the bucket count is not a power of two" end
+	if #map.keys ~= #map.values then return false, "keys and values differ in number" end
+	local at = 0
+	for b = 1, n do
+		local e = map.entries[b]
+		if e.start ~= at then return false, string.format("bucket %d's start is %d, expected %d", b - 1, e.start, at) end
+		for i = at + 1, at + e.count do
+			if map.keys[i].id.value & (n - 1) ~= b - 1 then
+				return false, string.format("key 0x%08x is in bucket %d", map.keys[i].id.value, b - 1)
+			end
+		end
+		at = at + e.count
+	end
+	if at ~= #map.keys then return false, "the buckets do not hold every key" end
+	return true
+end
+
+local function knowledge_find(map, key)
+	local e = map.entries[(key & (#map.entries - 1)) + 1]
+	for i = e.start + 1, e.start + e.count do
+		if map.keys[i].id.value == key then return i end
+	end
+	return nil
+end
+
+-- Copies the entry of from_key under new_key. false when from_key has no entry (nothing changed).
+function M._knowledge_copy(map, from_key, new_key)
+	local src = knowledge_find(map, from_key)
+	if not src then return false end
+	if knowledge_find(map, new_key) then fail("the knowledge id 0x%08x is taken (a GUID used twice?)", new_key) end
+	local n = #map.entries
+	local b = (new_key & (n - 1)) + 1
+	local e = map.entries[b]
+	local at = e.start + e.count + 1
+	table.insert(map.keys, at, {id = {value = new_key}})
+	table.insert(map.values, at, map.values[src])  -- EML inserts a copy
+	map.values[at].id = {id = {value = new_key}}
+	e.count = e.count + 1
+	for i = b + 1, n do
+		local x = map.entries[i]
+		x.start = x.start + 1
+	end
+	return true
+end
+
+local checked = {}
+
+local function copy_knowledge(which, from_key, new_key)
+	local map = knowledge()[which]
+	if not checked[which] then
+		local ok, why = M._knowledge_check(map)
+		if not ok then fail("the game's %s table is not laid out as this helper expects (%s): update it", which, why) end
+		checked[which] = true
+	end
+	return M._knowledge_copy(map, from_key, new_key)
+end
+
+-- An item's entries: the player's "has had it" flag and, when the source item has one, the world's.
+function M._item_knowledge(from_id, new_id)
+	if not copy_knowledge("playerKnowledge", from_id, new_id) then
+		print(string.format("emf_content: item 0x%08x has no knowledge entry to copy: 0x%08x gets none", from_id, new_id))
+	end
+	copy_knowledge("worldKnowledge", from_id, new_id)
+end
+
 -- ---- items ----
 
 local function item_registry() return game.assets.get_resources_by_type("keen::ItemRegistryResource")[1].data end
@@ -80,11 +157,15 @@ local function item_registry() return game.assets.get_resources_by_type("keen::I
 --   clone_of: the source item's GUID; edit(item): optional changes to the copy (fields of keen::ItemInfo);
 --   level: the item's level (a number, or {min, max}). Set it for gear you craft: a loot item's range is wide (the
 --   Bronze Sword: 1 to 55) and a craft picks a level inside it; the game's crafted items have one level (its own
---   crafting weapons: 3). nil keeps the copied item's range.
+--   crafting weapons: 3). nil keeps the copied item's range;
+--   description_guid, description: optional, a text of your own instead of the copied item's.
 -- Returns the item's id.
 function M.add_item(def)
 	for _, k in ipairs({"guid", "name_guid", "debug_name", "name", "clone_of"}) do
 		if not def[k] then fail("add_item: %s is missing", k) end
+	end
+	if (def.description == nil) ~= (def.description_guid == nil) then
+		fail("add_item: description and description_guid go together")
 	end
 	local src = game.assets.get_resource(def.clone_of, "keen::ItemInfo")
 	if not src then fail("add_item: no item %s to copy (the game changed?)", def.clone_of) end
@@ -93,6 +174,7 @@ function M.add_item(def)
 	item.itemId = {value = id}
 	item.objectId = def.guid
 	item.name = def.name_guid
+	if def.description_guid then item.description = def.description_guid end
 	item.debugName = def.debug_name
 	if def.level then
 		local lo, hi = def.level, def.level
@@ -109,11 +191,75 @@ function M.add_item(def)
 		if not icon then fail("add_item: no icon on %s", def.icon_of or def.clone_of) end
 		game.assets.create_resource(icon.data, "keen::UiTextureResource", def.guid, 0)
 		M.add_text(M.id(def.name_guid), def.name)
+		if def.description then M.add_text(M.id(def.description_guid), def.description) end
 	end
 	local reg = item_registry()
 	table.insert(reg.itemRefs, def.guid)
 	table.insert(reg.dbgNames, def.debug_name)
+	M._item_knowledge(src.data.itemId.value, id)  -- "has had it" (a recipe's unlock = {item = ...} reads it)
 	return id
+end
+
+-- ---- placeable objects ----
+
+local ZERO_GUID = "00000000-0000-0000-0000-000000000000"
+
+-- The parts that make a vanilla object a crafting station that villagers use (strip them from a Workbench copy).
+M.STATION_PARTS = {"keen::ecs::Crafting", "keen::ecs::CraftingInteraction", "keen::ecs::ClientCraftingInteraction",
+	"keen::ecs::RequiredCraftingProp", "keen::ecs::ActiveNpcTarget"}
+-- The parts of the game's E prompt on an object. Without them the object is a plain decoration, and a Lua mod can put
+-- its own prompt on a placed one (emf.offer refuses an entity that has the game's).
+M.PROMPT_PARTS = {"keen::ecs::InteractionOfferRuntime", "keen::ecs::ClientInteractionOffer",
+	"keen::ecs::CheckPlayerInRange"}
+
+-- Adds an object players place in their base: a copy of a vanilla object's template (its model, collider and
+-- behaviour) without the parts you strip, and a copy of the item that places it.
+--   guid, name_guid, debug_name, name, level, description_guid, description, edit: as add_item (the item);
+--   template_guid: the object's fixed GUID (saves store placed objects by it);
+--   clone_of: the vanilla placing item's GUID (the Workbench: 2f04a05f-697d-489b-a32f-76bb3439f5bc);
+--   strip = {component type names, or lists of them}: removed from the copy, e.g. {M.STATION_PARTS, M.PROMPT_PARTS};
+--   a name the template does not have is an error; edit_template(template): optional changes to the copy
+--   (keen::ecs::TemplateResource).
+-- Saved when placed inside a base; picking it up gives the item back. Returns the item's id.
+function M.add_placeable(def)
+	for _, k in ipairs({"guid", "template_guid", "name_guid", "debug_name", "name", "clone_of"}) do
+		if not def[k] then fail("add_placeable: %s is missing", k) end
+	end
+	local isrc = game.assets.get_resource(def.clone_of, "keen::ItemInfo")
+	if not isrc then fail("add_placeable: no item %s to copy (the game changed?)", def.clone_of) end
+	local from_tpl = isrc.data.equipment.placedEntity
+	if not from_tpl or from_tpl == ZERO_GUID then
+		fail("add_placeable: the item %s places nothing (pick an item that places an object)", def.clone_of)
+	end
+	local tsrc = game.assets.get_resource(from_tpl, "keen::ecs::TemplateResource")
+	if not tsrc then fail("add_placeable: no template %s to copy (the game changed?)", from_tpl) end
+	local strip, found = {}, {}
+	for _, name in ipairs(def.strip or {}) do
+		if type(name) == "table" then  -- a list of names (M.STATION_PARTS)
+			for _, n in ipairs(name) do strip[n] = true end
+		else
+			strip[name] = true
+		end
+	end
+	for _, c in ipairs(tsrc.data.components) do
+		if strip[c.type] then found[c.type] = true end
+	end
+	for name in pairs(strip) do
+		if not found[name] then fail("add_placeable: the template %s has no part %s", tsrc.data.name, name) end
+	end
+	local tpl = game.assets.create_resource(tsrc.data, "keen::ecs::TemplateResource", def.template_guid, 0).data
+	tpl.name = def.debug_name
+	for i = #tpl.components, 1, -1 do
+		if strip[tpl.components[i].type] then table.remove(tpl.components, i) end
+	end
+	if def.edit_template then def.edit_template(tpl) end
+	local item_def = {}
+	for k, v in pairs(def) do item_def[k] = v end
+	item_def.edit = function(item)
+		item.equipment.placedEntity = def.template_guid
+		if def.edit then def.edit(item) end
+	end
+	return M.add_item(item_def)
 end
 
 -- ---- recipes ----
@@ -191,6 +337,10 @@ function M.add_recipe(def)
 	end
 	r.requiresSheltered = def.sheltered or false
 	r.completionRequirementQuery.knowledgeOrQueryId = {value = id}  -- "crafted once" is tracked per recipe
+	if not copy_knowledge("playerKnowledge", source.recipeId.value, id) then  -- that flag's entry
+		print(string.format("emf_content: recipe %s has no knowledge entry to copy: %s is not marked crafted", like,
+			def.debug_name))
+	end
 	if def.unlock == "always" then
 		r.knowledgeRequirement.knowledgeOrQueryId = {value = 0}
 		r.knowledgeRequirement.compareValue = 0
