@@ -562,6 +562,34 @@ void on_e(EmfWorld* w, uint32_t player, uint32_t entity, void* user) { /* server
   offer and comes back with a new id: find it, offer again, don't spawn another. `offer_remove` takes yours off.
   Console: `offers.list`.
 
+## v26: pictures in windows
+
+Pictures in your windows (v24): a still one, or a turning one (frames at an fps), as a widget of their own, inside a
+slot, or before a row's text. EMF decodes the PNG files when you load them and draws them with the overlay.
+
+```c
+uint32_t wolf = api->image_load("pics/wolf.png");          // a file in your mod's folder (the folder of your DLL)
+uint32_t turn = api->image_load("pics/wolf_turn");         // a folder: its .png files, sorted by name, are the frames
+uint32_t cache = api->image_load("portrait:wolf");         // EMF's portrait cache: <game>/emf/cache/portraits/wolf/
+EmfUiWidget pic = {0};
+pic.type = EMF_UI_IMAGE;  pic.icon = turn;  pic.fps = 12;  pic.height = 8;  pic.key = "portrait";  // clickable
+EmfUiWidget slot = {0};
+slot.type = EMF_UI_SLOT;  slot.icon = wolf;  slot.text = "Wolf";  slot.key = "active.1";            // text: a caption
+```
+
+- `image_load` takes a .png, or a folder of .png frames that are all the same size: at most 512 x 512 pixels, 64
+  frames. A path is relative to your mod's folder, absolute, or `portrait:<key>` (key: A-Z a-z 0-9 _ . -). The same
+  path again gives the same handle; 0 when refused (logged once per path) and on a dedicated server (no windows).
+  Pictures stay until the game closes: at most 128, 64 MB of pixels in all. Any thread.
+- `EMF_UI_IMAGE`: `height` text lines high (0 = 6, at most 40), as wide as its frames and at most the window.
+  `EmfUiWidget.icon` on a slot draws the picture inside the square (its text becomes a caption over the bottom), on a
+  row a square one line high before the text. `fps` 0..60 turns a picture of several frames (0: its first frame).
+- `EmfUiWidget` grew to 64 bytes (`fps`, `height` appended): pass `widget_size = sizeof(EmfUiWidget)`. A mod built
+  against v24 or v25 keeps working (its widgets read `fps` and `height` as 0; `icon` was reserved and 0).
+- A picture shows from the frame after the overlay put it on the GPU; until then the widget keeps its place empty.
+- Renders of the game's own creatures or items are the game's art: don't ship them. The portrait cache is written on
+  the player's PC from their own game files.
+
 ## Lua
 
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
