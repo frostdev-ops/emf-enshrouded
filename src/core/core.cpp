@@ -44,6 +44,7 @@
 #include "teleport.h"
 #include "component_service.h"
 #include "offers.h"
+#include "net/net_service.h"
 #include "spawn.h"
 #include "world_settings_glue.h"
 #include "world_settings_service.h"
@@ -1153,6 +1154,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_builtin.player = [] { return emf::core::command_player(emf::core::api_table()->local_player()); };
     g_state->settings_backend = std::make_unique<emf::core::FileIniBackend>(dir + L"\\emf\\config");
     g_state->portrait_dir = dir + L"\\emf\\cache\\portraits";  // v26 image_load("portrait:<key>")
+    static std::unique_ptr<emf::core::net::NetService> net;      // v27 mod messages (in process for now)
+    net = std::make_unique<emf::core::net::NetService>(emf::core::net_deps(g_state.get()));
+    g_state->net = net.get();
     g_state->core_settings_backend = std::make_unique<emf::core::CoreIniBackend>(dir + L"\\emf\\emf_core.ini");
     g_state->settings_route = std::make_unique<emf::core::RoutingIniBackend>(g_state->core_settings_backend.get(),
                                                                               g_state->settings_backend.get());

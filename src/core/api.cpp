@@ -30,6 +30,7 @@
 #include "teleport.h"
 #include "component_service.h"
 #include "offers.h"
+#include "net/net_service.h"
 #include "overlay/window_model.h"
 #include "world_settings_service.h"
 #include "emf/generated/components.hpp"
@@ -1586,6 +1587,102 @@ bool api_offer_active(EmfWorld*, uint32_t entity) {
     return g_state->offers->active(entity, module_name_of(_ReturnAddress()));
 }
 
+// ---- v27 mod messages ----
+
+bool guarded_net_call(EmfNetCallback cb, EmfWorld* w, const EmfNetFrom* f, const void* d, uint32_t n, void* user) {
+    __try {
+        cb(w, f, d, n, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// A mod's C callback as the service's handler (a fault is caught and logged once; that callback is not called again).
+net::NetHandler net_handler(EmfNetCallback cb, void* user, const std::string& channel) {
+    if (!cb) return nullptr;
+    auto broken = std::make_shared<std::atomic<bool>>(false);
+    return [cb, user, channel, broken](EmfWorld* w, const net::NetFrom& f, const std::string& data) {
+        if (broken->load()) return;
+        EmfNetFrom from{};
+        from.size = sizeof from;
+        from.player = f.player;
+        from.account = f.account;
+        from.peer_version = f.peer_version;
+        from.admin = f.admin ? 1 : 0;
+        from.local = f.local ? 1 : 0;
+        if (!guarded_net_call(cb, w, &from, data.data(), static_cast<uint32_t>(data.size()), user)) {
+            broken->store(true);
+            core_log("a net callback for " + channel + " in " + module_name_of(reinterpret_cast<const void*>(cb)) +
+                     " faulted: it is not called again");
+        }
+    };
+}
+
+void net_refused(const std::string& mod, const char* what, const std::string& why) {
+    log_once(std::string(what) + " refused (" + mod + "): " + why);
+}
+
+bool api_net_channel(const EmfNetChannel* def) {
+    const std::string mod = module_name_of(_ReturnAddress());
+    if (!g_state || !g_state->net) return false;
+    if (!def || def->size < sizeof(EmfNetChannel) || !def->name) {
+        net_refused(mod, "net_channel", "no definition, its size field too small, or no name");
+        return false;
+    }
+    net::ChannelDef d;
+    d.name = def->name;
+    d.version = def->version;
+    d.flags = def->flags;
+    d.max_size = def->max_size;
+    d.per_10s = def->per_10s;
+    d.on_server = net_handler(def->on_server, def->user, d.name);
+    d.on_player = net_handler(def->on_player, def->user, d.name);
+    std::string why;
+    if (!g_state->net->add_channel(mod, d, &why)) {
+        net_refused(mod, "net_channel", why);
+        return false;
+    }
+    return true;
+}
+
+bool net_data(const void* data, uint32_t size, std::string* out) {
+    if (size && !data) return false;
+    if (size > net::kMaxMessage) return false;
+    out->assign(static_cast<const char*>(data ? data : ""), size);
+    return true;
+}
+
+bool api_net_to_server(const char* channel, const void* data, uint32_t size) {
+    const std::string mod = module_name_of(_ReturnAddress());
+    std::string d, why;
+    if (!g_state || !g_state->net || !channel || !net_data(data, size, &d)) return false;
+    if (!g_state->net->to_server(mod, channel, d, &why)) {
+        net_refused(mod, "net_to_server", why);
+        return false;
+    }
+    return true;
+}
+
+bool api_net_to_player(EmfWorld*, uint32_t player, const char* channel, const void* data, uint32_t size) {
+    const std::string mod = module_name_of(_ReturnAddress());
+    std::string d, why;
+    if (!g_state || !g_state->net || !channel || !net_data(data, size, &d)) return false;
+    return g_state->net->to_player(mod, player, channel, d, &why);  // not a peer: false without a log (normal)
+}
+
+uint32_t api_net_to_players(EmfWorld*, const char* channel, const void* data, uint32_t size) {
+    const std::string mod = module_name_of(_ReturnAddress());
+    std::string d;
+    if (!g_state || !g_state->net || !channel || !net_data(data, size, &d)) return 0;
+    return g_state->net->to_players(mod, channel, d);
+}
+
+uint32_t api_net_peer(EmfWorld*, uint32_t player, const char* channel) {
+    if (!g_state || !g_state->net || !channel) return 0;
+    return g_state->net->peer(player, channel);
+}
+
 // ---- v26 pictures in windows ----
 
 // The folder of the module that holds `address` (the mod calling the API), without a trailing slash.
@@ -1994,6 +2091,11 @@ const EmfApi kApi = {
     api_offer_remove,
     api_image_load,
     api_offer_active,
+    api_net_channel,
+    api_net_to_server,
+    api_net_to_player,
+    api_net_to_players,
+    api_net_peer,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {
@@ -2168,6 +2270,21 @@ void post_wheel_choice(const WheelRequest& request, int choice) {
         delete j;  // before the call: a faulting callback must not leak it
         copy.cb(w, copy.choice, copy.user);
     }, job);
+}
+
+net::NetDeps net_deps(CoreState* s) {
+    net::NetDeps d;
+    d.hosted = [](uint32_t* id) { return hosted_with_local_player(id); };
+    d.post = [s](uint8_t kind, std::function<void(EmfWorld*)> fn) {
+        using Fn = std::function<void(EmfWorld*)>;
+        s->dispatcher.post(kind, [](EmfWorld* w, void* u) {
+            const std::unique_ptr<Fn> f(static_cast<Fn*>(u));  // freed even when the handler faults (it is guarded)
+            (*f)(w);
+        }, new Fn(std::move(fn)));
+    };
+    d.now_ms = [s] { return s->now_ms ? s->now_ms() : GetTickCount64(); };
+    d.log = [](const std::string& line) { core_log(line); };
+    return d;
 }
 
 }  // namespace emf::core

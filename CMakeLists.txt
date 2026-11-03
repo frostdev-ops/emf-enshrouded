@@ -525,6 +525,7 @@ add_executable(emf_tests
   tests/test_net_line.cpp
   tests/test_net_peers.cpp
   tests/test_net_service.cpp
+  tests/test_api_net.cpp
   tests/test_pattern_find.cpp
   tests/test_hook_table.cpp
   tests/test_hook_chain_real.cpp
