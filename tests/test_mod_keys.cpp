@@ -5,6 +5,7 @@
 
 #include <doctest.h>
 
+#include <set>
 #include <string>
 
 #include "game_bindings.h"
@@ -12,10 +13,17 @@
 TEST_CASE("shipped mods: no two mods take the same key by default") {
     const auto keys = game_bindings::shipped_keys();
     REQUIRE(keys.size() >= 5);  // the source tree was found
+    // E, the game's interact key, is shared by the keys that act only on the mod's own prop under the crosshair
+    // (where the game's E does nothing): Bounty Board's board, Beastmaster's stable.
+    const std::set<std::string> at_own_prop = {"bounty.read_key", "beastmaster.stable_key"};
     for (const auto& [vk, users] : keys) {
         std::string list;
         for (const auto& u : users) list += (list.empty() ? "" : ", ") + u;
         CAPTURE(list);
+        if (vk == 'E') {
+            for (const auto& u : users) CHECK(at_own_prop.count(u) == 1u);
+            continue;
+        }
         CHECK(users.size() == 1);
     }
 }

@@ -295,6 +295,14 @@ function P:dismiss(world, account, beast)
 	return beast.name .. " goes home."
 end
 
+-- Release (the Beasts window): the beast leaves the collection for good; a beast that is out leaves the world as when
+-- it is sent home.
+function P:release(world, account, beast)
+	if beast.out then self:dismiss(world, account, beast) end
+	self.env.beasts():remove(account, beast)
+	self.env.save()
+end
+
 -- beastmaster.attack: every beast of `account` that is out attacks `target`.
 function P:attack(world, account, target)
 	local n = 0

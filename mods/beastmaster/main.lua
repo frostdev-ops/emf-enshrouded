@@ -11,6 +11,7 @@ local rare_mod = require("rare")
 local loyalty = require("loyalty")
 local slots = require("slots")
 local stable_mod = require("stable")
+local window_mod = require("beasts_window")
 
 emf.emits({ "StartGuardingEvent", "AddThreatTargetEvent" })
 
@@ -18,6 +19,7 @@ local beasts = roster.new()  -- every player's collection, kept with the world
 local loaded = false          -- the world's data has arrived (saving before that could overwrite it)
 local last_hit = {}           -- player entity -> {id, at}: what hit them last (attack's choice without a crosshair target)
 local taming                  -- the taming channels (made below; reset with each world)
+local window                  -- the Beasts window (made below)
 local next_hud = 0            -- when the HUD line is written next (reset with each world: the clock may restart)
 
 local function setting(key)
@@ -70,6 +72,7 @@ local rare = rare_mod.new()
 emf.on_world_data(function(world, text)
 	beasts = roster.parse(text)
 	stables:load(text)
+	window:reset()
 	pack:reset()
 	health:reset()
 	wild:reset()
@@ -105,6 +108,33 @@ local function state_text(b, aside)
 	if b.rest > 0 then return string.format("rests %d:%02d", math.floor(b.rest / 60), math.floor(b.rest % 60)) end
 	return "at home"
 end
+
+-- The level of a player's character.
+local function level_of(world, player)
+	local l = player and world:get("Level", player)
+	return l and l.dataStorage and l.dataStorage[1] or 0
+end
+
+-- the Beasts window (the host, at a stable)
+local STABLE_REACH_M = 4  -- E opens the window with a stable under the crosshair this close
+window = window_mod.new({
+	setting = setting,
+	now = now,
+	beasts = function() return beasts end,
+	save = save,
+	level = level_of,
+	state = function(b, account) return state_text(b, pack:is_aside(account)) end,
+	dismiss = function(world, account, b) return pack:dismiss(world, account, b) end,
+	release = function(world, account, b) return pack:release(world, account, b) end,
+})
+
+emf.on_key("stable_key", function(world)
+	if not world:is_server() or not loaded then return end
+	local player = emf.local_player()
+	if not player or player == 0 then return end
+	if not stables:under_crosshair(world, player, STABLE_REACH_M) then return end
+	window:show(world, player)
+end)
 
 command("list", ": your beasts", function(world, args)
 	local _, account = who(world)
@@ -276,12 +306,6 @@ command("aside", ": your beasts out step aside (leave for now) or come back; whi
 		emf.reply(account and pack:toggle_aside(world, account, player) or "Your account is not known yet.")
 	end)
 
--- The level of a player's character.
-local function level_of(world, player)
-	local l = player and world:get("Level", player)
-	return l and l.dataStorage and l.dataStorage[1] or 0
-end
-
 command("slots", ": your active slots (how many beasts can be out) and when the next one opens", function(world, args)
 	local player = who(world)
 	local lvl = level_of(world, player)
@@ -433,6 +457,7 @@ local function update_hud(world)
 	end
 	local head = account and string.format("Beasts (%s): ", beasts:mode(account)) or "Beasts: "
 	emf.hud("out", #parts > 0 and (head .. table.concat(parts, ", ")) or "", "bottom_left")
+	window:refresh(world)
 	publish(world)  -- the shared wheel shows what the other class mod's key opens with
 end
 

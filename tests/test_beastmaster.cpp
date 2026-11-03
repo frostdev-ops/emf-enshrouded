@@ -29,6 +29,7 @@ struct BeastRig : ModRig {
           }) {
         with_attributes(r.api);  // a v18+ core: health, mana and damage through the game's attributes
         with_teleport(r.api);    // a v20 core
+        with_windows(r.api);     // a v24 core
     }
     std::string saved() { return slurp(data); }
     // Player `p`'s camera at (x, y, z) looking along `yaw_deg` (0 = +z, 90 = +x), level.
@@ -1028,6 +1029,182 @@ TEST_CASE("stable: unmark takes the mark off; without camera data mark takes the
     CHECK(b.reply("beastmaster.stable unmark") == "No marked stable within 8 m.");
     place(b.r.fake, 960, 0, 10, 6);  // too far for a mark without camera data
     CHECK(b.reply("beastmaster.stable mark").rfind("Look at a prop", 0) == 0);
+}
+
+namespace {
+constexpr uint32_t kE = 0x45;  // the stable_key default
+// A prop 3 m in front of player 1, marked as a stable, with player 1 looking at it.
+void at_stable(BeastRig& b) {
+    stable_prop(b, 960, 0, 10, 3, nullptr);
+    b.look(1, 0, 11.5, 0, 0);
+    REQUIRE(b.reply("beastmaster.stable mark").rfind("Marked: ", 0) == 0);
+}
+// The Beasts window as last drawn: the last update, else the window opened.
+const Fake::Win& shown(BeastRig& b) {
+    return b.r.fake.window_updates.empty() ? b.r.fake.windows.back() : b.r.fake.window_updates.back();
+}
+int row_at(const Fake::Win& w, const std::string& key) {
+    for (size_t i = 0; i < w.keys.size(); ++i)
+        if (w.keys[i] == key) return static_cast<int>(i);
+    return -1;
+}
+std::string text_at(const Fake::Win& w, const std::string& key) {
+    const int i = row_at(w, key);
+    return i < 0 ? "<none>" : w.texts[static_cast<size_t>(i)];
+}
+uint32_t flags_at(const Fake::Win& w, const std::string& key) {
+    const int i = row_at(w, key);
+    return i < 0 ? 0xFFFFFFFFu : w.widgets[static_cast<size_t>(i)].flags;
+}
+bool shows(const Fake::Win& w, const std::string& part) {
+    for (const auto& t : w.texts)
+        if (t.find(part) != std::string::npos) return true;
+    return false;
+}
+// A click on the open window's row or button `key` (the core's event, on the server world).
+void click(BeastRig& b, const std::string& key, uint32_t kind = EMF_UI_CLICK) {
+    REQUIRE(!b.r.fake.windows.empty());
+    const Fake::Win w = b.r.fake.windows.back();
+    EmfUiEvent e{};
+    e.size = sizeof e;
+    e.kind = kind;
+    e.window = w.id.c_str();
+    e.key = key.c_str();
+    e.from_key = "";
+    e.reason = EMF_UI_BY_PLAYER;
+    w.cb(kServer, &e, w.user);
+}
+// Player 1's beasts from a save: Fang (wolf, active), Tusk (boar), Rex (hound); the world has had a stable.
+void three_beasts(BeastRig& b) {
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\nb 0x00000000000000aa boar 0 0 Tusk\n"
+                  "b 0x00000000000000aa hound 0 0 Rex\na 0x00000000000000aa Fang\ns 1\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+}
+}  // namespace
+
+TEST_CASE("stable: E at a stable opens the Beasts window with the slots and the stable list") {
+    BeastRig b;  // level 10: two slots, slot 3 at level 20, slot 4 at level 30
+    three_beasts(b);
+    at_stable(b);
+    press(b, kE);
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    const Fake::Win& w = b.r.fake.windows.back();
+    CHECK(w.id == "beastmaster.stable");
+    CHECK(w.title == "Beasts");
+    CHECK(w.close_key == kE);
+    CHECK(w.place == EMF_UI_PLACE_CENTRE);
+    CHECK(w.kind == EMF_WORLD_SERVER);
+    CHECK(shows(w, "Active 1/2"));
+    CHECK(text_at(w, "active.1") == "Fang");
+    CHECK((flags_at(w, "active.2") & EMF_UI_EMPTY) != 0u);
+    CHECK(text_at(w, "active.3") == "Level 20");
+    CHECK((flags_at(w, "active.3") & EMF_UI_LOCKED) != 0u);
+    CHECK(text_at(w, "active.4") == "Level 30");
+    CHECK(shows(w, "Stable 3/8"));
+    CHECK(text_at(w, "beast.Fang") == "Fang (wolf, loyalty 1, at home, active)");
+    CHECK(text_at(w, "beast.Tusk") == "Tusk (boar, loyalty 1, at home)");
+    CHECK(text_at(w, "beast.Rex") == "Rex (hound, loyalty 1, at home)");
+    for (const char* button : {"make_active", "store", "release"})  // nothing selected yet
+        CHECK((flags_at(w, button) & EMF_UI_DISABLED) != 0u);
+}
+
+TEST_CASE("stable: Make active puts the selected beast into a free slot; Store takes it out (sent home if out)") {
+    BeastRig b;
+    three_beasts(b);
+    b.spawnable(1);
+    REQUIRE(b.reply("beastmaster.call Fang").find("comes") != std::string::npos);
+    b.seconds(1);
+    const uint32_t fang = 1234;
+    at_stable(b);
+    press(b, kE);
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    click(b, "beast.Tusk");
+    CHECK((flags_at(shown(b), "beast.Tusk") & EMF_UI_SELECTED) != 0u);
+    CHECK((flags_at(shown(b), "make_active") & EMF_UI_DISABLED) == 0u);
+    CHECK((flags_at(shown(b), "store") & EMF_UI_DISABLED) != 0u);  // not active
+    click(b, "make_active");
+    CHECK(text_at(shown(b), "active.2") == "Tusk");
+    CHECK(shows(shown(b), "Active 2/2"));
+    CHECK(shows(shown(b), "Tusk is active."));
+    CHECK(b.saved().find("a 0x00000000000000aa Tusk") != std::string::npos);
+    click(b, "beast.Rex");  // both slots taken
+    click(b, "make_active");
+    CHECK(shows(shown(b), "No free active slot: store a beast first."));
+    CHECK(b.saved().find("a 0x00000000000000aa Rex") == std::string::npos);
+    click(b, "active.1");  // a slot selects its beast
+    CHECK((flags_at(shown(b), "beast.Fang") & EMF_UI_SELECTED) != 0u);
+    click(b, "store");
+    CHECK(shows(shown(b), "Fang goes to the stable."));
+    CHECK(text_at(shown(b), "active.1") == "Tusk");
+    CHECK((flags_at(shown(b), "active.2") & EMF_UI_EMPTY) != 0u);
+    CHECK(b.saved().find("a 0x00000000000000aa Fang") == std::string::npos);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), fang) != b.r.fake.destroyed.end());
+    CHECK(text_at(shown(b), "beast.Fang") == "Fang (wolf, loyalty 1, at home)");
+}
+
+TEST_CASE("stable: Release needs a second click within 5 s, removes the beast (its body too when out) and frees its slot") {
+    BeastRig b;
+    three_beasts(b);
+    b.spawnable(1);
+    REQUIRE(b.reply("beastmaster.call Fang").find("comes") != std::string::npos);
+    b.seconds(1);
+    at_stable(b);
+    press(b, kE);
+    click(b, "beast.Fang");
+    click(b, "release");
+    CHECK(shows(shown(b), "Click Release again within 5 s to let Fang go for good."));
+    CHECK(b.saved().find("Fang") != std::string::npos);
+    b.seconds(6);  // too late: asks again
+    click(b, "release");
+    CHECK(shows(shown(b), "Click Release again within 5 s"));
+    click(b, "release");
+    CHECK(shows(shown(b), "Fang is gone: you let it go."));
+    CHECK(b.saved().find("Fang") == std::string::npos);
+    CHECK(std::find(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), 1234u) != b.r.fake.destroyed.end());
+    CHECK(row_at(shown(b), "beast.Fang") == -1);
+    CHECK((flags_at(shown(b), "active.1") & EMF_UI_EMPTY) != 0u);
+    CHECK(shows(shown(b), "Stable 2/8"));
+    for (const char* button : {"make_active", "store", "release"})  // the selection went with it
+        CHECK((flags_at(shown(b), button) & EMF_UI_DISABLED) != 0u);
+}
+
+TEST_CASE("stable: the window redraws when a beast falls; once closed it is not drawn again") {
+    BeastRig b;
+    three_beasts(b);
+    b.spawnable(1);
+    REQUIRE(b.reply("beastmaster.call Fang").find("comes") != std::string::npos);
+    b.seconds(1);
+    at_stable(b);
+    press(b, kE);
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    CHECK(text_at(shown(b), "beast.Fang") == "Fang (wolf, loyalty 1, out, active)");
+    deliver(b.r.fake, "EntityDiedEvent", died_event(1234));
+    b.seconds(2);
+    CHECK(text_at(shown(b), "beast.Fang").find("Fang (wolf, loyalty 1, rests ") == 0);
+    CHECK(row_at(shown(b), "beast.Tusk") >= 0);
+    click(b, "", EMF_UI_CLOSED);
+    const size_t drawn = b.r.fake.window_updates.size();
+    b.seconds(3);
+    CHECK(b.r.fake.window_updates.size() == drawn);
+}
+
+TEST_CASE("stable: E away from a stable, or looking away from it, opens nothing") {
+    BeastRig b;
+    three_beasts(b);
+    press(b, kE);  // no stable in the world
+    CHECK(b.r.fake.windows.empty());
+    stable_prop(b, 960, 0, 10, 3, nullptr);
+    b.look(1, 0, 11.5, 0, 0);
+    REQUIRE(b.reply("beastmaster.stable mark").rfind("Marked: ", 0) == 0);
+    b.look(1, 0, 11.5, 0, 180);  // looking away
+    press(b, kE);
+    CHECK(b.r.fake.windows.empty());
+    place(b.r.fake, 1, 0, 10, -6);  // 9 m away, looking at it
+    b.look(1, 0, 11.5, -6, 0);
+    press(b, kE);
+    CHECK(b.r.fake.windows.empty());
 }
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
     BeastRig b;
