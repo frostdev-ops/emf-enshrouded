@@ -4,18 +4,25 @@
 --   - a prop the host marked (beastmaster.stable mark): kept with the world by its place and model, as lines
 --     "k <x> <y> <z> <model or ->" in the world's data, until the host takes the mark off.
 -- The server world is searched a slice at a time (SCAN_PER_STEP entities per step, a new search every RESCAN_S
--- seconds). Render models are client-side: on the host the client world is searched for the models too (the host's two
--- worlds share entity ids); a dedicated server has no client world, so there only marked props count unless its server
--- world has the model.
+-- seconds) for flame altars and props with a stable's model. Render models are client-side: on the host the client
+-- world is searched for the models too, every CLIENT_RESCAN_S (a bed just built counts within seconds, one taken down
+-- stops counting as fast), and its beds count by their place; a dedicated server has no client world, so there only
+-- marked props count unless its server world has the model.
 local aim = require("aim")
 
 local M = {}
 
--- The render model of the object players build as a stable, and the name the list shows for it.
-M.MODELS = { ["b5ab1e00-0000-4000-8000-000000000001"] = "Stable" }
+-- The render models of the props players build as a stable, and the names the list shows: the game's animal beds (the
+-- straw beds for farm animals; items Animal_Farm_Housing_Sleeping_Bed and ..._YAK_Sanddigger), which have no E use of
+-- their own.
+M.MODELS = {
+	["daeb81bb-8398-4128-9107-c75b2e3e7d5b"] = "Animal bed",        -- animalprops_farm_animal_sleep_01
+	["7dd9139a-fba7-4e60-8b5a-fa853c250ef7"] = "Large animal bed",  -- animalprops_farm_animal_sleep_large_01
+}
 
 local SCAN_PER_STEP = 250  -- entities looked at per step while a world is searched
-local RESCAN_S = 30        -- s between two searches (a new stable counts within a minute)
+local RESCAN_S = 30        -- s between two searches of the server world (flame altars)
+local CLIENT_RESCAN_S = 5  -- s between two searches of the host's client world (the beds' render models)
 local BASE_M = 80          -- m: a built stable is within this of a flame altar (horizontally)
 local SAME_M = 1           -- m: two places within this are one
 local MARK_REACH_M = 8     -- m: mark and unmark reach this far
@@ -60,9 +67,11 @@ end
 function S:reset()
 	self.walk, self.walk_after = nil, 0
 	self.cwalk, self.cwalk_after = nil, 0
-	self.client_models = {}  -- entity -> {model, x, y, z}: what the host's client world showed
+	self.client_models = {}  -- entity -> {model, x, y, z}: the beds the host's client world showed in its last search
 	self.client_steps = 0
-	self.found = {}          -- the built stables the last search found: {id, x, y, z}
+	self.altars = {}         -- the flame altars the last search of the server world found: {x, z}
+	self.server_found = {}   -- the props with a stable's model the server world itself showed: {id, x, y, z, name}
+	self.found = {}          -- the built stables (in a base): {id, x, y, z, name}
 	self.t = 0               -- the server world's last time
 	self.stables = {}
 end
@@ -86,7 +95,8 @@ function S:serialize()
 	return table.concat(lines, "\n")
 end
 
--- The model of an entity's template: on this world, else what the host's client world showed for it at its place.
+-- The model of an entity's template: on this world, else what the host's client world showed for it at its place
+-- (for the log of a mark).
 function S:model_of(world, id)
 	local ok, t = pcall(world.template, world, "ModelResource", id)
 	if ok and t then return t.model end
@@ -131,7 +141,8 @@ function S:walk_step(world)
 			local x, _, z = world:position(id)
 			if x then w.altars[#w.altars + 1] = { x = x, z = z } end
 		end
-		local model = self:model_of(world, id)
+		local okm, t = pcall(world.template, world, "ModelResource", id)
+		local model = okm and t and t.model
 		if model and M.MODELS[model] then
 			local x, y, z = world:position(id)
 			if x then w.found[#w.found + 1] = { id = id, x = x, y = y, z = z, name = M.MODELS[model] } end
@@ -139,20 +150,37 @@ function S:walk_step(world)
 	end
 	w.i = last + 1
 	if w.i <= #w.ids then return end
-	for id in pairs(self.client_models) do  -- entities the server world no longer has
-		if not w.present[id] then self.client_models[id] = nil end
+	self.altars, self.server_found = w.altars, w.found
+	self.walk = nil
+	self.walk_after = self.t + RESCAN_S
+	self:refound(world)
+end
+
+-- The built stables from the server world's props and the client world's beds (one place counts once), those in a
+-- base; then the list.
+function S:refound(world)
+	local all = {}
+	for _, f in ipairs(self.server_found) do all[#all + 1] = f end
+	local ids = {}
+	for id in pairs(self.client_models) do ids[#ids + 1] = id end
+	table.sort(ids)
+	for _, id in ipairs(ids) do
+		local c = self.client_models[id]
+		local twice = false
+		for _, f in ipairs(all) do
+			if dist(f, c.x, c.y, c.z) <= SAME_M then twice = true end
+		end
+		if not twice then all[#all + 1] = { id = id, x = c.x, y = c.y, z = c.z, name = M.MODELS[c.model] } end
 	end
 	self.found = {}
-	for _, f in ipairs(w.found) do
-		for _, a in ipairs(w.altars) do
+	for _, f in ipairs(all) do
+		for _, a in ipairs(self.altars) do
 			if (a.x - f.x) ^ 2 + (a.z - f.z) ^ 2 <= BASE_M * BASE_M then
 				self.found[#self.found + 1] = f
 				break
 			end
 		end
 	end
-	self.walk = nil
-	self.walk_after = self.t + RESCAN_S
 	self:rebuild(world)
 end
 
@@ -169,7 +197,7 @@ function S:client_step(world)
 	if self.client_steps > CLIENT_STEPS then return end
 	if not self.cwalk then
 		if self.t < self.cwalk_after then return end
-		self.cwalk = { ids = world:entities(), i = 1, new = false }
+		self.cwalk = { ids = world:entities(), i = 1, models = {} }
 	end
 	local w = self.cwalk
 	local last = math.min(#w.ids, w.i + SCAN_PER_STEP - 1)
@@ -178,17 +206,25 @@ function S:client_step(world)
 		local ok, t = pcall(world.template, world, "ModelResource", id)
 		if ok and t and M.MODELS[t.model] then
 			local x, y, z = world:position(id)
-			if x then
-				if not self.client_models[id] then w.new = true end
-				self.client_models[id] = { model = t.model, x = x, y = y, z = z }
-			end
+			if x then w.models[id] = { model = t.model, x = x, y = y, z = z } end
 		end
 	end
 	w.i = last + 1
 	if w.i > #w.ids then
-		if w.new and not self.walk then self.walk_after = 0 end  -- a new one: the server world is searched next step
+		-- a bed built, taken down or moved: the server world is searched now (its end decides the stables again, with
+		-- this list)
+		local changed = false
+		for id, c in pairs(w.models) do
+			local old = self.client_models[id]
+			if not old or old.model ~= c.model or dist(old, c.x, c.y, c.z) > SAME_M then changed = true end
+		end
+		for id in pairs(self.client_models) do
+			if not w.models[id] then changed = true end
+		end
+		self.client_models = w.models
+		if changed and not self.walk then self.walk_after = 0 end
 		self.cwalk = nil
-		self.cwalk_after = self.t + RESCAN_S
+		self.cwalk_after = self.t + CLIENT_RESCAN_S
 	end
 end
 
@@ -286,11 +322,14 @@ function S:unmark(world, player)
 	return string.format("Unmarked: the prop at %d, %d, %d is no stable now.", round(m.x), round(m.y), round(m.z))
 end
 
--- beastmaster.stable list: this world's stables (the distance from `player` when there is one). The reply.
-function S:list_text(world, player)
+-- beastmaster.stable list: this world's stables (the distance from `player` when there is one); `had`: the world has
+-- had a stable. The reply.
+function S:list_text(world, player, had)
 	if #self.stables == 0 then
-		return "No stable in this world yet: build one in your base, or mark a prop with beastmaster.stable mark " ..
-			"(a new one counts within a minute)."
+		local how = "build an animal bed (the straw bed for farm animals) in your base, or mark a prop with " ..
+			"beastmaster.stable mark."
+		if had then return "No stable in this world now (there was one: only active beasts can be called): " .. how end
+		return "No stable in this world yet: " .. how
 	end
 	local x, y, z
 	if player and player ~= 0 then x, y, z = world:position(player) end

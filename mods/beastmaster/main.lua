@@ -633,7 +633,7 @@ emf.command("stable", "mark | unmark | list: the prop you look at is a stable; t
 		emf.reply(word == "mark" and stables:mark(world, player) or stables:unmark(world, player))
 		if #stables.marks ~= count then save() end
 	elseif word == "list" then
-		emf.reply(stables:list_text(world, player))
+		emf.reply(stables:list_text(world, player, beasts:stabled()))
 	else
 		emf.reply("beastmaster.stable mark | unmark | list")
 	end
