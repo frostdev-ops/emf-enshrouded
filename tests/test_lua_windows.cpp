@@ -164,3 +164,84 @@ TEST_CASE("lua 1.13: a reload closes the script's open window; its late events r
     CHECK_FALSE(logged("old click"));
     CHECK_FALSE(logged("old closed"));
 }
+
+namespace {
+const char* kPictures =
+    "emf.command('img', '', function(w, args)\n"
+    "  local ok, h = pcall(emf.image, args[1])\n"
+    "  emf.reply(ok and tostring(h) or ('error ' .. tostring(h)))\n"
+    "end)\n"
+    "emf.command('show', '', function(w, args)\n"
+    "  local h = emf.image('pics/wolf.png')\n"
+    "  emf.reply(tostring(emf.window('pics', {rows = {\n"
+    "    {image = h, height = 8, fps = 12, key = 'portrait', tooltip = 'Wolf'},\n"
+    "    {slot = 'active.1', text = 'Wolf', icon = h, fps = 6},\n"
+    "    {row = 'beast.Wolf', text = 'Wolf (ready)', icon = h},\n"
+    "  }}, function() end)))\n"
+    "end)\n";
+}  // namespace
+
+TEST_CASE("lua 1.15: emf.image reads the script's own folder or the portrait cache; other paths are refused") {
+    Rig r(L"luaimg");
+    with_windows(r.api);
+    with_images(r.api);
+    add_script(r.dir, "wi", kPictures);
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("wi.img pics/wolf.png");
+    REQUIRE(r.fake.replies.size() == 1);
+    CHECK(r.fake.replies[0] == "50");
+    REQUIRE(r.fake.images_loaded.size() == 1u);
+    const std::string loaded = r.fake.images_loaded[0];
+    CHECK(loaded.size() > 2);  // <mods>\wi\pics\wolf.png: absolute, in the mod's folder
+    CHECK(loaded[1] == ':');
+    const std::string tail = "\\wi\\pics\\wolf.png";
+    CHECK(loaded.size() > tail.size());
+    CHECK(loaded.compare(loaded.size() - tail.size(), tail.size(), tail) == 0);
+    r.run_command("wi.img portrait:wolf_t1");
+    CHECK(r.fake.replies[1] == "51");
+    CHECK(r.fake.images_loaded[1] == "portrait:wolf_t1");
+    for (const char* bad : {"../other/x.png", "pics/../../x.png", "C:/x.png", "/x.png", "\\\\server\\x.png"}) {
+        r.fake.replies.clear();
+        r.run_command(std::string("wi.img ") + bad);
+        REQUIRE(r.fake.replies.size() == 1);
+        CHECK_MESSAGE(r.fake.replies[0].rfind("error", 0) == 0, bad);
+    }
+    CHECK(r.fake.images_loaded.size() == 2u);  // refused paths never reach the core
+    r.fake.image_ok = false;
+    r.fake.replies.clear();
+    r.run_command("wi.img pics/missing.png");
+    CHECK(r.fake.replies[0] == "nil");
+}
+
+TEST_CASE("lua 1.15: rows with image, icon, fps and height become the v26 widgets; a v25 core gives nil") {
+    Rig r(L"luaimg2");
+    with_windows(r.api);
+    with_images(r.api);
+    add_script(r.dir, "wp", kPictures);
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("wp.show");
+    REQUIRE(r.fake.windows.size() == 1u);
+    const auto& w = r.fake.windows[0].widgets;
+    REQUIRE(w.size() == 3u);
+    CHECK(w[0].type == EMF_UI_IMAGE);
+    CHECK(w[0].icon == 50u);
+    CHECK(w[0].height == 8.0f);
+    CHECK(w[0].fps == 12u);
+    CHECK(r.fake.windows[0].keys[0] == "portrait");
+    CHECK(w[1].type == EMF_UI_SLOT);
+    CHECK(w[1].icon == 50u);
+    CHECK(w[1].fps == 6u);
+    CHECK(w[2].type == EMF_UI_ROW);
+    CHECK(w[2].icon == 50u);
+
+    Rig old(L"luaimg3");
+    with_windows(old.api);  // a v25 core: no image_load
+    add_script(old.dir, "wo", kPictures);
+    Host h2(&old.api, old.dir);
+    h2.load_all();
+    old.run_command("wo.img pics/wolf.png");
+    REQUIRE(old.fake.replies.size() == 1);
+    CHECK(old.fake.replies[0] == "nil");
+}

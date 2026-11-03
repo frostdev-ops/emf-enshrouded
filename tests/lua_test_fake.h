@@ -131,6 +131,10 @@ struct Fake {
     bool offer_remove_ok = true;  // false: the core had dropped the offer already
     uint32_t next_offer_spawn = 9000;
     std::vector<std::string> windows_closed;
+    // v26 pictures: the paths image_load got, its answers
+    std::vector<std::string> images_loaded;
+    bool image_ok = true;
+    uint32_t next_image = 50;
     // v21 world settings: two settings, what set and reset were asked (key as passed, "" for NULL; flags), the
     // change listeners; ws_world false = no hosted world (every call answers false)
     struct WsField {
@@ -447,6 +451,12 @@ bool f_offer_remove(EmfWorld*, uint32_t entity) {
     g->offers_removed.push_back(entity);
     return g->offer_remove_ok;
 }
+uint32_t f_image_load(const char* path) {
+    g->images_loaded.emplace_back(path ? path : "");
+    return g->image_ok ? g->next_image++ : 0;
+}
+// A v26 core (fake_api leaves image_load out: emf.image answers nil without it).
+void with_images(EmfApi& a) { a.image_load = f_image_load; }
 // A v25 core (fake_api leaves the offer calls out: emf.offer answers false without them).
 void with_offers(EmfApi& a) {
     a.spawn_offer = f_spawn_offer;
