@@ -277,10 +277,13 @@ end
 -- Every server step: each held monster checked and its pick written again; a new pick after the hold, or at once when
 -- its target cannot be one any more; the game's own pick back on every way out.
 function T:step(world)
+	if next(self.held) == nil then return end
 	local now = self.env.now(world)
+	local with_beasts = {}  -- accounts with a beast out
+	for _, e in pairs(self.env.ids()) do with_beasts[e.account] = true end
 	for m, h in pairs(self.held) do
 		local player_here = world:get("PlayerState", h.player) and world:account(h.player) == h.account
-		if not (player_here and self:active(h.account) and self.env.hostile(world, m)) then
+		if not (player_here and with_beasts[h.account] and self:active(h.account) and self.env.hostile(world, m)) then
 			self:release(world, m)
 		else
 			local is_player = h.target == h.player

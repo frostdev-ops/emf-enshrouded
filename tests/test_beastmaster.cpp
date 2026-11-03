@@ -3564,3 +3564,17 @@ TEST_CASE("threat: a boss in the middle of an attack does not turn on a roaring 
     CHECK(pick_of(b, 75) == 1);     // mid-attack: it keeps you
     CHECK(pick_of(b, 76) == 1234);  // the other boss turns
 }
+
+TEST_CASE("threat: monsters held on you get their own pick back as soon as your last beast is out of the world") {
+    RollRig b;
+    b.reply("beastmaster.give boar");
+    out_at(b, "Boar", 1234, 0, 4);
+    b.roll(0.0);  // you
+    monster(b, 70, 10, 2, 1);
+    b.seconds(1);
+    REQUIRE(pick_of(b, 70) == 1);
+    REQUIRE_FALSE(switches(b, 70));
+    b.reply("beastmaster.dismiss Boar");
+    one_step(b);
+    CHECK(switches(b, 70));
+}
