@@ -45,6 +45,7 @@ struct Fake {
     struct Spawn {
         uint8_t guid[16];
         double x, y, z;
+        std::vector<std::pair<uint32_t, std::vector<uint8_t>>> extra;  // spawn_ex: (hash, data) of each component
     };
     std::vector<Spawn> spawns;
     uint32_t next_spawn_id = 1234;  // spawn gives 1234, 1235, ...
@@ -197,6 +198,16 @@ uint32_t f_spawn(EmfWorld*, const uint8_t guid[16], double x, double y, double z
     std::memcpy(t.data(), fixed, sizeof fixed);
     g->components[{0x027ac564u /* CurrentTransform */, g->next_spawn_id}] = t;
     return g->next_spawn_id++;
+}
+uint32_t f_spawn_ex(EmfWorld* w, const uint8_t guid[16], double x, double y, double z, const EmfComponentInit* c,
+                    uint32_t count) {
+    const uint32_t id = f_spawn(w, guid, x, y, z);
+    if (!id) return 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto* p = static_cast<const uint8_t*>(c[i].data);
+        g->spawns.back().extra.emplace_back(c[i].hash, std::vector<uint8_t>(p, p + c[i].size));
+    }
+    return id;
 }
 bool f_destroy(EmfWorld*, uint32_t e) {
     g->destroyed.push_back(e);
@@ -482,6 +493,7 @@ EmfApi fake_api() {
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;
     a.spawn = f_spawn;
+    a.spawn_ex = f_spawn_ex;
     a.destroy = f_destroy;
     a.on_event = f_on_event;
     a.register_program_def = f_program_def;

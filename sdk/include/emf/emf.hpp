@@ -779,7 +779,10 @@ inline bool change_component(World w, uint32_t entity, uint32_t op, uint32_t has
 template <class F>
 void component_done(EmfWorld* w, uint32_t, uint32_t, uint32_t status, const char* why, void* user) {
     auto* f = static_cast<F*>(user);
-    (*f)(World(w), status, why ? why : "");
+    try {
+        (*f)(World(w), status, why ? why : "");
+    } catch (...) {  // nothing may escape into EMF
+    }
     delete f;
 }
 template <class F>

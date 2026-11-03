@@ -1506,6 +1506,16 @@ static_assert(EMF_TELEPORT_FAILED == kTpFailed && EMF_TELEPORT_MOVED == kTpMoved
                   EMF_TELEPORT_OFF_TARGET == kTpOffTarget && EMF_TELEPORT_RAW_TARGET == kTpRawTarget,
               "the API's teleport results are the core's");
 
+bool guarded_component_call(EmfComponentCallback cb, EmfWorld* w, uint32_t entity, uint32_t hash, uint32_t status,
+                            const char* why, void* user) {
+    __try {
+        cb(w, entity, hash, status, why, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool guarded_teleport_call(EmfTeleportCallback cb, EmfWorld* w, const EmfTeleportResult* r, void* user) {
     __try {
         cb(w, r, user);
@@ -1536,9 +1546,9 @@ bool api_change_component(EmfWorld* w, const EmfComponentChange* c) {
     r.entity = c->entity;
     r.hash = c->hash;
     r.op = c->op == EMF_COMPONENT_ADD ? ComponentOp::Add : ComponentOp::Remove;
-    if (r.op == ComponentOp::Add && c->data && c->data_size) {
-        if (c->data_size > 4096) {
-            refuse_limited("change_component refused: data_size above 4096");
+    if (r.op == ComponentOp::Add && c->data) {
+        if (!c->data_size || c->data_size > 4096) {
+            refuse_limited("change_component refused: data given, so data_size must be the component's size");
             return false;
         }
         const auto* p = static_cast<const uint8_t*>(c->data);
@@ -1551,7 +1561,9 @@ bool api_change_component(EmfWorld* w, const EmfComponentChange* c) {
         void* const user = c->user;
         const uint32_t entity = c->entity, hash = c->hash;
         r.done = [cb, user, entity, hash](EmfWorld* world, uint32_t status, const std::string& why) {
-            cb(world, entity, hash, status, why.c_str(), user);
+            if (!guarded_component_call(cb, world, entity, hash, status, why.c_str(), user))
+                core_log("a change_component callback in " + module_name_of(reinterpret_cast<const void*>(cb)) +
+                         " faulted");
         };
     }
     std::string why;

@@ -110,9 +110,14 @@ bool ComponentService::request(const ComponentChangeRequest& r, std::string* why
     const bool added_before = added_.count({r.mod, r.entity, r.hash}) != 0;
     const std::string policy = check_change(r.op, r.hash, static_cast<uint32_t>(r.data.size()), !r.data.empty(),
                                             r.flags, added_before);
+    const std::string value = r.op == ComponentOp::Add
+                                  ? check_data(r.hash, r.data.empty() ? nullptr : r.data.data(),
+                                               static_cast<uint32_t>(r.data.size()))
+                                  : std::string();
     std::string reason;
     if (!enabled_) reason = "changing components is off (see the log)";
     else if (!policy.empty()) reason = policy;
+    else if (!value.empty()) reason = value;
     else if (jobs_.size() >= kMaxComponentChanges) reason = "too many changes under way";
     else
         for (const auto& j : jobs_)

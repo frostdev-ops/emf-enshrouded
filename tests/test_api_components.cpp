@@ -99,8 +99,44 @@ TEST_CASE("change_component: a ScaleComponent add reaches the service; bad reque
     CHECK_FALSE(api->change_component(f.w(), &wrong));
     CHECK(f.service->pending() == 1u);
     CHECK(logged("refused"));
-    EmfComponentChange zeros = scale_change(2004, nullptr);  // NULL data: zeros
+    EmfComponentChange zeros = scale_change(2004, nullptr);  // NULL data: zeros, a ScaleComponent of 0: refused
+    CHECK_FALSE(api->change_component(f.w(), &zeros));
+    zeros.hash = ecs::InteractionPause::kHash;  // zeros of another component are fine
     CHECK(api->change_component(f.w(), &zeros));
+}
+
+TEST_CASE("change_component: data given with a size of 0 is refused (not read as zeros)") {
+    Fixture f;
+    const float big = 1.25f;
+    EmfComponentChange c = scale_change(2000, &big);
+    c.data_size = 0;
+    CHECK_FALSE(api_table()->change_component(f.w(), &c));
+    CHECK(f.service->pending() == 0u);
+    CHECK(logged("refused"));
+}
+
+namespace {
+int g_answers = 0;
+void faulting_cb(EmfWorld*, uint32_t, uint32_t, uint32_t, const char*, void*) {
+    volatile int* p = nullptr;
+    *p = 1;
+}
+void counting_cb(EmfWorld*, uint32_t, uint32_t, uint32_t, const char*, void*) { ++g_answers; }
+}  // namespace
+
+TEST_CASE("change_component: a callback that faults is caught and logged; later answers still come") {
+    Fixture f;
+    g_answers = 0;
+    const float big = 1.25f;
+    EmfComponentChange c = scale_change(2000, &big);  // no such entity in the fake: FAILED after the next step
+    c.cb = faulting_cb;
+    REQUIRE(api_table()->change_component(f.w(), &c));
+    EmfComponentChange d = scale_change(2001, &big);
+    d.cb = counting_cb;
+    REQUIRE(api_table()->change_component(f.w(), &d));
+    f.service->on_server_tick(f.w());
+    CHECK(logged("faulted"));
+    CHECK(g_answers == 1);  // the answer after the faulting one was delivered too
 }
 
 TEST_CASE("change_component: off on this game build says why once") {

@@ -637,13 +637,17 @@ TEST_CASE("emf::add_component and remove_component take the hash and size from t
     CHECK(changes[1].op == EMF_COMPONENT_REMOVE);
     CHECK(changes[1].data == nullptr);
     CHECK(changes[2].flags == EMF_COMPONENT_PERSISTENT);
+    // the callback form: an exception from f does not escape into EMF
+    CHECK(emf::add_component(w, 2002, s, 0u, [](emf::World, uint32_t, const char*) { throw 1; }));
+    REQUIRE(changes.size() == 4);
+    CHECK_NOTHROW(changes[3].cb(kW, 2002, emf::gen::ecs::ScaleComponent::kHash, EMF_COMPONENT_DONE, "", changes[3].user));
     static EmfApi old = api;
     old.size = static_cast<uint32_t>(offsetof(EmfApi, change_component));  // a v22 core
     old.version = 22;
     emf::api_ref() = &old;
     CHECK_FALSE(emf::has_v23());
     CHECK_FALSE(emf::add_component(w, 2000, s));
-    CHECK(changes.size() == 3);
+    CHECK(changes.size() == 4);
     emf::api_ref() = &api;
 }
 

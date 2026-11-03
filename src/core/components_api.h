@@ -18,6 +18,7 @@ struct ComponentRule {
     bool savable;      // no do_not_save: a change goes into the world save and outlives the mod
     bool add;          // mods may add it
     bool remove;       // mods may remove it (and any component they added this session)
+    bool checked;      // checked in game: false = refused in this version (the savable ones: their effect on the save)
 };
 
 // The curated rule for a component, or nullptr (not one mods may change).
@@ -29,6 +30,10 @@ const ComponentRule* component_rule_by_name(const std::string& name);
 // this mod added that component in this session (it may remove it again).
 std::string check_change(ComponentOp op, uint32_t hash, uint32_t data_size, bool data_given, uint32_t flags,
                          bool added_by_this_mod);
+
+// "" when an add's data is acceptable, else why not. data NULL / size 0: zeros. ScaleComponent: a finite size from
+// 0.1 to 10 (0 hides the creature and leaves nothing to hit; a NaN or a huge one reaches physics and drawing).
+std::string check_data(uint32_t hash, const void* data, uint32_t size);
 
 // Whole records as QueuePush hands them out (the first 0xC header bytes stay QueuePush's): kind 3 adding one
 // component (hash at +0xC, the other 15 hash slots 0, size at +0x4C, the data at +0x6C; null data = zeros) and kind 4

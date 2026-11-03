@@ -742,6 +742,40 @@ TEST_CASE("lua 1.12: emf.add_component writes the fields by name into the compon
     CHECK(answered);
 }
 
+TEST_CASE("lua 1.12: emf.spawn takes components by name, spawned with the entity (spawn_ex)") {
+    Rig r(L"spawncomp");
+    add_script(r.dir, "sc",
+               "local function j(...) local t = {} for i = 1, select('#', ...) do t[#t + 1] = tostring((select(i, ...))) end return table.concat(t, ' ') end\n"
+               "local G = 'd5d05217-52dc-467a-9192-26b4f661d8d9'\n"
+               "emf.command('go', '', function(w)\n"
+               "  emf.reply(j(emf.spawn(w, G, 1, 2, 3, {ScaleComponent = {uniformScale = 1.25}})))\n"
+               "  emf.reply(j(pcall(emf.spawn, w, G, 1, 2, 3, {NoSuchThing = {}})))\n"
+               "  emf.reply(j(pcall(emf.spawn, w, G, 1, 2, 3, {ScaleComponent = {size = 2}})))\n"
+               "  emf.reply(j(pcall(emf.spawn, w, G, 1, 2, 3, {CurrentTransform = {}})))\n"
+               "  emf.reply(j(emf.spawn(w, G, 4, 5, 6)))\n"
+               "  emf.reply(j(pcall(emf.spawn, w, G, 1, 2, 3, {ScaleComponent = {uniformScale = 0}})))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("sc.go");
+    REQUIRE(r.fake.replies.size() == 6);
+    CHECK(r.fake.replies[5].find("false") == 0);  // a size of 0: not drawn, nothing to hit
+    CHECK(r.fake.replies[5].find("0.1") != std::string::npos);
+    CHECK(r.fake.replies[0] == "1234");
+    CHECK(r.fake.replies[1].find("false") == 0);  // not a component
+    CHECK(r.fake.replies[2].find("size") != std::string::npos);  // no such field
+    CHECK(r.fake.replies[3].find("false") == 0);  // x, y, z give the transform
+    CHECK(r.fake.replies[4] == "1235");
+    REQUIRE(r.fake.spawns.size() == 2);
+    REQUIRE(r.fake.spawns[0].extra.size() == 1u);
+    CHECK(r.fake.spawns[0].extra[0].first == emf::gen::ecs::ScaleComponent::kHash);
+    REQUIRE(r.fake.spawns[0].extra[0].second.size() == 4u);
+    float scale = 0;
+    std::memcpy(&scale, r.fake.spawns[0].extra[0].second.data(), 4);
+    CHECK(scale == 1.25f);
+    CHECK(r.fake.spawns[1].extra.empty());
+}
+
 TEST_CASE("lua 1.12: emf.add_component is false on a core without it, and when the core refuses (no callback kept)") {
     Rig r(L"addcomp_old");
     add_script(r.dir, "ad",

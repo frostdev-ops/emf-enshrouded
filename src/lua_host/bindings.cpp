@@ -813,6 +813,11 @@ int l_move(lua_State* L) {
     return 1;
 }
 
+std::vector<uint8_t> component_data(lua_State* L, const reflect::Type& t, const char* name, int data_index);
+
+// emf.spawn(world, guid, x, y, z [, components]) (components: lua 1.12): components = {Name = {field = value}, ...}
+// are spawned with the entity (spawn_ex, at most 15; never CurrentTransform: x, y, z give it). A component the game
+// reads when the entity is made (ScaleComponent: the size it is drawn at) only works this way.
 int l_spawn(lua_State* L) {
     Script* s = script_of(L);
     EmfWorld* w = world_arg(L, 1);
@@ -820,7 +825,42 @@ int l_spawn(lua_State* L) {
     uint8_t guid[16];
     if (!emf::parse_guid(text, guid)) return luaL_error(L, "%s is not a GUID (xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx)", text);
     const double x = luaL_checknumber(L, 3), y = luaL_checknumber(L, 4), z = luaL_checknumber(L, 5);
-    lua_pushinteger(L, s->host->api->spawn(w, guid, x, y, z));
+    if (lua_isnoneornil(L, 6)) {
+        lua_pushinteger(L, s->host->api->spawn(w, guid, x, y, z));
+        return 1;
+    }
+    luaL_checktype(L, 6, LUA_TTABLE);
+    std::vector<std::vector<uint8_t>> data;
+    std::vector<EmfComponentInit> inits;
+    lua_pushnil(L);
+    while (lua_next(L, 6)) {
+        if (lua_type(L, -2) != LUA_TSTRING) return luaL_error(L, "emf.spawn: the components' keys are component names");
+        const char* name = lua_tostring(L, -2);
+        const reflect::Type* t = find_type(name);
+        if (!t) return luaL_error(L, "no type named %s", name);
+        if (!(t->flags & 1)) return luaL_error(L, "%s is not a component", name);
+        if (t == find_type("CurrentTransform"))
+            return luaL_error(L, "emf.spawn: x, y, z give CurrentTransform");
+        if (inits.size() >= 15) return luaL_error(L, "emf.spawn: at most 15 components");
+        if (!lua_isnil(L, -1)) luaL_checktype(L, -1, LUA_TTABLE);
+        data.push_back(component_data(L, *t, name, lua_isnil(L, -1) ? 0 : lua_gettop(L)));
+        if (t == find_type("ScaleComponent") && data.back().size() == sizeof(float)) {
+            // the same range as change_component's (components_api.cpp check_data): 0 is not drawn and cannot be hit
+            float v = 0;
+            std::memcpy(&v, data.back().data(), sizeof v);
+            if (!std::isfinite(v) || v < 0.1f || v > 10.0f)
+                return luaL_error(L, "ScaleComponent needs a size from 0.1 to 10, not %f", static_cast<lua_Number>(v));
+        }
+        inits.push_back({t->hash, static_cast<uint32_t>(data.back().size()), nullptr});
+        lua_pop(L, 1);
+    }
+    for (size_t i = 0; i < inits.size(); ++i) inits[i].data = data[i].data();
+    const EmfApi* a = s->host->api;
+    if (!a->spawn_ex) {
+        lua_pushinteger(L, 0);
+        return 1;
+    }
+    lua_pushinteger(L, a->spawn_ex(w, guid, x, y, z, inits.data(), static_cast<uint32_t>(inits.size())));
     return 1;
 }
 

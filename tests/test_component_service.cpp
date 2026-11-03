@@ -309,13 +309,21 @@ TEST_CASE("change_component: a full command buffer waits; failed after 120 steps
     CHECK(f.answers[2].why.find("did not apply") != std::string::npos);
 }
 
-TEST_CASE("change_component: an add without data adds zeros of the component's size") {
+TEST_CASE("change_component: an add without data adds zeros of the component's size; never a ScaleComponent of 0") {
     Fixture f;
     ComponentChangeRequest r = f.add_scale(2000, 0);
+    r.hash = ecs::InteractionPause::kHash;
     r.data.clear();
     REQUIRE(f.service.request(r, nullptr));
     f.steps(2);
     REQUIRE(f.answers.size() == 1);
     CHECK(f.answers[0].status == EMF_COMPONENT_DONE);
-    CHECK(g_ents[2000][ecs::ScaleComponent::kHash].size() == 4u);
+    CHECK(g_ents[2000][ecs::InteractionPause::kHash].size() == sizeof(ecs::InteractionPause));
+    std::string why;
+    ComponentChangeRequest zero = f.add_scale(2000, 0);
+    CHECK_FALSE(f.service.request(zero, &why));
+    CHECK(why.find("0.1") != std::string::npos);
+    zero.data.clear();  // no data: zeros
+    CHECK_FALSE(f.service.request(zero, nullptr));
+    CHECK(f.service.pending() == 0u);
 }

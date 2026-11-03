@@ -1,5 +1,6 @@
 #include "components_api.h"
 
+#include <cmath>
 #include <cstdio>
 #include <cstring>
 
@@ -14,20 +15,22 @@ namespace {
 namespace gen = emf::gen::ecs;
 
 template <class T>
-constexpr ComponentRule rule(const char* name, bool savable, bool add, bool remove) {
-    return ComponentRule{name, T::kHash, static_cast<uint16_t>(T::kSize), savable, add, remove};
+constexpr ComponentRule rule(const char* name, bool savable, bool add, bool remove, bool checked) {
+    return ComponentRule{name, T::kHash, static_cast<uint16_t>(T::kSize), savable, add, remove, checked};
 }
 
-// The research's curated lists (add_component_api.md 5.3); savable = no do_not_save in docs/components.txt.
+// The research's curated lists (add_component_api.md 5.3); savable = no do_not_save in docs/components.txt. The
+// savable ones stay refused until their effect on the world save is checked in game (research 3.3: persistence and
+// what a failed save check does were not traced).
 constexpr ComponentRule kRules[] = {
-    rule<gen::ScaleComponent>("ScaleComponent", false, true, false),  // a creature's size (Beastmaster loyalty)
-    rule<gen::IsTame>("IsTame", true, true, true),
-    rule<gen::LifeTime>("LifeTime", true, true, true),
-    rule<gen::InteractionPause>("InteractionPause", false, true, false),
-    rule<gen::DoNotSave>("DoNotSave", true, true, true),  // removing it lets the entity be saved
-    rule<gen::ForceSave>("ForceSave", true, true, true),
-    rule<gen::ConditionalDespawn>("ConditionalDespawn", true, false, true),
-    rule<gen::DespawnLink>("DespawnLink", true, false, true),
+    rule<gen::ScaleComponent>("ScaleComponent", false, true, false, true),  // a size (drawn only when spawned with it)
+    rule<gen::IsTame>("IsTame", true, true, true, false),
+    rule<gen::LifeTime>("LifeTime", true, true, true, false),
+    rule<gen::InteractionPause>("InteractionPause", false, true, false, true),
+    rule<gen::DoNotSave>("DoNotSave", true, true, true, false),  // removing it lets the entity be saved
+    rule<gen::ForceSave>("ForceSave", true, true, true, false),
+    rule<gen::ConditionalDespawn>("ConditionalDespawn", true, false, true, false),
+    rule<gen::DespawnLink>("DespawnLink", true, false, true, false),
 };
 
 std::string lower(std::string s) {
@@ -64,6 +67,8 @@ std::string check_change(ComponentOp op, uint32_t hash, uint32_t data_size, bool
         std::snprintf(b, sizeof b, "0x%08x", hash);
         return std::string("component ") + b + " is not one EMF lets mods " + (op == ComponentOp::Add ? "add" : "remove");
     }
+    if (!r->checked)
+        return std::string(r->name) + " is saved with the world and not checked in game yet: this EMF refuses it";
     if (op == ComponentOp::Add) {
         if (!r->add) return std::string(r->name) + " is not one EMF lets mods add";
         if (data_given && data_size != r->size)
@@ -76,6 +81,16 @@ std::string check_change(ComponentOp op, uint32_t hash, uint32_t data_size, bool
         return std::string(r->name) +
                " is saved with the world: the change outlives the mod (pass EMF_COMPONENT_PERSISTENT to accept that)";
     return {};
+}
+
+std::string check_data(uint32_t hash, const void* data, uint32_t size) {
+    if (hash != gen::ScaleComponent::kHash) return {};
+    float v = 0;
+    if (data && size == sizeof v) std::memcpy(&v, data, sizeof v);
+    if (std::isfinite(v) && v >= 0.1f && v <= 10.0f) return {};
+    char b[96];
+    std::snprintf(b, sizeof b, "ScaleComponent needs a size from 0.1 to 10, not %g", static_cast<double>(v));
+    return b;
 }
 
 std::vector<uint8_t> add_component_record(uint32_t hash, const void* data, uint16_t size) {

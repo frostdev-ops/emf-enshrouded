@@ -750,9 +750,9 @@ typedef struct EmfApi {
 
     /* ---- v23: add a component to an entity, or remove one (EmfComponentChange above) ---- */
     /* Adds a component to an entity, or removes one, through the engine's own command. Only those EMF lists
-     * (reference.md "v23": ScaleComponent, IsTame, LifeTime, InteractionPause, DoNotSave, ForceSave to add; LifeTime,
-     * IsTame, ForceSave, ConditionalDespawn, DespawnLink, DoNotSave and what the same mod added this session to remove);
-     * one the world save keeps needs EMF_COMPONENT_PERSISTENT. SERVER world, never a player. True = queued: checked after the server
+     * (reference.md "v23"): in this version ScaleComponent (uniformScale 0.1-10) and InteractionPause, removed only by
+     * the mod that added them this session; the ones the world save keeps are refused until checked in game (then
+     * with EMF_COMPONENT_PERSISTENT). A ScaleComponent added later is not drawn: spawn with it (spawn_ex). SERVER world, never a player. True = queued: checked after the server
      * world's next step, applied in the step after, and cb answers once (EMF_COMPONENT_DONE / _ALREADY / _FAILED with
      * why) on the server world's thread; when the world ended first (a new world, the menu) it answers _FAILED with a
      * NULL world, on the thread that ended it. False (logged) when refused at once; cb is not called then. */

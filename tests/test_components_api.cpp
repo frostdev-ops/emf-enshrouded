@@ -2,6 +2,7 @@
 #include <doctest.h>
 
 #include <cstring>
+#include <limits>
 #include <string>
 #include <vector>
 
@@ -49,12 +50,18 @@ TEST_CASE("check_change: what a mod may add or remove, with what size and flags"
     CHECK(check_change(ComponentOp::Remove, gen::ScaleComponent::kHash, 0, false, 0, false).find("not allowed") !=
           std::string::npos);
     CHECK(check_change(ComponentOp::Remove, gen::ScaleComponent::kHash, 0, false, 0, true).empty());
-    // savable ones need EMF_COMPONENT_PERSISTENT
-    CHECK(check_change(ComponentOp::Add, gen::IsTame::kHash, 1, true, 0, false).find("PERSISTENT") != std::string::npos);
-    CHECK(check_change(ComponentOp::Add, gen::IsTame::kHash, 1, true, EMF_COMPONENT_PERSISTENT, false).empty());
-    CHECK(check_change(ComponentOp::Remove, gen::DoNotSave::kHash, 0, false, 0, false).find("PERSISTENT") !=
-          std::string::npos);
-    CHECK(check_change(ComponentOp::Remove, gen::DoNotSave::kHash, 0, false, EMF_COMPONENT_PERSISTENT, false).empty());
+    // savable ones (the world save keeps them) are refused until they are checked in game, PERSISTENT or not
+    const auto unchecked = [](const std::string& why) { return why.find("not checked in game") != std::string::npos; };
+    CHECK(unchecked(check_change(ComponentOp::Add, gen::IsTame::kHash, 1, true, 0, false)));
+    CHECK(unchecked(check_change(ComponentOp::Add, gen::IsTame::kHash, 1, true, EMF_COMPONENT_PERSISTENT, false)));
+    CHECK(unchecked(check_change(ComponentOp::Add, gen::LifeTime::kHash, sizeof(gen::LifeTime), true,
+                                 EMF_COMPONENT_PERSISTENT, false)));
+    CHECK(unchecked(check_change(ComponentOp::Remove, gen::DoNotSave::kHash, 0, false, EMF_COMPONENT_PERSISTENT, false)));
+    CHECK(unchecked(
+        check_change(ComponentOp::Remove, gen::ConditionalDespawn::kHash, 0, false, EMF_COMPONENT_PERSISTENT, false)));
+    // InteractionPause (not saved) is open like ScaleComponent
+    CHECK(check_change(ComponentOp::Add, gen::InteractionPause::kHash, sizeof(gen::InteractionPause), true, 0, false)
+              .empty());
     // anything else, and the expert flag (reserved), are refused
     CHECK(check_change(ComponentOp::Add, gen::Inventory::kHash, sizeof(gen::Inventory), true, 0, false)
               .find("not one EMF lets mods add") != std::string::npos);
@@ -63,6 +70,24 @@ TEST_CASE("check_change: what a mod may add or remove, with what size and flags"
     CHECK(check_change(ComponentOp::Add, gen::ScaleComponent::kHash, 4, true, 0x80, false).find("flag") !=
           std::string::npos);
     CHECK_FALSE(check_change(ComponentOp::Add, 0, 0, false, 0, false).empty());
+}
+
+TEST_CASE("check_data: a ScaleComponent needs a finite size from 0.1 to 10; the others take any data") {
+    const auto scale = [](float f) { return check_data(gen::ScaleComponent::kHash, &f, 4); };
+    CHECK(scale(1.25f).empty());
+    CHECK(scale(0.1f).empty());
+    CHECK(scale(10.0f).empty());
+    CHECK(scale(0.0f).find("0.1") != std::string::npos);
+    CHECK_FALSE(scale(0.05f).empty());
+    CHECK_FALSE(scale(-1.0f).empty());
+    CHECK_FALSE(scale(10.5f).empty());
+    CHECK_FALSE(scale(1e30f).empty());
+    CHECK_FALSE(scale(std::numeric_limits<float>::quiet_NaN()).empty());
+    CHECK_FALSE(scale(std::numeric_limits<float>::infinity()).empty());
+    CHECK_FALSE(check_data(gen::ScaleComponent::kHash, nullptr, 0).empty());  // zeros: a size of 0
+    const uint8_t pause[sizeof(gen::InteractionPause)] = {};
+    CHECK(check_data(gen::InteractionPause::kHash, pause, sizeof pause).empty());
+    CHECK(check_data(gen::InteractionPause::kHash, nullptr, 0).empty());
 }
 
 TEST_CASE("component records: kind 3 adds with hash, size and data; kind 4 removes by hash") {
