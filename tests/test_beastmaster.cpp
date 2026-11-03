@@ -741,6 +741,33 @@ TEST_CASE("loyalty: a beast out follows its owner's level, also when the owner l
     CHECK(now_of<ecs::DynamicEnemyScaling>(b, 1234).nextUpdateTime.value == 0);  // the game rescales it
 }
 
+namespace {
+bool healed(BeastRig& b, uint32_t id) {
+    for (const auto& [e, a, d] : b.r.fake.attr_adds)
+        if (e == id && a == EMF_ATTR_HEALTH && d > 0) return true;
+    return false;
+}
+}  // namespace
+
+TEST_CASE("loyalty: a beast heals 5 % of its maximum health a second, 5 s after its last hit") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(6);
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 40;  // 40 of 100, hurt in a fight
+    deliver(b.r.fake, "HitEvent", hit_event(60, 1234));
+    b.r.fake.attr_adds.clear();
+    b.seconds(3);
+    CHECK_FALSE(healed(b, 1234));                 // 3 s after its last hit: not yet
+    b.seconds(3);
+    CHECK(b.added(1234, EMF_ATTR_HEALTH, 5));     // 5 % of 100
+    b.r.fake.attr_adds.clear();
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 100;
+    b.seconds(2);
+    CHECK_FALSE(healed(b, 1234));                 // full: nothing more
+}
+
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
     BeastRig b;
     b.reply("beastmaster.give wolf");

@@ -19,6 +19,8 @@ local PLAYER_SIDE = { [7] = true, [8] = true, [PLAYER_ALLY] = true }  -- Player,
 local HOSTILE = { [2] = true, [3] = true, [4] = true, [6] = true, [10] = true, [13] = true, [14] = true, [15] = true }
 local SENT_S = 20       -- a passive beast that Attack sent at a creature fights it this long
 local RECALL_S = 3      -- a beast that dropped a chase fights nothing this long while it comes back
+local HEAL_AFTER_S = 5  -- a beast heals between fights: this long after its last hit to or from it,
+local HEAL_SHARE = 0.05 -- this share of its maximum health a second
 local STRAY_CHECKS = 3  -- a beast that guards someone else this many checks (seconds) in a row is not ours any more
 local REFUSALS = 3      -- a pack beast's call-back refused this many checks in a row: its pack is not in this game
 
@@ -45,6 +47,7 @@ function P:reset()
 	self.sent = {}       -- entity id -> until when Attack's order holds (a passive beast fights it until then)
 	self.recall = {}     -- entity id -> until when a beast that dropped a chase fights nothing
 	self.base = {}       -- entity id -> {damage, scale}: its template's damage multiplier and size, before role and loyalty
+	self.fought = {}     -- entity id -> when it last hit or was hit (it heals HEAL_AFTER_S after that)
 	self.aside:reset()
 end
 
@@ -124,6 +127,7 @@ function P:spawn(world, owner, account, beast)
 	local scaling = world:get("DynamicEnemyScaling", id)
 	if scaling then scaling.nextUpdateTime = 0 end  -- the game rescales health and damage to the new level
 	emf.emit("server", "StartGuardingEvent", { guardingEntityId = id, guardedEntityId = owner })
+	self.fought[id] = self.env.now(world)
 	self:strengthen(world, id, beast)
 	beast.entity = id
 	beast.out = true
@@ -157,7 +161,10 @@ function P:adopt(account, beast, id, world)
 	beast.out = true
 	self.ids[id] = { account = account, beast = beast }
 	self.aside:release(account)  -- it stays, and the beasts that stepped aside by the command come back
-	if world then self:strengthen(world, id, beast) end
+	if world then
+		self.fought[id] = self.env.now(world)
+		self:strengthen(world, id, beast)
+	end
 end
 
 -- The entity ids of `account`'s beasts in the world (where another player's building counts).
@@ -254,6 +261,7 @@ function P:dismiss(world, account, beast)
 	if beast.entity then
 		self.ids[beast.entity] = nil
 		self.sent[beast.entity], self.recall[beast.entity], self.base[beast.entity] = nil, nil, nil
+		self.fought[beast.entity] = nil
 	end
 	beast.entity = nil
 	beast.out = false
@@ -304,9 +312,15 @@ function P:hunt(world, account, owner)
 	if foe then self:attack(world, account, foe) end
 end
 
+-- Every hit to or from our beast is noted (it heals HEAL_AFTER_S after the last one).
 -- XP credit: when our beast's hit leaves a foe at or under 25 % health, its owner lands the killing blow (a real game
 -- hit: kill credit, XP and loot go to the owner). Once per foe; never on players or allies.
 function P:on_hit(world, source, target)
+	if self.ids[source] or self.ids[target] then
+		local now = self.env.now(world)
+		if self.ids[source] then self.fought[source] = now end
+		if self.ids[target] then self.fought[target] = now end
+	end
 	if not self.env.setting("xp_credit") then return end
 	local e = self.ids[source]
 	if not e or self.credited[target] then return end
@@ -325,7 +339,7 @@ end
 
 function P:on_died(id)
 	self.credited[id] = nil
-	self.sent[id], self.recall[id], self.base[id] = nil, nil, nil
+	self.sent[id], self.recall[id], self.base[id], self.fought[id] = nil, nil, nil, nil
 	local e = self.ids[id]
 	if not e then return end
 	self.ids[id] = nil
@@ -476,6 +490,11 @@ function P:step(world)
 							lvl.dataStorage[1] = mine
 							local scaling = world:get("DynamicEnemyScaling", b.entity)
 							if scaling then scaling.nextUpdateTime = 0 end
+						end
+						-- between fights it heals
+						local cur, max = emf.health(world, b.entity)
+						if cur and max and cur > 0 and cur < max and now - (self.fought[b.entity] or now) >= HEAL_AFTER_S then
+							emf.attribute_add(world, b.entity, "health", math.min(math.ceil(max * HEAL_SHARE), max - cur))
 						end
 						if guard ~= owner then
 							emf.emit("server", "StartGuardingEvent", { guardingEntityId = b.entity, guardedEntityId = owner })
