@@ -23,6 +23,7 @@ enum class Route : uint8_t {
     Both,     // to the console and the game (key releases while open)
     Toggle,   // the console opened or closed; nobody else sees it
     Swallow,  // nobody sees it
+    CloseWindow,  // Esc or the close key of a mod's window (API v24): the overlay closes it; nobody else sees it
 };
 
 enum class MouseKind : uint8_t { Move, ButtonDown, ButtonUp, Wheel };
@@ -43,8 +44,15 @@ public:
     // the game saw go down reach the game too, the mouse is kept from the game.
     bool wheel() const { return wheel_.load(); }
     void set_wheel(bool on) { wheel_ = on; }
-    // The console or a wheel holds the input (the game gets no presses and no mouse movement).
-    bool capturing() const { return open_.load() || wheel_.load(); }
+    // A mod's window captures the input like a wheel; Esc and its close key (a generic virtual-key code, 0 = none)
+    // close it on their press; the console key opens the console over it.
+    bool window() const { return window_.load(); }
+    void set_window(bool on, uint16_t close_vk = 0) {
+        window_close_vk_ = on ? close_vk : 0;
+        window_ = on;
+    }
+    // The console, a wheel or a mod's window holds the input (the game gets no presses and no mouse movement).
+    bool capturing() const { return open_.load() || wheel_.load() || window_.load(); }
     // While the console's suggestions show, Esc goes to the console (which hides them) instead of closing it. Set by
     // the render thread each frame the console draws; opening or closing the console clears it.
     void set_esc_to_console(bool on) { esc_to_console_ = on; }
@@ -71,6 +79,8 @@ private:
     uint16_t toggle_;
     std::atomic<bool> open_{false};
     std::atomic<bool> wheel_{false};
+    std::atomic<bool> window_{false};
+    std::atomic<uint16_t> window_close_vk_{0};
     std::atomic<bool> esc_to_console_{false};
     std::atomic<uint16_t> hidden_vk_{0};
     bool swallow_char_ = false;  // the character right after a toggle belongs to the toggle key

@@ -3,12 +3,13 @@
 namespace emf::core {
 
 WheelGate::Refusal WheelGate::request(const WheelRequest& r, const std::function<bool()>& overlay_ready,
-                                      bool window_hooked, bool console_open) {
+                                      bool window_hooked, bool console_open, bool mod_window_open) {
     std::lock_guard<std::mutex> l(m_);
     if (state_ != State::Idle) return Refusal::Busy;
     if (!overlay_ready || !overlay_ready()) return Refusal::NotReady;
     if (!window_hooked) return Refusal::NoWindow;  // no keyboard or mouse for it: it could not be closed
     if (console_open) return Refusal::ConsoleOpen;
+    if (mod_window_open) return Refusal::WindowOpen;
     if (r.items.empty()) return Refusal::Empty;
     req_ = r;
     state_ = State::Pending;

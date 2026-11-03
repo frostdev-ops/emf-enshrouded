@@ -299,6 +299,41 @@ TEST_CASE("InputRouter wheel: mouse movement and presses are kept from the game,
     CHECK(r.mouse(MouseKind::Wheel) == Route::Console);
 }
 
+TEST_CASE("InputRouter window: keys go to the overlay; Esc and the close key close it; the console opens over it") {
+    constexpr uint16_t kB = 0x30;  // the B key's scan code; its virtual key is 'B'
+    InputRouter r;
+    CHECK(r.key(down(kW)) == Route::Game);  // W held while the window opens
+    r.set_window(true, 'B');
+    CHECK(r.window());
+    CHECK(r.capturing());
+    CHECK_FALSE(r.open());
+    CHECK(r.key(down(kA)) == Route::Console);  // the overlay sees it, the game does not
+    CHECK(r.key(up(kA)) == Route::Console);
+    CHECK(r.key(up(kW)) == Route::Both);  // W's release still reaches the game
+    CHECK(r.character(L'a') == Route::Swallow);  // nothing types into a window (phase 1)
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);  // the close key, on its press
+    CHECK(r.key(down(kB, 'B')) == Route::Swallow);      // its auto-repeat does nothing more
+    CHECK(r.key(up(kB, 'B')) == Route::Swallow);        // and the game never saw it go down
+    CHECK(r.key(down(kEsc)) == Route::CloseWindow);
+    CHECK(r.key(up(kEsc)) == Route::Swallow);
+    // the console key opens the console over the window; Esc closes the console first, then the window
+    CHECK(r.key(down(kTilde)) == Route::Toggle);
+    CHECK(r.open());
+    CHECK(r.key(up(kTilde)) == Route::Swallow);
+    CHECK(r.key(down(kA)) == Route::Console);
+    CHECK(r.character(L'a') == Route::Console);  // typing goes to the console
+    CHECK(r.key(down(kEsc)) == Route::Toggle);
+    CHECK_FALSE(r.open());
+    CHECK(r.key(up(kEsc)) == Route::Swallow);
+    CHECK(r.key(down(kEsc)) == Route::CloseWindow);
+    CHECK(r.key(up(kEsc)) == Route::Swallow);
+    CHECK(r.mouse(MouseKind::Move) == Route::Swallow);
+    CHECK(r.mouse(MouseKind::ButtonUp) == Route::Game);
+    r.set_window(false);
+    CHECK_FALSE(r.capturing());
+    CHECK(r.key(down(kB, 'B')) == Route::Game);  // no window: B is the game's again
+}
+
 TEST_CASE("InputRouter wheel: key messages copy the raw decision; presses are swallowed while it captures") {
     InputRouter r;
     r.set_wheel(true);

@@ -29,6 +29,29 @@ Route InputRouter::decide(const KeyEvent& e) {
         }
         return game_down_[index(e)] ? Route::Both : Route::Console;  // the game gets the releases of keys it saw
     }
+    if (window_ && !open_) {  // a mod's window captures; the console key still opens the console over it
+        if (e.down) {
+            if (held) return Route::Swallow;  // auto-repeat of the key that toggled or closed
+            const uint16_t close_vk = window_close_vk_.load();
+            if (esc || (close_vk && e.vkey == close_vk)) {
+                held_ = e.scan;  // its repeats and its release go nowhere
+                return Route::CloseWindow;
+            }
+            if (toggle) {
+                open_ = true;
+                esc_to_console_ = false;
+                swallow_char_ = true;
+                held_ = e.scan;
+                return Route::Toggle;
+            }
+            return Route::Console;
+        }
+        if (held) {
+            held_ = 0;
+            return Route::Swallow;
+        }
+        return game_down_[index(e)] ? Route::Both : Route::Console;
+    }
     if (e.down) {
         if (held) {  // auto-repeat of the key that toggled: one press, one toggle
             swallow_char_ = true;  // and the repeat's character is not typed
@@ -68,7 +91,7 @@ Route InputRouter::legacy_key(const KeyEvent& e) {
 }
 
 Route InputRouter::character(wchar_t) {
-    if (wheel_ && !open_) return Route::Swallow;  // nothing types while a wheel is open
+    if ((wheel_ || window_) && !open_) return Route::Swallow;  // nothing types while a wheel or a window is open
     if (swallow_char_) {
         swallow_char_ = false;
         return Route::Swallow;

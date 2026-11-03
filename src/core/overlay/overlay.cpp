@@ -563,7 +563,8 @@ bool overlay_open_wheel(const WheelRequest& request) {
     const auto why = g_wheel_gate.request(request, ready, window_hooked(), g_router->open());
     if (why == WheelGate::Refusal::None) return true;
     static const char* const kWhy[] = {"", "the overlay cannot draw yet", "the game window is not hooked (no input)",
-                                       "the console is open", "no entries", "another wheel is open"};
+                                       "the console is open", "no entries", "another wheel is open",
+                                       "a mod's window is open"};
     log_line((std::string("wheel refused: ") + kWhy[static_cast<int>(why)]).c_str());
     return false;
 }

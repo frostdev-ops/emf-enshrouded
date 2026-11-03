@@ -46,6 +46,14 @@ TEST_CASE("wheel gate: one wheel at a time; refused while the overlay cannot tak
     CHECK_FALSE(g.busy());
 }
 
+TEST_CASE("wheel gate: refused while a mod's window is open (one capturing owner at a time)") {
+    Capture cap;
+    WheelGate g([&cap](bool on) { cap.on = on; ++cap.changes; });
+    CHECK(g.request(req("x"), true, true, false, true) == WheelGate::Refusal::WindowOpen);
+    CHECK(cap.changes == 0);
+    CHECK(g.request(req("x"), true, true, false, false) == WheelGate::Refusal::None);
+}
+
 TEST_CASE("wheel gate: the overlay turning off finishes a pending or open wheel exactly once") {
     Capture cap;
     WheelGate g([&cap](bool on) { cap.on = on; ++cap.changes; });
