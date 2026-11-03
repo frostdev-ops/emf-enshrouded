@@ -26,8 +26,9 @@ says what EMF does about that, for players and for authors of such mods.
 - A DLL that is missing or fails to load is skipped and reported; the game goes on. A crash in a DLL's own `DllMain`
   comes back from Windows as error 1114 and is reported the same way. A `DllMain` that hangs, or ends the process
   (EML does that for a broken mod), stops the game as it would have without EMF.
-- The game's DirectInput calls go to Windows' own `dinput8.dll`, not to a chained mod's exports: a mod that does its
-  work there (rather than from `DllMain` or a thread it starts) loses that part. None of the known ones does.
+- The game's DirectInput calls go to Windows' own `dinput8.dll`, not to a chained mod's exports, unless ShroudForge
+  hands EMF's loader a provider (see ShroudForge below): a mod that does its work there (rather than from `DllMain`
+  or a thread it starts) loses that part otherwise. None of the known ones does.
 - `chainloader.ini` is ModLoader Proxy's own file (with settings such as delayed loading and a mods folder). When
   ModLoader Proxy was the `dinput8.dll`, EMF starts it, and it reads its file as before. EMF can also be one of the
   DLLs ModLoader Proxy starts (ModLoader Proxy as `dinput8.dll`, EMF's loader renamed and listed under `[Load]`).

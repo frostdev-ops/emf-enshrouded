@@ -284,6 +284,41 @@ function Move-ChainEntriesToEmf([string]$Dir, [string[]]$Names) {
     return @($moving | ForEach-Object { $_.Name })
 }
 
+# Moves every line left in [EMF] (on or switched off, as it is) into [Chain] and drops the empty [EMF] with its note:
+# once EMF is uninstalled nothing reads [EMF], and a chain loader put back as dinput8.dll reads [Chain]. Returns the
+# lines moved.
+function Move-EmfEntriesToChain([string]$Dir) {
+    $f = Read-ChainFile $Dir
+    if (-not $f.Exists) { return @() }
+    $body = @(Get-ChainLineIndexes $f.Lines "EMF")
+    $moving = @()
+    foreach ($i in $body) {
+        $t = $f.Lines[$i].Trim()
+        if ($t -and $t.TrimStart(";").Trim() -match "\.dll$") { $moving += $t }
+    }
+    $keep = @(for ($i = 0; $i -lt $f.Lines.Count; $i++) { if ($body -notcontains $i) { $f.Lines[$i] } })
+    $keep = @(Remove-EmptyEmfSection $keep)
+    if ($moving.Count) {
+        $header = -1
+        for ($i = 0; $i -lt $keep.Count; $i++) { if ($keep[$i].Trim() -ieq "[Chain]") { $header = $i } }
+        if ($header -lt 0) {
+            while ($keep.Count -and $keep[-1].Trim() -eq "") { $keep = @($keep | Select-Object -First ($keep.Count - 1)) }
+            if ($keep.Count) { $keep += "" }
+            $keep += "[Chain]"
+            $keep += $moving
+        } else {
+            $at = $header + 1
+            while ($at -lt $keep.Count -and -not $keep[$at].Trim().StartsWith("[")) { $at++ }
+            while ($at -gt $header + 1 -and $keep[$at - 1].Trim() -eq "") { $at-- }
+            $before = @(); if ($at -gt 0) { $before = @($keep[0..($at - 1)]) }
+            $after = @(); if ($at -lt $keep.Count) { $after = @($keep[$at..($keep.Count - 1)]) }
+            $keep = @($before) + $moving + @($after)
+        }
+    }
+    if ($moving.Count -or $keep.Count -ne $f.Lines.Count) { Write-ChainFile $f $keep }
+    return $moving
+}
+
 # Game-root DLLs (no folder in their line) that a player listed in [Chain] or before any section: ShroudForge 1.7.7
 # reads those lines too and reports them as failed (it wants mods\<folder>\); EMF still starts them.
 function Get-ChainGameRootEntries([string]$Dir) {

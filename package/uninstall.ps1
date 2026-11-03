@@ -128,6 +128,10 @@ foreach ($name in $movedNames) {
     Remove-ChainEntry $Game $name $createdChain
     "put $name back as dinput8.dll"
 }
+# EMF is going: nothing reads [EMF] any more. What is left there (DLLs that stay renamed, a player's lines) goes to
+# [Chain], where the chain loader that is dinput8.dll again reads it.
+$toChain = @(Move-EmfEntriesToChain $Game)
+if ($toChain.Count) { "moved $($toChain -join ', ') from [EMF] to [Chain] in $($script:ChainFileName), where other chain loaders read them" }
 # EML's dbghelp.dll that EMF.exe set aside ("set-aside<TAB><name><TAB>dbghelp.dll", app/bridge_content.cpp) goes back to
 # its name, unless a dbghelp.dll is there again: then it stays set aside, and so does the record of it. Only the names
 # EMF.exe gives it (eml-dbghelp.dll, eml-dbghelp-2.dll, ...): a hand-edited record never moves another file.

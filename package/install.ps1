@@ -39,9 +39,6 @@ function Install-Emf([string]$Dir, [string]$Source) {
     }
     $movedRecord = Join-Path $Dir "emf\moved.txt"
     $recordBefore = @(Read-Lines $movedRecord)
-    # EMF 0.3.x listed the DLLs it renamed in [Chain]; they go into EMF's own [EMF] (ShroudForge reads only [Chain])
-    $movedNames = @($recordBefore | Where-Object { $_ -like "moved`t*" } | ForEach-Object { $_.Substring(6) })
-    $movedToEmf = @(Move-ChainEntriesToEmf $Dir $movedNames)
     $done = @{ Moved = $false; Added = $false; Created = $false; Off = @() }
     $notes = @()
     try {
@@ -82,6 +79,25 @@ function Install-Emf([string]$Dir, [string]$Source) {
             elseif (Test-Path -LiteralPath $movedRecord) { Remove-Item -LiteralPath $movedRecord -Force }
         }
         throw
+    }
+    # EMF 0.3.x listed the DLLs it renamed (emf\moved.txt) and the DLL mods EMF.exe installed (emf\installed_mods\*.json,
+    # "chain") in [Chain]; they go into EMF's own [EMF] (ShroudForge reads only [Chain]). Only now, with the new loader
+    # in place (it reads both): a failed install keeps the old loader, which reads only [Chain]. A failure here leaves
+    # the lines where they are, which still works.
+    $movedToEmf = @()
+    try {
+        $emfNames = @($recordBefore | Where-Object { $_ -like "moved`t*" } | ForEach-Object { $_.Substring(6) })
+        $records = Join-Path $Dir "emf\installed_mods"
+        if (Test-Path -LiteralPath $records) {
+            foreach ($r in @(Get-ChildItem -LiteralPath $records -Filter "*.json" -File)) {
+                try { $emfNames += @((Get-Content -LiteralPath $r.FullName -Raw | ConvertFrom-Json).chain | Where-Object { $_ }) }
+                catch { }  # a record that cannot be read: its lines stay in [Chain]
+            }
+        }
+        $movedToEmf = @(Move-ChainEntriesToEmf $Dir $emfNames)
+    } catch {
+        "Could not move EMF's own lines in $($script:ChainFileName) to [EMF] ($($_.Exception.Message)): they stay " +
+            "in [Chain], where EMF still starts them (ShroudForge shows them as failed)."
     }
     if ($plan) {
         if ($plan.RunsAs) {

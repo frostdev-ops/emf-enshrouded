@@ -278,6 +278,50 @@ function Test-InstallScripts([string]$scripts, [string]$gameTree) {
     $lines = @(Get-Content -LiteralPath (Join-Path $lk "dinput8-chain.ini") -ErrorAction SilentlyContinue)
     Check ($threw -and ((Get-Content -LiteralPath (Join-Path $lk "dinput8.dll") -Raw) -eq "a proxy") -and -not ($lines -contains "dinput8-previous.dll")) "a failed copy puts the other mod's dinput8.dll back and takes EMF's line out"
 
+    # an upgrade over 0.3.x that fails while copying leaves the chain file as it was: the 0.3.x loader that stays reads
+    # only [Chain], so EMF's lines must not have moved to [EMF] yet
+    $up = New-TempDir "failedupgrade"
+    Write-File (Join-Path $up "enshrouded.exe") "fake"
+    Write-File (Join-Path $up "dinput8.dll") "EMF-LOADER-7d3c9f old 0.3.x loader"
+    Write-File (Join-Path $up "creative.dll") "MZ creative"
+    Write-File (Join-Path $up "emf\moved.txt") "moved`tcreative.dll`r`n"
+    Write-File (Join-Path $up "dinput8-chain.ini") "[Chain]`r`ncreative.dll`r`n"
+    Write-File (Join-Path $up "emf\mods\clock\clock.dll") "in use"
+    $lock = [System.IO.File]::Open((Join-Path $up "emf\mods\clock\clock.dll"), "Open", "Read", "None")
+    $threw = $false
+    try { & $inst -Game $up -From $gameTree | Out-Null } catch { $threw = $true }
+    $lock.Close()
+    $text = Get-Content -LiteralPath (Join-Path $up "dinput8-chain.ini") -Raw
+    Check ($threw -and ($text -eq "[Chain]`r`ncreative.dll`r`n")) "a failed upgrade over 0.3.x leaves EMF's lines in [Chain], where the old loader still reads them ($($text -replace "`r`n", ' | '))"
+
+    # 0.3.x EMF.exe recorded the DLL mods it installed in emf\installed_mods\*.json ("chain"), not in moved.txt: an
+    # install moves those lines to [EMF] too
+    $appi = New-TempDir "appinstalled"
+    Write-File (Join-Path $appi "enshrouded.exe") "fake"
+    Write-File (Join-Path $appi "autolootplus.dll") "MZ alp"
+    Write-File (Join-Path $appi "emf\installed_mods\alp.json") '{"key":"alp","files":["autolootplus.dll"],"chain":["autolootplus.dll"]}'
+    Write-File (Join-Path $appi "dinput8-chain.ini") "[Chain]`r`nother.dll`r`nautolootplus.dll`r`n"
+    & $inst -Game $appi -From $gameTree | Out-Null
+    $lines = @(Get-Content -LiteralPath (Join-Path $appi "dinput8-chain.ini"))
+    $emfAt = [array]::IndexOf($lines, "[EMF]")
+    Check (($emfAt -gt 0) -and ([array]::IndexOf($lines, "other.dll") -lt $emfAt) -and ([array]::IndexOf($lines, "autolootplus.dll") -gt $emfAt)) "a DLL mod EMF.exe installed moves to [EMF] too, the player's line stays ($($lines -join ' | '))"
+
+    # uninstall: what is left in [EMF] goes back to [Chain] (on or off as it was), where the chain loader that is put
+    # back as dinput8.dll reads it; the empty [EMF] goes
+    $un2 = New-TempDir "uninstalltwo"
+    Write-File (Join-Path $un2 "enshrouded.exe") "fake"
+    Write-File (Join-Path $un2 "dinput8.dll") "unknown mod A"
+    & $inst -Game $un2 -From $gameTree | Out-Null
+    Write-File (Join-Path $un2 "dinput8.dll") "unknown mod B"
+    & $inst -Game $un2 -From $gameTree | Out-Null
+    Write-File (Join-Path $un2 "keepoff.dll") "a player's DLL"
+    $chainU = Join-Path $un2 "dinput8-chain.ini"
+    [System.IO.File]::AppendAllText($chainU, "; keepoff.dll`r`n")
+    & $uninst -Game $un2 -All -Force | Out-Null
+    $lines = @(Get-Content -LiteralPath $chainU)
+    $chainAt = [array]::IndexOf($lines, "[Chain]")
+    Check (($chainAt -ge 0) -and ([array]::IndexOf($lines, "dinput8-previous.dll") -gt $chainAt) -and ($lines -contains "; keepoff.dll") -and -not ($lines -contains "[EMF]")) "uninstall moves what is left in [EMF] to [Chain], a switched-off line stays off, and the empty [EMF] goes ($($lines -join ' | '))"
+
     # a moved file deleted by hand: uninstall still takes its line out (and the chain file EMF created)
     $gone = New-TempDir "gone"
     Write-File (Join-Path $gone "enshrouded.exe") "fake"
