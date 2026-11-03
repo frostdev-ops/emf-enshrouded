@@ -679,7 +679,10 @@ off, god mode, endless health, stamina and mana say "not available on this game 
 Installed switched off: switch it on in the Mods tab or EMF.exe (it needs the `lua` mod 1.9). A Beastmaster class: tame
 a wild wolf, boar, sabretooth, hound or bear by beating it under 25 % health (`/beastmaster tame`, a 3 s channel within
 8 m) or by feeding it its bait 3 times within 10 s (`/beastmaster feed`). Up to 8 beasts per player are kept with the
-world; call up to 2 (one of each kind) for 15 % mana with a 10 s cooldown (`/beastmaster call <name>`), send them at
+world; call as many as your active slots (1 at the start, more at levels 10, 20 and 30; any kinds) for 15 % mana with
+a 10 s cooldown (`/beastmaster call <name>`). A stable (the game's animal bed in your base, or a prop the host
+marks with `beastmaster.stable mark`): press E at it for the Beasts window (Make active, Store, Release); once a world
+has one, only active beasts are called. Send them at
 what you look at (`/beastmaster attack`), dismiss one or all; a beast that falls rests 2 minutes. While you build,
 your beasts step aside and come back after (`/beastmaster aside` does it by hand). Your beasts' kills give you XP and
 loot. Hold **F3** for the beast wheel (the host; B is the game's backpack key); every player has `/beastmaster` in the

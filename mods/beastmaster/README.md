@@ -1,10 +1,11 @@
 # Beastmaster (`beastmaster`, a Lua mod)
 
 A Beastmaster class for Enshrouded. Tame wild wolves, boars, sabretooths, hounds, bears, aurochs and snakes, keep up to 8 in
-your collection, and call up to 2 at a time to fight beside you. They follow you, come back when they stray, rest after
+your collection, and call as many to fight beside you as you have active slots (1 at the start, up to 4 as your character
+levels up). Build a stable to choose which beasts are active. They follow you, come back when they stray, rest after
 they fall, and are kept with the world. Their kills are yours: XP and loot.
 
-It needs the `lua` mod 1.12 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
+It needs the `lua` mod 1.13 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
 (the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs and the snake come in the **EMF creature packs**
 download (the **bear pack** and the **beasts pack**, below). The packs are EML content: **install EML (or ShroudForge)
 first**, because it loads them when the game starts; copying the pack folders alone does nothing. Without them
@@ -26,7 +27,8 @@ everything else works and those beasts are simply not there.
 2. A tamed beast becomes your ally, guards you, and joins your collection with a name: "Wolf", "Wolf 2", "Boar"... For its first
    5 s it cannot fall (a swing it began as a wild beast can land on itself).
 3. **Call a beast** from your collection: **Call <name>** on the wheel, or `/beastmaster call <name or number>`. It costs
-   15 % of your maximum mana, with 10 s between calls. At most 2 are out, one of each kind.
+   15 % of your maximum mana, with 10 s between calls. As many are out at once as you have **active slots** (see The
+   stable), of any kinds: with two slots, two wolves.
 4. **Fight together:** they defend you on their own. **Attack** (wheel) or `/beastmaster attack` sends every beast that is
    out at the creature you look at, up to 40 m away; when you look at nothing, at the creature that hit you in the last
    10 s. When a beast's hit leaves a foe at 25 % health or less, you land the killing blow, so the XP and loot are
@@ -54,6 +56,36 @@ everything else works and those beasts are simply not there.
    the wheel, `/beastmaster aside` again, calling or taming a beast, or sending the last one home ends it.
    `/beastmaster list` shows them as "aside".
 
+## The stable
+
+**Active slots.** You start with one: one beast out at a time. Slot 2 opens at character level 10, slot 3 at 20, slot 4
+at 30 (settings; 0 turns a slot off). `/beastmaster slots` tells you yours and when the next one opens.
+
+**Before your world has a stable**, you tame and call as before: any beast of your collection, as many out as your slots
+(dismiss one on the wheel and call another to swap). A beast you tame while your slots are full goes home.
+
+**The stable** is a prop Beastmaster knows: the game's **animal bed** (the straw bed for farm animals, large or small)
+built in your base, within 80 m of a flame altar (on the host a new one counts within seconds), or any prop the host
+marks with `beastmaster.stable mark` while looking at it (on a dedicated server an admin types `/beastmaster.stable
+mark` in the chat). An animal bed your farm animals already use counts too; it keeps working for them. Once your world has a stable (it
+stays so, kept with the world):
+- only **active** beasts can be called, and the wheel lists only those; the others wait in the stable. Calling one in
+  the stable says to make it active at a stable;
+- at the first stable, each player's beasts that are out become active, then the first of their list, up to their
+  slots;
+- a beast you tame takes a free active slot; with none free it goes to your stable.
+
+**The Beasts window:** look at the stable within 4 m and press **E** (the host). It shows your active slots (a beast and
+its loyalty, an empty slot, or a locked one with the level that opens it) and the stable: every beast with its kind,
+loyalty and whether it is out, at home or resting. Click a beast (or a slot) to select it, then:
+- **Make active**: into a free slot (it can be called);
+- **Store**: out of its slot (a beast that is out goes home);
+- **Release**: it leaves your collection for good (a beast that is out leaves the world); click it twice within 5 s.
+
+E or Esc closes the window. **Players who joined** use the chat within 10 m of a stable: `/beastmaster active <name or
+number>`, `/beastmaster store <name or number>` and `/beastmaster release <name or number>` (the same command again
+within 10 s lets the beast go). `/beastmaster list` shows which beasts are active.
+
 **Your beasts' strength.** A beast out is always at your level (also when you level up while it is out), with the
 health and damage a wild one of its kind has at that level, changed by its role:
 
@@ -78,7 +110,8 @@ has 20 % more health and damage and is 1.25x its size. The strength comes at onc
 
 **The wheel (hold F3):** Tame, Feed, Attack, **Mode** (steps passive, defending, aggressive), **Come back** while your beasts stepped aside by `/beastmaster aside`,
 **Dismiss <name>** for each beast that is out (and **Dismiss all** with two or more out), then **Call <name>** for up
-to 6 beasts that are at home or resting; a resting one shows its time left. The labels are short so they fit the
+to 6 beasts that are at home or resting (once your world has a stable: the active ones); a resting one shows its time
+left. The labels are short so they fit the
 wheel; the mouse wheel turns the page when there are more than 8 items. With **Necromancer** installed too, F3 and F2
 open one "Summons" wheel with "Beasts: ..." and "Undead: ..." items; turn **One wheel** (`shared_wheel`) off to keep
 Beastmaster's own wheel. A line at the bottom left lists your beasts that are out, aside or resting: "Beasts: Wolf
@@ -109,7 +142,11 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 
 | Command | What |
 |---|---|
-| `/beastmaster list` | your beasts and their loyalty: "1. Wolf - wolf, loyalty 3, out", "2. Bear - bear, loyalty 1, rests 0:40" |
+| `/beastmaster list` | your beasts and their loyalty: "1. Wolf - wolf, loyalty 3, out, active", "2. Bear - bear, loyalty 1, rests 0:40" (", active" once your world has a stable) |
+| `/beastmaster slots` | your active slots and the level that opens the next one |
+| `/beastmaster active <name or number>` | within 10 m of a stable: make a beast active (into a free slot) |
+| `/beastmaster store <name or number>` | within 10 m of a stable: put a beast into the stable (one that is out goes home) |
+| `/beastmaster release <name or number>` | within 10 m of a stable: let a beast go for good (the same command again within 10 s) |
 | `/beastmaster rename <name or number> <new name>` | rename a beast (1-20 characters, not a name your collection has) |
 | `/beastmaster tame` | tame the beast you look at, else the nearest beaten-down one (under 25 % health, within 8 m) |
 | `/beastmaster feed` | feed the beast you look at (else the nearest) its bait: 3 times to tame it |
@@ -119,6 +156,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
 | `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while someone builds next to them |
 | `/beastmaster mode [passive, defending or aggressive]` | how all your beasts fight; without a word, the mode now |
+| `beastmaster.stable mark`, `unmark`, `list` | **host or admins:** the prop you look at (no camera data: the one within 3 m of you) is a stable; the marked prop nearest you (within 8 m) is no stable; this world's stables |
 | `beastmaster.loyalty <name or number> <1-10>` | **host console only:** set a beast's loyalty (tests) |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
@@ -128,10 +166,11 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Setting | Default | What it does |
 |---|---|---|
 | Beast wheel (`wheel_key`) | F3 | hold it for the wheel (any key the game does not use; B is its backpack key) |
+| Beasts window (at a stable) (`stable_key`) | E | with a stable under your crosshair within 4 m; elsewhere E does what the game does |
+| Active slot 2, 3, 4 at level (`slot2_level`, `slot3_level`, `slot4_level`) | 10, 20, 30 | 0: that slot never opens |
 | One wheel with Necromancer's undead (`shared_wheel`) | on | off: Beastmaster's own wheel |
 | Mana to call a beast (`call_mana_pct`) | 15 % | of your maximum mana; 0 = free |
 | Seconds between calls (`call_cooldown_s`) | 10 | |
-| Beasts out at once (`max_out`) | 2 | 1-4, never two of the same kind |
 | Rest after a beast falls (`rest_s`) | 60 s | |
 | Beasts in your collection (`collection_max`) | 8 | 1-16 |
 | Tame by defeat below (`tame_health_pct`) | 25 % | |
@@ -209,8 +248,10 @@ does not ship this file.
 
 - It runs where the world runs: the host or a dedicated server. Without the packs, players who join need nothing:
   they see the beasts and use `/beastmaster` in the chat. **With a pack, everyone needs it:** the host (or the
-  server) and every player who joins, because it changes the game's data (an EML patch). The wheel and the line on
-  screen are the host's.
+  server) and every player who joins, because it changes the game's data (an EML patch). The wheel, the Beasts window
+  and the line on screen are the host's.
+- Render models are only on the game's client side: on a dedicated server a built stable is not seen; an admin marks it
+  (`/beastmaster.stable mark`).
 - Your collection is kept with the world, per player (by Steam account).
 - A beast that is out is taken out of the world while its owner is away, and comes back when they return.
 - Beasts are ordinary game creatures with the enemy AI: they guard you as the game's companions do, and sometimes take

@@ -395,6 +395,7 @@ From the mods in the EMF zip (only while that mod runs):
 - handover.log: the last hand-overs [handover]
 - handover.debug_target <entity|off>: (tests) every hand-over goes to this villager or chest [handover]
 - beastmaster.species <animation graph guid> <faction number> [scale]: which beast a creature is (for modders) [beastmaster]
+- beastmaster.stable mark | unmark | list: the prop you look at is a stable; the marked prop nearest you is not;  [beastmaster]
 - beastmaster.loyalty <name or number> <1-10>: set a beast's loyalty (admin) [beastmaster]
 - beastmaster.give <species>: add a beast to your collection (admin) [beastmaster]
 Lua mods add <id>.<name> commands with emf.command.
