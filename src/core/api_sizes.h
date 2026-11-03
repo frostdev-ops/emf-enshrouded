@@ -27,6 +27,8 @@ constexpr uint32_t kCommandSenderV15Size = EMF_FIELD_END(EmfCommandSender, pad);
 constexpr uint32_t kCommandDefV17Size = EMF_FIELD_END(EmfCommandDef, user);
 constexpr uint32_t kTeleportV20Size = EMF_FIELD_END(EmfTeleport, user);
 constexpr uint32_t kComponentChangeV23Size = EMF_FIELD_END(EmfComponentChange, user);
+constexpr uint32_t kWindowDefV24Size = EMF_FIELD_END(EmfWindowDef, user);
+constexpr uint32_t kUiEventV24Size = EMF_FIELD_END(EmfUiEvent, flags);
 // The API table itself, by the version that last appended to it (a mod checks api->size against these).
 constexpr uint32_t kApiV17Size = EMF_FIELD_END(EmfApi, register_command_ex);
 constexpr uint32_t kApiV18Size = EMF_FIELD_END(EmfApi, damage);
@@ -88,6 +90,16 @@ static_assert(kApiV23Size == 624 && sizeof(EmfApi) == kApiV23Size, "EmfApi size 
 static_assert(kComponentChangeV23Size == 48 && sizeof(EmfComponentChange) == 48 &&
                   offsetof(EmfComponentChange, data) == 16 && offsetof(EmfComponentChange, cb) == 32,
               "EmfComponentChange layout (v23)");
+static_assert(sizeof(EmfUiWidget) == 56 && offsetof(EmfUiWidget, key) == 8 && offsetof(EmfUiWidget, count) == 32 &&
+                  offsetof(EmfUiWidget, rgba) == 40 && offsetof(EmfUiWidget, item) == 48,
+              "EmfUiWidget layout (v24)");
+static_assert(kUiEventV24Size == 40 && sizeof(EmfUiEvent) == 40 && offsetof(EmfUiEvent, window) == 8 &&
+                  offsetof(EmfUiEvent, reason) == 32,
+              "EmfUiEvent layout (v24)");
+static_assert(kWindowDefV24Size == 72 && sizeof(EmfWindowDef) == 72 && offsetof(EmfWindowDef, widgets) == 24 &&
+                  offsetof(EmfWindowDef, width) == 48 && offsetof(EmfWindowDef, world_kind) == 52 &&
+                  offsetof(EmfWindowDef, cb) == 56,
+              "EmfWindowDef layout (v24)");
 static_assert(sizeof(EmfWorldSettingInfo) == 72 && offsetof(EmfWorldSettingInfo, key) == 8 &&
                   offsetof(EmfWorldSettingInfo, min) == 32 && offsetof(EmfWorldSettingInfo, flags) == 64,
               "EmfWorldSettingInfo layout (v21)");

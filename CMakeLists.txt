@@ -175,6 +175,7 @@ add_library(emf_core_lib STATIC
   src/core/overlay/console_model.cpp
   src/core/overlay/console_suggest.cpp
   src/core/overlay/wheel_model.cpp
+  src/core/overlay/window_model.cpp
   src/core/overlay/hud_model.cpp
   src/core/overlay/cursor_model.cpp
   src/core/overlay/mods_ui.cpp
@@ -452,6 +453,7 @@ add_executable(emf_tests
   tests/test_teleport.cpp
   tests/test_api_teleport.cpp
   tests/test_wheel_model.cpp
+  tests/test_window_model.cpp
   tests/test_hud_model.cpp
   tests/test_wheel_gate.cpp
   tests/test_aim.cpp
