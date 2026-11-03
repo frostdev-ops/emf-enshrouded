@@ -10,6 +10,7 @@ local species = require("species")
 local loyalty = require("loyalty")
 local aside_mod = require("aside")
 local talents = require("talents")
+local fight_mod = require("fight")
 
 local M = {}
 local P = {}
@@ -30,6 +31,12 @@ local REFUSALS = 3      -- a pack beast's call-back refused this many checks in 
 
 function M.new(env)
 	local p = setmetatable({ env = env, aside = aside_mod.new({ setting = env.setting }) }, P)
+	p.fight = fight_mod.new({
+		now = env.now,
+		tell = env.tell,
+		owner = function(world, account) return p:owner(world, account) end,
+		strike = function(world, e, id, target, amount) p:strike(world, e, id, target, amount) end,
+	})
 	p:reset()
 	return p
 end
@@ -55,6 +62,7 @@ function P:reset()
 	self.hits = {}       -- hostile creature id -> {beast entity id -> when it hit it} (loyalty for the kill)
 	self.speeds = {}     -- entity id -> {base, wrote} by Movement entry: the game's values and Swiftness's (talents.lua)
 	self.aside:reset()
+	self.fight:reset()
 end
 
 local function mmss(s)
@@ -155,6 +163,7 @@ end
 function P:fresh(id)
 	self.base[id], self.sent[id], self.recall[id], self.fought[id] = nil, nil, nil, nil
 	self.speeds[id] = nil
+	self.fight:forget(id)
 end
 
 -- When the game sets a beast's damage multiplier again (its rescale to a level), its role and loyalty go on top of the
@@ -405,20 +414,9 @@ function P:hunt(world, account, owner)
 	if foe then self:attack(world, account, foe) end
 end
 
--- Every hit to or from our beast is noted (it heals HEAL_AFTER_S after the last one).
 -- XP credit: when our beast's hit leaves a foe at or under 25 % health, its owner lands the killing blow (a real game
 -- hit: kill credit, XP and loot go to the owner). Once per foe; never on players or allies.
-function P:on_hit(world, source, target)
-	if self.ids[source] or self.ids[target] then
-		local now = self.env.now(world)
-		if self.ids[source] then self.fought[source] = now end
-		if self.ids[target] then self.fought[target] = now end
-		local f = self.ids[source] and world:get("Faction", target)
-		if f and HOSTILE[f.faction] and not world:get("PlayerState", target) then
-			self.hits[target] = self.hits[target] or {}
-			self.hits[target][source] = now
-		end
-	end
+function P:credit(world, source, target)
 	if not self.env.setting("xp_credit") then return end
 	local e = self.ids[source]
 	if not e or self.credited[target] then return end
@@ -433,6 +431,35 @@ function P:on_hit(world, source, target)
 	if not owner then return end
 	self.credited[target] = true
 	emf.damage(world, owner, target, cur)
+end
+
+-- Every hit to or from our beast is noted (it heals HEAL_AFTER_S after the last one), may hand a foe's killing blow to
+-- its owner (P:credit), and counts for its talents in fights (fight.lua). `change`: the hit's health change.
+function P:on_hit(world, source, target, change)
+	if not (self.ids[source] or self.ids[target]) then return end
+	local now = self.env.now(world)
+	if self.ids[source] then self.fought[source] = now end
+	if self.ids[target] then self.fought[target] = now end
+	local f = self.ids[source] and world:get("Faction", target)
+	if f and HOSTILE[f.faction] and not world:get("PlayerState", target) then
+		self.hits[target] = self.hits[target] or {}
+		self.hits[target][source] = now
+	end
+	self:credit(world, source, target)
+	self.fight:on_hit(world, source, target, change or 0, self.ids[source], self.ids[target], self.credited[target])
+end
+
+-- Ambush's bonus (fight.lua): a real hit from the beast on the next step; one that kills is its owner's while xp_credit
+-- is on (the XP and loot, as the XP credit gives them).
+function P:strike(world, e, id, target, amount)
+	local cur = emf.health(world, target)
+	local owner = self.env.setting("xp_credit") and cur and amount >= cur and self:owner(world, e.account)
+	if owner then
+		self.credited[target] = true
+		emf.damage(world, owner, target, amount)
+	else
+		emf.damage(world, id, target, amount)
+	end
 end
 
 -- A loyalty point for the beast of entity `e`: a new loyalty is told to its owner and makes it stronger at once.
@@ -563,6 +590,7 @@ function P:step(world)
 		if passive or now < (self.recall[id] or 0) then calm(world, id) end
 		if self.speeds[id] then self:set_speed(world, id, e.beast) end
 	end
+	self.fight:step(world, self.ids)
 	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now
 	if now < self.next_check then return end
 	self.next_check = now + 1

@@ -668,7 +668,7 @@ local function update_hud(world)
 end
 
 emf.on_event("HitEvent", function(world, e)
-	pack:on_hit(world, e.rootSourceId, e.targetId)
+	pack:on_hit(world, e.rootSourceId, e.targetId, e.healthChange)
 	rare:on_hit(world, e.rootSourceId, e.targetId)
 	if e.rootSourceId ~= 0 and e.rootSourceId ~= e.targetId and world:get("PlayerState", e.targetId) then
 		last_hit[e.targetId] = { id = e.rootSourceId, at = now(world) }

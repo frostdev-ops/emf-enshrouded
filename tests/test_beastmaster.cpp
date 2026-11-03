@@ -2863,3 +2863,173 @@ TEST_CASE("talent: Swiftness multiplies the Movement multiplier, kept when the g
     b.seconds(2);
     CHECK(speed_of(b, 1235) == doctest::Approx(0.7));
 }
+
+// ---- talents in fights: Guard, Second Wind, Ambush ----
+namespace {
+// A hit from `source` on `target` that changed its health by `change` (negative: damage).
+std::vector<uint8_t> hit(uint32_t source, uint32_t target, int32_t change) {
+    auto e = hit_event(source, target);
+    std::memcpy(&e[offsetof(ecs::HitEvent, healthChange)], &change, 4);
+    return e;
+}
+// The game's minimum health of `id` (Health storage [1]): the floor Guard and Second Wind hold.
+int32_t floor_of(BeastRig& b, uint32_t id) { return now_of<ecs::Health>(b, id).dataStorage[1]; }
+// Player 1's wolf (loyalty 10: 9 points) out as entity 1234 with 100 of 100 health, at a stable, with the talents
+// `spend` spent; foe 70 (a skeleton, 100 of 100) beside it.
+void wolf_with(BeastRig& b, const std::vector<std::string>& spend) {
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.loyalty Wolf 10");
+    next_beast(b, 1234);
+    component<ecs::Movement>(b.r.fake, 1234).dataStorage[1] = 1.0f;
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 1234).guardEntityId.id = 1;  // it guards its owner
+    at_stable(b);
+    for (const auto& t : spend) REQUIRE(b.reply("beastmaster.talent Wolf " + t).rfind("Wolf: ", 0) == 0);
+    creature(b, 70, 0, 10, kSkeletonFoe);
+    b.seconds(1);
+    b.r.fake.attr_adds.clear();
+    b.r.fake.damages.clear();
+}
+}  // namespace
+
+TEST_CASE("talent: Guard: the first seconds of a fight take no damage, the opening hit healed back; a hit after 10 s quiet starts a new fight") {
+    BeastRig b;
+    wolf_with(b, {"guard"});
+    REQUIRE(floor_of(b, 1234) == 0);
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 70;  // the foe's opening hit: 30
+    deliver(b.r.fake, "HitEvent", hit(70, 1234, -30));
+    CHECK(b.added(1234, EMF_ATTR_HEALTH, 30));  // healed back
+    CHECK(floor_of(b, 1234) == 100);            // its health when the fight started
+    b.seconds(2);
+    b.r.fake.attr_adds.clear();
+    deliver(b.r.fake, "HitEvent", hit(70, 1234, -10));  // in the fight: the floor holds, nothing healed back
+    CHECK(b.r.fake.attr_adds.empty());
+    CHECK(floor_of(b, 1234) == 100);
+    b.seconds(2);  // 4 s after the fight started: 3 s of Guard are over
+    CHECK(floor_of(b, 1234) == 0);
+    deliver(b.r.fake, "HitEvent", hit(1234, 70, -10));  // still the same fight (2 s after the last hit)
+    CHECK(floor_of(b, 1234) == 0);
+    b.reply("beastmaster.talent Wolf guard");  // 2 points: 5 s, from the next fight
+    b.seconds(11);                             // 10 s quiet: the fight is over
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 60;
+    b.r.fake.attr_adds.clear();
+    deliver(b.r.fake, "HitEvent", hit(1234, 70, -10));  // its own hit starts the next fight
+    CHECK(b.r.fake.attr_adds.empty());
+    CHECK(floor_of(b, 1234) == 60);
+    b.seconds(4);
+    CHECK(floor_of(b, 1234) == 60);
+    b.seconds(2);
+    CHECK(floor_of(b, 1234) == 0);
+}
+
+TEST_CASE("talent: Second Wind: a killing blow leaves it at 20 %; then 5 minutes before it works again") {
+    BeastRig b;
+    wolf_with(b, {"second wind"});
+    CHECK(floor_of(b, 1234) == 1);  // ready: a killing blow leaves it at 1
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 1;
+    one_step(b);
+    CHECK(b.added(1234, EMF_ATTR_HEALTH, 19));  // up to 20 of 100
+    CHECK(notes_with(b.r.fake, "Wolf gets up again: Second Wind (5 min before it works again).") == 1);
+    CHECK(floor_of(b, 1234) == 0);
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 40;
+    b.seconds(290);
+    CHECK(floor_of(b, 1234) == 0);
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 1;  // within the 5 minutes: nothing
+    one_step(b);
+    CHECK(notes_with(b.r.fake, "Wolf gets up again") == 1);
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 40;
+    b.seconds(11);
+    CHECK(floor_of(b, 1234) == 1);  // ready again
+}
+
+TEST_CASE("talent: Ambush: the first damaging hit in a fight deals 50 % more a point; a bonus that kills is its owner's") {
+    BeastRig b;
+    wolf_with(b, {"ambush"});
+    using Hit = std::tuple<uint32_t, uint32_t, int32_t>;
+    b.r.fake.attrs[{70, EMF_ATTR_HEALTH}] = 60;
+    deliver(b.r.fake, "HitEvent", hit(1234, 70, -40));
+    REQUIRE(b.r.fake.damages.size() == 1u);
+    CHECK(b.r.fake.damages[0] == Hit{1234, 70, 20});
+    deliver(b.r.fake, "HitEvent", hit(1234, 70, -10));  // its next hit: nothing more
+    CHECK(b.r.fake.damages.size() == 1u);
+    b.reply("beastmaster.talent Wolf ambush");
+    b.seconds(11);  // 10 s quiet: the next hit starts a new fight
+    deliver(b.r.fake, "HitEvent", hit(70, 1234, -5));   // the foe hits first: the fight starts, Ambush waits
+    deliver(b.r.fake, "HitEvent", hit(1234, 70, -0));   // a hit that deals nothing: still waits
+    CHECK(b.r.fake.damages.size() == 1u);
+    deliver(b.r.fake, "HitEvent", hit(1234, 70, -20));
+    REQUIRE(b.r.fake.damages.size() == 2u);
+    CHECK(b.r.fake.damages[1] == Hit{1234, 70, 20});  // 2 points: +100 %
+    b.seconds(11);
+    creature(b, 71, 0, 12, kSkeletonFoe);
+    b.r.fake.attrs[{71, EMF_ATTR_HEALTH}] = 26;  // 26 of 100 after the hit: the bonus kills it
+    deliver(b.r.fake, "HitEvent", hit(1234, 71, -26));
+    REQUIRE(b.r.fake.damages.size() == 3u);
+    CHECK(b.r.fake.damages[2] == Hit{1, 71, 26});  // the owner's: the XP and loot are theirs
+}
+
+TEST_CASE("talent: Ambush never hits a player or a player's ally, nor a foe its hit already handed to the owner") {
+    BeastRig b;
+    wolf_with(b, {"ambush"});
+    using Hit = std::tuple<uint32_t, uint32_t, int32_t>;
+    creature(b, 80, 5, 5, kPlayerAlly);  // another player's beast
+    deliver(b.r.fake, "HitEvent", hit(1234, 2, -10));
+    deliver(b.r.fake, "HitEvent", hit(1234, 80, -10));
+    CHECK(b.r.fake.damages.empty());
+    b.r.fake.attrs[{70, EMF_ATTR_HEALTH}] = 20;  // 20 of 100: the XP credit hands the killing blow to the owner
+    deliver(b.r.fake, "HitEvent", hit(1234, 70, -30));
+    REQUIRE(b.r.fake.damages.size() == 1u);
+    CHECK(b.r.fake.damages[0] == Hit{1, 70, 20});
+    deliver(b.r.fake, "HitEvent", hit(1234, 70, -10));  // its first damaging hit in this fight was spent
+    CHECK(b.r.fake.damages.size() == 1u);
+}
+
+TEST_CASE("talent: guard and second wind together: the higher floor while Guard lasts, then Second Wind's, then the game's") {
+    BeastRig b;
+    wolf_with(b, {"guard", "second wind"});
+    CHECK(floor_of(b, 1234) == 1);
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 80;
+    deliver(b.r.fake, "HitEvent", hit(70, 1234, -20));
+    CHECK(floor_of(b, 1234) == 100);
+    b.seconds(4);
+    CHECK(floor_of(b, 1234) == 1);  // Guard is over; Second Wind is ready
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 1;
+    one_step(b);
+    CHECK(b.added(1234, EMF_ATTR_HEALTH, 19));
+    CHECK(floor_of(b, 1234) == 0);  // neither: the game's minimum
+}
+
+TEST_CASE("talent: a beast sent home mid-fight leaves nothing behind; its next call starts a fresh fight") {
+    BeastRig b;
+    wolf_with(b, {"guard", "second wind", "swiftness"});
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 90;
+    deliver(b.r.fake, "HitEvent", hit(70, 1234, -10));
+    REQUIRE(floor_of(b, 1234) == 100);
+    REQUIRE(speed_of(b, 1234) == doctest::Approx(1.04));
+    b.reply("beastmaster.dismiss Wolf");
+    // the game gives the id to another creature: nothing of the wolf's is written on it
+    component<ecs::Health>(b.r.fake, 1234);
+    component<ecs::Movement>(b.r.fake, 1234).dataStorage[1] = 1.0f;
+    b.seconds(5);
+    CHECK(floor_of(b, 1234) == 0);
+    CHECK(speed_of(b, 1234) == 1.0f);
+    next_beast(b, 1235);
+    b.seconds(6);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(floor_of(b, 1235) == 1);  // Second Wind ready
+    b.r.fake.attrs[{1235, EMF_ATTR_HEALTH}] = 90;
+    b.r.fake.attr_adds.clear();
+    deliver(b.r.fake, "HitEvent", hit(70, 1235, -10));  // the opening hit of its own fight
+    CHECK(b.added(1235, EMF_ATTR_HEALTH, 10));
+    CHECK(floor_of(b, 1235) == 100);
+}
+
+TEST_CASE("talent: a reset while out takes Second Wind's floor off at the next step") {
+    BeastRig b;
+    wolf_with(b, {"second wind"});
+    REQUIRE(floor_of(b, 1234) == 1);
+    b.reply("beastmaster.talents Wolf reset");
+    one_step(b);
+    CHECK(floor_of(b, 1234) == 0);
+}
