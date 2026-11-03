@@ -7,7 +7,7 @@ they fall, and are kept with the world. Their kills are yours: XP and loot. Loya
 one your own (stronger, tougher, faster, a second wind, an ambush, a guard, a menace, a taunt). Monsters split between
 you and your beasts: a tank beast draws half of them.
 
-It needs the `lua` mod 1.13 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
+It needs the `lua` mod 1.14 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
 (the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs and the snake come in the **EMF creature packs**
 download (the **bear pack** and the **beasts pack**, below): install them with EMF.exe ("Install a downloaded file")
 and EMF builds them when the game starts (no EML needed; with EML or ShroudForge installed, the card on EMF.exe's EMF
@@ -77,7 +77,9 @@ stays so, kept with the world):
   slots;
 - a beast you tame takes a free active slot; with none free it goes to your stable.
 
-**The Beasts window:** look at the stable within 4 m and press **E** (the host). It has two tabs at the top: **Stable**
+**The Beasts window:** every stable shows the game's own **E Open** prompt; press E there (the host). (A marked prop
+whose own E use leaves no room for the prompt opens the window with E too, looking at it within 4 m.) It has two tabs
+at the top: **Stable**
 and the selected beast's name (the open one lit). The Stable tab shows your active slots (a beast and its loyalty, an
 empty slot, or a locked one with the level that opens it) and the stable: every beast with its kind, loyalty and
 whether it is out, at home or resting. Click a beast (or a slot) to select it: its own tab opens (see Talents); the
@@ -86,7 +88,8 @@ whether it is out, at home or resting. Click a beast (or a slot) to select it: i
 - **Store**: out of its slot (a beast that is out goes home);
 - **Release**: it leaves your collection for good (a beast that is out leaves the world); click it twice within 5 s.
 
-E or Esc closes the window. **Players who joined** use the chat within 10 m of a stable: `/beastmaster active <name or
+E or Esc closes the window. **Players who joined** get the stable's commands in the chat when they press E at its
+prompt, and use them within 10 m of a stable: `/beastmaster active <name or
 number>`, `/beastmaster store <name or number>` and `/beastmaster release <name or number>` (the same command again
 within 10 s lets the beast go). `/beastmaster list` shows which beasts are active.
 
@@ -237,7 +240,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Setting | Default | What it does |
 |---|---|---|
 | Beast wheel (`wheel_key`) | F3 | hold it for the wheel (any key the game does not use; B is its backpack key) |
-| Beasts window (at a stable) (`stable_key`) | E | with a stable under your crosshair within 4 m; elsewhere E does what the game does |
+| Beasts window (at a stable without the prompt) (`stable_key`) | E | a stable has the game's E Open prompt; this key opens the window only at a marked prop that has no prompt (its own E use), under your crosshair within 4 m; elsewhere E does what the game does |
 | Active slot 2, 3, 4 at level (`slot2_level`, `slot3_level`, `slot4_level`) | 10, 20, 30 | 0: that slot never opens |
 | One wheel with Necromancer's undead (`shared_wheel`) | on | off: Beastmaster's own wheel |
 | Mana to call a beast (`call_mana_pct`) | 15 % | of your maximum mana; 0 = free |
@@ -327,7 +330,9 @@ does not ship this file.
   server) and every player who joins, because it changes the game's data (an EML patch). The wheel, the Beasts window
   and the line on screen are the host's.
 - Render models are only on the game's client side: on a dedicated server a built stable is not seen; an admin marks it
-  (`/beastmaster.stable mark`).
+  (`/beastmaster.stable mark`). There every player who presses E at a stable's prompt gets its chat commands.
+- A stable's prompt is on the stable's entity in the world the host or the server runs; Beastmaster offers it again at
+  every search of the world (every 30 s), so one the game dropped (the bed streamed out of view) comes back.
 - Your collection is kept with the world, per player (by Steam account).
 - A beast that is out is taken out of the world while its owner is away, and comes back when they return.
 - Beasts are ordinary game creatures with the enemy AI: they guard you as the game's companions do, and sometimes take
