@@ -3812,3 +3812,49 @@ TEST_CASE("stable: a marked prop gets its prompt at once, loses it when unmarked
     REQUIRE(b.reply("beastmaster.stable unmark").rfind("Unmarked", 0) == 0);
     CHECK(contains(b.r.fake.offers_removed, 960));
 }
+
+namespace {
+bool told(BeastRig& b, uint32_t player, const std::string& part) {
+    for (const auto& [p, text] : b.r.fake.tells)
+        if (p == player && text.find(part) != std::string::npos) return true;
+    return false;
+}
+}  // namespace
+
+TEST_CASE("stable: E Open at a stable opens the Beasts window for the host and tells a player who joined the stable's commands") {
+    BeastRig b;
+    with_offers(b.r.api);
+    three_beasts(b);
+    at_stable(b);
+    Fake::Off o = *last_offer(b, 960);
+    o.cb(kServer, 1, 960, o.user);  // the host presses E there
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    CHECK(b.r.fake.windows.back().id == "beastmaster.stable");
+    CHECK(shows(b.r.fake.windows.back(), "Stable 3/8"));
+    o.cb(kServer, 2, 960, o.user);  // a player who joined
+    CHECK(b.r.fake.windows.size() == 1u);
+    for (const char* part : {"/beastmaster active <name or number>", "/beastmaster store", "/beastmaster release",
+                             "/beastmaster talent <name or number> <talent>"})
+        CHECK_MESSAGE(told(b, 2, part), part);
+    b.r.api.local_player = []() -> uint32_t { return 0; };  // a dedicated server: nobody has the window
+    o.cb(kServer, 1, 960, o.user);
+    CHECK(b.r.fake.windows.size() == 1u);
+    CHECK(told(b, 1, "/beastmaster active"));
+}
+
+TEST_CASE("stable: the E key opens the Beasts window only at a stable without the prompt") {
+    BeastRig b;
+    with_offers(b.r.api);
+    three_beasts(b);
+    at_stable(b);
+    REQUIRE(offers_on(b, 960) == 1u);
+    press(b, kE);
+    CHECK(b.r.fake.windows.empty());  // the prompt opens it (once)
+    BeastRig c;  // the game refused the prompt there (the prop has an E use of its own)
+    with_offers(c.r.api);
+    c.r.fake.offer_ok = false;
+    three_beasts(c);
+    at_stable(c);
+    press(c, kE);
+    CHECK(c.r.fake.windows.size() == 1u);
+}
