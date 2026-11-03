@@ -12,8 +12,9 @@
 -- its server world has the model.
 -- Each stable has the game's own "E Open" prompt (emf.offer, Lua 1.14) on its server-world entity: a bed the server
 -- world shows, its own; a bed only the client world shows, or a marked prop, the entity with a StaticCollider nearest its
--- place (matched in the server world's search). The prompts are offered again after every search (the game drops one
--- when its entity streams out) and taken off a stable that stops counting.
+-- place (matched in the server world's search); only an entity with a StaticCollider that is still at the stable's
+-- place gets one (the game gives an id out again when its entity streams out). The prompts are offered again after
+-- every search (the game drops one when its entity streams out) and taken off a stable that stops counting.
 local aim = require("aim")
 
 local M = {}
@@ -136,13 +137,21 @@ function S:rebuild(world)
 	if world and #list > 0 and self.env.on_found then self.env.on_found(world) end
 end
 
--- Every stable's prompt offered (again: an identical offer only replaces its function), and taken off the entities that
--- are no stable now. Server world only.
+-- Whether stable `b`'s entity is at its place now (an id the game gave out again is not).
+local function at_place(world, b)
+	if not b.entity then return false end
+	local x, y, z = world:position(b.entity)
+	return x ~= nil and dist(b, x, y, z) <= SAME_M
+end
+
+-- Every stable's prompt offered (again: an identical offer only replaces its function) on its entity when that is at
+-- its place and has a StaticCollider (the game shows no prompt without one), and taken off the entities that are no
+-- stable's now. Server world only.
 function S:sync_offers(world)
 	if not (emf.offer and world:is_server()) then return end
 	local want = {}
 	for _, b in ipairs(self.stables) do
-		if b.entity then want[b.entity] = true end
+		if at_place(world, b) and has(world, "StaticCollider", b.entity) then want[b.entity] = true end
 	end
 	for id in pairs(want) do
 		local ok = emf.offer(world, id, OFFER, function(w, player, entity)
@@ -158,9 +167,23 @@ function S:sync_offers(world)
 	end
 end
 
--- Whether stable `b` (from the list) has the game's prompt.
-function S:prompted(b)
-	return b ~= nil and b.entity ~= nil and self.offered[b.entity] == true
+-- Whether stable `b` (from the list) has the game's prompt now: offered, its entity still at its place, and the game's
+-- prompt there (InteractionOfferRuntime, where it can be read). A prompt the game dropped since (the entity streamed out
+-- and back) starts a new search, which offers it again.
+function S:prompted(world, b)
+	if not (b and b.entity and self.offered[b.entity]) then return false end
+	local ok, prompt = pcall(world.get, world, "InteractionOfferRuntime", b.entity)
+	if at_place(world, b) and not (ok and prompt == nil) then return true end
+	if not self.walk then self.walk_after = 0 end
+	return false
+end
+
+-- The stable whose prompt is on entity `id`, at its place now; nil when none.
+function S:stable_of(world, id)
+	for _, b in ipairs(self.stables) do
+		if b.entity == id and at_place(world, b) then return b end
+	end
+	return nil
 end
 
 function S:count()

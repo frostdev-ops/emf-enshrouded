@@ -3848,6 +3848,7 @@ TEST_CASE("stable: the E key opens the Beasts window only at a stable without th
     three_beasts(b);
     at_stable(b);
     REQUIRE(offers_on(b, 960) == 1u);
+    component<ecs::InteractionOfferRuntime>(b.r.fake, 960);  // the game's prompt components, as the core adds them
     press(b, kE);
     CHECK(b.r.fake.windows.empty());  // the prompt opens it (once)
     BeastRig c;  // the game refused the prompt there (the prop has an E use of its own)
@@ -3857,4 +3858,100 @@ TEST_CASE("stable: the E key opens the Beasts window only at a stable without th
     at_stable(c);
     press(c, kE);
     CHECK(c.r.fake.windows.size() == 1u);
+}
+
+// ---- the stable's prompt: after review ----
+TEST_CASE("stable: the E key opens the window at a stable whose prompt the game dropped (streamed out and back), and a new search starts") {
+    BeastRig b;
+    with_offers(b.r.api);
+    three_beasts(b);
+    at_stable(b);
+    component<ecs::InteractionOfferRuntime>(b.r.fake, 960);
+    REQUIRE(offers_on(b, 960) == 1u);
+    b.r.fake.components.erase({ecs::InteractionOfferRuntime::kHash, 960});  // the game dropped the prompt
+    press(b, kE);
+    CHECK(b.r.fake.windows.size() == 1u);
+    CHECK(offers_on(b, 960) == 2u);  // searched again at once: offered again
+    BeastRig c;  // the prompt's id names something elsewhere now
+    with_offers(c.r.api);
+    three_beasts(c);
+    at_stable(c);
+    component<ecs::InteractionOfferRuntime>(c.r.fake, 960);
+    place(c.r.fake, 960, 20, 10, 20);
+    press(c, kE);
+    CHECK(c.r.fake.windows.size() == 1u);
+}
+
+TEST_CASE("stable: an id that names something elsewhere now is not offered again, and E Open from it does nothing") {
+    BeastRig b;
+    with_offers(b.r.api);
+    three_beasts(b);
+    at_stable(b);  // prop 960 marked and offered
+    REQUIRE(offers_on(b, 960) == 1u);
+    const Fake::Off old = *last_offer(b, 960);
+    place(b.r.fake, 960, 20, 10, 20);  // the prop streamed out; the game gave its id to something else
+    old.cb(kServer, 1, 960, old.user);  // E there before the stables are offered again
+    CHECK(b.r.fake.windows.empty());
+    stable_prop(b, 962, 3, 10, 0, nullptr);
+    b.look(1, 0, 11.5, 0, 90);  // a second mark: the stables are offered again
+    REQUIRE(b.reply("beastmaster.stable mark").rfind("Marked: ", 0) == 0);
+    CHECK(offers_on(b, 962) == 1u);
+    CHECK(offers_on(b, 960) == 1u);  // not again on the old id
+}
+
+TEST_CASE("stable: a stable whose entity has no StaticCollider gets no prompt; the E key opens its window") {
+    BeastRig b;
+    with_offers(b.r.api);
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 950, 5, 10, 0);  // a bed the server world shows, without a collider
+    b.r.fake.components.erase({ecs::StaticCollider::kHash, 950});
+    b.seconds(32);
+    REQUIRE(has(b.reply("beastmaster.stable list"), "1. Animal bed at 5, 10, 0"));
+    CHECK(offers_on(b, 950) == 0u);
+    BeastRig c;  // a marked prop that has a model and no collider
+    with_offers(c.r.api);
+    three_beasts(c);
+    stable_prop(c, 963, 0, 10, 3, kStableModel);
+    c.r.fake.components.erase({ecs::StaticCollider::kHash, 963});
+    c.look(1, 0, 11.5, 0, 0);
+    REQUIRE(c.reply("beastmaster.stable mark").rfind("Marked: ", 0) == 0);
+    CHECK(offers_on(c, 963) == 0u);
+    press(c, kE);
+    CHECK(c.r.fake.windows.size() == 1u);
+}
+
+TEST_CASE("stable: one E press that reaches both the prompt and the key opens the window once") {
+    BeastRig b;
+    with_offers(b.r.api);
+    three_beasts(b);
+    at_stable(b);  // offered; the game's prompt not seen there yet: the key path takes it as a stable without one
+    Fake::Off o = *last_offer(b, 960);
+    o.cb(kServer, 1, 960, o.user);  // the prompt opens the window
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    press(b, kE);  // the same press, on the key path
+    CHECK(b.r.fake.windows.size() == 1u);
+}
+
+TEST_CASE("stable: a window from before a world load that closes late does not close the one opened since") {
+    BeastRig b;
+    three_beasts(b);
+    at_stable(b);
+    press(b, kE);
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    b.r.fake.session = 3;  // the world loads again
+    fire_load(1);
+    b.seconds(1);
+    press(b, kE);
+    REQUIRE(b.r.fake.windows.size() == 2u);
+    const Fake::Win first = b.r.fake.windows[0];
+    EmfUiEvent e{};
+    e.size = sizeof e;
+    e.kind = EMF_UI_CLOSED;
+    e.window = first.id.c_str();
+    e.key = "";
+    e.from_key = "";
+    e.reason = EMF_UI_BY_CORE;
+    first.cb(kServer, &e, first.user);  // the first window's close arrives now
+    click(b, "beast.Tusk");             // the open window still answers
+    CHECK(text_at(shown(b), "tab.beast") == "Tusk");
 }

@@ -22,7 +22,7 @@ local W = {}
 W.__index = W
 
 function M.new(env)
-	local w = setmetatable({ env = env }, W)
+	local w = setmetatable({ env = env, opening = 0 }, W)  -- opening: counts the windows opened (kept over resets)
 	w:reset()
 	return w
 end
@@ -206,14 +206,21 @@ local function signature(rows)
 	return table.concat(parts, ";")
 end
 
--- Opens the window for `player` (the host). True when it opened.
+-- Opens the window for `player` (the host); not while it is open (one E press can reach both the stable's prompt and
+-- the E key). Each opening answers only its own events: a window from before (a world loaded again under it) that
+-- closes late leaves the one opened since alone. True when it opened.
 function W:show(world, player)
+	if self.open then return false end
 	local account = world:account(player)
 	if not account then return false end
 	self:reset()
 	self.account, self.player = account, player
 	local def = self:def(world)
-	if not emf.window(M.ID, def, function(w, ev) self:on_event(w, ev) end) then
+	self.opening = self.opening + 1
+	local opening = self.opening
+	if not emf.window(M.ID, def, function(w, ev)
+		if opening == self.opening then self:on_event(w, ev) end
+	end) then
 		self:reset()
 		return false
 	end

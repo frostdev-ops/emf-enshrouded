@@ -77,9 +77,9 @@ stays so, kept with the world):
   slots;
 - a beast you tame takes a free active slot; with none free it goes to your stable.
 
-**The Beasts window:** every stable shows the game's own **E Open** prompt; press E there (the host). (A marked prop
-whose own E use leaves no room for the prompt opens the window with E too, looking at it within 4 m.) It has two tabs
-at the top: **Stable**
+**The Beasts window:** every stable shows the game's own **E Open** prompt; press E there (the host). Where a stable has
+no prompt (a marked prop with an E use of its own, a prop without a collider, or one whose prompt the game dropped
+until the next search), E opens the window too, looking at it within 4 m. It has two tabs at the top: **Stable**
 and the selected beast's name (the open one lit). The Stable tab shows your active slots (a beast and its loyalty, an
 empty slot, or a locked one with the level that opens it) and the stable: every beast with its kind, loyalty and
 whether it is out, at home or resting. Click a beast (or a slot) to select it: its own tab opens (see Talents); the
@@ -240,7 +240,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Setting | Default | What it does |
 |---|---|---|
 | Beast wheel (`wheel_key`) | F3 | hold it for the wheel (any key the game does not use; B is its backpack key) |
-| Beasts window (at a stable without the prompt) (`stable_key`) | E | a stable has the game's E Open prompt; this key opens the window only at a marked prop that has no prompt (its own E use), under your crosshair within 4 m; elsewhere E does what the game does |
+| Beasts window (at a stable without the prompt) (`stable_key`) | E | a stable has the game's E Open prompt; this key opens the window only at a stable without the prompt (a marked prop with its own E use or no collider, a prompt the game dropped), under your crosshair within 4 m; elsewhere E does what the game does |
 | Active slot 2, 3, 4 at level (`slot2_level`, `slot3_level`, `slot4_level`) | 10, 20, 30 | 0: that slot never opens |
 | One wheel with Necromancer's undead (`shared_wheel`) | on | off: Beastmaster's own wheel |
 | Mana to call a beast (`call_mana_pct`) | 15 % | of your maximum mana; 0 = free |

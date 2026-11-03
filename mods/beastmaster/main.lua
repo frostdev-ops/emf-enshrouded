@@ -41,7 +41,7 @@ end
 
 -- the stables in the world (built ones and the host's marks; the marks are kept with the world)
 local stables = stable_mod.new({ now = now, log = emf.log, on_found = function(world) on_first_stable(world) end,
-	on_open = function(world, player, entity) at_stable_open(world, player) end })
+	on_open = function(world, player, entity) at_stable_open(world, player, entity) end })
 
 -- The level of a player's character.
 local function level_of(world, player)
@@ -205,10 +205,11 @@ local AT_STABLE_CHAT = "At a stable: /beastmaster active <name or number> (it ca
 	"<name or number>, /beastmaster release <name or number> (twice), /beastmaster talents <name or number> [reset], " ..
 	"/beastmaster talent <name or number> <talent>. /beastmaster list shows your beasts."
 
--- E at a stable's prompt: the host gets the Beasts window; a player who joined (and everyone on a dedicated server),
--- the stable's chat commands.
-at_stable_open = function(world, player)
+-- E at a stable's prompt (on `entity`): the host gets the Beasts window; a player who joined (and everyone on a
+-- dedicated server), the stable's chat commands. An entity that is no stable's now (its id given out again) does nothing.
+at_stable_open = function(world, player, entity)
 	if not world:is_server() or not loaded or not player or player == 0 then return end
+	if not stables:stable_of(world, entity) then return end
 	local host = emf.local_player()
 	if host and host ~= 0 and player == host then
 		window:show(world, player)
@@ -224,7 +225,7 @@ emf.on_key("stable_key", function(world)
 	local player = emf.local_player()
 	if not player or player == 0 then return end
 	local b = stables:under_crosshair(world, player, STABLE_REACH_M)
-	if not b or stables:prompted(b) then return end
+	if not b or stables:prompted(world, b) then return end
 	window:show(world, player)
 end)
 
