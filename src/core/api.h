@@ -31,6 +31,7 @@ namespace emf::core {
 
 class InventoryService;
 class TeleportService;
+class ComponentService;
 namespace ws {
 class Service;
 }
@@ -62,6 +63,8 @@ struct CoreState {
     InventoryService* inventory = nullptr;              // put_items (null when its signatures are not usable)
     TeleportService* teleport = nullptr;                // teleport (null when off on this game build)
     std::string teleport_off;                           // why teleport is off ("" while it is on or not set up yet)
+    ComponentService* components = nullptr;             // v23 change_component (null when off on this game build)
+    std::string components_off;                         // why change_component is off
     std::atomic<uint32_t> server_session{0};            // +1 per server world set up (API v9 server_session)
     std::function<bool(const WheelRequest&)> open_wheel;   // the overlay's wheel (null: no overlay)
     std::function<void(const std::string&)> notify;        // the overlay's top-of-screen note (null: log only)

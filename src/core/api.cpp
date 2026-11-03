@@ -27,6 +27,7 @@
 #include "program_access.h"
 #include "spawn.h"
 #include "teleport.h"
+#include "component_service.h"
 #include "world_settings_service.h"
 #include "emf/generated/components.hpp"
 
@@ -1505,6 +1506,16 @@ static_assert(EMF_TELEPORT_FAILED == kTpFailed && EMF_TELEPORT_MOVED == kTpMoved
                   EMF_TELEPORT_OFF_TARGET == kTpOffTarget && EMF_TELEPORT_RAW_TARGET == kTpRawTarget,
               "the API's teleport results are the core's");
 
+bool guarded_component_call(EmfComponentCallback cb, EmfWorld* w, uint32_t entity, uint32_t hash, uint32_t status,
+                            const char* why, void* user) {
+    __try {
+        cb(w, entity, hash, status, why, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool guarded_teleport_call(EmfTeleportCallback cb, EmfWorld* w, const EmfTeleportResult* r, void* user) {
     __try {
         cb(w, r, user);
@@ -1512,6 +1523,51 @@ bool guarded_teleport_call(EmfTeleportCallback cb, EmfWorld* w, const EmfTelepor
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
     }
+}
+
+// v23: a component added to an entity, or removed (component_service.h).
+bool api_change_component(EmfWorld* w, const EmfComponentChange* c) {
+    if (!g_state) return false;
+    if (!c || c->size < kComponentChangeV23Size) {
+        log_once("change_component refused: no request, or its size field is too small");
+        return false;
+    }
+    if (!g_state->components) {
+        log_once("change_component is off: " +
+                 (g_state->components_off.empty() ? std::string("not set up (yet)") : g_state->components_off));
+        return false;
+    }
+    if (c->op != EMF_COMPONENT_ADD && c->op != EMF_COMPONENT_REMOVE) {
+        refuse_limited("change_component refused: op must be EMF_COMPONENT_ADD or EMF_COMPONENT_REMOVE");
+        return false;
+    }
+    ComponentChangeRequest r;
+    r.world = w;
+    r.entity = c->entity;
+    r.hash = c->hash;
+    r.op = c->op == EMF_COMPONENT_ADD ? ComponentOp::Add : ComponentOp::Remove;
+    if (r.op == ComponentOp::Add && c->data) {
+        if (!c->data_size || c->data_size > 4096) {
+            refuse_limited("change_component refused: data given, so data_size must be the component's size");
+            return false;
+        }
+        const auto* p = static_cast<const uint8_t*>(c->data);
+        r.data.assign(p, p + c->data_size);
+    }
+    r.flags = c->flags;
+    r.mod = module_name_of(_ReturnAddress());  // a mod may remove what it added
+    if (c->cb) {
+        const EmfComponentCallback cb = c->cb;
+        void* const user = c->user;
+        const uint32_t entity = c->entity, hash = c->hash;
+        r.done = [cb, user, entity, hash](EmfWorld* world, uint32_t status, const std::string& why) {
+            if (!guarded_component_call(cb, world, entity, hash, status, why.c_str(), user))
+                core_log("a change_component callback in " + module_name_of(reinterpret_cast<const void*>(cb)) +
+                         " faulted");
+        };
+    }
+    std::string why;
+    return g_state->components->request(r, &why);
 }
 
 bool api_teleport(EmfWorld* w, const EmfTeleport* req) {
@@ -1683,6 +1739,7 @@ const EmfApi kApi = {
     api_world_setting_get, api_world_setting_set, api_world_setting_reset, api_on_world_setting_changed,
     api_world_setting_info,
     api_player_xp_required, api_player_level_cap, api_player_level_set,
+    api_change_component,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

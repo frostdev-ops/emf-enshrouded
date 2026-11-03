@@ -45,6 +45,7 @@ struct Fake {
     struct Spawn {
         uint8_t guid[16];
         double x, y, z;
+        std::vector<std::pair<uint32_t, std::vector<uint8_t>>> extra;  // spawn_ex: (hash, data) of each component
     };
     std::vector<Spawn> spawns;
     uint32_t next_spawn_id = 1234;  // spawn gives 1234, 1235, ...
@@ -99,6 +100,10 @@ struct Fake {
     // v20 teleport: the requests made (answer them with their cb/user as the core would)
     std::vector<EmfTeleport> teleports;
     bool teleport_ok = true;
+    // v23 change_component: the requests (answer them with their cb/user as the core would) and their data
+    std::vector<EmfComponentChange> component_changes;
+    std::vector<std::vector<uint8_t>> component_data;
+    bool component_ok = true;
     // v21 world settings: two settings, what set and reset were asked (key as passed, "" for NULL; flags), the
     // change listeners; ws_world false = no hosted world (every call answers false)
     struct WsField {
@@ -193,6 +198,16 @@ uint32_t f_spawn(EmfWorld*, const uint8_t guid[16], double x, double y, double z
     std::memcpy(t.data(), fixed, sizeof fixed);
     g->components[{0x027ac564u /* CurrentTransform */, g->next_spawn_id}] = t;
     return g->next_spawn_id++;
+}
+uint32_t f_spawn_ex(EmfWorld* w, const uint8_t guid[16], double x, double y, double z, const EmfComponentInit* c,
+                    uint32_t count) {
+    const uint32_t id = f_spawn(w, guid, x, y, z);
+    if (!id) return 0;
+    for (uint32_t i = 0; i < count; ++i) {
+        const auto* p = static_cast<const uint8_t*>(c[i].data);
+        g->spawns.back().extra.emplace_back(c[i].hash, std::vector<uint8_t>(p, p + c[i].size));
+    }
+    return id;
 }
 bool f_destroy(EmfWorld*, uint32_t e) {
     g->destroyed.push_back(e);
@@ -350,6 +365,14 @@ bool f_level_set(EmfWorld*, uint32_t player, uint32_t level, uint32_t xp) {
     g->attr_adds.emplace_back(player, level, static_cast<int32_t>(xp));
     return level >= 1 && level <= 25;
 }
+bool f_change_component(EmfWorld*, const EmfComponentChange* c) {
+    g->component_changes.push_back(*c);
+    const auto* p = static_cast<const uint8_t*>(c->data);
+    g->component_data.emplace_back(p, p ? p + c->data_size : p);
+    return g->component_ok;
+}
+// A v23 core (fake_api leaves change_component out: emf.add_component answers false without it).
+void with_components(EmfApi& a) { a.change_component = f_change_component; }
 void with_levels(EmfApi& a) {
     a.player_xp_required = f_xp_required;
     a.player_level_cap = f_level_cap;
@@ -470,6 +493,7 @@ EmfApi fake_api() {
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;
     a.spawn = f_spawn;
+    a.spawn_ex = f_spawn_ex;
     a.destroy = f_destroy;
     a.on_event = f_on_event;
     a.register_program_def = f_program_def;

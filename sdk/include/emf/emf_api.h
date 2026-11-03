@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 22 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 23 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 22
+#define EMF_API_VERSION 23
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -291,6 +291,30 @@ typedef struct EmfWorldSettingInfo {
     uint32_t flags;    /* EMF_WS_CHANGED | EMF_WS_NEEDS_CLIENT */
     uint32_t pad;
 } EmfWorldSettingInfo;
+
+/* v23 change_component: add a component to an entity, or remove one, through the engine's own command (the record
+ * the game's own programs push). Only the components EMF lists (docs/modding/reference.md, "v23"). */
+#define EMF_COMPONENT_ADD 1u    /* add (only when absent: a present component is never overwritten: ALREADY) */
+#define EMF_COMPONENT_REMOVE 2u
+#define EMF_COMPONENT_PERSISTENT 0x01u /* accepted: a component the world save keeps (or removing DoNotSave) outlives
+                                          the mod in that world; required for those */
+#define EMF_COMPONENT_EXPERT 0x02u     /* reserved (refused in this version) */
+#define EMF_COMPONENT_FAILED 0u   /* the entity is gone, the game did not apply it, the world ended... (see why) */
+#define EMF_COMPONENT_DONE 1u     /* present (add) / absent (remove) after the step that applied it */
+#define EMF_COMPONENT_ALREADY 2u  /* add: it was there already (data untouched); remove: it was not there */
+typedef void (*EmfComponentCallback)(EmfWorld* world, uint32_t entity, uint32_t hash, uint32_t status, const char* why,
+                                     void* user);
+typedef struct EmfComponentChange {
+    uint32_t size;             /* sizeof(EmfComponentChange) */
+    uint32_t op;               /* EMF_COMPONENT_ADD or EMF_COMPONENT_REMOVE */
+    uint32_t entity;
+    uint32_t hash;             /* the component's hash (generated headers: emf::gen::ecs::X::kHash) */
+    const void* data;          /* add: data_size bytes of the component, or NULL for zeros */
+    uint32_t data_size;        /* add with data: the component's size in this game build (X::kSize) */
+    uint32_t flags;            /* EMF_COMPONENT_PERSISTENT */
+    EmfComponentCallback cb;   /* optional: once, on the server world's thread, after the step that applied it */
+    void* user;
+} EmfComponentChange;
 
 /* v13 mod_info: what the loader found */
 #define EMF_MOD_LOADED 0u
@@ -723,6 +747,16 @@ typedef struct EmfApi {
      * that costs more points than the level gives is reset by the game at the next load. Saved with the character. SERVER world; inside a world callback on that world at once, elsewhere after
      * the server world's next step (true = queued, a later refusal is logged). False (logged) when refused. */
     bool (*player_level_set)(EmfWorld* world, uint32_t player, uint32_t level, uint32_t xp);
+
+    /* ---- v23: add a component to an entity, or remove one (EmfComponentChange above) ---- */
+    /* Adds a component to an entity, or removes one, through the engine's own command. Only those EMF lists
+     * (reference.md "v23"): in this version ScaleComponent (uniformScale 0.1-10) and InteractionPause, removed only by
+     * the mod that added them this session; the ones the world save keeps are refused until checked in game (then
+     * with EMF_COMPONENT_PERSISTENT). A ScaleComponent added later is not drawn: spawn with it (spawn_ex). SERVER world, never a player. True = queued: checked after the server
+     * world's next step, applied in the step after, and cb answers once (EMF_COMPONENT_DONE / _ALREADY / _FAILED with
+     * why) on the server world's thread; when the world ended first (a new world, the menu) it answers _FAILED with a
+     * NULL world, on the thread that ended it. False (logged) when refused at once; cb is not called then. */
+    bool (*change_component)(EmfWorld* world, const EmfComponentChange* change);
 } EmfApi;
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);

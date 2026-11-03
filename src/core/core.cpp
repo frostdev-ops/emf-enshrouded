@@ -37,6 +37,7 @@
 #include "content_status.h"
 #include "inventory.h"
 #include "teleport.h"
+#include "component_service.h"
 #include "world_settings_glue.h"
 #include "world_settings_service.h"
 #include "world_commands.h"
@@ -281,6 +282,8 @@ uint32_t g_inst_slot_flag_offset = 0;
 std::unique_ptr<emf::core::InventoryService> g_inventory;
 // teleport: the emf_teleport program and its requests (null when off on this game build).
 std::unique_ptr<emf::core::TeleportService> g_teleport;
+// v23 change_component: the emf_components program and its requests (null when off on this game build).
+std::unique_ptr<emf::core::ComponentService> g_components;
 // v21 world settings: the change queue, the server step's write and resync, the per-world kept settings.
 struct WorldSettingsRuntime {
     emf::core::ws::State state;
@@ -353,7 +356,8 @@ void hk_register_all_programs(void* world) {
             g_state->relay.new_session();  // and an event overflow is logged again
             emf::core::bridge::note_session_start();  // the bridge forgets the last world's save slot
             if (g_inventory) g_inventory->world_reset();  // requests for the old world end with 0
-            if (g_teleport) g_teleport->world_reset();    // teleports under way end (FAILED)
+            if (g_teleport) g_teleport->world_reset();
+            if (g_components) g_components->world_reset();  // component changes under way end (FAILED)    // teleports under way end (FAILED)
             g_state->damage_queue.clear();                // hits for the old session never land
             ++g_state->server_session;                    // mods notice the new session (API v9)
         }
@@ -831,6 +835,45 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             emf::logf("teleport: off (%s)", off.c_str());
         }
     }
+    // v23 change_component: the same record path (kind 3 / kind 4), in a program of its own.
+    {
+        const auto& qp = g_state->sigs[static_cast<size_t>(emf::Sig::QueuePush)];
+        std::string off;
+        if (!emf::is_usable(qp, known))
+            off = "the QueuePush signature is not usable on this game build";
+        else if (!emf::core::teleport_layouts_checked(build))
+            off = "the game's command-buffer layout is not checked on this build";
+        else if (g_state->system_programs.registration_closed())
+            off = "mod programs are unavailable";
+        if (off.empty()) {
+            emf::core::ComponentService::Deps deps;
+            deps.queue_push = reinterpret_cast<emf::core::QueuePushFn>(qp.addr);
+            deps.get_component = g_state->get_component;
+            deps.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
+            deps.now_ms = [] { return GetTickCount64(); };
+            deps.session = [] { return g_state->server_session.load(); };
+            g_components = std::make_unique<emf::core::ComponentService>(std::move(deps));
+            if (g_state->system_programs.add(g_components->spec(), true)) {
+                g_state->components = g_components.get();
+                emf::logf("change_component: on (program %s in the server world)", emf::core::kComponentsProgramName);
+                std::thread([] {  // back to the menu: what is still under way is answered (a new world: its setup)
+                    for (;;) {
+                        Sleep(1000);
+                        if (g_components && g_components->pending() &&
+                            !g_state->tracker.latest_within(EMF_WORLD_SERVER, GetTickCount64(), 10000))
+                            g_components->end_session("the world ended (back to the menu)");
+                    }
+                }).detach();
+            } else {
+                g_components.reset();
+                off = std::string("the ") + emf::core::kComponentsProgramName + " program could not be added";
+            }
+        }
+        if (!off.empty()) {
+            g_state->components_off = off;
+            emf::logf("change_component: off (%s)", off.c_str());
+        }
+    }
     auto hook_sig = [&](emf::Sig s, void* detour, void** original, const char* what) {
         const auto& r = g_state->sigs[static_cast<size_t>(s)];
         const bool ok = emf::is_usable(r, known) && emf::core::install_emf_hook(what, r.addr, detour, original);
@@ -913,6 +956,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
         if (g_teleport && emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER)
             g_teleport->on_server_tick(w);
+        if (g_components && emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER)
+            g_components->on_server_tick(w);
     }, nullptr);
     // Event relay first among the tick subscribers: mods' on_event callbacks run before their on_tick ones.
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {

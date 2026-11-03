@@ -604,6 +604,53 @@ TEST_CASE("emf::xp_required, level_cap and set_level pass through on a v22 core;
     emf::api_ref() = &api;
 }
 
+TEST_CASE("emf::add_component and remove_component take the hash and size from the generated struct (v23)") {
+    reset_v18();
+    static std::vector<EmfComponentChange> changes;
+    static std::vector<float> scales;
+    changes.clear();
+    scales.clear();
+    static EmfApi api = v18_api();
+    api.change_component = [](EmfWorld*, const EmfComponentChange* c) {
+        changes.push_back(*c);
+        if (c->data && c->data_size == 4) {
+            float f = 0;
+            std::memcpy(&f, c->data, 4);
+            scales.push_back(f);
+        }
+        return true;
+    };
+    REQUIRE(emf::init(&api));
+    emf::World w(kW);
+    CHECK(emf::has_v23());
+    emf::gen::ecs::ScaleComponent s{};
+    s.uniformScale = 1.25f;
+    CHECK(emf::add_component(w, 2000, s));
+    CHECK(emf::remove_component<emf::gen::ecs::ScaleComponent>(w, 2000));
+    CHECK(emf::add_component(w, 2001, emf::gen::ecs::IsTame{}, EMF_COMPONENT_PERSISTENT));
+    REQUIRE(changes.size() == 3);
+    CHECK(changes[0].size == sizeof(EmfComponentChange));
+    CHECK(changes[0].op == EMF_COMPONENT_ADD);
+    CHECK(changes[0].hash == emf::gen::ecs::ScaleComponent::kHash);
+    CHECK(changes[0].data_size == 4u);
+    CHECK(scales == std::vector<float>{1.25f});  // the data was there while the call ran
+    CHECK(changes[1].op == EMF_COMPONENT_REMOVE);
+    CHECK(changes[1].data == nullptr);
+    CHECK(changes[2].flags == EMF_COMPONENT_PERSISTENT);
+    // the callback form: an exception from f does not escape into EMF
+    CHECK(emf::add_component(w, 2002, s, 0u, [](emf::World, uint32_t, const char*) { throw 1; }));
+    REQUIRE(changes.size() == 4);
+    CHECK_NOTHROW(changes[3].cb(kW, 2002, emf::gen::ecs::ScaleComponent::kHash, EMF_COMPONENT_DONE, "", changes[3].user));
+    static EmfApi old = api;
+    old.size = static_cast<uint32_t>(offsetof(EmfApi, change_component));  // a v22 core
+    old.version = 22;
+    emf::api_ref() = &old;
+    CHECK_FALSE(emf::has_v23());
+    CHECK_FALSE(emf::add_component(w, 2000, s));
+    CHECK(changes.size() == 4);
+    emf::api_ref() = &api;
+}
+
 TEST_CASE("emf::kill on a v18 core: the current-health attribute goes to 0 through attribute_add; never a player") {
     reset_v18();
     static EmfApi api = v18_api();

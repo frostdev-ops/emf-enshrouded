@@ -130,6 +130,8 @@ add_library(emf_core_lib STATIC
   src/core/mod_order.cpp
   src/core/settings.cpp
   src/core/emf_settings.cpp
+  src/core/components_api.cpp
+  src/core/component_service.cpp
   src/core/world_settings.cpp
   src/core/world_settings_state.cpp
   src/core/world_settings_file.cpp
@@ -478,6 +480,9 @@ add_executable(emf_tests
   tests/test_mod_order.cpp
   tests/test_settings.cpp
   tests/test_emf_settings.cpp
+  tests/test_components_api.cpp
+  tests/test_component_service.cpp
+  tests/test_api_components.cpp
   tests/test_world_settings.cpp
   tests/test_world_settings_state.cpp
   tests/test_world_settings_file.cpp
