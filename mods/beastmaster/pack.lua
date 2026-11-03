@@ -129,6 +129,7 @@ function P:spawn(world, owner, account, beast)
 	local scaling = world:get("DynamicEnemyScaling", id)
 	if scaling then scaling.nextUpdateTime = 0 end  -- the game rescales health and damage to the new level
 	emf.emit("server", "StartGuardingEvent", { guardingEntityId = id, guardedEntityId = owner })
+	self:fresh(id)
 	self.fought[id] = self.env.now(world)
 	self:strengthen(world, id, beast)
 	beast.entity = id
@@ -138,6 +139,23 @@ function P:spawn(world, owner, account, beast)
 end
 
 -- A beast the player just tamed (already an ally in the world).
+-- A fresh entity for a beast: whatever was kept for an earlier creature on the same id (the game gives ids out again)
+-- goes.
+function P:fresh(id)
+	self.base[id], self.sent[id], self.recall[id], self.fought[id] = nil, nil, nil, nil
+end
+
+-- When the game sets a beast's damage multiplier again (its rescale to a level), its role and loyalty go on top of the
+-- game's new value.
+function P:keep_damage(world, id, beast)
+	local base = self.base[id]
+	local dm = base and base.wrote and world:get("DamageMod", id)
+	if dm and dm.dataStorage and math.abs(dm.dataStorage[3] - base.wrote) > 1e-4 then
+		base.damage = dm.dataStorage[3]
+		self:strengthen(world, id, beast)
+	end
+end
+
 -- A beast out as strong as its role and loyalty: its health through the health watch (on_spawn with the multiplier),
 -- its DamageMod multiplier and its ScaleComponent (when it has one) against its template's, kept from the first time.
 function P:strengthen(world, id, beast)
@@ -153,7 +171,10 @@ function P:strengthen(world, id, beast)
 	end
 	if self.env.on_spawn then self.env.on_spawn(world, id, sp, role_health * f) end
 	local dm = base.damage and world:get("DamageMod", id)
-	if dm and dm.dataStorage then dm.dataStorage[3] = base.damage * role_damage * f end
+	if dm and dm.dataStorage then
+		base.wrote = base.damage * role_damage * f
+		dm.dataStorage[3] = base.wrote
+	end
 	local sc = base.scale and world:get("ScaleComponent", id)
 	if sc then sc.uniformScale = base.scale * loyalty.size(lvl) end
 end
@@ -164,6 +185,7 @@ function P:adopt(account, beast, id, world)
 	self.ids[id] = { account = account, beast = beast }
 	self.aside:release(account)  -- it stays, and the beasts that stepped aside by the command come back
 	if world then
+		self:fresh(id)
 		self.fought[id] = self.env.now(world)
 		self:strengthen(world, id, beast)
 	end
@@ -522,17 +544,20 @@ function P:step(world)
 						self.env.save()
 					else
 						self:leash(world, owner, b, now)
-						-- its level follows its owner's (a level up while it is out)
-						local lvl, mine = world:get("Level", b.entity), level_of(world, owner)
+						-- its level follows its owner's (a level up while it is out); the leash may have let it go
+						local lvl, mine = b.entity and world:get("Level", b.entity), level_of(world, owner)
 						if lvl and mine and lvl.dataStorage[1] ~= mine then
 							lvl.dataStorage[1] = mine
 							local scaling = world:get("DynamicEnemyScaling", b.entity)
 							if scaling then scaling.nextUpdateTime = 0 end
 						end
-						-- between fights it heals
-						local cur, max = emf.health(world, b.entity)
-						if cur and max and cur > 0 and cur < max and now - (self.fought[b.entity] or now) >= HEAL_AFTER_S then
-							emf.attribute_add(world, b.entity, "health", math.min(math.ceil(max * HEAL_SHARE), max - cur))
+						if b.entity then
+							self:keep_damage(world, b.entity, b)
+							-- between fights it heals
+							local cur, max = emf.health(world, b.entity)
+							if cur and max and cur > 0 and cur < max and now - (self.fought[b.entity] or now) >= HEAL_AFTER_S then
+								emf.attribute_add(world, b.entity, "health", math.min(math.ceil(max * HEAL_SHARE), max - cur))
+							end
 						end
 						if guard ~= owner then
 							emf.emit("server", "StartGuardingEvent", { guardingEntityId = b.entity, guardedEntityId = owner })

@@ -833,6 +833,71 @@ TEST_CASE("loyalty: a beast that falls rests 60 s, so it is back for the next fi
     CHECK(b.r.fake.settings["beastmaster.loyalty_pace"] == "1");
 }
 
+TEST_CASE("loyalty: a name that is a number or 'all' is refused (beasts are called and sent home by number, and all)") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    for (const char* name : {"2", "007", "1e0", "all", "ALL"}) {
+        CAPTURE(name);
+        CHECK(b.reply(std::string("beastmaster.rename Wolf ") + name).find("number") != std::string::npos);
+    }
+    CHECK(b.reply("beastmaster.list").find("1. Wolf - wolf") != std::string::npos);
+}
+
+TEST_CASE("loyalty: a y line belongs to the beast of that name, also a name that looks like a number (an older save)") {
+    BeastRig b;
+    write(b.data, "b 0x00000000000000aa wolf 0 0 2\nb 0x00000000000000aa boar 0 0 Fang\ny 0x00000000000000aa 30 2\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    const std::string list = b.reply("beastmaster.list");
+    CHECK(list.find("1. 2 - wolf, loyalty 3") != std::string::npos);
+    CHECK(list.find("2. Fang - boar, loyalty 1") != std::string::npos);
+}
+
+TEST_CASE("loyalty: a beast on an entity id the game gave out before gets its own template's damage, not the old beast's") {
+    BeastRig b;
+    b.reply("beastmaster.give bear");
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234, 1.4f);
+    component<ecs::DamageMod>(b.r.fake, 1234).dataStorage[2] = 1.5f;  // the pack bear's template
+    REQUIRE(b.reply("beastmaster.call Bear").find("comes") != std::string::npos);
+    b.seconds(1);
+    component<ecs::Faction>(b.r.fake, 1234).faction = static_cast<emf::gen::FactionType>(6);  // the id names another creature now
+    b.seconds(2);
+    b.r.fake.next_spawn_id = 1234;  // the game gives the id out again: to the wolf
+    next_beast(b, 1234);
+    b.seconds(11);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15));
+}
+
+TEST_CASE("loyalty: a beast the game will neither bring back nor call again leaves the mod running") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.r.fake.teleport_ok = false;
+    b.r.fake.spawn_fails = true;
+    place(b.r.fake, 1234, 130, 10, 0);  // far: it is brought back, and both ways fail
+    b.seconds(3);
+    CHECK(b.reply("beastmaster.mode").find("defending") != std::string::npos);  // the mod still answers
+}
+
+TEST_CASE("loyalty: when the game sets a beast's damage multiplier again (a rescale), its role and loyalty go on top") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    REQUIRE(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15));
+    live_of<ecs::DamageMod>(b, 1234).dataStorage[2] = 2.0f;  // the game's rescale (a world's enemy damage factor)
+    b.seconds(2);
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(2.3));
+    b.seconds(2);
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(2.3));  // not again on top of itself
+}
+
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
     BeastRig b;
     b.reply("beastmaster.give wolf");

@@ -65,10 +65,12 @@ function R:find(account, key)
 	return nil
 end
 
--- Renames a beast: 1-20 printable characters (trimmed), not a name the collection has (any case). Nil and why when not.
+-- Renames a beast: 1-20 printable characters (trimmed), not a number or "all" (commands take a beast's number, and
+-- dismiss takes all), not a name the collection has (any case). Nil and why when not.
 function R:rename(account, beast, new_name)
 	local name = tostring(new_name or ""):match("^%s*(.-)%s*$")
 	if #name < 1 or #name > 20 or name:find("%c") then return nil, "A name is 1-20 characters." end
+	if tonumber(name) or name:lower() == "all" then return nil, "A name cannot be a number or \"all\"." end
 	for _, b in ipairs(self.by[account] or {}) do
 		if b ~= beast and b.name:lower() == name:lower() then return nil, "The name " .. name .. " is taken." end
 	end
@@ -134,9 +136,10 @@ function M.parse(text)
 			r.by[account] = list
 		end
 	end
-	for _, y in ipairs(loyal) do
-		local b = r:find(y[1], y[3])
-		if b then b.points = y[2] end
+	for _, y in ipairs(loyal) do  -- by name only (a name that looks like a number is not a place in the list)
+		for _, b in ipairs(r.by[y[1]] or {}) do
+			if b.name == y[3] then b.points = y[2] end
+		end
 	end
 	return r
 end
