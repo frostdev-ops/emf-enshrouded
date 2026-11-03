@@ -1,98 +1,71 @@
 -- Emberbrand: an example of new content for Enshrouded (an EML data patch; see docs/modding/content.md).
--- It adds one item, a sword cloned from the Bronze Sword with its own name and stats (tested in game: it shows with
--- its name, damage and fire). Hand it out with EMF ("put Weapon_T1_1H_Sword_Emberbrand 1").
--- It also adds a recipe, which is in the game's recipe table but NOT listed in the crafting menu: the menu gets its
--- recipes from somewhere else (knowledge unlocks; where exactly is not known, docs/modding/content.md).
+-- It adds a sword cloned from the Bronze Sword with its own name and stats, and a placeable "Ember Table" (a Workbench
+-- copy without its crafting and its E prompt), each with a recipe the own crafting menu lists (wood logs; known once
+-- you have had wood logs). It uses EMF's helper, emf_content.lua (a copy of content/lib/emf_content.lua next to this
+-- file).
 --
--- The GUIDs below are FIXED FOREVER: a save stores items by ItemId = FNV-1a(GUID), so a new GUID would make every
--- saved Emberbrand vanish. Copy this mod for your own item and pick new GUIDs once (any GUID generator), then never
--- change them.
+-- The GUIDs below are FIXED FOREVER: a save stores items by ItemId = FNV-1a(GUID) and placed objects by their
+-- template's GUID, so a new GUID would make every saved Emberbrand and Ember Table vanish. Copy this mod for your own
+-- content and pick new GUIDs once (any GUID generator), then never change them.
 if not loader.features.patch then
 	return
 end
+
+local content = require("emf_content")
 
 local ITEM_GUID   = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e11"
 local NAME_GUID   = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e12"
 local RECIPE_GUID = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e13"
 local DEBUG_NAME  = "Weapon_T1_1H_Sword_Emberbrand"   -- what EMF's "items" and "give" commands use
-local DISPLAY     = "Emberbrand"                       -- what players see (every language)
 
-local SOURCE_ITEM   = "1d622bd9-8170-41b1-822e-d3984b386d95" -- Weapon_T1_1H_SwordEpic_01, the Bronze Sword
-local SOURCE_RECIPE = "Consumable_Tool_Campfire_PK"          -- the campfire: own crafting menu, known from the start
-local WOOD_GUID     = "3f4093ae-75ed-4e5d-bd0b-784ba83b88f5" -- Material_T1_Wood_Logs
+local TABLE_ITEM_GUID     = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e21"
+local TABLE_TEMPLATE_GUID = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e22"
+local TABLE_NAME_GUID     = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e23"
+local TABLE_DESC_GUID     = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e24"
+local TABLE_RECIPE_GUID   = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e25"
+local TABLE_DEBUG_NAME    = "Prop_Emberbrand_Table"
 
-local function log(...) print("emf_emberbrand:", ...) end
+local BRONZE_SWORD = "1d622bd9-8170-41b1-822e-d3984b386d95" -- Weapon_T1_1H_SwordEpic_01
+local WORKBENCH    = "2f04a05f-697d-489b-a32f-76bb3439f5bc" -- Craftingstation_Workbench (the item that places it)
+local WOOD_LOGS    = "3f4093ae-75ed-4e5d-bd0b-784ba83b88f5" -- Material_T1_Wood_Logs
+local WEAPONS      = "2632c31c-37fe-48f6-b788-dfa649065edb" -- the own crafting menu's weapons group
 
-local itemId = game.guid.hash(ITEM_GUID)
-local nameId = game.guid.hash(NAME_GUID)
-local recipeId = game.guid.hash(RECIPE_GUID)
+local item = content.add_item{
+	guid = ITEM_GUID, name_guid = NAME_GUID, debug_name = DEBUG_NAME, name = "Emberbrand",
+	clone_of = BRONZE_SWORD,
+	level = 3,  -- as the own crafting's other weapons (the Bronze Sword's range is 1 to 55: a craft would pick in it)
+	edit = function(it)
+		it.damageSetup.dmgMod = 1.75                          -- the Bronze Sword: 1.0
+		it.damageSetup.distribution.magicalFireDamage = 0.5   -- and some fire
+	end,
+}
 
--- 1) the item: a copy of the Bronze Sword's whole resource (model, icon, animations, perks), then our changes
-local src = game.assets.get_resource(SOURCE_ITEM, "keen::ItemInfo")
-assert(src, "the Bronze Sword was not found (the game changed?)")
-local item = game.assets.create_resource(src.data, "keen::ItemInfo", ITEM_GUID, 0).data
-item.itemId = { value = itemId }
-item.objectId = ITEM_GUID
-item.name = NAME_GUID
-item.debugName = DEBUG_NAME
-item.damageSetup.dmgMod = 1.75                          -- the Bronze Sword: 1.0
-item.damageSetup.distribution.magicalFireDamage = 0.5   -- and some fire
+local recipe = content.add_recipe{
+	guid = RECIPE_GUID, debug_name = "Craft_" .. DEBUG_NAME,
+	output = {ITEM_GUID, 1},
+	inputs = {{WOOD_LOGS, 5}},
+	like = "Consumable_Tool_Campfire_PK",  -- own crafting, unlocked once you have had wood logs
+	menu = {group = WEAPONS},
+}
 
--- its icon: the game shows an item's icon from a UiTextureResource stored under the item's own GUID, and stops with
--- "corrupted game ui texture" when that is missing. The Bronze Sword's icon fits (the same model). The dedicated
--- server has no UI data at all (no UiTextureResource type): the icon and the name (4) are for the game only.
-if not loader.is_server then
-	local icon = game.assets.get_resource(SOURCE_ITEM, "keen::UiTextureResource")
-	assert(icon, "the Bronze Sword's icon was not found (the game changed?)")
-	game.assets.create_resource(icon.data, "keen::UiTextureResource", ITEM_GUID, 0)
-end
+-- A table to place in your base: the Workbench's model and collider, no crafting, no villager work, no E prompt.
+local table_item = content.add_placeable{
+	guid = TABLE_ITEM_GUID, template_guid = TABLE_TEMPLATE_GUID, name_guid = TABLE_NAME_GUID,
+	debug_name = TABLE_DEBUG_NAME, name = "Ember Table",
+	description_guid = TABLE_DESC_GUID, description = "A sturdy table for your base. It crafts nothing.",
+	clone_of = WORKBENCH,
+	strip = {content.STATION_PARTS, content.PROMPT_PARTS},
+}
 
--- 2) register it: itemRefs and dbgNames are parallel lists
-local registry = game.assets.get_resources_by_type("keen::ItemRegistryResource")[1].data
-table.insert(registry.itemRefs, ITEM_GUID)
-table.insert(registry.dbgNames, DEBUG_NAME)
+local table_recipe = content.add_recipe{
+	guid = TABLE_RECIPE_GUID, debug_name = "Craft_" .. TABLE_DEBUG_NAME,
+	output = {TABLE_ITEM_GUID, 1},
+	inputs = {{WOOD_LOGS, 4}},
+	like = "Consumable_Tool_Campfire_PK",  -- listed next to the campfire
+}
 
--- 3) the recipe (not listed in the crafting menu, see the top): a copy of the campfire's, our output, 5 wood logs
-local recipes = game.assets.get_resources_by_type("keen::RecipeRegistryResource")[1].data
-local source = nil
-for _, r in ipairs(recipes.recipes) do
-	if r.debugName == SOURCE_RECIPE then source = r break end
-end
-assert(source, "the recipe " .. SOURCE_RECIPE .. " was not found (the game changed?)")
-table.insert(recipes.recipes, source)
-local recipe = recipes.recipes[#recipes.recipes]
-recipe.recipeGuid = RECIPE_GUID
-recipe.recipeId = { value = recipeId }
-recipe.debugName = "Craft_" .. DEBUG_NAME
-recipe.output[1].itemRef = ITEM_GUID
-recipe.output[1].item = { value = itemId }
-recipe.output[1].count = 1
-while #recipe.input > 1 do table.remove(recipe.input) end
-recipe.input[1].itemStack.itemRef = WOOD_GUID
-recipe.input[1].itemStack.item = { value = game.guid.hash(WOOD_GUID) }
-recipe.input[1].itemStack.count = 5
-recipe.input[1].inputItemCategory.categoryRef = "00000000-0000-0000-0000-000000000000" -- the campfire takes "any wood"
-recipe.input[1].inputItemCategory.category = { value = 0 }
-recipe.input[1].inputItemCategory.count = 0
-recipe.requiresSheltered = false
-recipe.completionRequirementQuery.knowledgeOrQueryId = { value = recipeId } -- "crafted once" is tracked per recipe
+content.finish()
 
--- 4) the name: one new tag in the keenglish table (the game falls back to it for every language), in sorted order.
--- The game only: the dedicated server shows no text.
-if not loader.is_server then
-	local collection = game.assets.get_resources_by_type("keen::LocaTagCollectionResource")[1].data
-	local content = game.assets.get_content(game.guid.from_content_hash(collection.keenglishData.hash))
-	local loca = content:read_data():read_resource("keen::LocaTagCollectionResourceData")
-	local at = #loca.tags + 1
-	for i, tag in ipairs(loca.tags) do
-		assert(tag.id.value ~= nameId, "the name's loca id is already taken: pick another NAME_GUID")
-		if tag.id.value > nameId then at = i break end
-	end
-	table.insert(loca.tags, at, { id = { value = nameId }, text = DISPLAY, arguments = {}, genericArguments = 0 })
-	local buf = buffer.create()
-	buf:write_resource("keen::LocaTagCollectionResourceData", loca)
-	collection.keenglishData.hash = game.assets.create_content(buf)
-end
-
-log(string.format("added %s (item 0x%08x, recipe 0x%08x)%s", DEBUG_NAME, itemId, recipeId,
-	loader.is_server and " on the dedicated server (no icon or name: no UI there)" or ""))
+print(string.format("emf_emberbrand: added %s (item 0x%08x, recipe 0x%08x) and %s (item 0x%08x, recipe 0x%08x)%s",
+	DEBUG_NAME, item, recipe, TABLE_DEBUG_NAME, table_item, table_recipe,
+	loader.is_server and " on the dedicated server (no icon, name or menu entry: no UI there)" or ""))

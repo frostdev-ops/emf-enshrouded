@@ -547,8 +547,8 @@ void on_e(EmfWorld* w, uint32_t player, uint32_t entity, void* user) { /* server
 
 - `verb`: `EMF_VERB_USE` (default), `OPEN`, `TALK`, `READ`, `SIT`, `SLEEP`, `PET`, `TOUCH`, `ACTIVATE`, `PRESS`,
   `ENTER`, `INSPECT`, `TAKE`, `COLLECT`, `REST`, `RELEASE`, or any loca id (Open, Rest and Talk seen in game). `text`:
-  your own words (1-63 bytes): for now the prompt shows "E" with no word (it works; EMF does not reach the prompt's
-  label yet).
+  your own words (1-63 bytes). The game shows them once a content mod adds them to its text table (the helper's
+  `add_prompt_words`, content.md); without that, the prompt shows "E" with no word (it works).
 - `sequence`: `EMF_SEQUENCE_TOUCH` (default, no screen) or `EMF_SEQUENCE_BUTTON`. `range_m` (0 = 32), `flags`:
   `EMF_OFFER_LOW_PRIORITY`, `EMF_OFFER_BUILD_MODE`.
 - From a world callback on the server world. `offer` refuses a player, an entity with the game's own offer (a chest, a
