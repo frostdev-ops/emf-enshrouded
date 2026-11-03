@@ -747,6 +747,7 @@ void Host::Impl::unload(Script& s) {
     s.windows.clear();
     for (const auto& id : windows)
         if (api->window_close) api->window_close(id.c_str());
+    queue_script_offers(*this, s);  // its offers come off on the next server step (only a world call may)
     drop_sections(s.id);  // before the state (and its pick functions) goes
     lua_close(s.L);
     s.L = nullptr;
@@ -849,6 +850,7 @@ void Host::tick_body(EmfWorld* world) {
     const int kind = h.api->world_kind ? h.api->world_kind(world) : EMF_WORLD_SERVER;
     const bool server = kind == EMF_WORLD_SERVER;
     if (server) h.server_seen = now;
+    if (server) run_offer_drops(h, world);
     for (auto& s : h.scripts) {
         std::lock_guard<std::recursive_mutex> l(s->m);
         if (!s->L || s->paused) continue;

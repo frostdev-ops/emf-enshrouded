@@ -337,6 +337,26 @@ std::unique_ptr<emf::core::TeleportService> g_teleport;
 std::unique_ptr<emf::core::ComponentService> g_components;
 // v25 E prompts: on top of the component service (null when that is off).
 std::unique_ptr<emf::core::OfferService> g_offers;
+
+// offers.list: the offers of the running session (entity, mod, verb, accepts), for tests and mod authors.
+void cmd_offers_list(EmfWorld*, int, const char* const*, void*) {
+    const EmfApi* api = emf::core::api_table();
+    if (!g_offers) {
+        api->command_reply("offers are off (see the log)");
+        return;
+    }
+    const uint32_t session = g_state->server_session.load();
+    size_t n = 0;
+    for (const auto& e : g_offers->list()) {
+        if (e.session != session) continue;
+        ++n;
+        char verb[96];
+        if (e.spec.text.empty()) std::snprintf(verb, sizeof verb, "0x%08X", emf::core::offer_verb(e.spec));
+        else std::snprintf(verb, sizeof verb, "\"%s\"", e.spec.text.c_str());
+        api->command_reply("%u: %s, verb %s, %u accept(s)", e.entity, e.owner.c_str(), verb, e.accepts);
+    }
+    api->command_reply("%zu offer(s)", n);
+}
 // v21 world settings: the change queue, the server step's write and resync, the per-world kept settings.
 struct WorldSettingsRuntime {
     emf::core::ws::State state;
@@ -943,6 +963,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
                         nullptr, &offer_why)) {
                     g_state->offers = g_offers.get();
                     emf::logf("offers: on (E prompts; InteractionAcceptedEvent in the server world)");
+                    if (!g_state->commands.add("offers.list", ": the E prompts mods put on entities in this world",
+                                               cmd_offers_list, nullptr, nullptr))
+                        emf::logf("commands: \"offers.list\" could not be added");
                 } else {
                     g_offers.reset();
                     emf::logf("offers: off (InteractionAcceptedEvent: %s)", offer_why.c_str());
