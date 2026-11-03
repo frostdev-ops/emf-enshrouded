@@ -495,6 +495,42 @@ reads the size when it makes the creature. For a bigger or smaller creature, spa
 `spawn_ex(world, guid, x, y, z, &init, 1)` with `{ScaleComponent::kHash, 4, &scale}` (Lua: `emf.spawn(w, guid, x, y, z,
 {ScaleComponent = {uniformScale = 1.25}})`). `EMF_COMPONENT_EXPERT` is reserved.
 
+## v24: mod windows
+
+A mod opens a window that EMF's overlay draws in the console's look: a title, then widgets top to bottom (side by side
+where asked). Clicks come back to the mod after the next step of the world it asked for, as a wheel's pick does. One
+window at a time takes the mouse and keyboard; Esc, its close key or its X close it. It may open while the console is
+open: it shows dim under the console and gets the input when the console closes. A wheel and a window exclude each
+other. The dedicated server has no overlay: there `window_open` returns false (keep chat commands for players).
+
+| Widget (`EmfUiWidget.type`) | Looks like | Events |
+|---|---|---|
+| `EMF_UI_TEXT` | a line of text, wrapped at the window's width | none |
+| `EMF_UI_HEADING` | a heading in the bold font | none |
+| `EMF_UI_BUTTON` | a button | click, right click (with a key) |
+| `EMF_UI_ROW` | a full-width list row; `"Name (detail)"` shows the detail dim at the right | click, right click |
+| `EMF_UI_SLOT` | an item-like square about 3 lines high: its text, `count` in the corner | click, right click |
+| `EMF_UI_BAR` | a bar filled to `value`/1000 with its text on it | none |
+| `EMF_UI_SEPARATOR` | a line | none |
+
+Flags: `EMF_UI_SAME_LINE` (on the line of the widget before), `_DISABLED` (dim, no events), `_SELECTED` (lit), `_DIM`,
+`_EMPTY` and `_LOCKED` (a slot's looks). `rgba` colours a widget's text; `tooltip` shows while the pointer rests on it.
+Keys (1-48 bytes) name what was clicked even after the mod changed the list; a widget without a key sends nothing.
+
+| C++ (`emf/emf.hpp`) | C | Rules |
+|---|---|---|
+| `emf::ui::Window w("mymod.stable", "Beasts"); w.heading("Active").slot("active.1", "Wolf").same_line().button("call", "Call"); w.open(EMF_WORLD_SERVER, f)` | `window_open(&def)` with an `EmfWindowDef` (`id`, `title`, `widgets`, `count`, `widget_size = sizeof(EmfUiWidget)`, `close_key`, `place`, `width`, `world_kind`, `cb`, `user`) | opens it (copied, strings too). The id is 1-48 of `A-Z a-z 0-9 _ . -`; start it with your mod's id and a dot. The open window's id replaces it (its callback gets CLOSED, BY_MOD). False (logged) while another window or a wheel is open, with no world running, without the overlay, or for a bad definition (up to 256 widgets, a title up to 64 bytes, a text up to 256, a tooltip up to 512). `f(World, const emf::ui::Event&)` (C: `cb(world, event, user)`) gets `EMF_UI_CLICK` / `_RIGHT_CLICK` with the widget's `key`, and last `EMF_UI_CLOSED` with the `reason`: `EMF_UI_BY_PLAYER` (Esc, the close key, the X), `_BY_MOD` (`window_close`, a replacement), `_BY_CORE` (the world ended, the overlay turned off). With no world running CLOSED comes at once with `EMF_UI_NO_WORLD` and an empty `World` (C: NULL): only free your data. A callback that faults or throws is caught and logged. |
+| `w.clear(); ...; w.update()` | `window_update(&def)` | new contents for the open window `def->id` (its callback stays). False when it is not open (the player closed it): it never reopens a window. |
+| `emf::ui::close("mymod.stable")` | `window_close(id)` | closes it (CLOSED, BY_MOD). False when it is not open. |
+| `emf::has_v24()` | -- | true when the core has it. |
+
+`place`: `EMF_UI_PLACE_CENTRE` (default), `_LEFT`, `_RIGHT` (beside the game's open inventory). `width`: in text
+heights (the console's text size scales it), 0 = about 28. `close_key`: a keyboard key's generic virtual-key code (the
+key that opened it), acting on a press; 0 = Esc only. Console commands for tests (the debug bridge cannot click EMF's
+ImGui): `ui.windows` lists the open window and its widgets with their keys, `ui.click <key> [right]` sends the same
+event as a click, `ui.close` closes it as Esc would. The debug bridge's state has `overlay.window`, the open window's
+id. Players in someone else's game see only windows from mods running in their own game.
+
 ## Lua
 
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).

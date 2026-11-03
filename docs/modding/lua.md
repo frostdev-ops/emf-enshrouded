@@ -38,7 +38,8 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    `emf.world_settings` and `emf.on_world_setting_changed` (EMF API v21): depend on `">=1.10"`. 1.11 adds a
    player's XP and level (`emf.xp_required`, `emf.level_cap`, `emf.set_level` and the attribute names `"xp_pending"`,
    `"xp"`, `"xp_required"`, `"level"`; EMF API v22): depend on `">=1.11"`. 1.12 adds `emf.add_component`,
-   `emf.remove_component` (EMF API v23) and components spawned with `emf.spawn`: depend on `">=1.12"`. Ranges are explained in [guide.md](guide.md), "Dependencies
+   `emf.remove_component` (EMF API v23) and components spawned with `emf.spawn`: depend on `">=1.12"`. 1.13 adds
+   mod windows (`emf.window`, `emf.window_update`, `emf.window_close`; EMF API v24): depend on `">=1.13"`. Ranges are explained in [guide.md](guide.md), "Dependencies
    and version ranges".)
 
 3. Put `main.lua` next to it:
@@ -135,6 +136,9 @@ right away.
 | `emf.wheel(title, labels, key, fn)` | the radial wheel; `key` is held to choose (`"G"`, `""` for click); `fn(world, choice)`, choice 1..n or nil |
 | `emf.wheel_section(group, title, labels, fn)` | (1.9) your part of a wheel shared by several mods: publishes (replaces) your section of `group`; an empty list or nil removes it. `fn(world, index, label)` gets the index into the labels as they were when the wheel opened, and the label shown: if you published another list since, find the item by `label`. A pick from a wheel opened before your mod reloaded is dropped. Publish again when your labels change |
 | `emf.wheel_group(group, title, key)` | (1.9) opens one wheel with every mod's section of `group` (each label as "Section: label" when more than one mod has a section); a pick runs only its owner's `fn`. True when it opened (false: no labels, or more than 64) |
+| `emf.window(id, def, fn)` | (1.13) opens a window EMF's overlay draws (one at a time; it takes the mouse and keyboard; Esc, its `close_key` or its X close it); true when it opened. `id` gets your mod's id in front (`"stable"` is `"beastmaster.stable"`). `def`: `title`, `width` (in text heights, about 28 by default), `place` (`"centre"`, `"left"`, `"right"`), `close_key` (a key name, for example `emf.setting("stable_key")`), `world` (`"server"` when you host, else `"client"`: where `fn` runs), `rows` = a list, top to bottom, each one of `{text = ...}`, `{heading = ...}`, `{button = key, text = ...}`, `{row = key, text = "Name (detail)"}`, `{slot = key, text = ..., count = n}`, `{bar = text, value = 0..1}`, `{separator = true}`, with any of `same_line`, `selected`, `disabled`, `dim`, `empty`, `locked` (true), `tooltip` and `color` (`"#rrggbb"`). `fn(world, ev)`: `ev.kind` is `"click"`, `"right_click"` or, last, `"closed"` (with `ev.reason` `"player"`, `"mod"` or `"core"`); `ev.key` is the clicked row's key. A reload closes the script's window. An unknown row kind or field is an error. false (logged) while another window or a wheel is open, with no world, without the overlay (a dedicated server) |
+| `emf.window_update(id, def)` | (1.13) new contents for your open window (`fn` stays); false when it is not open (the player closed it): it never reopens one |
+| `emf.window_close(id)` | (1.13) closes your window (`fn` gets `"closed"`, reason `"mod"`); false when it is not open |
 | `emf.emits(names [, kind])` / `emf.emit(kind, name, fields)` | send engine events (see below) |
 
 ### Moving items

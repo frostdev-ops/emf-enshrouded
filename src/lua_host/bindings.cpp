@@ -4,6 +4,7 @@
 #include <cmath>
 #include <cstdio>
 #include <cstring>
+#include <deque>
 
 #include "emf/emf.hpp"
 #include "emf/keys.hpp"
@@ -1754,6 +1755,273 @@ int l_wheel(lua_State* L) {
     return 1;
 }
 
+// ---- lua 1.13: mod windows (API v24) ----
+bool has_v24(const EmfApi* a) {
+    return a && a->version >= 24 && a->size >= offsetof(EmfApi, window_close) + sizeof(a->window_close);
+}
+
+struct WindowSlot {
+    Host::Impl* host;
+    std::string id;      // the script
+    std::string window;  // the window's full id
+    int ref;             // the Lua function
+    uint64_t load;       // the script's load counter when opened (a reload drops the events)
+};
+
+const char* window_kind_name(uint32_t k) {
+    return k == EMF_UI_CLICK ? "click" : k == EMF_UI_RIGHT_CLICK ? "right_click" : k == EMF_UI_CLOSED ? "closed" : "?";
+}
+const char* window_reason_name(uint32_t r) {
+    return r == EMF_UI_BY_PLAYER ? "player" : r == EMF_UI_BY_MOD ? "mod" : "core";
+}
+
+void window_cb_body(EmfWorld* w, const EmfUiEvent* e, void* user) {
+    auto* slot = static_cast<WindowSlot*>(user);
+    const bool closed = e->kind == EMF_UI_CLOSED;
+    Script* s = slot->host->find(slot->id);
+    if (s) {
+        std::lock_guard<std::recursive_mutex> l(s->m);
+        const bool same_state = s->L && slot->load == s->loads;
+        // a NULL world: no world runs (the main menu); the script is not asked
+        if (same_state && !s->paused && w) {
+            lua_rawgeti(s->L, LUA_REGISTRYINDEX, slot->ref);
+            push_world(s->L, *s, w);
+            lua_createtable(s->L, 0, 3);
+            lua_pushstring(s->L, window_kind_name(e->kind));
+            lua_setfield(s->L, -2, "kind");
+            lua_pushstring(s->L, e->key ? e->key : "");
+            lua_setfield(s->L, -2, "key");
+            if (closed) {
+                lua_pushstring(s->L, window_reason_name(e->reason));
+                lua_setfield(s->L, -2, "reason");
+            }
+            call_lua(*s, 2);
+            ++s->generation;
+        }
+        if (closed && same_state) {
+            luaL_unref(s->L, LUA_REGISTRYINDEX, slot->ref);
+            const auto it = s->windows.find(slot->window);
+            if (it != s->windows.end()) s->windows.erase(it);
+        }
+    }
+    if (closed) delete slot;
+}
+
+// Called by EMF: nothing may escape into the game (a Lua error is a C++ exception).
+void window_cb(EmfWorld* w, const EmfUiEvent* e, void* user) {
+    try {
+        window_cb_body(w, e, user);
+    } catch (...) {
+    }
+}
+
+// A window description built from a Lua table; the strings live as long as it does.
+struct LuaWindow {
+    std::string id, title;
+    std::deque<std::string> strings;
+    std::vector<EmfUiWidget> widgets;
+    EmfWindowDef def{};
+    const char* keep(const std::string& s) {
+        strings.push_back(s);
+        return strings.back().c_str();
+    }
+};
+
+// The full id: the script's id and a dot in front, unless it is there already.
+std::string window_full_id(const Script& s, const char* id) {
+    const std::string prefix = s.id + ".";
+    const std::string given = id;
+    return given.compare(0, prefix.size(), prefix) == 0 ? given : prefix + given;
+}
+
+uint32_t parse_colour(lua_State* L, const char* text) {
+    const size_t n = std::strlen(text);
+    if (text[0] != '#' || (n != 7 && n != 9)) luaL_error(L, "color must be \"#rrggbb\" or \"#rrggbbaa\", not %s", text);
+    char* end = nullptr;
+    const unsigned long v = std::strtoul(text + 1, &end, 16);
+    if (!end || *end) luaL_error(L, "color must be \"#rrggbb\" or \"#rrggbbaa\", not %s", text);
+    return n == 7 ? static_cast<uint32_t>((v << 8) | 0xFFu) : static_cast<uint32_t>(v);
+}
+
+// The window `id` from the table at `t` (title, width, place, close_key, world, rows). A bad row is an error.
+void lua_window(lua_State* L, Script& s, const char* id, int t, LuaWindow* out) {
+    static const char* const kRowFields[] = {"heading", "text",  "button",  "row",      "slot",  "bar",
+                                             "separator", "value", "count", "tooltip",  "color", "same_line",
+                                             "selected", "disabled", "dim", "empty", "locked"};
+    out->id = window_full_id(s, id);
+    lua_getfield(L, t, "title");
+    if (!lua_isnil(L, -1)) out->title = luaL_checkstring(L, -1);
+    lua_pop(L, 1);
+    EmfWindowDef& d = out->def;
+    d.size = sizeof d;
+    lua_getfield(L, t, "width");
+    d.width = lua_isnil(L, -1) ? 0.0f : static_cast<float>(luaL_checknumber(L, -1));
+    lua_pop(L, 1);
+    lua_getfield(L, t, "place");
+    if (!lua_isnil(L, -1)) {
+        const std::string p = luaL_checkstring(L, -1);
+        if (p == "centre" || p == "center") d.place = EMF_UI_PLACE_CENTRE;
+        else if (p == "left") d.place = EMF_UI_PLACE_LEFT;
+        else if (p == "right") d.place = EMF_UI_PLACE_RIGHT;
+        else luaL_error(L, "place must be \"centre\", \"left\" or \"right\", not %s", p.c_str());
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, t, "close_key");
+    if (!lua_isnil(L, -1)) {
+        const std::string k = luaL_checkstring(L, -1);
+        d.close_key = emf::keys::parse_key(std::wstring(k.begin(), k.end()));
+        if (!d.close_key) luaL_error(L, "%s is not a key", k.c_str());
+    }
+    lua_pop(L, 1);
+    const EmfApi* a = s.host->api;
+    d.world_kind = (a->server_world && a->server_world()) ? EMF_WORLD_SERVER : EMF_WORLD_CLIENT;
+    lua_getfield(L, t, "world");
+    if (!lua_isnil(L, -1)) {
+        const std::string k = luaL_checkstring(L, -1);
+        if (k == "server") d.world_kind = EMF_WORLD_SERVER;
+        else if (k == "client") d.world_kind = EMF_WORLD_CLIENT;
+        else luaL_error(L, "world must be \"server\" or \"client\", not %s", k.c_str());
+    }
+    lua_pop(L, 1);
+    lua_getfield(L, t, "rows");
+    if (!lua_isnil(L, -1)) {
+        luaL_checktype(L, -1, LUA_TTABLE);
+        const int rows = lua_gettop(L);
+        const lua_Integer n = luaL_len(L, rows);
+        for (lua_Integer i = 1; i <= n; ++i) {
+            lua_rawgeti(L, rows, i);
+            if (!lua_istable(L, -1)) luaL_error(L, "row %d is not a table", static_cast<int>(i));
+            const int row = lua_gettop(L);
+            lua_pushnil(L);
+            while (lua_next(L, row)) {  // every field is one EMF knows
+                const char* k = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : nullptr;
+                bool known = false;
+                for (const char* f : kRowFields) known |= k && std::strcmp(k, f) == 0;
+                if (!known) luaL_error(L, "row %d: unknown field %s", static_cast<int>(i), k ? k : "(not a name)");
+                lua_pop(L, 1);
+            }
+            EmfUiWidget w{};
+            const auto field = [&](const char* name) {
+                lua_getfield(L, row, name);
+                return !lua_isnil(L, -1);
+            };
+            const auto flag = [&](const char* name, uint32_t bit) {
+                lua_getfield(L, row, name);
+                if (lua_toboolean(L, -1)) w.flags |= bit;
+                lua_pop(L, 1);
+            };
+            const char* text_field = "text";
+            if (field("heading")) {
+                w.type = EMF_UI_HEADING;
+                text_field = "heading";
+            } else if (lua_pop(L, 1), field("button")) {
+                w.type = EMF_UI_BUTTON;
+                w.key = out->keep(luaL_checkstring(L, -1));
+            } else if (lua_pop(L, 1), field("row")) {
+                w.type = EMF_UI_ROW;
+                w.key = out->keep(luaL_checkstring(L, -1));
+            } else if (lua_pop(L, 1), field("slot")) {
+                w.type = EMF_UI_SLOT;
+                w.key = out->keep(luaL_checkstring(L, -1));
+            } else if (lua_pop(L, 1), field("bar")) {
+                w.type = EMF_UI_BAR;
+                text_field = "bar";
+            } else if (lua_pop(L, 1), field("separator")) {
+                w.type = EMF_UI_SEPARATOR;
+            } else if (lua_pop(L, 1), field("text")) {
+                w.type = EMF_UI_TEXT;
+            } else {
+                luaL_error(L, "row %d has no kind (text, heading, button, row, slot, bar or separator)",
+                           static_cast<int>(i));
+            }
+            lua_pop(L, 1);
+            lua_getfield(L, row, text_field);
+            if (!lua_isnil(L, -1)) w.text = out->keep(luaL_checkstring(L, -1));
+            lua_pop(L, 1);
+            lua_getfield(L, row, "tooltip");
+            if (!lua_isnil(L, -1)) w.tooltip = out->keep(luaL_checkstring(L, -1));
+            lua_pop(L, 1);
+            lua_getfield(L, row, "count");
+            if (!lua_isnil(L, -1)) w.count = static_cast<uint32_t>(luaL_checkinteger(L, -1));
+            lua_pop(L, 1);
+            lua_getfield(L, row, "value");  // a bar's fill, 0..1
+            if (!lua_isnil(L, -1)) {
+                const double v = luaL_checknumber(L, -1);
+                w.value = static_cast<uint32_t>((v < 0 ? 0 : v > 1 ? 1 : v) * 1000.0 + 0.5);
+            }
+            lua_pop(L, 1);
+            lua_getfield(L, row, "color");
+            if (!lua_isnil(L, -1)) w.rgba = parse_colour(L, luaL_checkstring(L, -1));
+            lua_pop(L, 1);
+            flag("same_line", EMF_UI_SAME_LINE);
+            flag("selected", EMF_UI_SELECTED);
+            flag("disabled", EMF_UI_DISABLED);
+            flag("dim", EMF_UI_DIM);
+            flag("empty", EMF_UI_EMPTY);
+            flag("locked", EMF_UI_LOCKED);
+            out->widgets.push_back(w);
+            lua_pop(L, 1);
+        }
+    }
+    lua_pop(L, 1);
+    d.id = out->id.c_str();
+    d.title = out->title.c_str();
+    d.widgets = out->widgets.data();
+    d.count = static_cast<uint32_t>(out->widgets.size());
+    d.widget_size = sizeof(EmfUiWidget);
+}
+
+// emf.window(id, {title, width, place, close_key, world, rows = {...}}, fn(world, ev)) (lua 1.13): true when it opened.
+// The id gets the mod's id in front ("stable" -> "beastmaster.stable"). ev: kind ("click", "right_click", "closed"),
+// key, reason ("player", "mod", "core"; closed only).
+int l_window(lua_State* L) {
+    Script* s = script_of(L);
+    const char* id = luaL_checkstring(L, 1);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    luaL_checktype(L, 3, LUA_TFUNCTION);
+    LuaWindow w;
+    lua_window(L, *s, id, 2, &w);
+    const EmfApi* a = s->host->api;
+    if (!has_v24(a) || !a->window_open) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    lua_pushvalue(L, 3);
+    auto* slot = new WindowSlot{s->host, s->id, w.id, luaL_ref(L, LUA_REGISTRYINDEX), s->loads};
+    w.def.cb = window_cb;
+    w.def.user = slot;
+    const bool ok = a->window_open(&w.def);
+    if (ok) {
+        s->windows.insert(w.id);
+    } else {  // refused at once: no event comes
+        luaL_unref(L, LUA_REGISTRYINDEX, slot->ref);
+        delete slot;
+    }
+    lua_pushboolean(L, ok);
+    return 1;
+}
+
+// emf.window_update(id, {title, ..., rows}) (lua 1.13): new contents for the open window; false when it is not open.
+int l_window_update(lua_State* L) {
+    Script* s = script_of(L);
+    const char* id = luaL_checkstring(L, 1);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    LuaWindow w;
+    lua_window(L, *s, id, 2, &w);
+    const EmfApi* a = s->host->api;
+    lua_pushboolean(L, has_v24(a) && a->window_update && a->window_update(&w.def));
+    return 1;
+}
+
+// emf.window_close(id) (lua 1.13): closes the window (fn gets "closed", reason "mod"); false when it is not open.
+int l_window_close(lua_State* L) {
+    Script* s = script_of(L);
+    const std::string id = window_full_id(*s, luaL_checkstring(L, 1));
+    const EmfApi* a = s->host->api;
+    lua_pushboolean(L, has_v24(a) && a->window_close && a->window_close(id.c_str()));
+    return 1;
+}
+
 // ---- lua 1.10: world settings (API v21, docs/modding/world_settings.md) ----
 bool has_v21(const EmfApi* a) {
     return a && a->size >= offsetof(EmfApi, world_setting_info) + sizeof(a->world_setting_info);
@@ -2095,6 +2363,7 @@ void open_bindings(lua_State* L, Script&) {
                                    {"damage", l_damage},
                                    {"xp_required", l_xp_required}, {"level_cap", l_level_cap}, {"set_level", l_set_level},
                                    {"add_component", l_add_component}, {"remove_component", l_remove_component},
+                                   {"window", l_window}, {"window_update", l_window_update}, {"window_close", l_window_close},
                                    {"tell", l_tell},       {"broadcast", l_broadcast}, {"on_chat", l_on_chat},
                                    {"request_save", l_request_save}, {"teleport", l_teleport},
                                    {"on_world_setting_changed", l_on_world_setting_changed},

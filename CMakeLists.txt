@@ -513,6 +513,7 @@ add_executable(emf_tests
   tests/test_lua_bindings.cpp
   tests/test_lua_template.cpp
   tests/test_lua_wheel_group.cpp
+  tests/test_lua_windows.cpp
   tests/test_beastmaster.cpp
   tests/test_necromancer.cpp
   tests/test_lua_examples.cpp

@@ -58,6 +58,7 @@ struct Script {
     std::map<std::string, int> commands;               // full command name (lower case) -> function
     std::map<std::string, std::vector<int>> events;    // "<kind>:<EventName>" -> functions
     std::set<std::string> hud;                         // full HUD ids shown
+    std::multiset<std::string> windows;                // full ids of the mod windows it opened (lua 1.13); closed on unload
     std::vector<KeyWatch> keys;                        // emf.on_key
     std::vector<int> chat_cbs;                         // emf.on_chat (lua 1.6)
     std::vector<int> ws_cbs;                           // emf.on_world_setting_changed (lua 1.10)

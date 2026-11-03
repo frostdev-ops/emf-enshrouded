@@ -104,6 +104,20 @@ struct Fake {
     std::vector<EmfComponentChange> component_changes;
     std::vector<std::vector<uint8_t>> component_data;
     bool component_ok = true;
+    // v24 windows: what window_open and window_update got (strings copied; answer with cb/user as the core would)
+    // and the ids closed
+    struct Win {
+        std::string id, title;
+        uint32_t close_key = 0, place = 0;
+        float width = 0;
+        uint8_t kind = 0;
+        std::vector<EmfUiWidget> widgets;
+        std::vector<std::string> keys, texts, tips;
+        EmfUiCallback cb = nullptr;
+        void* user = nullptr;
+    };
+    std::vector<Win> windows, window_updates;
+    std::vector<std::string> windows_closed;
     // v21 world settings: two settings, what set and reset were asked (key as passed, "" for NULL; flags), the
     // change listeners; ws_world false = no hosted world (every call answers false)
     struct WsField {
@@ -373,6 +387,43 @@ bool f_change_component(EmfWorld*, const EmfComponentChange* c) {
 }
 // A v23 core (fake_api leaves change_component out: emf.add_component answers false without it).
 void with_components(EmfApi& a) { a.change_component = f_change_component; }
+Fake::Win copy_window(const EmfWindowDef* d) {
+    Fake::Win w;
+    w.id = d->id ? d->id : "";
+    w.title = d->title ? d->title : "";
+    w.close_key = d->close_key;
+    w.place = d->place;
+    w.width = d->width;
+    w.kind = d->world_kind;
+    w.cb = d->cb;
+    w.user = d->user;
+    for (uint32_t i = 0; i < d->count; ++i) {
+        const EmfUiWidget& x = d->widgets[i];
+        w.widgets.push_back(x);
+        w.keys.emplace_back(x.key ? x.key : "");
+        w.texts.emplace_back(x.text ? x.text : "");
+        w.tips.emplace_back(x.tooltip ? x.tooltip : "");
+    }
+    return w;
+}
+bool f_window_open(const EmfWindowDef* d) {
+    g->windows.push_back(copy_window(d));
+    return true;
+}
+bool f_window_update(const EmfWindowDef* d) {
+    g->window_updates.push_back(copy_window(d));
+    return true;
+}
+bool f_window_close(const char* id) {
+    g->windows_closed.emplace_back(id);
+    return true;
+}
+// A v24 core (fake_api leaves the window calls out: emf.window answers false without them).
+void with_windows(EmfApi& a) {
+    a.window_open = f_window_open;
+    a.window_update = f_window_update;
+    a.window_close = f_window_close;
+}
 void with_levels(EmfApi& a) {
     a.player_xp_required = f_xp_required;
     a.player_level_cap = f_level_cap;
