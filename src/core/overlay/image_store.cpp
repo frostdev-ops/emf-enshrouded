@@ -168,6 +168,45 @@ std::optional<ImageFrame> ImageStore::frame(uint32_t handle, double seconds, uin
     return f;
 }
 
+namespace {
+
+double srgb_to_linear(double c) { return c <= 0.04045 ? c / 12.92 : std::pow((c + 0.055) / 1.055, 2.4); }
+
+// SMPTE ST 2084: the code value for `l` = luminance / 10000 nits.
+double pq_encode(double l) {
+    constexpr double m1 = 2610.0 / 16384.0, m2 = 2523.0 / 4096.0 * 128.0;
+    constexpr double c1 = 3424.0 / 4096.0, c2 = 2413.0 / 4096.0 * 32.0, c3 = 2392.0 / 4096.0 * 32.0;
+    const double p = std::pow(std::clamp(l, 0.0, 1.0), m1);
+    return std::pow((c1 + c2 * p) / (1.0 + c3 * p), m2);
+}
+
+uint8_t to_byte(double v) { return static_cast<uint8_t>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0)); }
+
+}  // namespace
+
+void convert_for_swapchain(std::vector<uint8_t>& px, PictureSpace space) {
+    if (space == PictureSpace::Srgb) return;
+    double lin[256];
+    for (int i = 0; i < 256; ++i) lin[i] = srgb_to_linear(i / 255.0);
+    constexpr double kWhite = 203.0 / 10000.0;  // BT.2408 reference white, as a fraction of PQ's 10000 nits
+    for (size_t i = 0; i + 3 < px.size(); i += 4) {
+        const double r = lin[px[i]], g = lin[px[i + 1]], b = lin[px[i + 2]];
+        if (space == PictureSpace::LinearScrgb) {
+            px[i] = to_byte(r);
+            px[i + 1] = to_byte(g);
+            px[i + 2] = to_byte(b);
+            continue;
+        }
+        // BT.709 primaries to BT.2020 (ITU-R BT.2087), then PQ
+        const double r2 = 0.6274 * r + 0.3293 * g + 0.0433 * b;
+        const double g2 = 0.0691 * r + 0.9195 * g + 0.0114 * b;
+        const double b2 = 0.0164 * r + 0.0880 * g + 0.8956 * b;
+        px[i] = to_byte(pq_encode(r2 * kWhite));
+        px[i + 1] = to_byte(pq_encode(g2 * kWhite));
+        px[i + 2] = to_byte(pq_encode(b2 * kWhite));
+    }
+}
+
 uint32_t load_image(ImageStore& store, const std::wstring& path, const std::string& key, std::string* why) {
     if (const uint32_t known = store.find_key(key)) return known;
     const std::vector<std::wstring> files = frame_files(path, why);

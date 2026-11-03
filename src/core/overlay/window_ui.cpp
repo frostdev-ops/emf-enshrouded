@@ -2,7 +2,8 @@
 
 #include <cstdio>
 
-#include "wheel_ui.h"  // wheel_label_lines: "Name (detail)"
+#include "wheel_ui.h"
+#include "window_model.h"  // wheel_label_lines: "Name (detail)"
 
 namespace emf::core {
 
@@ -115,9 +116,7 @@ std::optional<WindowClick> draw_window(const WindowRequest& w, WindowUiState& st
             ImGui::PushID(static_cast<int>(i));
             if (i > 0 && (x.flags & EMF_UI_SAME_LINE) && x.type != EMF_UI_SEPARATOR) ImGui::SameLine();
             const bool disabled = (x.flags & EMF_UI_DISABLED) != 0;
-            const bool clickable = input && !disabled && !x.key.empty() &&
-                                   (x.type == EMF_UI_BUTTON || x.type == EMF_UI_ROW || x.type == EMF_UI_SLOT ||
-                                    x.type == EMF_UI_IMAGE);
+            const bool clickable = input && !disabled && !x.key.empty() && widget_takes_clicks(x.type);
             int colours = 0;
             if (x.rgba) {
                 ImGui::PushStyleColor(ImGuiCol_Text, rgba_vec(x.rgba));

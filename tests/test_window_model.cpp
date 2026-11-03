@@ -299,3 +299,14 @@ TEST_CASE("windows v26: describe_window names a widget's picture") {
     CHECK(lines[1] == "  0 image picture 2 at 12 fps");
     CHECK(lines[2] == "  1 slot \"Wolf\" picture 4");
 }
+
+TEST_CASE("windows: the kinds a click reaches are buttons, rows, slots and (v26) pictures") {
+    CHECK(widget_takes_clicks(EMF_UI_BUTTON));
+    CHECK(widget_takes_clicks(EMF_UI_ROW));
+    CHECK(widget_takes_clicks(EMF_UI_SLOT));
+    CHECK(widget_takes_clicks(EMF_UI_IMAGE));
+    CHECK_FALSE(widget_takes_clicks(EMF_UI_TEXT));
+    CHECK_FALSE(widget_takes_clicks(EMF_UI_HEADING));
+    CHECK_FALSE(widget_takes_clicks(EMF_UI_BAR));
+    CHECK_FALSE(widget_takes_clicks(EMF_UI_SEPARATOR));
+}

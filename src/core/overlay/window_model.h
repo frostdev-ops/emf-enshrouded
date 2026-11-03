@@ -11,6 +11,9 @@ namespace emf::core {
 // window_update (cb and user are not needed and not copied). out->mod is left as it was.
 bool copy_window_def(const EmfWindowDef* def, bool for_update, WindowRequest* out, std::string* why);
 
+// The widget kinds a click reaches (with a key, not disabled): buttons, rows, slots and pictures (v26).
+bool widget_takes_clicks(uint32_t type);
+
 // The window as text lines (the ui.windows command): its id, title and widget count, then each widget.
 std::vector<std::string> describe_window(const WindowRequest& w);
 

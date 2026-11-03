@@ -14,6 +14,7 @@
 #include "core/emf_settings.h"
 #include "console_ui.h"
 #include "image_store.h"
+#include "window_model.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
 #include "font_plan.h"
@@ -684,7 +685,7 @@ bool overlay_click_window(const std::string& key, bool right, std::string* why) 
         return false;
     }
     for (const auto& x : w->widgets) {
-        if (x.key != key || (x.type != EMF_UI_BUTTON && x.type != EMF_UI_ROW && x.type != EMF_UI_SLOT)) continue;
+        if (x.key != key || !widget_takes_clicks(x.type)) continue;
         if (x.flags & EMF_UI_DISABLED) {
             if (why) *why = key + " is disabled";
             return false;
@@ -692,7 +693,7 @@ bool overlay_click_window(const std::string& key, bool right, std::string* why) 
         if (g_deps.window_event) g_deps.window_event(*w, right ? EMF_UI_RIGHT_CLICK : EMF_UI_CLICK, key, 0);
         return true;
     }
-    if (why) *why = "no button, row or slot with the key " + key;
+    if (why) *why = "no button, row, slot or picture with the key " + key;
     return false;
 }
 

@@ -331,6 +331,7 @@ struct GpuPicture {
 std::vector<std::pair<uint32_t, GpuPicture>> g_pictures;  // by handle
 std::vector<uint32_t> g_pictures_failed;                  // not tried again (logged once)
 VkSampler g_picture_sampler = VK_NULL_HANDLE;
+PictureSpace g_pictures_space = PictureSpace::Srgb;  // what the pictures on the GPU were converted for
 
 uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want) {
     for (uint32_t i = 0; i < g_mem_props.memoryTypeCount; ++i)
@@ -459,9 +460,26 @@ bool upload_picture(const std::vector<uint8_t>& px, uint32_t w, uint32_t h, VkQu
     return done(true, "");
 }
 
-// Before a frame: every picture the image store has waiting gets its texture (made once) and its ImGui descriptor
-// (made again after a backend restart).
-void upload_pictures(VkQueue queue) {
+void free_pictures();
+
+PictureSpace picture_space(VkColorSpaceKHR cs) {
+    if (cs == VK_COLOR_SPACE_HDR10_ST2084_EXT) return PictureSpace::Hdr10Pq;
+    if (cs == VK_COLOR_SPACE_EXTENDED_SRGB_LINEAR_EXT) return PictureSpace::LinearScrgb;
+    return PictureSpace::Srgb;
+}
+
+// Before a frame: every picture the image store has waiting gets its texture (made once, its pixels converted for the
+// swapchain's colour space: made again when that changes) and its ImGui descriptor (made again after a backend restart).
+void upload_pictures(VkQueue queue, PictureSpace space) {
+    if (space != g_pictures_space) {
+        if (!g_pictures.empty()) {
+            D.QueueWaitIdle(queue);  // EMF's frames in flight may still read them
+            for (auto& [handle, p] : g_pictures)
+                if (p.set) ImGui_ImplVulkan_RemoveTexture(p.set);  // back to the backend's pool (it lives on)
+            free_pictures();  // the store keeps the pixels: all wait again
+        }
+        g_pictures_space = space;
+    }
     ImageStore& store = overlay_images();
     const std::vector<uint32_t> pending = store.pending();
     if (pending.empty()) return;
@@ -483,6 +501,7 @@ void upload_pictures(VkQueue queue) {
             uint32_t w = 0, h = 0;
             std::vector<uint8_t> px;
             if (!store.pixels(handle, &w, &h, &px)) continue;
+            convert_for_swapchain(px, space);
             GpuPicture p;
             std::string why;
             if (!upload_picture(px, w, h, queue, &p, &why)) {
@@ -618,7 +637,7 @@ bool render(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* signal, vo
                               1.0f / 1000.0f, 0.25f);
     g_last = now;
     if (g_hooks.before_frame) g_hooks.before_frame(io);
-    upload_pictures(queue);       // mods' pictures loaded since the last frame (API v26)
+    upload_pictures(queue, picture_space(r.color_space));  // mods' pictures loaded since the last frame (API v26)
     ImGui_ImplVulkan_NewFrame();  // uploads the atlas when the backend has none yet (its first frame)
     if (io.Fonts->TexPixelsAlpha8 || io.Fonts->TexPixelsRGBA32) io.Fonts->ClearTexData();  // on the GPU now
     ImGui::NewFrame();
@@ -863,8 +882,10 @@ VkResult overlay_create_swapchain(VkDevice dev, const VkSwapchainCreateInfoKHR* 
             (readable && capture_wanted() ? " (readable for screenshots)" : ""));
         {
             const SrwExclusive lock(g_book_lock);
-            g_book.on_create(*out, ci->imageFormat, ci->imageExtent, ci->minImageCount, ci->oldSwapchain).drawable =
-                drawable;
+            SwapchainRecord& rec = g_book.on_create(*out, ci->imageFormat, ci->imageExtent, ci->minImageCount,
+                                                    ci->oldSwapchain);
+            rec.drawable = drawable;
+            rec.color_space = ci->imageColorSpace;
         }
         capture_swapchain_created(*out, ci->imageFormat, ci->imageColorSpace, ci->imageExtent, readable);
     }

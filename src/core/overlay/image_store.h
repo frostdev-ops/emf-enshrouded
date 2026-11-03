@@ -80,6 +80,12 @@ private:
     size_t bytes_ = 0;
 };
 
+// What the swapchain's pixel values mean (its colour space): pictures are sRGB, so an HDR swapchain needs them converted.
+enum class PictureSpace { Srgb, Hdr10Pq, LinearScrgb };
+// RGBA8 pixels (straight alpha) from sRGB into `space`, in place: HDR10 = BT.2020 primaries, PQ-encoded, sRGB white at
+// 203 nits (ITU-R BT.2408 reference white); scRGB = linear BT.709 (1.0 = 80 nits); alpha unchanged.
+void convert_for_swapchain(std::vector<uint8_t>& px, PictureSpace space);
+
 // frame_files + decode_png + add: the picture at `path` under `key` (the same key again: its handle, nothing decoded).
 uint32_t load_image(ImageStore& store, const std::wstring& path, const std::string& key, std::string* why);
 

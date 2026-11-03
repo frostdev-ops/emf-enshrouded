@@ -108,6 +108,10 @@ bool copy_window_def(const EmfWindowDef* def, bool for_update, WindowRequest* ou
     return true;
 }
 
+bool widget_takes_clicks(uint32_t type) {
+    return type == EMF_UI_BUTTON || type == EMF_UI_ROW || type == EMF_UI_SLOT || type == EMF_UI_IMAGE;
+}
+
 std::vector<std::string> describe_window(const WindowRequest& w) {
     static const char* const kTypes[] = {"text", "heading", "button", "row", "slot", "bar", "separator", "image"};
     static const std::pair<uint32_t, const char*> kFlags[] = {

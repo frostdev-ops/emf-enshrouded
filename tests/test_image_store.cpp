@@ -166,3 +166,30 @@ TEST_CASE("image store: a picture's files: a PNG, or a folder's PNGs sorted by n
     CHECK(load_image(s, (d.p / "empty").wstring(), "empty", &why) == 0);
     CHECK(load_image(s, (d.p / "turn").wstring(), "turn", &why) == h);  // the same key: the same handle, no new decode
 }
+
+TEST_CASE("image store: pixels for an HDR10 swapchain are PQ-encoded BT.2020 at a 203-nit white; scRGB is linear") {
+    std::vector<uint8_t> px = {255, 255, 255, 255,  // white
+                               0,   0,   0,   128,  // black, half transparent
+                               255, 0,   0,   255,  // red
+                               188, 188, 188, 255}; // mid grey (sRGB 188 = linear 0.5)
+    std::vector<uint8_t> hdr = px;
+    convert_for_swapchain(hdr, PictureSpace::Hdr10Pq);
+    CHECK(hdr[0] == hdr[1]);  // white stays neutral
+    CHECK(hdr[0] >= 147);      // PQ(203 nits) = 0.584
+    CHECK(hdr[0] <= 151);
+    CHECK(hdr[4] == 0);
+    CHECK(hdr[7] == 128);      // alpha unchanged
+    CHECK(hdr[8] > hdr[9]);    // red stays red: BT.709 red in BT.2020 is mostly R, a little G and B
+    CHECK(hdr[9] > 0);
+    CHECK(hdr[12] < hdr[0]);   // grey darker than white
+    CHECK(hdr[12] > 100);      // PQ is far from linear: half the light is not half the code
+    std::vector<uint8_t> lin = px;
+    convert_for_swapchain(lin, PictureSpace::LinearScrgb);
+    CHECK(lin[0] == 255);
+    CHECK(lin[12] >= 126);     // sRGB 188 -> linear 0.5
+    CHECK(lin[12] <= 129);
+    CHECK(lin[7] == 128);
+    std::vector<uint8_t> same = px;
+    convert_for_swapchain(same, PictureSpace::Srgb);
+    CHECK(same == px);
+}

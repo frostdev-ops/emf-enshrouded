@@ -587,6 +587,8 @@ slot.type = EMF_UI_SLOT;  slot.icon = wolf;  slot.text = "Wolf";  slot.key = "ac
 - `EmfUiWidget` grew to 64 bytes (`fps`, `height` appended): pass `widget_size = sizeof(EmfUiWidget)`. A mod built
   against v24 or v25 keeps working (its widgets read `fps` and `height` as 0; `icon` was reserved and 0).
 - A picture shows from the frame after the overlay put it on the GPU; until then the widget keeps its place empty.
+- PNGs are sRGB. On an HDR swapchain EMF converts them for you (HDR10: BT.2020, PQ, white at 203 nits; scRGB:
+  linear) and again when the game switches HDR on or off.
 - Renders of the game's own creatures or items are the game's art: don't ship them. The portrait cache is written on
   the player's PC from their own game files.
 
