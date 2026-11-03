@@ -19,10 +19,16 @@ function H:reset()
 	self.watched = {}
 end
 
--- Watch a beast just put into the world.
-function H:watch(world, id, sp)
-	if not sp or not sp.health_mul or sp.health_mul == 1 then return end
-	self.watched[id] = { mul = sp.health_mul, until_s = world:tick() / 60 + WAIT_S }
+-- Watch a beast just put into the world: `mul` (a tamed beast's role and loyalty) or its species' health_mul (a wild
+-- one). Watching it again changes its multiplier (a loyalty gained).
+function H:watch(world, id, sp, mul)
+	local m = mul or (sp and sp.health_mul)
+	local w = self.watched[id]
+	if w then
+		w.mul = m or 1
+	elseif m and m ~= 1 then
+		self.watched[id] = { mul = m, until_s = world:tick() / 60 + WAIT_S }
+	end
 end
 
 function H:step(world)

@@ -3,8 +3,9 @@
 -- guest who returns), and taking them out of the world while their owner is away or they step aside (aside.lua: while
 -- a player builds next to them, or after beastmaster.aside).
 -- M.new(env) where env has: setting(key), now(world), tell(world, player, text), beasts() (the roster), save(),
--- and optionally on_spawn(world, id, species) after a beast was put into the world.
+-- and optionally on_spawn(world, id, species, health_mul) after a beast was put into the world or its loyalty grew.
 local species = require("species")
+local loyalty = require("loyalty")
 local aside_mod = require("aside")
 
 local M = {}
@@ -43,6 +44,7 @@ function P:reset()
 	self.refused = {}    -- beast -> checks in a row the game refused to bring it back
 	self.sent = {}       -- entity id -> until when Attack's order holds (a passive beast fights it until then)
 	self.recall = {}     -- entity id -> until when a beast that dropped a chase fights nothing
+	self.base = {}       -- entity id -> {damage, scale}: its template's damage multiplier and size, before role and loyalty
 	self.aside:reset()
 end
 
@@ -122,7 +124,7 @@ function P:spawn(world, owner, account, beast)
 	local scaling = world:get("DynamicEnemyScaling", id)
 	if scaling then scaling.nextUpdateTime = 0 end  -- the game rescales health and damage to the new level
 	emf.emit("server", "StartGuardingEvent", { guardingEntityId = id, guardedEntityId = owner })
-	if self.env.on_spawn then self.env.on_spawn(world, id, sp) end
+	self:strengthen(world, id, beast)
 	beast.entity = id
 	beast.out = true
 	self.ids[id] = { account = account, beast = beast }
@@ -130,11 +132,32 @@ function P:spawn(world, owner, account, beast)
 end
 
 -- A beast the player just tamed (already an ally in the world).
-function P:adopt(account, beast, id)
+-- A beast out as strong as its role and loyalty: its health through the health watch (on_spawn with the multiplier),
+-- its DamageMod multiplier and its ScaleComponent (when it has one) against its template's, kept from the first time.
+function P:strengthen(world, id, beast)
+	local sp = species.by_id(beast.species)
+	local role_health, role_damage = species.role(sp)
+	local lvl = loyalty.level(beast.points, self.env.setting("loyalty_pace"))
+	local f = loyalty.factor(lvl)
+	local base = self.base[id]
+	if not base then
+		local dm, sc = world:get("DamageMod", id), world:get("ScaleComponent", id)
+		base = { damage = dm and dm.dataStorage and dm.dataStorage[3] or nil, scale = sc and sc.uniformScale or nil }
+		self.base[id] = base
+	end
+	if self.env.on_spawn then self.env.on_spawn(world, id, sp, role_health * f) end
+	local dm = base.damage and world:get("DamageMod", id)
+	if dm and dm.dataStorage then dm.dataStorage[3] = base.damage * role_damage * f end
+	local sc = base.scale and world:get("ScaleComponent", id)
+	if sc then sc.uniformScale = base.scale * loyalty.size(lvl) end
+end
+
+function P:adopt(account, beast, id, world)
 	beast.entity = id
 	beast.out = true
 	self.ids[id] = { account = account, beast = beast }
 	self.aside:release(account)  -- it stays, and the beasts that stepped aside by the command come back
+	if world then self:strengthen(world, id, beast) end
 end
 
 -- The entity ids of `account`'s beasts in the world (where another player's building counts).
@@ -230,7 +253,7 @@ function P:dismiss(world, account, beast)
 	if beast.entity and ours(world, beast.entity) then emf.destroy(world, beast.entity) end
 	if beast.entity then
 		self.ids[beast.entity] = nil
-		self.sent[beast.entity], self.recall[beast.entity] = nil, nil
+		self.sent[beast.entity], self.recall[beast.entity], self.base[beast.entity] = nil, nil, nil
 	end
 	beast.entity = nil
 	beast.out = false
@@ -302,7 +325,7 @@ end
 
 function P:on_died(id)
 	self.credited[id] = nil
-	self.sent[id], self.recall[id] = nil, nil
+	self.sent[id], self.recall[id], self.base[id] = nil, nil, nil
 	local e = self.ids[id]
 	if not e then return end
 	self.ids[id] = nil
@@ -447,6 +470,13 @@ function P:step(world)
 						self.env.save()
 					else
 						self:leash(world, owner, b, now)
+						-- its level follows its owner's (a level up while it is out)
+						local lvl, mine = world:get("Level", b.entity), level_of(world, owner)
+						if lvl and mine and lvl.dataStorage[1] ~= mine then
+							lvl.dataStorage[1] = mine
+							local scaling = world:get("DynamicEnemyScaling", b.entity)
+							if scaling then scaling.nextUpdateTime = 0 end
+						end
 						if guard ~= owner then
 							emf.emit("server", "StartGuardingEvent", { guardingEntityId = b.entity, guardedEntityId = owner })
 						end

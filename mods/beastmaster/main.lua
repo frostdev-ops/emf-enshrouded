@@ -35,10 +35,11 @@ local function save()
 	if loaded then emf.save_world_data(beasts:serialize()) end
 end
 
--- tougher beasts (the bear: 2.5x health), watched from their spawn
+-- tougher beasts, watched from their spawn: a wild one by its species' health_mul (the wild bear: 2.5x health), a
+-- tamed one by its role and loyalty (`mul`)
 local health = health_mod.new()
-local function spawned(world, id, sp)
-	health:watch(world, id, sp)
+local function spawned(world, id, sp, mul)
+	health:watch(world, id, sp, mul)
 end
 
 -- the beasts out in the world
@@ -133,7 +134,7 @@ taming = tame_mod.new({
 			tell(world, player, "Your collection is full: the " .. species.word(sp) .. " follows you until it falls.")
 			return
 		end
-		pack:adopt(account, b, id)
+		pack:adopt(account, b, id, world)
 		save()
 		tell(world, player, string.format("You tamed %s: %s", species.a(sp), b.name))
 	end,
