@@ -186,6 +186,38 @@ TEST_CASE("change_component: an add is checked after a step, pushed in the next,
     CHECK(f.service.pending() == 0);
 }
 
+TEST_CASE("change_component: an internal request (EMF's own E prompts) adds a component no mod may, with its bytes") {
+    Fixture f;
+    ComponentChangeRequest r;
+    r.world = f.world();
+    r.entity = 2000;
+    r.hash = ecs::InteractionOfferRuntime::kHash;
+    r.op = ComponentOp::Add;
+    r.data.assign(sizeof(ecs::InteractionOfferRuntime), 0);
+    r.data[8] = 0xBF;  // defaultSequence's low byte
+    r.mod = "emf";
+    r.done = [&f](EmfWorld* wd, uint32_t status, const std::string& why) { f.answers.push_back({status, why, wd}); };
+    CHECK_FALSE(f.service.request(r, nullptr));  // as a mod's request: not on the list
+    r.internal = true;
+    REQUIRE(f.service.request(r, nullptr));
+    f.steps(2);
+    REQUIRE(f.answers.size() == 1);
+    CHECK(f.answers[0].status == EMF_COMPONENT_DONE);
+    REQUIRE(g_ents[2000].count(ecs::InteractionOfferRuntime::kHash) == 1);
+    CHECK(g_ents[2000][ecs::InteractionOfferRuntime::kHash][8] == 0xBF);
+    r.entity = 1;
+    CHECK_FALSE(f.service.request(r, nullptr));  // never a player, internal or not
+    r.entity = 2000;
+    r.hash = ecs::ClientInteractionOffer::kHash;
+    r.data.clear();
+    CHECK_FALSE(f.service.request(r, nullptr));  // an internal add brings its bytes (no list entry gives a size)
+    r.op = ComponentOp::Remove;
+    r.hash = ecs::InteractionOfferRuntime::kHash;
+    REQUIRE(f.service.request(r, nullptr));  // an internal remove needs no record of who added it
+    f.steps(2);
+    CHECK(g_ents[2000].count(ecs::InteractionOfferRuntime::kHash) == 0);
+}
+
 TEST_CASE("change_component: a component already there answers already, nothing pushed; a remove of an absent one too") {
     Fixture f;
     g_ents[2000][ecs::ScaleComponent::kHash].assign(4, 0);

@@ -44,6 +44,7 @@ struct ComponentChangeRequest {
     std::vector<uint8_t> data;  // add: the component's bytes (empty: zeros)
     uint32_t flags = 0;         // EMF_COMPONENT_PERSISTENT
     std::string mod;            // who asks (what it added this session, it may remove)
+    bool internal = false;      // EMF's own request (E prompts): no mod policy; an add brings its bytes
     // EMF_COMPONENT_DONE / _ALREADY / _FAILED and why (FAILED); on the server world's thread
     std::function<void(EmfWorld* world, uint32_t status, const std::string& why)> done;
 };

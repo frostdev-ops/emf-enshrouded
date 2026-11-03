@@ -6,13 +6,17 @@
 //   ClientInteractionOffer: the replicated copy the prompt reads (the game fills it);
 //   CheckPlayerInRange: keeps PlayerInRange on the entity while a player is within the range.
 // The accept is InteractionAcceptedEvent {guest = player, host = entity} in the server world, for every player.
+#include <windows.h>
+
 #include <cstdint>
 #include <functional>
+#include <map>
 #include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
 
+#include "component_service.h"
 #include "emf/emf_api.h"
 
 namespace emf::core {
@@ -69,6 +73,68 @@ public:
 
 private:
     std::vector<Entry> entries_;
+};
+
+constexpr int kOfferUpkeepTicks = 60;  // the upkeep runs about once a second (60 server steps)
+
+struct OfferComponent {
+    uint32_t hash = 0;
+    std::vector<uint8_t> bytes;
+};
+
+// The offers in the running server session: spawned with their components, or added to an entity through the
+// component service (internal requests, three records as the game pushes them), handed to the owner on an accept, kept
+// through streaming (the upkeep adds a lost offer again) and forgotten with the session. The API layer checks the world
+// (the server world, inside a world call); everything here runs on the server world's thread.
+class OfferService {
+public:
+    struct Deps {
+        std::function<bool(const ComponentChangeRequest&, std::string*)> change;  // ComponentService::request
+        std::function<uint32_t(EmfWorld*, const uint8_t guid[16], double, double, double, const std::vector<OfferComponent>&,
+                               std::string*)>
+            spawn;
+        std::function<bool(EmfWorld*, uint32_t hash, uint32_t entity)> has;  // the entity has that component
+        std::function<uint32_t()> session;
+        std::function<void(const std::string&)> log;
+    };
+    explicit OfferService(Deps deps);
+    OfferService(const OfferService&) = delete;
+    OfferService& operator=(const OfferService&) = delete;
+
+    uint32_t spawn_offer(EmfWorld* w, const uint8_t guid[16], double x, double y, double z, const OfferSpec& spec,
+                         const std::string& owner, OfferCallback cb, std::string* why);
+    bool offer(EmfWorld* w, uint32_t entity, const OfferSpec& spec, const std::string& owner, OfferCallback cb,
+               std::string* why);
+    bool remove(EmfWorld* w, uint32_t entity, const std::string& owner, std::string* why);
+    // A mod's clean-up (a Lua reload): every offer it has goes; returns the entities.
+    std::vector<uint32_t> remove_owner(EmfWorld* w, const std::string& owner);
+    // InteractionAcceptedEvent in the server world.
+    void on_accept(EmfWorld* w, const void* event, uint32_t size);
+    // After every server step.
+    void on_server_tick(EmfWorld* w);
+    std::vector<OfferRegistry::Entry> list() const;
+
+private:
+    struct State {
+        int pending = 0;           // changes under way
+        bool range_added = false;  // EMF added CheckPlayerInRange (the entity had none)
+    };
+    using Key = std::pair<uint32_t, uint32_t>;  // session, entity
+    // The adds an entity still lacks (what it has stays), as internal requests.
+    std::vector<ComponentChangeRequest> adds_for(EmfWorld* w, uint32_t session, uint32_t entity, const OfferSpec& spec,
+                                                 bool first, bool* range_added);
+    ComponentChangeRequest change_of(EmfWorld* w, uint32_t session, uint32_t entity, uint32_t hash, ComponentOp op,
+                                     std::vector<uint8_t> bytes, bool first);
+    void submit(std::vector<ComponentChangeRequest>& reqs);  // outside the lock
+    void say(const std::string& line);
+    uint32_t session() const { return deps_.session ? deps_.session() : 0; }
+
+    Deps deps_;
+    mutable SRWLOCK lock_ = SRWLOCK_INIT;
+    OfferRegistry registry_;
+    std::map<Key, State> state_;
+    uint32_t session_seen_ = 0;
+    int ticks_ = 0;
 };
 
 }  // namespace emf::core
