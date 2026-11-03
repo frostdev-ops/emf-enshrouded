@@ -468,6 +468,35 @@ covers `player_level_set`, or `emf::has_v22()`). Server world only.
 | `emf::set_level(w, player, level, xp)` | `player_level_set(world, player, level, xp)` | sets the level (1..cap) with `xp` (default 0, cut to below the requirement) towards the next one, the way the game's own admin "set level" does: the level, the XP, the requirement for that level and no pending XP (it would level the player up again), all four together. Raises and lowers; no `LevelUpEvent` (to level up the game's way, `give_xp` the XP the levels need: `required - xp - pending` for the next level, plus `xp_required` of each level after it). The skill points follow the level. Skills already unlocked stay, but at the next load the game checks the tree: when it costs more points than the level gives, the game resets the whole tree itself (the points can be spent again). Saved with the character. Inside a world callback on the server world at once, elsewhere after its next step (true = queued; a later refusal is logged). False (logged) for a level outside 1..cap, a non-player, or without the game's function. |
 | `emf::has_v22()` | — | true when the core has them. |
 
+## v23: add and remove components
+
+A mod adds a component to an entity, or removes one, through the engine's own "add components" and "remove
+components" commands (the ones the game's programs use; EMF's teleport has used the same path since v20). Only the
+components EMF lists can be changed:
+
+| Component | Add | Remove | Saved with the world |
+|---|---|---|---|
+| `ScaleComponent` (`uniformScale`: a creature's size, 1 = as made) | yes | what the mod added | no |
+| `IsTame` | yes | yes | **yes** |
+| `LifeTime` | yes | yes | **yes** |
+| `InteractionPause` | yes | what the mod added | no |
+| `DoNotSave` | yes | yes (then the entity is saved) | **yes** |
+| `ForceSave` | yes | yes | **yes** |
+| `ConditionalDespawn`, `DespawnLink` | no | yes | **yes** |
+
+A change of a component the world save keeps outlives the mod in that world: pass `EMF_COMPONENT_PERSISTENT` to
+accept that (refused without it).
+
+| C++ (`emf/emf.hpp`) | C | Rules |
+|---|---|---|
+| `emf::add_component(w, id, emf::gen::ecs::ScaleComponent{1.25f}, flags[, f])` | `change_component(world, &change)` with `op = EMF_COMPONENT_ADD`, `hash`, `data`, `data_size` | adds the component with that data (C: `data` NULL for zeros; otherwise `data_size` must be the component's size in this game build, `X::kSize`). Only when absent: a component already there is never overwritten (answer `EMF_COMPONENT_ALREADY`). SERVER world, never a player. True = queued: checked after the server world's next step, applied in the step after; `f(World, status, why)` (C: `cb(world, entity, hash, status, why, user)`) answers once on the server world's thread: `EMF_COMPONENT_DONE`, `_ALREADY` or `_FAILED` (the entity is gone, the game did not apply it, the world ended...). False (logged) when refused at once: not listed, the wrong size, `EMF_COMPONENT_PERSISTENT` missing, a client world, a player, a change of that component on that entity under way, 256 under way; the callback is not called then. |
+| `emf::remove_component<emf::gen::ecs::ScaleComponent>(w, id, flags[, f])` | `change_component` with `op = EMF_COMPONENT_REMOVE` | removes it (absent: `_ALREADY`). Allowed for the components listed, and for any a mod added itself in this session. |
+| `emf::has_v23()` | — | true when the core has it. |
+
+The game owns what a component does: a `ScaleComponent` makes the creature bigger or smaller as the game draws and
+measures it. Whether a joined player's game sees a change depends on the component (the game replicates some to
+players; a test on the host shows what the host sees). `EMF_COMPONENT_EXPERT` is reserved.
+
 ## Lua
 
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).

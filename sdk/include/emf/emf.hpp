@@ -754,6 +754,66 @@ inline uint32_t level_cap(World w) { return has_v22() && api()->player_level_cap
 inline bool set_level(World w, uint32_t player, uint32_t level, uint32_t xp = 0) {
     return has_v22() && api()->player_level_set && api()->player_level_set(w.raw(), player, level, xp);
 }
+
+// ---- v23: add a component to an entity, or remove one (change_component in emf_api.h; only the listed ones) ----
+inline bool has_v23() {
+    return api() && api()->version >= 23 &&
+           api()->size >= offsetof(EmfApi, change_component) + sizeof(api()->change_component);
+}
+namespace detail {
+inline bool change_component(World w, uint32_t entity, uint32_t op, uint32_t hash, const void* data, uint32_t size,
+                             uint32_t flags, EmfComponentCallback cb, void* user) {
+    if (!has_v23() || !api()->change_component) return false;
+    EmfComponentChange c{};
+    c.size = sizeof c;
+    c.op = op;
+    c.entity = entity;
+    c.hash = hash;
+    c.data = data;
+    c.data_size = size;
+    c.flags = flags;
+    c.cb = cb;
+    c.user = user;
+    return api()->change_component(w.raw(), &c);
+}
+template <class F>
+void component_done(EmfWorld* w, uint32_t, uint32_t, uint32_t status, const char* why, void* user) {
+    auto* f = static_cast<F*>(user);
+    (*f)(World(w), status, why ? why : "");
+    delete f;
+}
+template <class F>
+bool change_component_cb(World w, uint32_t entity, uint32_t op, uint32_t hash, const void* data, uint32_t size,
+                         uint32_t flags, F f) {
+    auto* p = new F(std::move(f));
+    const bool ok = change_component(w, entity, op, hash, data, size, flags, &component_done<F>, p);
+    if (!ok) delete p;  // refused at once: the callback is never called
+    return ok;
+}
+}  // namespace detail
+// Adds `value` (a generated component struct: emf::gen::ecs::ScaleComponent{1.25f}) to `entity`, after the server
+// world's next step. flags: EMF_COMPONENT_PERSISTENT for one the world save keeps. False when refused (logged).
+template <class T>
+bool add_component(World w, uint32_t entity, const T& value, uint32_t flags = 0) {
+    return detail::change_component(w, entity, EMF_COMPONENT_ADD, T::kHash, &value, static_cast<uint32_t>(sizeof(T)),
+                                    flags, nullptr, nullptr);
+}
+// The same with f(World, uint32_t status, const char* why) once it is applied (EMF_COMPONENT_DONE / _ALREADY /
+// _FAILED), on the server world's thread.
+template <class T, class F>
+bool add_component(World w, uint32_t entity, const T& value, uint32_t flags, F f) {
+    return detail::change_component_cb(w, entity, EMF_COMPONENT_ADD, T::kHash, &value, static_cast<uint32_t>(sizeof(T)),
+                                       flags, std::move(f));
+}
+// Removes component T from `entity` (one EMF lets mods remove, or one this mod added in this session).
+template <class T>
+bool remove_component(World w, uint32_t entity, uint32_t flags = 0) {
+    return detail::change_component(w, entity, EMF_COMPONENT_REMOVE, T::kHash, nullptr, 0, flags, nullptr, nullptr);
+}
+template <class T, class F>
+bool remove_component(World w, uint32_t entity, uint32_t flags, F f) {
+    return detail::change_component_cb(w, entity, EMF_COMPONENT_REMOVE, T::kHash, nullptr, 0, flags, std::move(f));
+}
 // `amount` of true damage from attacker (a player gets the kill credit and XP; 0 = none) to target as a game hit,
 // applied on the next step with a HitEvent, a light hit reaction and aggro (see damage in emf_api.h). False when refused
 // or on an older core.
