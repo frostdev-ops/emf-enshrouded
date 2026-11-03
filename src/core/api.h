@@ -34,6 +34,7 @@ namespace emf::core {
 class InventoryService;
 class TeleportService;
 class ComponentService;
+class OfferService;
 namespace ws {
 class Service;
 }
@@ -67,6 +68,7 @@ struct CoreState {
     std::string teleport_off;                           // why teleport is off ("" while it is on or not set up yet)
     ComponentService* components = nullptr;             // v23 change_component (null when off on this game build)
     std::string components_off;                         // why change_component is off
+    OfferService* offers = nullptr;                     // v25 E prompts (null when change_component is off)
     std::atomic<uint32_t> server_session{0};            // +1 per server world set up (API v9 server_session)
     std::function<bool(const WheelRequest&)> open_wheel;   // the overlay's wheel (null: no overlay)
     // The overlay's mod window (API v24; null: no overlay): open (replaced: the window it replaced; why: a refusal),

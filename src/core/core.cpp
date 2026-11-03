@@ -38,6 +38,8 @@
 #include "inventory.h"
 #include "teleport.h"
 #include "component_service.h"
+#include "offers.h"
+#include "spawn.h"
 #include "world_settings_glue.h"
 #include "world_settings_service.h"
 #include "world_commands.h"
@@ -333,6 +335,8 @@ std::unique_ptr<emf::core::InventoryService> g_inventory;
 std::unique_ptr<emf::core::TeleportService> g_teleport;
 // v23 change_component: the emf_components program and its requests (null when off on this game build).
 std::unique_ptr<emf::core::ComponentService> g_components;
+// v25 E prompts: on top of the component service (null when that is off).
+std::unique_ptr<emf::core::OfferService> g_offers;
 // v21 world settings: the change queue, the server step's write and resync, the per-world kept settings.
 struct WorldSettingsRuntime {
     emf::core::ws::State state;
@@ -905,6 +909,44 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             if (g_state->system_programs.add(g_components->spec(), true)) {
                 g_state->components = g_components.get();
                 emf::logf("change_component: on (program %s in the server world)", emf::core::kComponentsProgramName);
+                // v25 E prompts: the offers' components go through the service above; the accept is the server
+                // world's InteractionAcceptedEvent (asked for now, before the game registers its programs)
+                emf::core::OfferService::Deps od;
+                od.change = [](const emf::core::ComponentChangeRequest& r, std::string* why) {
+                    return g_components && g_components->request(r, why);
+                };
+                const auto& spawn_sig = g_state->sigs[static_cast<size_t>(emf::Sig::SpawnWrapper)];
+                if (emf::is_usable(spawn_sig, known)) {
+                    const auto spawn_fn = reinterpret_cast<emf::core::SpawnWrapperFn>(spawn_sig.addr);
+                    od.spawn = [spawn_fn](EmfWorld* w, const uint8_t guid[16], double x, double y, double z,
+                                          const std::vector<emf::core::OfferComponent>& comps, std::string* why) {
+                        std::vector<emf::core::SpawnComponent> sc;
+                        for (const auto& c : comps)
+                            sc.push_back({c.hash, 0, c.bytes.data(), static_cast<uint32_t>(c.bytes.size())});
+                        return emf::core::spawn_entity_ex(spawn_fn, reinterpret_cast<uint8_t*>(w), guid, x, y, z,
+                                                          sc.data(), sc.size(), why);
+                    };
+                }
+                od.has = [](EmfWorld* w, uint32_t hash, uint32_t entity) {
+                    return emf::get_component(g_state->get_component, reinterpret_cast<uint8_t*>(w), hash, entity)
+                               .ptr != nullptr;
+                };
+                od.session = [] { return g_state->server_session.load(); };
+                od.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
+                g_offers = std::make_unique<emf::core::OfferService>(std::move(od));
+                std::string offer_why;
+                if (g_state->relay.subscribe(
+                        EMF_WORLD_SERVER, "InteractionAcceptedEvent", emf::gen::ecs::InteractionAcceptedEvent::kSize,
+                        [](EmfWorld* w, const void* ev, uint32_t size, void*) {
+                            if (g_offers) g_offers->on_accept(w, ev, size);
+                        },
+                        nullptr, &offer_why)) {
+                    g_state->offers = g_offers.get();
+                    emf::logf("offers: on (E prompts; InteractionAcceptedEvent in the server world)");
+                } else {
+                    g_offers.reset();
+                    emf::logf("offers: off (InteractionAcceptedEvent: %s)", offer_why.c_str());
+                }
                 std::thread([] {  // back to the menu: what is still under way is answered (a new world: its setup)
                     for (;;) {
                         Sleep(1000);
@@ -1007,6 +1049,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             g_teleport->on_server_tick(w);
         if (g_components && emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER)
             g_components->on_server_tick(w);
+        if (g_offers && emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER)
+            g_offers->on_server_tick(w);
     }, nullptr);
     // Event relay first among the tick subscribers: mods' on_event callbacks run before their on_tick ones.
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {

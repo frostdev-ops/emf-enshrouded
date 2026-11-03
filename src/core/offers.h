@@ -39,6 +39,10 @@ struct OfferSpec {
 uint32_t custom_verb_id(std::string_view text);
 // The verb id an offer shows: its text's id, else its verb, else "Use".
 uint32_t offer_verb(const OfferSpec& s);
+// Custom words for the client's loca lookup (any thread): the id is custom_verb_id(text).
+void register_verb_text(const std::string& text);
+std::optional<std::string> verb_text(uint32_t id);
+size_t verb_text_count();
 // The components' bytes (InteractionOfferRuntime 56, ClientInteractionOffer 12 zeros, CheckPlayerInRange 1).
 std::vector<uint8_t> offer_runtime_bytes(const OfferSpec& s);
 std::vector<uint8_t> offer_client_bytes();

@@ -28,6 +28,7 @@
 #include "spawn.h"
 #include "teleport.h"
 #include "component_service.h"
+#include "offers.h"
 #include "overlay/window_model.h"
 #include "world_settings_service.h"
 #include "emf/generated/components.hpp"
@@ -1517,6 +1518,15 @@ bool guarded_component_call(EmfComponentCallback cb, EmfWorld* w, uint32_t entit
     }
 }
 
+bool guarded_offer_call(EmfOfferCallback cb, EmfWorld* w, uint32_t player, uint32_t entity, void* user) {
+    __try {
+        cb(w, player, entity, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool guarded_window_call(EmfUiCallback cb, EmfWorld* w, const EmfUiEvent* e, void* user) {
     __try {
         cb(w, e, user);
@@ -1621,6 +1631,82 @@ bool api_change_component(EmfWorld* w, const EmfComponentChange* c) {
     }
     std::string why;
     return g_state->components->request(r, &why);
+}
+
+// v25: E prompts (offers.h). The caller's module owns the offer (a Lua script's offers are the Lua host's to track).
+bool offer_spec_from(const EmfOffer* o, OfferSpec& s, const char* what) {
+    if (!o || o->size < kOfferV25Size) {
+        refuse_limited(std::string(what) + " refused: no offer, or its size field is too small");
+        return false;
+    }
+    s.verb = o->verb;
+    if (o->text) {
+        const size_t n = strnlen(o->text, 64);
+        if (n == 0 || n > 63) {
+            refuse_limited(std::string(what) + " refused: text must be 1 to 63 bytes");
+            return false;
+        }
+        s.text.assign(o->text, n);
+        register_verb_text(s.text);
+    }
+    s.sequence = o->sequence;
+    s.range_m = o->range_m;
+    s.flags = static_cast<uint8_t>(o->flags & (kOfferLowPriority | kOfferBuildMode));
+    return true;
+}
+
+bool offers_on(EmfWorld* w, const char* what) {
+    if (!g_state) return false;
+    if (!g_state->offers) {
+        log_once(std::string(what) + " is off: " +
+                 (g_state->components_off.empty() ? std::string("not set up (yet)") : g_state->components_off));
+        return false;
+    }
+    if (!world_call_allowed(w, what)) return false;
+    if (WorldView(raw(w)).kind() != EMF_WORLD_SERVER) {
+        refuse_limited(std::string(what) + " refused: the server world only (a world this game hosts)");
+        return false;
+    }
+    return true;
+}
+
+OfferCallback offer_callback(EmfOfferCallback cb, void* user) {
+    if (!cb) return nullptr;
+    return [cb, user](EmfWorld* w, uint32_t player, uint32_t entity) {
+        if (!guarded_offer_call(cb, w, player, entity, user))
+            core_log("an offer callback in " + module_name_of(reinterpret_cast<const void*>(cb)) + " faulted");
+    };
+}
+
+uint32_t api_spawn_offer(EmfWorld* w, const uint8_t guid[16], double x, double y, double z, const EmfOffer* o,
+                         EmfOfferCallback cb, void* user) {
+    if (!offers_on(w, "spawn_offer") || !guid) return 0;
+    OfferSpec s;
+    if (!offer_spec_from(o, s, "spawn_offer")) return 0;
+    std::string why;
+    const uint32_t id = g_state->offers->spawn_offer(w, guid, x, y, z, s, module_name_of(_ReturnAddress()),
+                                                     offer_callback(cb, user), &why);
+    if (!id) core_log("spawn_offer refused: " + why);
+    return id;
+}
+
+bool api_offer(EmfWorld* w, uint32_t entity, const EmfOffer* o, EmfOfferCallback cb, void* user) {
+    if (!offers_on(w, "offer")) return false;
+    OfferSpec s;
+    if (!offer_spec_from(o, s, "offer")) return false;
+    std::string why;
+    if (g_state->offers->offer(w, entity, s, module_name_of(_ReturnAddress()), offer_callback(cb, user), &why))
+        return true;
+    refuse_limited("offer(" + std::to_string(entity) + ") refused: " + why);
+    return false;
+}
+
+bool api_offer_remove(EmfWorld* w, uint32_t entity) {
+    if (!offers_on(w, "offer_remove")) return false;
+    std::string why;
+    if (g_state->offers->remove(w, entity, module_name_of(_ReturnAddress()), &why)) return true;
+    refuse_limited("offer_remove(" + std::to_string(entity) + ") refused: " + why);
+    return false;
 }
 
 bool api_teleport(EmfWorld* w, const EmfTeleport* req) {
@@ -1796,6 +1882,9 @@ const EmfApi kApi = {
     api_window_open,
     api_window_update,
     api_window_close,
+    api_spawn_offer,
+    api_offer,
+    api_offer_remove,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

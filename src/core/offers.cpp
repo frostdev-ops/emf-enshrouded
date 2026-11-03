@@ -16,6 +16,37 @@ uint32_t custom_verb_id(std::string_view text) {
     return h;
 }
 
+namespace {
+SRWLOCK g_verb_lock = SRWLOCK_INIT;
+std::map<uint32_t, std::string>& verb_texts() {
+    static std::map<uint32_t, std::string> m;
+    return m;
+}
+}  // namespace
+
+void register_verb_text(const std::string& text) {
+    if (text.empty()) return;
+    AcquireSRWLockExclusive(&g_verb_lock);
+    if (verb_texts().size() < 4096) verb_texts()[custom_verb_id(text)] = text;
+    ReleaseSRWLockExclusive(&g_verb_lock);
+}
+
+std::optional<std::string> verb_text(uint32_t id) {
+    AcquireSRWLockShared(&g_verb_lock);
+    const auto it = verb_texts().find(id);
+    std::optional<std::string> out;
+    if (it != verb_texts().end()) out = it->second;
+    ReleaseSRWLockShared(&g_verb_lock);
+    return out;
+}
+
+size_t verb_text_count() {
+    AcquireSRWLockShared(&g_verb_lock);
+    const size_t n = verb_texts().size();
+    ReleaseSRWLockShared(&g_verb_lock);
+    return n;
+}
+
 uint32_t offer_verb(const OfferSpec& s) {
     if (!s.text.empty()) return custom_verb_id(s.text);
     return s.verb ? s.verb : kOfferDefaultVerb;
