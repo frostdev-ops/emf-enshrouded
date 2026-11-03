@@ -45,10 +45,13 @@ public:
     bool wheel() const { return wheel_.load(); }
     void set_wheel(bool on) { wheel_ = on; }
     // A mod's window captures the input like a wheel; Esc and its close key (a generic virtual-key code, 0 = none)
-    // close it on their press; the console key opens the console over it.
+    // close it on their press; the console key opens the console over it. `close_key_down`: the close key was down
+    // when it opened (the key that opened it): that press, if the window thread had not handled it yet, does not close
+    // it; the key's release ends this.
     bool window() const { return window_.load(); }
-    void set_window(bool on, uint16_t close_vk = 0) {
+    void set_window(bool on, uint16_t close_vk = 0, bool close_key_down = false) {
         window_close_vk_ = on ? close_vk : 0;
+        window_skip_vk_ = on && close_key_down ? close_vk : 0;
         window_ = on;
     }
     // The console, a wheel or a mod's window holds the input (the game gets no presses and no mouse movement).
@@ -81,6 +84,7 @@ private:
     std::atomic<bool> wheel_{false};
     std::atomic<bool> window_{false};
     std::atomic<uint16_t> window_close_vk_{0};
+    std::atomic<uint16_t> window_skip_vk_{0};  // the close key's press that opened the window (see set_window)
     std::atomic<bool> esc_to_console_{false};
     std::atomic<uint16_t> hidden_vk_{0};
     bool swallow_char_ = false;  // the character right after a toggle belongs to the toggle key

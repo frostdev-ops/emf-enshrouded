@@ -397,3 +397,26 @@ TEST_CASE("InputRouter window: auto-repeats of the key that opened it are repeat
     CHECK(r.key(up(kB, 'B')) == Route::Both);  // the game saw it go down: it sees it go up
     CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);  // the next press closes it
 }
+
+TEST_CASE("InputRouter window: opened while its close key is down, that press does not close it (it opened it)") {
+    // the mod polled the key down and opened the window before the window thread handled the key's own press
+    constexpr uint16_t kB = 0x30;
+    InputRouter r;
+    r.set_window(true, 'B', true);
+    CHECK(r.key(down(kB, 'B')) == Route::Swallow);  // the press that opened it
+    CHECK(r.window());
+    CHECK(r.key(up(kB, 'B')) == Route::Swallow);    // the game never saw it go down
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);  // the next press closes it
+    CHECK(r.key(up(kB, 'B')) == Route::Swallow);
+    r.set_window(true, 'B', false);  // opened with the key up: its first press closes it
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);
+}
+
+TEST_CASE("InputRouter window: opened while its close key is down after the game saw the press; its release ends that") {
+    constexpr uint16_t kB = 0x30;
+    InputRouter r;
+    CHECK(r.key(down(kB, 'B')) == Route::Game);  // the window thread handled the press first
+    r.set_window(true, 'B', true);
+    CHECK(r.key(up(kB, 'B')) == Route::Both);  // the game saw it go down
+    CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);  // so the next press closes it
+}

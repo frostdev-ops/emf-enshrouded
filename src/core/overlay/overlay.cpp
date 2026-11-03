@@ -65,7 +65,9 @@ WheelGate g_wheel_gate([](bool on) {
 });
 // A mod's window (API v24): the gate takes it from any thread; the render thread draws its copy.
 WindowGate g_window_gate([](bool on, uint16_t close_vk) {
-    if (g_router) g_router->set_window(on, close_vk);
+    // the close key down now (the key that opened it): that press must not close it (InputRouter::set_window)
+    const bool down = on && close_vk && (GetAsyncKeyState(close_vk) & 0x8000) != 0;
+    if (g_router) g_router->set_window(on, close_vk, down);
 });
 std::optional<WindowRequest> g_window;          // render thread: the copy drawn
 uint64_t g_window_seen = ~0ull;                 // render thread: the gate's version of that copy

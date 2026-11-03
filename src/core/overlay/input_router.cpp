@@ -35,6 +35,12 @@ Route InputRouter::decide(const KeyEvent& e) {
             // an auto-repeat of a key held since before the window opened (the key that opened it): not a press; its
             // release reaches the game, which saw it go down
             if (game_down_[index(e)]) return Route::Swallow;
+            const uint16_t skip = window_skip_vk_.load();
+            if (skip && e.vkey == skip) {  // the press that opened the window, handled here only now
+                window_skip_vk_ = 0;
+                held_ = e.scan;  // its repeats and its release go nowhere
+                return Route::Swallow;
+            }
             const uint16_t close_vk = window_close_vk_.load();
             if (esc || (close_vk && e.vkey == close_vk)) {
                 held_ = e.scan;  // its repeats and its release go nowhere
@@ -52,6 +58,7 @@ Route InputRouter::decide(const KeyEvent& e) {
             }
             return Route::Console;
         }
+        if (e.vkey && e.vkey == window_skip_vk_.load()) window_skip_vk_ = 0;  // released: its next press closes
         if (held) {
             held_ = 0;
             return Route::Swallow;
