@@ -180,22 +180,27 @@ them:
 | Tanks: boar, bear, aurochs | 50 % | 80 % |
 | The others: wolf, hound, sabretooth, snakes | 20 % | 50 % |
 
-The shares of several beasts add up, at most 90 %; you keep the rest. Against a boss (or a mini-boss) your beasts draw
-at most 35 % in all. The beast's tab says what it draws ("Draws 50 % of the monsters in a fight").
+The shares of several beasts add up; you keep the rest. Your beasts draw at most 90 % of the monsters in all, and of a
+boss (or a mini-boss) at most 35 %, also when they stand much nearer to it than you do. The beast's tab says what it
+draws ("Draws 50 % of the monsters in a fight").
 
 - **Who a monster goes for:** when it joins a fight with you or your beasts (it hits you or a beast, you or a beast hit
-  it, or it goes for you or a beast), it picks between you and your beasts within 30 m of it by those shares, a nearer
-  one weighing more.
-- **Groups split:** at least 1 in 4 of the monsters in a fight stay on you, however high the shares.
+  it, or it goes for you or a beast), it picks between you and your beasts within 30 m of it by those shares, the nearer
+  of your beasts weighing more. A monster that goes for another player or another player's beast is theirs.
+- **Groups split:** at least 1 in 4 of the monsters in a fight stay on you, from 2 monsters on and rounded up (1 of 2,
+  2 of 5, 3 of 9), however high the shares; a single monster can go to a beast.
 - **No flip-flopping:** a monster keeps its target at least 8 s, then picks again. It picks again at once when its beast
   falls, is sent home or is out of its reach; when none of your beasts is left near it, it is the game's again.
 - **Taunt** (a talent) sends the monsters near a beast at it for 6 s when one of them hits you; a boss in the middle of
-  an attack finishes it first (it stays on its target).
+  an attack turns when the attack ends. A roar that turns no monster is not spent.
 - **Passive mode:** your beasts draw no monsters; the game decides alone.
 
-Beastmaster holds each monster's pick (the game's own target choice) on the target it chose, and gives the game its
-pick back when the fight ends for that monster, the beast falls, you leave, you switch to passive mode or turn **Beasts
-draw monsters** off. `beastmaster.threat` (console) lists the monsters held on you or your beasts now.
+A monster picked for a beast is held on it: Beastmaster writes the beast as its pick (the game's own target choice).
+One picked for you is left to the game, which picks for it (it counts for the 1 in 4). A boss in the middle of an
+attack keeps its target until the attack ends. The game gets its pick back when the fight ends for that monster (no hit
+between it and you or your beasts for twice the hold, 16 s, or it goes home, flees or stands idle), the beast falls, you
+leave, you switch to passive mode or turn **Beasts draw monsters** off. `beastmaster.threat` (console) lists the
+monsters in your fights now and who they are on.
 
 ## Commands
 

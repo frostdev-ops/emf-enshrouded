@@ -3286,7 +3286,7 @@ size_t on(BeastRig& b, std::initializer_list<uint32_t> monsters, uint32_t target
 }
 }  // namespace
 
-TEST_CASE("threat: a monster that goes for you joins the fight and is held on a beast by its share for at least 8 s, then picks again") {
+TEST_CASE("threat: a monster that goes for you joins the fight and is held on a beast by its share for at least 8 s, then picks again; one left to you is never written on") {
     RollRig b;
     b.reply("beastmaster.give boar");
     out_at(b, "Boar", 1234, 0, 4);
@@ -3302,9 +3302,13 @@ TEST_CASE("threat: a monster that goes for you joins the fight and is held on a 
     b.roll(0.4);
     b.seconds(6);
     CHECK(pick_of(b, 70) == 1234);
-    b.seconds(2);  // 8 s: it picks again (you)
-    CHECK(pick_of(b, 70) == 1);
-    CHECK_FALSE(switches(b, 70));
+    b.seconds(2);  // 8 s: it picks again: you; the game's own pick, switches on
+    CHECK(switches(b, 70));
+    CHECK(has(b.reply("beastmaster.threat"), "70 on you"));
+    game_picks(b, 70, 0);
+    b.seconds(2);
+    CHECK(pick_of(b, 70) == 0);  // nothing written
+    CHECK(switches(b, 70));
 }
 
 TEST_CASE("threat: a monster that hits your beast, or that you or your beast hit, joins the fight") {
@@ -3318,7 +3322,13 @@ TEST_CASE("threat: a monster that hits your beast, or that you or your beast hit
     deliver(b.r.fake, "HitEvent", hit(73, 1234, -5));
     deliver(b.r.fake, "HitEvent", hit(74, 2, -5));  // player 2 has no beast out
     one_step(b);
-    for (uint32_t m : {71u, 72u, 73u}) {
+    const std::string held = b.reply("beastmaster.threat");
+    CAPTURE(held);
+    CHECK(has(held, "71 on Boar"));
+    CHECK(has(held, "72 on you"));  // the second of a fight: 1 in 4 from 2, rounded up
+    CHECK(has(held, "73 on Boar"));
+    CHECK_FALSE(has(held, "74 on"));
+    for (uint32_t m : {71u, 73u}) {
         CAPTURE(m);
         CHECK(pick_of(b, m) == 1234);
         CHECK_FALSE(switches(b, m));
@@ -3370,21 +3380,30 @@ TEST_CASE("threat: shares: a tank 50 %, another beast 20 %, Menace 10 % a point;
     CHECK(pick_at(0.87, true) == 1235u);
 }
 
-TEST_CASE("threat: at least 1 in 4 monsters of a fight stays on you") {
+TEST_CASE("threat: at least 1 in 4 monsters of a fight stays on you, rounded up from 2 monsters; a single one can go to a beast") {
     RollRig b({{"tank_share_pct", "90"}});
     b.reply("beastmaster.give boar");
     out_at(b, "Boar", 1234, 0, 4);
     b.roll(0.99);  // every pick by share: the boar
-    for (int i = 0; i < 4; ++i) monster(b, 70 + i, 6.0 + i, 4, 1);
+    monster(b, 70, 6, 4, 1);
+    b.seconds(1);
+    CHECK(pick_of(b, 70) == 1234);  // alone: by share
+    monster(b, 71, 7, 4, 1);
+    b.seconds(1);
+    CHECK(on(b, {70, 71}, 1) == 1u);  // 2 monsters: 1 on you
+    for (int i = 0; i < 2; ++i) monster(b, 72 + i, 8.0 + i, 4, 1);
     b.seconds(1);
     CHECK(on(b, {70, 71, 72, 73}, 1) == 1u);
     CHECK(on(b, {70, 71, 72, 73}, 1234) == 3u);
-    for (int i = 0; i < 4; ++i) monster(b, 74 + i, -6.0 - i, 4, 1);
+    monster(b, 74, -6, 4, 1);
+    b.seconds(1);
+    CHECK(on(b, {70, 71, 72, 73, 74}, 1) == 2u);  // 5: 2 on you
+    for (int i = 0; i < 3; ++i) monster(b, 75 + i, -7.0 - i, 4, 1);
     b.seconds(1);
     CHECK(on(b, {70, 71, 72, 73, 74, 75, 76, 77}, 1) == 2u);
-    for (int i = 0; i < 4; ++i) monster(b, 80 + i, 6, -4.0 - i, 1);  // 80..83: 12 in all
+    monster(b, 80, 6, -4, 1);
     b.seconds(1);
-    CHECK(on(b, {70, 71, 72, 73, 74, 75, 76, 77, 80, 81, 82, 83}, 1) == 3u);
+    CHECK(on(b, {70, 71, 72, 73, 74, 75, 76, 77, 80}, 1) == 3u);  // 9: 3 on you
 }
 
 TEST_CASE("threat: a monster picks again at once when its beast is sent home, falls or is out of its reach; with no beast left it gets its own pick back") {
@@ -3500,8 +3519,9 @@ TEST_CASE("threat: Taunt: a monster hitting you within 10 m of the beast makes i
     CHECK(pick_of(b, 73) == 1);
     b.seconds(5);
     CHECK(pick_of(b, 70) == 1234);  // over the shares (they pick you)
-    b.seconds(2);                   // 6 s: they pick as usual
-    CHECK(pick_of(b, 70) == 1);
+    CHECK_FALSE(switches(b, 70));
+    b.seconds(2);                   // 6 s: they pick as usual: you, the game's own pick
+    CHECK(switches(b, 70));
     b.seconds(3);
     deliver(b.r.fake, "HitEvent", hit(70, 1, -10));  // 10 s after the roar
     CHECK(notes_with(b.r.fake, "Wolf roars") == 1);
@@ -3546,14 +3566,15 @@ TEST_CASE("threat: only the nearest ready beast roars; a beast too far does not 
     CHECK(notes_with(b.r.fake, "roars") == 2);
 }
 
-TEST_CASE("threat: a boss in the middle of an attack does not turn on a roaring beast") {
+TEST_CASE("threat: a boss in the middle of an attack keeps its target until the attack ends (a roar, a join), then turns") {
     RollRig b;
     taunters(b, {"wolf"});
     out_at(b, "Wolf", 1234, 0, 4);
     b.roll(0.0);
     monster(b, 75, 2, 4, 1);
     component<ecs::Boss>(b.r.fake, 75);
-    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 75).state = emf::gen::enemy01::State::ControlledByAttack;
+    auto& attacking = component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 75);
+    attacking.state = emf::gen::enemy01::State::ControlledByAttack;
     monster(b, 76, -2, 4, 1);
     component<ecs::Boss>(b.r.fake, 76);
     component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 76).state = emf::gen::enemy01::State::Combat;
@@ -3561,20 +3582,162 @@ TEST_CASE("threat: a boss in the middle of an attack does not turn on a roaring 
     deliver(b.r.fake, "HitEvent", hit(75, 1, -10));
     CHECK(notes_with(b.r.fake, "Wolf roars") == 1);
     one_step(b);
-    CHECK(pick_of(b, 75) == 1);     // mid-attack: it keeps you
+    CHECK(pick_of(b, 75) == 1);     // mid-attack: it keeps you for now
     CHECK(pick_of(b, 76) == 1234);  // the other boss turns
+    b.seconds(2);
+    CHECK(pick_of(b, 75) == 1);
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 75).state = emf::gen::enemy01::State::Combat;  // the attack ends
+    one_step(b);
+    CHECK(pick_of(b, 75) == 1234);  // within the roar's 6 s
+    b.r.fake.attrs[{75, EMF_ATTR_HEALTH}] = 0;
+    b.r.fake.attrs[{76, EMF_ATTR_HEALTH}] = 0;
+    b.seconds(1);
+    monster(b, 77, 0, 8, 1);  // a boss joins mid-attack, picked for the wolf
+    component<ecs::Boss>(b.r.fake, 77);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 77).state = emf::gen::enemy01::State::ControlledByAttack;
+    b.roll(0.99);
+    b.seconds(1);
+    CHECK(has(b.reply("beastmaster.threat"), "77 on Wolf"));
+    CHECK(pick_of(b, 77) == 1);
+    CHECK(switches(b, 77));
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 77).state = emf::gen::enemy01::State::Combat;
+    one_step(b);
+    CHECK(pick_of(b, 77) == 1234);
 }
 
-TEST_CASE("threat: monsters held on you get their own pick back as soon as your last beast is out of the world") {
+TEST_CASE("threat: a roar that turns no monster says nothing and keeps the cooldown") {
+    RollRig b;
+    taunters(b, {"wolf"});
+    out_at(b, "Wolf", 1234, 0, 4);
+    b.roll(0.0);
+    creature(b, 79, 2, 4, kSkeletonFoe);  // a monster whose target cannot be held
+    b.seconds(1);
+    deliver(b.r.fake, "HitEvent", hit(79, 1, -10));
+    CHECK(notes_with(b.r.fake, "roars") == 0);
+    monster(b, 70, 2, 5, 1);
+    b.seconds(1);
+    deliver(b.r.fake, "HitEvent", hit(70, 1, -10));
+    CHECK(notes_with(b.r.fake, "Wolf roars: the monsters turn on it.") == 1);
+}
+
+TEST_CASE("threat: monsters of your fight are let go as soon as your last beast is out of the world") {
     RollRig b;
     b.reply("beastmaster.give boar");
     out_at(b, "Boar", 1234, 0, 4);
     b.roll(0.0);  // you
     monster(b, 70, 10, 2, 1);
     b.seconds(1);
-    REQUIRE(pick_of(b, 70) == 1);
-    REQUIRE_FALSE(switches(b, 70));
+    REQUIRE(has(b.reply("beastmaster.threat"), "70 on you"));
+    CHECK(switches(b, 70));  // left to you: never written on
     b.reply("beastmaster.dismiss Boar");
     one_step(b);
+    CHECK(b.reply("beastmaster.threat") == "No monster is held.");
+}
+
+// ---- threat: after review ----
+TEST_CASE("threat: a monster with no hit to or from your side for twice the hold (16 s) is let go; a fight that goes on keeps it") {
+    RollRig b;
+    b.reply("beastmaster.give boar");
+    out_at(b, "Boar", 1234, 0, 4);
+    b.roll(0.99);
+    monster(b, 70, 6, 4, 1);
+    monster(b, 71, 7, 4, 1);
+    b.roll(0.99);
+    b.seconds(1);
+    REQUIRE(has(b.reply("beastmaster.threat"), "70 on Boar"));
+    REQUIRE_FALSE(switches(b, 70));
+    for (int i = 0; i < 3; ++i) {
+        b.seconds(5);
+        deliver(b.r.fake, "HitEvent", hit(1234, 71, -5));  // the boar keeps biting 71
+    }
+    b.seconds(1);   // 16 s
+    CHECK_FALSE(switches(b, 70));
+    one_step(b);    // over 16 s without a hit
+    CHECK(switches(b, 70));
+    CHECK_FALSE(has(b.reply("beastmaster.threat"), "70 on"));
+    CHECK(has(b.reply("beastmaster.threat"), "71 on"));
+    game_picks(b, 70, 0);  // the game picks something else
+    b.seconds(2);
+    CHECK(pick_of(b, 70) == 0);
+}
+
+TEST_CASE("threat: a monster that goes home, flees or idles is let go at once, and taken again only when it fights again") {
+    RollRig b;
+    b.reply("beastmaster.give boar");
+    out_at(b, "Boar", 1234, 0, 4);
+    b.roll(0.99);
+    monster(b, 70, 6, 4, 1);
+    auto& ai = component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 70);
+    ai.state = emf::gen::enemy01::State::Combat;
+    b.seconds(1);
+    REQUIRE_FALSE(switches(b, 70));
+    using S = emf::gen::enemy01::State;
+    for (S st : {S::Idle, S::ReturnHome, S::FleeHome, S::WaitAtHome, S::Flee}) {
+        CAPTURE(static_cast<int>(st));
+        live_of<ecs::DynamicEnemy01BehaviorState>(b, 70).state = st;
+        one_step(b);
+        CHECK(switches(b, 70));
+        b.seconds(2);  // its pick is still the boar, but it is not fighting
+        CHECK(switches(b, 70));
+        live_of<ecs::DynamicEnemy01BehaviorState>(b, 70).state = S::Combat;
+        b.seconds(1);
+        CHECK_FALSE(switches(b, 70));
+    }
+}
+
+TEST_CASE("threat: the cap holds after closeness: a boss with your bear 2 m from it and you 15 m away goes to the beasts 35 % of the time") {
+    RollRig b;
+    b.reply("beastmaster.give bear");
+    out_at(b, "Bear", 1234, 0, 13);
+    uint32_t next = 70;
+    auto pick_at = [&](double roll) {
+        const uint32_t m = next++;
+        monster(b, m, 0, 15, 1);
+        component<ecs::Boss>(b.r.fake, m);
+        b.roll(roll);
+        b.seconds(1);
+        const uint32_t got = pick_of(b, m);
+        b.r.fake.attrs[{m, EMF_ATTR_HEALTH}] = 0;
+        b.seconds(1);
+        return got;
+    };
+    CHECK(pick_at(0.64) == 1u);
+    CHECK(pick_at(0.66) == 1234u);
+}
+
+TEST_CASE("threat: a monster that goes for another player or their beast is not taken into your fight") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    write(b.data, "b 0x00000000000000bb wolf 0 1 Grey\n");  // player 2's wolf, out
+    b.r.fake.session = 2;
+    fire_load(1);
+    next_beast(b, 1234);
+    b.seconds(2);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 1234).guardEntityId.id = 2;
+    REQUIRE(has(b.reply("beastmaster.list", 2, 0xBB), "1. Grey - wolf, loyalty 1, out"));
+    b.reply("beastmaster.give boar");
+    out_at(b, "Boar", 1235, 0, 4);
+    b.roll(0.99);
+    monster(b, 70, -6, 4, 1234);  // going for player 2's wolf
+    monster(b, 71, -6, 5, 2);     // going for player 2
+    monster(b, 72, -6, 6, 0);     // going for nothing
+    for (uint32_t m : {70u, 71u, 72u}) deliver(b.r.fake, "HitEvent", hit(1235, m, -5));  // your boar bites them all
+    one_step(b);
+    const std::string held = b.reply("beastmaster.threat");
+    CAPTURE(held);
+    CHECK_FALSE(has(held, "70 on"));
+    CHECK_FALSE(has(held, "71 on"));
+    CHECK(has(held, "72 on Boar"));
+    CHECK(pick_of(b, 70) != 1235u);
+    CHECK(pick_of(b, 71) != 1235u);
+}
+
+TEST_CASE("threat: with no share for the beasts (both share settings 0) Beastmaster picks nothing") {
+    RollRig b({{"tank_share_pct", "0"}, {"damage_share_pct", "0"}});
+    b.reply("beastmaster.give boar");
+    out_at(b, "Boar", 1234, 0, 4);
+    b.roll(0.99);
+    monster(b, 70, 6, 4, 1);
+    b.seconds(2);
+    CHECK(b.reply("beastmaster.threat") == "No monster is held.");
     CHECK(switches(b, 70));
 }
