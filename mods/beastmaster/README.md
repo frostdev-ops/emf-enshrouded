@@ -87,7 +87,8 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 
 | Command | What |
 |---|---|
-| `/beastmaster list` | your beasts: "1. Wolf - wolf, out", "2. Bear - bear, rests 1:20", "3. Boar - boar, at home" |
+| `/beastmaster list` | your beasts and their loyalty: "1. Wolf - wolf, loyalty 3, out", "2. Bear - bear, loyalty 1, rests 0:40" |
+| `/beastmaster rename <name or number> <new name>` | rename a beast (1-20 characters, not a name your collection has) |
 | `/beastmaster tame` | tame the beast you look at, else the nearest beaten-down one (under 25 % health, within 8 m) |
 | `/beastmaster feed` | feed the beast you look at (else the nearest) its bait: 3 times to tame it |
 | `/beastmaster call <name or number>` | call a beast from your collection |
@@ -96,6 +97,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
 | `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while someone builds next to them |
 | `/beastmaster mode [passive, defending or aggressive]` | how all your beasts fight; without a word, the mode now |
+| `beastmaster.loyalty <name or number> <1-10>` | **host console only:** set a beast's loyalty (tests) |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
 

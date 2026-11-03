@@ -8,6 +8,7 @@ local aim = require("aim")
 local health_mod = require("health")
 local wild_mod = require("wild")
 local rare_mod = require("rare")
+local loyalty = require("loyalty")
 
 emf.emits({ "StartGuardingEvent", "AddThreatTargetEvent" })
 
@@ -85,6 +86,10 @@ local function command(word, help, fn)
 	word_list[#word_list + 1] = word
 end
 
+local function loyalty_of(b)
+	return loyalty.level(b.points, setting("loyalty_pace"))
+end
+
 local function state_text(b, aside)
 	if b.out then return aside and "aside" or "out" end
 	if b.rest > 0 then return string.format("rests %d:%02d", math.floor(b.rest / 60), math.floor(b.rest % 60)) end
@@ -101,7 +106,8 @@ command("list", ": your beasts", function(world, args)
 	local lines = { string.format("Your beasts (%d/%d):", #list, setting("collection_max")) }
 	local aside = pack:is_aside(account)
 	for i, b in ipairs(list) do
-		lines[#lines + 1] = string.format("%d. %s - %s, %s", i, b.name, b.species, state_text(b, aside))
+		lines[#lines + 1] = string.format("%d. %s - %s, loyalty %d, %s", i, b.name, b.species, loyalty_of(b),
+			state_text(b, aside))
 	end
 	if pack:aside_by_command(account) then
 		lines[#lines + 1] = "They stepped aside: Come back on the wheel or /beastmaster aside brings them back."
@@ -260,6 +266,23 @@ command("aside", ": your beasts out step aside (leave for now) or come back; whi
 		emf.reply(account and pack:toggle_aside(world, account, player) or "Your account is not known yet.")
 	end)
 
+command("rename", "<name or number> <new name>: rename one of your beasts (1-20 characters)", function(world, args)
+	local _, account = who(world)
+	local b = account and beasts:find(account, args[1])
+	if not b then
+		emf.reply("No such beast (beastmaster.list shows yours).")
+		return
+	end
+	local old = b.name
+	local ok, why = beasts:rename(account, b, table.concat(args, " ", 2))
+	if not ok then
+		emf.reply(why)
+		return
+	end
+	save()
+	emf.reply(string.format("%s is now called %s.", old, b.name))
+end)
+
 local WORDS_HELP = " (call takes a name or number; dismiss a name, a number, or nothing for all)"
 emf.command(emf.id, "<word>: " .. table.concat(word_list, ", ") .. WORDS_HELP,
 	function(world, args)
@@ -413,6 +436,29 @@ emf.on_tick(function(world)
 		emf.notify(actions[p.action](world, player, account, p.key))
 	end
 	update_hud(world)
+end)
+
+-- Admin: set a beast's loyalty (console only, not from the chat; for tests and live checks).
+emf.command("loyalty", "<name or number> <1-10>: set a beast's loyalty (admin)", function(world, args)
+	local sender = emf.sender()
+	if sender and sender.chat then
+		emf.reply("beastmaster.loyalty is for the host's console")
+		return
+	end
+	local _, account = who(world)
+	local b = account and beasts:find(account, args[1])
+	if not b then
+		emf.reply("No such beast (beastmaster.list shows yours).")
+		return
+	end
+	local n = tonumber(args[2] or "")
+	if not n or n < 1 or n > loyalty.MAX or n ~= math.floor(n) then
+		emf.reply("Loyalty is 1-10.")
+		return
+	end
+	b.points = loyalty.points_for(n, setting("loyalty_pace"))
+	save()
+	emf.reply(string.format("%s's loyalty is now %d.", b.name, n))
 end)
 
 -- Admin: add a beast to your collection without taming it (console only, not from the chat).

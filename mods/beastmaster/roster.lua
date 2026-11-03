@@ -1,6 +1,7 @@
 -- Every player's collection of tamed beasts and their mode, kept with the world (one line per beast, one per mode):
 --   b <account> <species> <rest seconds left> <out 0|1> <name>
 --   m <account> <passive|defending|aggressive>
+--   y <account> <loyalty points> <name>   (a beast with points; none: 0)
 -- account is world:account's text ("0x" + 16 hex digits); the name is last and may hold spaces. A player without an m
 -- line is defending.
 local M = {}
@@ -46,7 +47,7 @@ function R:add(account, species_id, base_name, max)
 		n = n + 1
 		name = base_name .. " " .. n
 	end
-	local beast = { species = species_id, name = name, rest = 0, out = false }
+	local beast = { species = species_id, name = name, rest = 0, out = false, points = 0 }
 	list[#list + 1] = beast
 	self.by[account] = list
 	return beast
@@ -62,6 +63,17 @@ function R:find(account, key)
 		if b.name:lower() == tostring(key):lower() then return b end
 	end
 	return nil
+end
+
+-- Renames a beast: 1-20 printable characters (trimmed), not a name the collection has (any case). Nil and why when not.
+function R:rename(account, beast, new_name)
+	local name = tostring(new_name or ""):match("^%s*(.-)%s*$")
+	if #name < 1 or #name > 20 or name:find("%c") then return nil, "A name is 1-20 characters." end
+	for _, b in ipairs(self.by[account] or {}) do
+		if b ~= beast and b.name:lower() == name:lower() then return nil, "The name " .. name .. " is taken." end
+	end
+	beast.name = name
+	return true
 end
 
 function R:remove(account, beast)
@@ -94,6 +106,11 @@ function R:serialize()
 				b.out and 1 or 0, b.name)
 		end
 	end
+	for _, account in ipairs(self:accounts()) do
+		for _, b in ipairs(self.by[account]) do
+			if (b.points or 0) > 0 then lines[#lines + 1] = string.format("y %s %d %s", account, b.points, b.name) end
+		end
+	end
 	return table.concat(lines, "\n")
 end
 
@@ -103,16 +120,23 @@ local RETIRED = { panther = "sabretooth" }
 
 function M.parse(text)
 	local r = M.new()
+	local loyal = {}  -- y lines, applied once every beast is read
 	for line in (text or ""):gmatch("[^\r\n]+") do
+		local y_account, points, y_name = line:match("^y (%S+) (%d+) (.+)$")
+		if y_account then loyal[#loyal + 1] = { y_account, tonumber(points), y_name } end
 		local m_account, mode = line:match("^m (%S+) (%S+)$")
 		if m_account then r:set_mode(m_account, mode) end
 		local account, species, rest, out, name = line:match("^b (%S+) (%S+) (%d+) ([01]) (.+)$")
 		if account then
 			local list = r.by[account] or {}
 			species = RETIRED[species] or species
-			list[#list + 1] = { species = species, name = name, rest = tonumber(rest), out = out == "1" }
+			list[#list + 1] = { species = species, name = name, rest = tonumber(rest), out = out == "1", points = 0 }
 			r.by[account] = list
 		end
+	end
+	for _, y in ipairs(loyal) do
+		local b = r:find(y[1], y[3])
+		if b then b.points = y[2] end
 	end
 	return r
 end
