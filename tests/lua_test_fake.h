@@ -128,6 +128,7 @@ struct Fake {
     std::vector<Off> offers;
     std::vector<uint32_t> offers_removed;
     bool offer_ok = true;
+    bool offer_remove_ok = true;  // false: the core had dropped the offer already
     uint32_t next_offer_spawn = 9000;
     std::vector<std::string> windows_closed;
     // v21 world settings: two settings, what set and reset were asked (key as passed, "" for NULL; flags), the
@@ -444,7 +445,7 @@ bool f_offer(EmfWorld* w, uint32_t entity, const EmfOffer* o, EmfOfferCallback c
 }
 bool f_offer_remove(EmfWorld*, uint32_t entity) {
     g->offers_removed.push_back(entity);
-    return true;
+    return g->offer_remove_ok;
 }
 // A v25 core (fake_api leaves the offer calls out: emf.offer answers false without them).
 void with_offers(EmfApi& a) {

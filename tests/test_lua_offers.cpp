@@ -118,3 +118,28 @@ TEST_CASE("lua 1.14: on a core without offers emf.offer answers false") {
     REQUIRE(r.fake.replies.size() == 1);
     CHECK(r.fake.replies[0] == "false");
 }
+
+TEST_CASE("lua 1.14: only the touch and button sequences; a slot the core had dropped is freed by offer_remove") {
+    Rig r(L"luaoffer5");
+    with_offers(r.api);
+    add_script(r.dir, "aa", kStable);
+    add_script(r.dir, "bb", kStable);
+    add_script(r.dir, "sq", "emf.command('go', '', function(w)\n"
+                            "  local ok, e = pcall(emf.offer, w, 5000, {sequence = 0x79CB89E4})\n"
+                            "  emf.reply(tostring(ok) .. ' ' .. tostring(e))\n"
+                            "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("sq.go");
+    REQUIRE(r.fake.replies.size() == 1);
+    CHECK(r.fake.replies[0].find("false") == 0);
+    CHECK(r.fake.replies[0].find("touch") != std::string::npos);
+    CHECK(r.fake.offers.empty());
+    r.run_command("aa.go 5000");
+    CHECK(r.fake.replies.back() == "true");
+    r.fake.offer_remove_ok = false;  // the entity went: the core dropped the offer
+    r.run_command("aa.off 5000");
+    CHECK(r.fake.replies.back() == "false");
+    r.run_command("bb.go 5000");  // the slot is gone: another script may offer there now
+    CHECK(r.fake.replies.back() == "true");
+}

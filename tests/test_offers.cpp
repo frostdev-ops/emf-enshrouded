@@ -4,6 +4,7 @@
 
 #include <cstring>
 #include <map>
+#include <optional>
 #include <set>
 #include <string>
 
@@ -131,7 +132,9 @@ namespace ecs = emf::gen::ecs;
 
 struct Fake {
     std::map<uint32_t, std::set<uint32_t>> comps;  // entity -> component hashes
+    std::map<uint32_t, std::pair<uint32_t, uint32_t>> ior;  // entity -> (sequence, verb) of its offer
     std::vector<ComponentChangeRequest> changes;
+    bool refuse = false;  // the component service refuses at once
     std::vector<std::vector<OfferComponent>> spawned;
     uint32_t next_spawn = 7000, session = 1;
     std::vector<std::string> log;
@@ -139,8 +142,12 @@ struct Fake {
 
     OfferService::Deps deps() {
         OfferService::Deps d;
-        d.change = [this](const ComponentChangeRequest& r, std::string*) {
+        d.change = [this](const ComponentChangeRequest& r, std::string* why) {
             CHECK(r.internal);
+            if (refuse) {
+                if (why) *why = "too many changes under way";
+                return false;
+            }
             changes.push_back(r);
             return true;
         };
@@ -149,8 +156,17 @@ struct Fake {
             spawned.push_back(c);
             const uint32_t id = next_spawn++;
             comps[id].insert(ecs::CurrentTransform::kHash);
-            for (const auto& x : c) comps[id].insert(x.hash);
+            for (const auto& x : c) {
+                comps[id].insert(x.hash);
+                if (x.hash == ecs::InteractionOfferRuntime::kHash) ior[id] = fingerprint(x.bytes);
+            }
             return id;
+        };
+        d.read_offer = [this](EmfWorld*, uint32_t entity) -> std::optional<std::pair<uint32_t, uint32_t>> {
+            auto c = comps.find(entity);
+            if (c == comps.end() || !c->second.count(ecs::InteractionOfferRuntime::kHash)) return std::nullopt;
+            auto f = ior.find(entity);
+            return f == ior.end() ? std::make_pair(0u, 0u) : f->second;
         };
         d.has = [this](EmfWorld*, uint32_t hash, uint32_t entity) {
             auto e = comps.find(entity);
@@ -161,14 +177,24 @@ struct Fake {
         return d;
     }
     void prop(uint32_t id) { comps[id].insert(ecs::CurrentTransform::kHash); }
+    static std::pair<uint32_t, uint32_t> fingerprint(const std::vector<uint8_t>& b) {
+        uint32_t seq = 0, verb = 0;
+        std::memcpy(&seq, b.data() + offsetof(ecs::InteractionOfferRuntime, defaultSequence), 4);
+        std::memcpy(&verb, b.data() + offsetof(ecs::InteractionOfferRuntime, defaultVerbId), 4);
+        return {seq, verb};
+    }
     // the component service's answers, as after a step: the changes land (or the given status)
     void answer_all(uint32_t status = EMF_COMPONENT_DONE) {
         auto pending = std::move(changes);
         changes.clear();
         for (auto& r : pending) {
             if (status == EMF_COMPONENT_DONE) {
-                if (r.op == ComponentOp::Add) comps[r.entity].insert(r.hash);
-                else comps[r.entity].erase(r.hash);
+                if (r.op == ComponentOp::Add) {
+                    comps[r.entity].insert(r.hash);
+                    if (r.hash == ecs::InteractionOfferRuntime::kHash) ior[r.entity] = fingerprint(r.data);
+                } else {
+                    comps[r.entity].erase(r.hash);
+                }
             }
             if (r.done) r.done(world, status, status == EMF_COMPONENT_DONE ? "" : "no");
         }
@@ -270,7 +296,7 @@ TEST_CASE("offer service: remove takes the components off; only the owner may; a
     CHECK(s.list().empty());
 }
 
-TEST_CASE("offer service: upkeep re-adds a lost offer, drops a gone entity and forgets an ended session") {
+TEST_CASE("offer service: upkeep drops a lost offer and a gone entity (the mod offers again) and forgets an ended session") {
     Fake f;
     OfferService s(f.deps());
     f.prop(5000);
@@ -283,13 +309,112 @@ TEST_CASE("offer service: upkeep re-adds a lost offer, drops a gone entity and f
     f.comps[5000].erase(ecs::CheckPlayerInRange::kHash);
     f.comps.erase(5001);  // destroyed
     for (int i = 0; i < kOfferUpkeepTicks; ++i) s.on_server_tick(f.world);
-    CHECK(s.list().size() == 1);
-    CHECK(f.changes.size() == 3);  // 5000's three again
-    for (int i = 0; i < kOfferUpkeepTicks; ++i) s.on_server_tick(f.world);
-    CHECK(f.changes.size() == 3);  // not asked twice while under way
+    CHECK(s.list().empty());   // both gone: EMF never puts an offer back on an id by itself (the id may be another
+    CHECK(f.changes.empty());  // entity's by then); the mod offers again when it finds its entity
+    f.comps[5000].insert(ecs::InteractionOfferRuntime::kHash);
+    CHECK(s.offer(f.world, 5000, OfferSpec{}, "m", nullptr, nullptr) == false);  // its parts came back: the game's now
+    f.prop(5005);
+    CHECK(s.offer(f.world, 5005, OfferSpec{}, "m", nullptr, nullptr));
     f.answer_all();
     f.session = 2;  // a new world
     for (int i = 0; i < kOfferUpkeepTicks; ++i) s.on_server_tick(f.world);
     CHECK(s.list().empty());
     CHECK(f.changes.empty());  // nothing pushed into the new world for the old one's ids
+}
+
+TEST_CASE("offer service: a remove while the adds are under way takes the offer off once they landed (no orphan prompt)") {
+    Fake f;
+    OfferService s(f.deps());
+    f.prop(5000);
+    CHECK(s.offer(f.world, 5000, OfferSpec{}, "m", nullptr, nullptr));
+    REQUIRE(f.changes.size() == 3);
+    CHECK(s.remove(f.world, 5000, "m", nullptr));
+    CHECK(f.changes.size() == 3);  // no removes yet: the component service would refuse them while the adds run
+    CHECK(s.list().empty());       // but no accept reaches the mod any more
+    f.answer_all();                // the adds land...
+    REQUIRE(f.changes.size() == 3);  // ...and the removes follow
+    for (const auto& c : f.changes) CHECK(c.op == ComponentOp::Remove);
+    f.answer_all();
+    CHECK(f.comps[5000].count(ecs::InteractionOfferRuntime::kHash) == 0);
+    CHECK(f.comps[5000].count(ecs::CheckPlayerInRange::kHash) == 0);
+}
+
+TEST_CASE("offer service: an offer while EMF still takes an earlier one off is refused with a reason to try again") {
+    Fake f;
+    OfferService s(f.deps());
+    f.prop(5000);
+    CHECK(s.offer(f.world, 5000, OfferSpec{}, "m", nullptr, nullptr));
+    f.answer_all();
+    CHECK(s.remove(f.world, 5000, "m", nullptr));
+    std::string why;
+    CHECK_FALSE(s.offer(f.world, 5000, OfferSpec{}, "m", nullptr, &why));
+    CHECK(why.find("try again") != std::string::npos);
+    f.answer_all();  // the removes landed
+    CHECK(s.offer(f.world, 5000, OfferSpec{}, "m", nullptr, &why));
+}
+
+TEST_CASE("offer service: an offer the component service refuses at once is false, with nothing left behind") {
+    Fake f;
+    OfferService s(f.deps());
+    f.prop(5000);
+    f.refuse = true;
+    std::string why;
+    CHECK_FALSE(s.offer(f.world, 5000, OfferSpec{}, "m", nullptr, &why));
+    CHECK(why.find("too many") != std::string::npos);
+    CHECK(s.list().empty());
+    CHECK(f.changes.empty());
+}
+
+TEST_CASE("offer service: an id that is another entity's now never gets the mod's callback") {
+    Fake f;
+    OfferService s(f.deps());
+    int calls = 0;
+    const OfferCallback cb = [&](EmfWorld*, uint32_t, uint32_t) { ++calls; };
+    f.prop(5000);
+    OfferSpec spec;
+    spec.verb = EMF_VERB_OPEN;
+    CHECK(s.offer(f.world, 5000, spec, "m", cb, nullptr));
+    f.answer_all();
+    f.ior[5000] = {0x79CB89E4u, 0xABCDu};  // the id is a chest's now (its own offer)
+    const auto ev = f.accepted(1, 5000);
+    s.on_accept(f.world, ev.data(), static_cast<uint32_t>(ev.size()));
+    CHECK(calls == 0);
+    for (int i = 0; i < kOfferUpkeepTicks; ++i) s.on_server_tick(f.world);
+    CHECK(s.list().empty());
+
+    f.prop(5001);  // destroyed through EMF: forgotten at once
+    CHECK(s.offer(f.world, 5001, spec, "m", cb, nullptr));
+    f.answer_all();
+    s.forget(5001);
+    CHECK(s.list().empty());
+
+    // a stale entry of another mod on an id a new spawn gets: the spawn's owner has it
+    f.prop(7000);
+    CHECK(s.offer(f.world, 7000, spec, "old", cb, nullptr));
+    f.answer_all();
+    f.comps.erase(7000);
+    const uint32_t id = s.spawn_offer(f.world, kStatue, 0, 0, 0, spec, "new", nullptr, nullptr);
+    REQUIRE(id == 7000);
+    REQUIRE(s.list().size() == 1u);
+    CHECK(s.list()[0].owner == "new");
+}
+
+TEST_CASE("offer service: the same offer again replaces the callback; other options (the range too) are refused") {
+    Fake f;
+    OfferService s(f.deps());
+    f.prop(5000);
+    OfferSpec a;
+    CHECK(s.offer(f.world, 5000, a, "m", nullptr, nullptr));
+    f.answer_all();
+    int calls = 0;
+    CHECK(s.offer(f.world, 5000, a, "m", [&](EmfWorld*, uint32_t, uint32_t) { ++calls; }, nullptr));
+    CHECK(f.changes.empty());
+    const auto ev = f.accepted(1, 5000);
+    s.on_accept(f.world, ev.data(), static_cast<uint32_t>(ev.size()));
+    CHECK(calls == 1);
+    OfferSpec b = a;
+    b.range_m = 9;
+    std::string why;
+    CHECK_FALSE(s.offer(f.world, 5000, b, "m", nullptr, &why));
+    CHECK(why.find("remove it first") != std::string::npos);
 }

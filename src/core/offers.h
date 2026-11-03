@@ -29,7 +29,7 @@ constexpr uint8_t kOfferBuildMode = 2;                   // allowedAsBuildingSpa
 
 struct OfferSpec {
     uint32_t verb = 0;      // a loca tag id (the game's own verbs: every player sees the word); 0 = "Use"
-    std::string text;       // custom words: a verb id of their own (custom_verb_id), shown on PCs with EMF
+    std::string text;       // custom words: a verb id of their own (custom_verb_id); the prompt shows no word yet
     uint32_t sequence = 0;  // the action sequence's hash; 0 = kOfferDefaultSequence
     uint8_t range_m = 0;    // 0 = kOfferDefaultRange
     uint8_t flags = 0;      // kOfferLowPriority, kOfferBuildMode
@@ -39,7 +39,7 @@ struct OfferSpec {
 uint32_t custom_verb_id(std::string_view text);
 // The verb id an offer shows: its text's id, else its verb, else "Use".
 uint32_t offer_verb(const OfferSpec& s);
-// Custom words for the client's loca lookup (any thread): the id is custom_verb_id(text).
+// Custom words registered by offers (any thread): the id is custom_verb_id(text). Kept for a later way to show them.
 void register_verb_text(const std::string& text);
 std::optional<std::string> verb_text(uint32_t id);
 size_t verb_text_count();
@@ -98,6 +98,8 @@ public:
                                std::string*)>
             spawn;
         std::function<bool(EmfWorld*, uint32_t hash, uint32_t entity)> has;  // the entity has that component
+        // the (defaultSequence, defaultVerbId) of the entity's InteractionOfferRuntime; nullopt when it has none
+        std::function<std::optional<std::pair<uint32_t, uint32_t>>(EmfWorld*, uint32_t entity)> read_offer;
         std::function<uint32_t()> session;
         std::function<void(const std::string&)> log;
     };
@@ -110,8 +112,10 @@ public:
     bool offer(EmfWorld* w, uint32_t entity, const OfferSpec& spec, const std::string& owner, OfferCallback cb,
                std::string* why);
     bool remove(EmfWorld* w, uint32_t entity, const std::string& owner, std::string* why);
-    // A mod's clean-up (a Lua reload): every offer it has goes; returns the entities.
+    // A mod's clean-up: every offer it has goes; returns the entities.
     std::vector<uint32_t> remove_owner(EmfWorld* w, const std::string& owner);
+    // The entity was destroyed (through EMF): its offer is forgotten at once (its id may soon be another entity's).
+    void forget(uint32_t entity);
     // InteractionAcceptedEvent in the server world.
     void on_accept(EmfWorld* w, const void* event, uint32_t size);
     // After every server step.
@@ -120,8 +124,10 @@ public:
 
 private:
     struct State {
-        int pending = 0;           // changes under way
-        bool range_added = false;  // EMF added CheckPlayerInRange (the entity had none)
+        int pending = 0;            // changes under way
+        bool range_added = false;   // EMF added CheckPlayerInRange (the entity had none)
+        bool removing = false;      // taken off: no accepts; the removes go when the adds landed
+        bool removes_sent = false;  // ... and are under way
     };
     using Key = std::pair<uint32_t, uint32_t>;  // session, entity
     // The adds an entity still lacks (what it has stays), as internal requests.
@@ -130,6 +136,10 @@ private:
     ComponentChangeRequest change_of(EmfWorld* w, uint32_t session, uint32_t entity, uint32_t hash, ComponentOp op,
                                      std::vector<uint8_t> bytes, bool first);
     void submit(std::vector<ComponentChangeRequest>& reqs);  // outside the lock
+    // The removes of an offer (the range check only when EMF added it).
+    std::vector<ComponentChangeRequest> removes_for(EmfWorld* w, uint32_t session, uint32_t entity, bool range);
+    // Its offer is the one EMF made from `spec` (and not a game offer on an id that is another entity's now).
+    bool still_ours(EmfWorld* w, uint32_t entity, const OfferSpec& spec) const;
     void say(const std::string& line);
     uint32_t session() const { return deps_.session ? deps_.session() : 0; }
 

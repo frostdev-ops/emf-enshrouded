@@ -131,7 +131,7 @@ value that moves is reported to the mod as a change.
 |---|---|---|
 | — | `hook_program(name, pre, post, user)` | wrap a game ECS program's update by name (`docs/ecs_programs.md`): `pre` before, `post` after, on game worker threads. Programs sharing one function all trigger it. |
 | — | `register_program(name, kind, fn, user)` | your own per-tick system program (iterates no entities). Register in `emf_mod_load`; at most 16 mod programs. In C++ use `emf::add_program` (v3, below), which also declares events. |
-| `emf::api()->spawn(w.raw(), guid, x, y, z)` | `spawn(w, guid, x, y, z)` | spawn a template (16-byte GUID as stored; `emf::parse_guid("xxxxxxxx-...")`) at metres; returns the entity id or 0. Server world, world callback. **Not saved** by the game (except villagers). |
+| `emf::api()->spawn(w.raw(), guid, x, y, z)` | `spawn(w, guid, x, y, z)` | spawn a template (16-byte GUID as stored; `emf::parse_guid("xxxxxxxx-...")`) at metres; returns the entity id or 0. Server world, world callback. **Not saved** by the game, except villagers and props (template family Prop) spawned inside a base's build zone, which the game saves like placed objects (seen on build 1285601). |
 | — | `destroy(w, id)` | remove an entity (never a player). Same rules as spawn. |
 | `api()->on_save(cb, user)` | `on_save` | `cb(slot)` after the host wrote a world save (save thread). |
 | `api()->on_load(cb, user)` | `on_load` | `cb(slot)` after the host loaded a world save, before the world starts. |
@@ -553,9 +553,14 @@ void on_e(EmfWorld* w, uint32_t player, uint32_t entity, void* user) { /* server
   `EMF_OFFER_LOW_PRIORITY`, `EMF_OFFER_BUILD_MODE`.
 - From a world callback on the server world. `offer` refuses a player, an entity with the game's own offer (a chest, a
   bench, a bed) or another mod's. The game picks one target near the crosshair.
-- EMF keeps the offer for the session (re-added when the entity streams in again); a new world forgets all: offer again
-  after a load. A spawned prop may stay in the save without its offer (seen in game): offer it again, don't spawn
-  another. `offer_remove` takes yours off. Console: `offers.list`.
+- The entity needs a collider (the game's target choice tests it): `offer` accepts one without, but no prompt shows.
+  Refused also: your own offer there with other options (`offer_remove` it first; an identical one only replaces the
+  callback).
+- EMF drops your offer, without telling you, when the entity is gone or loses its offer (streaming, destroyed); it
+  never puts one back by itself, since the id may be another entity's by then. Offer again when your mod finds the
+  entity (a stable search, a scan). A new world forgets all; a spawned prop inside a base stays in the save without its
+  offer and comes back with a new id: find it, offer again, don't spawn another. `offer_remove` takes yours off.
+  Console: `offers.list`.
 
 ## Lua
 

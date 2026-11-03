@@ -850,7 +850,6 @@ void Host::tick_body(EmfWorld* world) {
     const int kind = h.api->world_kind ? h.api->world_kind(world) : EMF_WORLD_SERVER;
     const bool server = kind == EMF_WORLD_SERVER;
     if (server) h.server_seen = now;
-    if (server) run_offer_drops(h, world);
     for (auto& s : h.scripts) {
         std::lock_guard<std::recursive_mutex> l(s->m);
         if (!s->L || s->paused) continue;
@@ -907,6 +906,8 @@ void Host::tick_body(EmfWorld* world) {
         }
         ++s->generation;
     }
+    // after the scripts' ticks: a reloaded script that offered again kept its entities; the rest come off
+    if (server) run_offer_drops(h, world);
 }
 
 void Host::check_reload_now() {

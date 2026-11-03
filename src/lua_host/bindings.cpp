@@ -2430,15 +2430,11 @@ EmfOffer offer_options(lua_State* L, int opts, std::string& text) {
             const char* t = luaL_checklstring(L, -1, &n);
             if (n == 0 || n > 63) luaL_error(L, "emf.offer: text must be 1 to 63 bytes");
             text.assign(t, n);
-        } else if (key == "sequence") {
-            if (lua_type(L, -1) == LUA_TNUMBER) {
-                o.sequence = static_cast<uint32_t>(lua_tointeger(L, -1));
-            } else {
-                const std::string seq = luaL_checkstring(L, -1);
-                if (seq == "touch") o.sequence = EMF_SEQUENCE_TOUCH;
-                else if (seq == "button") o.sequence = EMF_SEQUENCE_BUTTON;
-                else luaL_error(L, "emf.offer: sequence is \"touch\", \"button\" or a sequence hash");
-            }
+        } else if (key == "sequence") {  // only the neutral ones: a script never plays an arbitrary sequence for players
+            const std::string seq = luaL_checkstring(L, -1);
+            if (seq == "touch") o.sequence = EMF_SEQUENCE_TOUCH;
+            else if (seq == "button") o.sequence = EMF_SEQUENCE_BUTTON;
+            else luaL_error(L, "emf.offer: sequence is \"touch\" or \"button\"");
         } else if (key == "range") {
             const lua_Integer m = luaL_checkinteger(L, -1);
             if (m < 1 || m > 255) luaL_error(L, "emf.offer: range is 1 to 255 metres");
@@ -2581,14 +2577,12 @@ int l_offer_remove(lua_State* L) {
         return 1;
     }
     const bool ok = a->offer_remove(w, entity);
-    if (ok) {
-        {
-            std::lock_guard<std::mutex> g(h.m);
-            h.offer_slots.erase(entity);
-        }
-        s->offers.erase(entity);
-        free_offer_slot(mine);
+    {  // taken off, or the core had dropped it already (the entity went): either way the slot is done
+        std::lock_guard<std::mutex> g(h.m);
+        h.offer_slots.erase(entity);
     }
+    s->offers.erase(entity);
+    free_offer_slot(mine);
     lua_pushboolean(L, ok);
     return 1;
 }
@@ -2635,7 +2629,7 @@ void run_offer_drops(Host::Impl& h, EmfWorld* w) {
             if (still) h.offer_slots.erase(it);
         }
         if (!still) continue;
-        if (h.api && h.api->offer_remove) h.api->offer_remove(w, e);
+        if (has_v25(h.api) && h.api->offer_remove) h.api->offer_remove(w, e);
         free_offer_slot(static_cast<OfferSlot*>(p));
     }
 }

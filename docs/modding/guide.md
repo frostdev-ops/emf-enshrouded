@@ -114,7 +114,7 @@ or collect from an animal into a chest). See the cookbook for each.
   pointers. Entity ids of the old session mean nothing in the new one.
 - `on_load(slot)` runs after the host loaded a world save (with its slot number), `on_save(slot)` after it wrote one.
 - The game saves player-built things and entities whose template is marked to be saved (villagers). **Entities a mod
-  spawns are not saved** (chests, plants, animals, even with an added `ForceSave` component), except villagers.
+  spawns are not saved** (chests, plants, animals, even with an added `ForceSave` component), except villagers and props (template family Prop) spawned inside a base's build zone.
 - For your own per-world data use `emf::WorldFile` (`emf/storage.hpp`): it learns the slot, loads once per session,
   and saves atomically into `<game>\emf\config\<mod>\<slot>.txt`, only for the session whose file it read.
 

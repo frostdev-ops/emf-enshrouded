@@ -774,6 +774,7 @@ bool api_destroy(EmfWorld* w, uint32_t entity) {
     }
     const bool ok = destroy_entity(fn, raw(w), entity);
     if (!ok) core_log("destroy: refused (not a server world, entity 0, or the call faulted)");
+    if (ok && g_state->offers) g_state->offers->forget(entity);  // its id may soon be another entity's (E prompts)
     return ok;
 }
 
@@ -1649,9 +1650,14 @@ bool offer_spec_from(const EmfOffer* o, OfferSpec& s, const char* what) {
         s.text.assign(o->text, n);
         register_verb_text(s.text);
     }
+    if ((o->flags & ~(kOfferLowPriority | kOfferBuildMode)) || o->reserved) {
+        refuse_limited(std::string(what) + " refused: unknown flags (this EMF knows EMF_OFFER_LOW_PRIORITY and "
+                                           "EMF_OFFER_BUILD_MODE), or reserved is not 0");
+        return false;
+    }
     s.sequence = o->sequence;
     s.range_m = o->range_m;
-    s.flags = static_cast<uint8_t>(o->flags & (kOfferLowPriority | kOfferBuildMode));
+    s.flags = o->flags;
     return true;
 }
 
@@ -1672,9 +1678,14 @@ bool offers_on(EmfWorld* w, const char* what) {
 
 OfferCallback offer_callback(EmfOfferCallback cb, void* user) {
     if (!cb) return nullptr;
-    return [cb, user](EmfWorld* w, uint32_t player, uint32_t entity) {
-        if (!guarded_offer_call(cb, w, player, entity, user))
-            core_log("an offer callback in " + module_name_of(reinterpret_cast<const void*>(cb)) + " faulted");
+    auto broken = std::make_shared<std::atomic<bool>>(false);  // a callback that faulted is not called again
+    return [cb, user, broken](EmfWorld* w, uint32_t player, uint32_t entity) {
+        if (broken->load()) return;
+        if (!guarded_offer_call(cb, w, player, entity, user)) {
+            broken->store(true);
+            core_log("an offer callback in " + module_name_of(reinterpret_cast<const void*>(cb)) +
+                     " faulted: it is not called again (the prompt stays until the mod removes it)");
+        }
     };
 }
 

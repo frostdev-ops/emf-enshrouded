@@ -951,6 +951,17 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
                     return emf::get_component(g_state->get_component, reinterpret_cast<uint8_t*>(w), hash, entity)
                                .ptr != nullptr;
                 };
+                od.read_offer = [](EmfWorld* w, uint32_t entity) -> std::optional<std::pair<uint32_t, uint32_t>> {
+                    using Ior = emf::gen::ecs::InteractionOfferRuntime;
+                    const auto ref = emf::get_component(g_state->get_component, reinterpret_cast<uint8_t*>(w), Ior::kHash,
+                                                        entity);
+                    if (!ref.ptr || ref.size < Ior::kSize) return std::nullopt;
+                    uint32_t sequence = 0, verb = 0;
+                    if (!emf::seh_read(static_cast<const uint8_t*>(ref.ptr) + offsetof(Ior, defaultSequence), &sequence, 4) ||
+                        !emf::seh_read(static_cast<const uint8_t*>(ref.ptr) + offsetof(Ior, defaultVerbId), &verb, 4))
+                        return std::nullopt;
+                    return std::make_pair(sequence, verb);
+                };
                 od.session = [] { return g_state->server_session.load(); };
                 od.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
                 g_offers = std::make_unique<emf::core::OfferService>(std::move(od));

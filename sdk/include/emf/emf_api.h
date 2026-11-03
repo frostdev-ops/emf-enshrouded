@@ -891,8 +891,9 @@ typedef struct EmfApi {
                             const EmfOffer* offer, EmfOfferCallback cb, void* user);
     /* Puts an offer on an entity of the server world (from a world callback on it): it shows after a few steps. Refused
      * (false, logged): a player, an entity without a position, one with an offer of the game's own (a chest, a bench),
-     * one with another mod's offer. EMF keeps the offer for the session (it comes back when the entity streams in
-     * again); after a load the mod offers again. */
+     * one with another mod's offer, your own with other options. The entity needs a collider, or no prompt shows.
+     * EMF drops the offer (silently) when the entity goes or loses it, and never puts it back by itself: offer again
+     * when your mod finds the entity, and after a load. */
     bool (*offer)(EmfWorld* world, uint32_t entity, const EmfOffer* offer, EmfOfferCallback cb, void* user);
     /* Takes the mod's offer off the entity. False when it has none of this mod's. */
     bool (*offer_remove)(EmfWorld* world, uint32_t entity);
