@@ -4,13 +4,15 @@
 -- within CONFIRM_S. The window is drawn again after every click, and once a second when what it shows changed (a beast
 -- fell, rests, came).
 -- M.new(env) where env has: setting(key), now(world), beasts() (the roster), level(world, player), state(beast, account)
--- ("out", "at home", "rests 1:20"), wind_left(world, beast) (seconds before Second Wind works again), and the stable's
+-- ("out", "at home", "rests 1:20"), mode(account) (how the beasts fight), wind_left(world, beast) (seconds before Second
+-- Wind works again), and the stable's
 -- actions, each returning what it did: make_active(world, account, player, beast), store(world, account, beast),
 -- release(world, account, beast), spend(world, account, beast, talent), reset_talents(world, account, beast).
 local species = require("species")
 local loyalty = require("loyalty")
 local slots = require("slots")
 local talents = require("talents")
+local threat = require("threat")
 
 local M = {}
 M.ID = "stable"
@@ -99,6 +101,16 @@ function W:beast_rows(world, rows, b)
 	end
 	rows[#rows + 1] = { text = string.format("Health x%.2f, damage x%.2f, speed x%.2f", role_health * f * talents.health(b),
 		role_damage * f * talents.damage(b), talents.speed(b)), tooltip = "Its role, loyalty and talents together" }
+	if not env.setting("threat") then
+		rows[#rows + 1] = { text = "Draws no monsters (Beasts draw monsters is off)" }
+	elseif env.mode(self.account) == "passive" then
+		rows[#rows + 1] = { text = "Draws no monsters (passive mode)" }
+	else
+		rows[#rows + 1] = { text = string.format("Draws %d %% of the monsters in a fight",
+			math.floor(threat.share(b, env.setting) * 100 + 0.5)),
+			tooltip = "All your beasts together at most " .. env.setting("beasts_share_max_pct") .. " %, of a boss at most " ..
+				env.setting("boss_share_max_pct") .. " %" }
+	end
 	local state = env.state(b, self.account)
 	rows[#rows + 1] = { text = state:sub(1, 1):upper() .. state:sub(2) .. (b.active and ", active" or ", in the stable") }
 	rows[#rows + 1] = { separator = true }

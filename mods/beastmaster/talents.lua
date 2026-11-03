@@ -4,6 +4,9 @@
 --   second_wind: a killing blow leaves it at `heal` of its health; then `cooldown_s` before it works again
 --   ambush: per point, its first hit in a fight deals `bonus` more (0.5: +50 %)
 --   guard: it takes no damage for the first `guard_s[points]` seconds of a fight, at most once every `cooldown_s`
+--   menace: per point, it draws `share` more of the monsters in a fight (threat.lua)
+--   taunt: when a monster hits its owner within `radius_m` of it, it roars: the monsters of the fight within `radius_m`
+--     of it turn on it for `hold_s`; then `taunt_cooldown_s[points]` before it roars again (threat.lua)
 -- A beast's points spent are kept with the world in the roster's t lines (roster.lua): "strength:2,guard:1".
 local loyalty = require("loyalty")
 
@@ -16,6 +19,8 @@ M.LIST = {
 	{ id = "second_wind", name = "Second Wind", max = 1, heal = 0.20, cooldown_s = 300 },
 	{ id = "ambush", name = "Ambush", max = 2, bonus = 0.50 },
 	{ id = "guard", name = "Guard", max = 2, guard_s = { 3, 5 }, cooldown_s = 30 },
+	{ id = "menace", name = "Menace", max = 3, share = 0.10 },
+	{ id = "taunt", name = "Taunt", max = 2, radius_m = 10, hold_s = 6, taunt_cooldown_s = { 45, 30 } },
 }
 
 -- A fight starts with the first hit to or from a beast after this many seconds without any.
@@ -109,6 +114,19 @@ function M.guard_cooldown_s()
 	return by_id.guard.cooldown_s or 0
 end
 
+-- Menace's share of the monsters (0: none).
+function M.menace(b)
+	return M.rank(b, "menace") * by_id.menace.share
+end
+
+-- Taunt's entry when the beast has it (else nil), and its cooldown for the beast's points.
+function M.taunt(b)
+	local n = M.rank(b, "taunt")
+	if n <= 0 then return nil end
+	local t = by_id.taunt
+	return t, t.taunt_cooldown_s[math.min(n, #t.taunt_cooldown_s)]
+end
+
 -- Second Wind's entry when the beast has it, else nil.
 function M.second_wind(b)
 	return M.rank(b, "second_wind") > 0 and by_id.second_wind or nil
@@ -134,6 +152,15 @@ function M.effect(t, n)
 	elseif t.bonus then
 		if n == 0 then return string.format("+%d %% damage a point on its first hit in a fight", pct(t.bonus)) end
 		return string.format("+%d %% damage on its first hit in a fight", pct(t.bonus * n))
+	elseif t.share then
+		if n == 0 then return string.format("draws %d %% more of the monsters a point", pct(t.share)) end
+		return string.format("draws %d %% more of the monsters", pct(t.share * n))
+	elseif t.taunt_cooldown_s then
+		local cd = t.taunt_cooldown_s
+		local text = string.format("roars when a monster near it hits you: the monsters within %d m turn on it for %d s, every %d s",
+			t.radius_m, t.hold_s, cd[math.max(1, math.min(n, #cd))])
+		if n == 0 and #cd > 1 then text = text .. string.format(" (%d s with %d points)", cd[#cd], #cd) end
+		return text
 	elseif t.guard_s then
 		local s = t.guard_s[math.max(1, math.min(n, #t.guard_s))]
 		local text = string.format("no damage for the first %d s of a fight", s)

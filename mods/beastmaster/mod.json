@@ -41,6 +41,12 @@
     {"key": "loyalty_pace", "type": "slider", "min": 0.25, "max": 4, "step": 0.25, "default": 1, "label": "Loyalty grows (x the normal pace)", "live": true, "group": "Behaviour"},
     {"key": "aggro_m", "type": "slider", "min": 5, "max": 40, "step": 1, "default": 25, "label": "Aggressive beasts go at foes within (m)", "live": true, "group": "Behaviour"},
     {"key": "xp_credit", "type": "bool", "default": true, "label": "You get your beasts' kills (XP and loot)", "live": true, "group": "Behaviour"},
+    {"key": "threat", "type": "bool", "default": true, "label": "Beasts draw monsters to them", "live": true, "group": "Monsters"},
+    {"key": "threat_hold_s", "type": "slider", "min": 3, "max": 30, "step": 1, "default": 8, "label": "A monster keeps its target at least (s)", "live": true, "group": "Monsters"},
+    {"key": "tank_share_pct", "type": "slider", "min": 0, "max": 90, "step": 5, "default": 50, "label": "A tank (boar, bear, aurochs) draws (% of the monsters)", "live": true, "group": "Monsters"},
+    {"key": "damage_share_pct", "type": "slider", "min": 0, "max": 90, "step": 5, "default": 20, "label": "Another beast draws (% of the monsters)", "live": true, "group": "Monsters"},
+    {"key": "beasts_share_max_pct", "type": "slider", "min": 0, "max": 90, "step": 5, "default": 90, "label": "All your beasts draw at most (%)", "live": true, "group": "Monsters"},
+    {"key": "boss_share_max_pct", "type": "slider", "min": 0, "max": 90, "step": 5, "default": 35, "label": "Of a boss, your beasts draw at most (%)", "live": true, "group": "Monsters"},
     {"key": "make_room", "type": "bool", "default": true, "label": "Beasts step aside while someone builds next to them", "live": true, "group": "Behaviour"},
     {"key": "wild_bears", "type": "bool", "default": true, "label": "Rare wild bears, aurochs and snakes (needs their content pack)", "live": true, "group": "World"},
     {"key": "wild_bear_minutes", "type": "slider", "min": 5, "max": 120, "step": 5, "default": 30, "label": "A wild pack beast about every (minutes)", "live": true, "group": "World"}

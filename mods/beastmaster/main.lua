@@ -189,6 +189,7 @@ window = window_mod.new({
 	beasts = function() return beasts end,
 	level = level_of,
 	state = function(b, account) return state_text(b, pack:is_aside(account)) end,
+	mode = function(account) return beasts:mode(account) end,
 	wind_left = function(world, b) return pack.fight:wind_left(world, b) end,
 	make_active = stable_do.make_active,
 	store = stable_do.store,
@@ -487,10 +488,10 @@ stable_command("release", "<name or number>: let a beast go for good (at a stabl
 	end)
 
 -- Talents: listed anywhere; spent and reset at a stable (the Beasts window's beast tab does the same for the host).
-local function talents_text(b)
-	local lines = { string.format("%s's talents: %s", b.name, talents.summary(b, setting("loyalty_pace"))) }
-	for _, t in ipairs(talents.LIST) do lines[#lines + 1] = talents.row_text(b, t) end
-	return table.concat(lines, "\n")
+-- The list is one reply a line (a reply holds at most 1023 bytes).
+local function reply_talents(b)
+	emf.reply(string.format("%s's talents: %s", b.name, talents.summary(b, setting("loyalty_pace"))))
+	for _, t in ipairs(talents.LIST) do emf.reply(talents.row_text(b, t)) end
 end
 
 command("talents", "<name or number> [reset]: a beast's talents; reset (at a stable): every point back, free",
@@ -512,7 +513,7 @@ command("talents", "<name or number> [reset]: a beast's talents; reset (at a sta
 			return
 		end
 		if not reset then
-			emf.reply(talents_text(b))
+			reply_talents(b)
 			return
 		end
 		emf.reply(away_from_stable(world, player, true) or stable_do.reset_talents(world, account, b))

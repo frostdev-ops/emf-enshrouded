@@ -2676,7 +2676,10 @@ TEST_CASE("talent: a beast gets a point for each loyalty above 1; the new loyalt
                              "Swiftness 0/3: +4 % speed a point",
                              "Second Wind 0/1: a killing blow leaves it at 20 % health, then 5 min before it works again",
                              "Ambush 0/2: +50 % damage a point on its first hit in a fight",
-                             "Guard 0/2: no damage for the first 3 s of a fight (5 s with 2 points), once every 30 s"})
+                             "Guard 0/2: no damage for the first 3 s of a fight (5 s with 2 points), once every 30 s",
+                             "Menace 0/3: draws 10 % more of the monsters a point",
+                             "Taunt 0/2: roars when a monster near it hits you: the monsters within 10 m turn on it for 6 s, "
+                             "every 45 s (30 s with 2 points)"})
         CHECK(has(list, line));
     b.reply("beastmaster.loyalty Wolf 10");
     CHECK(has(b.reply("beastmaster.talents 1"), "Wolf's talents: 9 points (9 left)"));
@@ -2699,7 +2702,8 @@ TEST_CASE("talent: spending and reset at a stable; refused away from one, when f
     CHECK(say("beastmaster talent Wolf 2 Second_Wind") == "Wolf 2's Second Wind is full (1/1).");
     CHECK(say("beastmaster talent Wolf 2 guard") ==
           "Wolf 2: Guard 1/2, no damage for the first 3 s of a fight, once every 30 s (1 point left).");
-    const std::string which = "A talent is Strength, Toughness, Swiftness, Second Wind, Ambush or Guard: /beastmaster talent "
+    const std::string which = "A talent is Strength, Toughness, Swiftness, Second Wind, Ambush, Guard, Menace or Taunt: "
+                              "/beastmaster talent "
                               "<name or number> <talent>";
     CHECK(say("beastmaster talent Grey shield") == which);
     CHECK(say("beastmaster talent Grey") == which);
@@ -3228,4 +3232,24 @@ TEST_CASE("talent: Guard works at most once every 30 s") {
     opening();
     CHECK(b.added(1234, EMF_ATTR_HEALTH, 30));
     CHECK(floor_of(b, 1234) == 100);
+}
+
+// ---- threat: how much of the monsters in a fight the beasts draw ----
+TEST_CASE("threat: the beast tab says how much of the monsters a beast draws") {
+    BeastRig b;
+    fang_window(b);  // Fang, a wolf at loyalty 3 (2 points), out
+    click(b, "beast.Fang");
+    CHECK(shows(shown(b), "Draws 20 % of the monsters in a fight"));
+    click(b, "talent.menace");
+    CHECK(shows(shown(b), "Menace 1/3: draws 10 % more of the monsters"));
+    CHECK(shows(shown(b), "Draws 30 % of the monsters in a fight"));
+    click(b, "talent.taunt");
+    CHECK(shows(shown(b), "Taunt 1/2: roars when a monster near it hits you: the monsters within 10 m turn on it for 6 s, "
+                          "every 45 s"));
+    click(b, "tab.stable");
+    click(b, "beast.Tusk");  // a boar: a tank
+    CHECK(shows(shown(b), "Draws 50 % of the monsters in a fight"));
+    b.reply("beastmaster.mode passive");
+    b.seconds(1);
+    CHECK(shows(shown(b), "Draws no monsters (passive mode)"));
 }
