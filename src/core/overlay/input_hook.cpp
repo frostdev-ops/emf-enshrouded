@@ -23,6 +23,7 @@ WNDPROC g_original = nullptr;
 std::atomic<bool> g_window_hooked{false};
 std::atomic<bool> g_raw_keyboard{false};  // the game gets keys as raw input: characters come from there too
 std::atomic<bool> g_raw_mouse{false};
+std::atomic<bool> g_absolute_mouse{false};  // raw mouse input with MOUSE_MOVE_ABSOLUTE (remote desktop, a VM)
 std::atomic<bool> g_legacy_keys{false};   // the window also gets WM_KEYDOWN/WM_CHAR: characters come from WM_CHAR
 HeldKeys g_keys;  // key state as seen through raw input (window thread only), for ToUnicodeEx
 
@@ -164,6 +165,7 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 const USHORT f = m.usButtonFlags;
                 const float notches = (f & RI_MOUSE_WHEEL) ? static_cast<SHORT>(m.usButtonData) / float(WHEEL_DELTA) : 0.0f;
                 const bool relative = (m.usFlags & MOUSE_MOVE_ABSOLUTE) == 0;
+                if (!relative) g_absolute_mouse = true;
                 const float dx = relative ? static_cast<float>(m.lLastX) : 0.0f;
                 const float dy = relative ? static_cast<float>(m.lLastY) : 0.0f;
                 if (!g_router->open() && g_router->wheel()) {  // a wheel: movement steers it
@@ -178,6 +180,7 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (!(f & ups)) return DefWindowProcW(hwnd, msg, wp, lp);  // releases pass, everything else stays here
             } else if (ri->header.dwType == RIM_TYPEMOUSE) {
                 g_raw_mouse = true;
+                if (ri->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE) g_absolute_mouse = true;
             }
             break;
         }
@@ -296,6 +299,27 @@ bool ensure_key_state_hooks() {
 }  // namespace
 
 bool window_hooked() { return g_window_hooked.load(); }
+
+WindowsPointer read_windows_pointer() {
+    WindowsPointer out;
+    const HWND w = game_window();
+    if (!w) return out;
+    out.in_front = game_really_in_front();
+    CURSORINFO ci{};
+    ci.cbSize = sizeof ci;
+    out.showing = GetCursorInfo(&ci) && (ci.flags & CURSOR_SHOWING) != 0;
+    POINT p{};
+    RECT r{};
+    if (GetCursorPos(&p) && ScreenToClient(w, &p) && GetClientRect(w, &r)) {
+        out.x = p.x;
+        out.y = p.y;
+        out.client_w = r.right - r.left;
+        out.client_h = r.bottom - r.top;
+    }
+    return out;
+}
+
+bool absolute_mouse_seen() { return g_absolute_mouse.load(); }
 
 InjectedKeyHooks install_injected_keys(InjectedKeys* keys) {
     if (!keys) return InjectedKeyHooks::None;

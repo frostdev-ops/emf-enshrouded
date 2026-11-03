@@ -143,6 +143,20 @@ void before_frame(ImGuiIO& io) {
     AcquireSRWLockExclusive(&g_queue_lock);
     events.swap(g_queue);
     ReleaseSRWLockExclusive(&g_queue_lock);
+    // One pointer: in the game's menus the Windows pointer shows, and the console follows it (no arrow of its own);
+    // in play it is hidden and the console's arrow moves with the raw mouse. Looked at only while the console is open.
+    PointerSource pointer = PointerSource::Own;
+    if (g_router->open()) {
+        const WindowsPointer wp = read_windows_pointer();
+        pointer = pointer_source(wp.showing, wp.in_front, absolute_mouse_seen());
+        if (pointer == PointerSource::Windows) {
+            g_cursor.set_display(io.DisplaySize);
+            if (const auto at = client_to_display(wp.x, wp.y, wp.client_w, wp.client_h, io.DisplaySize)) {
+                g_cursor.place(*at);  // the arrow takes over from here when the game hides the pointer again
+                io.AddMousePosEvent(at->x, at->y);
+            }
+        }
+    }
     for (const auto& e : events) {
         if (g_wheel.is_open() && (e.kind == InputEvent::Key || e.kind == InputEvent::Mouse)) {  // the wheel's input
             std::optional<int> result;
@@ -164,7 +178,7 @@ void before_frame(ImGuiIO& io) {
                 if (e.open) {
                     g_ui.focus_input = true;
                     g_cursor.set_display(io.DisplaySize);
-                    io.AddMousePosEvent(g_cursor.pos().x, g_cursor.pos().y);
+                    if (pointer == PointerSource::Own) io.AddMousePosEvent(g_cursor.pos().x, g_cursor.pos().y);
                 } else {  // no hover or held button stays behind
                     io.AddMouseButtonEvent(0, false);
                     io.AddMouseButtonEvent(1, false);
@@ -187,9 +201,11 @@ void before_frame(ImGuiIO& io) {
             case InputEvent::Wheel: io.AddMouseWheelEvent(0.0f, e.wheel); break;
             case InputEvent::Mouse:  // the console's cursor (a wheel's input is handled above)
                 if (!g_router->open()) break;
-                g_cursor.set_display(io.DisplaySize);
-                g_cursor.move(e.dx, e.dy, g_mouse_speed);
-                io.AddMousePosEvent(g_cursor.pos().x, g_cursor.pos().y);
+                if (pointer == PointerSource::Own) {  // with the Windows pointer the position came from it above
+                    g_cursor.set_display(io.DisplaySize);
+                    g_cursor.move(e.dx, e.dy, g_mouse_speed);
+                    io.AddMousePosEvent(g_cursor.pos().x, g_cursor.pos().y);
+                }
                 if (e.buttons & RI_MOUSE_LEFT_BUTTON_DOWN) io.AddMouseButtonEvent(0, true);
                 if (e.buttons & RI_MOUSE_LEFT_BUTTON_UP) io.AddMouseButtonEvent(0, false);
                 if (e.buttons & RI_MOUSE_RIGHT_BUTTON_DOWN) io.AddMouseButtonEvent(1, true);
@@ -197,7 +213,8 @@ void before_frame(ImGuiIO& io) {
                 break;
         }
     }
-    io.MouseDrawCursor = g_router->open();  // the game hides the system cursor
+    // EMF's arrow only where the game hides the Windows pointer (play); in its menus that pointer is the one
+    io.MouseDrawCursor = g_router->open() && pointer == PointerSource::Own;
     // Slide: ~0.15 s down or up.
     const float target = g_router->open() ? 1.0f : 0.0f;
     const float step = io.DeltaTime * 7.0f;

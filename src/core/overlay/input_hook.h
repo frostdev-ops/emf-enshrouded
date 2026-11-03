@@ -28,6 +28,17 @@ bool install_input_hooks(InputRouter* router, InputCallbacks callbacks);
 // The game window is subclassed (keys, characters and mouse reach the overlay).
 bool window_hooked();
 
+// The Windows pointer, for the console's one pointer (cursor_model.h). Any thread.
+struct WindowsPointer {
+    bool showing = false;   // the game shows it (its menus); in play it is hidden
+    bool in_front = false;  // the game window is the foreground window
+    int x = 0, y = 0;       // in the game window's client area (pixels)
+    int client_w = 0, client_h = 0;
+};
+WindowsPointer read_windows_pointer();
+// The raw mouse has reported absolute positions (remote desktop, a virtual machine) since the game started.
+bool absolute_mouse_seen();
+
 // The loaded mods' image ranges [begin, end): their key-state calls see "not pressed" while the console is open.
 void set_mod_ranges(std::vector<std::pair<uintptr_t, uintptr_t>> ranges);
 
