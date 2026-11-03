@@ -186,6 +186,7 @@ add_library(emf_core_lib STATIC
   src/core/overlay/wheel_ui.cpp
   src/core/overlay/window_ui.cpp
   src/core/overlay/png_decode.cpp
+  src/core/overlay/image_store.cpp
   src/core/overlay/submit.cpp
   src/core/overlay/input_router.cpp
   src/core/overlay/input_hook.cpp
@@ -506,6 +507,7 @@ add_executable(emf_tests
   tests/test_settings_ui.cpp
   tests/test_window_ui.cpp
   tests/test_png_decode.cpp
+  tests/test_image_store.cpp
   tests/test_pattern_find.cpp
   tests/test_hook_table.cpp
   tests/test_hook_chain_real.cpp

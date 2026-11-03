@@ -2,7 +2,6 @@
 #include <doctest.h>
 
 #include <windows.h>
-#include <wincodec.h>
 
 #include <cstdio>
 #include <filesystem>
@@ -12,6 +11,7 @@
 #include <vector>
 
 #include "core/overlay/png_decode.h"
+#include "png_test_util.h"
 
 using namespace emf::core;
 
@@ -23,31 +23,6 @@ std::filesystem::path temp_dir() {
     return d;
 }
 
-// A PNG written by WIC's own encoder: w x h, RGBA8 pixels row by row.
-bool write_png(const std::filesystem::path& file, UINT w, UINT h, const std::vector<uint8_t>& rgba) {
-    CoInitializeEx(nullptr, COINIT_MULTITHREADED);
-    IWICImagingFactory* f = nullptr;
-    if (FAILED(CoCreateInstance(CLSID_WICImagingFactory, nullptr, CLSCTX_INPROC_SERVER, IID_PPV_ARGS(&f)))) return false;
-    IWICStream* s = nullptr;
-    IWICBitmapEncoder* e = nullptr;
-    IWICBitmapFrameEncode* fr = nullptr;
-    bool ok = SUCCEEDED(f->CreateStream(&s)) && SUCCEEDED(s->InitializeFromFilename(file.c_str(), GENERIC_WRITE)) &&
-              SUCCEEDED(f->CreateEncoder(GUID_ContainerFormatPng, nullptr, &e)) &&
-              SUCCEEDED(e->Initialize(s, WICBitmapEncoderNoCache)) && SUCCEEDED(e->CreateNewFrame(&fr, nullptr)) &&
-              SUCCEEDED(fr->Initialize(nullptr)) && SUCCEEDED(fr->SetSize(w, h));
-    std::vector<uint8_t> bgra = rgba;  // the PNG encoder takes BGRA
-    for (size_t i = 0; i + 3 < bgra.size(); i += 4) std::swap(bgra[i], bgra[i + 2]);
-    WICPixelFormatGUID fmt = GUID_WICPixelFormat32bppBGRA;
-    ok = ok && SUCCEEDED(fr->SetPixelFormat(&fmt)) && IsEqualGUID(fmt, GUID_WICPixelFormat32bppBGRA) &&
-         SUCCEEDED(fr->WritePixels(h, w * 4, static_cast<UINT>(bgra.size()), bgra.data())) &&
-         SUCCEEDED(fr->Commit()) && SUCCEEDED(e->Commit());
-    if (fr) fr->Release();
-    if (e) e->Release();
-    if (s) s->Release();
-    f->Release();
-    return ok;
-}
-
 }  // namespace
 
 TEST_CASE("png decode: a PNG comes back as its RGBA pixels, rows top to bottom, straight alpha") {
@@ -56,7 +31,7 @@ TEST_CASE("png decode: a PNG comes back as its RGBA pixels, rows top to bottom, 
         255, 0,   0,   255, 0,   255, 0,   255, 0,   0,   255, 255,  // red, green, blue
         10,  20,  30,  128, 200, 100, 50,  0,   255, 255, 255, 255,  // half-transparent, fully transparent, white
     };
-    REQUIRE(write_png(file, 3, 2, px));
+    REQUIRE(emf::test::write_png(file, 3, 2, px));
     Rgba out;
     std::string why;
     REQUIRE(decode_png(file.wstring(), &out, &why));
