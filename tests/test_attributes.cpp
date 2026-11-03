@@ -413,6 +413,10 @@ TEST_CASE("attributes: attributes, attribute_add and damage only on a build whos
     // list is full (guarded_alloc handles NULL); HitCandidate, HitEvent and Health kept their layouts
     CHECK(attribute_layouts_checked(emf::known_build_index(1283531u)));
     CHECK(attribute_layouts_checked(emf::known_build_index(1283531u, true)));
+    // 1285601 (a hotfix): attrFind, attrAdd and allocPendingHit are 1283531's instruction for instruction, and every
+    // reflected type is the same
+    CHECK(attribute_layouts_checked(emf::known_build_index(1285601u)));
+    CHECK(attribute_layouts_checked(emf::known_build_index(1285601u, true)));
     CHECK_FALSE(attribute_layouts_checked(emf::known_build_index(1269579u)));  // the exe was not at hand: unchecked
     CHECK_FALSE(attribute_layouts_checked(-1));                                // an unknown build (a game update)
     CHECK_FALSE(attribute_layouts_checked(99));

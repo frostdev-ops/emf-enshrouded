@@ -3,8 +3,8 @@
 EMF finds the engine functions it needs (the "signatures") and a few data offsets inside `enshrouded.exe` (or
 `enshrouded_server.exe`). A game update moves code around, so EMF checks which build it is running in at every start:
 
-- **A known build** (its SHA-256 is in EMF's table: 1269579, 1273043 and 1283531, and the dedicated servers of 1273043
-  and 1283531):
+- **A known build** (its SHA-256 is in EMF's table: 1269579, 1273043, 1283531 and 1285601, and the dedicated servers
+  of 1273043, 1283531 and 1285601):
   every signature has a recorded address, and the data offsets are the recorded ones. The log says
   `game sha256 ... (known build 1273043)` and `signatures: 38 of 38 usable` (on the server
   `... usable (N not in this exe)`: client-only functions, such as the client world's setup, are not in the server exe).

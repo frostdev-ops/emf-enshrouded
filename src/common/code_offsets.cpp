@@ -10,7 +10,7 @@
 
 namespace emf {
 namespace {
-// Values: {1269579, 1273043, 1273043 server, 1283531, 1283531 server}. In save2WriteWorld (docs/engine_parts/re_saves.md):
+// Values: {1269579, 1273043, 1273043 server, 1283531, 1283531 server, 1285601, 1285601 server}. In save2WriteWorld (docs/engine_parts/re_saves.md):
 //   Save2Result: its first store `mov [rcx+disp32], rax` (function start + 0x5a on 1273043) writes the job result.
 //   Save2WorldSlot: `movzx eax, word ptr [rsi+disp32]; mov word ptr [rbp+..], ax` copies the world slot id for the
 //   save (function start + 0x2c7 on 1273043; the server uses rdi, so the register byte is a wildcard). The server's
@@ -21,31 +21,31 @@ namespace {
 //   on 1273043) tests the instance's "local world slot set" flag; the u16 slot id is the field right before it.
 constexpr CodeOffsetDef kCodeOffsets[] = {
     {CodeOffset::Save2Result, "Save2Result", Sig::Save2WriteWorld, "48 89 81 ?? ?? ?? ??", 3, 0x100,
-     {0xB728Cu, 0xB729Cu, 0xE4u, 0xB729Cu, 0xE4u}},
+     {0xB728Cu, 0xB729Cu, 0xE4u, 0xB729Cu, 0xE4u, 0xB729Cu, 0xE4u}},
     {CodeOffset::Save2WorldSlot, "Save2WorldSlot", Sig::Save2WriteWorld, "0F B7 ?? ?? ?? ?? ?? 66 89 85", 3, 0x1000,
-     {0xB7287u, 0xB7297u, 0xDFu, 0xB7297u, 0xDFu}},
+     {0xB7287u, 0xB7297u, 0xDFu, 0xB7297u, 0xDFu, 0xB7297u, 0xDFu}},
     {CodeOffset::InstWorldSlotFlag, "InstWorldSlotFlag", Sig::LoadSavegameStep, "80 BB ?? ?? ?? ?? 00 48 8B 8B", 2,
-     0x1000, {0x1756u, 0x1756u, 0x1756u, 0x1756u, 0x1756u}},
+     0x1000, {0x1756u, 0x1756u, 0x1756u, 0x1756u, 0x1756u, 0x1756u, 0x1756u}},
     {CodeOffset::StorageTickPeriod, "StorageTickPeriod", Sig::SimStep, "48 8B 86 ?? ?? ?? ?? 48 85 D2", 3, 0x1000,
-     {0x4C0u, 0x4C0u, 0x4C0u, 0x4C0u, 0x4C0u}},
+     {0x4C0u, 0x4C0u, 0x4C0u, 0x4C0u, 0x4C0u, 0x4C0u, 0x4C0u}},
     {CodeOffset::StorageTick, "StorageTick", Sig::SimStep, "48 8D 9E ?? ?? ?? ?? 4C 8B BC 24", 3, 0x1000,
-     {0x4DCu, 0x4DCu, 0x4DCu, 0x4DCu, 0x4DCu}},
+     {0x4DCu, 0x4DCu, 0x4DCu, 0x4DCu, 0x4DCu, 0x4DCu, 0x4DCu}},
     // In sendServerInfo (+0x3ab on both exes of 1273043): `cmp byte ptr [rbx+flag], 0; je; mov rax, [rbx+settings]`.
     // 1269579 is not checked; its instance layout matches 1273043's (InstWorldSlotFlag), so the same values.
     {CodeOffset::InstSendSettingsFlag, "InstSendSettingsFlag", Sig::SendServerInfo,
-     "80 BB ?? ?? ?? ?? 00 74 ?? 48 8B 83 ?? ?? ?? ??", 2, 0x1000, {0x18E0u, 0x18E0u, 0x18E0u, 0x18E0u, 0x18E0u}},
+     "80 BB ?? ?? ?? ?? 00 74 ?? 48 8B 83 ?? ?? ?? ??", 2, 0x1000, {0x18E0u, 0x18E0u, 0x18E0u, 0x18E0u, 0x18E0u, 0x18E0u, 0x18E0u}},
     {CodeOffset::InstSettingsPtr, "InstSettingsPtr", Sig::SendServerInfo, "80 BB ?? ?? ?? ?? 00 74 ?? 48 8B 83 ?? ?? ?? ??",
-     12, 0x1000, {0x1758u, 0x1758u, 0x1758u, 0x1758u, 0x1758u}},
+     12, 0x1000, {0x1758u, 0x1758u, 0x1758u, 0x1758u, 0x1758u, 0x1758u, 0x1758u}},
     // In getComponent (+0xF on every exe; the signature holds the instruction): `lea rdi, [rdx+disp32]` takes the
     // world's entity storage. Build 1283531 moved it by +0x1C00 with the rest of the world after the program table.
     {CodeOffset::WorldStorage, "WorldStorage", Sig::GetComponent, "48 8D BA ?? ?? ?? ??", 3, 0x20,
-     {0xE15DC0u, 0xE15DC0u, 0xE15DC0u, 0xE179C0u, 0xE179C0u}},
+     {0xE15DC0u, 0xE15DC0u, 0xE15DC0u, 0xE179C0u, 0xE179C0u, 0xE179C0u, 0xE179C0u}},
     // In registerProgram's "already registered?" walk over the table: `cmp di, word ptr [rcx+count]` (+0x39 on both
     // servers and 1283531's game) and `add r14, stride` (+0x7b). 1283531's entries are 8 bytes longer (0x1F28).
     {CodeOffset::ProgramCount, "ProgramCount", Sig::RegisterProgram, "66 3B B9 ?? ?? ?? ??", 3, 0x100,
-     {0xE15350u, 0xE15350u, 0xE15350u, 0xE16F50u, 0xE16F50u}},
+     {0xE15350u, 0xE15350u, 0xE15350u, 0xE16F50u, 0xE16F50u, 0xE16F50u, 0xE16F50u}},
     {CodeOffset::ProgramStride, "ProgramStride", Sig::RegisterProgram, "49 81 C6 ?? ?? ?? ??", 3, 0x100,
-     {0x1F20u, 0x1F20u, 0x1F20u, 0x1F28u, 0x1F28u}},
+     {0x1F20u, 0x1F20u, 0x1F20u, 0x1F28u, 0x1F28u, 0x1F28u, 0x1F28u}},
 };
 // the storage-relative tick fields EMF's world offsets assume (world_offsets.h: the same on every build)
 constexpr uint32_t kPeriodInStorage = kBaseWorldOffsets.tick_period_ns - kBaseWorldOffsets.storage;

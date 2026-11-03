@@ -184,6 +184,17 @@ TEST_CASE("load_world layout: 1273043's and 1283531's game exes; build 1283531's
     CHECK(b.play_slot == a.play_slot + 0x20);
     CHECK(b.play_slot_set == a.play_slot_set + 0x20);
     CHECK(b.adventure == a.adventure + 0x20);
+    // 1285601 (a hotfix): each of those offsets is used in its client's code as often as in 1283531's
+    const int c1285601 = emf::known_build_index(1285601);
+    REQUIRE(menu_app_layout(c1285601).has_value());
+    const L::AppLayout c = *menu_app_layout(c1285601);
+    CHECK(c.ui_command_queue == b.ui_command_queue);
+    CHECK(c.mode == b.mode);
+    CHECK(c.session_name == b.session_name);
+    CHECK(c.play_slot == b.play_slot);
+    CHECK(c.play_slot_set == b.play_slot_set);
+    CHECK(c.adventure == b.adventure);
+    CHECK_FALSE(menu_app_layout(emf::known_build_index(1285601, true)).has_value());
     // the dedicated servers have no menu; 1269579 and unknown builds were never checked
     CHECK_FALSE(menu_app_layout(emf::known_build_index(1273043, true)).has_value());
     CHECK_FALSE(menu_app_layout(emf::known_build_index(1283531, true)).has_value());
