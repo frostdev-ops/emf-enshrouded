@@ -6,6 +6,7 @@
 #include <malloc.h>
 #include <cstdio>
 #include <cstring>
+#include <iterator>
 #include <optional>
 #include <string>
 #include <utility>
@@ -13,7 +14,9 @@
 
 #include "common/srw.h"
 #include "imgui_impl_vulkan.h"
+#include "image_store.h"
 #include "imgui_internal.h"
+#include "overlay.h"
 #include "swapchain_book.h"
 #include "vk_capture.h"
 
@@ -125,6 +128,23 @@ struct DeviceFns {
     PFN_vkDestroyRenderPass DestroyRenderPass;
     PFN_vkDestroyCommandPool DestroyCommandPool;
     PFN_vkDeviceWaitIdle DeviceWaitIdle;
+    // mods' pictures (API v26)
+    PFN_vkCreateImage CreateImage;
+    PFN_vkDestroyImage DestroyImage;
+    PFN_vkGetImageMemoryRequirements GetImageMemoryRequirements;
+    PFN_vkBindImageMemory BindImageMemory;
+    PFN_vkCreateBuffer CreateBuffer;
+    PFN_vkDestroyBuffer DestroyBuffer;
+    PFN_vkGetBufferMemoryRequirements GetBufferMemoryRequirements;
+    PFN_vkBindBufferMemory BindBufferMemory;
+    PFN_vkAllocateMemory AllocateMemory;
+    PFN_vkFreeMemory FreeMemory;
+    PFN_vkMapMemory MapMemory;
+    PFN_vkUnmapMemory UnmapMemory;
+    PFN_vkCmdPipelineBarrier CmdPipelineBarrier;
+    PFN_vkCmdCopyBufferToImage CmdCopyBufferToImage;
+    PFN_vkCreateSampler CreateSampler;
+    PFN_vkDestroySampler DestroySampler;
 } D{};
 
 SRWLOCK g_book_lock = SRWLOCK_INIT;
@@ -137,6 +157,7 @@ bool g_backend = false;        // ImGui's Vulkan backend runs on g_device
 VkRenderPass g_imgui_pass = VK_NULL_HANDLE;
 uint32_t g_imgui_images = 0;
 LARGE_INTEGER g_last{}, g_freq{};
+VkPhysicalDeviceMemoryProperties g_mem_props{};  // for the pictures' memory (API v26)
 
 // Command buffers EMF allocates by calling below the loader carry no loader dispatch pointer yet; layers below EMF
 // key their tables by it, so the loader's callback stamps them.
@@ -299,6 +320,201 @@ bool prepare(SwapchainRecord& r, uint32_t family) {
     return true;
 }
 
+// ---- mods' pictures (API v26): one RGBA texture per picture, made from the image store's pixels ----
+
+struct GpuPicture {
+    VkImage image = VK_NULL_HANDLE;
+    VkDeviceMemory memory = VK_NULL_HANDLE;
+    VkImageView view = VK_NULL_HANDLE;
+    VkDescriptorSet set = VK_NULL_HANDLE;  // ImGui's texture id; gone with the backend's pool
+};
+std::vector<std::pair<uint32_t, GpuPicture>> g_pictures;  // by handle
+std::vector<uint32_t> g_pictures_failed;                  // not tried again (logged once)
+VkSampler g_picture_sampler = VK_NULL_HANDLE;
+
+uint32_t memory_type(uint32_t bits, VkMemoryPropertyFlags want) {
+    for (uint32_t i = 0; i < g_mem_props.memoryTypeCount; ++i)
+        if ((bits & (1u << i)) && (g_mem_props.memoryTypes[i].propertyFlags & want) == want) return i;
+    return UINT32_MAX;
+}
+
+void free_picture(GpuPicture& p) {
+    if (p.view) D.DestroyImageView(g_device, p.view, nullptr);
+    if (p.image) D.DestroyImage(g_device, p.image, nullptr);
+    if (p.memory) D.FreeMemory(g_device, p.memory, nullptr);
+    p = GpuPicture{};
+}
+
+// The picture's pixels into a new device-local image, through a staging buffer, on `queue` (waited for: rare).
+bool upload_picture(const std::vector<uint8_t>& px, uint32_t w, uint32_t h, VkQueue queue, GpuPicture* out,
+                    std::string* why) {
+    const VkDeviceSize size = static_cast<VkDeviceSize>(px.size());
+    VkBuffer staging = VK_NULL_HANDLE;
+    VkDeviceMemory staging_mem = VK_NULL_HANDLE;
+    VkCommandBuffer cmd = VK_NULL_HANDLE;
+    VkFence fence = VK_NULL_HANDLE;
+    GpuPicture p;
+    const auto done = [&](bool ok, const char* reason) {
+        if (fence) D.DestroyFence(g_device, fence, nullptr);
+        if (cmd) D.FreeCommandBuffers(g_device, g_pool, 1, &cmd);
+        if (staging) D.DestroyBuffer(g_device, staging, nullptr);
+        if (staging_mem) D.FreeMemory(g_device, staging_mem, nullptr);
+        if (ok) *out = p;
+        else {
+            free_picture(p);
+            if (why) *why = reason;
+        }
+        return ok;
+    };
+    VkBufferCreateInfo bi{VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO};
+    bi.size = size;
+    bi.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    bi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    if (D.CreateBuffer(g_device, &bi, nullptr, &staging) != VK_SUCCESS) return done(false, "vkCreateBuffer");
+    VkMemoryRequirements br{};
+    D.GetBufferMemoryRequirements(g_device, staging, &br);
+    VkMemoryAllocateInfo ba{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ba.allocationSize = br.size;
+    ba.memoryTypeIndex = memory_type(br.memoryTypeBits, VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT |
+                                                            VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+    if (ba.memoryTypeIndex == UINT32_MAX || D.AllocateMemory(g_device, &ba, nullptr, &staging_mem) != VK_SUCCESS ||
+        D.BindBufferMemory(g_device, staging, staging_mem, 0) != VK_SUCCESS)
+        return done(false, "no host-visible memory for the staging buffer");
+    void* mapped = nullptr;
+    if (D.MapMemory(g_device, staging_mem, 0, size, 0, &mapped) != VK_SUCCESS) return done(false, "vkMapMemory");
+    std::memcpy(mapped, px.data(), px.size());
+    D.UnmapMemory(g_device, staging_mem);
+
+    VkImageCreateInfo ii{VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO};
+    ii.imageType = VK_IMAGE_TYPE_2D;
+    ii.format = VK_FORMAT_R8G8B8A8_UNORM;  // as ImGui's own font atlas
+    ii.extent = {w, h, 1};
+    ii.mipLevels = 1;
+    ii.arrayLayers = 1;
+    ii.samples = VK_SAMPLE_COUNT_1_BIT;
+    ii.tiling = VK_IMAGE_TILING_OPTIMAL;
+    ii.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    ii.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    ii.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    if (D.CreateImage(g_device, &ii, nullptr, &p.image) != VK_SUCCESS) return done(false, "vkCreateImage");
+    VkMemoryRequirements ir{};
+    D.GetImageMemoryRequirements(g_device, p.image, &ir);
+    VkMemoryAllocateInfo ia{VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
+    ia.allocationSize = ir.size;
+    ia.memoryTypeIndex = memory_type(ir.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
+    if (ia.memoryTypeIndex == UINT32_MAX || D.AllocateMemory(g_device, &ia, nullptr, &p.memory) != VK_SUCCESS ||
+        D.BindImageMemory(g_device, p.image, p.memory, 0) != VK_SUCCESS)
+        return done(false, "no device memory for the picture");
+    VkImageViewCreateInfo vi{VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
+    vi.image = p.image;
+    vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    vi.format = ii.format;
+    vi.subresourceRange = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1};
+    if (D.CreateImageView(g_device, &vi, nullptr, &p.view) != VK_SUCCESS) return done(false, "vkCreateImageView");
+
+    VkCommandBufferAllocateInfo ai{VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+    ai.commandPool = g_pool;
+    ai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    ai.commandBufferCount = 1;
+    if (D.AllocateCommandBuffers(g_device, &ai, &cmd) != VK_SUCCESS) {
+        cmd = VK_NULL_HANDLE;
+        return done(false, "vkAllocateCommandBuffers");
+    }
+    if (!stamp(&cmd, 1)) return done(false, "the loader's data on the command buffer");
+    VkCommandBufferBeginInfo cb{VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+    cb.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    D.BeginCommandBuffer(cmd, &cb);
+    VkImageMemoryBarrier to_copy{VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER};
+    to_copy.oldLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    to_copy.newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_copy.srcQueueFamilyIndex = to_copy.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    to_copy.image = p.image;
+    to_copy.subresourceRange = vi.subresourceRange;
+    to_copy.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    D.CmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &to_copy);
+    VkBufferImageCopy region{};
+    region.imageSubresource = {VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1};
+    region.imageExtent = {w, h, 1};
+    D.CmdCopyBufferToImage(cmd, staging, p.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+    VkImageMemoryBarrier to_read = to_copy;
+    to_read.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+    to_read.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    to_read.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+    to_read.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    D.CmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, 0, 0, nullptr, 0,
+                         nullptr, 1, &to_read);
+    D.EndCommandBuffer(cmd);
+    VkFenceCreateInfo fi{VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    if (D.CreateFence(g_device, &fi, nullptr, &fence) != VK_SUCCESS) {
+        fence = VK_NULL_HANDLE;
+        return done(false, "vkCreateFence");
+    }
+    VkSubmitInfo si{VK_STRUCTURE_TYPE_SUBMIT_INFO};
+    si.commandBufferCount = 1;
+    si.pCommandBuffers = &cmd;
+    if (D.QueueSubmit(queue, 1, &si, fence) != VK_SUCCESS) return done(false, "vkQueueSubmit");
+    if (D.WaitForFences(g_device, 1, &fence, VK_TRUE, 2000000000ull) != VK_SUCCESS)
+        return done(false, "the upload did not finish");
+    return done(true, "");
+}
+
+// Before a frame: every picture the image store has waiting gets its texture (made once) and its ImGui descriptor
+// (made again after a backend restart).
+void upload_pictures(VkQueue queue) {
+    ImageStore& store = overlay_images();
+    const std::vector<uint32_t> pending = store.pending();
+    if (pending.empty()) return;
+    if (!g_picture_sampler) {
+        VkSamplerCreateInfo si{VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        si.magFilter = si.minFilter = VK_FILTER_LINEAR;
+        si.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        si.addressModeU = si.addressModeV = si.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+        si.maxLod = 1.0f;
+        if (D.CreateSampler(g_device, &si, nullptr, &g_picture_sampler) != VK_SUCCESS) {
+            g_picture_sampler = VK_NULL_HANDLE;
+            return;
+        }
+    }
+    for (const uint32_t handle : pending) {
+        if (std::find(g_pictures_failed.begin(), g_pictures_failed.end(), handle) != g_pictures_failed.end()) continue;
+        auto it = std::find_if(g_pictures.begin(), g_pictures.end(), [&](const auto& e) { return e.first == handle; });
+        if (it == g_pictures.end()) {
+            uint32_t w = 0, h = 0;
+            std::vector<uint8_t> px;
+            if (!store.pixels(handle, &w, &h, &px)) continue;
+            GpuPicture p;
+            std::string why;
+            if (!upload_picture(px, w, h, queue, &p, &why)) {
+                g_pictures_failed.push_back(handle);
+                log("overlay: picture " + std::to_string(handle) + " could not be put on the GPU (" + why + ")");
+                continue;
+            }
+            g_pictures.emplace_back(handle, p);
+            it = std::prev(g_pictures.end());
+        }
+        if (!it->second.set)
+            it->second.set = ImGui_ImplVulkan_AddTexture(g_picture_sampler, it->second.view,
+                                                         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        if (it->second.set) store.set_texture(handle, reinterpret_cast<uint64_t>(it->second.set));
+    }
+}
+
+// The backend's descriptor pool is gone (a restart, or the device): the pictures' ImGui ids with it.
+void pictures_lost_descriptors() {
+    for (auto& [handle, p] : g_pictures) p.set = VK_NULL_HANDLE;
+    overlay_images().forget_textures();
+}
+
+void free_pictures() {
+    pictures_lost_descriptors();
+    for (auto& [handle, p] : g_pictures) free_picture(p);
+    g_pictures.clear();
+    g_pictures_failed.clear();
+    if (g_picture_sampler) D.DestroySampler(g_device, g_picture_sampler, nullptr);
+    g_picture_sampler = VK_NULL_HANDLE;
+}
+
 bool init_imgui(const SwapchainRecord& r, VkQueue queue, uint32_t family) {
     const uint32_t images = static_cast<uint32_t>(r.images.size());
     if (g_backend && g_imgui_pass == r.render_pass) {
@@ -326,6 +542,7 @@ bool init_imgui(const SwapchainRecord& r, VkQueue queue, uint32_t family) {
     }
     if (g_backend) {
         ImGui_ImplVulkan_Shutdown();  // the swapchain format changed: a new render pass
+        pictures_lost_descriptors();  // its pool held the pictures' descriptors
         g_backend = false;
     } else if (!ImGui_ImplVulkan_LoadFunctions(g_api, load_fn, nullptr)) {  // this device's functions
         log("overlay: could not load the Vulkan functions for ImGui");
@@ -338,7 +555,7 @@ bool init_imgui(const SwapchainRecord& r, VkQueue queue, uint32_t family) {
     ii.Device = g_device;
     ii.QueueFamily = family;
     ii.Queue = queue;
-    ii.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE + 8;
+    ii.DescriptorPoolSize = IMGUI_IMPL_VULKAN_MINIMUM_IMAGE_SAMPLER_POOL_SIZE + 8 + kMaxImages;  // + mods' pictures
     ii.RenderPass = r.render_pass;
     ii.MinImageCount = (std::max<uint32_t>)(2, (std::min)(r.min_images, images));
     ii.ImageCount = (std::max)(ii.MinImageCount, images);
@@ -401,6 +618,7 @@ bool render(VkQueue queue, const VkPresentInfoKHR* info, VkSemaphore* signal, vo
                               1.0f / 1000.0f, 0.25f);
     g_last = now;
     if (g_hooks.before_frame) g_hooks.before_frame(io);
+    upload_pictures(queue);       // mods' pictures loaded since the last frame (API v26)
     ImGui_ImplVulkan_NewFrame();  // uploads the atlas when the backend has none yet (its first frame)
     if (io.Fonts->TexPixelsAlpha8 || io.Fonts->TexPixelsRGBA32) io.Fonts->ClearTexData();  // on the GPU now
     ImGui::NewFrame();
@@ -494,7 +712,27 @@ bool overlay_attach_device(const LayerDevice& d) {
     EMF_LOAD(DestroyRenderPass);
     EMF_LOAD(DestroyCommandPool);
     EMF_LOAD(DeviceWaitIdle);
+    EMF_LOAD(CreateImage);
+    EMF_LOAD(DestroyImage);
+    EMF_LOAD(GetImageMemoryRequirements);
+    EMF_LOAD(BindImageMemory);
+    EMF_LOAD(CreateBuffer);
+    EMF_LOAD(DestroyBuffer);
+    EMF_LOAD(GetBufferMemoryRequirements);
+    EMF_LOAD(BindBufferMemory);
+    EMF_LOAD(AllocateMemory);
+    EMF_LOAD(FreeMemory);
+    EMF_LOAD(MapMemory);
+    EMF_LOAD(UnmapMemory);
+    EMF_LOAD(CmdPipelineBarrier);
+    EMF_LOAD(CmdCopyBufferToImage);
+    EMF_LOAD(CreateSampler);
+    EMF_LOAD(DestroySampler);
 #undef EMF_LOAD
+    g_mem_props = {};
+    if (auto mp = reinterpret_cast<PFN_vkGetPhysicalDeviceMemoryProperties>(
+            d.gipa(d.instance, "vkGetPhysicalDeviceMemoryProperties")))
+        mp(d.phys, &g_mem_props);
     o_create_swapchain = reinterpret_cast<PFN_vkCreateSwapchainKHR>(d.gdpa(d.device, "vkCreateSwapchainKHR"));
     o_destroy_swapchain = reinterpret_cast<PFN_vkDestroySwapchainKHR>(d.gdpa(d.device, "vkDestroySwapchainKHR"));
     o_present = reinterpret_cast<PresentFn>(d.gdpa(d.device, "vkQueuePresentKHR"));
@@ -523,6 +761,7 @@ void overlay_detach_device(VkDevice device) {
         g_imgui_pass = VK_NULL_HANDLE;
         g_imgui_images = 0;
     }
+    free_pictures();  // the store keeps the pixels: a later device uploads them again
     std::vector<SwapchainRecord> records;
     {
         const SrwExclusive lock(g_book_lock);
