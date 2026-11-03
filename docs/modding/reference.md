@@ -535,7 +535,8 @@ id. Players in someone else's game see only windows from mods running in their o
 
 The game's own "E <verb>" prompt on an entity your mod spawns or names, and a callback when any player (host, joined,
 dedicated server) presses E there. An offer is three components the game adds to its own objects at run time; none is
-saved, so an uninstalled mod leaves plain entities. Seen in game on build 1285601 ("E Open" on a spawned statue).
+saved, so an uninstalled mod leaves plain entities. Seen in game on build 1285601 ("E Open" on a spawned statue,
+  "E Rest" on one that existed).
 
 ```c
 EmfOffer o = {sizeof o};
@@ -545,14 +546,16 @@ void on_e(EmfWorld* w, uint32_t player, uint32_t entity, void* user) { /* server
 ```
 
 - `verb`: `EMF_VERB_USE` (default), `OPEN`, `TALK`, `READ`, `SIT`, `SLEEP`, `PET`, `TOUCH`, `ACTIVATE`, `PRESS`,
-  `ENTER`, `INSPECT`, `TAKE`, `COLLECT`, `REST`, `RELEASE`, or any loca id. `text`: your own words (1-63 bytes); players
-  without EMF see "E Unknown Tag Id".
+  `ENTER`, `INSPECT`, `TAKE`, `COLLECT`, `REST`, `RELEASE`, or any loca id (Open, Rest and Talk seen in game). `text`:
+  your own words (1-63 bytes): for now the prompt shows "E" with no word (it works; EMF does not reach the prompt's
+  label yet).
 - `sequence`: `EMF_SEQUENCE_TOUCH` (default, no screen) or `EMF_SEQUENCE_BUTTON`. `range_m` (0 = 32), `flags`:
   `EMF_OFFER_LOW_PRIORITY`, `EMF_OFFER_BUILD_MODE`.
 - From a world callback on the server world. `offer` refuses a player, an entity with the game's own offer (a chest, a
   bench, a bed) or another mod's. The game picks one target near the crosshair.
 - EMF keeps the offer for the session (re-added when the entity streams in again); a new world forgets all: offer again
-  after a load. `offer_remove` takes yours off. Console: `offers.list`.
+  after a load. A spawned prop may stay in the save without its offer (seen in game): offer it again, don't spawn
+  another. `offer_remove` takes yours off. Console: `offers.list`.
 
 ## Lua
 

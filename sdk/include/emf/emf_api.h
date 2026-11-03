@@ -458,8 +458,8 @@ typedef struct EmfProgramDef {
 typedef struct EmfOffer {
     uint32_t size;      /* sizeof(EmfOffer) */
     uint32_t verb;      /* EMF_VERB_* (any loca tag id); 0 = "Use" */
-    const char* text;   /* or the mod's own words (UTF-8, at most 63 bytes): players without EMF see "Unknown Tag Id";
-                           NULL = verb */
+    const char* text;   /* or the mod's own words (UTF-8, at most 63 bytes): for now the prompt shows no word ("E"
+                           alone; it still works); NULL = verb */
     uint32_t sequence;  /* EMF_SEQUENCE_*; 0 = EMF_SEQUENCE_TOUCH */
     uint8_t range_m;    /* the game considers it when a player is this near; 0 = 32 */
     uint8_t flags;      /* EMF_OFFER_* */
@@ -885,7 +885,8 @@ typedef struct EmfApi {
 
     /* ---- v25: E prompts (EmfOffer above; reference.md "v25") ---- */
     /* Spawns a template (spawn_ex's rules: from a world callback on the server world) with an offer on it. The entity
-     * id, or 0 (logged). Spawned entities are not saved: spawn it again after a load. */
+     * id, or 0 (logged). A spawned prop may stay in the world save, without its offer: after a load, offer it again
+     * rather than spawning a second one. */
     uint32_t (*spawn_offer)(EmfWorld* world, const uint8_t template_guid[16], double x, double y, double z,
                             const EmfOffer* offer, EmfOfferCallback cb, void* user);
     /* Puts an offer on an entity of the server world (from a world callback on it): it shows after a few steps. Refused
