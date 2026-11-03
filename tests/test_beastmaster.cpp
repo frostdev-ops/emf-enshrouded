@@ -1294,7 +1294,7 @@ TEST_CASE("stable: before a stable any beast can be called; after it only active
     b.seconds(1);
     CHECK(b.saved().find("s 1") != std::string::npos);
     b.seconds(11);
-    CHECK(b.reply("beastmaster.call Rex") == "Rex is in the stable: make it active at a stable.");
+    CHECK(b.reply("beastmaster.call Rex") == "Rex is in the stable: make it active at a stable (an animal bed in your base).");
     CHECK(b.reply("beastmaster.call Tusk").find("comes") != std::string::npos);
     press(b, VK_F3);
     REQUIRE(b.r.fake.wheels.size() == 1);
@@ -1423,6 +1423,75 @@ TEST_CASE("stable: a release asked before the world loaded again needs asking ag
     b.seconds(1);
     CHECK(b.reply("beastmaster.release Hog", 2, 0xBB).rfind("Type the same command again", 0) == 0);
     CHECK(b.saved().find("Hog") != std::string::npos);
+}
+
+TEST_CASE("stable: a bed out of the host's sight still counts while the server world has it; a guest uses it there") {
+    BeastRig b;
+    write(b.data, "b 0x00000000000000bb wolf 0 0 Grey\nb 0x00000000000000bb boar 0 0 Hog\n"
+                  "a 0x00000000000000bb Grey\ns 1\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    flame_altar(b, 900, 30, 0);
+    stable_prop(b, 961, 33, 10, 0, nullptr);  // the bed; its model is on the client world while the host sees it
+    const auto model = guid_bytes(kStableModel);
+    bool seen = true;
+    auto step_both = [&](int secs) {
+        for (int i = 0; i < secs * 60; ++i) {
+            if (seen) b.r.fake.templates[{ecs::ModelResource::kHash, 961}] = model;
+            b.host->tick(kClient);
+            b.r.fake.templates.erase({ecs::ModelResource::kHash, 961});
+            b.r.fake.tick += 1;
+            b.host->tick(kServer);
+        }
+    };
+    step_both(10);
+    REQUIRE(b.reply("beastmaster.stable list").find("1. Animal bed at 33, 10, 0") != std::string::npos);
+    place(b.r.fake, 1, 600, 10, 0);  // the host goes far away: the client world no longer shows the bed
+    seen = false;
+    step_both(40);
+    CHECK(b.reply("beastmaster.stable list").find("1. Animal bed at 33, 10, 0") != std::string::npos);
+    CHECK(b.reply("beastmaster.active Hog", 2, 0xBB) == "Hog is active.");  // the guest beside it
+    remove_entity(b.r.fake, 961);  // taken down while the host is away: gone at the server world's next search
+    step_both(35);
+    CHECK(b.reply("beastmaster.stable list").rfind("No stable in this world now", 0) == 0);
+}
+
+TEST_CASE("stable: before the world has a stable the wheel says what to build; a stored beast's refusal says what a stable is") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    press(b, VK_F3);
+    REQUIRE(b.r.fake.wheels.size() == 1);
+    const int hint = index_of(b.r.fake.wheels[0].items, "Stable: animal bed");
+    REQUIRE(hint >= 0);
+    b.r.fake.wheels[0].cb(kClient, hint, b.r.fake.wheels[0].user);
+    b.seconds(1);
+    CHECK(noted(b, "Build an animal bed (the straw bed for farm animals) in your base"));
+    three_beasts(b);  // a world that has had a stable; Tusk is stored
+    at_stable(b);
+    b.seconds(1);
+    b.r.fake.wheels.clear();
+    press(b, VK_F3);
+    REQUIRE(b.r.fake.wheels.size() == 1);
+    CHECK(index_of(b.r.fake.wheels[0].items, "Stable: animal bed") < 0);
+    CHECK(b.reply("beastmaster.call Tusk") ==
+          "Tusk is in the stable: make it active at a stable (an animal bed in your base).");
+}
+
+TEST_CASE("stable: a player whose level cannot be read yet keeps their beasts out (no slot trimming on a level of 0)") {
+    BeastRig b;
+    set_level(b, 1, 25);  // three slots
+    write(b.data, "b 0x00000000000000aa wolf 0 1 Fang\nb 0x00000000000000aa boar 0 1 Tusk\n"
+                  "b 0x00000000000000aa hound 0 1 Rex\n");
+    b.spawnable(3);
+    b.r.fake.components.erase({ecs::Level::kHash, 1});  // not there yet (a player who just joined or loaded)
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(3);
+    CHECK(b.r.fake.spawns.size() == 3);
+    CHECK(b.reply("beastmaster.list").find("goes home") == std::string::npos);
+    set_level(b, 1, 25);
+    b.seconds(2);
+    CHECK(b.reply("beastmaster.list").find("3. Rex - hound, loyalty 1, out") != std::string::npos);
 }
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
     BeastRig b;

@@ -5,9 +5,11 @@
 --     "k <x> <y> <z> <model or ->" in the world's data, until the host takes the mark off.
 -- The server world is searched a slice at a time (SCAN_PER_STEP entities per step, a new search every RESCAN_S
 -- seconds) for flame altars and props with a stable's model. Render models are client-side: on the host the client
--- world is searched for the models too, every CLIENT_RESCAN_S (a bed just built counts within seconds, one taken down
--- stops counting as fast), and its beds count by their place; a dedicated server has no client world, so there only
--- marked props count unless its server world has the model.
+-- world is searched for the models too, every CLIENT_RESCAN_S (a bed just built counts within seconds), and its beds
+-- count by their place. A bed the client world no longer shows is kept while the server world has an entity at its
+-- place (the host may just be too far away to see it), unless the host is within CLIENT_SEE_M of it (then it was taken
+-- down, and stops counting as fast). A dedicated server has no client world, so there only marked props count unless
+-- its server world has the model.
 local aim = require("aim")
 
 local M = {}
@@ -30,6 +32,7 @@ local MARK_NEAR_M = 3      -- m: mark without camera data takes the nearest prop
 local PROP_HEIGHT = 1      -- m: the point of a prop the crosshair aims at, above its position
 local KEY_RAY_M = 1        -- under_crosshair: the crosshair passes within this of a stable's middle
 local CLIENT_STEPS = 180   -- the client world stepping this often without a server step: someone else's game
+local CLIENT_SEE_M = 40    -- m: a bed this close to the host that the client world does not show is gone
 
 local function dist(a, x, y, z) return math.sqrt((a.x - x) ^ 2 + (a.y - y) ^ 2 + (a.z - z) ^ 2) end
 local function round(v) return math.floor(v + 0.5) end
@@ -130,12 +133,24 @@ function S:count()
 end
 
 function S:walk_step(world)
-	if not self.walk then self.walk = { ids = world:entities(), i = 1, found = {}, altars = {}, present = {} } end
+	if not self.walk then
+		local beds = {}  -- the client world's beds when this search began: which have an entity at their place here
+		for id in pairs(self.client_models) do beds[id] = false end
+		self.walk = { ids = world:entities(), i = 1, found = {}, altars = {}, beds = beds }
+	end
 	local w = self.walk
 	local last = math.min(#w.ids, w.i + SCAN_PER_STEP - 1)
 	for k = w.i, last do
 		local id = w.ids[k]
-		w.present[id] = true
+		if next(w.beds) then
+			local x, y, z = world:position(id)
+			if x then
+				for bed, seen in pairs(w.beds) do
+					local c = self.client_models[bed]
+					if not seen and c and dist(c, x, y, z) <= SAME_M then w.beds[bed] = true end
+				end
+			end
+		end
 		local ok, base = pcall(world.get, world, "BaseIdComponent", id)
 		if ok and base and not base.wasAbandoned then  -- an abandoned flame altar makes no base
 			local x, _, z = world:position(id)
@@ -151,6 +166,9 @@ function S:walk_step(world)
 	w.i = last + 1
 	if w.i <= #w.ids then return end
 	self.altars, self.server_found = w.altars, w.found
+	for bed, seen in pairs(w.beds) do  -- no entity at its place on the server world: it is gone
+		if not seen then self.client_models[bed] = nil end
+	end
 	self.walk = nil
 	self.walk_after = self.t + RESCAN_S
 	self:refound(world)
@@ -211,15 +229,24 @@ function S:client_step(world)
 	end
 	w.i = last + 1
 	if w.i > #w.ids then
-		-- a bed built, taken down or moved: the server world is searched now (its end decides the stables again, with
-		-- this list)
+		-- a bed built, taken down (not shown with the host near it) or moved: the server world is searched now (its end
+		-- decides the stables again, with this list)
 		local changed = false
 		for id, c in pairs(w.models) do
 			local old = self.client_models[id]
 			if not old or old.model ~= c.model or dist(old, c.x, c.y, c.z) > SAME_M then changed = true end
 		end
-		for id in pairs(self.client_models) do
-			if not w.models[id] then changed = true end
+		local me = emf.local_player()
+		local hx, hy, hz
+		if me and me ~= 0 then hx, hy, hz = world:position(me) end
+		for id, old in pairs(self.client_models) do
+			if not w.models[id] then
+				if hx and dist(old, hx, hy, hz) <= CLIENT_SEE_M then
+					changed = true
+				else
+					w.models[id] = old  -- out of the host's sight: the server world's search decides
+				end
+			end
 		end
 		self.client_models = w.models
 		if changed and not self.walk then self.walk_after = 0 end

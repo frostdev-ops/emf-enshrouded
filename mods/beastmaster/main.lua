@@ -46,9 +46,12 @@ local function level_of(world, player)
 	return l and l.dataStorage and l.dataStorage[1] or 0
 end
 
--- How many beasts `player` may have out at once: their active slots.
+-- How many beasts `player` may have out at once: their active slots; nil while their level cannot be read (0: a
+-- player who just joined or loaded).
 local function open_slots(world, player)
-	return slots.unlocked(level_of(world, player), setting)
+	local level = level_of(world, player)
+	if level <= 0 then return nil end
+	return slots.unlocked(level, setting)
 end
 
 local function save()
@@ -134,7 +137,7 @@ function stable_do.make_active(world, account, player, b)
 	for _, x in ipairs(beasts:list(account)) do
 		if x.active then n = n + 1 end
 	end
-	if n >= open_slots(world, player) then return "No free active slot: store a beast first." end
+	if n >= (open_slots(world, player) or 1) then return "No free active slot: store a beast first." end
 	b.active = true
 	save()
 	return b.name .. " is active."
@@ -214,7 +217,7 @@ taming = tame_mod.new({
 		pack:adopt(account, b, id, world)
 		-- it takes a free slot; with none free it leaves (to the stable once the world has had one, else home)
 		local said = string.format("You tamed %s: %s", species.a(sp), b.name)
-		local open = open_slots(world, player)
+		local open = open_slots(world, player) or math.huge  -- a level not read yet: it stays
 		if beasts:stabled() then
 			local active = 0
 			for _, x in ipairs(beasts:list(account)) do
@@ -280,6 +283,16 @@ local ATTACK_RANGE_M, HIT_MEMORY_S = 40, 10
 function actions.come_back(world, player, account)
 	if not account then return "Your account is not known yet." end
 	return pack:come_back(world, account, player)
+end
+
+-- The wheel's stable item (while the world has no stable): what to build.
+function actions.stable_hint(world, player, account)
+	if beasts:stabled() then
+		return "Your world's stables are gone: build an animal bed (the straw bed for farm animals) in your base, and " ..
+			"press E at it to choose your active beasts."
+	end
+	return "Build an animal bed (the straw bed for farm animals) in your base: press E at it to choose your active " ..
+		"beasts. Until your world has one, you can call any beast, as many at once as your active slots."
 end
 
 function actions.attack(world, player, account)
@@ -479,6 +492,7 @@ local function wheel_items(world)
 	add("Feed (bait)", { action = "feed" })
 	add("Attack", { action = "attack" })
 	if account then add("Mode: " .. beasts:mode(account):gsub("^%l", string.upper), { action = "mode" }) end
+	if stables:count() == 0 then add("Stable: animal bed", { action = "stable_hint" }) end
 	if account and pack:aside_by_command(account) then add("Come back", { action = "come_back" }) end
 	local list = account and beasts:list(account) or {}
 	local out = 0
@@ -602,7 +616,7 @@ on_first_stable = function(world)
 	if beasts:stabled() then return end
 	beasts:set_stabled()
 	for _, account in ipairs(beasts:accounts()) do
-		local open = open_slots(world, pack:owner(world, account))
+		local open = open_slots(world, pack:owner(world, account)) or 1
 		local n = 0
 		for _, b in ipairs(beasts:list(account)) do
 			if b.out and n < open then

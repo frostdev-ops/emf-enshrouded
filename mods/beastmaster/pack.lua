@@ -220,10 +220,10 @@ function P:call(world, owner, account, beast)
 	local busy, busy_why = self.aside:building(world, account, owner, self.env.now(world), self:spots(account))
 	if busy then return waits(busy_why, "call again") end
 	if self.env.stabled() and not beast.active then
-		return beast.name .. " is in the stable: make it active at a stable."
+		return beast.name .. " is in the stable: make it active at a stable (an animal bed in your base)."
 	end
 	if beast.rest > 0 then return string.format("%s rests for %s.", beast.name, mmss(beast.rest)) end
-	local n, max = self:out_count(account), self.env.slots(world, owner)
+	local n, max = self:out_count(account), self.env.slots(world, owner) or 1
 	if n >= max then
 		return string.format("You have %s out (%s): dismiss one first.", plural(n, "beast"), plural(max, "active slot"))
 	end
@@ -303,16 +303,17 @@ end
 
 -- The beasts out fit the owner's active slots: once the world has had a stable only active beasts stay out, and
 -- never more than the slots (the first in list order stay; a save from before the slots, or a slot setting raised).
+-- While the owner's level cannot be read (slots nil) the number out is left as it is.
 function P:fit_slots(world, account, owner)
 	local max = self.env.slots(world, owner)
 	local stabled = self.env.stabled()
 	local out = 0
 	for _, b in ipairs(self.env.beasts():list(account)) do
 		if b.out then
-			if (stabled and not b.active) or out >= max then
+			if (stabled and not b.active) or (max and out >= max) then
 				self:dismiss(world, account, b)
 				self.env.tell(world, owner, string.format("%s goes home: %s.", b.name,
-					stabled and not b.active and "it is in the stable" or plural(max, "active slot")))
+					(stabled and not b.active) and "it is in the stable" or plural(max, "active slot")))
 			else
 				out = out + 1
 			end
