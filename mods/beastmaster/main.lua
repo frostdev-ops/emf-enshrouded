@@ -10,6 +10,7 @@ local wild_mod = require("wild")
 local rare_mod = require("rare")
 local loyalty = require("loyalty")
 local slots = require("slots")
+local stable_mod = require("stable")
 
 emf.emits({ "StartGuardingEvent", "AddThreatTargetEvent" })
 
@@ -32,8 +33,14 @@ local function now(world)
 	return world:tick() / 60
 end
 
+-- the stables in the world (built ones and the host's marks; the marks are kept with the world)
+local stables = stable_mod.new({ now = now, log = emf.log })
+
 local function save()
-	if loaded then emf.save_world_data(beasts:serialize()) end
+	if not loaded then return end
+	local text, marks = beasts:serialize(), stables:serialize()
+	if marks ~= "" then text = text ~= "" and (text .. "\n" .. marks) or marks end
+	emf.save_world_data(text)
 end
 
 -- tougher beasts, watched from their spawn: a wild one by its species' health_mul (the wild bear: 2.5x health), a
@@ -62,6 +69,7 @@ local rare = rare_mod.new()
 
 emf.on_world_data(function(world, text)
 	beasts = roster.parse(text)
+	stables:load(text)
 	pack:reset()
 	health:reset()
 	wild:reset()
@@ -443,7 +451,11 @@ emf.on_event("EntityDiedEvent", function(world, e)
 end)
 
 emf.on_tick(function(world)
-	if not world:is_server() then return end
+	if not world:is_server() then
+		if world:is_client() then stables:client_step(world) end
+		return
+	end
+	stables:step(world)
 	taming:step(world)
 	pack:step(world)
 	wild:step(world)
@@ -456,6 +468,26 @@ emf.on_tick(function(world)
 		emf.notify(actions[p.action](world, player, account, p.key))
 	end
 	update_hud(world)
+end)
+
+-- Host and admins: the stables (a prop marked as one, the mark taken off, the list).
+emf.command("stable", "mark | unmark | list: the prop you look at is a stable; the marked prop nearest you is not; " ..
+	"this world's stables (host and admins)", function(world, args)
+	local word = args[1] and args[1]:lower() or "list"
+	local player = who(world)
+	if word == "mark" or word == "unmark" then
+		if not loaded then
+			emf.reply("This world's data is not loaded yet; try again in a moment.")
+			return
+		end
+		local count = #stables.marks
+		emf.reply(word == "mark" and stables:mark(world, player) or stables:unmark(world, player))
+		if #stables.marks ~= count then save() end
+	elseif word == "list" then
+		emf.reply(stables:list_text(world, player))
+	else
+		emf.reply("beastmaster.stable mark | unmark | list")
+	end
 end)
 
 -- Admin: set a beast's loyalty (console only, not from the chat; for tests and live checks).

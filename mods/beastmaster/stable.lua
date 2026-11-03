@@ -1,0 +1,305 @@
+-- Stables: the props Beastmaster counts as a stable.
+--   - a built prop whose render model is in M.MODELS, within BASE_M (horizontally) of a flame altar that is not
+--     abandoned (players build only in a base; villages and ruins may have the same model);
+--   - a prop the host marked (beastmaster.stable mark): kept with the world by its place and model, as lines
+--     "k <x> <y> <z> <model or ->" in the world's data, until the host takes the mark off.
+-- The server world is searched a slice at a time (SCAN_PER_STEP entities per step, a new search every RESCAN_S
+-- seconds). Render models are client-side: on the host the client world is searched for the models too (the host's two
+-- worlds share entity ids); a dedicated server has no client world, so there only marked props count unless its server
+-- world has the model.
+local aim = require("aim")
+
+local M = {}
+
+-- The render model of the object players build as a stable, and the name the list shows for it.
+M.MODELS = { ["b5ab1e00-0000-4000-8000-000000000001"] = "Stable" }
+
+local SCAN_PER_STEP = 250  -- entities looked at per step while a world is searched
+local RESCAN_S = 30        -- s between two searches (a new stable counts within a minute)
+local BASE_M = 80          -- m: a built stable is within this of a flame altar (horizontally)
+local SAME_M = 1           -- m: two places within this are one
+local MARK_REACH_M = 8     -- m: mark and unmark reach this far
+local MARK_NEAR_M = 3      -- m: mark without camera data takes the nearest prop this close
+local PROP_HEIGHT = 1      -- m: the point of a prop the crosshair aims at, above its position
+local KEY_RAY_M = 1        -- under_crosshair: the crosshair passes within this of a stable's middle
+local CLIENT_STEPS = 180   -- the client world stepping this often without a server step: someone else's game
+
+local function dist(a, x, y, z) return math.sqrt((a.x - x) ^ 2 + (a.y - y) ^ 2 + (a.z - z) ^ 2) end
+local function round(v) return math.floor(v + 0.5) end
+
+local function has(world, component, id)
+	local ok, value = pcall(world.get, world, component, id)
+	return ok and value ~= nil
+end
+
+local function is_player(world, id)
+	return id >= 1 and id <= 1023 and has(world, "PlayerState", id)
+end
+
+-- The camera ray of `player`, or nil when the server has no camera for them.
+local function camera(world, player)
+	local ok, input = pcall(world.get, world, "PlayerInput", player)
+	if not ok or not input then return nil end
+	local q = input.fromClient.camera.orientation
+	if q.x == 0 and q.y == 0 and q.z == 0 and q.w == 0 then return nil end
+	return aim.ray(world, player)
+end
+
+local S = {}
+S.__index = S
+
+-- env: now(world) -> seconds; log(text); on_found(world) (optional): called after a search or a mark when the world
+-- has a stable.
+function M.new(env)
+	local s = setmetatable({ env = env, marks = {} }, S)
+	s:reset()
+	return s
+end
+
+-- A world (re)loaded: what was found is searched again.
+function S:reset()
+	self.walk, self.walk_after = nil, 0
+	self.cwalk, self.cwalk_after = nil, 0
+	self.client_models = {}  -- entity -> {model, x, y, z}: what the host's client world showed
+	self.client_steps = 0
+	self.found = {}          -- the built stables the last search found: {id, x, y, z}
+	self.t = 0               -- the server world's last time
+	self.stables = {}
+end
+
+-- The marks from the world's data.
+function S:load(text)
+	self.marks = {}
+	for line in (text or ""):gmatch("[^\r\n]+") do
+		local x, y, z, model = line:match("^k (%S+) (%S+) (%S+) (%S+)$")
+		if x and tonumber(x) and tonumber(y) and tonumber(z) then
+			self.marks[#self.marks + 1] = { x = tonumber(x), y = tonumber(y), z = tonumber(z), model = model }
+		end
+	end
+	self:reset()
+	self:rebuild()
+end
+
+function S:serialize()
+	local lines = {}
+	for _, m in ipairs(self.marks) do lines[#lines + 1] = string.format("k %.2f %.2f %.2f %s", m.x, m.y, m.z, m.model) end
+	return table.concat(lines, "\n")
+end
+
+-- The model of an entity's template: on this world, else what the host's client world showed for it at its place.
+function S:model_of(world, id)
+	local ok, t = pcall(world.template, world, "ModelResource", id)
+	if ok and t then return t.model end
+	local c = self.client_models[id]
+	if c then
+		local x, y, z = world:position(id)
+		if x and dist(c, x, y, z) <= SAME_M then return c.model end
+	end
+	return nil
+end
+
+-- The stables: the built ones found, then the marks (a mark on a built one counts once).
+function S:rebuild(world)
+	local list = {}
+	for _, f in ipairs(self.found) do
+		list[#list + 1] = { id = f.id, x = f.x, y = f.y, z = f.z, kind = "built", name = f.name }
+	end
+	for _, m in ipairs(self.marks) do
+		local twice = false
+		for _, b in ipairs(list) do
+			if dist(b, m.x, m.y, m.z) <= SAME_M then twice = true end
+		end
+		if not twice then list[#list + 1] = { x = m.x, y = m.y, z = m.z, kind = "mark" } end
+	end
+	self.stables = list
+	if world and #list > 0 and self.env.on_found then self.env.on_found(world) end
+end
+
+function S:count()
+	return #self.stables
+end
+
+function S:walk_step(world)
+	if not self.walk then self.walk = { ids = world:entities(), i = 1, found = {}, altars = {}, present = {} } end
+	local w = self.walk
+	local last = math.min(#w.ids, w.i + SCAN_PER_STEP - 1)
+	for k = w.i, last do
+		local id = w.ids[k]
+		w.present[id] = true
+		local ok, base = pcall(world.get, world, "BaseIdComponent", id)
+		if ok and base and not base.wasAbandoned then  -- an abandoned flame altar makes no base
+			local x, _, z = world:position(id)
+			if x then w.altars[#w.altars + 1] = { x = x, z = z } end
+		end
+		local model = self:model_of(world, id)
+		if model and M.MODELS[model] then
+			local x, y, z = world:position(id)
+			if x then w.found[#w.found + 1] = { id = id, x = x, y = y, z = z, name = M.MODELS[model] } end
+		end
+	end
+	w.i = last + 1
+	if w.i <= #w.ids then return end
+	for id in pairs(self.client_models) do  -- entities the server world no longer has
+		if not w.present[id] then self.client_models[id] = nil end
+	end
+	self.found = {}
+	for _, f in ipairs(w.found) do
+		for _, a in ipairs(w.altars) do
+			if (a.x - f.x) ^ 2 + (a.z - f.z) ^ 2 <= BASE_M * BASE_M then
+				self.found[#self.found + 1] = f
+				break
+			end
+		end
+	end
+	self.walk = nil
+	self.walk_after = self.t + RESCAN_S
+	self:rebuild(world)
+end
+
+-- Every step of the server world.
+function S:step(world)
+	self.t = self.env.now(world)
+	self.client_steps = 0
+	if self.walk or self.t >= self.walk_after then self:walk_step(world) end
+end
+
+-- Every step of a client world: on the host (its server world steps too) the stables' models are searched here.
+function S:client_step(world)
+	self.client_steps = self.client_steps + 1
+	if self.client_steps > CLIENT_STEPS then return end
+	if not self.cwalk then
+		if self.t < self.cwalk_after then return end
+		self.cwalk = { ids = world:entities(), i = 1, new = false }
+	end
+	local w = self.cwalk
+	local last = math.min(#w.ids, w.i + SCAN_PER_STEP - 1)
+	for k = w.i, last do
+		local id = w.ids[k]
+		local ok, t = pcall(world.template, world, "ModelResource", id)
+		if ok and t and M.MODELS[t.model] then
+			local x, y, z = world:position(id)
+			if x then
+				if not self.client_models[id] then w.new = true end
+				self.client_models[id] = { model = t.model, x = x, y = y, z = z }
+			end
+		end
+	end
+	w.i = last + 1
+	if w.i > #w.ids then
+		if w.new and not self.walk then self.walk_after = 0 end  -- a new one: the server world is searched next step
+		self.cwalk = nil
+		self.cwalk_after = self.t + RESCAN_S
+	end
+end
+
+-- The stable nearest to `player` within `range` metres, or nil.
+function S:near(world, player, range)
+	local x, y, z = world:position(player)
+	if not x then return nil end
+	local best, best_d = nil, range
+	for _, b in ipairs(self.stables) do
+		local d = dist(b, x, y, z)
+		if d <= best_d then best, best_d = b, d end
+	end
+	return best
+end
+
+-- The stable under `player`'s crosshair within `range` metres: the camera ray passes within KEY_RAY_M of its middle
+-- (PROP_HEIGHT above its place), the nearest to the ray. No camera: the nearest stable within range. nil when none.
+function S:under_crosshair(world, player, range)
+	local px, py, pz = world:position(player)
+	if not px then return nil end
+	local ray = camera(world, player)
+	if not ray then return self:near(world, player, range) end
+	local best, best_perp
+	for _, b in ipairs(self.stables) do
+		if dist(b, px, py, pz) <= range then
+			local vx, vy, vz = b.x - ray.ox, b.y + PROP_HEIGHT - ray.oy, b.z - ray.oz
+			local t = vx * ray.dx + vy * ray.dy + vz * ray.dz
+			if t > 0 then
+				local ex, ey, ez = vx - ray.dx * t, vy - ray.dy * t, vz - ray.dz * t
+				local perp = math.sqrt(ex * ex + ey * ey + ez * ez)
+				if perp <= KEY_RAY_M and (not best or perp < best_perp) then best, best_perp = b, perp end
+			end
+		end
+	end
+	return best
+end
+
+-- The prop with a collider nearest to `player` within `range` metres (not a player), or nil.
+local function prop_nearest(world, player, range)
+	local px, py, pz = world:position(player)
+	if not px then return nil end
+	local best, best_d = nil, range
+	for _, id in ipairs(world:entities()) do
+		if id ~= player then
+			local x, y, z = world:position(id)
+			if x then
+				local d = math.sqrt((x - px) ^ 2 + (y - py) ^ 2 + (z - pz) ^ 2)
+				if d <= best_d and not is_player(world, id) and has(world, "StaticCollider", id) then best, best_d = id, d end
+			end
+		end
+	end
+	return best
+end
+
+-- beastmaster.stable mark: the prop `player` looks at (no camera data: the one beside them) is a stable. The reply.
+function S:mark(world, player)
+	if not player or player == 0 then return "Mark a stable from the chat in the game (no player here)." end
+	local id, nearest = nil, false
+	if camera(world, player) then
+		id = aim.pick(world, player, MARK_REACH_M, function(e)
+			return not is_player(world, e) and (has(world, "StaticCollider", e) or self:model_of(world, e) ~= nil)
+		end)
+	else
+		id = prop_nearest(world, player, MARK_NEAR_M)
+		nearest = id ~= nil
+	end
+	if not id then return "Look at a prop within 8 m (a post, a trough, a fence), or stand next to one, and try again." end
+	local x, y, z = world:position(id)
+	for _, b in ipairs(self.stables) do
+		if dist(b, x, y, z) <= SAME_M then return "That is a stable already." end
+	end
+	local model = self:model_of(world, id) or "-"
+	self.marks[#self.marks + 1] = { x = x, y = y, z = z, model = model }
+	self:rebuild(world)
+	self.env.log(string.format("prop %d at %d, %d, %d (model %s) marked as a stable", id, round(x), round(y), round(z), model))
+	if nearest then
+		return string.format("Marked: the prop nearest to you (at %d, %d, %d) is a stable now.", round(x), round(y), round(z))
+	end
+	return string.format("Marked: this prop is a stable now (at %d, %d, %d).", round(x), round(y), round(z))
+end
+
+-- beastmaster.stable unmark: the marked prop nearest to `player` is no stable. The reply.
+function S:unmark(world, player)
+	local x, y, z
+	if player and player ~= 0 then x, y, z = world:position(player) end
+	if not x then return "Unmark a stable from the chat in the game (no player here)." end
+	local best, best_d = nil, MARK_REACH_M
+	for i, m in ipairs(self.marks) do
+		local d = dist(m, x, y, z)
+		if d <= best_d then best, best_d = i, d end
+	end
+	if not best then return "No marked stable within 8 m." end
+	local m = table.remove(self.marks, best)
+	self:rebuild(world)
+	return string.format("Unmarked: the prop at %d, %d, %d is no stable now.", round(m.x), round(m.y), round(m.z))
+end
+
+-- beastmaster.stable list: this world's stables (the distance from `player` when there is one). The reply.
+function S:list_text(world, player)
+	if #self.stables == 0 then
+		return "No stable in this world yet: build one in your base, or mark a prop with beastmaster.stable mark " ..
+			"(a new one counts within a minute)."
+	end
+	local x, y, z
+	if player and player ~= 0 then x, y, z = world:position(player) end
+	local lines = {}
+	for i, b in ipairs(self.stables) do
+		lines[#lines + 1] = string.format("%d. %s at %d, %d, %d%s", i, b.kind == "built" and b.name or "marked prop",
+			round(b.x), round(b.y), round(b.z), x and string.format(" (%d m from you)", round(dist(b, x, y, z))) or "")
+	end
+	return table.concat(lines, "\n")
+end
+
+return M

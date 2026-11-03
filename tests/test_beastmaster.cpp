@@ -952,6 +952,83 @@ TEST_CASE("stable: one active slot at the start, more at levels 10, 20 and 30; a
     CHECK(off.reply("beastmaster.slots").find("Active slots: 2 (slot 4 at level 30)") != std::string::npos);
 }
 
+
+// The render model of the object players build as a stable (mods/beastmaster/stable.lua MODELS).
+constexpr const char* kStableModel = "b5ab1e00-0000-4000-8000-000000000001";
+// A flame altar (the heart of a base) at (x, 10, z).
+void flame_altar(BeastRig& b, uint32_t id, double x, double z) {
+    place(b.r.fake, id, x, 10, z);
+    component<ecs::BaseIdComponent>(b.r.fake, id);
+    add_entity(b.r.fake, id);
+}
+// A placed prop with a render model (the stable's by default; none: nullptr) at (x, y, z).
+void stable_prop(BeastRig& b, uint32_t id, double x, double y, double z, const char* model = kStableModel) {
+    place(b.r.fake, id, x, y, z);
+    if (model) b.r.fake.templates[{ecs::ModelResource::kHash, id}] = guid_bytes(model);
+    component<ecs::StaticCollider>(b.r.fake, id);
+    add_entity(b.r.fake, id);
+}
+
+TEST_CASE("stable: a built prop with the stable's model in a base is a stable; another prop, or one outside every base, is not") {
+    BeastRig b;
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 950, 5, 10, 0);
+    stable_prop(b, 951, 8, 10, 0, "91e2d4cc-01c9-4203-a92e-b08769364522");  // another prop in the base
+    stable_prop(b, 952, 300, 10, 0);                                         // a village's, far from every base
+    CHECK(b.reply("beastmaster.stable list").find("No stable in this world yet") != std::string::npos);
+    b.seconds(32);  // the next search of the world (one every 30 s)
+    const std::string list = b.reply("beastmaster.stable list");
+    CHECK(list.find("1. Stable at 5, 10, 0 (5 m from you)") != std::string::npos);
+    CHECK(list.find("300") == std::string::npos);
+    CHECK(list.find("2. ") == std::string::npos);
+}
+
+TEST_CASE("stable: on the host, a stable whose model only the client world has is found") {
+    BeastRig b;
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 950, 10, 10, 0);
+    // render models are client-side: the model is there while the host's client world steps, not on the server's
+    const auto model = b.r.fake.templates[{ecs::ModelResource::kHash, 950}];
+    for (int i = 0; i < 4; ++i) {
+        b.r.fake.templates[{ecs::ModelResource::kHash, 950}] = model;
+        b.host->tick(kClient);
+        b.r.fake.templates.erase({ecs::ModelResource::kHash, 950});
+        b.seconds(1);
+    }
+    CHECK(b.reply("beastmaster.stable list").find("1. Stable at 10, 10, 0") != std::string::npos);
+}
+
+TEST_CASE("stable: the host marks a prop as a stable, it is kept with the world and found again by place after a reload") {
+    BeastRig b;
+    stable_prop(b, 960, 0, 10, 5, nullptr);  // any prop (a post, a trough): its model unknown here
+    b.look(1, 0, 11.5, 0, 0);                // looking along +z at it
+    CHECK(b.reply("beastmaster.stable mark") == "Marked: this prop is a stable now (at 0, 10, 5).");
+    b.seconds(1);
+    CHECK(b.saved().find("k 0.00 10.00 5.00 -") != std::string::npos);
+    CHECK(b.reply("beastmaster.stable list").find("1. marked prop at 0, 10, 5 (5 m from you)") != std::string::npos);
+    b.r.fake.session = 2;  // a reload: the mark comes back with the world's data, by its place
+    fire_load(1);
+    b.seconds(1);
+    CHECK(b.reply("beastmaster.stable list").find("1. marked prop at 0, 10, 5") != std::string::npos);
+    CHECK(b.reply("beastmaster.stable mark") == "That is a stable already.");
+    b.look(1, 0, 11.5, 0, 180);  // looking away
+    CHECK(b.reply("beastmaster.stable mark").rfind("Look at a prop", 0) == 0);
+    for (const auto& c : b.r.fake.commands)  // the host's and admins' command, not every player's
+        if (c.name == "beastmaster.stable") CHECK(c.flags == 0u);
+}
+
+TEST_CASE("stable: unmark takes the mark off; without camera data mark takes the prop nearest the sender within 3 m") {
+    BeastRig b;
+    stable_prop(b, 960, 0, 10, 2, nullptr);  // 2 m from the host, whose camera the server does not know
+    CHECK(b.reply("beastmaster.stable mark") == "Marked: the prop nearest to you (at 0, 10, 2) is a stable now.");
+    CHECK(b.reply("beastmaster.stable unmark") == "Unmarked: the prop at 0, 10, 2 is no stable now.");
+    CHECK(b.reply("beastmaster.stable list").find("No stable in this world yet") != std::string::npos);
+    b.seconds(1);
+    CHECK(b.saved().find("k 0.00") == std::string::npos);
+    CHECK(b.reply("beastmaster.stable unmark") == "No marked stable within 8 m.");
+    place(b.r.fake, 960, 0, 10, 6);  // too far for a mark without camera data
+    CHECK(b.reply("beastmaster.stable mark").rfind("Look at a prop", 0) == 0);
+}
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
     BeastRig b;
     b.reply("beastmaster.give wolf");
