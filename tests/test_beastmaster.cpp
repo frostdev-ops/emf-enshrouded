@@ -3741,3 +3741,74 @@ TEST_CASE("threat: with no share for the beasts (both share settings 0) Beastmas
     CHECK(b.reply("beastmaster.threat") == "No monster is held.");
     CHECK(switches(b, 70));
 }
+
+// ---- the stable's E prompt (EMF API v25, Lua 1.14) ----
+namespace {
+size_t offers_on(BeastRig& b, uint32_t id) {
+    size_t n = 0;
+    for (const auto& o : b.r.fake.offers) n += o.entity == id;
+    return n;
+}
+const Fake::Off* last_offer(BeastRig& b, uint32_t id) {
+    for (auto it = b.r.fake.offers.rbegin(); it != b.r.fake.offers.rend(); ++it)
+        if (it->entity == id) return &*it;
+    return nullptr;
+}
+}  // namespace
+
+TEST_CASE("stable: every stable gets the game's E Open prompt on its server entity, again at every search; one taken down loses it") {
+    BeastRig b;
+    with_offers(b.r.api);  // a v25 core
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 950, 5, 10, 0);
+    b.seconds(32);  // the next search
+    REQUIRE(offers_on(b, 950) == 1u);
+    const Fake::Off* o = last_offer(b, 950);
+    CHECK(o->o.verb == EMF_VERB_OPEN);
+    CHECK(o->text.empty());
+    CHECK(o->world == kServer);
+    CHECK(offers_on(b, 900) == 0u);
+    b.seconds(30);
+    CHECK(offers_on(b, 950) == 2u);  // again at the next search (the game may have dropped it)
+    CHECK(b.r.fake.offers_removed.empty());
+    remove_entity(b.r.fake, 950);  // taken down
+    b.seconds(31);
+    CHECK(contains(b.r.fake.offers_removed, 950));
+}
+
+TEST_CASE("stable: a bed only the host's client world shows gets its prompt on the server entity at its place") {
+    BeastRig b;
+    with_offers(b.r.api);
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 951, 10, 10, 0, nullptr);  // the bed on the server world: no render model there
+    const auto model = guid_bytes(kStableModel);
+    auto step_both = [&](int secs) {
+        for (int i = 0; i < secs * 60; ++i) {
+            place(b.r.fake, 950, 10, 10, 0);  // the client world's entity of the same bed, with its model
+            b.r.fake.templates[{ecs::ModelResource::kHash, 950}] = model;
+            add_entity(b.r.fake, 950);
+            b.host->tick(kClient);
+            remove_entity(b.r.fake, 950);
+            b.r.fake.templates.erase({ecs::ModelResource::kHash, 950});
+            b.r.fake.tick += 1;
+            b.host->tick(kServer);
+        }
+    };
+    step_both(40);
+    REQUIRE(has(b.reply("beastmaster.stable list"), "1. Animal bed at 10, 10, 0"));
+    CHECK(offers_on(b, 951) >= 1u);
+    CHECK(offers_on(b, 950) == 0u);  // never the client world's id
+}
+
+TEST_CASE("stable: a marked prop gets its prompt at once, loses it when unmarked, and gets it back after a reload") {
+    BeastRig b;
+    with_offers(b.r.api);
+    at_stable(b);  // prop 960 marked
+    CHECK(offers_on(b, 960) == 1u);
+    b.r.fake.session = 2;  // the world loads again: the mark is found by its place
+    fire_load(1);
+    b.seconds(1);
+    CHECK(offers_on(b, 960) == 2u);
+    REQUIRE(b.reply("beastmaster.stable unmark").rfind("Unmarked", 0) == 0);
+    CHECK(contains(b.r.fake.offers_removed, 960));
+}

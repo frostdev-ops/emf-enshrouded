@@ -10,6 +10,10 @@
 -- place (the host may just be too far away to see it), unless the host is within CLIENT_SEE_M of it (then it was taken
 -- down, and stops counting as fast). A dedicated server has no client world, so there only marked props count unless
 -- its server world has the model.
+-- Each stable has the game's own "E Open" prompt (emf.offer, Lua 1.14) on its server-world entity: a bed the server
+-- world shows, its own; a bed only the client world shows, or a marked prop, the entity with a StaticCollider nearest its
+-- place (matched in the server world's search). The prompts are offered again after every search (the game drops one
+-- when its entity streams out) and taken off a stable that stops counting.
 local aim = require("aim")
 
 local M = {}
@@ -33,6 +37,7 @@ local PROP_HEIGHT = 1      -- m: the point of a prop the crosshair aims at, abov
 local KEY_RAY_M = 1        -- under_crosshair: the crosshair passes within this of a stable's middle
 local CLIENT_STEPS = 180   -- the client world stepping this often without a server step: someone else's game
 local CLIENT_SEE_M = 40    -- m: a bed this close to the host that the client world does not show is gone
+local OFFER = { verb = "Open" }  -- the prompt: "E Open" (the game's word; a text of our own shows no word)
 
 local function dist(a, x, y, z) return math.sqrt((a.x - x) ^ 2 + (a.y - y) ^ 2 + (a.z - z) ^ 2) end
 local function round(v) return math.floor(v + 0.5) end
@@ -59,7 +64,7 @@ local S = {}
 S.__index = S
 
 -- env: now(world) -> seconds; log(text); on_found(world) (optional): called after a search or a mark when the world
--- has a stable.
+-- has a stable; on_open(world, player, entity) (optional): a player pressed E at a stable's prompt.
 function M.new(env)
 	local s = setmetatable({ env = env, marks = {} }, S)
 	s:reset()
@@ -74,9 +79,11 @@ function S:reset()
 	self.client_steps = 0
 	self.altars = {}         -- the flame altars the last search of the server world found: {x, z}
 	self.server_found = {}   -- the props with a stable's model the server world itself showed: {id, x, y, z, name}
-	self.found = {}          -- the built stables (in a base): {id, x, y, z, name}
+	self.found = {}          -- the built stables (in a base): {id, x, y, z, name, entity}
 	self.t = 0               -- the server world's last time
 	self.stables = {}
+	self.client_server = {}  -- a client world bed's id -> the server world's entity at its place (for its prompt)
+	self.offered = {}        -- server entity -> true: a stable's prompt the game took
 end
 
 -- The marks from the world's data.
@@ -115,39 +122,81 @@ end
 function S:rebuild(world)
 	local list = {}
 	for _, f in ipairs(self.found) do
-		list[#list + 1] = { id = f.id, x = f.x, y = f.y, z = f.z, kind = "built", name = f.name }
+		list[#list + 1] = { id = f.id, x = f.x, y = f.y, z = f.z, kind = "built", name = f.name, entity = f.entity }
 	end
 	for _, m in ipairs(self.marks) do
 		local twice = false
 		for _, b in ipairs(list) do
 			if dist(b, m.x, m.y, m.z) <= SAME_M then twice = true end
 		end
-		if not twice then list[#list + 1] = { x = m.x, y = m.y, z = m.z, kind = "mark" } end
+		if not twice then list[#list + 1] = { x = m.x, y = m.y, z = m.z, kind = "mark", entity = m.entity } end
 	end
 	self.stables = list
+	if world then self:sync_offers(world) end
 	if world and #list > 0 and self.env.on_found then self.env.on_found(world) end
+end
+
+-- Every stable's prompt offered (again: an identical offer only replaces its function), and taken off the entities that
+-- are no stable now. Server world only.
+function S:sync_offers(world)
+	if not (emf.offer and world:is_server()) then return end
+	local want = {}
+	for _, b in ipairs(self.stables) do
+		if b.entity then want[b.entity] = true end
+	end
+	for id in pairs(want) do
+		local ok = emf.offer(world, id, OFFER, function(w, player, entity)
+			if self.env.on_open then self.env.on_open(w, player, entity) end
+		end)
+		self.offered[id] = ok or nil
+	end
+	for id in pairs(self.offered) do
+		if not want[id] then
+			emf.offer_remove(world, id)
+			self.offered[id] = nil
+		end
+	end
+end
+
+-- Whether stable `b` (from the list) has the game's prompt.
+function S:prompted(b)
+	return b ~= nil and b.entity ~= nil and self.offered[b.entity] == true
 end
 
 function S:count()
 	return #self.stables
 end
 
+-- A prompt's entity at a place: an entity with a StaticCollider, the nearest (`best` {id, d} so far, or nil).
+local function nearer(world, best, id, d)
+	if (best and d >= best.d) or is_player(world, id) or not has(world, "StaticCollider", id) then return best end
+	return { id = id, d = d }
+end
+
 function S:walk_step(world)
 	if not self.walk then
 		local beds = {}  -- the client world's beds when this search began: which have an entity at their place here
 		for id in pairs(self.client_models) do beds[id] = false end
-		self.walk = { ids = world:entities(), i = 1, found = {}, altars = {}, beds = beds }
+		self.walk = { ids = world:entities(), i = 1, found = {}, altars = {}, beds = beds, bed_at = {}, mark_at = {} }
 	end
 	local w = self.walk
 	local last = math.min(#w.ids, w.i + SCAN_PER_STEP - 1)
 	for k = w.i, last do
 		local id = w.ids[k]
-		if next(w.beds) then
+		if next(w.beds) or #self.marks > 0 then
 			local x, y, z = world:position(id)
 			if x then
-				for bed, seen in pairs(w.beds) do
+				for bed in pairs(w.beds) do
 					local c = self.client_models[bed]
-					if not seen and c and dist(c, x, y, z) <= SAME_M then w.beds[bed] = true end
+					local d = c and dist(c, x, y, z)
+					if d and d <= SAME_M then
+						w.beds[bed] = true
+						w.bed_at[bed] = nearer(world, w.bed_at[bed], id, d)
+					end
+				end
+				for _, m in ipairs(self.marks) do
+					local d = dist(m, x, y, z)
+					if d <= SAME_M then w.mark_at[m] = nearer(world, w.mark_at[m], id, d) end
 				end
 			end
 		end
@@ -169,6 +218,12 @@ function S:walk_step(world)
 	for bed, seen in pairs(w.beds) do  -- no entity at its place on the server world: it is gone
 		if not seen then self.client_models[bed] = nil end
 	end
+	self.client_server = {}
+	for bed, at in pairs(w.bed_at) do self.client_server[bed] = at.id end
+	for _, m in ipairs(self.marks) do
+		local at = w.mark_at[m]
+		m.entity = at and at.id or nil
+	end
 	self.walk = nil
 	self.walk_after = self.t + RESCAN_S
 	self:refound(world)
@@ -178,7 +233,9 @@ end
 -- base; then the list.
 function S:refound(world)
 	local all = {}
-	for _, f in ipairs(self.server_found) do all[#all + 1] = f end
+	for _, f in ipairs(self.server_found) do
+		all[#all + 1] = { id = f.id, x = f.x, y = f.y, z = f.z, name = f.name, entity = f.id }
+	end
 	local ids = {}
 	for id in pairs(self.client_models) do ids[#ids + 1] = id end
 	table.sort(ids)
@@ -188,7 +245,9 @@ function S:refound(world)
 		for _, f in ipairs(all) do
 			if dist(f, c.x, c.y, c.z) <= SAME_M then twice = true end
 		end
-		if not twice then all[#all + 1] = { id = id, x = c.x, y = c.y, z = c.z, name = M.MODELS[c.model] } end
+		if not twice then
+			all[#all + 1] = { id = id, x = c.x, y = c.y, z = c.z, name = M.MODELS[c.model], entity = self.client_server[id] }
+		end
 	end
 	self.found = {}
 	for _, f in ipairs(all) do
@@ -324,7 +383,7 @@ function S:mark(world, player)
 		if dist(b, x, y, z) <= SAME_M then return "That is a stable already." end
 	end
 	local model = self:model_of(world, id) or "-"
-	self.marks[#self.marks + 1] = { x = x, y = y, z = z, model = model }
+	self.marks[#self.marks + 1] = { x = x, y = y, z = z, model = model, entity = id }
 	self:rebuild(world)
 	self.env.log(string.format("prop %d at %d, %d, %d (model %s) marked as a stable", id, round(x), round(y), round(z), model))
 	if nearest then
