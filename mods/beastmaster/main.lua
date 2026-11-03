@@ -12,6 +12,7 @@ local loyalty = require("loyalty")
 local slots = require("slots")
 local stable_mod = require("stable")
 local window_mod = require("beasts_window")
+local talents = require("talents")
 
 emf.emits({ "StartGuardingEvent", "AddThreatTargetEvent" })
 
@@ -154,6 +155,26 @@ end
 function stable_do.release(world, account, b)
 	pack:release(world, account, b)
 	return b.name .. " is gone: you let it go."
+end
+
+local function plural(n, word)
+	return string.format("%d %s%s", n, word, n == 1 and "" or "s")
+end
+
+-- A talent point spent on `b` (talent `t`).
+function stable_do.spend(world, account, b, t)
+	local ok, said = talents.spend(b, t, setting("loyalty_pace"))
+	if ok then save() end
+	return said
+end
+
+-- Every talent point of `b` back, free.
+function stable_do.reset_talents(world, account, b)
+	if talents.spent(b) == 0 then return b.name .. " has no talent points spent." end
+	talents.reset(b)
+	save()
+	return string.format("%s's talents are reset: %s to spend.", b.name,
+		plural(talents.points(b, setting("loyalty_pace")), "point"))
 end
 
 -- the Beasts window (the host, at a stable)
@@ -410,6 +431,14 @@ end)
 local CHAT_STABLE_M = 10    -- within this of a stable
 local CHAT_CONFIRM_S = 10   -- release: the same command again within this
 
+-- Why `player` cannot act at a stable now (none within CHAT_STABLE_M), or nil.
+local function away_from_stable(world, player)
+	if player and stables:near(world, player, CHAT_STABLE_M) then return nil end
+	return string.format("Go to a stable (within %d m) to do that.", CHAT_STABLE_M)
+end
+
+local NO_BEAST = "No such beast (beastmaster.list shows yours)."
+
 local function stable_command(word, help, fn)
 	command(word, help, function(world, args)
 		local player, account = who(world)
@@ -419,11 +448,12 @@ local function stable_command(word, help, fn)
 		end
 		local b = beasts:find(account, table.concat(args, " "))
 		if not b then
-			emf.reply("No such beast (beastmaster.list shows yours).")
+			emf.reply(NO_BEAST)
 			return
 		end
-		if not (player and stables:near(world, player, CHAT_STABLE_M)) then
-			emf.reply(string.format("Go to a stable (within %d m) to do that.", CHAT_STABLE_M))
+		local away = away_from_stable(world, player)
+		if away then
+			emf.reply(away)
 			return
 		end
 		emf.reply(fn(world, player, account, b))
@@ -446,6 +476,63 @@ stable_command("release", "<name or number>: let a beast go for good (at a stabl
 		end
 		release_asked[account] = { name = b.name, at = t }
 		return string.format("Type the same command again within %d s to let %s go for good.", CHAT_CONFIRM_S, b.name)
+	end)
+
+-- Talents: listed anywhere; spent and reset at a stable (the Beasts window's beast tab does the same for the host).
+local function talents_text(b)
+	local lines = { string.format("%s's talents: %s", b.name, talents.summary(b, setting("loyalty_pace"))) }
+	for _, t in ipairs(talents.LIST) do lines[#lines + 1] = talents.row_text(b, t) end
+	return table.concat(lines, "\n")
+end
+
+command("talents", "<name or number> [reset]: a beast's talents; reset (at a stable): every point back, free",
+	function(world, args)
+		local player, account = who(world)
+		if not account then
+			emf.reply("Your account is not known yet.")
+			return
+		end
+		local reset = #args > 1 and args[#args]:lower() == "reset"
+		local key = table.concat(args, " ", 1, reset and #args - 1 or #args)
+		if key == "" then
+			emf.reply("/beastmaster talents <name or number> [reset]")
+			return
+		end
+		local b = beasts:find(account, key)
+		if not b then
+			emf.reply(NO_BEAST)
+			return
+		end
+		if not reset then
+			emf.reply(talents_text(b))
+			return
+		end
+		emf.reply(away_from_stable(world, player) or stable_do.reset_talents(world, account, b))
+	end)
+
+local TALENT_NAMES = {}
+for _, t in ipairs(talents.LIST) do TALENT_NAMES[#TALENT_NAMES + 1] = t.name end
+local WHICH_TALENT = string.format("A talent is %s or %s: /beastmaster talent <name or number> <talent>",
+	table.concat(TALENT_NAMES, ", ", 1, #TALENT_NAMES - 1), TALENT_NAMES[#TALENT_NAMES])
+
+command("talent", "<name or number> <talent>: spend a talent point (at a stable): strength, toughness, swiftness, second wind, ambush or guard",
+	function(world, args)
+		local player, account = who(world)
+		if not account then
+			emf.reply("Your account is not known yet.")
+			return
+		end
+		local key, t = talents.split(table.concat(args, " "))
+		if not t then
+			emf.reply(WHICH_TALENT)
+			return
+		end
+		local b = beasts:find(account, key)
+		if not b then
+			emf.reply(NO_BEAST)
+			return
+		end
+		emf.reply(away_from_stable(world, player) or stable_do.spend(world, account, b, t))
 	end)
 
 local WORDS_HELP = " (call takes a name or number; dismiss a name, a number, or nothing for all)"
@@ -673,7 +760,7 @@ emf.command("loyalty", "<name or number> <1-10>: set a beast's loyalty (admin)",
 	end
 	b.points = loyalty.points_for(n, setting("loyalty_pace"))
 	save()
-	emf.reply(string.format("%s's loyalty is now %d.", b.name, n))
+	emf.reply(string.format("%s's loyalty is now %d. Talents: %s.", b.name, n, talents.summary(b, setting("loyalty_pace"))))
 end)
 
 -- Admin: add a beast to your collection without taming it (console only, not from the chat).

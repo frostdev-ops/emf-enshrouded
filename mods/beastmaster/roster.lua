@@ -4,8 +4,11 @@
 --   y <account> <loyalty points> <name>   (a beast with points; none: 0)
 --   a <account> <name>                    (an active beast: in one of its owner's active slots)
 --   s 1                                   (the world has had a stable: from then on only active beasts are called)
+--   t <account> <talent:points,...> <name> (a beast's talent points spent: "strength:2,guard:1", talents.lua)
 -- account is world:account's text ("0x" + 16 hex digits); the name is last and may hold spaces. A player without an m
 -- line is defending.
+local talents = require("talents")
+
 local M = {}
 local R = {}
 R.__index = R
@@ -123,6 +126,8 @@ function R:serialize()
 		for _, b in ipairs(self.by[account]) do
 			if (b.points or 0) > 0 then lines[#lines + 1] = string.format("y %s %d %s", account, b.points, b.name) end
 			if b.active then lines[#lines + 1] = string.format("a %s %s", account, b.name) end
+			local spent = talents.format(b)
+			if spent then lines[#lines + 1] = string.format("t %s %s %s", account, spent, b.name) end
 		end
 	end
 	if self.has_stable then lines[#lines + 1] = "s 1" end
@@ -137,11 +142,15 @@ function M.parse(text)
 	local r = M.new()
 	local loyal = {}  -- y lines, applied once every beast is read
 	local active = {}  -- a lines, the same
+	local spent = {}   -- t lines, the same
 	for line in (text or ""):gmatch("[^\r\n]+") do
 		local y_account, points, y_name = line:match("^y (%S+) (%d+) (.+)$")
 		if y_account then loyal[#loyal + 1] = { y_account, tonumber(points), y_name } end
 		local a_account, a_name = line:match("^a (%S+) (.+)$")
 		if a_account then active[#active + 1] = { a_account, a_name } end
+		local t_account, t_points, t_name = line:match("^t (%S+) (%S+) (.+)$")
+		local t_spent = t_account and talents.parse(t_points)
+		if t_spent then spent[#spent + 1] = { t_account, t_spent, t_name } end  -- a field with no known talent: no line
 		if line == "s 1" then r.has_stable = true end
 		local m_account, mode = line:match("^m (%S+) (%S+)$")
 		if m_account then r:set_mode(m_account, mode) end
@@ -161,6 +170,11 @@ function M.parse(text)
 	for _, a in ipairs(active) do
 		for _, b in ipairs(r.by[a[1]] or {}) do
 			if b.name == a[2] then b.active = true end
+		end
+	end
+	for _, t in ipairs(spent) do
+		for _, b in ipairs(r.by[t[1]] or {}) do
+			if b.name == t[3] then b.talents = t[2] end
 		end
 	end
 	return r

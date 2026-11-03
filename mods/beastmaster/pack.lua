@@ -411,7 +411,9 @@ function P:gain(world, e)
 	self.env.save()
 	if after > before then
 		local owner = self:owner(world, e.account)
-		if owner then self.env.tell(world, owner, string.format("%s's loyalty grows: %d.", b.name, after)) end
+		if owner then
+			self.env.tell(world, owner, string.format("%s reached loyalty %d: a talent point to spend at a stable.", b.name, after))
+		end
 		if b.entity then self:strengthen(world, b.entity, b) end
 	end
 end

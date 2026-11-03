@@ -831,7 +831,7 @@ TEST_CASE("loyalty: the tenth point brings loyalty 2: the owner hears it, the be
         deliver(b.r.fake, "EntityDiedEvent", died_event(100 + i));
         b.seconds(1);
     }
-    CHECK(b.noted("Wolf's loyalty grows: 2."));
+    CHECK(b.noted("Wolf reached loyalty 2: a talent point to spend at a stable."));
     CHECK(b.reply("beastmaster.list").find("loyalty 2,") != std::string::npos);
     const double damage = 1.15 * (1 + 0.2 / 9);
     CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(damage));
@@ -2632,4 +2632,162 @@ TEST_CASE("wild beasts: a species_extra.lua beast with a pack comes as a wild be
     b.seconds(61);
     REQUIRE(b.r.fake.spawns.size() == 1);
     CHECK(guid_text(b.r.fake.spawns.back().guid) == kTrollTemplate);
+}
+
+// ---- talents: points from loyalty, spent at a stable, kept with the world ----
+namespace {
+bool has(const std::string& text, const std::string& part) { return text.find(part) != std::string::npos; }
+// Player 2's wolves Grey and Wolf 2 at loyalty 4 (60 points: 3 talent points each) from a save; a built stable 3 m from
+// player 2 (at 30, 10, 0).
+void guest_wolves(BeastRig& b) {
+    write(b.data, "b 0x00000000000000bb wolf 0 0 Grey\nb 0x00000000000000bb wolf 0 0 Wolf 2\n"
+                  "y 0x00000000000000bb 60 Grey\ny 0x00000000000000bb 60 Wolf 2\ns 1\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    flame_altar(b, 900, 30, 0);
+    stable_prop(b, 961, 33, 10, 0);
+    b.seconds(32);  // the next search of the world finds it
+}
+}  // namespace
+
+TEST_CASE("talent: a beast gets a point for each loyalty above 1; the new loyalty's note says so") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    CHECK(has(b.reply("beastmaster.talents Wolf"), "Wolf's talents: no points yet (one for each loyalty above 1)"));
+    for (uint32_t i = 0; i < 10; ++i) {
+        creature(b, 100 + i, 0, 10, kSkeletonFoe);
+        deliver(b.r.fake, "HitEvent", hit_event(1234, 100 + i));
+        deliver(b.r.fake, "EntityDiedEvent", died_event(100 + i));
+        b.seconds(1);
+    }
+    CHECK(b.noted("Wolf reached loyalty 2: a talent point to spend at a stable."));
+    const std::string list = b.reply("beastmaster talents Wolf");
+    CAPTURE(list);
+    CHECK(has(list, "Wolf's talents: 1 point (1 left)"));
+    for (const char* line : {"Strength 0/5: +4 % damage a point", "Toughness 0/5: +5 % health a point",
+                             "Swiftness 0/3: +4 % speed a point",
+                             "Second Wind 0/1: a killing blow leaves it at 20 % health, then 5 min before it works again",
+                             "Ambush 0/2: +50 % damage a point on its first hit in a fight",
+                             "Guard 0/2: no damage for the first 3 s of a fight (5 s with 2 points)"})
+        CHECK(has(list, line));
+    b.reply("beastmaster.loyalty Wolf 10");
+    CHECK(has(b.reply("beastmaster.talents 1"), "Wolf's talents: 9 points (9 left)"));
+}
+
+TEST_CASE("talent: spending and reset at a stable; refused away from one, when full or when no point is left") {
+    BeastRig b;
+    guest_wolves(b);
+    auto say = [&](const std::string& c) { return b.reply(c, 2, 0xBB); };
+    CHECK(say("beastmaster talent Grey strength") == "Grey: Strength 1/5, +4 % damage (2 points left).");
+    CHECK(say("beastmaster.talent Grey Strength") == "Grey: Strength 2/5, +8 % damage (1 point left).");
+    CHECK(say("beastmaster talent 1 STRENGTH") == "Grey: Strength 3/5, +12 % damage (0 points left).");
+    CHECK(say("beastmaster talent Grey toughness") == "Grey has no talent point left (3 of 3 spent).");
+    CHECK(has(say("beastmaster.talents Grey"), "Strength 3/5: +12 % damage"));
+    CHECK(say("beastmaster talents Grey reset") == "Grey's talents are reset: 3 points to spend.");
+    CHECK(has(say("beastmaster.talents Grey"), "Grey's talents: 3 points (3 left)"));
+    CHECK(say("beastmaster talent Wolf 2 second wind") ==
+          "Wolf 2: Second Wind 1/1, a killing blow leaves it at 20 % health, then 5 min before it works again "
+          "(2 points left).");
+    CHECK(say("beastmaster talent Wolf 2 Second_Wind") == "Wolf 2's Second Wind is full (1/1).");
+    CHECK(say("beastmaster talent Wolf 2 guard") == "Wolf 2: Guard 1/2, no damage for the first 3 s of a fight (1 point left).");
+    const std::string which = "A talent is Strength, Toughness, Swiftness, Second Wind, Ambush or Guard: /beastmaster talent "
+                              "<name or number> <talent>";
+    CHECK(say("beastmaster talent Grey shield") == which);
+    CHECK(say("beastmaster talent Grey") == which);
+    CHECK(say("beastmaster talent Nobody strength") == "No such beast (beastmaster.list shows yours).");
+    CHECK(say("beastmaster talents Nobody") == "No such beast (beastmaster.list shows yours).");
+    place(b.r.fake, 2, 60, 10, 0);  // 27 m from the stable
+    CHECK(say("beastmaster talent Grey ambush") == "Go to a stable (within 10 m) to do that.");
+    CHECK(say("beastmaster talents Grey reset") == "Go to a stable (within 10 m) to do that.");
+    CHECK(has(say("beastmaster talents Grey"), "Grey's talents: 3 points (3 left)"));  // a list anywhere
+}
+
+TEST_CASE("talent: spent points are kept with the world; a release forgets them, a rename keeps them; 1.6.0 and 1.2.0 saves load with none spent") {
+    BeastRig b;
+    // a Beastmaster 1.6.0 save: modes, beasts, loyalty, active flags, stabled, a mark
+    write(b.data, "m 0x00000000000000aa passive\nb 0x00000000000000aa wolf 0 0 Fang\nb 0x00000000000000aa boar 0 0 Tusk\n"
+                  "y 0x00000000000000aa 60 Fang\ny 0x00000000000000aa 30 Tusk\na 0x00000000000000aa Fang\ns 1\n"
+                  "k 50.00 10.00 50.00 -\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    const std::string list = b.reply("beastmaster.list");
+    CHECK(has(list, "1. Fang - wolf, loyalty 4, at home, active"));
+    CHECK(has(list, "2. Tusk - boar, loyalty 3, at home"));
+    CHECK(has(b.reply("beastmaster.talents Fang"), "Fang's talents: 3 points (3 left)"));
+    at_stable(b);
+    b.reply("beastmaster.talent Fang strength");
+    b.reply("beastmaster.talent Fang strength");
+    CHECK(b.reply("beastmaster.talent Fang guard") == "Fang: Guard 1/2, no damage for the first 3 s of a fight (0 points left).");
+    b.seconds(1);
+    const std::string saved = b.saved();
+    CAPTURE(saved);
+    for (const char* line : {"t 0x00000000000000aa strength:2,guard:1 Fang", "m 0x00000000000000aa passive",
+                             "y 0x00000000000000aa 60 Fang", "y 0x00000000000000aa 30 Tusk", "a 0x00000000000000aa Fang",
+                             "\ns 1", "k 50.00 10.00 50.00 -"})
+        CHECK(has(saved, line));
+    b.reply("beastmaster.rename Fang Rex");
+    CHECK(has(b.saved(), "t 0x00000000000000aa strength:2,guard:1 Rex"));
+    b.r.fake.session = 3;  // the world loads again
+    fire_load(1);
+    b.seconds(1);
+    const std::string again = b.reply("beastmaster.talents Rex");
+    CAPTURE(again);
+    CHECK(has(again, "Rex's talents: 3 points (0 left)"));
+    CHECK(has(again, "Strength 2/5: +8 % damage"));
+    CHECK(has(again, "Guard 1/2: no damage for the first 3 s of a fight"));
+    b.reply("beastmaster.release Rex");
+    CHECK(b.reply("beastmaster.release Rex") == "Rex is gone: you let it go.");
+    CHECK_FALSE(has(b.saved(), "\nt "));
+    // a Beastmaster 1.2.0 save: beasts only
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\n");
+    b.r.fake.session = 4;
+    fire_load(1);
+    b.seconds(1);
+    CHECK(has(b.reply("beastmaster.talents Fang"), "Fang's talents: no points yet"));
+    b.reply("beastmaster.mode aggressive");
+    b.seconds(1);
+    CHECK(has(b.saved(), "b 0x00000000000000aa wolf 0 0 Fang"));
+    CHECK_FALSE(has(b.saved(), "\nt "));
+}
+
+TEST_CASE("talent: points spent beyond loyalty stay; none can be spent; the list says how many too many") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.loyalty Wolf 4");
+    at_stable(b);
+    for (int i = 0; i < 3; ++i) b.reply("beastmaster.talent Wolf strength");
+    CHECK(b.reply("beastmaster.loyalty Wolf 2") ==
+          "Wolf's loyalty is now 2. Talents: 1 point (2 too many: reset to choose again).");
+    const std::string list = b.reply("beastmaster.talents Wolf");
+    CHECK(has(list, "Wolf's talents: 1 point (2 too many: reset to choose again)"));
+    CHECK(has(list, "Strength 3/5: +12 % damage"));
+    CHECK(b.reply("beastmaster.talent Wolf guard") == "Wolf has 2 talent points spent too many: reset to choose again.");
+    b.seconds(1);
+    CHECK(has(b.saved(), "t 0x00000000000000aa strength:3 Wolf"));
+    CHECK(b.reply("beastmaster.talents Wolf reset") == "Wolf's talents are reset: 1 point to spend.");
+}
+
+TEST_CASE("talent: t lines from another version: an unknown talent is skipped, a rank over the most is cut to it, a name with no beast is ignored") {
+    BeastRig b;
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\ny 0x00000000000000aa 450 Fang\n"
+                  "t 0x00000000000000aa strength:9,shield:2,guard:1 Fang\nt 0x00000000000000aa ambush:1 Nobody\n"
+                  "t 0x00000000000000aa nonsense Fang\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    const std::string list = b.reply("beastmaster.talents Fang");
+    CAPTURE(list);
+    CHECK(has(list, "Fang's talents: 9 points (3 left)"));
+    CHECK(has(list, "Strength 5/5: +20 % damage"));
+    CHECK(has(list, "Guard 1/2"));
+    b.reply("beastmaster.mode passive");  // a change: the world's data is written
+    b.seconds(1);
+    const std::string saved = b.saved();
+    CAPTURE(saved);
+    CHECK(has(saved, "t 0x00000000000000aa strength:5,guard:1 Fang"));
+    CHECK_FALSE(has(saved, "Nobody"));
+    CHECK_FALSE(has(saved, "shield"));
 }
