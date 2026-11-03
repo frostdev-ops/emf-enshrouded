@@ -127,6 +127,10 @@ void write_later(const std::wstring& path, const std::string& text, int step) {
     CloseHandle(h);
 }
 
+// The world-data files' clock in a rig: the fake world's time (60 ticks a second), so a save from a command reads the
+// world as stepping however long the test machine takes between two of its ticks.
+inline uint64_t rig_file_ms() { return g ? static_cast<uint64_t>(g->tick) * 1000 / 60 : 0; }
+
 // A shipped Lua mod copied into the rig's mods folder (its world data stays in the test's folder), its settings at
 // mod.json's defaults (plus `settings`), loaded, a world loaded (slot 1) and one second played.
 struct ModRig {
@@ -155,6 +159,7 @@ struct ModRig {
             DeleteFileW(others_data.back().c_str());
         }
         host = std::make_unique<Host>(&r.api, r.dir);
+        host->set_file_clock(&rig_file_ms);
         host->load_all();
         REQUIRE_MESSAGE(host->status(id) == "running", host->status(id));
         fire_load(1);

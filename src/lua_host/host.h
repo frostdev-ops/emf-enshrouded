@@ -42,6 +42,9 @@ public:
     // The clock (ms) of the scripts' chat line limit (emf.tell / emf.broadcast: 30 lines per 10 s) and of the 250 ms
     // time limit per call (default GetTickCount64; tests use a fake).
     void set_clock(std::function<uint64_t()> now_ms);
+    // The clock (ms) the scripts' world-data files tell by that the server world still steps (save_world_data works
+    // only within 2 s of its last step; default GetTickCount64; tests that step a fake world pass its time).
+    void set_file_clock(uint64_t (*now_ms)());
 
     struct Impl;
 

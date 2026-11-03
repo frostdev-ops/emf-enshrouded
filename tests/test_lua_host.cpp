@@ -392,6 +392,34 @@ TEST_CASE("lua host: world data: a reloaded script gets the saved text again; an
     DeleteFileW(two.c_str());
 }
 
+namespace {
+uint64_t g_file_ms = 0;
+uint64_t file_ms() { return g_file_ms; }
+}  // namespace
+
+TEST_CASE("lua host: world data: save_world_data goes by the files' clock: a save more than 2 s after the server world's last step is refused") {
+    Rig r(L"fileclock");
+    add_script(r.dir, "keeper", kKeeper);
+    const std::wstring file = r.dir + L"\\..\\config\\keeper\\0001.txt";
+    DeleteFileW(file.c_str());
+    Host host(&r.api, r.dir);
+    g_file_ms = 1000;
+    host.set_file_clock(&file_ms);
+    host.load_all();
+    fire_load(1);
+    host.tick(kServer);
+    host.tick(kServer);
+    g_file_ms = 3500;  // 2.5 s by the files' clock without a step of the server world (back in the menu, say)
+    r.run_command("keeper.save late");
+    REQUIRE(!r.fake.replies.empty());
+    CHECK(r.fake.replies.back() == "false");
+    host.tick(kServer);  // it steps again
+    r.run_command("keeper.save kills=3");
+    CHECK(r.fake.replies.back() == "true");
+    CHECK(read_file(file) == "kills=3");
+    DeleteFileW(file.c_str());
+}
+
 TEST_CASE("lua host: world data: a slow write of the world's data (a busy disk) does not count toward the time limit") {
     Rig r(L"slowsave");
     add_script(r.dir, "keeper",

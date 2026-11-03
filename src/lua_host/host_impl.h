@@ -130,6 +130,7 @@ struct Host::Impl {
     std::atomic<int> ws_hooked{0};                       // the core's on_world_setting_changed: 0 not asked, 1 on, -1 refused
     std::atomic<int> moves{0};                           // emf.move requests in flight (each holds one place in the item queue)
     std::function<uint64_t()> now_ms;                    // the clock of the chat limit and time limit (tests replace it)
+    uint64_t (*file_clock)() = nullptr;                  // the world-data files' clock (nullptr: GetTickCount64)
 
     Script* find(const std::string& id);
     bool load(Script& s);

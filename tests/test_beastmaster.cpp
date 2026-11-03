@@ -1414,6 +1414,16 @@ TEST_CASE("stable: chat release needs the same command again within 10 s") {
     CHECK(b.reply("beastmaster.release Hog", 2, 0xBB) == "No such beast (beastmaster.list shows yours).");
 }
 
+TEST_CASE("stable: a change saved more than 2 s of real time after the rig's last tick still lands (the rig's file clock)") {
+    // the flake this pins: the world-data file once went by the wall clock, so a slow test machine between two ticks
+    // made save_world_data refuse and the file kept the old text
+    BeastRig b;
+    guest_at_stable(b);
+    Sleep(2100);
+    CHECK(b.reply("beastmaster.active Hog", 2, 0xBB) == "Hog is active.");
+    CHECK(b.saved().find("a 0x00000000000000bb Hog") != std::string::npos);
+}
+
 TEST_CASE("stable: a release asked before the world loaded again needs asking again") {
     BeastRig b;
     guest_at_stable(b);

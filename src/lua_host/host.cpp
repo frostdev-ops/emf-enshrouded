@@ -801,6 +801,7 @@ void Host::load_all() {
     for (auto& s : h.scripts) {
         s->file = std::make_unique<emf::WorldFile>(s->id);
         s->file->set_dir(config + std::wstring(s->id.begin(), s->id.end()));
+        if (h.file_clock) s->file->set_clock(h.file_clock);
         s->file->attach(h.api);  // false without on_load: save_world_data then always answers false
     }
     for (auto& s : h.scripts) {
@@ -926,6 +927,12 @@ void Host::set_memory_limit(size_t bytes) { impl_->memory_limit = bytes; }
 void Host::set_key_reader(std::function<bool(uint32_t)> down) { impl_->key_down = std::move(down); }
 
 void Host::set_clock(std::function<uint64_t()> now_ms) { impl_->now_ms = std::move(now_ms); }
+
+void Host::set_file_clock(uint64_t (*now_ms)()) {
+    impl_->file_clock = now_ms;
+    for (auto& s : impl_->scripts)
+        if (s->file) s->file->set_clock(now_ms ? now_ms : &GetTickCount64);
+}
 
 size_t Host::script_count() const { return impl_->scripts.size(); }
 
