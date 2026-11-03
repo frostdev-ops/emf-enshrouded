@@ -8,7 +8,7 @@
   "emf": 14,
   "side": "server",
   "main": "main.lua",
-  "depends": {"lua": ">=1.9"},
+  "depends": {"lua": ">=1.12"},
   "settings": [
     {"key": "wheel_key", "type": "keybind", "default": "F3", "label": "Beast wheel (hold)", "live": true, "group": "Controls"},
     {"key": "shared_wheel", "type": "bool", "default": true, "label": "One wheel with Necromancer's undead (when both are installed)", "live": true, "group": "Controls"},

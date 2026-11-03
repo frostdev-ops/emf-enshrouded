@@ -711,21 +711,39 @@ TEST_CASE("loyalty: a tamed bear's health is its role (2.2x), not the wild bear'
     CHECK(now_of<ecs::ScaleComponent>(b, 1234).uniformScale == doctest::Approx(1.4));  // loyalty 1: its own size
 }
 
-TEST_CASE("loyalty: a bear grows with its loyalty (1.25x at 10); a beast without a ScaleComponent is left as it is") {
+namespace {
+// The size a spawn was given (spawn_ex's ScaleComponent), or -1 when none.
+float scale_given(const Fake::Spawn& sp) {
+    for (const auto& [hash, data] : sp.extra)
+        if (hash == ecs::ScaleComponent::kHash && data.size() >= sizeof(ecs::ScaleComponent))
+            return reinterpret_cast<const ecs::ScaleComponent*>(data.data())->uniformScale;
+    return -1.0f;
+}
+}  // namespace
+
+TEST_CASE("loyalty: a beast is called at its loyalty's size (a bear 1.4 x 1.25 at 10, a game wolf 1.25); at loyalty 1 its own") {
+    // the game draws a creature at the size it is made with: a ScaleComponent changed later is not drawn
     BeastRig b;
     b.reply("beastmaster.give bear");
     b.reply("beastmaster.loyalty Bear 10");
     next_beast(b, 1234, 1.4f);
     REQUIRE(b.reply("beastmaster.call Bear").find("comes") != std::string::npos);
-    b.seconds(1);
-    CHECK(now_of<ecs::ScaleComponent>(b, 1234).uniformScale == doctest::Approx(1.75));
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(scale_given(b.r.fake.spawns[0]) == doctest::Approx(1.75));
     b.reply("beastmaster.give wolf");
     b.reply("beastmaster.loyalty Wolf 10");
     next_beast(b, 1235);
     b.seconds(11);
     REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
-    b.seconds(1);
-    CHECK(b.r.fake.components.count({ecs::ScaleComponent::kHash, 1235u}) == 0);
+    REQUIRE(b.r.fake.spawns.size() == 2);
+    CHECK(scale_given(b.r.fake.spawns[1]) == doctest::Approx(1.25));  // the game's wolf grows too
+    b.reply("beastmaster.give boar");
+    b.reply("beastmaster.dismiss all");  // two out: the most
+    next_beast(b, 1236);
+    b.seconds(11);
+    REQUIRE(b.reply("beastmaster.call Boar").find("comes") != std::string::npos);
+    REQUIRE(b.r.fake.spawns.size() == 3);
+    CHECK(scale_given(b.r.fake.spawns[2]) == -1.0f);  // loyalty 1: as its template makes it
 }
 
 TEST_CASE("loyalty: a beast out follows its owner's level, also when the owner levels up") {

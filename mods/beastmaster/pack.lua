@@ -47,7 +47,7 @@ function P:reset()
 	self.refused = {}    -- beast -> checks in a row the game refused to bring it back
 	self.sent = {}       -- entity id -> until when Attack's order holds (a passive beast fights it until then)
 	self.recall = {}     -- entity id -> until when a beast that dropped a chase fights nothing
-	self.base = {}       -- entity id -> {damage, scale}: its template's damage multiplier and size, before role and loyalty
+	self.base = {}       -- entity id -> {damage, wrote}: its template's damage multiplier, and the one written
 	self.fought = {}     -- entity id -> when it last hit or was hit (it heals HEAL_AFTER_S after that)
 	self.hits = {}       -- hostile creature id -> {beast entity id -> when it hit it} (loyalty for the kill)
 	self.aside:reset()
@@ -117,7 +117,10 @@ function P:spawn(world, owner, account, beast)
 	if not sp then return nil, "unknown species " .. tostring(beast.species) end
 	local x, y, z = world:position(owner)
 	if not x then return nil, "your position is not known" end
-	local id = emf.spawn(world, sp.template, x + 2, y + 0.5, z)
+	-- its size from loyalty is given at the spawn: the game draws a creature at the size it is made with
+	local lvl = loyalty.level(beast.points, self.env.setting("loyalty_pace"))
+	local size = lvl > 1 and { ScaleComponent = { uniformScale = (sp.scale or 1) * loyalty.size(lvl) } } or nil
+	local id = emf.spawn(world, sp.template, x + 2, y + 0.5, z, size)
 	if not id or id == 0 then
 		if sp.pack then return nil, no_pack(sp), true end
 		return nil, "the game refused the call (see the log)", true
@@ -156,8 +159,8 @@ function P:keep_damage(world, id, beast)
 	end
 end
 
--- A beast out as strong as its role and loyalty: its health through the health watch (on_spawn with the multiplier),
--- its DamageMod multiplier and its ScaleComponent (when it has one) against its template's, kept from the first time.
+-- A beast out as strong as its role and loyalty: its health through the health watch (on_spawn with the multiplier) and
+-- its DamageMod multiplier against its template's, kept from the first time. (Its size is given at the spawn.)
 function P:strengthen(world, id, beast)
 	local sp = species.by_id(beast.species)
 	local role_health, role_damage = species.role(sp)
@@ -165,8 +168,8 @@ function P:strengthen(world, id, beast)
 	local f = loyalty.factor(lvl)
 	local base = self.base[id]
 	if not base then
-		local dm, sc = world:get("DamageMod", id), world:get("ScaleComponent", id)
-		base = { damage = dm and dm.dataStorage and dm.dataStorage[3] or nil, scale = sc and sc.uniformScale or nil }
+		local dm = world:get("DamageMod", id)
+		base = { damage = dm and dm.dataStorage and dm.dataStorage[3] or nil }
 		self.base[id] = base
 	end
 	if self.env.on_spawn then self.env.on_spawn(world, id, sp, role_health * f) end
@@ -175,8 +178,6 @@ function P:strengthen(world, id, beast)
 		base.wrote = base.damage * role_damage * f
 		dm.dataStorage[3] = base.wrote
 	end
-	local sc = base.scale and world:get("ScaleComponent", id)
-	if sc then sc.uniformScale = base.scale * loyalty.size(lvl) end
 end
 
 function P:adopt(account, beast, id, world)
