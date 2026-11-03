@@ -684,7 +684,9 @@ world; call as many as your active slots (1 at the start, more at levels 10, 20 
 a 10 s cooldown (`/beastmaster call <name>`). A stable (the game's animal bed in your base, or a prop the host
 marks with `beastmaster.stable mark`): press E at it for the Beasts window (Make active, Store, Release); once a world
 has one, only active beasts are called. Each loyalty above 1 gives a beast a talent point (Strength, Toughness,
-Swiftness, Second Wind, Ambush, Guard), spent on its tab of the Beasts window or with `/beastmaster talent`. Send them at
+Swiftness, Second Wind, Ambush, Guard, Menace, Taunt), spent on its tab of the Beasts window or with
+`/beastmaster talent`. Monsters in a fight split between you and your beasts (a tank 50 %, another beast 20 %, at
+most 90 %; a boss 35 %), keep a target at least 8 s, and at least 1 in 4 stay on you. Send them at
 what you look at (`/beastmaster attack`), dismiss one or all; a beast that falls rests 60 s. While you build,
 your beasts step aside and come back after (`/beastmaster aside` does it by hand). Your beasts' kills give you XP and
 loot. Hold **F3** for the beast wheel (the host; B is the game's backpack key); every player has `/beastmaster` in the

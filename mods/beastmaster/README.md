@@ -4,7 +4,8 @@ A Beastmaster class for Enshrouded. Tame wild wolves, boars, sabretooths, hounds
 your collection, and call as many to fight beside you as you have active slots (1 at the start, up to 4 as your character
 levels up). Build a stable to choose which beasts are active. They follow you, come back when they stray, rest after
 they fall, and are kept with the world. Their kills are yours: XP and loot. Loyal beasts earn talent points: make each
-one your own (stronger, tougher, faster, a second wind, an ambush, a guard).
+one your own (stronger, tougher, faster, a second wind, an ambush, a guard, a menace, a taunt). Monsters split between
+you and your beasts: a tank beast draws half of them.
 
 It needs the `lua` mod 1.13 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
 (the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs and the snake come in the **EMF creature packs**
@@ -125,14 +126,16 @@ the Beasts window (its **+** buttons), or `/beastmaster talent <name or number> 
 | Second Wind | | 1 | a killing blow leaves it at 20 % health instead; then 5 minutes before it works again |
 | Ambush | +50 % | 2 | its first hit on a foe in a fight deals that much more (a bonus that kills is your kill: XP and loot, with You get your beasts' kills on) |
 | Guard | 3 s, 5 s with 2 points | 2 | it takes no damage for the first seconds of a fight (the hit that starts it is healed back), once every 30 s |
+| Menace | +10 % of the monsters | 3 | it draws more of the monsters in a fight (see Monsters and your beasts) |
+| Taunt | | 2 | when a monster hits you within 10 m of it, it roars: the monsters of the fight within 10 m of it turn on it for 6 s; then 45 s before it roars again (30 s with 2 points) |
 
 A fight starts with the first hit to or from the beast after 10 s without any. A beast that is out gets Strength,
-Toughness, Swiftness and Second Wind at once, Ambush and Guard from its next fight. Talents act only while the beast is
-out. **Reset talents** (on its tab, or `/beastmaster talents <name or number> reset` at a stable) gives every point back,
-free, at once. When a beast has more points spent than its loyalty gives (its loyalty was set lower, or the Loyalty
-grows setting turned down), it keeps them, but no new point can be spent until a reset ("2 too many: reset to choose
-again"). A release forgets a beast's talents; a rename keeps them. The numbers are in one table at the top of
-`talents.lua`.
+Toughness, Swiftness, Second Wind, Menace and Taunt at once, Ambush and Guard from its next fight. Talents act only
+while the beast is out. **Reset talents** (on its tab, or `/beastmaster talents <name or number> reset` at a stable)
+gives every point back, free, at once. When a beast has more points spent than its loyalty gives (its loyalty was set
+lower, or the Loyalty grows setting turned down), it keeps them, but no new point can be spent until a reset ("2 too
+many: reset to choose again"). A release forgets a beast's talents; a rename keeps them. The numbers are in one table at
+the top of `talents.lua`.
 
 **The beast's tab** shows its kind and level (yours), its loyalty and the kills to the next, what its role, loyalty and
 talents make of its health, damage and speed ("Health x1.32, damage x1.27, speed x1.08"), whether it is out, at home or
@@ -167,6 +170,33 @@ never within 40 m of a flame altar. Beat it down or feed it its bait to tame it.
   | Golden king snake | 0.4 % | 1.25x | 4x / 1.8x | 4-6 | 25 % | 10 %, epic |
   | Albino snake | 0.25 % | 1.35x | 5x / 2.0x | 6-10 | 50 % | 25 %, legendary |
 
+## Monsters and your beasts
+
+Monsters in a fight with you or your beasts split between you and the beasts that are out. Each beast draws a share of
+them:
+
+| Beasts | Draws | With Menace (3 points) |
+|---|---|---|
+| Tanks: boar, bear, aurochs | 50 % | 80 % |
+| The others: wolf, hound, sabretooth, snakes | 20 % | 50 % |
+
+The shares of several beasts add up, at most 90 %; you keep the rest. Against a boss (or a mini-boss) your beasts draw
+at most 35 % in all. The beast's tab says what it draws ("Draws 50 % of the monsters in a fight").
+
+- **Who a monster goes for:** when it joins a fight with you or your beasts (it hits you or a beast, you or a beast hit
+  it, or it goes for you or a beast), it picks between you and your beasts within 30 m of it by those shares, a nearer
+  one weighing more.
+- **Groups split:** at least 1 in 4 of the monsters in a fight stay on you, however high the shares.
+- **No flip-flopping:** a monster keeps its target at least 8 s, then picks again. It picks again at once when its beast
+  falls, is sent home or is out of its reach; when none of your beasts is left near it, it is the game's again.
+- **Taunt** (a talent) sends the monsters near a beast at it for 6 s when one of them hits you; a boss in the middle of
+  an attack finishes it first (it stays on its target).
+- **Passive mode:** your beasts draw no monsters; the game decides alone.
+
+Beastmaster holds each monster's pick (the game's own target choice) on the target it chose, and gives the game its
+pick back when the fight ends for that monster, the beast falls, you leave, you switch to passive mode or turn **Beasts
+draw monsters** off. `beastmaster.threat` (console) lists the monsters held on you or your beasts now.
+
 ## Commands
 
 All of these work from the game's chat for every player (`/beastmaster <word>`), and in the console
@@ -192,6 +222,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while someone builds next to them |
 | `/beastmaster mode [passive, defending or aggressive]` | how all your beasts fight; without a word, the mode now |
 | `beastmaster.stable mark`, `unmark`, `list` | **host or admins:** the prop you look at (no camera data: the one within 3 m of you) is a stable; the marked prop nearest you (within 8 m) is no stable; this world's stables |
+| `beastmaster.threat` | **console:** the monsters held on you or your beasts now, and for how long |
 | `beastmaster.loyalty <name or number> <1-10>` | **host console only:** set a beast's loyalty (tests); the reply says its talent points |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
@@ -219,6 +250,10 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Aggressive beasts go at foes within (`aggro_m`) | 25 m | |
 | You get your beasts' kills (`xp_credit`) | on | XP and loot for the owner |
 | Beasts step aside while someone builds next to them (`make_room`) | on | while you, or a player within 20 m of them, hold something to build or place, your beasts leave and come back after |
+| Beasts draw monsters to them (`threat`) | on | off: monsters pick their targets as the game does |
+| A monster keeps its target at least (`threat_hold_s`) | 8 s | |
+| A tank (boar, bear, aurochs) draws, Another beast draws (`tank_share_pct`, `damage_share_pct`) | 50 %, 20 % | of the monsters in a fight, before Menace |
+| All your beasts draw at most (`beasts_share_max_pct`), Of a boss (`boss_share_max_pct`) | 90 %, 35 % | |
 | Rare wild bears, aurochs and snakes (`wild_bears`), About every (`wild_bear_minutes`) | on, 30 min | needs their pack |
 
 ## The bear pack (`emf_beastmaster_bear`)
@@ -298,4 +333,7 @@ does not ship this file.
   above.
 - Second Wind and Guard work through the game's minimum health of the beast (as the 5 s after a taming do); Swiftness
   through its Movement multiplier, the one value `SPEED_ENTRIES` in `talents.lua` names.
+- A monster's target is held through its `SelectedTargets` pick, written every server step with its target switches
+  (`DynamicAggro.allowTargetSwitches`) off; the game's threat event alone does not move a monster. A `species_extra.lua`
+  beast is a tank with `tank = true` in its entry.
 - Second Wind's 5 minutes are not kept with the world: after a reload it is ready again.
