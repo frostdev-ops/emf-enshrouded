@@ -2791,3 +2791,75 @@ TEST_CASE("talent: t lines from another version: an unknown talent is skipped, a
     CHECK_FALSE(has(saved, "Nobody"));
     CHECK_FALSE(has(saved, "shield"));
 }
+
+// ---- talents on a beast out: Strength, Toughness, Swiftness ----
+namespace {
+// Movement's storage [1] (C index): its multiplier, which Swiftness multiplies (mods/beastmaster/talents.lua
+// SPEED_ENTRIES).
+float speed_of(BeastRig& b, uint32_t id) { return now_of<ecs::Movement>(b, id).dataStorage[1]; }
+void one_step(BeastRig& b) {
+    b.r.fake.tick += 1;
+    b.host->tick(kServer);
+}
+}  // namespace
+
+TEST_CASE("talent: Strength and Toughness go on top of role and loyalty, at once on a beast out and on the next call") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.loyalty Wolf 3");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    at_stable(b);
+    b.seconds(1);
+    const double f = 1 + 2.0 / 9 * 0.2;  // loyalty 3
+    REQUIRE(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15 * f));
+    REQUIRE(now_of<ecs::Health>(b, 1234).dataStorage[3] == 25);  // 100 x 1.2 x f - 100, rounded
+    b.reply("beastmaster.talent Wolf strength");
+    b.reply("beastmaster.talent Wolf strength");
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15 * f * 1.08));  // at once
+    b.reply("beastmaster.talents Wolf reset");
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15 * f));
+    b.reply("beastmaster.talent Wolf toughness");
+    b.reply("beastmaster.talent Wolf strength");
+    one_step(b);
+    CHECK(now_of<ecs::Health>(b, 1234).dataStorage[3] == 32);  // 100 x 1.2 x f x 1.05 - 100, rounded
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15 * f * 1.04));
+    b.reply("beastmaster.dismiss Wolf");
+    next_beast(b, 1235);
+    b.seconds(11);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(1);
+    CHECK(now_of<ecs::Health>(b, 1235).dataStorage[3] == 32);
+    CHECK(now_of<ecs::DamageMod>(b, 1235).dataStorage[2] == doctest::Approx(1.15 * f * 1.04));
+}
+
+TEST_CASE("talent: Swiftness multiplies the Movement multiplier, kept when the game writes it again; reset gives the game's value back; no Swiftness leaves Movement alone") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give boar");
+    b.reply("beastmaster.loyalty Wolf 4");
+    next_beast(b, 1234);
+    component<ecs::Movement>(b.r.fake, 1234).dataStorage[1] = 1.0f;
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    at_stable(b);
+    b.seconds(1);
+    CHECK(speed_of(b, 1234) == 1.0f);  // no Swiftness yet: as the game made it
+    for (int i = 0; i < 3; ++i) b.reply("beastmaster.talent Wolf swiftness");
+    CHECK(speed_of(b, 1234) == doctest::Approx(1.12));  // at once
+    live_of<ecs::Movement>(b, 1234).dataStorage[1] = 0.5f;  // the game writes it anew
+    one_step(b);
+    CHECK(speed_of(b, 1234) == doctest::Approx(0.56));
+    b.seconds(2);
+    CHECK(speed_of(b, 1234) == doctest::Approx(0.56));  // not again on top of itself
+    b.reply("beastmaster.talents Wolf reset");
+    CHECK(speed_of(b, 1234) == doctest::Approx(0.5));
+    live_of<ecs::Movement>(b, 1234).dataStorage[1] = 0.8f;  // the game's own from now on
+    b.seconds(2);
+    CHECK(speed_of(b, 1234) == doctest::Approx(0.8));
+    next_beast(b, 1235);
+    component<ecs::Movement>(b.r.fake, 1235).dataStorage[1] = 0.7f;
+    b.seconds(11);
+    REQUIRE(b.reply("beastmaster.call Boar").find("comes") != std::string::npos);
+    b.seconds(2);
+    CHECK(speed_of(b, 1235) == doctest::Approx(0.7));
+}

@@ -164,7 +164,10 @@ end
 -- A talent point spent on `b` (talent `t`).
 function stable_do.spend(world, account, b, t)
 	local ok, said = talents.spend(b, t, setting("loyalty_pace"))
-	if ok then save() end
+	if ok then
+		pack:retalent(world, b)
+		save()
+	end
 	return said
 end
 
@@ -172,6 +175,7 @@ end
 function stable_do.reset_talents(world, account, b)
 	if talents.spent(b) == 0 then return b.name .. " has no talent points spent." end
 	talents.reset(b)
+	pack:retalent(world, b)
 	save()
 	return string.format("%s's talents are reset: %s to spend.", b.name,
 		plural(talents.points(b, setting("loyalty_pace")), "point"))

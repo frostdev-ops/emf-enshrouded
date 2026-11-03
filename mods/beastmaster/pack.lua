@@ -9,6 +9,7 @@
 local species = require("species")
 local loyalty = require("loyalty")
 local aside_mod = require("aside")
+local talents = require("talents")
 
 local M = {}
 local P = {}
@@ -52,6 +53,7 @@ function P:reset()
 	self.base = {}       -- entity id -> {damage, wrote}: its template's damage multiplier, and the one written
 	self.fought = {}     -- entity id -> when it last hit or was hit (it heals HEAL_AFTER_S after that)
 	self.hits = {}       -- hostile creature id -> {beast entity id -> when it hit it} (loyalty for the kill)
+	self.speeds = {}     -- entity id -> {base, wrote} by Movement entry: the game's values and Swiftness's (talents.lua)
 	self.aside:reset()
 end
 
@@ -152,6 +154,7 @@ end
 -- goes.
 function P:fresh(id)
 	self.base[id], self.sent[id], self.recall[id], self.fought[id] = nil, nil, nil, nil
+	self.speeds[id] = nil
 end
 
 -- When the game sets a beast's damage multiplier again (its rescale to a level), its role and loyalty go on top of the
@@ -165,8 +168,33 @@ function P:keep_damage(world, id, beast)
 	end
 end
 
--- A beast out as strong as its role and loyalty: its health through the health watch (on_spawn with the multiplier) and
--- its DamageMod multiplier against its template's, kept from the first time. (Its size is given at the spawn.)
+-- A beast out at its Swiftness: the Movement entries talents.SPEED_ENTRIES at the game's values times its speed. The
+-- game's values are kept from the first write and taken again when the game writes them anew (kept up every step); a
+-- beast without Swiftness is left as the game made it (after a reset, from the step its game values are back).
+function P:set_speed(world, id, beast)
+	local factor = talents.speed(beast)
+	local kept = self.speeds[id]
+	if factor == 1 and not kept then return end
+	local m = world:get("Movement", id)
+	if not (m and m.dataStorage) then return end
+	if not kept then
+		kept = { base = {}, wrote = {} }
+		for _, i in ipairs(talents.SPEED_ENTRIES) do kept.base[i] = m.dataStorage[i] end
+		self.speeds[id] = kept
+	end
+	for _, i in ipairs(talents.SPEED_ENTRIES) do
+		local cur = m.dataStorage[i]
+		if kept.wrote[i] and math.abs(cur - kept.wrote[i]) > 1e-4 then kept.base[i] = cur end  -- the game wrote it anew
+		local want = kept.base[i] * factor
+		if math.abs(cur - want) > 1e-4 then m.dataStorage[i] = want end
+		kept.wrote[i] = want
+	end
+	if factor == 1 then self.speeds[id] = nil end
+end
+
+-- A beast out as strong as its role, loyalty and talents: its health through the health watch (on_spawn with the
+-- multiplier), its DamageMod multiplier against its template's, kept from the first time, and its speed. (Its size is
+-- given at the spawn.)
 function P:strengthen(world, id, beast)
 	local sp = species.by_id(beast.species)
 	local role_health, role_damage = species.role(sp)
@@ -178,12 +206,18 @@ function P:strengthen(world, id, beast)
 		base = { damage = dm and dm.dataStorage and dm.dataStorage[3] or nil }
 		self.base[id] = base
 	end
-	if self.env.on_spawn then self.env.on_spawn(world, id, sp, role_health * f) end
+	if self.env.on_spawn then self.env.on_spawn(world, id, sp, role_health * f * talents.health(beast)) end
 	local dm = base.damage and world:get("DamageMod", id)
 	if dm and dm.dataStorage then
-		base.wrote = base.damage * role_damage * f
+		base.wrote = base.damage * role_damage * f * talents.damage(beast)
 		dm.dataStorage[3] = base.wrote
 	end
+	self:set_speed(world, id, beast)
+end
+
+-- A beast's talents changed: when it is out, its health, damage and speed follow at once.
+function P:retalent(world, beast)
+	if beast.entity and self.ids[beast.entity] then self:strengthen(world, beast.entity, beast) end
 end
 
 function P:adopt(account, beast, id, world)
@@ -292,7 +326,7 @@ function P:dismiss(world, account, beast)
 	if beast.entity then
 		self.ids[beast.entity] = nil
 		self.sent[beast.entity], self.recall[beast.entity], self.base[beast.entity] = nil, nil, nil
-		self.fought[beast.entity] = nil
+		self.fought[beast.entity], self.speeds[beast.entity] = nil, nil
 	end
 	beast.entity = nil
 	beast.out = false
@@ -430,6 +464,7 @@ function P:on_died(id, world)
 	end
 	self.credited[id] = nil
 	self.sent[id], self.recall[id], self.base[id], self.fought[id] = nil, nil, nil, nil
+	self.speeds[id] = nil
 	local e = self.ids[id]
 	if not e then return end
 	self.ids[id] = nil
@@ -526,6 +561,7 @@ function P:step(world)
 	for id, e in pairs(self.ids) do
 		local passive = self.env.mode and self.env.mode(e.account) == "passive" and now >= (self.sent[id] or 0)
 		if passive or now < (self.recall[id] or 0) then calm(world, id) end
+		if self.speeds[id] then self:set_speed(world, id, e.beast) end
 	end
 	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now
 	if now < self.next_check then return end
