@@ -5,6 +5,7 @@
 #include <cstring>
 #include <cwctype>
 #include <filesystem>
+#include <new>
 #include <system_error>
 
 namespace emf::core {
@@ -182,13 +183,28 @@ double pq_encode(double l) {
 
 uint8_t to_byte(double v) { return static_cast<uint8_t>(std::lround(std::clamp(v, 0.0, 1.0) * 255.0)); }
 
+// PQ codes for linear BT.2020 values 0..1 (sRGB white = 203 nits) in 65536 steps: the dark end needs them. Built once.
+const std::vector<uint8_t>& pq_table() {
+    static const std::vector<uint8_t> t = [] {
+        constexpr double kWhite = 203.0 / 10000.0;  // BT.2408 reference white, as a fraction of PQ's 10000 nits
+        std::vector<uint8_t> v(65536);
+        for (size_t i = 0; i < v.size(); ++i) v[i] = to_byte(pq_encode(static_cast<double>(i) / 65535.0 * kWhite));
+        return v;
+    }();
+    return t;
+}
+
+uint8_t pq_of(double linear) {
+    const double c = std::clamp(linear, 0.0, 1.0);
+    return pq_table()[static_cast<size_t>(std::lround(c * 65535.0))];
+}
+
 }  // namespace
 
 void convert_for_swapchain(std::vector<uint8_t>& px, PictureSpace space) {
     if (space == PictureSpace::Srgb) return;
     double lin[256];
     for (int i = 0; i < 256; ++i) lin[i] = srgb_to_linear(i / 255.0);
-    constexpr double kWhite = 203.0 / 10000.0;  // BT.2408 reference white, as a fraction of PQ's 10000 nits
     for (size_t i = 0; i + 3 < px.size(); i += 4) {
         const double r = lin[px[i]], g = lin[px[i + 1]], b = lin[px[i + 2]];
         if (space == PictureSpace::LinearScrgb) {
@@ -201,9 +217,9 @@ void convert_for_swapchain(std::vector<uint8_t>& px, PictureSpace space) {
         const double r2 = 0.6274 * r + 0.3293 * g + 0.0433 * b;
         const double g2 = 0.0691 * r + 0.9195 * g + 0.0114 * b;
         const double b2 = 0.0164 * r + 0.0880 * g + 0.8956 * b;
-        px[i] = to_byte(pq_encode(r2 * kWhite));
-        px[i + 1] = to_byte(pq_encode(g2 * kWhite));
-        px[i + 2] = to_byte(pq_encode(b2 * kWhite));
+        px[i] = pq_of(r2);  // a table, not std::pow per pixel: this runs on the game's present path
+        px[i + 1] = pq_of(g2);
+        px[i + 2] = pq_of(b2);
     }
 }
 
@@ -215,15 +231,25 @@ uint32_t load_image(ImageStore& store, const std::wstring& path, const std::stri
         if (why) *why = "more than " + std::to_string(kMaxImageFrames) + " frames";
         return 0;
     }
-    std::vector<Rgba> frames(files.size());
-    for (size_t i = 0; i < files.size(); ++i) {
-        std::string e;
-        if (!decode_png(files[i], &frames[i], &e)) {
-            if (why) *why = narrow(std::filesystem::path(files[i]).filename().wstring()) + ": " + e;
-            return 0;
+    try {
+        std::vector<Rgba> frames(files.size());
+        for (size_t i = 0; i < files.size(); ++i) {
+            const std::string name = narrow(std::filesystem::path(files[i]).filename().wstring());
+            std::string e;
+            if (!decode_png(files[i], &frames[i], &e, kMaxImageSide)) {
+                if (why) *why = name + ": " + e;
+                return 0;
+            }
+            if (i > 0 && (frames[i].w != frames[0].w || frames[i].h != frames[0].h)) {
+                if (why) *why = name + ": not the size of the first frame (frames are all the same size)";
+                return 0;
+            }
         }
+        return store.add(key, frames, why);
+    } catch (const std::bad_alloc&) {
+        if (why) *why = "out of memory while decoding it";
+        return 0;
     }
-    return store.add(key, frames, why);
 }
 
 }  // namespace emf::core

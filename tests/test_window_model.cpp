@@ -310,3 +310,20 @@ TEST_CASE("windows: the kinds a click reaches are buttons, rows, slots and (v26)
     CHECK_FALSE(widget_takes_clicks(EMF_UI_BAR));
     CHECK_FALSE(widget_takes_clicks(EMF_UI_SEPARATOR));
 }
+
+TEST_CASE("windows v26: a widget array of a v24/v25 mod never brings a picture (icon was reserved there)") {
+    Def d;
+    std::vector<uint8_t> raw(56, 0);
+    EmfUiWidget a{};
+    a.type = EMF_UI_SLOT;
+    a.text = "old";
+    a.icon = 5;  // an old mod's leftover in a reserved field
+    std::memcpy(raw.data(), &a, 56);
+    d.def.widgets = reinterpret_cast<const EmfUiWidget*>(raw.data());
+    d.def.widget_size = 56;
+    d.def.count = 1;
+    WindowRequest r;
+    std::string why;
+    REQUIRE(copy_window_def(&d.def, false, &r, &why));
+    CHECK(r.widgets[0].icon == 0u);
+}

@@ -30,7 +30,7 @@ constexpr uint32_t kMaxSide = 16384;  // a sanity bound before allocating; calle
 
 }  // namespace
 
-bool decode_png(const std::wstring& file, Rgba* out, std::string* why) {
+bool decode_png(const std::wstring& file, Rgba* out, std::string* why, uint32_t max_side) {
     const auto fail = [&](std::string s) {
         if (why) *why = std::move(s);
         return false;
@@ -62,7 +62,9 @@ bool decode_png(const std::wstring& file, Rgba* out, std::string* why) {
     if (FAILED(hr)) return fail(hr_text("reading its first frame", hr));
     UINT w = 0, h = 0;
     if (FAILED(frame->GetSize(&w, &h)) || w == 0 || h == 0) return fail("it has no size");
-    if (w > kMaxSide || h > kMaxSide) return fail("it is too large");
+    if (w > kMaxSide || h > kMaxSide || w > max_side || h > max_side)  // before any pixel is allocated
+        return fail("it is too large (" + std::to_string(w) + " x " + std::to_string(h) + "; at most " +
+                    std::to_string(max_side < kMaxSide ? max_side : kMaxSide) + " a side)");
     Com<IWICFormatConverter> conv;
     hr = factory->CreateFormatConverter(conv.put());
     if (FAILED(hr)) return fail(hr_text("creating a format converter", hr));

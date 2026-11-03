@@ -43,6 +43,7 @@ EmfUiWidget widget_at(const EmfWindowDef& def, uint32_t i) {
     EmfUiWidget w{};
     const auto* base = reinterpret_cast<const uint8_t*>(def.widgets) + static_cast<size_t>(i) * def.widget_size;
     std::memcpy(&w, base, def.widget_size < sizeof w ? def.widget_size : sizeof w);
+    if (def.widget_size < sizeof w) w.icon = 0;  // a v24/v25 mod: icon was reserved there, whatever it holds
     return w;
 }
 

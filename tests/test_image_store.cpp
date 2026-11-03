@@ -193,3 +193,18 @@ TEST_CASE("image store: pixels for an HDR10 swapchain are PQ-encoded BT.2020 at 
     convert_for_swapchain(same, PictureSpace::Srgb);
     CHECK(same == px);
 }
+
+TEST_CASE("image store: a frame over 512 px is refused while decoding (no frame is held larger than the limit)") {
+    TempDir d;
+    std::string why;
+    REQUIRE(emf::test::write_png(d.p / "huge.png", kMaxImageSide + 1, 4,
+                                 emf::test::solid(kMaxImageSide + 1, 4, 9, 9, 9)));
+    ImageStore s;
+    CHECK(load_image(s, (d.p / "huge.png").wstring(), "huge", &why) == 0);
+    CHECK(why.find("large") != std::string::npos);
+    std::filesystem::create_directories(d.p / "mixed");
+    REQUIRE(emf::test::write_png(d.p / "mixed" / "a.png", 2, 2, emf::test::solid(2, 2, 1, 1, 1)));
+    REQUIRE(emf::test::write_png(d.p / "mixed" / "b.png", 3, 3, emf::test::solid(3, 3, 1, 1, 1)));
+    CHECK(load_image(s, (d.p / "mixed").wstring(), "mixed", &why) == 0);
+    CHECK(why.find("b.png") != std::string::npos);  // named while decoding
+}

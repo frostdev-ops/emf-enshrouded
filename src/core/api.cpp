@@ -1654,7 +1654,13 @@ uint32_t api_image_load(const char* path) {
     };
     if (!g_state->load_image) return refused("no in-game overlay (a dedicated server, or [overlay] enabled=0)");
     std::string why;
-    const uint32_t h = g_state->load_image(file, key, &why);
+    uint32_t h = 0;
+    try {
+        h = g_state->load_image(file, key, &why);
+    } catch (...) {  // never into the mod (an allocation that failed while decoding)
+        h = 0;
+        why = "it could not be loaded (out of memory?)";
+    }
     return h ? h : refused(why.empty() ? "refused" : why);
 }
 

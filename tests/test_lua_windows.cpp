@@ -211,7 +211,7 @@ TEST_CASE("lua 1.15: emf.image reads the script's own folder or the portrait cac
     r.fake.image_ok = false;
     r.fake.replies.clear();
     r.run_command("wi.img pics/missing.png");
-    CHECK(r.fake.replies[0] == "nil");
+    CHECK(r.fake.replies[0] == "0");  // 0, not nil: {image = h} still makes a row that keeps its place
 }
 
 TEST_CASE("lua 1.15: rows with image, icon, fps and height become the v26 widgets; a v25 core gives nil") {
@@ -243,5 +243,5 @@ TEST_CASE("lua 1.15: rows with image, icon, fps and height become the v26 widget
     h2.load_all();
     old.run_command("wo.img pics/wolf.png");
     REQUIRE(old.fake.replies.size() == 1);
-    CHECK(old.fake.replies[0] == "nil");
+    CHECK(old.fake.replies[0] == "0");
 }

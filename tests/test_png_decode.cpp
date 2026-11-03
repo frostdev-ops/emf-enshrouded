@@ -57,3 +57,15 @@ TEST_CASE("png decode: a file that is not a PNG, and a missing file, fail with a
     CHECK_FALSE(why.empty());
     std::filesystem::remove_all(temp_dir());
 }
+
+TEST_CASE("png decode: a picture larger than the caller's limit is refused before its pixels are allocated") {
+    const auto file = temp_dir() / "three_by_two.png";
+    REQUIRE(emf::test::write_png(file, 3, 2, emf::test::solid(3, 2, 1, 2, 3)));
+    Rgba out;
+    std::string why;
+    CHECK_FALSE(decode_png(file.wstring(), &out, &why, 2));
+    CHECK(why.find("large") != std::string::npos);
+    CHECK(out.px.empty());
+    CHECK(decode_png(file.wstring(), &out, &why, 3));
+    std::filesystem::remove_all(temp_dir());
+}

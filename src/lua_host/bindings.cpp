@@ -1993,7 +1993,7 @@ bool has_v26(const EmfApi* a) {
 }
 
 // emf.image(path) (lua 1.15): a picture for windows, a .png or a folder of frame .pngs inside the script's own mod folder
-// ("pics/wolf.png"), or "portrait:<key>" (EMF's portrait cache). The handle, or nil (refused, or a core before v26). A
+// ("pics/wolf.png"), or "portrait:<key>" (EMF's portrait cache). The handle, or 0 (refused, or a core before v26). A
 // path that leaves the mod's folder is an error.
 int l_image(lua_State* L) {
     Script* s = script_of(L);
@@ -2020,8 +2020,7 @@ int l_image(lua_State* L) {
     }
     const EmfApi* a = s->host->api;
     const uint32_t h = has_v26(a) ? a->image_load(arg.c_str()) : 0;
-    if (h) lua_pushinteger(L, static_cast<lua_Integer>(h));
-    else lua_pushnil(L);
+    lua_pushinteger(L, static_cast<lua_Integer>(h));  // 0 when refused: a row with it keeps its place, draws nothing
     return 1;
 }
 

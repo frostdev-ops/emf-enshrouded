@@ -455,8 +455,17 @@ bool upload_picture(const std::vector<uint8_t>& px, uint32_t w, uint32_t h, VkQu
     si.commandBufferCount = 1;
     si.pCommandBuffers = &cmd;
     if (D.QueueSubmit(queue, 1, &si, fence) != VK_SUCCESS) return done(false, "vkQueueSubmit");
-    if (D.WaitForFences(g_device, 1, &fence, VK_TRUE, 2000000000ull) != VK_SUCCESS)
+    const VkResult waited = D.WaitForFences(g_device, 1, &fence, VK_TRUE, 2000000000ull);
+    if (waited != VK_SUCCESS) {
+        if (waited != VK_ERROR_DEVICE_LOST) {  // the GPU may still use them: leaked rather than freed under it
+            cmd = VK_NULL_HANDLE;
+            fence = VK_NULL_HANDLE;
+            staging = VK_NULL_HANDLE;
+            staging_mem = VK_NULL_HANDLE;
+            p = GpuPicture{};
+        }
         return done(false, "the upload did not finish");
+    }
     return done(true, "");
 }
 
@@ -494,13 +503,17 @@ void upload_pictures(VkQueue queue, PictureSpace space) {
             return;
         }
     }
+    size_t budget = 4u << 20;  // pixels converted and uploaded per frame (one picture always goes): no long stall
     for (const uint32_t handle : pending) {
         if (std::find(g_pictures_failed.begin(), g_pictures_failed.end(), handle) != g_pictures_failed.end()) continue;
         auto it = std::find_if(g_pictures.begin(), g_pictures.end(), [&](const auto& e) { return e.first == handle; });
         if (it == g_pictures.end()) {
             uint32_t w = 0, h = 0;
             std::vector<uint8_t> px;
+            if (budget == 0) break;  // the rest next frame
             if (!store.pixels(handle, &w, &h, &px)) continue;
+            const size_t n = static_cast<size_t>(w) * h;
+            budget = n >= budget ? 0 : budget - n;
             convert_for_swapchain(px, space);
             GpuPicture p;
             std::string why;
