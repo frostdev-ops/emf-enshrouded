@@ -1,12 +1,16 @@
--- The Beasts window (the host presses E at a stable): the active slots and the stable (every beast of the collection),
--- with Make active, Store and Release for the selected beast. Release asks for a second click within CONFIRM_S. The
--- window is drawn again after every click, and once a second when what it shows changed (a beast fell, rests, came).
+-- The Beasts window (the host presses E at a stable), with two tabs: Stable (the active slots and every beast of the
+-- collection) and the selected beast's own (its stats and talents). Selecting a beast (its row or its slot) opens its
+-- tab; Stable goes back. Both have Make active, Store and Release for the selected beast; Release asks for a second click
+-- within CONFIRM_S. The window is drawn again after every click, and once a second when what it shows changed (a beast
+-- fell, rests, came).
 -- M.new(env) where env has: setting(key), now(world), beasts() (the roster), level(world, player), state(beast, account)
--- ("out", "at home", "rests 1:20"), and the stable's actions, each returning what it did: make_active(world, account,
--- player, beast), store(world, account, beast), release(world, account, beast).
+-- ("out", "at home", "rests 1:20"), wind_left(world, beast) (seconds before Second Wind works again), and the stable's
+-- actions, each returning what it did: make_active(world, account, player, beast), store(world, account, beast),
+-- release(world, account, beast), spend(world, account, beast, talent), reset_talents(world, account, beast).
 local species = require("species")
 local loyalty = require("loyalty")
 local slots = require("slots")
+local talents = require("talents")
 
 local M = {}
 M.ID = "stable"
@@ -26,6 +30,7 @@ function W:reset()
 	self.open = false
 	self.account, self.player = nil, nil
 	self.selected = nil  -- the selected beast's name
+	self.tab = "stable"  -- "stable" or "beast" (the selected beast's)
 	self.confirm = nil   -- {name, at}: Release clicked once
 	self.note = nil      -- the line under the buttons: what the last click did
 	self.drawn = nil     -- what the window shows now (to draw it again only when that changed)
@@ -52,14 +57,83 @@ function W:open_slots(world)
 	return slots.unlocked(self.env.level(world, self.player), self.env.setting)
 end
 
--- The window's rows for its account.
+-- The tab buttons: Stable, and the selected beast's name; the open one lit.
+local function tabs(rows, sel, on_beast)
+	rows[#rows + 1] = { button = "tab.stable", text = "Stable", selected = not on_beast }
+	if sel then rows[#rows + 1] = { button = "tab.beast", text = sel.name, same_line = true, selected = on_beast } end
+	rows[#rows + 1] = { separator = true }
+end
+
+-- Make active, Store and Release for the selection, and the line saying what the last click did.
+function W:action_rows(rows, sel)
+	rows[#rows + 1] = { button = "make_active", text = "Make active", disabled = not (sel and not sel.active) }
+	rows[#rows + 1] = { button = "store", text = "Store", same_line = true, disabled = not (sel and sel.active) }
+	rows[#rows + 1] = { button = "release", text = "Release", same_line = true, disabled = not sel,
+		tooltip = "Let the beast go for good (click twice)" }
+	if self.note then rows[#rows + 1] = { text = self.note } end
+end
+
+local function mmss(s)
+	return string.format("%d:%02d", math.floor(s / 60), math.floor(s % 60))
+end
+
+-- The selected beast's tab: its stats (kind, level, loyalty, what its role, loyalty and talents make of its health,
+-- damage and speed, where it is), its talents with a + each and Reset talents, and its actions.
+function W:beast_rows(world, rows, b)
+	local env = self.env
+	local pace = env.setting("loyalty_pace")
+	local sp = species.by_id(b.species)
+	local role_health, role_damage = species.role(sp)
+	local lvl = self:loyalty_of(b)
+	local f = loyalty.factor(lvl)
+	rows[#rows + 1] = { heading = b.name }
+	local level = env.level(world, self.player)
+	local kind = sp and sp.name or tostring(b.species)
+	rows[#rows + 1] = { text = level > 0 and string.format("%s, level %d", kind, level) or kind }
+	if lvl >= loyalty.MAX then
+		rows[#rows + 1] = { text = string.format("Loyalty %d (the highest)", lvl) }
+	else
+		local kills = loyalty.points_for(lvl + 1, pace) - (b.points or 0)
+		rows[#rows + 1] = { text = string.format("Loyalty %d: %d kill%s to loyalty %d", lvl, kills, kills == 1 and "" or "s",
+			lvl + 1), tooltip = "A kill is a hostile creature it hit that dies within 30 s" }
+	end
+	rows[#rows + 1] = { text = string.format("Health x%.2f, damage x%.2f, speed x%.2f", role_health * f * talents.health(b),
+		role_damage * f * talents.damage(b), talents.speed(b)), tooltip = "Its role, loyalty and talents together" }
+	local state = env.state(b, self.account)
+	rows[#rows + 1] = { text = state:sub(1, 1):upper() .. state:sub(2) .. (b.active and ", active" or ", in the stable") }
+	rows[#rows + 1] = { separator = true }
+	rows[#rows + 1] = { heading = "Talents: " .. talents.summary(b, pace) }
+	local left = talents.left(b, pace)
+	for _, t in ipairs(talents.LIST) do
+		local n = talents.rank(b, t.id)
+		rows[#rows + 1] = { button = "talent." .. t.id, text = "+", disabled = n >= t.max or left <= 0,
+			tooltip = "Spend a point on " .. t.name }
+		local text = talents.row_text(b, t)
+		if t.heal and n > 0 and b.out then
+			local wait = env.wind_left(world, b)
+			text = text .. (wait > 0 and string.format(" (again in %s)", mmss(wait)) or " (ready)")
+		end
+		rows[#rows + 1] = { text = text, same_line = true,
+			tooltip = string.format("%s: %s (at most %d)", t.name, talents.effect(t, 0), t.max) }
+	end
+	rows[#rows + 1] = { button = "reset_talents", text = "Reset talents", disabled = talents.spent(b) == 0,
+		tooltip = "Every point back, free" }
+	rows[#rows + 1] = { separator = true }
+	self:action_rows(rows, b)
+	return rows
+end
+
+-- The window's rows for its account: the open tab.
 function W:rows(world)
 	local env = self.env
 	local list = env.beasts():list(self.account)
 	local active = self:active_list()
 	local open = self:open_slots(world)
 	local sel = self:selection()
-	local rows = { { heading = string.format("Active %d/%d", #active, open) } }
+	local rows = {}
+	tabs(rows, sel, sel ~= nil and self.tab == "beast")
+	if sel and self.tab == "beast" then return self:beast_rows(world, rows, sel) end
+	rows[#rows + 1] = { heading = string.format("Active %d/%d", #active, open) }
 	local shown = 0
 	for i = 1, slots.MAX do
 		local unlock = slots.level_for(i, env.setting)
@@ -94,11 +168,7 @@ function W:rows(world)
 				env.state(b, self.account), b.active and ", active" or "") }
 	end
 	rows[#rows + 1] = { separator = true }
-	rows[#rows + 1] = { button = "make_active", text = "Make active", disabled = not (sel and not sel.active) }
-	rows[#rows + 1] = { button = "store", text = "Store", same_line = true, disabled = not (sel and sel.active) }
-	rows[#rows + 1] = { button = "release", text = "Release", same_line = true, disabled = not sel,
-		tooltip = "Let the beast go for good (click twice)" }
-	if self.note then rows[#rows + 1] = { text = self.note } end
+	self:action_rows(rows, sel)
 	return rows
 end
 
@@ -154,8 +224,10 @@ function W:refresh(world, force)
 end
 
 -- ---- clicks ----
+-- Selects `b` and opens its tab (nil: none, the Stable tab).
 function W:select(b)
 	self.selected = b and b.name or nil
+	self.tab = b and "beast" or "stable"
 	self.confirm = nil
 	self.note = nil
 end
@@ -164,7 +236,7 @@ function W:release(world, b)
 	local now = self.env.now(world)
 	local c = self.confirm
 	if c and c.name == b.name and now - c.at <= CONFIRM_S then
-		self.selected, self.confirm = nil, nil
+		self.selected, self.confirm, self.tab = nil, nil, "stable"
 		self.note = self.env.release(world, self.account, b)
 		return
 	end
@@ -181,8 +253,13 @@ function W:on_event(world, ev)
 	local key = ev.key or ""
 	local slot = key:match("^active%.(%d+)$")
 	local name = key:match("^beast%.(.+)$")
+	local talent = talents.find(key:match("^talent%.(.+)$"))
 	local sel = self:selection()
-	if slot then
+	if key == "tab.stable" then
+		self.tab, self.confirm = "stable", nil
+	elseif key == "tab.beast" then
+		if sel then self.tab, self.confirm = "beast", nil end
+	elseif slot then
 		local b = self:active_list()[tonumber(slot)]
 		if b then self:select(b) end
 	elseif name then
@@ -196,6 +273,12 @@ function W:on_event(world, ev)
 		self.note = self.env.store(world, self.account, sel)
 	elseif sel and key == "release" then
 		self:release(world, sel)
+	elseif sel and talent then
+		self.confirm = nil
+		self.note = self.env.spend(world, self.account, sel, talent)
+	elseif sel and key == "reset_talents" then
+		self.confirm = nil
+		self.note = self.env.reset_talents(world, self.account, sel)
 	end
 	self:refresh(world, true)
 end

@@ -189,9 +189,12 @@ window = window_mod.new({
 	beasts = function() return beasts end,
 	level = level_of,
 	state = function(b, account) return state_text(b, pack:is_aside(account)) end,
+	wind_left = function(world, b) return pack.fight:wind_left(world, b) end,
 	make_active = stable_do.make_active,
 	store = stable_do.store,
 	release = stable_do.release,
+	spend = stable_do.spend,
+	reset_talents = stable_do.reset_talents,
 })
 
 emf.on_key("stable_key", function(world)

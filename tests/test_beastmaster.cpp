@@ -1154,11 +1154,15 @@ TEST_CASE("stable: Make active puts the selected beast into a free slot; Store t
     at_stable(b);
     press(b, kE);
     REQUIRE(b.r.fake.windows.size() == 1u);
-    click(b, "beast.Tusk");
-    CHECK((flags_at(shown(b), "beast.Tusk") & EMF_UI_SELECTED) != 0u);
+    click(b, "beast.Tusk");  // selecting a beast opens its tab
+    CHECK(text_at(shown(b), "tab.beast") == "Tusk");
+    CHECK((flags_at(shown(b), "tab.beast") & EMF_UI_SELECTED) != 0u);
     CHECK((flags_at(shown(b), "make_active") & EMF_UI_DISABLED) == 0u);
     CHECK((flags_at(shown(b), "store") & EMF_UI_DISABLED) != 0u);  // not active
     click(b, "make_active");
+    CHECK(shows(shown(b), "Tusk is active."));
+    click(b, "tab.stable");
+    CHECK((flags_at(shown(b), "beast.Tusk") & EMF_UI_SELECTED) != 0u);  // still selected
     CHECK(text_at(shown(b), "active.2") == "Tusk");
     CHECK(shows(shown(b), "Active 2/2"));
     CHECK(shows(shown(b), "Tusk is active."));
@@ -1167,10 +1171,12 @@ TEST_CASE("stable: Make active puts the selected beast into a free slot; Store t
     click(b, "make_active");
     CHECK(shows(shown(b), "No free active slot: store a beast first."));
     CHECK(b.saved().find("a 0x00000000000000aa Rex") == std::string::npos);
-    click(b, "active.1");  // a slot selects its beast
-    CHECK((flags_at(shown(b), "beast.Fang") & EMF_UI_SELECTED) != 0u);
+    click(b, "tab.stable");
+    click(b, "active.1");  // a slot selects its beast and opens its tab
+    CHECK(text_at(shown(b), "tab.beast") == "Fang");
     click(b, "store");
     CHECK(shows(shown(b), "Fang goes to the stable."));
+    click(b, "tab.stable");
     CHECK(text_at(shown(b), "active.1") == "Tusk");
     CHECK((flags_at(shown(b), "active.2") & EMF_UI_EMPTY) != 0u);
     CHECK(b.saved().find("a 0x00000000000000aa Fang") == std::string::npos);
@@ -3032,4 +3038,110 @@ TEST_CASE("talent: a reset while out takes Second Wind's floor off at the next s
     b.reply("beastmaster.talents Wolf reset");
     one_step(b);
     CHECK(floor_of(b, 1234) == 0);
+}
+
+// ---- the beast's tab of the Beasts window ----
+namespace {
+// three_beasts with Fang at loyalty 3 (2 talent points) out as entity 1234, the host at a stable with the window open.
+void fang_window(BeastRig& b) {
+    three_beasts(b);
+    b.reply("beastmaster.loyalty Fang 3");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Fang").find("comes") != std::string::npos);
+    at_stable(b);
+    b.seconds(1);
+    press(b, kE);
+    REQUIRE(b.r.fake.windows.size() == 1u);
+}
+bool lit(const Fake::Win& w, const std::string& key) { return (flags_at(w, key) & EMF_UI_SELECTED) != 0u; }
+bool off(const Fake::Win& w, const std::string& key) { return (flags_at(w, key) & EMF_UI_DISABLED) != 0u; }
+}  // namespace
+
+TEST_CASE("talent: selecting a beast opens its tab with its stats and talents; Stable goes back") {
+    BeastRig b;  // level 10
+    fang_window(b);
+    CHECK(lit(shown(b), "tab.stable"));
+    CHECK(row_at(shown(b), "tab.beast") == -1);  // nothing selected: the Stable tab alone
+    click(b, "beast.Fang");
+    const Fake::Win& w = shown(b);
+    CHECK_FALSE(lit(w, "tab.stable"));
+    CHECK(text_at(w, "tab.beast") == "Fang");
+    CHECK(lit(w, "tab.beast"));
+    CHECK(row_at(w, "active.1") == -1);  // the slots and the list are on the Stable tab
+    CHECK(row_at(w, "beast.Tusk") == -1);
+    for (const char* line : {"Wolf, level 10", "Loyalty 3: 30 kills to loyalty 4", "Health x1.25, damage x1.20, speed x1.00",
+                             "Out, active", "Talents: 2 points (2 left)", "Strength 0/5: +4 % damage a point",
+                             "Guard 0/2: no damage for the first 3 s of a fight (5 s with 2 points)"})
+        CHECK_MESSAGE(shows(w, line), line);
+    for (const char* t : {"talent.strength", "talent.toughness", "talent.swiftness", "talent.second_wind", "talent.ambush",
+                          "talent.guard"})
+        CHECK_MESSAGE(!off(w, t), t);
+    CHECK(off(w, "reset_talents"));  // nothing spent
+    CHECK(off(w, "make_active"));    // active already
+    CHECK_FALSE(off(w, "store"));
+    CHECK_FALSE(off(w, "release"));
+    click(b, "tab.stable");
+    CHECK(lit(shown(b), "tab.stable"));
+    CHECK(shows(shown(b), "Active 1/2"));
+    CHECK(lit(shown(b), "beast.Fang"));  // still selected
+    CHECK(text_at(shown(b), "tab.beast") == "Fang");
+    click(b, "tab.beast");
+    CHECK(shows(shown(b), "Out, active"));
+    click(b, "tab.stable");
+    click(b, "beast.Tusk");  // another beast: its tab
+    CHECK(text_at(shown(b), "tab.beast") == "Tusk");
+    CHECK(shows(shown(b), "Boar, level 10"));
+    CHECK(shows(shown(b), "Loyalty 1: 10 kills to loyalty 2"));
+    CHECK(shows(shown(b), "At home, in the stable"));
+    CHECK(shows(shown(b), "Talents: no points yet"));
+    CHECK(off(shown(b), "talent.strength"));
+}
+
+TEST_CASE("talent: + spends a point at once on a beast out; full or no point left turns + off; Reset talents gives every point back") {
+    BeastRig b;
+    fang_window(b);
+    const double f = 1 + 2.0 / 9 * 0.2;  // loyalty 3
+    click(b, "beast.Fang");
+    click(b, "talent.strength");
+    CHECK(shows(shown(b), "Strength 1/5: +4 % damage"));
+    CHECK(shows(shown(b), "Fang: Strength 1/5, +4 % damage (1 point left)."));
+    CHECK(shows(shown(b), "Talents: 2 points (1 left)"));
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15 * f * 1.04));
+    click(b, "talent.second_wind");
+    CHECK(shows(shown(b), "Second Wind 1/1: a killing blow leaves it at 20 % health, then 5 min before it works again (ready)"));
+    CHECK(shows(shown(b), "Talents: 2 points (0 left)"));
+    for (const char* t : {"talent.strength", "talent.second_wind", "talent.guard"}) CHECK_MESSAGE(off(shown(b), t), t);
+    CHECK(b.saved().find("t 0x00000000000000aa strength:1,second_wind:1 Fang") != std::string::npos);
+    CHECK_FALSE(off(shown(b), "reset_talents"));
+    click(b, "reset_talents");
+    CHECK(shows(shown(b), "Fang's talents are reset: 2 points to spend."));
+    CHECK(shows(shown(b), "Talents: 2 points (2 left)"));
+    CHECK(now_of<ecs::DamageMod>(b, 1234).dataStorage[2] == doctest::Approx(1.15 * f));
+    CHECK(off(shown(b), "reset_talents"));
+    b.reply("beastmaster.loyalty Fang 10");
+    b.seconds(1);
+    click(b, "talent.second_wind");
+    CHECK(off(shown(b), "talent.second_wind"));  // full (1/1)
+    CHECK_FALSE(off(shown(b), "talent.strength"));
+}
+
+TEST_CASE("talent: a beast released on its tab, or by chat while its tab is open, leaves the Stable tab showing") {
+    BeastRig b;
+    fang_window(b);
+    click(b, "beast.Fang");
+    click(b, "release");
+    CHECK(shows(shown(b), "Click Release again within 5 s to let Fang go for good."));
+    click(b, "release");
+    CHECK(shows(shown(b), "Fang is gone: you let it go."));
+    CHECK(lit(shown(b), "tab.stable"));
+    CHECK(row_at(shown(b), "tab.beast") == -1);
+    CHECK(shows(shown(b), "Stable 2/8"));
+    click(b, "beast.Tusk");
+    REQUIRE(text_at(shown(b), "tab.beast") == "Tusk");
+    b.reply("beastmaster.release Tusk");  // the host's console, at the stable
+    REQUIRE(b.reply("beastmaster.release Tusk") == "Tusk is gone: you let it go.");
+    b.seconds(1);  // the window is drawn again
+    CHECK(lit(shown(b), "tab.stable"));
+    CHECK(row_at(shown(b), "tab.beast") == -1);
+    CHECK(shows(shown(b), "Stable 1/8"));
 }
