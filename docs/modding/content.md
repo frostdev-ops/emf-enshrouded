@@ -68,9 +68,10 @@ content.add_recipe{guid = ..., debug_name = "Craft_Prop_Mine", output = {<item G
 - It is saved only when placed **inside a base**. A Workbench copy can only be placed there (its item needs a build
   zone); copies of objects that can stand anywhere are not saved outside a base. Picking it up gives the item back.
 - The save keeps it by `template_guid`: that GUID is fixed forever like the item's.
-- **Removing the mod deletes placed objects for good** (from the game's code; not tested yet). When a world loads, the
-  game silently drops every saved object whose template it doesn't know, and the next autosave (30 s) writes the world
-  without them; reinstalling the mod doesn't bring them back. A container's contents go with it, and the placing items
+- **Removing the mod deletes placed objects for good.** When a world loads, the game silently drops every saved object
+  whose template it doesn't know (seen in game: a placed Ember Table was gone when the world loaded without the mod),
+  and the next autosave (30 s) writes the world without them; reinstalling the mod doesn't bring them back (from the
+  game's code). A container's contents go with it, and the placing items
   in inventories are deleted when the game next touches them.
 
 ## What a new item needs
