@@ -11,6 +11,7 @@ local loyalty = require("loyalty")
 local aside_mod = require("aside")
 local talents = require("talents")
 local fight_mod = require("fight")
+local threat_mod = require("threat")
 
 local M = {}
 local P = {}
@@ -31,6 +32,15 @@ local REFUSALS = 3      -- a pack beast's call-back refused this many checks in 
 
 function M.new(env)
 	local p = setmetatable({ env = env, aside = aside_mod.new({ setting = env.setting }) }, P)
+	p.threat = threat_mod.new({
+		now = env.now,
+		setting = env.setting,
+		tell = env.tell,
+		ids = function() return p.ids end,
+		mode = function(account) return env.mode and env.mode(account) or "defending" end,
+		hostile = function(world, id) return M.hostile(world, id) end,
+		boss = function(world, id) return M.boss(world, id) end,
+	})
 	p.fight = fight_mod.new({
 		now = env.now,
 		tell = env.tell,
@@ -63,6 +73,7 @@ function P:reset()
 	self.speeds = {}     -- entity id -> {base, wrote} by Movement entry: the game's values and Swiftness's (talents.lua)
 	self.aside:reset()
 	self.fight:reset()
+	self.threat:reset()
 end
 
 local function mmss(s)
@@ -80,6 +91,20 @@ local function no_pack(sp)
 end
 local INSTALL = "Install them with EMF.exe (Install a downloaded file) and restart the game; EMF.exe's EML content " ..
 	"card says whether they were built."
+
+-- A living hostile creature (HOSTILE), never a player.
+function M.hostile(world, id)
+	if world:get("PlayerState", id) then return false end
+	local f = world:get("Faction", id)
+	if not (f and HOSTILE[f.faction]) then return false end
+	local cur = emf.health(world, id)
+	return cur ~= nil and cur > 0
+end
+
+-- A boss or a mini-boss.
+function M.boss(world, id)
+	return world:get("Boss", id) ~= nil or world:get("BossHealthBar", id) ~= nil
+end
 
 -- Clears what a beast's AI fights (every aggro target and every chosen target), so it turns from a fight: the game
 -- picks targets again from what it senses and what hits it, so a passive beast is cleared every step.
@@ -454,6 +479,7 @@ end
 -- Every hit to or from our beast is noted (it heals HEAL_AFTER_S after the last one), may hand a foe's killing blow to
 -- its owner (P:credit), and counts for its talents in fights (fight.lua). `change`: the hit's health change.
 function P:on_hit(world, source, target, change)
+	self.threat:on_hit(world, source, target)
 	if not (self.ids[source] or self.ids[target]) then return end
 	local now = self.env.now(world)
 	if self.ids[source] then self.fought[source] = now end
@@ -508,6 +534,7 @@ function P:on_died(id, world)
 		end
 	end
 	self.credited[id] = nil
+	self.threat:forget(id)
 	self.sent[id], self.recall[id], self.base[id], self.fought[id] = nil, nil, nil, nil
 	local e = self.ids[id]
 	if not e then return end
@@ -612,6 +639,7 @@ function P:step(world)
 		if not self.ids[id] then self:give_back_speed(world, id) end
 	end
 	self.fight:step(world, self.ids)
+	self.threat:step(world)
 	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now
 	if now < self.next_check then return end
 	self.next_check = now + 1
@@ -623,6 +651,7 @@ function P:step(world)
 		if next(hitters) == nil then self.hits[target] = nil end
 	end
 	local present = players(world)
+	self.threat:scan(world, present)
 	self.aside:set_players(present)
 	for _, e in ipairs(self.fallen) do
 		local owner = present[e.account]

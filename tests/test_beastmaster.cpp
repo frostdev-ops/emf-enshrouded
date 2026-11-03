@@ -3253,3 +3253,212 @@ TEST_CASE("threat: the beast tab says how much of the monsters a beast draws") {
     b.seconds(1);
     CHECK(shows(shown(b), "Draws no monsters (passive mode)"));
 }
+
+namespace {
+// What monster `id` goes for now (SelectedTargets.targets[0]), and whether the game may switch its target.
+uint32_t pick_of(BeastRig& b, uint32_t id) { return now_of<ecs::SelectedTargets>(b, id).targets[0].targetEntityId.id; }
+uint32_t root_of(BeastRig& b, uint32_t id) { return now_of<ecs::SelectedTargets>(b, id).targets[0].targetRootEntityId.id; }
+bool switches(BeastRig& b, uint32_t id) { return now_of<ecs::DynamicAggro>(b, id).allowTargetSwitches; }
+// The game picks `pick` for monster `id` (0: nothing).
+void game_picks(BeastRig& b, uint32_t id, uint32_t pick) {
+    auto& t = component<ecs::SelectedTargets>(b.r.fake, id).targets[0];
+    t.targetEntityId.id = pick;
+    t.targetRootEntityId.id = pick;
+}
+// A hostile monster (a skeleton unless `faction`) at (x, 10, z), 100 of 100, that goes for `pick` (0: nothing), its
+// target switches on.
+void monster(BeastRig& b, uint32_t id, double x, double z, uint32_t pick, int faction = kSkeletonFoe) {
+    creature(b, id, x, z, faction);
+    component<ecs::DynamicAggro>(b.r.fake, id).allowTargetSwitches = true;
+    game_picks(b, id, pick);
+}
+// Calls player 1's beast `name` (in the collection already) as entity `id` and puts it at (x, 10, z), guarding them.
+void out_at(BeastRig& b, const std::string& name, uint32_t id, double x, double z) {
+    next_beast(b, id);
+    REQUIRE(b.reply("beastmaster.call " + name).find("comes") != std::string::npos);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, id).guardEntityId.id = 1;
+    place(b.r.fake, id, x, 10, z);
+}
+size_t on(BeastRig& b, std::initializer_list<uint32_t> monsters, uint32_t target) {
+    size_t n = 0;
+    for (uint32_t m : monsters) n += pick_of(b, m) == target;
+    return n;
+}
+}  // namespace
+
+TEST_CASE("threat: a monster that goes for you joins the fight and is held on a beast by its share for at least 8 s, then picks again") {
+    RollRig b;
+    b.reply("beastmaster.give boar");
+    out_at(b, "Boar", 1234, 0, 4);
+    monster(b, 70, 10, 2, 1);  // as far from you as from the boar, going for you
+    b.roll(0.6);               // over your half: the boar
+    b.seconds(1);              // the next look at the fights
+    CHECK(pick_of(b, 70) == 1234);
+    CHECK(root_of(b, 70) == 1234);
+    CHECK_FALSE(switches(b, 70));
+    game_picks(b, 70, 1);  // the game picks you again
+    one_step(b);
+    CHECK(pick_of(b, 70) == 1234);  // held, every step
+    b.roll(0.4);
+    b.seconds(6);
+    CHECK(pick_of(b, 70) == 1234);
+    b.seconds(2);  // 8 s: it picks again (you)
+    CHECK(pick_of(b, 70) == 1);
+    CHECK_FALSE(switches(b, 70));
+}
+
+TEST_CASE("threat: a monster that hits your beast, or that you or your beast hit, joins the fight") {
+    RollRig b;
+    b.reply("beastmaster.give boar");
+    out_at(b, "Boar", 1234, 0, 4);
+    b.roll(0.99);  // the boar
+    for (uint32_t m : {71u, 72u, 73u, 74u}) monster(b, m, 6, 4, 0);
+    deliver(b.r.fake, "HitEvent", hit(1234, 71, -5));
+    deliver(b.r.fake, "HitEvent", hit(1, 72, -5));
+    deliver(b.r.fake, "HitEvent", hit(73, 1234, -5));
+    deliver(b.r.fake, "HitEvent", hit(74, 2, -5));  // player 2 has no beast out
+    one_step(b);
+    for (uint32_t m : {71u, 72u, 73u}) {
+        CAPTURE(m);
+        CHECK(pick_of(b, m) == 1234);
+        CHECK_FALSE(switches(b, m));
+    }
+    CHECK(pick_of(b, 74) == 0);
+    CHECK(switches(b, 74));
+}
+
+TEST_CASE("threat: shares: a tank 50 %, another beast 20 %, Menace 10 % a point; your beasts at most 90 %, of a boss at most 35 %") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.reply("beastmaster.give boar");
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.loyalty Boar 10");
+    b.reply("beastmaster.loyalty Wolf 10");
+    at_stable(b);
+    out_at(b, "Boar", 1234, 10, 20);  // you at (0, 10, 10), the monsters at (0, 10, 20): all three 10 m from them
+    out_at(b, "Wolf", 1235, -10, 20);
+    place(b.r.fake, 1, 0, 10, 10);
+    uint32_t next = 70;
+    auto pick_at = [&](double roll, bool boss = false) {
+        const uint32_t m = next++;
+        monster(b, m, 0, 20, 1);
+        if (boss) component<ecs::Boss>(b.r.fake, m);
+        b.roll(roll);
+        b.seconds(1);
+        const uint32_t got = pick_of(b, m);
+        b.r.fake.attrs[{m, EMF_ATTR_HEALTH}] = 0;  // it falls: the next one fights alone
+        b.seconds(1);
+        return got;
+    };
+    // the boar 50 %, the wolf 20 %: you 30 %
+    CHECK(pick_at(0.29) == 1u);
+    CHECK(pick_at(0.31) == 1234u);
+    CHECK(pick_at(0.79) == 1234u);
+    CHECK(pick_at(0.81) == 1235u);
+    place(b.r.fake, 1, 0, 10, 0);  // to the stable: Menace 3 on both (80 % and 50 %: 130 %, at most 90 %)
+    for (int i = 0; i < 3; ++i) {
+        REQUIRE(b.reply("beastmaster.talent Boar menace").rfind("Boar: ", 0) == 0);
+        REQUIRE(b.reply("beastmaster.talent Wolf menace").rfind("Wolf: ", 0) == 0);
+    }
+    place(b.r.fake, 1, 0, 10, 10);
+    CHECK(pick_at(0.09) == 1u);
+    CHECK(pick_at(0.11) == 1234u);  // 90 % x 80/130 = 55.4 %
+    CHECK(pick_at(0.64) == 1234u);
+    CHECK(pick_at(0.66) == 1235u);
+    // a boss: your beasts 35 % at most
+    CHECK(pick_at(0.64, true) == 1u);
+    CHECK(pick_at(0.66, true) == 1234u);  // 35 % x 80/130 = 21.5 %
+    CHECK(pick_at(0.87, true) == 1235u);
+}
+
+TEST_CASE("threat: at least 1 in 4 monsters of a fight stays on you") {
+    RollRig b({{"tank_share_pct", "90"}});
+    b.reply("beastmaster.give boar");
+    out_at(b, "Boar", 1234, 0, 4);
+    b.roll(0.99);  // every pick by share: the boar
+    for (int i = 0; i < 4; ++i) monster(b, 70 + i, 6.0 + i, 4, 1);
+    b.seconds(1);
+    CHECK(on(b, {70, 71, 72, 73}, 1) == 1u);
+    CHECK(on(b, {70, 71, 72, 73}, 1234) == 3u);
+    for (int i = 0; i < 4; ++i) monster(b, 74 + i, -6.0 - i, 4, 1);
+    b.seconds(1);
+    CHECK(on(b, {70, 71, 72, 73, 74, 75, 76, 77}, 1) == 2u);
+    for (int i = 0; i < 4; ++i) monster(b, 80 + i, 6, -4.0 - i, 1);  // 80..83: 12 in all
+    b.seconds(1);
+    CHECK(on(b, {70, 71, 72, 73, 74, 75, 76, 77, 80, 81, 82, 83}, 1) == 3u);
+}
+
+TEST_CASE("threat: a monster picks again at once when its beast is sent home, falls or is out of its reach; with no beast left it gets its own pick back") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.reply("beastmaster.give boar");
+    b.reply("beastmaster.give wolf");
+    out_at(b, "Boar", 1234, 0, 4);
+    out_at(b, "Wolf", 1235, 0, -4);
+    monster(b, 70, 10, 0, 1);
+    b.roll(0.99);  // the last: the wolf, then the boar
+    b.seconds(1);
+    REQUIRE(pick_of(b, 70) == 1235);
+    b.reply("beastmaster.dismiss Wolf");  // sent home
+    one_step(b);
+    CHECK(pick_of(b, 70) == 1234);
+    place(b.r.fake, 1234, 0, 10, 40);  // the boar 40 m from the monster: out of its reach
+    one_step(b);
+    CHECK(switches(b, 70));  // no beast in reach: the game's own pick
+    game_picks(b, 70, 1);
+    b.seconds(2);
+    CHECK(pick_of(b, 70) == 1);
+    CHECK(switches(b, 70));
+    place(b.r.fake, 1234, 0, 10, 4);  // back
+    b.seconds(1);
+    REQUIRE(pick_of(b, 70) == 1234);
+    deliver(b.r.fake, "EntityDiedEvent", died_event(1234));  // it falls
+    one_step(b);
+    CHECK(switches(b, 70));
+}
+
+TEST_CASE("threat: never on a monster not in the fight, a player-side creature, in passive mode or with the setting off; a monster tamed meanwhile gets its own pick back") {
+    RollRig b;
+    b.reply("beastmaster.give boar");
+    out_at(b, "Boar", 1234, 0, 4);
+    b.roll(0.99);  // a pick would be the boar
+    monster(b, 80, 8, 0, 0);               // not fighting
+    monster(b, 81, 6, 0, 1, kPlayerAlly);  // on the players' side
+    monster(b, 82, 25, 0, 2);              // fighting player 2, who has no beast out
+    b.seconds(2);
+    for (uint32_t m : {80u, 81u, 82u}) {
+        CAPTURE(m);
+        CHECK(switches(b, m));
+    }
+    CHECK(pick_of(b, 80) == 0);
+    CHECK(pick_of(b, 81) == 1);
+    CHECK(pick_of(b, 82) == 2);
+    monster(b, 70, 6, 4, 1);
+    b.seconds(1);
+    REQUIRE(pick_of(b, 70) == 1234);
+    component<ecs::Faction>(b.r.fake, 70).faction = static_cast<emf::gen::FactionType>(kPlayerAlly);  // tamed
+    one_step(b);
+    CHECK(switches(b, 70));
+    game_picks(b, 70, 0);
+    b.seconds(2);
+    CHECK(pick_of(b, 70) == 0);
+    monster(b, 71, 6, 4, 1);
+    b.seconds(1);
+    REQUIRE(pick_of(b, 71) == 1234);
+    b.reply("beastmaster.mode passive");
+    one_step(b);
+    CHECK(switches(b, 71));
+    monster(b, 72, 6, 4, 1);
+    b.seconds(2);
+    CHECK(pick_of(b, 72) == 1);
+    CHECK(switches(b, 72));
+    b.reply("beastmaster.mode defending");
+    monster(b, 73, 6, 4, 1);
+    b.seconds(1);
+    REQUIRE(pick_of(b, 73) == 1234);
+    b.r.fake.settings["beastmaster.threat"] = "false";
+    one_step(b);
+    CHECK(switches(b, 73));
+    monster(b, 74, 6, 4, 1);
+    b.seconds(2);
+    CHECK(pick_of(b, 74) == 1);
+    CHECK(switches(b, 74));
+}

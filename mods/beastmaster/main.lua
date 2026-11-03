@@ -749,6 +749,12 @@ emf.command("stable", "mark | unmark | list: the prop you look at is a stable; t
 	end
 end)
 
+-- The monsters Beastmaster holds on you or your beasts now (for live checks).
+emf.command("threat", ": the monsters held on you or your beasts now, and for how long", function(world, args)
+	local _, account = who(world)
+	emf.reply(account and pack.threat:held_text(world, account) or "Your account is not known yet.")
+end)
+
 -- Admin: set a beast's loyalty (console only, not from the chat; for tests and live checks).
 emf.command("loyalty", "<name or number> <1-10>: set a beast's loyalty (admin)", function(world, args)
 	local sender = emf.sender()
