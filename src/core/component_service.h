@@ -96,7 +96,7 @@ private:
     bool present(uint8_t* world, uint32_t entity, uint32_t hash) const;
     bool exists(uint8_t* world, uint32_t entity) const;
     static bool is_player_entity(uint32_t entity);
-    Result answer(const Job& j, uint32_t status, const std::string& why);
+    Result answer(const Job& j, uint32_t status, const std::string& why, bool world_gone = false);
     void deliver(std::vector<Result>& results);
     void say(const std::string& line);
     uint32_t session() const { return deps_.session ? deps_.session() : 0; }

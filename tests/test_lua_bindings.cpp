@@ -697,6 +697,69 @@ TEST_CASE("lua 1.11: on a core without levels emf.xp_required and emf.level_cap 
     CHECK(r.fake.replies[0] == "nil nil false");
 }
 
+TEST_CASE("lua 1.12: emf.add_component writes the fields by name into the component; fn gets the answer") {
+    Rig r(L"addcomp");
+    with_components(r.api);
+    add_script(r.dir, "ac",
+               "local function j(...) local t = {} for i = 1, select('#', ...) do t[#t + 1] = tostring((select(i, ...))) end return table.concat(t, ' ') end\n"
+               "emf.command('go', '', function(w)\n"
+               "  emf.reply(j(emf.add_component(w, 2000, 'ScaleComponent', {uniformScale = 1.25}, function(w2, status, why)\n"
+               "    emf.log(j('answer', status, why, w2:is_server()))\n"
+               "  end)))\n"
+               "  emf.reply(j(emf.add_component(w, 2001, 'IsTame', nil, {persistent = true})))\n"
+               "  emf.reply(j(emf.remove_component(w, 2000, 'ScaleComponent')))\n"
+               "  emf.reply(j(pcall(emf.add_component, w, 2002, 'ScaleComponent', {size = 2})))\n"
+               "  emf.reply(j(pcall(emf.add_component, w, 2003, 'NoSuchThing')))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("ac.go");
+    REQUIRE(r.fake.replies.size() == 5);
+    CHECK(r.fake.replies[0] == "true");
+    CHECK(r.fake.replies[1] == "true");
+    CHECK(r.fake.replies[2] == "true");
+    CHECK(r.fake.replies[3].find("false") == 0);  // an unknown field is an error
+    CHECK(r.fake.replies[3].find("size") != std::string::npos);
+    CHECK(r.fake.replies[4].find("false") == 0);  // not a component
+    REQUIRE(r.fake.component_changes.size() == 3);
+    const EmfComponentChange& a = r.fake.component_changes[0];
+    CHECK(a.size == sizeof(EmfComponentChange));
+    CHECK(a.op == EMF_COMPONENT_ADD);
+    CHECK(a.entity == 2000u);
+    CHECK(a.hash == emf::gen::ecs::ScaleComponent::kHash);
+    CHECK(a.data_size == 4u);
+    REQUIRE(r.fake.component_data[0].size() == 4u);
+    float scale = 0;
+    std::memcpy(&scale, r.fake.component_data[0].data(), 4);
+    CHECK(scale == 1.25f);
+    CHECK(r.fake.component_changes[1].flags == EMF_COMPONENT_PERSISTENT);
+    CHECK(r.fake.component_changes[1].data_size == 1u);  // IsTame's one byte, zeroed
+    CHECK(r.fake.component_changes[2].op == EMF_COMPONENT_REMOVE);
+    // the core answers one step later
+    a.cb(kServer, a.entity, a.hash, EMF_COMPONENT_DONE, "", a.user);
+    bool answered = false;
+    for (const auto& l : r.fake.log) answered |= l.find("answer done") != std::string::npos;
+    CHECK(answered);
+}
+
+TEST_CASE("lua 1.12: emf.add_component is false on a core without it, and when the core refuses (no callback kept)") {
+    Rig r(L"addcomp_old");
+    add_script(r.dir, "ad",
+               "emf.command('go', '', function(w)\n"
+               "  emf.reply(tostring(emf.add_component(w, 2000, 'ScaleComponent', {uniformScale = 2}, function() end)))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("ad.go");
+    REQUIRE(r.fake.replies.size() == 1);
+    CHECK(r.fake.replies[0] == "false");
+    with_components(r.api);
+    r.fake.component_ok = false;
+    r.run_command("ad.go");
+    REQUIRE(r.fake.replies.size() == 2);
+    CHECK(r.fake.replies[1] == "false");
+}
+
 TEST_CASE("lua 1.5: emf.attribute_add and emf.damage reach the core; a bad amount is an error") {
     Rig r(L"attradd");
     with_attributes(r.api);

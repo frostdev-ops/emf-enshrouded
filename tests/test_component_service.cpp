@@ -89,6 +89,7 @@ size_t count_logged(const std::string& needle) {
 struct Answer {
     uint32_t status;
     std::string why;
+    EmfWorld* world;  // NULL when the session ended first (the world may be gone)
 };
 
 struct Fixture {
@@ -140,10 +141,7 @@ struct Fixture {
         r.data.resize(sizeof(ecs::ScaleComponent));
         std::memcpy(r.data.data(), &scale, 4);
         r.mod = mod;
-        r.done = [this](EmfWorld* wd, uint32_t status, const std::string& why) {
-            CHECK(wd == world());
-            answers.push_back({status, why});
-        };
+        r.done = [this](EmfWorld* wd, uint32_t status, const std::string& why) { answers.push_back({status, why, wd}); };
         return r;
     }
     ComponentChangeRequest remove_scale(uint32_t entity, const char* mod = "beastmaster") {
@@ -183,6 +181,7 @@ TEST_CASE("change_component: an add is checked after a step, pushed in the next,
     CHECK(f.pushed_total == 1);
     REQUIRE(f.answers.size() == 1);
     CHECK(f.answers[0].status == EMF_COMPONENT_DONE);
+    CHECK(f.answers[0].world == f.world());
     CHECK(f.scale_of(2000) == 1.25f);
     CHECK(f.service.pending() == 0);
 }
@@ -264,6 +263,7 @@ TEST_CASE("change_component: a new world answers what is under way failed; nothi
     f.service.world_reset();
     REQUIRE(f.answers.size() == 1);
     CHECK(f.answers[0].status == EMF_COMPONENT_FAILED);
+    CHECK(f.answers[0].world == nullptr);  // the old world may be freed: callers never see it
     f.steps(3);
     CHECK(f.pushed_total == 0);
     CHECK(f.answers.size() == 1);
@@ -273,7 +273,13 @@ TEST_CASE("change_component: a new world answers what is under way failed; nothi
     f.step();
     REQUIRE(f.answers.size() == 2);
     CHECK(f.answers[1].status == EMF_COMPONENT_FAILED);
+    CHECK(f.answers[1].world == nullptr);
     CHECK(f.pushed_total == 0);
+    // end_session too
+    REQUIRE(f.service.request(f.add_scale(2000, 1.25f), nullptr));
+    f.service.end_session("back to the menu");
+    REQUIRE(f.answers.size() == 3);
+    CHECK(f.answers[2].world == nullptr);
 }
 
 TEST_CASE("change_component: a full command buffer waits; failed after 120 steps; a change the game ignores fails too") {

@@ -99,6 +99,10 @@ struct Fake {
     // v20 teleport: the requests made (answer them with their cb/user as the core would)
     std::vector<EmfTeleport> teleports;
     bool teleport_ok = true;
+    // v23 change_component: the requests (answer them with their cb/user as the core would) and their data
+    std::vector<EmfComponentChange> component_changes;
+    std::vector<std::vector<uint8_t>> component_data;
+    bool component_ok = true;
     // v21 world settings: two settings, what set and reset were asked (key as passed, "" for NULL; flags), the
     // change listeners; ws_world false = no hosted world (every call answers false)
     struct WsField {
@@ -350,6 +354,14 @@ bool f_level_set(EmfWorld*, uint32_t player, uint32_t level, uint32_t xp) {
     g->attr_adds.emplace_back(player, level, static_cast<int32_t>(xp));
     return level >= 1 && level <= 25;
 }
+bool f_change_component(EmfWorld*, const EmfComponentChange* c) {
+    g->component_changes.push_back(*c);
+    const auto* p = static_cast<const uint8_t*>(c->data);
+    g->component_data.emplace_back(p, p ? p + c->data_size : p);
+    return g->component_ok;
+}
+// A v23 core (fake_api leaves change_component out: emf.add_component answers false without it).
+void with_components(EmfApi& a) { a.change_component = f_change_component; }
 void with_levels(EmfApi& a) {
     a.player_xp_required = f_xp_required;
     a.player_level_cap = f_level_cap;

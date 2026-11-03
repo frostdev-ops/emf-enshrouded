@@ -968,6 +968,128 @@ int l_set_level(lua_State* L) {
     return 1;
 }
 
+// ---- lua 1.12: add and remove components (API v23) ----
+bool has_v23(const EmfApi* a) {
+    return a && a->version >= 23 && a->size >= offsetof(EmfApi, change_component) + sizeof(a->change_component);
+}
+
+struct ComponentSlot {
+    Host::Impl* host;
+    std::string id;
+    int ref;        // the Lua function
+    uint64_t load;  // the script's load counter when asked (a reload drops the answer)
+};
+
+const char* component_status_name(uint32_t s) {
+    return s == EMF_COMPONENT_DONE ? "done" : s == EMF_COMPONENT_ALREADY ? "already" : "failed";
+}
+
+void component_cb_body(EmfWorld* w, uint32_t status, const char* why, void* user) {
+    auto* slot = static_cast<ComponentSlot*>(user);
+    Script* s = slot->host->find(slot->id);
+    if (s) {
+        std::lock_guard<std::recursive_mutex> l(s->m);
+        const bool same_state = s->L && slot->load == s->loads;
+        // a NULL world: the world ended first (its ids mean nothing); the script is not asked
+        if (same_state && !s->paused && w) {
+            lua_rawgeti(s->L, LUA_REGISTRYINDEX, slot->ref);
+            push_world(s->L, *s, w);
+            lua_pushstring(s->L, component_status_name(status));
+            lua_pushstring(s->L, why ? why : "");
+            call_lua(*s, 3);
+            ++s->generation;
+        }
+        if (same_state) luaL_unref(s->L, LUA_REGISTRYINDEX, slot->ref);
+    }
+    delete slot;
+}
+
+// Called by EMF: nothing may escape into the game (a Lua error is a C++ exception).
+void component_cb(EmfWorld* w, uint32_t, uint32_t, uint32_t status, const char* why, void* user) {
+    try {
+        component_cb_body(w, status, why, user);
+    } catch (...) {
+    }
+}
+
+// The fields of `data` (a table: field name = value) written by name into a zeroed component of type t.
+std::vector<uint8_t> component_data(lua_State* L, const reflect::Type& t, const char* name, int data_index) {
+    std::vector<uint8_t> data(t.size, 0);
+    if (!data_index) return data;
+    lua_pushnil(L);
+    while (lua_next(L, data_index)) {
+        if (lua_type(L, -2) != LUA_TSTRING) luaL_error(L, "%s: the data's keys are field names", name);
+        const char* key = lua_tostring(L, -2);
+        const reflect::Field* f = find_field(t, key);
+        if (!f) luaL_error(L, "%s has no field %s", name, key);
+        if (f->count > 1) luaL_error(L, "%s.%s is an array: not supported here", name, key);
+        write_value(L, data.data(), *f, 0, lua_gettop(L));
+        lua_pop(L, 1);
+    }
+    return data;
+}
+
+// add: emf.add_component(world, id, name [, data] [, opts] [, fn]); remove: emf.remove_component(world, id, name [, opts]
+// [, fn]). data = {field = value} (absent fields are zero); opts: persistent = true (one the world save keeps);
+// fn(world, status, why) once: status "done", "already" or "failed". True when queued.
+int change_component_lua(lua_State* L, uint32_t op) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const auto entity = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    const char* name = luaL_checkstring(L, 3);
+    const reflect::Type* t = find_type(name);
+    if (!t) return luaL_error(L, "no type named %s", name);
+    if (!(t->flags & 1)) return luaL_error(L, "%s is not a component", name);
+    const bool add = op == EMF_COMPONENT_ADD;
+    int data_index = 0, fn_index = 0, opts_index = 0;
+    if (add && !lua_isnoneornil(L, 4)) {
+        luaL_checktype(L, 4, LUA_TTABLE);
+        data_index = 4;
+    }
+    for (int i = add ? 5 : 4; i <= (add ? 6 : 5); ++i) {
+        if (lua_isfunction(L, i) && !fn_index) fn_index = i;
+        else if (lua_istable(L, i) && !opts_index) opts_index = i;
+    }
+    EmfComponentChange c{};
+    c.size = sizeof c;
+    c.op = op;
+    c.entity = entity;
+    c.hash = t->hash;
+    if (opts_index) {
+        lua_getfield(L, opts_index, "persistent");
+        if (lua_toboolean(L, -1)) c.flags |= EMF_COMPONENT_PERSISTENT;
+        lua_pop(L, 1);
+    }
+    std::vector<uint8_t> data;
+    if (add) {
+        data = component_data(L, *t, name, data_index);
+        c.data = data.data();
+        c.data_size = static_cast<uint32_t>(data.size());
+    }
+    const EmfApi* a = s->host->api;
+    if (!has_v23(a) || !a->change_component) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    ComponentSlot* slot = nullptr;
+    if (fn_index) {
+        lua_pushvalue(L, fn_index);
+        slot = new ComponentSlot{s->host, s->id, luaL_ref(L, LUA_REGISTRYINDEX), s->loads};
+        c.cb = component_cb;
+        c.user = slot;
+    }
+    const bool ok = a->change_component(w, &c);
+    if (!ok && slot) {  // refused at once: the callback is never called
+        luaL_unref(L, LUA_REGISTRYINDEX, slot->ref);
+        delete slot;
+    }
+    lua_pushboolean(L, ok);
+    return 1;
+}
+
+int l_add_component(lua_State* L) { return change_component_lua(L, EMF_COMPONENT_ADD); }
+int l_remove_component(lua_State* L) { return change_component_lua(L, EMF_COMPONENT_REMOVE); }
+
 // ---- lua 1.6: chat lines and saves (API v19) ----
 bool has_v19(const EmfApi* a) { return a && a->size >= offsetof(EmfApi, request_save) + sizeof(a->request_save); }
 
@@ -1932,6 +2054,7 @@ void open_bindings(lua_State* L, Script&) {
                                    {"health", l_health},   {"attribute", l_attribute}, {"attribute_add", l_attribute_add},
                                    {"damage", l_damage},
                                    {"xp_required", l_xp_required}, {"level_cap", l_level_cap}, {"set_level", l_set_level},
+                                   {"add_component", l_add_component}, {"remove_component", l_remove_component},
                                    {"tell", l_tell},       {"broadcast", l_broadcast}, {"on_chat", l_on_chat},
                                    {"request_save", l_request_save}, {"teleport", l_teleport},
                                    {"on_world_setting_changed", l_on_world_setting_changed},

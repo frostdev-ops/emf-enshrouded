@@ -749,12 +749,13 @@ typedef struct EmfApi {
     bool (*player_level_set)(EmfWorld* world, uint32_t player, uint32_t level, uint32_t xp);
 
     /* ---- v23: add a component to an entity, or remove one (EmfComponentChange above) ---- */
-    /* Through the engine's own command, the one its programs use. Only the components EMF lists (reference.md "v23":
-     * ScaleComponent, IsTame, LifeTime, InteractionPause, DoNotSave, ForceSave to add; LifeTime, IsTame, ForceSave,
-     * ConditionalDespawn, DespawnLink, DoNotSave and what the same mod added this session to remove); one the world save
-     * keeps needs EMF_COMPONENT_PERSISTENT. SERVER world, never a player. True = queued: checked after the server
+    /* Adds a component to an entity, or removes one, through the engine's own command. Only those EMF lists
+     * (reference.md "v23": ScaleComponent, IsTame, LifeTime, InteractionPause, DoNotSave, ForceSave to add; LifeTime,
+     * IsTame, ForceSave, ConditionalDespawn, DespawnLink, DoNotSave and what the same mod added this session to remove);
+     * one the world save keeps needs EMF_COMPONENT_PERSISTENT. SERVER world, never a player. True = queued: checked after the server
      * world's next step, applied in the step after, and cb answers once (EMF_COMPONENT_DONE / _ALREADY / _FAILED with
-     * why) on the server world's thread. False (logged) when refused at once; cb is not called then. */
+     * why) on the server world's thread; when the world ended first (a new world, the menu) it answers _FAILED with a
+     * NULL world, on the thread that ended it. False (logged) when refused at once; cb is not called then. */
     bool (*change_component)(EmfWorld* world, const EmfComponentChange* change);
 } EmfApi;
 

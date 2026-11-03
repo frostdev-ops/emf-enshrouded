@@ -799,7 +799,7 @@ bool add_component(World w, uint32_t entity, const T& value, uint32_t flags = 0)
                                     flags, nullptr, nullptr);
 }
 // The same with f(World, uint32_t status, const char* why) once it is applied (EMF_COMPONENT_DONE / _ALREADY /
-// _FAILED), on the server world's thread.
+// _FAILED), on the server world's thread. The World is empty (false) when the world ended first.
 template <class T, class F>
 bool add_component(World w, uint32_t entity, const T& value, uint32_t flags, F f) {
     return detail::change_component_cb(w, entity, EMF_COMPONENT_ADD, T::kHash, &value, static_cast<uint32_t>(sizeof(T)),

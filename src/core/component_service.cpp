@@ -135,10 +135,11 @@ bool ComponentService::request(const ComponentChangeRequest& r, std::string* why
     return true;
 }
 
-ComponentService::Result ComponentService::answer(const Job& j, uint32_t status, const std::string& why) {
+ComponentService::Result ComponentService::answer(const Job& j, uint32_t status, const std::string& why,
+                                                   bool world_gone) {
     if (status == EMF_COMPONENT_FAILED)
         say("change_component(" + name_of(j.req.hash) + " on " + std::to_string(j.req.entity) + ") failed: " + why);
-    return Result{j.req.done, j.req.world, status, why};
+    return Result{j.req.done, world_gone ? nullptr : j.req.world, status, why};  // a world that ended may be freed
 }
 
 void ComponentService::deliver(std::vector<Result>& results) {
@@ -230,7 +231,7 @@ void ComponentService::on_server_tick(EmfWorld* world) {
         Job& j = *it;
         bool done = false;
         if (j.session != cur) {
-            results.push_back(answer(j, EMF_COMPONENT_FAILED, "the world it was meant for ended"));
+            results.push_back(answer(j, EMF_COMPONENT_FAILED, "the world it was meant for ended", true));
             done = true;
         } else if (j.req.world == world) {
             const bool add = j.req.op == ComponentOp::Add;
@@ -267,9 +268,12 @@ void ComponentService::on_server_tick(EmfWorld* world) {
 }
 
 void ComponentService::answer_all_locked(const std::string& why, std::vector<Result>& out) {
-    for (const auto& j : jobs_) out.push_back(answer(j, EMF_COMPONENT_FAILED, why));
+    for (const auto& j : jobs_) out.push_back(answer(j, EMF_COMPONENT_FAILED, why, true));
     jobs_.clear();
-    for (auto& r : early_) out.push_back(std::move(r));
+    for (auto& r : early_) {
+        r.world = nullptr;
+        out.push_back(std::move(r));
+    }
     early_.clear();
     added_.clear();
 }
