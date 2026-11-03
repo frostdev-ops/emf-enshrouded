@@ -3,7 +3,8 @@
 A Beastmaster class for Enshrouded. Tame wild wolves, boars, sabretooths, hounds, bears, aurochs and snakes, keep up to 8 in
 your collection, and call as many to fight beside you as you have active slots (1 at the start, up to 4 as your character
 levels up). Build a stable to choose which beasts are active. They follow you, come back when they stray, rest after
-they fall, and are kept with the world. Their kills are yours: XP and loot.
+they fall, and are kept with the world. Their kills are yours: XP and loot. Loyal beasts earn talent points: make each
+one your own (stronger, tougher, faster, a second wind, an ambush, a guard).
 
 It needs the `lua` mod 1.13 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
 (the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs and the snake come in the **EMF creature packs**
@@ -75,9 +76,11 @@ stays so, kept with the world):
   slots;
 - a beast you tame takes a free active slot; with none free it goes to your stable.
 
-**The Beasts window:** look at the stable within 4 m and press **E** (the host). It shows your active slots (a beast and
-its loyalty, an empty slot, or a locked one with the level that opens it) and the stable: every beast with its kind,
-loyalty and whether it is out, at home or resting. Click a beast (or a slot) to select it, then:
+**The Beasts window:** look at the stable within 4 m and press **E** (the host). It has two tabs at the top: **Stable**
+and the selected beast's name (the open one lit). The Stable tab shows your active slots (a beast and its loyalty, an
+empty slot, or a locked one with the level that opens it) and the stable: every beast with its kind, loyalty and
+whether it is out, at home or resting. Click a beast (or a slot) to select it: its own tab opens (see Talents); the
+**Stable** tab brings you back, the beast still selected. On both tabs:
 - **Make active**: into a free slot (it can be called);
 - **Store**: out of its slot (a beast that is out goes home);
 - **Release**: it leaves your collection for good (a beast that is out leaves the world); click it twice within 5 s.
@@ -106,7 +109,36 @@ Between fights it heals: 5 s after its last hit, 5 % of its health a second.
 within 30 s (wildlife and farm animals give none); 10 points to loyalty 2, 20 more to 3, and so on (450 to loyalty 10;
 the **Loyalty grows** setting changes the pace). Each loyalty makes it a little stronger and bigger: at loyalty 10 it
 has 20 % more health and damage and is 1.25x its size. The strength comes at once; the size the next time you call it
-(the game draws a creature at the size it is made with). `/beastmaster list` shows it; a new loyalty is told to you.
+(the game draws a creature at the size it is made with). `/beastmaster list` shows it; a new loyalty is told to you,
+with the talent point it brings.
+
+## Talents
+
+Each loyalty above 1 gives a beast a **talent point** (9 at loyalty 10). Spend them at a stable: on the beast's tab of
+the Beasts window (its **+** buttons), or `/beastmaster talent <name or number> <talent>` within 10 m of a stable.
+
+| Talent | Per point | Most | What it does |
+|---|---|---|---|
+| Strength | +4 % damage | 5 | on top of its role and loyalty |
+| Toughness | +5 % health | 5 | on top of its role and loyalty |
+| Swiftness | +4 % speed | 3 | it moves faster |
+| Second Wind | | 1 | a killing blow leaves it at 20 % health instead; then 5 minutes before it works again |
+| Ambush | +50 % | 2 | its first hit on a foe in a fight deals that much more (a bonus that kills is your kill: XP and loot) |
+| Guard | 3 s, 5 s with 2 points | 2 | it takes no damage for the first seconds of a fight (the hit that starts it is healed back) |
+
+A fight starts with the first hit to or from the beast after 10 s without any. A beast that is out gets Strength,
+Toughness, Swiftness and Second Wind at once, Ambush and Guard from its next fight. Talents act only while the beast is
+out. **Reset talents** (on its tab, or `/beastmaster talents <name or number> reset` at a stable) gives every point back,
+free, at once. When a beast has more points spent than its loyalty gives (its loyalty was set lower, or the Loyalty
+grows setting turned down), it keeps them, but no new point can be spent until a reset ("2 too many: reset to choose
+again"). A release forgets a beast's talents; a rename keeps them. The numbers are in one table at the top of
+`talents.lua`.
+
+**The beast's tab** shows its kind and level (yours), its loyalty and the kills to the next, what its role, loyalty and
+talents make of its health, damage and speed ("Health x1.32, damage x1.27, speed x1.08"), whether it is out, at home or
+resting and active or in the stable, then "Talents: 3 points (1 left)", a row per talent with its points ("Strength 2/5:
++8 % damage") and a **+** (off when the talent is full or no point is left; Second Wind says "ready" or when it works
+again while the beast is out), **Reset talents**, and Make active, Store and Release.
 
 **The wheel (hold F3):** Tame, Feed, Attack, **Mode** (steps passive, defending, aggressive), **Stable: animal bed** while your world has no stable (it says what to build), **Come back** while your beasts stepped aside by `/beastmaster aside`,
 **Dismiss <name>** for each beast that is out (and **Dismiss all** with two or more out), then **Call <name>** for up
@@ -147,6 +179,9 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster active <name or number>` | within 10 m of a stable: make a beast active (into a free slot) |
 | `/beastmaster store <name or number>` | within 10 m of a stable: put a beast into the stable (one that is out goes home) |
 | `/beastmaster release <name or number>` | within 10 m of a stable: let a beast go for good (the same command again within 10 s) |
+| `/beastmaster talents <name or number>` | a beast's talents: its points and each talent's |
+| `/beastmaster talent <name or number> <talent>` | within 10 m of a stable: spend a talent point (strength, toughness, swiftness, second wind, ambush or guard) |
+| `/beastmaster talents <name or number> reset` | within 10 m of a stable: every talent point back, free |
 | `/beastmaster rename <name or number> <new name>` | rename a beast (1-20 characters, not a name your collection has) |
 | `/beastmaster tame` | tame the beast you look at, else the nearest beaten-down one (under 25 % health, within 8 m) |
 | `/beastmaster feed` | feed the beast you look at (else the nearest) its bait: 3 times to tame it |
@@ -157,7 +192,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while someone builds next to them |
 | `/beastmaster mode [passive, defending or aggressive]` | how all your beasts fight; without a word, the mode now |
 | `beastmaster.stable mark`, `unmark`, `list` | **host or admins:** the prop you look at (no camera data: the one within 3 m of you) is a stable; the marked prop nearest you (within 8 m) is no stable; this world's stables |
-| `beastmaster.loyalty <name or number> <1-10>` | **host console only:** set a beast's loyalty (tests) |
+| `beastmaster.loyalty <name or number> <1-10>` | **host console only:** set a beast's loyalty (tests); the reply says its talent points |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
 
@@ -261,3 +296,6 @@ does not ship this file.
   command) has a wolf's or a boar's health.
 - Beasts are called with the wheel or the chat command; there are no spell items for it. The species are the six
   above.
+- Second Wind and Guard work through the game's minimum health of the beast (as the 5 s after a taming do); Swiftness
+  through its Movement multiplier, the one value `SPEED_ENTRIES` in `talents.lua` names.
+- Second Wind's 5 minutes are not kept with the world: after a reload it is ready again.

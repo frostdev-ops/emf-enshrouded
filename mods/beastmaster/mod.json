@@ -1,8 +1,8 @@
 {
   "id": "beastmaster",
   "name": "Beastmaster",
-  "version": "1.6.0",
-  "description": "A Beastmaster class: tame wild wolves, boars, sabretooths and hounds (beat them down or feed them bait), and bears, aurochs and snakes with the EMF creature packs (a wild snake is now and then a rare crimson, golden king or albino one, with a bonus for whoever slays it), keep up to 8 in your collection, call as many to fight beside you as your active slots (1 at the start, up to 4 with your level), and choose them at a stable (the game's animal bed in your base: press E at it). They follow you, come back when far away, and are kept with the world. Hold F3 for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
+  "version": "1.7.0",
+  "description": "A Beastmaster class: tame wild wolves, boars, sabretooths and hounds (beat them down or feed them bait), and bears, aurochs and snakes with the EMF creature packs (a wild snake is now and then a rare crimson, golden king or albino one, with a bonus for whoever slays it), keep up to 8 in your collection, call as many to fight beside you as your active slots (1 at the start, up to 4 with your level), and choose them at a stable (the game's animal bed in your base: press E at it). Loyal beasts earn talent points (Strength, Toughness, Swiftness, Second Wind, Ambush, Guard), spent on each beast's tab of the Beasts window. They follow you, come back when far away, and are kept with the world. Hold F3 for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
   "authors": ["EMF contributors"],
   "enabled": false,
   "emf": 14,
