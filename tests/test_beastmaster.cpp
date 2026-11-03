@@ -280,7 +280,7 @@ TEST_CASE("beastmaster: at most 2 out; a 10 s cooldown; too little mana gives a 
     CHECK(b.r.fake.spawns.size() == 2);
 }
 
-TEST_CASE("beastmaster: a beast that dies rests 120 s, its body is removed, and it can be called again after") {
+TEST_CASE("beastmaster: a beast that dies rests 60 s, its body is removed, and it can be called again after") {
     BeastRig b;
     b.reply("beastmaster.give wolf");
     b.spawnable(2);
@@ -289,9 +289,9 @@ TEST_CASE("beastmaster: a beast that dies rests 120 s, its body is removed, and 
     b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 0;
     b.seconds(2);
     CHECK(contains(b.r.fake.destroyed, 1234));  // no loot from our own beasts
-    CHECK(b.reply("beastmaster.list").find("rests 1:5") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("rests 0:5") != std::string::npos);
     CHECK(b.reply("beastmaster.call Wolf").find("rests") != std::string::npos);
-    b.seconds(120);
+    b.seconds(60);
     CHECK(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
     CHECK(b.r.fake.spawns.size() == 2);
 }
@@ -821,6 +821,16 @@ TEST_CASE("loyalty: the tenth point brings loyalty 2: the owner hears it, the be
     b.seconds(1);
     CHECK(b.reply("beastmaster.list").find("loyalty 2,") != std::string::npos);
     CHECK(now_of<ecs::DamageMod>(b, 1235).dataStorage[2] == doctest::Approx(damage));
+}
+
+TEST_CASE("loyalty: a beast that falls rests 60 s, so it is back for the next fight but not in this one") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    next_beast(b, 1234);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    deliver(b.r.fake, "EntityDiedEvent", died_event(1234));
+    CHECK(b.reply("beastmaster.list").find("rests 1:00") != std::string::npos);
+    CHECK(b.r.fake.settings["beastmaster.loyalty_pace"] == "1");
 }
 
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {

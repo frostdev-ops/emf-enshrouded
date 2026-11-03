@@ -39,7 +39,7 @@ everything else works and those beasts are simply not there.
    - **Passive:** they ignore fights and keep following you; Attack still sends them at a creature (for 20 s).
    - **Aggressive:** they also go after hostile creatures within 25 m of you (never wildlife, farm animals, bosses or
      players).
-7. **A beast that falls** rests for 2 minutes at home, and then you can call it again. Its body is gone a second after,
+7. **A beast that falls** rests for 60 seconds at home, and then you can call it again. Its body is gone a second after,
    so our own beasts never drop loot.
 8. **Dismiss** a beast to send it home: **Dismiss <name>** on the wheel (one for each beast that is out), **Dismiss
    all** (with two or more out), or `/beastmaster dismiss <name or number>`; `/beastmaster dismiss` alone sends every
@@ -53,6 +53,28 @@ everything else works and those beasts are simply not there.
    `/beastmaster aside` sends them away by hand, for example when they stand where you want to work; **Come back** on
    the wheel, `/beastmaster aside` again, calling or taming a beast, or sending the last one home ends it.
    `/beastmaster list` shows them as "aside".
+
+**Your beasts' strength.** A beast out is always at your level (also when you level up while it is out), with the
+health and damage a wild one of its kind has at that level, changed by its role:
+
+| Kind | Role | Health | Damage |
+|---|---|---|---|
+| Wolf | fast hunter | x1.2 | x1.15 |
+| Hound | like the wolf, a bit sturdier | x1.3 | x1.1 |
+| Sabretooth | the striker | x1.15 | x1.25 |
+| Snake | quick biter | x1.2 | x1.15 |
+| Crimson, golden king, albino snake | (their bites are strong already) | x1.2 | x1, x0.95, x0.9 |
+| Boar | tank | x1.7 | x0.9 |
+| Aurochs | charging tank | x2.0 | x1.0 |
+| Bear | heavy tank | x2.2 | x1.1 |
+
+Between fights it heals: 5 s after its last hit, 5 % of its health a second.
+
+**Loyalty** (1 to 10) grows with the fights a beast takes part in: a point for each hostile creature it hit that dies
+within 30 s (wildlife and farm animals give none); 10 points to loyalty 2, 20 more to 3, and so on (450 to loyalty 10;
+the **Loyalty grows** setting changes the pace). Each loyalty makes it a little stronger and bigger: at loyalty 10 it
+has 20 % more health and damage and is 1.25x its size (the bear, aurochs and snakes grow; the game's wolf, boar,
+sabretooth and hound get the health and damage). `/beastmaster list` shows it; a new loyalty is told to you.
 
 **The wheel (hold F3):** Tame, Feed, Attack, **Mode** (steps passive, defending, aggressive), **Come back** while your beasts stepped aside by `/beastmaster aside`,
 **Dismiss <name>** for each beast that is out (and **Dismiss all** with two or more out), then **Call <name>** for up
@@ -110,7 +132,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Mana to call a beast (`call_mana_pct`) | 15 % | of your maximum mana; 0 = free |
 | Seconds between calls (`call_cooldown_s`) | 10 | |
 | Beasts out at once (`max_out`) | 2 | 1-4, never two of the same kind |
-| Rest after a beast falls (`rest_s`) | 120 s | |
+| Rest after a beast falls (`rest_s`) | 60 s | |
 | Beasts in your collection (`collection_max`) | 8 | 1-16 |
 | Tame by defeat below (`tame_health_pct`) | 25 % | |
 | Taming takes (`tame_channel_s`) | 3 s | |
@@ -118,6 +140,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Baits to tame by feeding (`feed_count`), Feeding window (`feed_window_s`) | 3, 10 s | |
 | Bait for wolves, hounds, boars, sabretooths, bears, aurochs, snakes, the rare snakes (`bait_<kind>`) | see above | an item's debug name (`items meat` in the console) |
 | Beasts drop a chase at (`chase_m`) | 45 m | they turn from the fight and run back |
+| Loyalty grows (`loyalty_pace`) | 1x | 2x: half the kills per loyalty |
 | Beasts come back from (`leash_m`), At once from (`leash_far_m`) | 60 m, 120 m | |
 | Aggressive beasts go at foes within (`aggro_m`) | 25 m | |
 | You get your beasts' kills (`xp_credit`) | on | XP and loot for the owner |
