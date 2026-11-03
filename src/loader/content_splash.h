@@ -22,16 +22,27 @@ inline int screen_dpi() {
 }
 inline int splash_scaled(int px, int dpi) { return MulDiv(px, dpi, 96); }
 
+// The window shows only once the work has run this long: a quick start (nothing to build, or a small build) shows no
+// window at all, instead of one that flickers past.
+constexpr DWORD kSplashShowAfterMs = 1000;
+
 class ContentSplash {
 public:
+    // Shows the window (default ShowWindow + UpdateWindow); tests replace it, so nothing appears on the screen.
+    std::function<void(HWND)> show_window;
+
     ContentSplash() = default;
     ContentSplash(const ContentSplash&) = delete;
     ContentSplash& operator=(const ContentSplash&) = delete;
     ~ContentSplash() { end(); }
 
-    // Shows the window; false when it could not (the build runs all the same).
-    bool begin(const std::string& title) {
+    // Makes the window, hidden; run_with_splash shows it once the work has run `show_after_ms` (0: at once). False when
+    // it could not (the build runs all the same).
+    bool begin(const std::string& title, DWORD show_after_ms = kSplashShowAfterMs) {
         if (hwnd_) return true;
+        began_ = GetTickCount64();
+        show_after_ = show_after_ms;
+        shown_ = false;
         title_ = cio::from_utf8(title);
         HMODULE self = nullptr;
         GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
@@ -55,10 +66,30 @@ public:
         hwnd_ = CreateWindowExW(WS_EX_TOPMOST | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE, kClass, L"EMF", WS_POPUP | WS_BORDER,
                                 x, y, w, h, nullptr, nullptr, instance_, this);
         if (!hwnd_) return false;
-        ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
-        UpdateWindow(hwnd_);
+        if (show_after_ == 0) show_if_due(began_);
         return true;
     }
+
+    // Shows the window when its delay has passed (once); on the thread that made it.
+    void show_if_due(ULONGLONG now) {
+        if (!hwnd_ || shown_ || now - began_ < show_after_) return;
+        shown_ = true;
+        if (show_window) {
+            show_window(hwnd_);
+        } else {
+            ShowWindow(hwnd_, SW_SHOWNOACTIVATE);
+            UpdateWindow(hwnd_);
+        }
+    }
+
+    // Milliseconds until it is due (INFINITE when shown or not made).
+    DWORD due_in(ULONGLONG now) const {
+        if (!hwnd_ || shown_) return INFINITE;
+        const ULONGLONG at = began_ + show_after_;
+        return now >= at ? 0 : static_cast<DWORD>(at - now);
+    }
+
+    bool shown() const { return shown_; }
 
     // The last log line to show; any thread.
     void line(const std::string& text) {
@@ -138,6 +169,9 @@ private:
     HFONT font_ = nullptr;  // the system's UI font at the screen's DPI
     int margin_ = 16, line_gap_ = 34;
     bool registered_ = false;
+    ULONGLONG began_ = 0;
+    DWORD show_after_ = kSplashShowAfterMs;
+    bool shown_ = false;
     std::wstring title_;
     mutable SRWLOCK lock_ = SRWLOCK_INIT;
     std::string line_;
@@ -180,8 +214,10 @@ inline bool run_with_splash(ContentSplash* splash, std::function<void()> work, D
     const ULONGLONG until = GetTickCount64() + timeout_ms;
     for (;;) {
         const ULONGLONG now = GetTickCount64();
+        splash->show_if_due(now);
         const DWORD left = now >= until ? 0 : static_cast<DWORD>(until - now);
-        const DWORD w = MsgWaitForMultipleObjects(1, &t, FALSE, left, QS_ALLINPUT);
+        const DWORD due = splash->due_in(now);
+        const DWORD w = MsgWaitForMultipleObjects(1, &t, FALSE, due < left ? due : left, QS_ALLINPUT);
         if (w == WAIT_OBJECT_0) {
             CloseHandle(t);
             return true;
@@ -194,6 +230,7 @@ inline bool run_with_splash(ContentSplash* splash, std::function<void()> work, D
             }
             continue;
         }
+        if (w == WAIT_TIMEOUT && GetTickCount64() < until) continue;  // the splash's delay passed: show it, wait on
         CloseHandle(t);
         return false;  // the time is up (or the wait failed)
     }

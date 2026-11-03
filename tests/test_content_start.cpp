@@ -420,9 +420,12 @@ TEST_CASE("content start: facts stop at the first no (a start without emf_conten
 
 TEST_CASE("content splash: a window while the work runs on another thread, with its last line; gone afterwards") {
     emf::loader::ContentSplash splash;
+    int shown = 0;
+    splash.show_window = [&](HWND) { ++shown; };  // nothing on the screen during the tests
     REQUIRE(splash.begin("EMF is preparing EML content (first start after a change)..."));
     const HWND w = splash.window();
     CHECK(IsWindow(w));
+    CHECK_FALSE(IsWindowVisible(w));  // hidden until the work has run for a second
     CHECK((GetWindowLongPtrW(w, GWL_EXSTYLE) & WS_EX_NOACTIVATE) != 0);  // never takes the game's focus
     DWORD worker = 0;
     const bool done = emf::loader::run_with_splash(&splash,
@@ -437,10 +440,26 @@ TEST_CASE("content splash: a window while the work runs on another thread, with 
     CHECK(worker != 0);
     CHECK(worker != GetCurrentThreadId());
     CHECK(splash.last_line() == "the last line");
+    CHECK(shown == 0);  // a work of 0.3 s never shows it: a quick start shows nothing
+    CHECK_FALSE(splash.shown());
     splash.end();
     CHECK_FALSE(IsWindow(w));
     // a work that does not come back in time: false, and the work keeps what it needs
     CHECK_FALSE(emf::loader::run_with_splash(nullptr, [] { Sleep(1500); }, 100));
+}
+
+TEST_CASE("content splash: a work longer than the delay shows the window once, after the delay") {
+    emf::loader::ContentSplash splash;
+    std::vector<ULONGLONG> shown_at;
+    splash.show_window = [&](HWND) { shown_at.push_back(GetTickCount64()); };
+    const ULONGLONG start = GetTickCount64();
+    REQUIRE(splash.begin("EMF is preparing EML content (first start after a change)...", 150));
+    CHECK(emf::loader::run_with_splash(&splash, [] { Sleep(700); }, 10000));
+    REQUIRE(shown_at.size() == 1u);
+    CHECK(shown_at[0] - start >= 140u);  // not before the delay
+    CHECK(shown_at[0] - start < 650u);   // but while the work still ran
+    CHECK(splash.shown());
+    splash.end();
 }
 
 TEST_CASE("content splash: without a splash (the dedicated server) it only waits: no message loop, no window") {
