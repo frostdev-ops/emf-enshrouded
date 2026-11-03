@@ -120,7 +120,7 @@ FontPlan plan_fonts(const LookSettings& look, int swapchain_height, const FontPa
 }
 
 bool FontRebuild::due(const FontSizes& sizes, uint64_t now_ms) {
-    if (!any_) return true;  // the first atlas: at once
+    if (!any_ || requested_) return true;  // the first atlas, or a font picked in the settings: at once
     if (sizes == built_) {   // the sizes it has: nothing to do (and a size that came and went is forgotten)
         pending_ = built_;
         return false;
@@ -135,8 +135,11 @@ bool FontRebuild::due(const FontSizes& sizes, uint64_t now_ms) {
 
 void FontRebuild::built(const FontSizes& sizes) {
     any_ = true;
+    requested_ = false;
     built_ = pending_ = sizes;
 }
+
+void FontRebuild::request() { requested_ = true; }
 
 bool read_font_file(const std::wstring& path, size_t max_bytes, std::vector<unsigned char>& out) {
     out.clear();

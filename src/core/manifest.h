@@ -60,7 +60,8 @@ struct Dependency {
 };
 
 // The values 0-5 are the C API's EMF_SETTING_BOOL..TEXT (api.cpp casts them): append new types only.
-enum class SettingType { Bool, Int, Float, Choice, Key, Text, Select, Color };
+// ScanCode: EMF's own console key (a keyboard scan code 1-0x7F stored as "0x29"); mod.json cannot name it.
+enum class SettingType { Bool, Int, Float, Choice, Key, Text, Select, Color, ScanCode };
 const char* setting_type_name(SettingType t);
 
 struct SettingOption {
@@ -115,6 +116,8 @@ ManifestResult parse_manifest(std::string_view json_text);
 
 // 1-48 of a-z 0-9 _ . -
 bool valid_mod_id(std::string_view id);
+// EMF's own id (its settings in emf_core.ini): no mod may take it.
+constexpr const char* kReservedEmfId = "emf";
 // 1-48 of A-Z a-z 0-9 _ . -
 bool valid_setting_key(std::string_view key);
 // Builds and checks one setting (shared by manifests and the API's setting_declare). `default_text` may be empty

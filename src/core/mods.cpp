@@ -100,6 +100,11 @@ std::vector<Found> discover(const std::wstring& dir) {
         x.rec.source = name;
         x.dll = dir + L"\\" + f;
         x.sort_name = name;
+        if (x.rec.id == kReservedEmfId) {  // emf.dll: the id is EMF's own (its settings)
+            x.rec.status = ModStatus::Rejected;
+            x.rec.reason = "the id \"emf\" is EMF's own (its settings use it): rename the DLL";
+            x.rejected = true;
+        }
         out.push_back(std::move(x));
     }
     for (const auto& folder : folders) {

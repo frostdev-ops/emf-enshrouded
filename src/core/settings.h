@@ -33,6 +33,35 @@ private:
     std::wstring dir_;
 };
 
+// EMF's own settings: declared under this id (no mod may take it), keys "<section>.<name>" (hud.size), kept in
+// emf_core.ini.
+constexpr const char* kEmfSettingsId = kReservedEmfId;
+
+// One ini file whose keys are "<section>.<name>" ([section] name), for EMF's own emf_core.ini: a read leaves out a
+// "; comment" after the value and surrounding spaces (as the overlay's own reads do); a write changes only that line
+// and keeps the file's encoding (scripts read this file). A key without a '.' is no key here.
+class CoreIniBackend : public IniBackend {
+public:
+    explicit CoreIniBackend(std::wstring ini_path) : path_(std::move(ini_path)) {}
+    std::optional<std::string> read(const std::string& mod, const std::string& key) override;
+    bool write(const std::string& mod, const std::string& key, const std::string& value) override;
+
+private:
+    std::wstring path_;
+};
+
+// kEmfSettingsId to `emf`, every other mod to `mods`.
+class RoutingIniBackend : public IniBackend {
+public:
+    RoutingIniBackend(IniBackend* emf, IniBackend* mods) : emf_(emf), mods_(mods) {}
+    std::optional<std::string> read(const std::string& mod, const std::string& key) override;
+    bool write(const std::string& mod, const std::string& key, const std::string& value) override;
+
+private:
+    IniBackend* emf_;
+    IniBackend* mods_;
+};
+
 class SettingsStore {
 public:
     explicit SettingsStore(IniBackend* backend) : backend_(backend) {}
@@ -42,7 +71,9 @@ public:
     //   is clamped or replaced and written back, so mods reading their ini see what the Mods tab shows.
     // - Live (mod.json edited while the game runs): always the ini's value, fitted to the new definition in memory only
     //   (an edit saved half-way never overwrites what the player saved); a value that moves is a change (callbacks run).
-    enum class Declare { Start, Live };
+    // - Keep (EMF's own settings): as Start, but a value that does not fit is only used clamped, never written back
+    //   (EMF never rewrites what the player typed into emf_core.ini).
+    enum class Declare { Start, Live, Keep };
     // Declares (or redeclares) a setting and reads its stored value. False (and *why) for a bad definition; true with
     // *why set to something worth a log line (SettingDef::warning), or cleared.
     bool declare(const std::string& mod, SettingDef def, std::string* why = nullptr, Declare mode = Declare::Start);
@@ -50,6 +81,8 @@ public:
     std::vector<std::string> mods() const;  // mods with declared settings, by id
     bool has(const std::string& mod, const std::string& key) const;
     std::string get(const std::string& mod, const std::string& key) const;  // effective value; "" if undeclared
+    // The value came from the ini (a usable one) or a change, not from the default nobody set.
+    bool stored(const std::string& mod, const std::string& key) const;
     int64_t get_int(const std::string& mod, const std::string& key, int64_t fallback) const;
     double get_float(const std::string& mod, const std::string& key, double fallback) const;
 
@@ -68,6 +101,7 @@ private:
     struct Entry {
         SettingDef def;
         std::string value;
+        bool stored = false;  // see stored()
     };
     const Entry* find(const std::string& mod, const std::string& key) const;
     IniBackend* backend_;

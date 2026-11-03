@@ -76,6 +76,30 @@ void with_help(Rig& r) {
 }
 }  // namespace
 
+TEST_CASE("console UI: Ctrl+Tab goes Console, Mods, Settings, Console; a missing tab is skipped") {
+    CHECK(next_tab(0, true, true) == 1);
+    CHECK(next_tab(1, true, true) == 2);
+    CHECK(next_tab(2, true, true) == 0);
+    CHECK(next_tab(0, false, true) == 2);  // no Mods tab
+    CHECK(next_tab(2, false, true) == 0);
+    CHECK(next_tab(0, true, false) == 1);  // no Settings tab: Console and Mods as before
+    CHECK(next_tab(1, true, false) == 0);
+    CHECK(next_tab(0, false, false) == 0);
+}
+
+TEST_CASE("console UI: each kind of line takes its colour from the console's state ([overlay] colour_*)") {
+    ConsoleUiState ui;
+    const ImVec4 reply = line_colour(ui, LineKind::Normal);  // replies: today's grey by default
+    CHECK(reply.x == doctest::Approx(0xB3 / 255.0f));
+    CHECK(reply.z == doctest::Approx(0xC2 / 255.0f));
+    ui.colour_error = ImVec4(0.1f, 0.2f, 0.3f, 1.0f);
+    const ImVec4 err = line_colour(ui, LineKind::Error);
+    CHECK(err.x == doctest::Approx(0.1f));
+    CHECK(err.y == doctest::Approx(0.2f));
+    CHECK(line_colour(ui, LineKind::Command).x == doctest::Approx(1.0f));
+    CHECK(line_colour(ui, LineKind::Success).y == doctest::Approx(0xE8 / 255.0f));
+}
+
 TEST_CASE("console UI: after the window grows and shrinks again, the scrollback still shows the newest line") {
     Headless h;
     Rig r;

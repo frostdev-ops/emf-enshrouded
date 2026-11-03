@@ -54,7 +54,28 @@ TEST_CASE("look settings: the defaults when nothing is set (game style, serif, w
     CHECK(s.opacity == 80);
     CHECK(s.background == 0x080A0EFFu);
     CHECK(s.accent == 0xC0B074FFu);
+    CHECK(s.colour_command == 0xFFFFFFFFu);  // the console's line colours (today's, console_ui.cpp)
+    CHECK(s.colour_reply == 0xB3BAC2FFu);
+    CHECK(s.colour_error == 0xFF7A73FFu);
+    CHECK(s.colour_success == 0x7DE887FFu);
     CHECK(s == LookSettings{});  // the struct's own defaults are the same
+}
+
+TEST_CASE("look settings: the console's line colours are read; a bad one falls back with a problem line") {
+    std::vector<std::string> problems;
+    const LookSettings s = read({{"overlay.colour_command", "#123456"},
+                                 {"overlay.colour_reply", "#abc"},
+                                 {"overlay.colour_error", "#ff0000"},
+                                 {"overlay.colour_success", "#00ff00"}},
+                                &problems);
+    CHECK(problems.empty());
+    CHECK(s.colour_command == 0x123456FFu);
+    CHECK(s.colour_reply == 0xAABBCCFFu);
+    CHECK(s.colour_error == 0xFF0000FFu);
+    CHECK(s.colour_success == 0x00FF00FFu);
+    const LookSettings bad = read({{"overlay.colour_error", "red"}}, &problems);
+    CHECK(bad.colour_error == 0xFF7A73FFu);
+    CHECK(problems.size() == 1);
 }
 
 TEST_CASE("look settings: every key is read") {
@@ -275,4 +296,34 @@ TEST_CASE("read_overlay_config: the look comes from emf_core.ini's [hud] and [ov
     REQUIRE(c.look_problems.size() == 1);
     CHECK(c.look_problems[0].find("[overlay] height=lots") != std::string::npos);
     DeleteFileW(ini.c_str());
+}
+
+TEST_CASE("fonts_differ: a font, style or size change rebuilds the fonts; a colour, opacity or place does not") {
+    const LookSettings base;
+    LookSettings x = base;
+    CHECK_FALSE(fonts_differ(base, x));
+    x.hud_colour = 0x112233FFu;
+    x.opacity = 40;
+    x.accent = 0x445566FFu;
+    x.notes_place = NotesPlace::Right;
+    x.colour_error = 0x010203FFu;
+    CHECK_FALSE(fonts_differ(base, x));
+    LookSettings f = base;
+    f.hud_font = FontChoice{FontChoice::Kind::Console};
+    CHECK(fonts_differ(base, f));
+    f = base;
+    f.console_font = FontChoice{FontChoice::Kind::File, "Mine.ttf"};
+    CHECK(fonts_differ(base, f));
+    f = base;
+    f.tabs_font = FontChoice{FontChoice::Kind::Consolas};
+    CHECK(fonts_differ(base, f));
+    f = base;
+    f.style = HudStyle::Boxed;  // boxed draws HUD lines at the console's size and font
+    CHECK(fonts_differ(base, f));
+    f = base;
+    f.hud_size = 140;
+    CHECK(fonts_differ(base, f));
+    f = base;
+    f.text_size = 80;
+    CHECK(fonts_differ(base, f));
 }

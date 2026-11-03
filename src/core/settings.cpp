@@ -125,6 +125,46 @@ bool FileIniBackend::write(const std::string& mod, const std::string& key, const
     return WritePrivateProfileStringW(wide(mod).c_str(), wide(key).c_str(), wide(value).c_str(), file.c_str()) != 0;
 }
 
+namespace {
+// "hud.size" -> ("hud", "size"); false without a '.' or with an empty part.
+bool split_core_key(const std::string& key, std::wstring* section, std::wstring* name) {
+    const size_t dot = key.find('.');
+    if (dot == std::string::npos || dot == 0 || dot + 1 >= key.size()) return false;
+    *section = wide(key.substr(0, dot));
+    *name = wide(key.substr(dot + 1));
+    return true;
+}
+}  // namespace
+
+std::optional<std::string> CoreIniBackend::read(const std::string&, const std::string& key) {
+    std::wstring section, name;
+    if (!split_core_key(key, &section, &name)) return std::nullopt;
+    wchar_t buf[1024];
+    const DWORD n = GetPrivateProfileStringW(section.c_str(), name.c_str(), L"\x01", buf, 1024, path_.c_str());
+    if (n == 1 && buf[0] == L'\x01') return std::nullopt;
+    std::string v = narrow(std::wstring(buf, n));
+    if (const size_t semi = v.find(';'); semi != std::string::npos) v.erase(semi);  // "140 ; bigger"
+    v = trim(v);
+    if (!v.empty() && v.back() == '%') v = trim(v.substr(0, v.size() - 1));  // "150%", as the overlay read it
+    return v;
+}
+
+bool CoreIniBackend::write(const std::string&, const std::string& key, const std::string& value) {
+    std::wstring section, name;
+    if (!split_core_key(key, &section, &name)) return false;
+    return WritePrivateProfileStringW(section.c_str(), name.c_str(), wide(value).c_str(), path_.c_str()) != 0;
+}
+
+std::optional<std::string> RoutingIniBackend::read(const std::string& mod, const std::string& key) {
+    IniBackend* b = mod == kEmfSettingsId ? emf_ : mods_;
+    return b ? b->read(mod, key) : std::nullopt;
+}
+
+bool RoutingIniBackend::write(const std::string& mod, const std::string& key, const std::string& value) {
+    IniBackend* b = mod == kEmfSettingsId ? emf_ : mods_;
+    return b && b->write(mod, key, value);
+}
+
 const SettingsStore::Entry* SettingsStore::find(const std::string& mod, const std::string& key) const {
     auto it = mods_.find(mod);
     if (it == mods_.end()) return nullptr;
@@ -152,26 +192,35 @@ bool SettingsStore::declare(const std::string& mod, SettingDef def, std::string*
     std::string value = def.default_value;
     std::optional<std::string> before;  // the value it had when redeclared
     std::string note;                   // a hand-edited value that had to change, for the log
+    bool set_by_someone = false;  // the value came from the file (or, redeclared, was so before), not the default
     {
         std::lock_guard<std::mutex> l(m_);
         auto& list = mods_[mod];
+        std::optional<bool> was_set;  // redeclared: whether the value it had was set by someone
         for (auto it = list.begin(); it != list.end(); ++it)
             if (it->def.key == def.key) {  // redeclared: Start keeps the current value if it still fits
                 before = it->value;
-                if (!live || !backend_) stored = it->value;
+                if (!live || !backend_) {
+                    stored = it->value;
+                    was_set = it->stored;
+                }
                 list.erase(it);
                 break;
             }
         if (stored)
-            if (auto v = setting_value(def, *stored, true, nullptr)) value = *v;
+            if (auto v = setting_value(def, *stored, true, nullptr)) {
+                value = *v;
+                set_by_someone = was_set.value_or(true);
+            }
         if (!live && stored && trim(*stored) != value) note = moved_note(def, trim(*stored), value);
-        list.push_back({std::move(def), value});
+        list.push_back({std::move(def), value, set_by_someone});
         if (live && before && *before != value) changes_.emplace_back(mod, key);  // the value a mod reads moved
         ++version_;
     }
     // A value that had to be clamped or replaced is written back, so mods that read their ini themselves
     // (GetPrivateProfile*) see the value the Mods tab shows. Never for a live edit: it may be half-way.
-    if (!live && stored && trim(*stored) != value && backend_) backend_->write(mod, key, value);
+    // Keep (EMF's own emf_core.ini): what the player typed stays in the file.
+    if (!live && mode != Declare::Keep && stored && trim(*stored) != value && backend_) backend_->write(mod, key, value);
     if (why) *why = warning.empty() ? note : note.empty() ? warning : warning + "; " + note;  // worth a log line
     return true;
 }
@@ -204,6 +253,12 @@ std::string SettingsStore::get(const std::string& mod, const std::string& key) c
     return e ? e->value : std::string();
 }
 
+bool SettingsStore::stored(const std::string& mod, const std::string& key) const {
+    std::lock_guard<std::mutex> l(m_);
+    const Entry* e = find(mod, key);
+    return e && e->stored;
+}
+
 int64_t SettingsStore::get_int(const std::string& mod, const std::string& key, int64_t fallback) const {
     const std::string v = get(mod, key);
     double x = 0.0;
@@ -230,7 +285,8 @@ SettingsStore::SetResult SettingsStore::set(const std::string& mod, const std::s
         }
         auto checked = setting_value(e->def, value, false, why);
         if (!checked) return SetResult::Invalid;
-        if (*checked == e->value) return SetResult::Unchanged;
+        // the default, picked on purpose, is saved too (EMF's style=boxed reads unset keys with defaults of its own)
+        if (*checked == e->value && (e->stored || mod != kEmfSettingsId)) return SetResult::Unchanged;
         v = std::move(*checked);
     }
     if (backend_ && !backend_->write(mod, key, v)) {  // the file write, outside m_
@@ -238,7 +294,10 @@ SettingsStore::SetResult SettingsStore::set(const std::string& mod, const std::s
         return SetResult::WriteFailed;
     }
     std::lock_guard<std::mutex> l(m_);
-    if (auto* e = const_cast<Entry*>(find(mod, key))) e->value = v;  // still there: entries change only under io_m_
+    if (auto* e = const_cast<Entry*>(find(mod, key))) {  // still there: entries change only under io_m_
+        e->value = v;
+        e->stored = true;
+    }
     changes_.emplace_back(mod, key);
     ++version_;
     return SetResult::Ok;

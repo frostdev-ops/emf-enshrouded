@@ -11,12 +11,14 @@
 #include <optional>
 #include <set>
 
+#include "core/emf_settings.h"
 #include "console_ui.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
 #include "font_plan.h"
 #include "input_hook.h"
 #include "mods_ui.h"
+#include "settings_ui.h"
 #include "submit.h"
 #include "vk_overlay.h"
 #include "wheel_gate.h"
@@ -51,6 +53,7 @@ SRWLOCK g_status_lock = SRWLOCK_INIT;
 std::string g_status;   // overlay_set_status: the tab bar's status text
 CursorModel g_cursor;   // render thread: the console's mouse cursor
 ModsUiState g_mods_ui;  // render thread
+SettingsUiState g_settings_ui;  // render thread: the Settings tab
 float g_mouse_speed = 1.0f;
 // Mods' radial wheel: requested from any thread, opened and driven on the render thread.
 WheelModel g_wheel;  // render thread
@@ -133,7 +136,37 @@ void setup_fonts(ImGuiIO& io, float height) {
     }
 }
 
+// EMF's own settings changed (the Settings tab, `set emf ...`): the look, the console's colours, the mouse speed and the
+// suggestions follow at once; the fonts are built again only when a font, the style or a size changed. Render thread,
+// before a frame; one version compare while nothing changed.
+void follow_settings() {
+    static uint64_t seen = 0;
+    if (!g_deps.settings) return;
+    const uint64_t v = g_deps.settings->version();
+    if (v == seen) return;
+    seen = v;
+    std::vector<std::string> problems;
+    const LookSettings look = look_from_store(*g_deps.settings, &problems);
+    if (fonts_differ(g_look, look)) g_font_rebuild.request();
+    g_look = look;
+    g_ui.height = static_cast<float>(g_look.height) / 100.0f;
+    g_ui.opacity = static_cast<float>(g_look.opacity) / 100.0f;
+    g_ui.background = look_colour4(g_look.background);
+    g_ui.colour_command = look_colour4(g_look.colour_command);
+    g_ui.colour_reply = look_colour4(g_look.colour_reply);
+    g_ui.colour_error = look_colour4(g_look.colour_error);
+    g_ui.colour_success = look_colour4(g_look.colour_success);
+    apply_look_theme(ImGui::GetStyle(), g_look);
+    const SettingsStore& s = *g_deps.settings;
+    if (s.has(kEmfSettingsId, "overlay.mouse_speed"))
+        g_mouse_speed = static_cast<float>(s.get_float(kEmfSettingsId, "overlay.mouse_speed", g_mouse_speed));
+    if (s.has(kEmfSettingsId, "overlay.suggest")) g_ui.suggest = s.get(kEmfSettingsId, "overlay.suggest") == "1";
+    if (s.has(kEmfSettingsId, "overlay.suggest_rows"))
+        g_ui.suggester.set_rows(static_cast<size_t>(s.get_int(kEmfSettingsId, "overlay.suggest_rows", 8)));
+}
+
 void before_frame(ImGuiIO& io) {
+    follow_settings();
     take_wheel_request();
     if (g_wheel_gate.take_cancel() && g_wheel.is_open()) {  // alt-tab while it was open: its keys' releases are gone
         g_wheel.cancel();
@@ -189,6 +222,10 @@ void before_frame(ImGuiIO& io) {
                 // Esc reaches the console only while its suggestions show (InputRouter): it hides them (only while
                 // the console is open). ImGui never gets it (an active input line would throw away what was typed).
                 if (e.key.scan == InputRouter::kEscScan && !e.key.extended) {
+                    if (capturing_key(g_mods_ui)) {  // a key bind or the console key waits: Esc cancels it
+                        feed_key_event(g_mods_ui, e.key, io, ImGui::GetFrameCount());
+                        break;
+                    }
                     if (e.key.down && g_router->open()) g_ui.escape = true;
                     break;
                 }
@@ -293,14 +330,21 @@ void build(ImVec2 display) {
     if (g_router->open() || g_ui.open_fraction > 0.0f) refresh_sources();  // Tab completion: only for the console
     std::function<void()> mods_tab;
     if (g_deps.mods) mods_tab = [] { draw_mods_tab(g_deps.mods->list(), g_deps.settings, g_mods_ui); };
+    std::function<void()> settings_tab;
+    if (g_deps.settings)
+        settings_tab = [] {
+            draw_settings_tab(g_deps.settings, g_mods_ui, g_settings_ui,
+                              [] { draw_look_preview(text_look(), ImGui::GetContentRegionAvail().x); });
+        };
     AcquireSRWLockShared(&g_status_lock);
     g_ui.status = g_status;
     ReleaseSRWLockShared(&g_status_lock);
     draw_console(*g_model, g_ui, g_sources, display, [](const std::string& line) {
         submit_line(*g_deps.center, host_state(*g_deps.tracker, GetTickCount64()), line, g_deps.reply);
         g_model->save_history(g_history_path);
-    }, mods_tab);
-    g_router->set_esc_to_console(g_router->open() && g_ui.wants_escape);  // Esc hides the suggestions first
+    }, mods_tab, settings_tab);
+    // Esc hides the suggestions first, and cancels a key bind or console key that waits for a key
+    g_router->set_esc_to_console(g_router->open() && (g_ui.wants_escape || capturing_key(g_mods_ui)));
     const TextLook look = text_look();
     if (g_ui.open_fraction <= 0.0f) {
         draw_notes(toast_lines(*g_model, ToastState{g_toast_from.load(), g_toast_until.load()}, GetTickCount64()),
@@ -365,6 +409,20 @@ OverlayConfig read_overlay_config(const std::wstring& ini_path) {
     return c;
 }
 
+OverlayConfig overlay_config_with_store(OverlayConfig c, const SettingsStore& s) {
+    if (!s.has(kEmfSettingsId, "hud.style")) return c;  // no EMF settings in this store
+    c.look_problems.clear();
+    c.look = look_from_store(s, &c.look_problems);
+    c.mouse_speed = static_cast<float>(s.get_float(kEmfSettingsId, "overlay.mouse_speed", c.mouse_speed));
+    c.chat_commands = s.get(kEmfSettingsId, "overlay.chat") == "1";
+    c.suggest = s.get(kEmfSettingsId, "overlay.suggest") == "1";
+    c.suggest_rows = static_cast<size_t>(s.get_int(kEmfSettingsId, "overlay.suggest_rows", 8));
+    const std::string key = s.get(kEmfSettingsId, "overlay.key");  // "0x29", checked by the store
+    const unsigned long scan = std::strtoul(key.c_str(), nullptr, 16);
+    if (scan >= 1 && scan <= 0x7F) c.toggle_scan = static_cast<uint16_t>(scan);
+    return c;
+}
+
 void feed_key_event(ModsUiState& mods_ui, const KeyEvent& e, ImGuiIO& io, int frame) {
     if (capture_key_event(mods_ui, e, frame)) return;  // the Mods tab waits for a key to bind
     const ImGuiKey k = imgui_key(e);
@@ -416,6 +474,10 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
     g_ui.height = static_cast<float>(g_look.height) / 100.0f;
     g_ui.opacity = static_cast<float>(g_look.opacity) / 100.0f;
     g_ui.background = look_colour4(g_look.background);
+    g_ui.colour_command = look_colour4(g_look.colour_command);
+    g_ui.colour_reply = look_colour4(g_look.colour_reply);
+    g_ui.colour_error = look_colour4(g_look.colour_error);
+    g_ui.colour_success = look_colour4(g_look.colour_success);
     g_mouse_speed = config.mouse_speed;
     g_ui.suggest = config.suggest;
     g_ui.suggester.set_rows(config.suggest_rows);

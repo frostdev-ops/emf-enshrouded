@@ -144,7 +144,7 @@ commands answer `not run: load a world you host first`, and in someone else's ga
 host`.
 
 ### The Mods tab
-The console has two tabs, **Console** and **Mods** (click one, or Ctrl+Tab). The Mods tab lists every mod in
+The console has three tabs, **Console**, **Mods** and **Settings** (click one, or Ctrl+Tab for the next). The Mods tab lists every mod in
 `<game>\emf\mods`, coloured by what became of it (loaded, a Lua script, disabled, failed, not loaded). Click one to see its
 description and status, to switch it on or off ("Switched on", from the next game start) and to change its settings:
 checkboxes, sliders, lists and text fields, with the range and the default when you hover over one. Settings marked
@@ -158,6 +158,16 @@ the same files as EMF.exe's, [docs/app.md](docs/app.md#profiles)): it shows the 
 mod it lists is switched another way now; **Load** switches every mod to the chosen profile from the next game
 start and shows what it did; **Save as** saves the switches (and, with "with settings", the EMF mods' settings) under
 a new name, and asks before it replaces one. The console's `profile` command does the same.
+
+### The Settings tab
+EMF's own settings, on three pages: **Text on screen** (the look of HUD lines, notes and wheels, with a preview),
+**Console** (its key, mouse speed, fonts, size, colours and suggestions) and **Start-up** (the log window and the
+save backups). They apply at once, apart from those marked "(next start)". The console key takes two presses of the
+new key (Esc cancels), so a key you cannot press again is never saved. The same from the command line: `settings emf`
+lists them, `set emf <section>.<key> <value>` changes one (`set emf hud.size 140`). They are the keys of
+`<game>\emf\emf_core.ini` below: a change writes only its own line, and a value you typed by hand that is out of range
+is used inside its range but stays in the file as you wrote it. Switching the console off (`[overlay] enabled`), chat
+admins and the debug bridge stay in the file and EMF.exe's Server tab.
 
 Settings in `<game>\emf\emf_core.ini`:
 ```
@@ -174,6 +184,10 @@ height=50      ; the console's height, 25 to 90 (% of the screen)
 opacity=80     ; how solid its background is, 30 to 100 (%)
 background=#080a0e  ; its background colour
 accent=#c0b074 ; the tabs, the selection, the scrollbar and the wheels' ring
+colour_command=#ffffff  ; the console's lines: commands you type,
+colour_reply=#b3bac2    ; replies,
+colour_error=#ff7a73    ; errors
+colour_success=#7de887  ; and done
 
 [hud]
 style=game     ; game (serif, soft shadow, no box), boxed (EMF's earlier look) or plain (the text alone)
@@ -191,8 +205,9 @@ three rows each. `[hud]` changes that, `[overlay]` changes the console. Colours 
 percentage of the size EMF picks for the screen: on-screen text is the screen's height / 38 (28 px at 1080p), the
 console's text its height / 54 (20 px at 1080p), and serif tabs 1.3 times the console's text (26 px at 1080p). The
 text is sized again when the window's size has stayed the same for a moment. EMF reads these keys when the game
-starts and never writes them; a value it cannot use falls back to its default and a number out of range is kept
-inside its range, each with one line in `emf_core.log`. `style=boxed` alone gives EMF's earlier look: dark boxes at
+starts; the Settings tab (or `set emf ...`) changes them while it runs and writes only the line it changed. A value
+EMF cannot use falls back to its default and a number out of range is kept inside its range, each with one line in
+`emf_core.log`. `style=boxed` alone gives EMF's earlier look: dark boxes at
 the console's size, the console's font, `#dbdbcc` and notes top left (the keys you set still apply).
 
 **Fonts.** EMF ships Alegreya (the serif) and Cascadia Mono in `<game>\emf\fonts\` (both under the SIL Open Font

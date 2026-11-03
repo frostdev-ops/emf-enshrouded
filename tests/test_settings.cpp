@@ -3,12 +3,15 @@
 #include <windows.h>
 
 #include <atomic>
+#include <fstream>
 #include <map>
+#include <sstream>
 #include <string>
 #include <thread>
 
 #include "core/settings.h"
 #include "emf/keys.hpp"
+#include "test_scratch.h"
 
 using namespace emf::core;
 
@@ -396,4 +399,131 @@ TEST_CASE("settings: a whole number beyond what the ini and the API keep exactly
     CHECK(s.set("m", "count", "999999999999999") == SettingsStore::SetResult::Ok);
     CHECK(s.get_int("m", "count", 0) == 999999999999999LL);
     CHECK(s.get("m", "huge") == "999999999999999");  // from the ini: clamped
+}
+
+// ---- EMF's own settings in emf_core.ini (in-game look phase 2) ----
+namespace {
+std::string file_bytes(const std::wstring& path) {
+    std::ifstream in(path, std::ios::binary);
+    std::stringstream ss;
+    ss << in.rdbuf();
+    return ss.str();
+}
+void put_bytes(const std::wstring& path, const std::string& bytes) {
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    out << bytes;
+}
+SettingDef int_def(const char* key, const char* dflt, double mn, double mx) {
+    SettingDef d;
+    d.key = key;
+    d.type = SettingType::Int;
+    d.default_value = dflt;
+    d.min = mn;
+    d.max = mx;
+    d.has_min = d.has_max = true;
+    return d;
+}
+}  // namespace
+
+TEST_CASE("emf_core.ini: hud.size reads and writes [hud] size; a ; comment and spaces are not part of the value") {
+    const std::wstring ini = test_scratch::temp_path(L"emf_core_test_a", L".ini");
+    put_bytes(ini, "[hud]\r\nsize = 140 ; bigger\r\n");
+    CoreIniBackend b(ini);
+    CHECK(b.read(kEmfSettingsId, "hud.size").value_or("") == "140");
+    CHECK_FALSE(b.read(kEmfSettingsId, "hud.missing").has_value());
+    REQUIRE(b.write(kEmfSettingsId, "hud.size", "120"));
+    wchar_t back[32] = {};
+    GetPrivateProfileStringW(L"hud", L"size", L"", back, 32, ini.c_str());
+    CHECK(std::wstring(back) == L"120");
+    CHECK_FALSE(b.read(kEmfSettingsId, "nodot").has_value());  // a key is <section>.<name>
+    CHECK_FALSE(b.write(kEmfSettingsId, "nodot", "1"));
+    DeleteFileW(ini.c_str());
+}
+
+TEST_CASE("emf_core.ini: a change touches only its own line") {
+    const std::wstring ini = test_scratch::temp_path(L"emf_core_test_b", L".ini");
+    const std::string before =
+        "; my notes\r\n[hud]\r\nstyle=boxed\r\nsize=140\r\n\r\n[chat]\r\nadmins=0x1\r\n[weird]\r\nx = y\r\n";
+    put_bytes(ini, before);
+    CoreIniBackend core(ini);
+    FakeIni mods;
+    RoutingIniBackend route(&core, &mods);
+    SettingsStore s(&route);
+    REQUIRE(s.declare(kEmfSettingsId, int_def("hud.size", "100", 60, 200), nullptr, SettingsStore::Declare::Keep));
+    CHECK(s.get(kEmfSettingsId, "hud.size") == "140");
+    REQUIRE(s.set(kEmfSettingsId, "hud.size", "120") == SettingsStore::SetResult::Ok);
+    std::string expected = before;
+    expected.replace(expected.find("size=140"), 8, "size=120");
+    CHECK(file_bytes(ini) == expected);  // every other byte as the player left it, and no UTF-16 BOM
+    CHECK(mods.writes == 0);
+    DeleteFileW(ini.c_str());
+}
+
+TEST_CASE("routing: mod emf goes to emf_core.ini, other mods to their own ini") {
+    FakeIni core, mods;
+    RoutingIniBackend route(&core, &mods);
+    REQUIRE(route.write(kEmfSettingsId, "hud.size", "120"));
+    REQUIRE(route.write("clock", "corner", "top_right"));
+    CHECK(core.values.count("emf.hud.size") == 1);
+    CHECK(core.values.count("clock.corner") == 0);
+    CHECK(mods.values.count("clock.corner") == 1);
+    CHECK(route.read(kEmfSettingsId, "hud.size").value_or("") == "120");
+    CHECK(route.read("clock", "corner").value_or("") == "top_right");
+}
+
+TEST_CASE("Declare::Keep: a value outside the range is used clamped and never written back") {
+    FakeIni ini;
+    ini.values["emf.hud.size"] = "500";
+    SettingsStore s(&ini);
+    REQUIRE(s.declare(kEmfSettingsId, int_def("hud.size", "100", 60, 200), nullptr, SettingsStore::Declare::Keep));
+    CHECK(s.get(kEmfSettingsId, "hud.size") == "200");
+    CHECK(ini.writes == 0);
+    CHECK(ini.values["emf.hud.size"] == "500");  // the player's text stays in the file
+    FakeIni mod_ini;                              // mods keep today's behaviour: the clamped value is written back
+    mod_ini.values["m.size"] = "500";
+    SettingsStore m(&mod_ini);
+    REQUIRE(m.declare("m", int_def("size", "100", 60, 200)));
+    CHECK(mod_ini.values["m.size"] == "200");
+}
+
+TEST_CASE("emf_core.ini missing: the defaults, and the first change creates the file") {
+    const std::wstring ini = test_scratch::temp_path(L"emf_core_test_c", L".ini");
+    DeleteFileW(ini.c_str());
+    CoreIniBackend core(ini);
+    FakeIni mods;
+    RoutingIniBackend route(&core, &mods);
+    SettingsStore s(&route);
+    REQUIRE(s.declare(kEmfSettingsId, int_def("hud.size", "100", 60, 200), nullptr, SettingsStore::Declare::Keep));
+    CHECK(s.get(kEmfSettingsId, "hud.size") == "100");
+    CHECK(GetFileAttributesW(ini.c_str()) == INVALID_FILE_ATTRIBUTES);  // declaring wrote nothing
+    REQUIRE(s.set(kEmfSettingsId, "hud.size", "150") == SettingsStore::SetResult::Ok);
+    wchar_t back[32] = {};
+    GetPrivateProfileStringW(L"hud", L"size", L"", back, 32, ini.c_str());
+    CHECK(std::wstring(back) == L"150");
+    DeleteFileW(ini.c_str());
+}
+
+TEST_CASE("settings: stored() tells a value from the ini or a change from a default nobody set") {
+    FakeIni ini;
+    ini.values["emf.hud.style"] = "boxed";
+    SettingsStore s(&ini);
+    REQUIRE(s.declare(kEmfSettingsId, int_def("hud.size", "100", 60, 200), nullptr, SettingsStore::Declare::Keep));
+    SettingDef style;
+    style.key = "hud.style";
+    style.type = SettingType::Text;
+    style.default_value = "game";
+    REQUIRE(s.declare(kEmfSettingsId, style, nullptr, SettingsStore::Declare::Keep));
+    CHECK(s.stored(kEmfSettingsId, "hud.style"));
+    CHECK_FALSE(s.stored(kEmfSettingsId, "hud.size"));  // the default: not in the file
+    REQUIRE(s.set(kEmfSettingsId, "hud.size", "120") == SettingsStore::SetResult::Ok);
+    CHECK(s.stored(kEmfSettingsId, "hud.size"));
+    CHECK_FALSE(s.stored(kEmfSettingsId, "nope"));
+}
+
+TEST_CASE("emf_core.ini: a size typed as 150% reads as 150") {
+    const std::wstring ini = test_scratch::temp_path(L"emf_core_test_d", L".ini");
+    put_bytes(ini, "[hud]\r\nsize = 150% ; bigger\r\n");
+    CoreIniBackend b(ini);
+    CHECK(b.read(kEmfSettingsId, "hud.size").value_or("") == "150");
+    DeleteFileW(ini.c_str());
 }

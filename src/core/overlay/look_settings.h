@@ -41,6 +41,11 @@ struct LookSettings {
     int opacity = 80;                               // the console's background, % (30-100)
     uint32_t background = 0x080A0EFFu;
     uint32_t accent = 0xC0B074FFu;  // tabs, the selection, the scrollbar, the wheel's ring
+    // the console's lines: the commands typed, replies, errors and successes
+    uint32_t colour_command = 0xFFFFFFFFu;
+    uint32_t colour_reply = 0xB3BAC2FFu;
+    uint32_t colour_error = 0xFF7A73FFu;
+    uint32_t colour_success = 0x7DE887FFu;
     bool operator==(const LookSettings&) const = default;
 };
 
@@ -49,5 +54,9 @@ struct LookSettings {
 // is kept inside it. Each such value adds one line to *problems (for the log).
 LookSettings read_look_settings(const std::function<std::string(const char* section, const char* key)>& get,
                                 std::vector<std::string>* problems);
+
+// Whether going from `a` to `b` needs the font atlas built again: a font, the style (boxed draws HUD lines in the
+// console's font and size) or a text size changed. Colours, opacity, height and places do not.
+bool fonts_differ(const LookSettings& a, const LookSettings& b);
 
 }  // namespace emf::core

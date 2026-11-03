@@ -11,6 +11,7 @@
 #include "core/builtin_commands.h"
 #include "core/commands.h"
 #include "core/daytime.h"
+#include "core/emf_settings.h"
 #include "core/inventory.h"
 #include "core/items.h"
 #include "core/manifest.h"
@@ -271,6 +272,24 @@ TEST_CASE("builtin commands: settings lists a mod's settings, set changes them")
     CHECK(f.ini.values["companion.enabled"] == "0");
     CHECK(bsaid("no mod \"ghost\""));
     CHECK(bsaid("sample_mod has no settings"));
+}
+
+TEST_CASE("builtin commands: set emf hud.size 120 changes EMF's own setting; settings emf lists its pages") {
+    BFixture f;
+    FakeWorld w;
+    for (SettingDef d : emf_setting_defs({}))
+        REQUIRE(f.settings->declare(kEmfSettingsId, std::move(d), nullptr, SettingsStore::Declare::Keep));
+    f.center.enqueue("set emf hud.size 120");
+    f.center.enqueue("set emf hud.size 999");
+    f.center.enqueue("set emf overlay.enabled 0");
+    f.center.enqueue("settings emf");
+    f.run(w);
+    CHECK(bsaid("emf.hud.size = 120"));
+    CHECK(f.ini.values["emf.hud.size"] == "120");
+    CHECK(bsaid("must be between 60 and 200"));
+    CHECK(bsaid("no setting \"overlay.enabled\""));  // switching the overlay off stays in the ini (lockout)
+    CHECK(bsaid("Text on screen"));
+    CHECK(bsaid("Start-up"));
 }
 
 TEST_CASE("builtin commands: settings shows a select's options, steps, max length, groups and enabledWhen") {
