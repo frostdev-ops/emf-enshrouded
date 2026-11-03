@@ -70,9 +70,17 @@ _G.game = {
 		for i = 1, #g do h = ((h ~ g:byte(i)) * 16777619) & 0xFFFFFFFF end
 		return h
 	end},
+	types = {get_by_qualified_name = function(n)  -- the component types the fake game knows
+		local known = {["keen::ecs::Crafting"] = true, ["keen::ecs::CraftingInteraction"] = true,
+			["keen::ecs::ClientCraftingInteraction"] = true, ["keen::ecs::RequiredCraftingProp"] = true,
+			["keen::ecs::ActiveNpcTarget"] = true, ["keen::ecs::InteractionOfferRuntime"] = true,
+			["keen::ecs::ClientInteractionOffer"] = true, ["keen::ecs::CheckPlayerInRange"] = true,
+			["keen::ecs::ModelResource"] = true}
+		return known[n] and {qualified_name = n} or nil
+	end},
 	assets = {
 		get_resources_by_type = function(t)
-			if t == "keen::GameKnowledgeResource" then return {{data = knowledge}} end
+			if t == "keen::GameKnowledgeResource" then return knowledge and {{data = knowledge}} or {} end
 			if t == "keen::ItemRegistryResource" then return {{data = registry}} end
 			if t == "keen::RecipeRegistryResource" then return {{data = recipe_registry}} end
 			if t == "keen::FbUiBundle" then return {{data = ui_bundle}} end
@@ -242,8 +250,10 @@ local function recipe_world()
 		output = {{itemRef = "o", item = {value = 1}, count = 1}},
 		input = {{itemStack = {itemRef = "i", item = {value = 2}, count = 3},
 			inputItemCategory = {categoryRef = "x", category = {value = 9}, count = 0}}},
-		completionRequirementQuery = {knowledgeOrQueryId = {value = CAMPFIRE_ID}},
-		knowledgeRequirement = {knowledgeOrQueryId = {value = 77}, compareValue = 1},
+		completionRequirementQuery = {knowledgeOrQueryId = {value = CAMPFIRE_ID}, compareValue = 2,
+			compareOperator = "Equals", type = "SimpleFlag", isExplicitPlayerKnowledgeQuery = true},
+		knowledgeRequirement = {knowledgeOrQueryId = {value = 0xE971EA1F}, compareValue = 1,  -- the campfire's Extern query
+			compareOperator = "Equals", type = "Extern", isExplicitPlayerKnowledgeQuery = false},
 	}}}
 	ui_bundle = {menu = {crafting = {recipes = {workshops = {{value = 0}}, trees = {{groups = {
 		{groupId = "g-weapons", sets = {{entries = {{value = 0x51}}}}},
@@ -274,6 +284,100 @@ test("a recipe with a menu group goes into that group's set 1, or the set named"
 	local b = M.add_recipe{guid = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e32", debug_name = "Craft_B",
 		output = {TABLE.guid, 1}, inputs = {{WOOD, 1}}, menu = {group = "g-supplies", set = 2}}
 	eq(groups[2].sets[2].entries[4].value, b, "supplies, set 2, at the end")
+end)
+
+local function last_recipe() return recipe_registry.recipes[#recipe_registry.recipes] end
+
+test("unlock = {item = ...} is a simple flag on that item (not the copied recipe's query type)", function()
+	recipe_world()
+	M.add_recipe{guid = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e41", debug_name = "Craft_U", output = {TABLE.guid, 1},
+		inputs = {{WOOD, 1}}, unlock = {item = WOOD}}
+	local k = last_recipe().knowledgeRequirement
+	eq(k.knowledgeOrQueryId.value, game.guid.hash(WOOD), "the item's id")
+	eq(k.compareValue, 1, "compareValue")
+	eq(k.type, 3, "type (SimpleFlag)")
+	eq(k.compareOperator, 2, "compareOperator (Equals)")
+	eq(k.isExplicitPlayerKnowledgeQuery, true, "a player's knowledge")
+end)
+
+test("unlock = 'always' clears the whole requirement; an unknown unlock is an error", function()
+	recipe_world()
+	M.add_recipe{guid = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e42", debug_name = "Craft_V", output = {TABLE.guid, 1},
+		inputs = {{WOOD, 1}}, unlock = "always"}
+	local k = last_recipe().knowledgeRequirement
+	eq(k.knowledgeOrQueryId.value, 0, "id")
+	eq(k.compareValue, 0, "compareValue")
+	eq(k.type, 0, "type")
+	eq(k.compareOperator, 0, "compareOperator")
+	eq(k.isExplicitPlayerKnowledgeQuery, false, "explicit")
+	for _, bad in ipairs({"Always", {like = "x"}, 5}) do
+		local ok, err = pcall(M.add_recipe, {guid = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e43", debug_name = "Craft_W",
+			output = {TABLE.guid, 1}, inputs = {{WOOD, 1}}, unlock = bad})
+		eq(ok, false, "unlock " .. tostring(bad))
+		assert(tostring(err):find("unlock"), err)
+	end
+end)
+
+test("'crafted once' is the whole vanilla query on the new recipe's id", function()
+	recipe_world()
+	recipe_registry.recipes[1].completionRequirementQuery = {knowledgeOrQueryId = {value = 5}, compareValue = 9,
+		compareOperator = "Greater", type = "Extern", isExplicitPlayerKnowledgeQuery = false}  -- a recipe without it
+	local id = M.add_recipe{guid = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e44", debug_name = "Craft_X",
+		output = {TABLE.guid, 1},
+		inputs = {{WOOD, 1}}}
+	local q = last_recipe().completionRequirementQuery
+	eq(q.knowledgeOrQueryId.value, id, "id")
+	eq(q.compareValue, 2, "compareValue")
+	eq(q.compareOperator, 2, "compareOperator (Equals)")
+	eq(q.type, 3, "type (SimpleFlag)")
+	eq(q.isExplicitPlayerKnowledgeQuery, true, "explicit")
+end)
+
+test("a knowledge table laid out otherwise (a game update) only costs the entries: a warning, no error", function()
+	recipe_world()
+	knowledge.playerKnowledge.entries[3].start = 7  -- broken
+	M._checked.playerKnowledge = nil
+	local said = {}
+	local real_print = print
+	print = function(s) said[#said + 1] = s end
+	local ok, err = pcall(M.add_recipe, {guid = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e45", debug_name = "Craft_Y",
+		output = {TABLE.guid, 1}, inputs = {{WOOD, 1}}})
+	print = real_print
+	M._checked.playerKnowledge = nil
+	assert(ok, err)
+	eq(#knowledge.playerKnowledge.keys, 1, "nothing inserted")
+	assert(said[1] and said[1]:find("laid out"), said[1])
+end)
+
+test("a real component type the template lacks is a warning (server data may differ); a typo is an error", function()
+	vanilla()
+	local def = deepcopy(TABLE)
+	def.strip = {"keen::ecs::Crafting", "keen::ecs::ClientCraftingInteraction"}  -- the fake Workbench has no Client part
+	local said = {}
+	local real_print = print
+	print = function(s) said[#said + 1] = s end
+	loader.is_server = true
+	local ok, err = pcall(M.add_placeable, def)
+	loader.is_server = false
+	print = real_print
+	assert(ok, err)
+	local noted = false
+	for _, s in ipairs(said) do noted = noted or s:find("ClientCraftingInteraction") ~= nil end
+	assert(noted, "no note naming the missing part")
+	eq(#resources["keen::ecs::TemplateResource|" .. TABLE.template_guid].components, 3, "Crafting went")
+end)
+
+test("no knowledge resource at all (a dedicated server without one) costs only the entries", function()
+	recipe_world()
+	knowledge = nil
+	M._checked.playerKnowledge = nil
+	local real_print = print
+	print = function() end
+	local ok, err = pcall(M.add_recipe, {guid = "5e3a1f4c-2b7d-4e8a-9c61-7f0d2a4b8e46", debug_name = "Craft_Z",
+		output = {TABLE.guid, 1}, inputs = {{WOOD, 1}}})
+	print = real_print
+	M._checked.playerKnowledge = nil
+	assert(ok, err)
 end)
 
 io.write(string.format("%d of %d passed\n", ran - failures, ran))

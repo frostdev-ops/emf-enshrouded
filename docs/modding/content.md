@@ -42,7 +42,8 @@ content.finish()   -- once, at the end: writes the names back
 - New items and recipes also get their entries in the game's knowledge tables ("has had this item", "has crafted this
   recipe"), copied from the source item's and the copied recipe's. Without them the menu keeps the new recipe marked
   as new after crafting, and a recipe unlocked by your new item never unlocks. The helper checks those tables' layout
-  first and stops the build with a message if a game update changed it.
+  first: if a game update changed it, new items and recipes get no entries (one warning in the content log) and the
+  build goes on.
 - The UI parts (menu, icons, text) are skipped on the dedicated server for you.
 
 ## Placeable objects
@@ -61,13 +62,16 @@ content.add_recipe{guid = ..., debug_name = "Craft_Prop_Mine", output = {<item G
 - `strip` removes parts of the copy. `content.STATION_PARTS` makes a Workbench copy stop being a crafting station
   (and a "Workbench nearby" for other recipes, and a place villagers work). `content.PROMPT_PARTS` removes the game's
   E prompt (without it, E would still run the Workbench's crafting animation). A Lua mod can then put its own prompt
-  on a placed one with `emf.offer`. A name the template does not have is an error, so a typo can't leave a second
-  Workbench behind.
-- It is saved when placed **inside a base** (outside, the game refuses to place it). Picking it up gives the item back.
+  on a placed one with `emf.offer`. A name that is not a component type is an error, so a typo can't leave a second
+  Workbench behind; a real part the template lacks is only noted in the content log (the dedicated server's data may
+  not carry the game-only parts).
+- It is saved only when placed **inside a base**. A Workbench copy can only be placed there (its item needs a build
+  zone); copies of objects that can stand anywhere are not saved outside a base. Picking it up gives the item back.
 - The save keeps it by `template_guid`: that GUID is fixed forever like the item's.
-- **Removing the mod deletes placed objects for good.** When a world loads, the game silently drops every saved object
-  whose template it doesn't know, and the next autosave (30 s) writes the world without them; reinstalling the mod
-  doesn't bring them back. Placing items in inventories are deleted too.
+- **Removing the mod deletes placed objects for good** (from the game's code; not tested yet). When a world loads, the
+  game silently drops every saved object whose template it doesn't know, and the next autosave (30 s) writes the world
+  without them; reinstalling the mod doesn't bring them back. A container's contents go with it, and the placing items
+  in inventories are deleted when the game next touches them.
 
 ## What a new item needs
 

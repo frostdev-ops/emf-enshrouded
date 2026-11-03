@@ -78,7 +78,6 @@ end
 -- key & (buckets - 1). Every vanilla ItemId and RecipeId has a player entry. A new item or recipe gets a copy of its
 -- source's entry, both sides (the server keeps the flags).
 
-local function knowledge() return game.assets.get_resources_by_type("keen::GameKnowledgeResource")[1].data end
 
 -- true, or false and why, when the map is not laid out as above (the game changed: nothing is inserted then).
 function M._knowledge_check(map)
@@ -128,21 +127,32 @@ function M._knowledge_copy(map, from_key, new_key)
 	return true
 end
 
-local checked = {}
+M._checked = {}  -- per table: true (checked, fine) or false (laid out otherwise: no entries are added)
 
+-- Copies from_key's entry under new_key in table `which`: true when copied; false and "missing" when from_key has
+-- none, false and "layout" when the table is not laid out as expected (a game update: only the entries are skipped,
+-- with one warning; the "new" mark and item unlocks are what they cost).
 local function copy_knowledge(which, from_key, new_key)
-	local map = knowledge()[which]
-	if not checked[which] then
-		local ok, why = M._knowledge_check(map)
-		if not ok then fail("the game's %s table is not laid out as this helper expects (%s): update it", which, why) end
-		checked[which] = true
+	local res = game.assets.get_resources_by_type("keen::GameKnowledgeResource")[1]
+	local map = res and res.data and res.data[which]
+	if M._checked[which] == nil then
+		local ok, why = false, "the game has no such table"
+		if map then ok, why = M._knowledge_check(map) end
+		M._checked[which] = ok
+		if not ok then
+			print(string.format("emf_content: the game's %s table is not laid out as this helper expects (%s): new items "
+				.. "and recipes get no entries in it (update emf_content.lua)", which, why))
+		end
 	end
-	return M._knowledge_copy(map, from_key, new_key)
+	if not M._checked[which] then return false, "layout" end
+	if not M._knowledge_copy(map, from_key, new_key) then return false, "missing" end
+	return true
 end
 
 -- An item's entries: the player's "has had it" flag and, when the source item has one, the world's.
 function M._item_knowledge(from_id, new_id)
-	if not copy_knowledge("playerKnowledge", from_id, new_id) then
+	local ok, why = copy_knowledge("playerKnowledge", from_id, new_id)
+	if not ok and why == "missing" then
 		print(string.format("emf_content: item 0x%08x has no knowledge entry to copy: 0x%08x gets none", from_id, new_id))
 	end
 	copy_knowledge("worldKnowledge", from_id, new_id)
@@ -244,8 +254,14 @@ function M.add_placeable(def)
 	for _, c in ipairs(tsrc.data.components) do
 		if strip[c.type] then found[c.type] = true end
 	end
-	for name in pairs(strip) do
-		if not found[name] then fail("add_placeable: the template %s has no part %s", tsrc.data.name, name) end
+	for name in pairs(strip) do  -- a name that is no component type is a typo; a real one the copy lacks is only noted
+		if not found[name] then  -- (the dedicated server's data may not carry the game-only parts)
+			if not game.types.get_by_qualified_name(name) then
+				fail("add_placeable: %s is not a component type (a typo?)", name)
+			end
+			print(string.format("emf_content: add_placeable: the template %s has no part %s: nothing to remove",
+				tostring(tsrc.data.name), name))
+		end
 	end
 	local tpl = game.assets.create_resource(tsrc.data, "keen::ecs::TemplateResource", def.template_guid, 0).data
 	tpl.name = def.debug_name
@@ -263,6 +279,9 @@ function M.add_placeable(def)
 end
 
 -- ---- recipes ----
+
+-- keen::KnowledgeQueryData enums, as numbers (EML takes either): compareOperator 2 = Equals, type 3 = SimpleFlag
+local EQUALS, SIMPLE_FLAG = 2, 3
 
 local function recipe_registry() return game.assets.get_resources_by_type("keen::RecipeRegistryResource")[1].data end
 
@@ -309,6 +328,11 @@ function M.add_recipe(def)
 		if not def[k] then fail("add_recipe: %s is missing", k) end
 	end
 	if #def.inputs < 1 or #def.inputs > 4 then fail("add_recipe: 1 to 4 inputs") end
+	local unlock = def.unlock
+	if unlock ~= nil and unlock ~= "always" and not (type(unlock) == "table" and type(unlock.item) == "string") then
+		fail('add_recipe: unlock is "always", {item = "<item GUID>"} or nil (the copied recipe\'s), not %s',
+			tostring(unlock))
+	end
 	local like = def.like or "Consumable_Tool_Campfire_PK"
 	local source = find_recipe(like)
 	if not source then fail("add_recipe: no recipe %s to copy (the game changed?)", like) end
@@ -336,17 +360,30 @@ function M.add_recipe(def)
 		slot.inputItemCategory.count = 0
 	end
 	r.requiresSheltered = def.sheltered or false
-	r.completionRequirementQuery.knowledgeOrQueryId = {value = id}  -- "crafted once" is tracked per recipe
-	if not copy_knowledge("playerKnowledge", source.recipeId.value, id) then  -- that flag's entry
+	local done = r.completionRequirementQuery  -- "crafted once", per recipe: the game's own pattern on the new id
+	done.knowledgeOrQueryId = {value = id}
+	done.compareValue = 2
+	done.compareOperator = EQUALS
+	done.type = SIMPLE_FLAG
+	done.isExplicitPlayerKnowledgeQuery = true
+	local ok, why = copy_knowledge("playerKnowledge", source.recipeId.value, id)  -- that flag's entry
+	if not ok and why == "missing" then
 		print(string.format("emf_content: recipe %s has no knowledge entry to copy: %s is not marked crafted", like,
 			def.debug_name))
 	end
-	if def.unlock == "always" then
-		r.knowledgeRequirement.knowledgeOrQueryId = {value = 0}
-		r.knowledgeRequirement.compareValue = 0
-	elseif type(def.unlock) == "table" and def.unlock.item then
-		r.knowledgeRequirement.knowledgeOrQueryId = {value = M.id(def.unlock.item)}
-		r.knowledgeRequirement.compareValue = 1
+	local req = r.knowledgeRequirement
+	if unlock == "always" then  -- all zero, as the club's and the bow's
+		req.knowledgeOrQueryId = {value = 0}
+		req.compareValue = 0
+		req.compareOperator = 0
+		req.type = 0
+		req.isExplicitPlayerKnowledgeQuery = false
+	elseif unlock then  -- once this player has had the item (the wood axe's pattern on stone)
+		req.knowledgeOrQueryId = {value = M.id(unlock.item)}
+		req.compareValue = 1
+		req.compareOperator = EQUALS
+		req.type = SIMPLE_FLAG
+		req.isExplicitPlayerKnowledgeQuery = true
 	end
 	if not loader.is_server then
 		local workshop = r.workshopId and r.workshopId.value or 0
