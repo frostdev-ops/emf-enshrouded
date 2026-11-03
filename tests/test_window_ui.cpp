@@ -5,6 +5,7 @@
 #include <windows.h>
 
 #include <optional>
+#include <set>
 #include <string>
 
 #include "core/overlay/overlay.h"
@@ -52,6 +53,7 @@ struct Rig {
     WindowRequest req;
     WindowUiState st;
     bool input = true;
+    const ImageLookup* images = nullptr;  // v26 pictures (null: none)
     std::optional<WindowClick> last;
     Rig() {
         req.id = "test.window";
@@ -82,7 +84,7 @@ struct Rig {
         const int crashed = guarded([](void* p) {
             Rig* r = static_cast<Ctx*>(p)->r;
             ImGui::NewFrame();
-            auto click = draw_window(r->req, r->st, r->input, ImVec2(1920, 1080), TextLook{});
+            auto click = draw_window(r->req, r->st, r->input, ImVec2(1920, 1080), TextLook{}, r->images);
             if (click) r->last = click;
             ImGui::Render();
         }, &c);
@@ -184,4 +186,54 @@ TEST_CASE("window ui: 256 widgets of every kind and flag, in every place, draw w
     r.req.widgets.clear();  // an empty window
     r.frame();
     CHECK(emf_imgui_last_assert()[0] == '\0');
+}
+
+namespace {
+// Vertices drawn with `tex` whose UV is `uv` (each picture quad has one corner at its frame's uv0).
+int vertices_with(ImTextureID tex, ImVec2 uv) {
+    int n = 0;
+    const ImDrawData* dd = ImGui::GetDrawData();
+    for (int l = 0; dd && l < dd->CmdListsCount; ++l) {
+        const ImDrawList* list = dd->CmdLists[l];
+        std::set<unsigned> seen;  // a quad's corner is used by both its triangles: count each vertex once
+        for (const ImDrawCmd& cmd : list->CmdBuffer) {
+            if (cmd.GetTexID() != tex) continue;
+            for (unsigned i = 0; i < cmd.ElemCount; ++i) {
+                const unsigned at = list->IdxBuffer[cmd.IdxOffset + i] + cmd.VtxOffset;
+                const ImDrawVert& v = list->VtxBuffer[at];
+                if (v.uv.x == uv.x && v.uv.y == uv.y && seen.insert(at).second) ++n;
+            }
+        }
+    }
+    return n;
+}
+}  // namespace
+
+TEST_CASE("window ui v26: pictures draw their frame (image, slot, row); unknown ones draw none; a keyed one clicks") {
+    Headless h;
+    Rig r;
+    const ImTextureID tex = static_cast<ImTextureID>(0x7777);
+    const ImageLookup lookup = [&](uint32_t handle, double, uint32_t) -> std::optional<ImageDraw> {
+        if (handle != 7) return std::nullopt;
+        return ImageDraw{tex, ImVec2(0.5f, 0.0f), ImVec2(1.0f, 0.5f), 1.0f};
+    };
+    r.images = &lookup;
+    WindowWidget pic = widget(EMF_UI_IMAGE, "pic", "");
+    pic.icon = 7;
+    pic.height = 4;
+    WindowWidget slot = widget(EMF_UI_SLOT, "slot", "Wolf");
+    slot.icon = 7;
+    WindowWidget row = widget(EMF_UI_ROW, "row", "Wolf (ready)");
+    row.icon = 7;
+    WindowWidget missing = widget(EMF_UI_IMAGE, "", "");
+    missing.icon = 8;  // not loaded (or not uploaded yet)
+    r.req.widgets = {pic, slot, row, missing};
+    for (int i = 0; i < 3; ++i) r.frame();
+    CHECK(vertices_with(tex, ImVec2(0.5f, 0.0f)) == 3);  // one quad each for the picture, the slot and the row
+    auto c = r.click("pic");
+    REQUIRE(c);
+    CHECK(c->key == "pic");
+    r.images = nullptr;  // no pictures at all: the widgets still draw, without them
+    r.frame();
+    CHECK(vertices_with(tex, ImVec2(0.5f, 0.0f)) == 0);
 }

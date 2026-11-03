@@ -366,9 +366,18 @@ TextLook text_look() {
     return t;
 }
 
+// A mod window's pictures (API v26): the image store's frame, once the render thread uploaded the picture.
+std::optional<ImageDraw> window_picture(uint32_t handle, double seconds, uint32_t fps) {
+    const auto f = overlay_images().frame(handle, seconds, fps);
+    if (!f) return std::nullopt;
+    return ImageDraw{static_cast<ImTextureID>(f->texture), ImVec2(f->uv.u0, f->uv.v0), ImVec2(f->uv.u1, f->uv.v1),
+                     f->aspect};
+}
+
 void build(ImVec2 display) {
     if (g_window) {  // under the console: drawn first, and without input while the console is open
-        const auto click = draw_window(*g_window, g_window_ui, !g_router->open(), display, text_look());
+        static const ImageLookup pictures = window_picture;
+        const auto click = draw_window(*g_window, g_window_ui, !g_router->open(), display, text_look(), &pictures);
         if (click && g_deps.window_event)
             g_deps.window_event(*g_window, click->right ? EMF_UI_RIGHT_CLICK : EMF_UI_CLICK, click->key, 0);
         if (g_window_ui.close_clicked) {
