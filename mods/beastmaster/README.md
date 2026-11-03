@@ -4,7 +4,7 @@ A Beastmaster class for Enshrouded. Tame wild wolves, boars, sabretooths, hounds
 your collection, and call up to 2 at a time to fight beside you. They follow you, come back when they stray, rest after
 they fall, and are kept with the world. Their kills are yours: XP and loot.
 
-It needs the `lua` mod 1.9 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
+It needs the `lua` mod 1.12 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
 (the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs and the snake come in the **EMF creature packs**
 download (the **bear pack** and the **beasts pack**, below). The packs are EML content: **install EML (or ShroudForge)
 first**, because it loads them when the game starts; copying the pack folders alone does nothing. Without them
@@ -73,8 +73,8 @@ Between fights it heals: 5 s after its last hit, 5 % of its health a second.
 **Loyalty** (1 to 10) grows with the fights a beast takes part in: a point for each hostile creature it hit that dies
 within 30 s (wildlife and farm animals give none); 10 points to loyalty 2, 20 more to 3, and so on (450 to loyalty 10;
 the **Loyalty grows** setting changes the pace). Each loyalty makes it a little stronger and bigger: at loyalty 10 it
-has 20 % more health and damage and is 1.25x its size (the bear, aurochs and snakes grow; the game's wolf, boar,
-sabretooth and hound get the health and damage). `/beastmaster list` shows it; a new loyalty is told to you.
+has 20 % more health and damage and is 1.25x its size. The strength comes at once; the size the next time you call it
+(the game draws a creature at the size it is made with). `/beastmaster list` shows it; a new loyalty is told to you.
 
 **The wheel (hold F3):** Tame, Feed, Attack, **Mode** (steps passive, defending, aggressive), **Come back** while your beasts stepped aside by `/beastmaster aside`,
 **Dismiss <name>** for each beast that is out (and **Dismiss all** with two or more out), then **Call <name>** for up
