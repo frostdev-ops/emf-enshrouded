@@ -102,4 +102,28 @@ bool copy_window_def(const EmfWindowDef* def, bool for_update, WindowRequest* ou
     return true;
 }
 
+std::vector<std::string> describe_window(const WindowRequest& w) {
+    static const char* const kTypes[] = {"text", "heading", "button", "row", "slot", "bar", "separator"};
+    static const std::pair<uint32_t, const char*> kFlags[] = {
+        {EMF_UI_SAME_LINE, "same_line"}, {EMF_UI_DISABLED, "disabled"}, {EMF_UI_SELECTED, "selected"},
+        {EMF_UI_DIM, "dim"},             {EMF_UI_EMPTY, "empty"},       {EMF_UI_LOCKED, "locked"}};
+    std::vector<std::string> out;
+    out.push_back("window " + w.id + " \"" + w.title + "\": " + std::to_string(w.widgets.size()) + " widgets, events on the " +
+                  (w.world_kind == EMF_WORLD_CLIENT ? "client" : "server") + " world");
+    for (size_t i = 0; i < w.widgets.size(); ++i) {
+        const WindowWidget& x = w.widgets[i];
+        std::string line = "  " + std::to_string(i) + " " + (x.type <= EMF_UI_SEPARATOR ? kTypes[x.type] : "?");
+        if (!x.key.empty()) line += " " + x.key;
+        if (!x.text.empty()) line += " \"" + x.text + "\"";
+        if (x.type == EMF_UI_SLOT && x.count) line += " count " + std::to_string(x.count);
+        if (x.type == EMF_UI_BAR) line += " " + std::to_string(x.value) + "/1000";
+        std::string flags;
+        for (const auto& [bit, name] : kFlags)
+            if (x.flags & bit) flags += (flags.empty() ? "" : " ") + std::string(name);
+        if (!flags.empty()) line += " [" + flags + "]";
+        out.push_back(std::move(line));
+    }
+    return out;
+}
+
 }  // namespace emf::core

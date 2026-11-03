@@ -488,6 +488,7 @@ add_executable(emf_tests
   tests/test_components_api.cpp
   tests/test_component_service.cpp
   tests/test_api_components.cpp
+  tests/test_api_windows.cpp
   tests/test_world_settings.cpp
   tests/test_world_settings_state.cpp
   tests/test_world_settings_file.cpp

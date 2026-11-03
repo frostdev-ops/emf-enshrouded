@@ -47,6 +47,7 @@
 #include "overlay/profiles_ui.h"
 #include "overlay/overlay.h"
 #include "overlay/vk_overlay.h"
+#include "overlay/window_model.h"
 #include "overlay/submit.h"
 #include "file_poll.h"
 #include "mods.h"
@@ -189,6 +190,54 @@ uint32_t chat_sender_entity(uint64_t account) {
 // connection handle their BasicPlayerInfos entry holds and whether the server's connection record for it matches (their
 // chat reader), and their name. (No raw dump: connection records hold players' network data, and logs go into bug
 // reports.)
+// ui.windows / ui.click / ui.close: a mod's open window (API v24) as text, a click on one of its widgets and closing it
+// as the player would; the debug bridge cannot click ImGui (the game keeps the mouse), so tests go through these.
+void cmd_ui_windows(EmfWorld*, int, const char* const*, void*) {
+    const EmfApi* api = emf::core::api_table();
+    const auto w = emf::core::overlay_window();
+    if (!w) {
+        api->command_reply("no mod window is open");
+        return;
+    }
+    for (const auto& line : emf::core::describe_window(*w)) api->command_reply("%s", line.c_str());
+}
+
+void cmd_ui_click(EmfWorld*, int argc, const char* const* argv, void*) {
+    const EmfApi* api = emf::core::api_table();
+    const bool right = argc == 3 && std::strcmp(argv[2], "right") == 0;
+    if (argc < 2 || argc > 3 || (argc == 3 && !right)) {
+        api->command_reply("usage: ui.click <key> [right]");
+        return;
+    }
+    std::string why;
+    if (emf::core::overlay_click_window(argv[1], right, &why))
+        api->command_reply("%s %s", right ? "right-clicked" : "clicked", argv[1]);
+    else
+        api->command_reply("ui.click: %s", why.c_str());
+}
+
+void cmd_ui_close(EmfWorld*, int, const char* const*, void*) {
+    const EmfApi* api = emf::core::api_table();
+    api->command_reply(emf::core::overlay_close_window_by_player() ? "closed the mod window"
+                                                                    : "no mod window is open");
+}
+
+void add_window_commands() {
+    struct Cmd {
+        const char* name;
+        const char* help;
+        emf::core::CommandFn fn;
+    };
+    const Cmd cmds[] = {
+        {"ui.windows", ": the open mod window as text (its widgets with their keys)", cmd_ui_windows},
+        {"ui.click", "<key> [right]: click a widget of the open mod window, as the mouse would", cmd_ui_click},
+        {"ui.close", ": close the open mod window, as Esc would", cmd_ui_close},
+    };
+    for (const auto& c : cmds)
+        if (!g_state->commands.add(c.name, c.help, c.fn, nullptr, nullptr))
+            emf::logf("commands: \"%s\" could not be added", c.name);
+}
+
 void cmd_chat_players(EmfWorld* w, int argc, const char* const* argv, void*) {
     const EmfApi* api = emf::core::api_table();
     (void)argc;
@@ -1063,6 +1112,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             };
             deps.log = [](const char* s) { emf::logf("%s", s); };
             deps.wheel_done = [](const emf::core::WheelRequest& r, int choice) { emf::core::post_wheel_choice(r, choice); };
+            deps.window_event = [](const emf::core::WindowRequest& r, uint32_t kind, const std::string& key,
+                                   uint32_t reason) { emf::core::post_window_event(r, kind, key, reason); };
             deps.hud = &g_state->hud;
             deps.mods = &g_state->mods;
             deps.settings = g_state->settings.get();
@@ -1072,6 +1123,17 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
                     if (!ok) emf::logf("wheel_open refused: the console or another wheel is open, or the overlay cannot draw");
                     return ok;
                 };
+                g_state->open_window = [](emf::core::WindowRequest r, std::optional<emf::core::WindowRequest>* replaced,
+                                          std::string* why) {
+                    return emf::core::overlay_open_window(std::move(r), replaced, why);
+                };
+                g_state->update_window = [](const emf::core::WindowRequest& r) {
+                    return emf::core::overlay_update_window(r);
+                };
+                g_state->close_window = [](const std::string& id, std::optional<emf::core::WindowRequest>* closed) {
+                    return emf::core::overlay_close_window(id, closed);
+                };
+                add_window_commands();
                 g_state->notify = [](const std::string& s) {
                     emf::logf("[note] %s", s.c_str());
                     emf::core::overlay_notify(s);

@@ -64,7 +64,7 @@ std::string state_json(const StateSnapshot& s) {
         hud.push_back(JsonObj().str("id", l.id).str("text", l.text).num("place", static_cast<int>(l.place)).text());
     JsonObj overlay;
     overlay.boolean("running", s.overlay_running).boolean("console_open", s.console_open);
-    overlay.boolean("wheel_open", s.wheel_open).raw("hud", json_list(hud));
+    overlay.boolean("wheel_open", s.wheel_open).str("window", s.window).raw("hud", json_list(hud));
 
     JsonObj hooks;
     hooks.num("total", static_cast<double>(s.hooks_total)).num("emf", static_cast<double>(s.hooks_emf));

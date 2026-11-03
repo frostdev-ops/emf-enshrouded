@@ -28,6 +28,7 @@
 #include "spawn.h"
 #include "teleport.h"
 #include "component_service.h"
+#include "overlay/window_model.h"
 #include "world_settings_service.h"
 #include "emf/generated/components.hpp"
 
@@ -1516,6 +1517,53 @@ bool guarded_component_call(EmfComponentCallback cb, EmfWorld* w, uint32_t entit
     }
 }
 
+bool guarded_window_call(EmfUiCallback cb, EmfWorld* w, const EmfUiEvent* e, void* user) {
+    __try {
+        cb(w, e, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// v24: a mod's window (window_request.h; the overlay draws it, overlay.cpp).
+bool refuse_window(const std::string& mod, const char* what, const std::string& why) {
+    refuse_limited(std::string(what) + " refused (" + mod + "): " + why);
+    return false;
+}
+
+bool api_window_open(const EmfWindowDef* def) {
+    if (!g_state) return false;
+    WindowRequest r;
+    r.mod = module_name_of(_ReturnAddress());
+    std::string why;
+    if (!copy_window_def(def, false, &r, &why)) return refuse_window(r.mod, "window_open", why);
+    if (!g_state->open_window) return refuse_window(r.mod, "window_open", "the in-game overlay is off (or no screen)");
+    if (!api_server_world() && !api_client_world()) return refuse_window(r.mod, "window_open", "no world runs");
+    const std::string mod = r.mod;
+    std::optional<WindowRequest> replaced;
+    if (!g_state->open_window(std::move(r), &replaced, &why)) return refuse_window(mod, "window_open", why);
+    if (replaced) post_window_event(*replaced, EMF_UI_CLOSED, "", EMF_UI_BY_MOD);
+    return true;
+}
+
+bool api_window_update(const EmfWindowDef* def) {
+    if (!g_state) return false;
+    WindowRequest r;
+    r.mod = module_name_of(_ReturnAddress());
+    std::string why;
+    if (!copy_window_def(def, true, &r, &why)) return refuse_window(r.mod, "window_update", why);
+    return g_state->update_window && g_state->update_window(r);  // not open: false, no log (the player closed it)
+}
+
+bool api_window_close(const char* id) {
+    if (!g_state || !id || !g_state->close_window) return false;
+    std::optional<WindowRequest> closed;
+    if (!g_state->close_window(id, &closed)) return false;
+    if (closed) post_window_event(*closed, EMF_UI_CLOSED, "", EMF_UI_BY_MOD);
+    return true;
+}
+
 bool guarded_teleport_call(EmfTeleportCallback cb, EmfWorld* w, const EmfTeleportResult* r, void* user) {
     __try {
         cb(w, r, user);
@@ -1740,6 +1788,9 @@ const EmfApi kApi = {
     api_world_setting_info,
     api_player_xp_required, api_player_level_cap, api_player_level_set,
     api_change_component,
+    api_window_open,
+    api_window_update,
+    api_window_close,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {
@@ -1859,6 +1910,40 @@ void pump_chat_lines(EmfWorld* world) {
                      " faulted and was switched off");
         }
     }
+}
+
+namespace {
+struct WindowJob {
+    EmfUiCallback cb;
+    void* user;
+    std::string id, key;
+    uint32_t kind, reason;
+};
+void deliver_window_event(EmfWorld* w, const WindowJob& j, uint32_t flags) {
+    EmfUiEvent e{};
+    e.size = sizeof e;
+    e.kind = j.kind;
+    e.window = j.id.c_str();
+    e.key = j.key.c_str();
+    e.from_key = "";
+    e.reason = j.reason;
+    e.flags = flags;
+    if (!guarded_window_call(j.cb, w, &e, j.user))
+        core_log("a window callback in " + module_name_of(reinterpret_cast<const void*>(j.cb)) + " faulted");
+}
+}  // namespace
+
+void post_window_event(const WindowRequest& request, uint32_t kind, const std::string& key, uint32_t reason) {
+    if (!g_state || !request.cb) return;
+    WindowJob job{request.cb, request.user, request.id, key, kind, reason};
+    if (!g_state->tracker.latest(request.world_kind, now())) {  // no step would come: CLOSED now, a click is dropped
+        if (kind == EMF_UI_CLOSED) deliver_window_event(nullptr, job, EMF_UI_NO_WORLD);
+        return;
+    }
+    g_state->dispatcher.post(request.world_kind, [](EmfWorld* w, void* u) {
+        std::unique_ptr<WindowJob> j(static_cast<WindowJob*>(u));
+        deliver_window_event(w, *j, 0);
+    }, new WindowJob(std::move(job)));
 }
 
 void post_wheel_choice(const WheelRequest& request, int choice) {

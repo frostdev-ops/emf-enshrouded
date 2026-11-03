@@ -203,3 +203,30 @@ TEST_CASE("windows: a bad description is refused with a reason naming what is wr
         CHECK(d.refused().empty());
     }
 }
+
+TEST_CASE("windows: describe_window lists the window and each widget with its kind, key, flags and text") {
+    WindowRequest r;
+    r.id = "beastmaster.stable";
+    r.title = "Beasts";
+    r.world_kind = EMF_WORLD_CLIENT;
+    WindowWidget a;
+    a.type = EMF_UI_HEADING;
+    a.text = "Active 1/3";
+    WindowWidget b;
+    b.type = EMF_UI_SLOT;
+    b.key = "active.3";
+    b.text = "Level 15";
+    b.flags = EMF_UI_SAME_LINE | EMF_UI_LOCKED;
+    b.count = 2;
+    WindowWidget c;
+    c.type = EMF_UI_BAR;
+    c.text = "Wolf 2";
+    c.value = 800;
+    r.widgets = {a, b, c};
+    const auto lines = describe_window(r);
+    REQUIRE(lines.size() == 4u);
+    CHECK(lines[0] == "window beastmaster.stable \"Beasts\": 3 widgets, events on the client world");
+    CHECK(lines[1] == "  0 heading \"Active 1/3\"");
+    CHECK(lines[2] == "  1 slot active.3 \"Level 15\" count 2 [same_line locked]");
+    CHECK(lines[3] == "  2 bar \"Wolf 2\" 800/1000");
+}

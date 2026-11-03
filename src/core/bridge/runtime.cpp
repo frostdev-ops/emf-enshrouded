@@ -147,6 +147,7 @@ StateSnapshot base_snapshot() {
     s.overlay_running = ov.running;
     s.console_open = ov.console_open;
     s.wheel_open = ov.wheel_open;
+    s.window = ov.window;
     s.hud = st->hud.lines();
     s.mods = st->mods.list();
     if (st->hooks)

@@ -75,7 +75,8 @@ std::optional<WindowClick> draw_window(const WindowRequest& w, WindowUiState& st
     ImGui::SetNextWindowPos(pos, ImGuiCond_Always, pivot);
     ImGui::SetNextWindowSizeConstraints(ImVec2(width, 0), ImVec2(width, display.y * 0.85f));
     ImGuiWindowFlags flags = ImGuiWindowFlags_AlwaysAutoResize | ImGuiWindowFlags_NoCollapse |
-                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove;
+                             ImGuiWindowFlags_NoSavedSettings | ImGuiWindowFlags_NoMove |
+                             ImGuiWindowFlags_NoBringToFrontOnFocus;  // the console stays on top
     if (!input) flags |= ImGuiWindowFlags_NoInputs;
     ImGui::PushStyleVar(ImGuiStyleVar_Alpha, input ? 1.0f : 0.6f);
     bool open = true;

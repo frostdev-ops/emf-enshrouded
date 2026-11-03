@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 23
+#define EMF_API_VERSION 24
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -828,6 +828,20 @@ typedef struct EmfApi {
      * why) on the server world's thread; when the world ended first (a new world, the menu) it answers _FAILED with a
      * NULL world, on the thread that ended it. False (logged) when refused at once; cb is not called then. */
     bool (*change_component)(EmfWorld* world, const EmfComponentChange* change);
+
+    /* ---- v24: mod windows (EmfWindowDef above; reference.md "v24") ---- */
+    /* Opens a window drawn by EMF's overlay (copied, every string too). With the open window's id it replaces it (that
+     * window's cb gets CLOSED, BY_MOD). One window at a time: false (logged) while another id is open, a wheel is open,
+     * the overlay is off or cannot draw (always on a dedicated server), no world runs, or the definition is bad. It may
+     * open while the console is open: it shows under the console and gets the input when the console closes. Events
+     * (CLICK, RIGHT_CLICK, the last one CLOSED) reach cb after the next step of a world of def->world_kind, on its
+     * thread; CLOSED with no world running comes at once with EMF_UI_NO_WORLD and a NULL world. Any thread. */
+    bool (*window_open)(const EmfWindowDef* def);
+    /* New contents for the open window def->id (cb and user are ignored; the scroll stays). False when it is not open,
+     * for example because the player closed it: it never reopens a window. Any thread. */
+    bool (*window_update)(const EmfWindowDef* def);
+    /* Closes the window `id`; its cb gets CLOSED (BY_MOD). False when it is not open. Any thread. */
+    bool (*window_close)(const char* id);
 } EmfApi;
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);

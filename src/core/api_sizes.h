@@ -37,6 +37,7 @@ constexpr uint32_t kApiV20Size = EMF_FIELD_END(EmfApi, teleport);
 constexpr uint32_t kApiV21Size = EMF_FIELD_END(EmfApi, world_setting_info);
 constexpr uint32_t kApiV22Size = EMF_FIELD_END(EmfApi, player_level_set);
 constexpr uint32_t kApiV23Size = EMF_FIELD_END(EmfApi, change_component);
+constexpr uint32_t kApiV24Size = EMF_FIELD_END(EmfApi, window_close);
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
 // then read it only when size covers it and update the sizeof here.
@@ -86,7 +87,10 @@ static_assert(offsetof(EmfApi, player_xp_required) == kApiV21Size && offsetof(Em
 static_assert(kApiV22Size == 616, "EmfApi size (v22)");
 static_assert(offsetof(EmfApi, change_component) == kApiV22Size,
               "EmfApi layout (v23 appends change_component after player_level_set)");
-static_assert(kApiV23Size == 624 && sizeof(EmfApi) == kApiV23Size, "EmfApi size (v23)");
+static_assert(kApiV23Size == 624, "EmfApi size (v23)");
+static_assert(offsetof(EmfApi, window_open) == kApiV23Size,
+              "EmfApi layout (v24 appends window_open, window_update, window_close after change_component)");
+static_assert(kApiV24Size == 648 && sizeof(EmfApi) == kApiV24Size, "EmfApi size (v24)");
 static_assert(kComponentChangeV23Size == 48 && sizeof(EmfComponentChange) == 48 &&
                   offsetof(EmfComponentChange, data) == 16 && offsetof(EmfComponentChange, cb) == 32,
               "EmfComponentChange layout (v23)");
