@@ -70,6 +70,29 @@ void emf_game(const TempGame& g) {
     g.write(L"emf\\emf_core.dll", std::string("emf_core 1.2.3\0", 15));
 }
 
+// A real DLL (kernel32.dll's bytes) with its FileVersion set to a.b.c.d and `tag` after it (a known tool's text, as
+// known_tools.txt finds it in the file).
+std::string versioned_dll(uint16_t a, uint16_t b, uint16_t c, uint16_t d, const std::string& tag) {
+    std::string bytes;
+    REQUIRE(read_file(L"C:\\Windows\\System32\\kernel32.dll", bytes));
+    const size_t sig = bytes.find(std::string("\xBD\x04\xEF\xFE", 4));  // VS_FIXEDFILEINFO
+    REQUIRE(sig != std::string::npos);
+    const auto put = [&](size_t at, uint32_t v) {
+        for (int i = 0; i < 4; ++i) bytes[at + i] = static_cast<char>((v >> (8 * i)) & 0xFF);
+    };
+    put(sig + 8, (static_cast<uint32_t>(a) << 16) | b);
+    put(sig + 12, (static_cast<uint32_t>(c) << 16) | d);
+    return bytes + tag;
+}
+
+const PlanPart* labelled(const InstallPlan& p, const std::string& label) {
+    for (const auto& x : p.parts)
+        if (x.label == label) return &x;
+    return nullptr;
+}
+
+bool has(const std::vector<std::string>& v, const std::string& s) { return std::find(v.begin(), v.end(), s) != v.end(); }
+
 }  // namespace
 
 TEST_CASE("app install: names for renamed DLLs and install keys") {
@@ -287,6 +310,110 @@ TEST_CASE("app install: Greeneye mods, with the loader's dbgcore.dll only when n
     CHECK(kept->copies.empty());
     CHECK(all_lines(*kept).find("installed already") != std::string::npos);
     CHECK(part_of(p, "greeneye-mod")->installs());
+}
+
+TEST_CASE("app install: a DLL's file version is read from its bytes") {
+    std::string bytes;
+    REQUIRE(read_file(L"C:\\Windows\\System32\\kernel32.dll", bytes));
+    const auto v = dll_file_version(bytes);
+    REQUIRE(v.has_value());
+    CHECK((*v)[0] >= 6);
+    const auto w = dll_file_version(versioned_dll(1, 3, 0, 7, ""));
+    REQUIRE(w.has_value());
+    CHECK(version_text(*w) == "1.3.0.7");
+    CHECK_FALSE(dll_file_version("MZ not a dll").has_value());
+    CHECK_FALSE(dll_file_version(std::string(100000, '\xFF')).has_value());
+}
+
+TEST_CASE("app install: a known loader already there is compared by contents and version, not by its name") {
+    TempGame g(L"inst_loader_ver");
+    int n = 0;
+    const auto plan_with = [&](const std::string& installed, const std::string& incoming) {
+        Archive a((L"inst_loader_ver_" + std::to_wstring(++n)).c_str());
+        a.add(L"greeneye\\speed\\mod.json", R"({"id":"speed","name":"Speed"})");
+        a.add(L"greeneye\\speed\\speed.dll");
+        a.add(L"dbgcore.dll", incoming);
+        g.write(L"dbgcore.dll", installed);
+        PlanInput in = a.input(g);
+        in.state.proxies.push_back({"dbgcore.dll", "greeneye"});
+        return build_plan(in);
+    };
+    SUBCASE("the archive's copy is newer: it replaces the installed one, which moves to the backup") {
+        const InstallPlan p = plan_with(versioned_dll(1, 2, 0, 0, "greeneye"), versioned_dll(1, 3, 0, 0, "greeneye"));
+        const PlanPart* loader = labelled(p, "Greeneye Loader");
+        REQUIRE(loader);
+        CHECK(loader->action == Action::Update);
+        REQUIRE(has_copy(*loader, "dbgcore.dll"));
+        CHECK(loader->copies[0].shared);
+        CHECK(loader->shared_replace == std::vector<std::string>{"dbgcore.dll"});
+        CHECK(all_lines(*loader).find("Updates Greeneye Loader (dbgcore.dll) from 1.2.0.0 to 1.3.0.0") != std::string::npos);
+    }
+    SUBCASE("the installed copy is newer: kept, and the plan says so") {
+        const InstallPlan p = plan_with(versioned_dll(1, 3, 0, 0, "greeneye"), versioned_dll(1, 2, 0, 0, "greeneye"));
+        const PlanPart* loader = labelled(p, "Greeneye Loader");
+        REQUIRE(loader);
+        CHECK(loader->copies.empty());
+        CHECK(has(loader->deps, "dbgcore.dll"));
+        CHECK(all_lines(*loader).find("is newer (1.3.0.0) than this file's (1.2.0.0)") != std::string::npos);
+        CHECK(part_of(p, "greeneye-mod")->installs());
+    }
+    SUBCASE("the same version with other bytes: kept, and the plan says the versions do not tell") {
+        const InstallPlan p = plan_with(versioned_dll(1, 2, 0, 0, "greeneye A"), versioned_dll(1, 2, 0, 0, "greeneye B"));
+        const PlanPart* loader = labelled(p, "Greeneye Loader");
+        REQUIRE(loader);
+        CHECK(loader->copies.empty());
+        CHECK(all_lines(*loader).find("do not tell which is newer") != std::string::npos);
+        CHECK(all_lines(*loader).find("both 1.2.0.0") != std::string::npos);
+    }
+    SUBCASE("the same file: kept as the same contents") {
+        const std::string same = versioned_dll(1, 2, 0, 0, "greeneye");
+        const InstallPlan p = plan_with(same, same);
+        const PlanPart* loader = labelled(p, "Greeneye Loader");
+        REQUIRE(loader);
+        CHECK(loader->copies.empty());
+        CHECK(all_lines(*loader).find("same contents") != std::string::npos);
+    }
+    SUBCASE("another tool's DLL of that name: refused, never replaced") {
+        g.write(L"dbgcore.dll", "MZ another loader");
+        Archive a(L"inst_loader_ver_other");
+        a.add(L"greeneye\\speed\\mod.json", R"({"id":"speed","name":"Speed"})");
+        a.add(L"greeneye\\speed\\speed.dll");
+        a.add(L"dbgcore.dll", versioned_dll(1, 3, 0, 0, "greeneye"));
+        const InstallPlan p = build_plan(a.input(g));
+        const PlanPart* loader = labelled(p, "Greeneye Loader");
+        REQUIRE(loader);
+        CHECK(loader->action == Action::Refused);
+    }
+}
+
+TEST_CASE("app install: a newer loader replaces the installed one (kept in the backup), and uninstall leaves it") {
+    TempGame g(L"inst_loader_apply");
+    emf_game(g);
+    g.write(L"dbgcore.dll", versioned_dll(1, 2, 0, 0, "greeneye"));
+    Archive a(L"inst_loader_apply_a");
+    a.add(L"greeneye\\speed\\mod.json", R"({"id":"speed","name":"Speed"})");
+    a.add(L"greeneye\\speed\\speed.dll");
+    a.add(L"dbgcore.dll", versioned_dll(1, 3, 0, 0, "greeneye"));
+    PlanInput in = a.input(g);
+    in.state.proxies.push_back({"dbgcore.dll", "greeneye"});
+    const InstallPlan p = build_plan(in);
+    const InstallResult r = apply_plan(g.dir, p);
+    REQUIRE_MESSAGE(r.ok, r.error);
+    const auto now = dll_file_version(g.read(L"dbgcore.dll"));
+    REQUIRE(now.has_value());
+    CHECK(version_text(*now) == "1.3.0.0");
+    const auto rec = read_install_record(g.dir, p.key);
+    REQUIRE(rec);
+    CHECK(has(rec->deps, "dbgcore.dll"));  // shared: never deleted with this mod
+    CHECK(std::none_of(rec->files.begin(), rec->files.end(), [](const auto& f) { return f.first == "dbgcore.dll"; }));
+    REQUIRE_FALSE(rec->backups.empty());
+    const auto old = dll_file_version(g.read(wide(rec->backups[0]) + L"\\dbgcore.dll"));
+    REQUIRE(old.has_value());
+    CHECK(version_text(*old) == "1.2.0.0");
+    const InstallResult u = uninstall_mod(g.dir, p.key);
+    REQUIRE_MESSAGE(u.ok, u.error);
+    CHECK(g.has(L"dbgcore.dll"));
+    CHECK_FALSE(g.has(L"greeneye\\speed\\speed.dll"));
 }
 
 TEST_CASE("app install: ReShade, saves, Cheat Engine tables, unknown files and EMF itself are explained, not installed") {

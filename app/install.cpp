@@ -297,14 +297,51 @@ std::string ver_string(const std::string& v, const VerBlock& b) {
 }
 
 // The planned copies of a part, checked against the game folder: a file of this install's earlier version is replaced
-// (it moves to the backup first), the same bytes already there are left, a read-me is skipped, anything else stops the
-// part. Returns the names that stop it.
+// (it moves to the backup first), the same bytes already there are left, a read-me is skipped, a loader of the same
+// tool at a proxy name next to the game is compared by version (a newer copy replaces it, else it stays), anything else
+// stops the part. Returns the names that stop it.
 struct Placer {
     const PlanInput& in;
     const std::set<std::string>& owned;      // lower-case paths the earlier version installed
     const std::set<std::string>& own;        // EMF's own files (emf\installed.txt)
     const std::set<std::string>& emf_mod_dirs;  // emf\mods\<id> folders the archive installs
+    const std::vector<core::KnownTool>* tools = nullptr;  // known_tools.txt: which loader a DLL is
     std::vector<std::string> conflicts, same, skipped, blocked, game_files;
+
+    // `to_rel`, a proxy name next to the game (dbgcore.dll, dbghelp.dll, winmm.dll...), holds a loader of the same known
+    // tool as the archive's copy, with other bytes: a newer FileVersion in the archive replaces it (the installed copy
+    // moves to the backup; the new one is shared, never deleted on uninstall); an older, equal or unreadable one leaves
+    // it, and the plan says why. False when the two are not the same tool (the caller refuses the file).
+    bool same_tool_loader(PlanPart& part, const std::wstring& src, const std::wstring& dst, const std::string& to_rel) {
+        if (!tools || to_rel.find('\\') != std::string::npos || !is_proxy_name(lower(to_rel))) return false;
+        std::string mine, theirs;
+        if (!read_file(src, mine, 256u << 20) || !read_file(dst, theirs, 256u << 20)) return false;
+        const std::string tool = tool_of_bytes(*tools, mine);
+        if (tool.empty() || tool == "emf" || tool_of_bytes(*tools, theirs) != tool) return false;
+        const std::string name = tool_name(*tools, tool) + " (" + to_rel + ")";
+        const auto incoming = dll_file_version(mine), installed = dll_file_version(theirs);
+        if (incoming && installed && *incoming > *installed) {
+            part.shared_replace.push_back(to_rel);
+            part.copies.push_back({src, to_rel, mine.size(), true});
+            part.lines.push_back("Updates " + name + " from " + version_text(*installed) + " to " + version_text(*incoming) +
+                                 ": the installed copy moves to emf\\backup\\ first. Other mods use it too, so it stays "
+                                 "when you uninstall this one.");
+            return true;
+        }
+        part.deps.push_back(to_rel);  // the installed copy stays, and this install needs it
+        if (incoming && installed && *incoming < *installed) {
+            part.lines.push_back("The installed " + name + " is newer (" + version_text(*installed) + ") than this file's (" +
+                                 version_text(*incoming) + "): kept as it is.");
+        } else {
+            const std::string versions = incoming && installed ? "both " + version_text(*installed)
+                                         : "installed: " + (installed ? version_text(*installed) : std::string("none")) +
+                                               ", this file: " + (incoming ? version_text(*incoming) : std::string("none"));
+            part.lines.push_back("A different " + name + " is installed already, and their versions (" + versions +
+                                 ") do not tell which is newer: the installed one is kept. To use this file's copy, "
+                                 "replace " + to_rel + " by hand.");
+        }
+        return true;
+    }
 
     bool place(PlanPart& part, const std::string& from_rel, const std::string& to_rel, bool doc_ok = true) {
         const std::wstring src = in.folder + L"\\" + wide(win(from_rel));
@@ -330,6 +367,8 @@ struct Placer {
             } else if (protected_from_removal(win(to_rel), own)) {
                 game_files.push_back(to_rel);  // the game's or EMF's own file: never replaced
                 return false;
+            } else if (same_tool_loader(part, src, dst, to_rel)) {
+                return true;
             } else {
                 conflicts.push_back(to_rel);
                 return false;
@@ -671,8 +710,9 @@ std::string archive_slug(const std::string& file_name) {
     return s;
 }
 
-std::vector<std::string> dll_version_strings(const std::string& b) {
-    std::vector<std::string> out(3);
+// The VS_VERSIONINFO data of a DLL's version resource (RT_VERSION, the first name and language), "" when it has none.
+std::string version_resource(const std::string& b) {
+    const std::string out;
     bool ok = true;
     if (b.size() < 0x40 || b[0] != 'M' || b[1] != 'Z') return out;
     const uint32_t pe = rd(b, 0x3C, 4, ok);
@@ -723,7 +763,28 @@ std::vector<std::string> dll_version_strings(const std::string& b) {
     const uint32_t data_rva = rd(b, root + data_entry, 4, ok), data_size = rd(b, root + data_entry + 4, 4, ok);
     const size_t at = offset_of(data_rva);
     if (!ok || at == static_cast<size_t>(-1) || at >= b.size()) return out;
-    const std::string v = b.substr(at, (std::min)(static_cast<size_t>(data_size), b.size() - at));
+    return b.substr(at, (std::min)(static_cast<size_t>(data_size), b.size() - at));
+}
+
+std::optional<std::array<uint16_t, 4>> dll_file_version(const std::string& b) {
+    const std::string v = version_resource(b);
+    VerBlock top;
+    if (!ver_block(v, 0, v.size(), top) || top.key != L"VS_VERSION_INFO") return std::nullopt;
+    bool ok = true;
+    if (top.value + 16 > top.end || rd(v, top.value, 4, ok) != 0xFEEF04BDu) return std::nullopt;  // VS_FIXEDFILEINFO
+    const uint32_t ms = rd(v, top.value + 8, 4, ok), ls = rd(v, top.value + 12, 4, ok);
+    if (!ok) return std::nullopt;
+    return std::array<uint16_t, 4>{static_cast<uint16_t>(ms >> 16), static_cast<uint16_t>(ms & 0xFFFF),
+                                   static_cast<uint16_t>(ls >> 16), static_cast<uint16_t>(ls & 0xFFFF)};
+}
+
+std::string version_text(const std::array<uint16_t, 4>& v) {
+    return std::to_string(v[0]) + "." + std::to_string(v[1]) + "." + std::to_string(v[2]) + "." + std::to_string(v[3]);
+}
+
+std::vector<std::string> dll_version_strings(const std::string& b) {
+    std::vector<std::string> out(3);
+    const std::string v = version_resource(b);
     VerBlock top;
     if (!ver_block(v, 0, v.size(), top) || top.key != L"VS_VERSION_INFO") return out;
     for (size_t p = top.children; p < top.end;) {
@@ -986,6 +1047,7 @@ InstallPlan build_plan(const PlanInput& in) {
         part.chain_keep.clear();
         part.chain_off.clear();
         part.replace_files.clear();
+        part.shared_replace.clear();
         part.deps.clear();
     };
     const auto finish = [&](PlanPart& part, Placer& p) {
@@ -1020,7 +1082,7 @@ InstallPlan build_plan(const PlanInput& in) {
         if (!part.installs() && part.action != Action::Refused && part.action != Action::Skip) {
             part.action = Action::Skip;
             if (part.why.empty()) part.why = "Nothing to copy: it is installed already.";
-        } else if (part.action == Action::Install && !part.replace_files.empty()) {
+        } else if (part.action == Action::Install && (!part.replace_files.empty() || !part.shared_replace.empty())) {
             part.action = Action::Update;
         }
     };
@@ -1032,7 +1094,7 @@ InstallPlan build_plan(const PlanInput& in) {
         part.label = nexus::kind_label(c.kind);
         part.title = !c.loader.empty() ? tool_name(tools, c.loader) : !in.nexus_name.empty() ? in.nexus_name : in.archive;
         part.target = "next to the game";
-        Placer p{in, owned, own, emf_mod_dirs};
+        Placer p{in, owned, own, emf_mod_dirs, &tools};
         size_t dll_copies = 0;
         for (const auto& rel : loose) {
             const std::string low = lower(rel);
@@ -1146,6 +1208,7 @@ InstallPlan build_plan(const PlanInput& in) {
             part.chain_keep.clear();
             part.chain_off.clear();
             part.replace_files.clear();
+            part.shared_replace.clear();
             part.lines.clear();
         }
         plan.parts.push_back(std::move(part));
@@ -1154,21 +1217,14 @@ InstallPlan build_plan(const PlanInput& in) {
         // (a loose DLL in emf\mods, a settings ini that is never overwritten), DLLs directly in mods\ for Shroudtopia
         PlanPart part;
         part.kind = nexus::kind_id(c.kind);
-        Placer p{in, owned, own, emf_mod_dirs};
+        Placer p{in, owned, own, emf_mod_dirs, &tools};
         std::vector<std::string> kept_settings;
         for (const auto& rel : loose) {
             const std::string low = lower(rel);
             if (c.kind == K::GreeneyeMod && low == "dbgcore.dll") {
                 part.label = "Greeneye Loader";
                 part.title = "Greeneye Loader (dbgcore.dll)";
-                const std::string* word = nullptr;
-                for (const auto& pr : in.state.proxies)
-                    if (lower(pr.first) == "dbgcore.dll") word = &pr.second;
-                if (word && *word == "greeneye" && !owned.count("dbgcore.dll")) {
-                    part.lines.push_back("The Greeneye Loader (dbgcore.dll) is installed already: kept as it is.");
-                    part.deps.push_back("dbgcore.dll");  // shared: uninstall must not delete it if another mod needs it
-                    continue;
-                }
+                // one already there: the same bytes stay; the same loader is compared by version (Placer)
                 p.place(part, from_of(rel), "dbgcore.dll", false);
             } else if (c.kind == K::EmfMod && low.rfind("emf/", 0) == 0) {
                 part.label = "EMF mod files";
@@ -1469,6 +1525,8 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
         }
         for (const auto& f : part.replace_files)
             if (!backup_file(f)) return undo("Could not move " + f + " to the backup: " + windows_error_text(GetLastError()));
+        for (const auto& f : part.shared_replace)
+            if (!backup_file(f)) return undo("Could not move " + f + " to the backup: " + windows_error_text(GetLastError()));
     }
     // the earlier versions' other files go too (kept in the backup, never deleted); a record of several separate mods
     // keeps the files of the mods this plan does not ship
@@ -1512,7 +1570,8 @@ InstallResult apply_plan(const std::wstring& game, const InstallPlan& plan) {
                                                    : "Could not copy " + cp.to + ": " + windows_error_text(e));
             }
             copied.push_back(cp.to);
-            rec.files.emplace_back(cp.to, file_sha256(dst));
+            if (cp.shared) add_unique(rec.deps, cp.to);  // other mods use it too: uninstall never deletes it
+            else rec.files.emplace_back(cp.to, file_sha256(dst));
             ++n;
         }
         for (const auto& a : part.chain_add) chain_add.push_back(a);

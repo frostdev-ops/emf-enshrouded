@@ -307,8 +307,8 @@ through the same steps from step 2.)
 | EML mod, ShroudForge mod (`mods/<id>/` with `mod.json` and `src/mod.lua`) | `mods\<id>\` |
 | EMF mod (`emf/mods/<id>/`, or `<id>/mod.json` with `main.lua`) | `emf\mods\<id>\`, named by the `id` in its `mod.json`, which must be one EMF reads (`core::parse_manifest`); a newer `emf` API than this EMF.exe knows is a note |
 | a DLL mod with `dinput8.dll` at the top | `dinput8.dll` is renamed as EMF's installer does: `<tool>.dll` when `known_tools.txt` knows its DLL, else its version information's product (Microsoft's names skipped), else the archive's name without Nexus's numbers (`AutoLootPlus 1.1.8-170-1-1-8-1792790875.zip` gives `autolootplus.dll`), else `dinput8-previous.dll`; `-2`, `-3` when the name is taken. The new name is added inside `[EMF]` of `dinput8-chain.ini`, the section only EMF reads (the installer's Add-ChainEntry rules, the file's own encoding and line breaks), and older listed copies of the same known tool are switched off (`; `). Its other files are copied with their paths. EMF must be installed in the folder |
-| another proxy DLL at the top (`dbghelp.dll`, `winmm.dll`, ...) and a loader's files | copied only where nothing is |
-| Greeneye mod (`greeneye/<id>/`) | `greeneye\<id>\`, with the Greeneye Loader's `dbgcore.dll` when it ships one and the folder has none |
+| another proxy DLL at the top (`dbghelp.dll`, `winmm.dll`, ...) and a loader's files | copied where nothing is. Where a loader of the same known tool is (`known_tools.txt`) with other bytes, the FileVersions decide: a newer copy replaces it (the installed one moves to `emf\backup\` first; the new one is a shared file no uninstall deletes), an older, equal or unreadable one leaves it and the plan names both versions. Another tool's file of that name stops the part |
+| Greeneye mod (`greeneye/<id>/`) | `greeneye\<id>\`, with the Greeneye Loader's `dbgcore.dll` when it ships one and the folder has none or an older one (the proxy DLL rule above) |
 | Shroudtopia mod (`mods/<id>/` with a DLL) | `mods\<id>\` |
 | EMF itself, a ReShade preset, save files, a Cheat Engine table, files EMF cannot place | explained, not installed |
 
@@ -349,7 +349,8 @@ not only by the time limit. (A folder listing shows a file that is still being w
 **A file two installs share** (a loader DLL such as Greeneye's `dbgcore.dll`, put there by the first install and
 found there by the second) stays while either needs it. When the install that put it there is uninstalled first, the
 other one takes it over in its record, so whichever goes last removes it. A file that was there before EMF installed
-anything is never removed.
+anything is never removed, and neither is a newer loader copy that replaced an older one (the older one stays in
+`emf\backup\`).
 
 ## Uninstall and what is recorded
 

@@ -22,6 +22,7 @@
 // several separate mods (each in its own mod folder, nothing installed outside them: the EMF creature packs) writes one
 // record per mod, keyed by its folder, so each uninstalls by itself. Each mod folder belongs to one record: an install
 // replaces the records that hold its folders (a record that also holds other things keeps those).
+#include <array>
 #include <cstdint>
 #include <map>
 #include <optional>
@@ -38,6 +39,7 @@ struct CopyStep {
     std::wstring from;  // the file in the unpack folder
     std::string to;     // relative to the game folder, '\' between folders
     uint64_t size = 0;
+    bool shared = false;  // a newer copy of a loader other mods use too: recorded as needed, never deleted on uninstall
 };
 
 struct PlanPart {
@@ -51,6 +53,8 @@ struct PlanPart {
     std::vector<CopyStep> copies;
     std::string replace_folder;               // Update: the folder that moves to emf\backup\ first (relative)
     std::vector<std::string> replace_files;   // files of this install's earlier version that move to the backup first
+    std::vector<std::string> shared_replace;  // a loader of the same tool, older, that this part's newer copy replaces
+                                              // (dbgcore.dll, dbghelp.dll...): it moves to the backup first
     std::vector<std::string> chain_add;       // DLL names it lists in dinput8-chain.ini
     std::vector<std::string> chain_keep;      // DLLs its earlier version listed there, which it replaces
     std::vector<std::string> chain_off;       // older copies of the same tool it switches off there
@@ -148,6 +152,10 @@ std::string archive_slug(const std::string& file_name);
 // ProductName, FileDescription and OriginalFilename from a DLL's version resource (read from the bytes; the DLL is
 // never loaded). Empty strings for what it lacks.
 std::vector<std::string> dll_version_strings(const std::string& dll_bytes);
+// The FileVersion of a DLL's version resource (VS_FIXEDFILEINFO, read from the bytes; the DLL is never loaded); nullopt
+// when it has none.
+std::optional<std::array<uint16_t, 4>> dll_file_version(const std::string& dll_bytes);
+std::string version_text(const std::array<uint16_t, 4>& v);  // "1.3.0.7"
 // The installer's fallback name for an unknown dinput8.dll: the first of the strings that is not Microsoft's, as a
 // slug of at most 40 characters ("" when none).
 std::string product_slug(const std::vector<std::string>& version_strings);
