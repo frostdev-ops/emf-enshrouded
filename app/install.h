@@ -11,7 +11,8 @@
 //   emf\backup\<id>-<time>\ first.
 // - DLL mod with dinput8.dll: the file is renamed as EMF's installer does (<tool>.dll from known_tools.txt, else its
 //   version information's product, else the archive's name, else dinput8-previous.dll; -2, -3 when taken) and listed
-//   inside [Chain] of dinput8-chain.ini (EMF must be installed); its other files are copied with their paths.
+//   inside [EMF] of dinput8-chain.ini, the section only EMF reads (EMF must be installed); its other files are copied
+//   with their paths.
 // - Other proxy names (dbghelp.dll, winmm.dll, ...) and the other loose files: copied only where nothing is.
 // - EMF itself, ReShade presets, save files, Cheat Engine tables and unknown files: explained, not installed.
 // Nothing is ever overwritten: a part that would replace another mod's file is refused with the reason, and the other

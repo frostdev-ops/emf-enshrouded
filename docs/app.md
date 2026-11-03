@@ -306,7 +306,7 @@ through the same steps from step 2.)
 |---|---|
 | EML mod, ShroudForge mod (`mods/<id>/` with `mod.json` and `src/mod.lua`) | `mods\<id>\` |
 | EMF mod (`emf/mods/<id>/`, or `<id>/mod.json` with `main.lua`) | `emf\mods\<id>\`, named by the `id` in its `mod.json`, which must be one EMF reads (`core::parse_manifest`); a newer `emf` API than this EMF.exe knows is a note |
-| a DLL mod with `dinput8.dll` at the top | `dinput8.dll` is renamed as EMF's installer does: `<tool>.dll` when `known_tools.txt` knows its DLL, else its version information's product (Microsoft's names skipped), else the archive's name without Nexus's numbers (`AutoLootPlus 1.1.8-170-1-1-8-1792790875.zip` gives `autolootplus.dll`), else `dinput8-previous.dll`; `-2`, `-3` when the name is taken. The new name is added inside `[Chain]` of `dinput8-chain.ini` (the installer's Add-ChainEntry rules, the file's own encoding and line breaks), and older listed copies of the same known tool are switched off (`; `). Its other files are copied with their paths. EMF must be installed in the folder |
+| a DLL mod with `dinput8.dll` at the top | `dinput8.dll` is renamed as EMF's installer does: `<tool>.dll` when `known_tools.txt` knows its DLL, else its version information's product (Microsoft's names skipped), else the archive's name without Nexus's numbers (`AutoLootPlus 1.1.8-170-1-1-8-1792790875.zip` gives `autolootplus.dll`), else `dinput8-previous.dll`; `-2`, `-3` when the name is taken. The new name is added inside `[EMF]` of `dinput8-chain.ini`, the section only EMF reads (the installer's Add-ChainEntry rules, the file's own encoding and line breaks), and older listed copies of the same known tool are switched off (`; `). Its other files are copied with their paths. EMF must be installed in the folder |
 | another proxy DLL at the top (`dbghelp.dll`, `winmm.dll`, ...) and a loader's files | copied only where nothing is |
 | Greeneye mod (`greeneye/<id>/`) | `greeneye\<id>\`, with the Greeneye Loader's `dbgcore.dll` when it ships one and the folder has none |
 | Shroudtopia mod (`mods/<id>/` with a DLL) | `mods\<id>\` |
@@ -1054,7 +1054,7 @@ player's, and counts only a stand-in game running from the folder shown.
   in order, the "doesn't list" note, an older file classified on request, the description in its container without
   scripts, a picture from `example.com` and a fetch blocked while a Nexus picture loads. An archive made in the test is
   installed through the page (`install_path`, the test's stand-in for the file dialog, allowed only with `EMF_TEST=1`)
-  and uninstalled again, checking the files, the `[Chain]` line, the record, the backup and that the question names the
+  and uninstalled again, checking the files, the `[EMF]` line, the record, the backup and that the question names the
   other mod of the same install; an archive of two packs is installed as two installs, and uninstalling one through the
   page leaves the other; one record of two packs as EMF.exe 0.3.2 wrote it is uninstalled one pack at a time. The
   Nexus account, offline:
