@@ -28,8 +28,9 @@ account features are switched off, and a tester setting switches them on ("Nexus
   - **EML and ShroudForge mods**: `mods\<folder>\mod.json` and `mods\*.zip`; when EMF builds them itself
     (`emf_content.dll`, "EML content" below) the ones it builds are loaded by EMF ("EML content: built by EMF at the
     start.") and the others "left out" with the loader's reason;
-  - **DLL mods started by EMF**: the lines of `dinput8-chain.ini` that count for EMF's loader (before any section
-    and in `[Chain]`; other sections are another tool's), with how each did at the last game start
+  - **DLL mods started by EMF**: the lines of `dinput8-chain.ini` that count for EMF's loader (before any section,
+    in `[Chain]` and in `[EMF]`, where EMF puts the DLLs it renames; other sections are another tool's), with how each
+    did at the last game start
     (`emf\chain_status.txt`). DLLs the installer renamed (`emf\moved.txt`) that the file does not list are shown
     too: "kept aside" when the same tool already runs through another proxy name (`same-loader` in
     `known_tools.txt`), otherwise "not listed";

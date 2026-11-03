@@ -6,6 +6,8 @@
 #        | chain-as:<the name a renamed dinput8.dll of it gets instead of <word>.dll: it runs only under certain names>
 # A text counts as plain text or as UTF-16 (a DLL built with wide strings), case ignored.
 # The first line whose text a DLL contains wins: ShroudForge's DLLs contain EML's text too, so ShroudForge comes first.
+# ShroudForge's dinput8.dll is the same loader as its dbghelp.dll (same-loader: its copy is not started) and also its
+# "dinput8 chain host" (ShroudforgeSetDinput8Provider), which EMF's loader offers too (docs/modding/other_mods.md).
 # ModLoader Proxy: modloader-proxy.dll is the name its export table keeps after a rename (1.0.0, 1.1.0); its
 # chainloader.ini text is UTF-16.
 # Ultimate ASI Loader (10.0.2, its export IsUltimateASILoader) shows "This library isn't supported." and holds the game

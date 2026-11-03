@@ -7,8 +7,8 @@ says what EMF does about that, for players and for authors of such mods.
 ## What EMF does
 
 - EMF's loader is `dinput8.dll`. Mods under other names run next to it untouched.
-- When `install.cmd` finds another mod's `dinput8.dll`, it renames it, lists the new name in `dinput8-chain.ini` and
-  records it in `emf\moved.txt`. `uninstall.cmd` puts it back. The new name is `<tool>.dll` when it recognises the
+- When `install.cmd` finds another mod's `dinput8.dll`, it renames it, lists the new name in the `[EMF]` section of
+  `dinput8-chain.ini` and records it in `emf\moved.txt`. `uninstall.cmd` puts it back. The new name is `<tool>.dll` when it recognises the
   tool from `emf\known_tools.txt` (a text inside its DLL, as plain text or UTF-16), else a name from the DLL's version
   information (its product name), else `dinput8-previous.dll`.
 - Nothing EMF moves is overwritten or deleted. A newer copy of a recognised tool gets `<tool>-2.dll` and the older copy
@@ -18,7 +18,8 @@ says what EMF does about that, for players and for authors of such mods.
   nothing at start (one EMF loader per process), and `install.cmd` takes its line out.
 - A tool that ships the same loader under two names (ShroudForge: `dbghelp.dll` and `dinput8.dll`) already runs
   through the other one: its `dinput8.dll` is kept as `<tool>.dll` but not listed, so it does not start twice.
-- At every start EMF's loader reads `dinput8-chain.ini` next to the exe and starts each listed DLL in order from its
+- At every start EMF's loader reads `dinput8-chain.ini` next to the exe (`[Chain]`, `[EMF]` and lines before any
+  section) and starts each listed DLL in order from its
   own `DllMain`, before it starts EMF's core: the way the community's chain loaders do it and the moment the mod would
   have started as `dinput8.dll` itself (during the game's start-up, before any game code). EMF does not patch the
   game's entry point for this (ShroudForge does, and two patches there would fight).
@@ -53,11 +54,18 @@ Plain text, one DLL per line, relative to the game folder:
 
 ```ini
 [Chain]
-creative.dll
 mods\mymod\mymod.dll
+
+; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader.
+[EMF]
+creative.dll
 ```
 
-- Only lines in `[Chain]` (and lines before any section) count; other sections belong to other tools.
+- Lines in `[Chain]`, in `[EMF]` and before any section count for EMF; other sections belong to other tools.
+- `[Chain]` is shared: XHL-Core, Auto Loot Plus and ShroudForge read it too (each with its own rules, see below).
+  `[EMF]` holds the DLLs EMF renamed (its installer and EMF.exe put them there), and only EMF reads it. An install
+  over EMF 0.3.x moves EMF's own lines (those in `emf\moved.txt`) from `[Chain]` to `[EMF]`; a player's lines stay
+  where they are. When EMF's last line leaves `[EMF]`, the section and its note go too.
 - Blank lines and `;` `#` `//` comments are skipped; a `key=value` line counts with its value when that names a `.dll`
   (other settings are ignored). `; ` in front of a line switches that DLL off.
 - Only DLLs inside the game folder: absolute paths, drive letters, UNC paths and `..` are refused. `/` is read as `\`.
@@ -72,6 +80,24 @@ mods\mymod\mymod.dll
 ShroudForge's updater and uninstaller manage `dinput8.dll` as their own file: updating ShroudForge puts its
 `dinput8.dll` back over EMF's, and uninstalling ShroudForge deletes EMF's. Run `install.cmd` again afterwards; it
 sets the new copy aside again.
+
+ShroudForge 1.7.7 reads `[Chain]` in `dinput8-chain.ini` too, with rules of its own:
+
+- every line must be a DLL inside its own folder under `mods\` (`mods\<folder>\name.dll`); a game-root line shows as
+  "Load failed" in ShroudForge's Modloader (F9, Compatibility > DLL Manager);
+- it loads those lines through the game folder's `dinput8.dll`, its "dinput8 chain host". EMF's loader offers the same
+  contract (the export `ShroudforgeSetDinput8Provider`; the game's `DirectInput8Create` goes to the first DLL with its
+  own one, as with ShroudForge's own `dinput8.dll`), so `mods\` lines set up ShroudForge's way load in ShroudForge
+  while EMF is `dinput8.dll`. EMF starts them as well; Windows hands the second start the DLL already loaded.
+
+What this means for players with ShroudForge and EMF:
+
+- The DLLs EMF renamed are in `[EMF]`: ShroudForge does not see them, and they show no error there.
+- A game-root line a player put in `[Chain]` (as XHL-Core and Auto Loot Plus describe it) shows as failed in
+  ShroudForge, but EMF still starts it. Leave it where it is: moving a DLL into `mods\` can break it (Ultimate ASI
+  Loader looks for its `.asi` plugins next to itself). `install.cmd` names such lines when it finds ShroudForge.
+- Plain EML (and ShroudForge set to "eml") stops with "Errors loading some mods" when a folder in `mods\` has no
+  `mod.json`: a DLL folder there needs one, or belongs elsewhere.
 
 ## For authors of DLL mods
 
