@@ -2676,7 +2676,7 @@ TEST_CASE("talent: a beast gets a point for each loyalty above 1; the new loyalt
                              "Swiftness 0/3: +4 % speed a point",
                              "Second Wind 0/1: a killing blow leaves it at 20 % health, then 5 min before it works again",
                              "Ambush 0/2: +50 % damage a point on its first hit in a fight",
-                             "Guard 0/2: no damage for the first 3 s of a fight (5 s with 2 points)"})
+                             "Guard 0/2: no damage for the first 3 s of a fight (5 s with 2 points), once every 30 s"})
         CHECK(has(list, line));
     b.reply("beastmaster.loyalty Wolf 10");
     CHECK(has(b.reply("beastmaster.talents 1"), "Wolf's talents: 9 points (9 left)"));
@@ -2697,7 +2697,8 @@ TEST_CASE("talent: spending and reset at a stable; refused away from one, when f
           "Wolf 2: Second Wind 1/1, a killing blow leaves it at 20 % health, then 5 min before it works again "
           "(2 points left).");
     CHECK(say("beastmaster talent Wolf 2 Second_Wind") == "Wolf 2's Second Wind is full (1/1).");
-    CHECK(say("beastmaster talent Wolf 2 guard") == "Wolf 2: Guard 1/2, no damage for the first 3 s of a fight (1 point left).");
+    CHECK(say("beastmaster talent Wolf 2 guard") ==
+          "Wolf 2: Guard 1/2, no damage for the first 3 s of a fight, once every 30 s (1 point left).");
     const std::string which = "A talent is Strength, Toughness, Swiftness, Second Wind, Ambush or Guard: /beastmaster talent "
                               "<name or number> <talent>";
     CHECK(say("beastmaster talent Grey shield") == which);
@@ -2705,8 +2706,8 @@ TEST_CASE("talent: spending and reset at a stable; refused away from one, when f
     CHECK(say("beastmaster talent Nobody strength") == "No such beast (beastmaster.list shows yours).");
     CHECK(say("beastmaster talents Nobody") == "No such beast (beastmaster.list shows yours).");
     place(b.r.fake, 2, 60, 10, 0);  // 27 m from the stable
-    CHECK(say("beastmaster talent Grey ambush") == "Go to a stable (within 10 m) to do that.");
-    CHECK(say("beastmaster talents Grey reset") == "Go to a stable (within 10 m) to do that.");
+    CHECK(say("beastmaster talent Grey ambush") == "Go to a stable (an animal bed in your base) within 10 m to do that.");
+    CHECK(say("beastmaster talents Grey reset") == "Go to a stable (an animal bed in your base) within 10 m to do that.");
     CHECK(has(say("beastmaster talents Grey"), "Grey's talents: 3 points (3 left)"));  // a list anywhere
 }
 
@@ -2726,7 +2727,8 @@ TEST_CASE("talent: spent points are kept with the world; a release forgets them,
     at_stable(b);
     b.reply("beastmaster.talent Fang strength");
     b.reply("beastmaster.talent Fang strength");
-    CHECK(b.reply("beastmaster.talent Fang guard") == "Fang: Guard 1/2, no damage for the first 3 s of a fight (0 points left).");
+    CHECK(b.reply("beastmaster.talent Fang guard") ==
+          "Fang: Guard 1/2, no damage for the first 3 s of a fight, once every 30 s (0 points left).");
     b.seconds(1);
     const std::string saved = b.saved();
     CAPTURE(saved);
@@ -2743,7 +2745,7 @@ TEST_CASE("talent: spent points are kept with the world; a release forgets them,
     CAPTURE(again);
     CHECK(has(again, "Rex's talents: 3 points (0 left)"));
     CHECK(has(again, "Strength 2/5: +8 % damage"));
-    CHECK(has(again, "Guard 1/2: no damage for the first 3 s of a fight"));
+    CHECK(has(again, "Guard 1/2: no damage for the first 3 s of a fight, once every 30 s"));
     b.reply("beastmaster.release Rex");
     CHECK(b.reply("beastmaster.release Rex") == "Rex is gone: you let it go.");
     CHECK_FALSE(has(b.saved(), "\nt "));
@@ -2916,7 +2918,7 @@ TEST_CASE("talent: Guard: the first seconds of a fight take no damage, the openi
     deliver(b.r.fake, "HitEvent", hit(1234, 70, -10));  // still the same fight (2 s after the last hit)
     CHECK(floor_of(b, 1234) == 0);
     b.reply("beastmaster.talent Wolf guard");  // 2 points: 5 s, from the next fight
-    b.seconds(11);                             // 10 s quiet: the fight is over
+    b.seconds(27);  // the fight is over (10 s quiet), and Guard worked 31 s ago (at most once every 30 s)
     b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 60;
     b.r.fake.attr_adds.clear();
     deliver(b.r.fake, "HitEvent", hit(1234, 70, -10));  // its own hit starts the next fight
@@ -3024,6 +3026,7 @@ TEST_CASE("talent: a beast sent home mid-fight leaves nothing behind; its next c
     REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
     b.seconds(1);
     CHECK(floor_of(b, 1235) == 1);  // Second Wind ready
+    b.seconds(19);                  // Guard worked 31 s ago (once every 30 s, also across a call)
     b.r.fake.attrs[{1235, EMF_ATTR_HEALTH}] = 90;
     b.r.fake.attr_adds.clear();
     deliver(b.r.fake, "HitEvent", hit(70, 1235, -10));  // the opening hit of its own fight
@@ -3071,7 +3074,7 @@ TEST_CASE("talent: selecting a beast opens its tab with its stats and talents; S
     CHECK(row_at(w, "beast.Tusk") == -1);
     for (const char* line : {"Wolf, level 10", "Loyalty 3: 30 kills to loyalty 4", "Health x1.25, damage x1.20, speed x1.00",
                              "Out, active", "Talents: 2 points (2 left)", "Strength 0/5: +4 % damage a point",
-                             "Guard 0/2: no damage for the first 3 s of a fight (5 s with 2 points)"})
+                             "Guard 0/2: no damage for the first 3 s of a fight (5 s with 2 points), once every 30 s"})
         CHECK_MESSAGE(shows(w, line), line);
     for (const char* t : {"talent.strength", "talent.toughness", "talent.swiftness", "talent.second_wind", "talent.ambush",
                           "talent.guard"})
@@ -3144,4 +3147,85 @@ TEST_CASE("talent: a beast released on its tab, or by chat while its tab is open
     CHECK(lit(shown(b), "tab.stable"));
     CHECK(row_at(shown(b), "tab.beast") == -1);
     CHECK(shows(shown(b), "Stable 1/8"));
+}
+
+// ---- talents: fixes after review ----
+TEST_CASE("talent: an id that stops being our beast (its faction changes) keeps no floor or speed of ours") {
+    BeastRig b;
+    wolf_with(b, {"second wind", "swiftness"});
+    REQUIRE(floor_of(b, 1234) == 1);
+    REQUIRE(speed_of(b, 1234) == doctest::Approx(1.04));
+    component<ecs::Faction>(b.r.fake, 1234).faction = static_cast<emf::gen::FactionType>(kSkeletonFoe);
+    one_step(b);  // never written on a creature that is not the players' ally, and given back at once
+    CHECK(floor_of(b, 1234) == 0);
+    CHECK(speed_of(b, 1234) == doctest::Approx(1.0));
+    b.seconds(2);  // the check that drops it
+    CHECK(has(b.reply("beastmaster.list"), "1. Wolf - wolf, loyalty 10, at home"));
+    CHECK(floor_of(b, 1234) == 0);
+    CHECK(speed_of(b, 1234) == doctest::Approx(1.0));
+}
+
+TEST_CASE("talent: an id dropped because it guards someone else gets the game's minimum and speed back") {
+    BeastRig b;
+    wolf_with(b, {"second wind", "swiftness"});
+    REQUIRE(floor_of(b, 1234) == 1);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 1234).guardEntityId.id = 999;  // another entity's guard now
+    b.seconds(4);
+    REQUIRE(has(b.reply("beastmaster.list"), "1. Wolf - wolf, loyalty 10, at home"));
+    CHECK(floor_of(b, 1234) == 0);
+    CHECK(speed_of(b, 1234) == doctest::Approx(1.0));
+}
+
+TEST_CASE("talent: a beast sent home that is no longer ours (not destroyed) gets the game's minimum and speed back") {
+    BeastRig b;
+    wolf_with(b, {"second wind", "swiftness"});
+    component<ecs::Faction>(b.r.fake, 1234).faction = static_cast<emf::gen::FactionType>(kSkeletonFoe);
+    b.reply("beastmaster.dismiss Wolf");  // before any step: it is left alive
+    REQUIRE_FALSE(contains(b.r.fake.destroyed, 1234));
+    b.seconds(2);
+    CHECK(floor_of(b, 1234) == 0);
+    CHECK(speed_of(b, 1234) == doctest::Approx(1.0));
+}
+
+TEST_CASE("talent: a floor or speed the game changed meanwhile is left as the game has it when the id leaves") {
+    BeastRig b;
+    wolf_with(b, {"second wind", "swiftness"});
+    component<ecs::Faction>(b.r.fake, 1234).faction = static_cast<emf::gen::FactionType>(kSkeletonFoe);
+    live_of<ecs::Health>(b, 1234).dataStorage[1] = 7;       // the game's own values now
+    live_of<ecs::Movement>(b, 1234).dataStorage[1] = 0.6f;
+    b.seconds(2);
+    CHECK(floor_of(b, 1234) == 7);
+    CHECK(speed_of(b, 1234) == doctest::Approx(0.6));
+}
+
+TEST_CASE("talent: Ambush is used up but strikes nothing when the first hit already killed the foe") {
+    BeastRig b;
+    wolf_with(b, {"ambush"});
+    b.r.fake.attrs[{70, EMF_ATTR_HEALTH}] = 0;  // the bite killed it
+    deliver(b.r.fake, "HitEvent", hit(1234, 70, -40));
+    CHECK(b.r.fake.damages.empty());
+    creature(b, 71, 0, 12, kSkeletonFoe);
+    deliver(b.r.fake, "HitEvent", hit(1234, 71, -40));  // the same fight: it was used up
+    CHECK(b.r.fake.damages.empty());
+}
+
+TEST_CASE("talent: Guard works at most once every 30 s") {
+    BeastRig b;
+    wolf_with(b, {"guard"});
+    auto opening = [&]() {
+        b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 70;
+        b.r.fake.attr_adds.clear();
+        deliver(b.r.fake, "HitEvent", hit(70, 1234, -30));
+    };
+    opening();
+    CHECK(b.added(1234, EMF_ATTR_HEALTH, 30));
+    CHECK(floor_of(b, 1234) == 100);
+    b.seconds(12);  // a new fight (10 s quiet), 12 s after Guard last worked
+    opening();
+    CHECK_FALSE(b.added(1234, EMF_ATTR_HEALTH, 30));
+    CHECK(floor_of(b, 1234) == 0);
+    b.seconds(19);  // 31 s after Guard last worked, 19 s quiet
+    opening();
+    CHECK(b.added(1234, EMF_ATTR_HEALTH, 30));
+    CHECK(floor_of(b, 1234) == 100);
 }

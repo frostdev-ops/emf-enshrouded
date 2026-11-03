@@ -177,13 +177,31 @@ function P:keep_damage(world, id, beast)
 	end
 end
 
+-- The game's speeds back on `id` (Swiftness written on it before), each while it still has the value written last (else
+-- the game wrote its own); nothing more is kept for it.
+function P:give_back_speed(world, id)
+	local kept = self.speeds[id]
+	self.speeds[id] = nil
+	local m = kept and world:get("Movement", id)
+	if not (m and m.dataStorage) then return end
+	for _, i in ipairs(talents.SPEED_ENTRIES) do
+		if kept.wrote[i] and math.abs(m.dataStorage[i] - kept.wrote[i]) <= 1e-4 then m.dataStorage[i] = kept.base[i] end
+	end
+end
+
 -- A beast out at its Swiftness: the Movement entries talents.SPEED_ENTRIES at the game's values times its speed. The
 -- game's values are kept from the first write and taken again when the game writes them anew (kept up every step); a
--- beast without Swiftness is left as the game made it (after a reset, from the step its game values are back).
+-- beast without Swiftness is left as the game made it (after a reset, from the step its game values are back). Only on
+-- the players' ally: an id that is not (no beast of ours now) gets the game's speeds back.
 function P:set_speed(world, id, beast)
 	local factor = talents.speed(beast)
 	local kept = self.speeds[id]
 	if factor == 1 and not kept then return end
+	local f = world:get("Faction", id)
+	if not (f and f.faction == PLAYER_ALLY) then
+		self:give_back_speed(world, id)
+		return
+	end
 	local m = world:get("Movement", id)
 	if not (m and m.dataStorage) then return end
 	if not kept then
@@ -335,7 +353,7 @@ function P:dismiss(world, account, beast)
 	if beast.entity then
 		self.ids[beast.entity] = nil
 		self.sent[beast.entity], self.recall[beast.entity], self.base[beast.entity] = nil, nil, nil
-		self.fought[beast.entity], self.speeds[beast.entity] = nil, nil
+		self.fought[beast.entity] = nil
 	end
 	beast.entity = nil
 	beast.out = false
@@ -491,7 +509,6 @@ function P:on_died(id, world)
 	end
 	self.credited[id] = nil
 	self.sent[id], self.recall[id], self.base[id], self.fought[id] = nil, nil, nil, nil
-	self.speeds[id] = nil
 	local e = self.ids[id]
 	if not e then return end
 	self.ids[id] = nil
@@ -589,6 +606,10 @@ function P:step(world)
 		local passive = self.env.mode and self.env.mode(e.account) == "passive" and now >= (self.sent[id] or 0)
 		if passive or now < (self.recall[id] or 0) then calm(world, id) end
 		if self.speeds[id] then self:set_speed(world, id, e.beast) end
+	end
+	-- ids that left (sent home, fallen, aside, not ours): the game's speeds and minimum health back
+	for id in pairs(self.speeds) do
+		if not self.ids[id] then self:give_back_speed(world, id) end
 	end
 	self.fight:step(world, self.ids)
 	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now

@@ -123,8 +123,8 @@ the Beasts window (its **+** buttons), or `/beastmaster talent <name or number> 
 | Toughness | +5 % health | 5 | on top of its role and loyalty |
 | Swiftness | +4 % speed | 3 | it moves faster |
 | Second Wind | | 1 | a killing blow leaves it at 20 % health instead; then 5 minutes before it works again |
-| Ambush | +50 % | 2 | its first hit on a foe in a fight deals that much more (a bonus that kills is your kill: XP and loot) |
-| Guard | 3 s, 5 s with 2 points | 2 | it takes no damage for the first seconds of a fight (the hit that starts it is healed back) |
+| Ambush | +50 % | 2 | its first hit on a foe in a fight deals that much more (a bonus that kills is your kill: XP and loot, with You get your beasts' kills on) |
+| Guard | 3 s, 5 s with 2 points | 2 | it takes no damage for the first seconds of a fight (the hit that starts it is healed back), once every 30 s |
 
 A fight starts with the first hit to or from the beast after 10 s without any. A beast that is out gets Strength,
 Toughness, Swiftness and Second Wind at once, Ambush and Guard from its next fight. Talents act only while the beast is

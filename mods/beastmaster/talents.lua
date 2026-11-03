@@ -3,7 +3,7 @@
 --   strength, toughness, swiftness: per point, +damage, +health, +speed (on top of its role and loyalty)
 --   second_wind: a killing blow leaves it at `heal` of its health; then `cooldown_s` before it works again
 --   ambush: per point, its first hit in a fight deals `bonus` more (0.5: +50 %)
---   guard: it takes no damage for the first `guard_s[points]` seconds of a fight
+--   guard: it takes no damage for the first `guard_s[points]` seconds of a fight, at most once every `cooldown_s`
 -- A beast's points spent are kept with the world in the roster's t lines (roster.lua): "strength:2,guard:1".
 local loyalty = require("loyalty")
 
@@ -15,7 +15,7 @@ M.LIST = {
 	{ id = "swiftness", name = "Swiftness", max = 3, speed = 0.04 },
 	{ id = "second_wind", name = "Second Wind", max = 1, heal = 0.20, cooldown_s = 300 },
 	{ id = "ambush", name = "Ambush", max = 2, bonus = 0.50 },
-	{ id = "guard", name = "Guard", max = 2, guard_s = { 3, 5 } },
+	{ id = "guard", name = "Guard", max = 2, guard_s = { 3, 5 }, cooldown_s = 30 },
 }
 
 -- A fight starts with the first hit to or from a beast after this many seconds without any.
@@ -104,6 +104,11 @@ function M.guard_s(b)
 	return n > 0 and by_id.guard.guard_s[math.min(n, #by_id.guard.guard_s)] or 0
 end
 
+-- Seconds after Guard worked before it can work again.
+function M.guard_cooldown_s()
+	return by_id.guard.cooldown_s or 0
+end
+
 -- Second Wind's entry when the beast has it, else nil.
 function M.second_wind(b)
 	return M.rank(b, "second_wind") > 0 and by_id.second_wind or nil
@@ -135,6 +140,7 @@ function M.effect(t, n)
 		if n == 0 and #t.guard_s > 1 then
 			text = text .. string.format(" (%d s with %d points)", t.guard_s[#t.guard_s], #t.guard_s)
 		end
+		if (t.cooldown_s or 0) > 0 then text = text .. string.format(", once every %d s", t.cooldown_s) end
 		return text
 	end
 	return ""

@@ -1,13 +1,16 @@
 -- The fights of the beasts out, for their talents (talents.lua). A fight starts with the first hit to or from a beast
 -- after talents.FIGHT_GAP_S without any.
 --   Guard: for its first seconds the beast's health cannot go under what it had when the fight started; a foe's opening
---     hit is healed back.
+--     hit is healed back. At most once every talents.guard_cooldown_s() (kept per beast).
 --   Second Wind: while ready its health cannot go under 1; when a killing blow leaves it there, it is healed to its
 --     share of the maximum and the talent waits its cooldown (kept per beast: a call does not make it ready).
---   Ambush: the beast's first damaging hit on a foe in a fight deals its bonus more, as a real hit.
+--   Ambush: the beast's first damaging hit on a foe in a fight deals its bonus more, as a real hit (none when that hit
+--     killed the foe).
 -- Both floors are the game's minimum health (Health storage [2], as tame.lua's guard of a beast just tamed): the higher
--- one is held, and the game's own minimum comes back when neither holds. Nothing is kept for an entity that is no beast
--- out any more (sent home, fallen, aside): the game gives its id out again.
+-- one is held, and the game's own minimum comes back when neither holds. A floor is written only on the players' ally
+-- (Faction 11). When an entity is no beast out any more (sent home, fallen, aside, not ours), the game's minimum goes
+-- back while the entity still has the floor written last (the game gives ids out again: a creature that got the id has
+-- its own), and nothing more is kept for it.
 -- M.new(env) where env has: now(world), tell(world, player, text), owner(world, account) (the owner's entity or nil),
 -- strike(world, e, id, target, amount) (Ambush's bonus as a hit from beast entity `id` of entry `e`).
 local talents = require("talents")
@@ -17,7 +20,8 @@ local F = {}
 F.__index = F
 
 local WIND_FLOOR = 1  -- Second Wind holds health at this while ready
-local PLAYER_SIDE = { [7] = true, [8] = true, [11] = true }  -- Player, AutomatedPlayer, PlayerAlly
+local PLAYER_ALLY = 11
+local PLAYER_SIDE = { [7] = true, [8] = true, [PLAYER_ALLY] = true }  -- Player, AutomatedPlayer, PlayerAlly
 
 function M.new(env)
 	local f = setmetatable({ env = env }, F)
@@ -31,12 +35,26 @@ function F:reset()
 	self.guard = {}   -- entity id -> {until_s, floor}: Guard in this fight
 	self.ambush = {}  -- entity id -> true while its first damaging hit in this fight is still to come
 	self.old = {}     -- entity id -> the game's minimum health before a floor was written
+	self.wrote = {}   -- entity id -> the floor written last
 	self.wind = setmetatable({}, { __mode = "k" })  -- beast -> when Second Wind works again
+	self.guard_ready = setmetatable({}, { __mode = "k" })  -- beast -> when Guard can work again
 end
 
--- `id` is no beast of ours now (or a fresh one): what was kept for it goes.
+-- `id` is a fresh beast of ours (an id the game gave out again): what was kept for the old one goes.
 function F:forget(id)
-	self.last[id], self.guard[id], self.ambush[id], self.old[id] = nil, nil, nil, nil
+	self.last[id], self.guard[id], self.ambush[id], self.old[id], self.wrote[id] = nil, nil, nil, nil, nil
+end
+
+-- The game's minimum health back on `id`, while it still has the floor written last (else the game wrote its own).
+function F:give_back(world, id)
+	local h = self.old[id] ~= nil and world:get("Health", id)
+	if h and h.dataStorage and h.dataStorage[2] == self.wrote[id] then h.dataStorage[2] = self.old[id] end
+	self.old[id], self.wrote[id] = nil, nil
+end
+
+local function ally(world, id)
+	local f = world:get("Faction", id)
+	return f ~= nil and f.faction == PLAYER_ALLY
 end
 
 -- Seconds before Second Wind works again for `beast` (0: ready).
@@ -53,19 +71,19 @@ function F:floor_of(id, beast, now)
 	return want
 end
 
--- Writes the floor `beast` holds now as its minimum health, or gives the game's back.
+-- Writes the floor `beast` holds now as its minimum health (only on the players' ally), or gives the game's back.
 function F:hold(world, id, beast, now)
 	local want = self:floor_of(id, beast, now)
-	if not want and self.old[id] == nil then return end
+	if want and not ally(world, id) then want = nil end
+	if not want then
+		if self.old[id] ~= nil then self:give_back(world, id) end
+		return
+	end
 	local h = world:get("Health", id)
 	if not (h and h.dataStorage) then return end
-	if want then
-		if self.old[id] == nil then self.old[id] = h.dataStorage[2] end
-		if h.dataStorage[2] ~= want then h.dataStorage[2] = want end
-	else
-		h.dataStorage[2] = self.old[id]
-		self.old[id] = nil
-	end
+	if self.old[id] == nil then self.old[id] = h.dataStorage[2] end
+	if h.dataStorage[2] ~= want then h.dataStorage[2] = want end
+	self.wrote[id] = want
 end
 
 -- A hit to or from beast `id`: a new fight after FIGHT_GAP_S without any (Ambush armed, Guard started). `taken` is the
@@ -76,9 +94,10 @@ function F:touch(world, id, beast, now, taken)
 	if last and now - last < talents.FIGHT_GAP_S and now >= last then return end
 	self.ambush[id] = talents.ambush(beast) > 0 or nil
 	local secs = talents.guard_s(beast)
-	if secs <= 0 then return end
+	if secs <= 0 or now < (self.guard_ready[beast] or 0) then return end
 	local cur, max = emf.health(world, id)
 	if not cur or cur <= 0 then return end
+	self.guard_ready[beast] = now + talents.guard_cooldown_s()
 	local floor = cur
 	if taken < 0 then
 		floor = max and math.min(max, cur - taken) or (cur - taken)
@@ -105,6 +124,8 @@ function F:on_hit(world, source, target, change, src_e, tgt_e, credited)
 	if not (src_e and self.ambush[source]) or change >= 0 or not foe(world, target) then return end
 	self.ambush[source] = nil
 	if credited then return end  -- the foe dies by its owner's hit already
+	local cur = emf.health(world, target)
+	if not cur or cur <= 0 then return end  -- the hit killed it
 	local amount = math.floor(-change * talents.ambush(src_e.beast) + 0.5)
 	if amount > 0 then self.env.strike(world, src_e, source, target, amount) end
 end
@@ -113,7 +134,10 @@ end
 -- up, the floors are held.
 function F:step(world, ids)
 	local now = self.env.now(world)
-	for _, t in ipairs({ self.last, self.guard, self.ambush, self.old }) do
+	for id in pairs(self.old) do
+		if not ids[id] then self:give_back(world, id) end
+	end
+	for _, t in ipairs({ self.last, self.guard, self.ambush, self.wrote }) do
 		for id in pairs(t) do
 			if not ids[id] then t[id] = nil end
 		end
