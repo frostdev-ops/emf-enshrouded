@@ -39,6 +39,9 @@ function Install-Emf([string]$Dir, [string]$Source) {
     }
     $movedRecord = Join-Path $Dir "emf\moved.txt"
     $recordBefore = @(Read-Lines $movedRecord)
+    # EMF 0.3.x listed the DLLs it renamed in [Chain]; they go into EMF's own [EMF] (ShroudForge reads only [Chain])
+    $movedNames = @($recordBefore | Where-Object { $_ -like "moved`t*" } | ForEach-Object { $_.Substring(6) })
+    $movedToEmf = @(Move-ChainEntriesToEmf $Dir $movedNames)
     $done = @{ Moved = $false; Added = $false; Created = $false; Off = @() }
     $notes = @()
     try {
@@ -99,6 +102,19 @@ function Install-Emf([string]$Dir, [string]$Source) {
             "Note: $($script:ChainFileName) also still starts $old, an earlier dinput8.dll EMF could not identify. If " +
                 "$($plan.Name) is a newer copy of the same mod, switch $old off: put '; ' in front of its line."
         }
+    }
+    if ($movedToEmf.Count) {
+        "EMF's own lines in $($script:ChainFileName) ($($movedToEmf -join ', ')) moved from [Chain] to [EMF], the " +
+            "section only EMF reads: other chain loaders such as ShroudForge read only [Chain]."
+    }
+    $sfHere = (Test-Path -LiteralPath (Join-Path $Dir "shroudforge")) -or
+        ((Test-Path -LiteralPath (Join-Path $Dir "dbghelp.dll")) -and
+            (Get-DllToolName (Join-Path $Dir "dbghelp.dll") (Read-KnownTools (Join-Path $Source "emf\known_tools.txt"))) -eq "shroudforge")
+    $rootLines = @(Get-ChainGameRootEntries $Dir)
+    if ($sfHere -and $rootLines.Count) {
+        "ShroudForge reads [Chain] in $($script:ChainFileName) too and shows $($rootLines -join ', ') there as failed " +
+            "(it wants each DLL in its own folder under mods\). EMF still starts them: leave them where they are " +
+            "(moving one into mods\ can break it, for example Ultimate ASI Loader's plugins)."
     }
     $notes
     # EMF is installed now: a problem with the shortcut is said, never an install failure

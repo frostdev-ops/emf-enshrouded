@@ -1398,6 +1398,42 @@ std::optional<std::string> add_chain_line(const std::string& text, const std::ws
     return text.substr(0, lines[at].start) + name + nl + text.substr(lines[at].start);
 }
 
+namespace {
+// An [EMF] with no line left goes, with EMF's note just above it and one blank line before that: a file EMF added
+// [EMF] to is as it was once EMF's last line is out.
+std::string drop_empty_emf_section(const std::string& text) {
+    struct Line {
+        size_t start, end;  // end: after the line break
+        std::string trimmed;
+    };
+    std::vector<Line> lines;
+    for (size_t from = 0; from < text.size();) {
+        const size_t nlat = text.find('\n', from);
+        const size_t end = nlat == std::string::npos ? text.size() : nlat + 1;
+        std::string body = text.substr(from, end - from);
+        if (from == 0 && body.compare(0, 3, "\xEF\xBB\xBF") == 0) body.erase(0, 3);
+        lines.push_back({from, end, loader::trim_chain(body)});
+        from = end;
+    }
+    for (size_t h = 0; h < lines.size(); ++h) {
+        if (_stricmp(lines[h].trimmed.c_str(), "[emf]") != 0) continue;
+        size_t end = h + 1;
+        bool empty = true;
+        for (; end < lines.size() && !(!lines[end].trimmed.empty() && lines[end].trimmed[0] == '['); ++end)
+            empty = empty && lines[end].trimmed.empty();
+        if (!empty) return text;
+        size_t from = h;
+        if (from > 0 && lines[from - 1].trimmed == kEmfChainNote) --from;
+        if (from > 0 && lines[from - 1].trimmed.empty()) --from;
+        // a BOM on the first line stays
+        const size_t cut = from == 0 && text.compare(0, 3, "\xEF\xBB\xBF") == 0 ? 3 : lines[from].start;
+        const size_t until = end < lines.size() ? lines[end].start : text.size();
+        return text.substr(0, cut) + text.substr(until);
+    }
+    return text;
+}
+}  // namespace
+
 std::optional<std::string> remove_chain_line(const std::string& text, const std::wstring& dll) {
     std::vector<std::pair<size_t, size_t>> drop;  // (line start, length with its line break)
     each_chain_line(text, [&](size_t start, const std::string& body) {
@@ -1409,7 +1445,7 @@ std::optional<std::string> remove_chain_line(const std::string& text, const std:
     if (drop.empty()) return std::nullopt;
     std::string out = text;
     for (auto it = drop.rbegin(); it != drop.rend(); ++it) out.erase(it->first, it->second);
-    return out;
+    return drop_empty_emf_section(out);
 }
 
 }  // namespace emf::app

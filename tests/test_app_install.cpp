@@ -518,7 +518,7 @@ TEST_CASE("app install: uninstall removes exactly what was installed; changed fi
     CHECK(g.has(L"mods\\cm\\notes.txt"));  // not the install's
     CHECK(g.read(L"creative.ini") == "[x]\nchanged by the player");
     CHECK(g.read(L"creative.dll") == "MZ creative-mode-marker OLD");
-    CHECK(g.read(L"dinput8-chain.ini") == "[Chain]\ncreative.dll\n\n; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader.\n[EMF]\n");  // its line out, the old copy on again
+    CHECK(g.read(L"dinput8-chain.ini") == "[Chain]\ncreative.dll\n");  // its line out (and the empty [EMF]), the old copy on again
     std::string said;
     for (const auto& l : r.done) said += l + "\n";
     CHECK(said.find("creative.ini") != std::string::npos);
@@ -567,7 +567,11 @@ TEST_CASE("app install: dinput8-chain.ini lines go into [EMF] and are taken out 
     CHECK(*add_chain_line("[Other]\r\nb.dll\r\n", L"b.dll") == "[Other]\r\nb.dll\r\n\r\n" + kChainHeader + std::string("b.dll\r\n"));
 
     CHECK(*remove_chain_line("[Chain]\r\na.dll\r\nb.dll\r\n; b.dll\r\nc.dll\r\n", L"b.dll") == "[Chain]\r\na.dll\r\nc.dll\r\n");
-    CHECK(*remove_chain_line("[Chain]\r\na.dll\r\n[EMF]\r\nb.dll\r\n", L"b.dll") == "[Chain]\r\na.dll\r\n[EMF]\r\n");
+    // the last line out of [EMF]: the section, its note and the blank line before it go too (the file as it was)
+    CHECK(*remove_chain_line("[Chain]\r\na.dll\r\n[EMF]\r\nb.dll\r\n", L"b.dll") == "[Chain]\r\na.dll\r\n");
+    CHECK(*remove_chain_line("a.dll\r\n\r\n" + kChainHeader + "b.dll\r\n", L"b.dll") == "a.dll\r\n");
+    CHECK(*remove_chain_line(kChainHeader + "b.dll\r\nc.dll\r\n", L"b.dll") == kChainHeader + "c.dll\r\n");
+    CHECK(*remove_chain_line(kChainHeader + "b.dll\r\n\r\n[Other]\r\nx=1\r\n", L"b.dll") == "[Other]\r\nx=1\r\n");
     CHECK(*remove_chain_line("\xEF\xBB\xBF" "b.dll\nc.dll", L"b.dll") == "\xEF\xBB\xBF" "c.dll");
     CHECK_FALSE(remove_chain_line("[Chain]\r\na.dll\r\n[Other]\r\nb.dll\r\n", L"b.dll"));
     CHECK(*switch_chain_line("[EMF]\r\nb.dll\r\n", L"b.dll", false) == "[EMF]\r\n; b.dll\r\n");

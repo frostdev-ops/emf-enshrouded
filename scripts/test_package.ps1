@@ -90,7 +90,7 @@ function Test-InstallScripts([string]$scripts, [string]$gameTree) {
     Check ((Test-Path -LiteralPath $moved) -and (Get-Content -LiteralPath $moved -Raw) -eq "someone else's proxy") "the other mod's dinput8.dll is kept under a new name (dinput8-previous.dll for an unknown tool)"
     $chain = Join-Path $foreign "dinput8-chain.ini"
     Check ((Test-Path -LiteralPath $chain) -and ((Get-Content -LiteralPath $chain) -contains "dinput8-previous.dll")) "the renamed DLL is listed in dinput8-chain.ini, so EMF starts it"
-    Check ((Get-Content -LiteralPath $chain)[0] -ceq "[Chain]") "a chain file EMF creates starts with [Chain], as XHL-Core documents it"
+    Check (((Get-Content -LiteralPath $chain)[0] -ceq "; [EMF]: DLLs EMF renamed, started by EMF only. [Chain]: read by every chain loader.") -and ((Get-Content -LiteralPath $chain)[1] -ceq "[EMF]")) "a chain file EMF creates holds its note and [EMF], the section only EMF reads (ShroudForge 1.7.7 reads only [Chain])"
     Check (($out -match "dinput8-previous.dll") -and ($out -match "dinput8-chain.ini")) "install says what it moved and where it is listed ($out)"
     & $inst -Game $foreign -From $gameTree | Out-Null
     Check (@(Get-ChildItem -LiteralPath $foreign -Filter "dinput8-previous*.dll").Count -eq 1 -and @((Get-Content -LiteralPath $chain) | Where-Object { $_ -eq "dinput8-previous.dll" }).Count -eq 1) "a reinstall moves nothing again and lists the DLL once"
@@ -198,14 +198,37 @@ function Test-InstallScripts([string]$scripts, [string]$gameTree) {
         Remove-Item -LiteralPath $d1 -Recurse -Force -ErrorAction SilentlyContinue
     }
 
-    # EMF's line goes into [Chain], not into a section after it
+    # EMF's line goes into [EMF] (a new section at the end); the player's [Chain] and [Settings] stay as they were
     $sec = New-TempDir "sections"
     Write-File (Join-Path $sec "enshrouded.exe") "fake"
     Write-File (Join-Path $sec "dinput8.dll") "a proxy"
     Write-File (Join-Path $sec "dinput8-chain.ini") "[Chain]`r`nother.dll`r`n`r`n[Settings]`r`nlog=1`r`n"
     & $inst -Game $sec -From $gameTree | Out-Null
     $lines = @(Get-Content -LiteralPath (Join-Path $sec "dinput8-chain.ini"))
-    Check ([array]::IndexOf($lines, "dinput8-previous.dll") -lt [array]::IndexOf($lines, "[Settings]") -and [array]::IndexOf($lines, "dinput8-previous.dll") -gt 0) "EMF's line is added inside [Chain] ($($lines -join ' | '))"
+    Check (($lines[0] -ceq "[Chain]") -and ($lines[1] -ceq "other.dll") -and ([array]::IndexOf($lines, "[Settings]") -lt [array]::IndexOf($lines, "[EMF]")) -and ([array]::IndexOf($lines, "[EMF]") -lt [array]::IndexOf($lines, "dinput8-previous.dll"))) "EMF's line is added in [EMF] after the other sections ($($lines -join ' | '))"
+
+    # an install over 0.3.x moves EMF's own lines (emf\moved.txt) from [Chain] to [EMF], a switched-off one stays off;
+    # the player's lines stay in [Chain]
+    $old = New-TempDir "chain03"
+    Write-File (Join-Path $old "enshrouded.exe") "fake"
+    New-Item -ItemType Directory -Force (Join-Path $old "emf") | Out-Null
+    Write-File (Join-Path $old "emf\moved.txt") "moved`tdinput8-previous.dll`r`nmoved`told-tool.dll`r`n"
+    Write-File (Join-Path $old "dinput8-chain.ini") "[Chain]`r`nother.dll`r`ndinput8-previous.dll`r`n; old-tool.dll`r`n"
+    $out = (& $inst -Game $old -From $gameTree) -join "`n"
+    $lines = @(Get-Content -LiteralPath (Join-Path $old "dinput8-chain.ini"))
+    $emfAt = [array]::IndexOf($lines, "[EMF]")
+    Check (($emfAt -gt 0) -and ([array]::IndexOf($lines, "other.dll") -lt $emfAt) -and ([array]::IndexOf($lines, "dinput8-previous.dll") -gt $emfAt) -and ([array]::IndexOf($lines, "; old-tool.dll") -gt $emfAt) -and (@($lines | Where-Object { $_ -match "dinput8-previous" }).Count -eq 1)) "EMF's old [Chain] lines move to [EMF], the switched-off one stays off, other.dll stays ($($lines -join ' | '))"
+    Check ($out -match "\[EMF\]") "install says it moved its lines to [EMF] ($out)"
+
+    # ShroudForge installed and a player's game-root line in [Chain]: install says ShroudForge shows it as failed and
+    # that EMF still starts it
+    $sfc = New-TempDir "sfchain"
+    Write-File (Join-Path $sfc "enshrouded.exe") "fake"
+    Write-File (Join-Path $sfc "dbghelp.dll") "SF dbghelp shroudforge"
+    Write-File (Join-Path $sfc "player.dll") "a player's DLL"
+    Write-File (Join-Path $sfc "dinput8-chain.ini") "[Chain]`r`nplayer.dll`r`nmods\x\y.dll`r`n"
+    $out = (& $inst -Game $sfc -From $gameTree) -join "`n"
+    Check (($out -match "ShroudForge") -and ($out -match "player.dll") -and -not ($out -match "y\.dll")) "with ShroudForge, install names the game-root [Chain] line ShroudForge reports as failed, not the mods\ one ($out)"
 
     # a chain file in the ANSI code page keeps its bytes through install and uninstall
     $ansi = New-TempDir "ansi"
