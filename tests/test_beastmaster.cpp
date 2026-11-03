@@ -244,7 +244,7 @@ constexpr const char* kWolfTemplate = "478381c5-585f-4264-b373-dbb1ea596eca";
 bool contains(const std::vector<uint32_t>& v, uint32_t x) { return std::find(v.begin(), v.end(), x) != v.end(); }
 }  // namespace
 
-TEST_CASE("beastmaster: calling a wolf costs 15 % mana, spawns it beside you as your ally, and a second call of a wolf is refused") {
+TEST_CASE("beastmaster: calling a wolf costs 15 % mana, spawns it beside you as your ally; a second wolf can come too") {
     BeastRig b;
     b.reply("beastmaster.give wolf");
     b.reply("beastmaster.give wolf");
@@ -259,8 +259,10 @@ TEST_CASE("beastmaster: calling a wolf costs 15 % mana, spawns it beside you as 
     const auto g = b.guards();
     CHECK(std::find(g.begin(), g.end(), std::make_pair(1234u, 1u)) != g.end());
     CHECK(b.reply("beastmaster.list").find("1. Wolf - wolf, loyalty 1, out") != std::string::npos);
-    CHECK(b.reply("beastmaster.call Wolf 2").find("out already") != std::string::npos);
-    CHECK(b.r.fake.spawns.size() == 1);
+    CHECK(b.reply("beastmaster.call Wolf").find("out already") != std::string::npos);
+    b.seconds(11);
+    CHECK(b.reply("beastmaster.call Wolf 2").find("comes") != std::string::npos);  // two slots: two wolves
+    CHECK(b.r.fake.spawns.size() == 2);
 }
 
 TEST_CASE("beastmaster: at most 2 out; a 10 s cooldown; too little mana gives a note and nothing else") {
@@ -1205,6 +1207,136 @@ TEST_CASE("stable: E away from a stable, or looking away from it, opens nothing"
     b.look(1, 0, 11.5, -6, 0);
     press(b, kE);
     CHECK(b.r.fake.windows.empty());
+}
+
+namespace {
+void set_level(BeastRig& b, uint32_t player, uint32_t level) {
+    component<ecs::Level>(b.r.fake, player).dataStorage[0] = level;
+}
+bool noted(BeastRig& b, const std::string& part) {
+    for (const auto& n : b.r.fake.notes)
+        if (n.find(part) != std::string::npos) return true;
+    return false;
+}
+// Tames the wild wolf 50 in front of player 1 (beaten down to 20 of 100).
+void tame_wolf(BeastRig& b) {
+    b.look(1, 0, 10.5, 0, 0);
+    b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);
+    REQUIRE(b.reply("beastmaster.tame").find("Taming") != std::string::npos);
+    b.seconds(4);
+}
+}  // namespace
+
+TEST_CASE("stable: two wolves can be out with two slots; one slot allows one beast out") {
+    BeastRig b;  // level 10: two slots
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give wolf");
+    b.spawnable(2);
+    CHECK(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(11);
+    CHECK(b.reply("beastmaster.call Wolf 2").find("comes") != std::string::npos);
+    CHECK(b.r.fake.spawns.size() == 2);
+
+    BeastRig one;
+    set_level(one, 1, 5);  // one slot
+    one.reply("beastmaster.give wolf");
+    one.reply("beastmaster.give boar");
+    one.spawnable(2);
+    CHECK(one.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    one.seconds(11);
+    CHECK(one.reply("beastmaster.call Boar") == "You have 1 beast out (1 active slot): dismiss one first.");
+    CHECK(one.r.fake.spawns.size() == 1);
+}
+
+TEST_CASE("stable: before a stable any beast can be called; after it only active ones (a stored one says to make it active at a stable)") {
+    BeastRig b;  // level 10: two slots
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\nb 0x00000000000000aa boar 0 0 Tusk\n"
+                  "b 0x00000000000000aa hound 0 0 Rex\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    b.spawnable(2);
+    CHECK(b.reply("beastmaster.call Rex").find("comes") != std::string::npos);  // no stable yet: any beast
+    b.reply("beastmaster.dismiss Rex");
+    at_stable(b);  // the world's first stable: Fang and Tusk (list order) take the two slots
+    b.seconds(1);
+    CHECK(b.saved().find("s 1") != std::string::npos);
+    b.seconds(11);
+    CHECK(b.reply("beastmaster.call Rex") == "Rex is in the stable: make it active at a stable.");
+    CHECK(b.reply("beastmaster.call Tusk").find("comes") != std::string::npos);
+    press(b, VK_F3);
+    REQUIRE(b.r.fake.wheels.size() == 1);
+    CHECK(index_of(b.r.fake.wheels[0].items, "Call Fang") >= 0);
+    CHECK(index_of(b.r.fake.wheels[0].items, "Call Rex") < 0);  // stored: not on the wheel
+}
+
+TEST_CASE("stable: a beast tamed with no free slot leaves: home before a stable, to the stable after") {
+    BeastRig home;
+    set_level(home, 1, 5);  // one slot
+    home.reply("beastmaster.give boar");
+    home.spawnable(1);
+    REQUIRE(home.reply("beastmaster.call Boar").find("comes") != std::string::npos);
+    tame_wolf(home);
+    CHECK(noted(home, "You tamed a wolf: Wolf. It goes home (1 active slot, 1 beast out)."));
+    CHECK(contains(home.r.fake.destroyed, 50));
+    CHECK(home.reply("beastmaster.list").find("2. Wolf - wolf, loyalty 1, at home") != std::string::npos);
+
+    BeastRig full;
+    set_level(full, 1, 5);
+    write(full.data, "b 0x00000000000000aa boar 0 0 Tusk\na 0x00000000000000aa Tusk\ns 1\n");
+    full.r.fake.session = 2;
+    fire_load(1);
+    full.seconds(1);
+    tame_wolf(full);
+    CHECK(noted(full, "You tamed a wolf: Wolf. It goes to your stable (no free active slot)."));
+    CHECK(contains(full.r.fake.destroyed, 50));
+    CHECK(full.saved().find("a 0x00000000000000aa Wolf") == std::string::npos);
+
+    BeastRig free;  // level 10: a second slot is free
+    write(free.data, "b 0x00000000000000aa boar 0 0 Tusk\na 0x00000000000000aa Tusk\ns 1\n");
+    free.r.fake.session = 2;
+    fire_load(1);
+    free.seconds(1);
+    tame_wolf(free);
+    CHECK(noted(free, "You tamed a wolf: Wolf"));
+    CHECK_FALSE(contains(free.r.fake.destroyed, 50));
+    CHECK(free.saved().find("a 0x00000000000000aa Wolf") != std::string::npos);
+    CHECK(free.reply("beastmaster.list").find("2. Wolf - wolf, loyalty 1, out") != std::string::npos);
+}
+
+TEST_CASE("stable: a 1.5.0 save: beasts out beyond the slots go home, all stay callable; at the first stable the beasts out become active, then list order") {
+    BeastRig one;
+    set_level(one, 1, 5);  // one slot
+    write(one.data, "b 0x00000000000000aa wolf 0 1 Fang\nb 0x00000000000000aa boar 0 1 Tusk\n"
+                    "b 0x00000000000000aa hound 0 0 Rex\n");
+    one.spawnable(2);
+    one.r.fake.session = 2;
+    fire_load(1);
+    one.seconds(2);
+    CHECK(one.r.fake.spawns.size() == 1);  // Fang comes back; Tusk goes home
+    CHECK(one.reply("beastmaster.list").find("2. Tusk - boar, loyalty 1, at home") != std::string::npos);
+    one.reply("beastmaster.dismiss Fang");
+    CHECK(one.reply("beastmaster.call Rex").find("comes") != std::string::npos);  // nothing lost, all callable
+    at_stable(one);
+    one.seconds(1);
+    CHECK(one.saved().find("a 0x00000000000000aa Rex") != std::string::npos);  // the one out
+    CHECK(one.saved().find("a 0x00000000000000aa Fang") == std::string::npos);
+    CHECK(one.saved().find("a 0x00000000000000aa Tusk") == std::string::npos);
+
+    BeastRig three;
+    set_level(three, 1, 25);  // three slots
+    write(three.data, "b 0x00000000000000aa wolf 0 0 Fang\nb 0x00000000000000aa boar 0 1 Tusk\n"
+                      "b 0x00000000000000aa hound 0 0 Rex\nb 0x00000000000000aa sabretooth 0 1 Moss\n");
+    three.spawnable(2);
+    three.r.fake.session = 2;
+    fire_load(1);
+    three.seconds(2);
+    REQUIRE(three.r.fake.spawns.size() == 2);
+    at_stable(three);
+    three.seconds(1);
+    for (const char* name : {"Tusk", "Moss", "Fang"})
+        CHECK(three.saved().find(std::string("a 0x00000000000000aa ") + name) != std::string::npos);
+    CHECK(three.saved().find("a 0x00000000000000aa Rex") == std::string::npos);
 }
 TEST_CASE("beastmaster: each beast out has its own Dismiss item, Dismiss all comes with two out; /beastmaster dismiss alone sends all home") {
     BeastRig b;

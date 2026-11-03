@@ -3,7 +3,9 @@
 -- guest who returns), and taking them out of the world while their owner is away or they step aside (aside.lua: while
 -- a player builds next to them, or after beastmaster.aside).
 -- M.new(env) where env has: setting(key), now(world), tell(world, player, text), beasts() (the roster), save(),
--- and optionally on_spawn(world, id, species, health_mul) after a beast was put into the world or its loyalty grew.
+-- slots(world, owner) (how many beasts the owner may have out: their active slots), stabled() (the world has had a
+-- stable: only active beasts are called), and optionally on_spawn(world, id, species, health_mul) after a beast was
+-- put into the world or its loyalty grew.
 local species = require("species")
 local loyalty = require("loyalty")
 local aside_mod = require("aside")
@@ -55,6 +57,10 @@ end
 
 local function mmss(s)
 	return string.format("%d:%02d", math.floor(s / 60), math.floor(s % 60))
+end
+
+local function plural(n, word)
+	return string.format("%d %s%s", n, word, n == 1 and "" or "s")
 end
 
 -- Why a pack beast cannot come. The game has no such creature when its pack is missing and also when EML (or
@@ -213,14 +219,14 @@ function P:call(world, owner, account, beast)
 	if beast.out then return beast.name .. " is out already." end
 	local busy, busy_why = self.aside:building(world, account, owner, self.env.now(world), self:spots(account))
 	if busy then return waits(busy_why, "call again") end
-	for _, b in ipairs(self.env.beasts():list(account)) do
-		if b.out and b.species == beast.species then
-			return string.format("Your %s %s is out already: one of each kind at a time.", species.word(b.species), b.name)
-		end
+	if self.env.stabled() and not beast.active then
+		return beast.name .. " is in the stable: make it active at a stable."
 	end
 	if beast.rest > 0 then return string.format("%s rests for %s.", beast.name, mmss(beast.rest)) end
-	local n, max = self:out_count(account), s("max_out")
-	if n >= max then return string.format("You have %d beasts out (at most %d): dismiss one first.", n, max) end
+	local n, max = self:out_count(account), self.env.slots(world, owner)
+	if n >= max then
+		return string.format("You have %s out (%s): dismiss one first.", plural(n, "beast"), plural(max, "active slot"))
+	end
 	local now = self.env.now(world)
 	local since = now - (self.last_call[account] or -math.huge)
 	if since < s("call_cooldown_s") then
@@ -293,6 +299,25 @@ function P:dismiss(world, account, beast)
 	if self:out_count(account) == 0 then self.aside:release(account) end  -- none left to step aside
 	self.env.save()
 	return beast.name .. " goes home."
+end
+
+-- The beasts out fit the owner's active slots: once the world has had a stable only active beasts stay out, and
+-- never more than the slots (the first in list order stay; a save from before the slots, or a slot setting raised).
+function P:fit_slots(world, account, owner)
+	local max = self.env.slots(world, owner)
+	local stabled = self.env.stabled()
+	local out = 0
+	for _, b in ipairs(self.env.beasts():list(account)) do
+		if b.out then
+			if (stabled and not b.active) or out >= max then
+				self:dismiss(world, account, b)
+				self.env.tell(world, owner, string.format("%s goes home: %s.", b.name,
+					stabled and not b.active and "it is in the stable" or plural(max, "active slot")))
+			else
+				out = out + 1
+			end
+		end
+	end
 end
 
 -- Release (the Beasts window): the beast leaves the collection for good; a beast that is out leaves the world as when
@@ -520,6 +545,7 @@ function P:step(world)
 	self.fallen = {}
 	for _, account in ipairs(beasts:accounts()) do
 		local owner = present[account]
+		if owner then self:fit_slots(world, account, owner) end
 		if self:out_count(account) == 0 then self.aside:release(account) end  -- none left to step aside
 		local away, why = false, nil
 		if owner then away, why = self.aside:check(world, account, owner, now, self:spots(account)) end

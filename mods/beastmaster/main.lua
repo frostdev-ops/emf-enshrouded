@@ -20,6 +20,7 @@ local loaded = false          -- the world's data has arrived (saving before tha
 local last_hit = {}           -- player entity -> {id, at}: what hit them last (attack's choice without a crosshair target)
 local taming                  -- the taming channels (made below; reset with each world)
 local window                  -- the Beasts window (made below)
+local on_first_stable         -- the world's first stable was found or marked (made below)
 local next_hud = 0            -- when the HUD line is written next (reset with each world: the clock may restart)
 
 local function setting(key)
@@ -36,7 +37,18 @@ local function now(world)
 end
 
 -- the stables in the world (built ones and the host's marks; the marks are kept with the world)
-local stables = stable_mod.new({ now = now, log = emf.log })
+local stables = stable_mod.new({ now = now, log = emf.log, on_found = function(world) on_first_stable(world) end })
+
+-- The level of a player's character.
+local function level_of(world, player)
+	local l = player and world:get("Level", player)
+	return l and l.dataStorage and l.dataStorage[1] or 0
+end
+
+-- How many beasts `player` may have out at once: their active slots.
+local function open_slots(world, player)
+	return slots.unlocked(level_of(world, player), setting)
+end
 
 local function save()
 	if not loaded then return end
@@ -61,6 +73,8 @@ local pack = pack_mod.new({
 	save = save,
 	on_spawn = spawned,
 	mode = function(account) return beasts:mode(account) end,
+	slots = open_slots,
+	stabled = function() return beasts:stabled() end,
 })
 
 -- rare wild bears, aurochs and snakes (with their content packs)
@@ -107,12 +121,6 @@ local function state_text(b, aside)
 	if b.out then return aside and "aside" or "out" end
 	if b.rest > 0 then return string.format("rests %d:%02d", math.floor(b.rest / 60), math.floor(b.rest % 60)) end
 	return "at home"
-end
-
--- The level of a player's character.
-local function level_of(world, player)
-	local l = player and world:get("Level", player)
-	return l and l.dataStorage and l.dataStorage[1] or 0
 end
 
 -- the Beasts window (the host, at a stable)
@@ -174,8 +182,28 @@ taming = tame_mod.new({
 			return
 		end
 		pack:adopt(account, b, id, world)
+		-- it takes a free slot; with none free it leaves (to the stable once the world has had one, else home)
+		local said = string.format("You tamed %s: %s", species.a(sp), b.name)
+		local open = open_slots(world, player)
+		if beasts:stabled() then
+			local active = 0
+			for _, x in ipairs(beasts:list(account)) do
+				if x.active then active = active + 1 end
+			end
+			if active < open then
+				b.active = true
+			else
+				pack:dismiss(world, account, b)
+				said = said .. ". It goes to your stable (no free active slot)."
+			end
+		elseif pack:out_count(account) > open then
+			pack:dismiss(world, account, b)
+			local out = pack:out_count(account)
+			said = string.format("%s. It goes home (%d active slot%s, %d beast%s out).", said, open, open == 1 and "" or "s",
+				out, out == 1 and "" or "s")
+		end
 		save()
-		tell(world, player, string.format("You tamed %s: %s", species.a(sp), b.name))
+		tell(world, player, said)
 	end,
 })
 
@@ -390,8 +418,9 @@ local function wheel_items(world)
 	end
 	if out > 1 then add("Dismiss all", { action = "dismiss", key = "all" }) end
 	local shown = 0
+	local stabled = beasts:stabled()
 	for _, b in ipairs(list) do
-		if not b.out and shown < WHEEL_CALLS then
+		if not b.out and shown < WHEEL_CALLS and (b.active or not stabled) then
 			shown = shown + 1
 			local label
 			if b.rest > 0 then
@@ -494,6 +523,29 @@ emf.on_tick(function(world)
 	end
 	update_hud(world)
 end)
+
+-- The world's first stable (found or marked; kept with the world): from now on only active beasts are called. Each
+-- player's active slots fill with the beasts out, then the first in list order (a player not in the world: one slot).
+on_first_stable = function(world)
+	if beasts:stabled() then return end
+	beasts:set_stabled()
+	for _, account in ipairs(beasts:accounts()) do
+		local open = open_slots(world, pack:owner(world, account))
+		local n = 0
+		for _, b in ipairs(beasts:list(account)) do
+			if b.out and n < open then
+				b.active, n = true, n + 1
+			end
+		end
+		for _, b in ipairs(beasts:list(account)) do
+			if not b.active and n < open then
+				b.active, n = true, n + 1
+			end
+		end
+	end
+	save()
+	emf.log("this world has its first stable: from now on only active beasts are called")
+end
 
 -- Host and admins: the stables (a prop marked as one, the mark taken off, the list).
 emf.command("stable", "mark | unmark | list: the prop you look at is a stable; the marked prop nearest you is not; " ..
