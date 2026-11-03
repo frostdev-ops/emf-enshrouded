@@ -11,6 +11,7 @@
 #include <cstdarg>
 #include <cstring>
 #include <cstdio>
+#include <cwctype>
 #include <mutex>
 #include <set>
 #include <vector>
@@ -1580,6 +1581,83 @@ bool api_window_close(const char* id) {
     return true;
 }
 
+// ---- v26 pictures in windows ----
+
+// The folder of the module that holds `address` (the mod calling the API), without a trailing slash.
+std::wstring module_folder_of(const void* address) {
+    HMODULE m = nullptr;
+    if (!GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                            static_cast<LPCWSTR>(address), &m))
+        return L".";
+    wchar_t path[MAX_PATH] = {};
+    const DWORD n = GetModuleFileNameW(m, path, MAX_PATH);
+    std::wstring s(path, n);
+    const size_t slash = s.find_last_of(L"\\/");
+    return slash == std::wstring::npos ? L"." : s.substr(0, slash);
+}
+
+std::wstring widen_utf8(const std::string& s) {
+    if (s.empty()) return {};
+    const int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), nullptr, 0);
+    std::wstring w(static_cast<size_t>(n > 0 ? n : 0), L'\0');
+    if (n > 0) MultiByteToWideChar(CP_UTF8, 0, s.data(), static_cast<int>(s.size()), w.data(), n);
+    return w;
+}
+
+std::string narrow_utf8(const std::wstring& w) {
+    if (w.empty()) return {};
+    const int n = WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), nullptr, 0, nullptr, nullptr);
+    std::string s(static_cast<size_t>(n > 0 ? n : 0), '\0');
+    if (n > 0) WideCharToMultiByte(CP_UTF8, 0, w.data(), static_cast<int>(w.size()), s.data(), n, nullptr, nullptr);
+    return s;
+}
+
+bool portrait_key_ok(const std::string& k) {
+    if (k.empty() || k.size() > 64 || k == "." || k == "..") return false;
+    for (const char c : k)
+        if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' ||
+              c == '-'))
+            return false;
+    return k.find("..") == std::string::npos;
+}
+
+std::mutex g_image_refusals_m;
+std::set<std::string> g_image_refusals;  // keys refused once (logged once)
+
+uint32_t api_image_load(const char* path) {
+    if (!g_state || !path || !*path) return 0;
+    const std::string mod = module_name_of(_ReturnAddress());
+    const std::string p(path);
+    std::wstring file;
+    std::string key;
+    const std::string kPortrait = "portrait:";
+    if (p.compare(0, kPortrait.size(), kPortrait) == 0) {
+        const std::string k = p.substr(kPortrait.size());
+        if (!portrait_key_ok(k)) {
+            core_log("image_load('" + p + "') refused (" + mod + "): a portrait key is 1-64 of A-Z a-z 0-9 _ . -");
+            return 0;
+        }
+        file = g_state->portrait_dir + L"\\" + widen_utf8(k);
+        key = p;
+    } else {
+        const std::wstring w = widen_utf8(p);
+        const bool absolute = (w.size() > 2 && w[1] == L':') || (w.size() > 1 && (w[0] == L'\\' || w[0] == L'/'));
+        file = absolute ? w : module_folder_of(_ReturnAddress()) + L"\\" + w;
+        std::wstring lower = file;
+        for (wchar_t& c : lower) c = static_cast<wchar_t>(towlower(c));
+        key = narrow_utf8(lower);
+    }
+    const auto refused = [&](const std::string& why) -> uint32_t {
+        const std::lock_guard<std::mutex> g(g_image_refusals_m);
+        if (g_image_refusals.insert(key).second) core_log("image_load('" + p + "') refused (" + mod + "): " + why);
+        return 0;
+    };
+    if (!g_state->load_image) return refused("no in-game overlay (a dedicated server, or [overlay] enabled=0)");
+    std::string why;
+    const uint32_t h = g_state->load_image(file, key, &why);
+    return h ? h : refused(why.empty() ? "refused" : why);
+}
+
 bool guarded_teleport_call(EmfTeleportCallback cb, EmfWorld* w, const EmfTeleportResult* r, void* user) {
     __try {
         cb(w, r, user);
@@ -1896,6 +1974,7 @@ const EmfApi kApi = {
     api_spawn_offer,
     api_offer,
     api_offer_remove,
+    api_image_load,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

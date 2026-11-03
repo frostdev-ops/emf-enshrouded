@@ -3,6 +3,7 @@
 
 #include <doctest.h>
 
+#include <cstring>
 #include <string>
 #include <vector>
 
@@ -229,4 +230,72 @@ TEST_CASE("windows: describe_window lists the window and each widget with its ki
     CHECK(lines[1] == "  0 heading \"Active 1/3\"");
     CHECK(lines[2] == "  1 slot active.3 \"Level 15\" count 2 [same_line locked]");
     CHECK(lines[3] == "  2 bar \"Wolf 2\" 800/1000");
+}
+
+TEST_CASE("windows v26: a picture widget and icons are copied; a v24-sized widget array reads them as 0") {
+    Def d;
+    d.widgets[0].type = EMF_UI_IMAGE;
+    d.widgets[0].icon = 3;
+    d.widgets[0].fps = 12;
+    d.widgets[0].height = 8.0f;
+    d.widgets[2].icon = 5;  // the slot's picture
+    WindowRequest r;
+    std::string why;
+    REQUIRE(copy_window_def(&d.def, false, &r, &why));
+    CHECK(r.widgets[0].type == EMF_UI_IMAGE);
+    CHECK(r.widgets[0].icon == 3u);
+    CHECK(r.widgets[0].fps == 12u);
+    CHECK(r.widgets[0].height == 8.0f);
+    CHECK(r.widgets[2].icon == 5u);
+
+    // a mod built against v24/v25: 56-byte widgets; icon was reserved (0), fps and height are past its stride
+    std::vector<uint8_t> raw(56 * 2, 0);
+    EmfUiWidget a{};
+    a.type = EMF_UI_SLOT;
+    a.text = "old";
+    a.fps = 99;  // past 56 bytes: must not be read
+    a.height = 99.0f;
+    std::memcpy(raw.data(), &a, 56);
+    std::memcpy(raw.data() + 56, &a, 56);
+    d.def.widgets = reinterpret_cast<const EmfUiWidget*>(raw.data());
+    d.def.widget_size = 56;
+    d.def.count = 2;
+    REQUIRE(copy_window_def(&d.def, false, &r, &why));
+    CHECK(r.widgets[1].text == "old");
+    CHECK(r.widgets[1].fps == 0u);
+    CHECK(r.widgets[1].height == 0.0f);
+}
+
+TEST_CASE("windows v26: a picture's height and fps are checked; a type past EMF_UI_IMAGE is unknown") {
+    Def d;
+    d.widgets[0].type = EMF_UI_IMAGE;
+    d.widgets[0].height = -1.0f;
+    CHECK(d.refused().find("height") != std::string::npos);
+    d.widgets[0].height = 41.0f;
+    CHECK(d.refused().find("height") != std::string::npos);
+    d.widgets[0].height = 6.0f;
+    d.widgets[0].fps = 61;
+    CHECK(d.refused().find("fps") != std::string::npos);
+    d.widgets[0].fps = 60;
+    CHECK(d.refused().empty());
+    d.widgets[0].type = EMF_UI_IMAGE + 1;
+    CHECK(d.refused().find("unknown type") != std::string::npos);
+}
+
+TEST_CASE("windows v26: describe_window names a widget's picture") {
+    WindowRequest r;
+    r.id = "test.pics";
+    WindowWidget a;
+    a.type = EMF_UI_IMAGE;
+    a.icon = 2;
+    a.fps = 12;
+    WindowWidget b;
+    b.type = EMF_UI_SLOT;
+    b.text = "Wolf";
+    b.icon = 4;
+    r.widgets = {a, b};
+    const auto lines = describe_window(r);
+    REQUIRE(lines.size() == 3u);
+    CHECK(lines[1] == "  0 image picture 2 at 12 fps");
+    CHECK(lines[2] == "  1 slot \"Wolf\" picture 4");
 }

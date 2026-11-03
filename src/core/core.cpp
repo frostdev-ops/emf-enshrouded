@@ -1101,6 +1101,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_builtin.center = &g_state->commands;
     g_builtin.player = [] { return emf::core::command_player(emf::core::api_table()->local_player()); };
     g_state->settings_backend = std::make_unique<emf::core::FileIniBackend>(dir + L"\\emf\\config");
+    g_state->portrait_dir = dir + L"\\emf\\cache\\portraits";  // v26 image_load("portrait:<key>")
     g_state->core_settings_backend = std::make_unique<emf::core::CoreIniBackend>(dir + L"\\emf\\emf_core.ini");
     g_state->settings_route = std::make_unique<emf::core::RoutingIniBackend>(g_state->core_settings_backend.get(),
                                                                               g_state->settings_backend.get());
@@ -1210,6 +1211,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
                 };
                 g_state->close_window = [](const std::string& id, std::optional<emf::core::WindowRequest>* closed) {
                     return emf::core::overlay_close_window(id, closed);
+                };
+                g_state->load_image = [](const std::wstring& path, const std::string& key, std::string* why) {
+                    return emf::core::overlay_load_image(path, key, why);
                 };
                 add_window_commands();
                 g_state->notify = [](const std::string& s) {

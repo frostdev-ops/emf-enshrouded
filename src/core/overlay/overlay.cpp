@@ -13,6 +13,7 @@
 
 #include "core/emf_settings.h"
 #include "console_ui.h"
+#include "image_store.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
 #include "font_plan.h"
@@ -624,6 +625,15 @@ void overlay_notify(const std::string& text) {
     if (GetTickCount64() >= g_toast_until.load()) g_toast_from = g_model->version();  // a new toast, else join it
     g_toast_until = GetTickCount64() + static_cast<uint64_t>(g_look.notes_seconds) * 1000;  // [hud] notes_seconds
     g_model->add_line(text);
+}
+
+ImageStore& overlay_images() {
+    static ImageStore store;  // lives as long as the process: pictures stay until the game closes
+    return store;
+}
+
+uint32_t overlay_load_image(const std::wstring& path, const std::string& key, std::string* why) {
+    return load_image(overlay_images(), path, key, why);
 }
 
 OverlayStatus overlay_status() {

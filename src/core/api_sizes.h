@@ -40,6 +40,8 @@ constexpr uint32_t kApiV22Size = EMF_FIELD_END(EmfApi, player_level_set);
 constexpr uint32_t kApiV23Size = EMF_FIELD_END(EmfApi, change_component);
 constexpr uint32_t kApiV24Size = EMF_FIELD_END(EmfApi, window_close);
 constexpr uint32_t kApiV25Size = EMF_FIELD_END(EmfApi, offer_remove);
+constexpr uint32_t kApiV26Size = EMF_FIELD_END(EmfApi, image_load);
+constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
 // then read it only when size covers it and update the sizeof here.
@@ -95,16 +97,20 @@ static_assert(offsetof(EmfApi, window_open) == kApiV23Size,
 static_assert(kApiV24Size == 648, "EmfApi size (v24)");
 static_assert(offsetof(EmfApi, spawn_offer) == kApiV24Size,
               "EmfApi layout (v25 appends spawn_offer, offer, offer_remove after window_close)");
-static_assert(kApiV25Size == 672 && sizeof(EmfApi) == kApiV25Size, "EmfApi size (v25)");
+static_assert(kApiV25Size == 672, "EmfApi size (v25)");
+static_assert(offsetof(EmfApi, image_load) == kApiV25Size && kApiV26Size == 680 && sizeof(EmfApi) == kApiV26Size,
+              "EmfApi layout (v26 appends image_load after offer_remove)");
 static_assert(kOfferV25Size == 24 && sizeof(EmfOffer) == 24 && offsetof(EmfOffer, text) == 8 &&
                   offsetof(EmfOffer, sequence) == 16 && offsetof(EmfOffer, range_m) == 20,
               "EmfOffer layout (v25)");
 static_assert(kComponentChangeV23Size == 48 && sizeof(EmfComponentChange) == 48 &&
                   offsetof(EmfComponentChange, data) == 16 && offsetof(EmfComponentChange, cb) == 32,
               "EmfComponentChange layout (v23)");
-static_assert(sizeof(EmfUiWidget) == 56 && offsetof(EmfUiWidget, key) == 8 && offsetof(EmfUiWidget, count) == 32 &&
+static_assert(kUiWidgetV24Size == 56 && offsetof(EmfUiWidget, key) == 8 && offsetof(EmfUiWidget, count) == 32 &&
                   offsetof(EmfUiWidget, rgba) == 40 && offsetof(EmfUiWidget, item) == 48,
               "EmfUiWidget layout (v24)");
+static_assert(sizeof(EmfUiWidget) == 64 && offsetof(EmfUiWidget, fps) == 56 && offsetof(EmfUiWidget, height) == 60,
+              "EmfUiWidget layout (v26 appends fps and height)");
 static_assert(kUiEventV24Size == 40 && sizeof(EmfUiEvent) == 40 && offsetof(EmfUiEvent, window) == 8 &&
                   offsetof(EmfUiEvent, reason) == 32,
               "EmfUiEvent layout (v24)");

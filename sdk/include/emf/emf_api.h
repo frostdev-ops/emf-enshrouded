@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 25 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 26 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 25
+#define EMF_API_VERSION 26
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -325,6 +325,8 @@ typedef struct EmfComponentChange {
 #define EMF_UI_SLOT      4u /* an item-like square (about 3 lines high): its text, a count in the corner */
 #define EMF_UI_BAR       5u /* a bar filled to value/1000, its text on it */
 #define EMF_UI_SEPARATOR 6u
+#define EMF_UI_IMAGE     7u /* (v26) the picture `icon`, `height` text lines high (0 = 6), turning at `fps`; clickable
+                               with a key */
 /* EmfUiWidget.flags */
 #define EMF_UI_SAME_LINE 0x01u /* on the line of the widget before (slots in a row, buttons side by side) */
 #define EMF_UI_DISABLED  0x02u /* drawn dim, no events */
@@ -341,9 +343,13 @@ typedef struct EmfUiWidget {   /* no size field: EmfWindowDef.widget_size is the
     uint32_t count;            /* slot: the number in its corner (0 = none) */
     uint32_t value;            /* bar: 0..1000 (more is 1000) */
     uint32_t rgba;             /* text colour 0xRRGGBBAA, 0 = the look's */
-    uint32_t icon;             /* reserved (icons come later): 0 */
+    uint32_t icon;             /* (v26) a picture from image_load, 0 = none: EMF_UI_IMAGE's picture; a slot's, inside the
+                                  square; a row's, a square before the text (v24/v25: reserved, 0) */
     uint32_t item;             /* reserved (game item icons come later): 0 */
     uint32_t pad;
+    /* v26 (a v24/v25 mod's widget_size ends before these: they read as 0) */
+    uint32_t fps;              /* a turning picture's frames per second, 0..60 (0: its first frame) */
+    float height;              /* EMF_UI_IMAGE: in text lines, 0..40 (0 = 6) */
 } EmfUiWidget;
 #define EMF_UI_PLACE_CENTRE 0u
 #define EMF_UI_PLACE_LEFT   1u
@@ -897,6 +903,15 @@ typedef struct EmfApi {
     bool (*offer)(EmfWorld* world, uint32_t entity, const EmfOffer* offer, EmfOfferCallback cb, void* user);
     /* Takes the mod's offer off the entity. False when it has none of this mod's. */
     bool (*offer_remove)(EmfWorld* world, uint32_t entity);
+
+    /* ---- v26: pictures in windows (reference.md "v26") ---- */
+    /* A picture for EmfUiWidget.icon: a .png file, or a folder whose .png files (sorted by name) are the frames of a
+     * turning picture, all the same size (at most 512 x 512 px, 64 frames). `path`: relative to the calling mod's folder
+     * (the folder of its DLL), absolute, or "portrait:<key>" for EMF's portrait cache (<game>/emf/cache/portraits/<key>/,
+     * key: A-Z a-z 0-9 _ . -). Decoded before it returns; the same path again gives the same handle. 0 when refused
+     * (logged once per path) and on a dedicated server (no windows). Pictures stay until the game closes (at most 128,
+     * 64 MB). Any thread. */
+    uint32_t (*image_load)(const char* path);
 } EmfApi;
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);

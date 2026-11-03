@@ -17,6 +17,9 @@ struct WindowWidget {
     uint32_t count = 0;
     uint32_t value = 0;  // bar: 0..1000
     uint32_t rgba = 0;
+    uint32_t icon = 0;     // v26: a picture handle (image_load), 0 = none
+    uint32_t fps = 0;      // a turning picture's frames per second
+    float height = 0;      // EMF_UI_IMAGE: text lines (0 = 6)
 };
 
 struct WindowRequest {
