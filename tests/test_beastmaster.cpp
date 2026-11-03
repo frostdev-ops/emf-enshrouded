@@ -3462,3 +3462,105 @@ TEST_CASE("threat: never on a monster not in the fight, a player-side creature, 
     CHECK(pick_of(b, 74) == 1);
     CHECK(switches(b, 74));
 }
+
+// ---- Taunt ----
+namespace {
+// Player 1's beasts `names` (given now) at loyalty 10 with Taunt spent `points` times, at a stable.
+void taunters(BeastRig& b, std::initializer_list<const char*> kinds, int points = 1) {
+    for (const char* k : kinds) b.reply(std::string("beastmaster.give ") + k);
+    for (const char* name : {"Wolf", "Boar"}) b.reply(std::string("beastmaster.loyalty ") + name + " 10");
+    at_stable(b);
+    for (const char* k : kinds) {
+        std::string name = k;
+        name[0] = static_cast<char>(name[0] - 'a' + 'A');
+        for (int i = 0; i < points; ++i) REQUIRE(b.reply("beastmaster.talent " + name + " taunt").rfind(name + ": ", 0) == 0);
+    }
+}
+}  // namespace
+
+TEST_CASE("threat: Taunt: a monster hitting you within 10 m of the beast makes it roar: the fight's monsters within 10 m turn on it for 6 s; 45 s before it roars again, 30 s with 2 points") {
+    RollRig b;
+    taunters(b, {"wolf"});
+    out_at(b, "Wolf", 1234, 0, 4);
+    b.roll(0.0);                // every pick by share: you
+    monster(b, 70, 3, 4, 1);    // 3 m from the wolf
+    monster(b, 71, -4, 4, 1);   // 4 m from it
+    monster(b, 72, 0, 10, 0);   // 6 m from it, not in the fight
+    monster(b, 73, 0, -16, 1);  // 20 m from it
+    b.seconds(1);
+    REQUIRE(pick_of(b, 70) == 1);
+    REQUIRE(pick_of(b, 71) == 1);
+    deliver(b.r.fake, "HitEvent", hit(70, 1, -10));
+    CHECK(notes_with(b.r.fake, "Wolf roars: the monsters turn on it.") == 1);
+    one_step(b);
+    CHECK(pick_of(b, 70) == 1234);
+    CHECK(pick_of(b, 71) == 1234);
+    CHECK(pick_of(b, 72) == 0);
+    CHECK(switches(b, 72));
+    CHECK(pick_of(b, 73) == 1);
+    b.seconds(5);
+    CHECK(pick_of(b, 70) == 1234);  // over the shares (they pick you)
+    b.seconds(2);                   // 6 s: they pick as usual
+    CHECK(pick_of(b, 70) == 1);
+    b.seconds(3);
+    deliver(b.r.fake, "HitEvent", hit(70, 1, -10));  // 10 s after the roar
+    CHECK(notes_with(b.r.fake, "Wolf roars") == 1);
+    b.seconds(36);
+    deliver(b.r.fake, "HitEvent", hit(70, 1, -10));  // 46 s after it
+    CHECK(notes_with(b.r.fake, "Wolf roars") == 2);
+    REQUIRE(b.reply("beastmaster.talent Wolf taunt").rfind("Wolf: Taunt 2/2", 0) == 0);
+    b.seconds(20);
+    deliver(b.r.fake, "HitEvent", hit(70, 1, -10));
+    CHECK(notes_with(b.r.fake, "Wolf roars") == 2);
+    b.seconds(11);  // 31 s after the last roar
+    deliver(b.r.fake, "HitEvent", hit(70, 1, -10));
+    CHECK(notes_with(b.r.fake, "Wolf roars") == 3);
+}
+
+TEST_CASE("threat: only the nearest ready beast roars; a beast too far does not and keeps its cooldown; none in passive mode") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    taunters(b, {"wolf", "boar"});
+    out_at(b, "Wolf", 1234, 0, 4);
+    out_at(b, "Boar", 1235, 0, -8);
+    b.roll(0.0);
+    monster(b, 69, 25, 0, 1);  // more than 10 m from both
+    monster(b, 70, 3, 6, 1);   // 4 m from the wolf, 14 m from the boar
+    monster(b, 71, 0, -1, 1);  // 5 m from the wolf, 7 m from the boar
+    monster(b, 72, 0, -5, 1);  // 9 m from the wolf, 3 m from the boar
+    b.seconds(1);
+    deliver(b.r.fake, "HitEvent", hit(69, 1, -10));
+    CHECK(notes_with(b.r.fake, "roars") == 0);       // too far: neither roars, both stay ready
+    deliver(b.r.fake, "HitEvent", hit(71, 1, -10));  // both ready and in reach: the nearer
+    CHECK(notes_with(b.r.fake, "Wolf roars") == 1);
+    CHECK(notes_with(b.r.fake, "Boar roars") == 0);
+    deliver(b.r.fake, "HitEvent", hit(72, 1, -10));  // the wolf waits: the boar is the nearest ready one
+    CHECK(notes_with(b.r.fake, "Wolf roars") == 1);
+    CHECK(notes_with(b.r.fake, "Boar roars") == 1);
+    one_step(b);
+    CHECK(pick_of(b, 70) == 1234);  // the wolf's roar only
+    CHECK(pick_of(b, 71) == 1235);  // the boar's roar came later
+    CHECK(pick_of(b, 72) == 1235);
+    b.seconds(46);
+    b.reply("beastmaster.mode passive");
+    deliver(b.r.fake, "HitEvent", hit(70, 1, -10));
+    CHECK(notes_with(b.r.fake, "roars") == 2);
+}
+
+TEST_CASE("threat: a boss in the middle of an attack does not turn on a roaring beast") {
+    RollRig b;
+    taunters(b, {"wolf"});
+    out_at(b, "Wolf", 1234, 0, 4);
+    b.roll(0.0);
+    monster(b, 75, 2, 4, 1);
+    component<ecs::Boss>(b.r.fake, 75);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 75).state = emf::gen::enemy01::State::ControlledByAttack;
+    monster(b, 76, -2, 4, 1);
+    component<ecs::Boss>(b.r.fake, 76);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 76).state = emf::gen::enemy01::State::Combat;
+    b.seconds(1);
+    deliver(b.r.fake, "HitEvent", hit(75, 1, -10));
+    CHECK(notes_with(b.r.fake, "Wolf roars") == 1);
+    one_step(b);
+    CHECK(pick_of(b, 75) == 1);     // mid-attack: it keeps you
+    CHECK(pick_of(b, 76) == 1234);  // the other boss turns
+}

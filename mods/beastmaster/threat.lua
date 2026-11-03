@@ -7,6 +7,9 @@
 -- (DynamicAggro.allowTargetSwitches). It picks again at once when the target falls, is sent home or is out of the
 -- monster's reach. The game's own pick comes back (switches on, nothing written) on every way out: no beast left in
 -- reach, the monster tamed or no longer hostile, its player gone, passive mode, the threat setting off.
+-- Taunt (talents.lua): when a monster hits a player within a Taunt beast's radius of it, the nearest of their beasts
+-- with Taunt ready roars: every monster of that player's fight within its radius is held on it for its hold time, over
+-- the shares (a boss in the middle of an attack is left alone); then they pick as usual.
 -- M.new(env) where env has: now(world), setting(key), tell(world, player, text), ids() (the beasts out: entity id ->
 -- {account, beast}), mode(account), hostile(world, id) (a living hostile creature, not a player), boss(world, id).
 local species = require("species")
@@ -21,6 +24,7 @@ local CLOSE_M = 5      -- a target weighs its share / (its distance + CLOSE_M): 
 local OWNER_EVERY = 4  -- at least 1 in OWNER_EVERY of a fight's monsters stay on the player
 local PLAYER_ALLY = 11
 local NOT_REACHABLE = 2  -- DynamicAggro target reachableState: the game finds no way to it
+local MID_ATTACK = 14    -- enemy01 State ControlledByAttack (DynamicEnemy01BehaviorState.state): in an attack
 
 -- The share of the monsters in a fight `beast` draws (0..1): a tank's (boar, bear, aurochs) or a damage beast's
 -- setting, and Menace on top; the settings and caps for all of a player's beasts are applied when a monster picks.
@@ -40,7 +44,7 @@ end
 function T:reset()
 	self.held = {}    -- monster id -> {account, player, target, until_s, taunt}
 	self.owners = {}  -- account -> player entity, for the players in the world (from the last look)
-	self.roared = setmetatable({}, { __mode = "k" })  -- beast -> when it can roar again
+	self.roared = setmetatable({}, { __mode = "k" })  -- beast -> when it roared last
 end
 
 local function dist(world, a, b)
@@ -174,12 +178,69 @@ function T:side_of(world, id)
 	return nil
 end
 
--- A HitEvent: a monster that hits a player's side, or that their side hits, joins their fight.
+-- Whether `beast` can roar now: Taunt, and its cooldown (for its points now) over since it roared last.
+function T:ready(world, beast)
+	local t, cooldown = talents.taunt(beast)
+	if not t then return nil end
+	local now, last = self.env.now(world), self.roared[beast]
+	if last and now >= last and now < last + cooldown then return nil end
+	return t
+end
+
+local function mid_attack(world, m)
+	local s = world:get("DynamicEnemy01BehaviorState", m)
+	return s ~= nil and s.state == MID_ATTACK
+end
+
+-- Monster `hitter` hit `player` (of `account`): the nearest of their beasts with Taunt ready within its radius of the
+-- hitter roars, and the monsters of their fight within that radius of it turn on it.
+function T:taunt(world, hitter, account, player)
+	if not self:active(account) then return end
+	local ids = self.env.ids()
+	local best, best_d, best_t
+	for id, e in pairs(ids) do
+		local t = e.account == account and self:ready(world, e.beast)
+		if t and self:usable(world, hitter, id, account, false) then
+			local d = dist(world, hitter, id)
+			if d and d <= t.radius_m and (not best_d or d < best_d) then best, best_d, best_t = id, d, t end
+		end
+	end
+	if not best then return end
+	local beast = ids[best].beast
+	local now = self.env.now(world)
+	self.roared[beast] = now
+	local side = { [player] = true }
+	for id, e in pairs(ids) do
+		if e.account == account then side[id] = true end
+	end
+	for _, m in ipairs(world:entities()) do
+		if not side[m] and self.env.hostile(world, m) then
+			local d = dist(world, best, m)
+			local h = self.held[m]
+			local fighting = m == hitter or (h and h.account == account)
+			if not fighting and not h then
+				local s = world:get("SelectedTargets", m)
+				fighting = s and s.targets and side[s.targets[1].targetEntityId]
+			end
+			if fighting and d and d <= best_t.radius_m and not (self.env.boss(world, m) and mid_attack(world, m))
+				and force(world, m, best) then
+				self.held[m] = { account = account, player = player, target = best, until_s = now + best_t.hold_s, taunt = true }
+			end
+		end
+	end
+	self.env.tell(world, player, string.format("%s roars: the monsters turn on it.", beast.name))
+end
+
+-- A HitEvent: a monster that hits a player's side, or that their side hits, joins their fight; one that hits the
+-- player may make a beast of theirs roar (Taunt).
 function T:on_hit(world, source, target)
 	if source == target or not self.env.setting("threat") then return end
 	local account, player = self:side_of(world, target)
 	if account then
-		if self.env.hostile(world, source) then self:join(world, source, account, player) end
+		if self.env.hostile(world, source) then
+			self:join(world, source, account, player)
+			if target == player then self:taunt(world, source, account, player) end
+		end
 		return
 	end
 	account, player = self:side_of(world, source)

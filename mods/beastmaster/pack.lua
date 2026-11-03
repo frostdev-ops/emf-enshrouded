@@ -94,9 +94,8 @@ local INSTALL = "Install them with EMF.exe (Install a downloaded file) and resta
 
 -- A living hostile creature (HOSTILE), never a player.
 function M.hostile(world, id)
-	if world:get("PlayerState", id) then return false end
 	local f = world:get("Faction", id)
-	if not (f and HOSTILE[f.faction]) then return false end
+	if not (f and HOSTILE[f.faction]) or world:get("PlayerState", id) then return false end
 	local cur = emf.health(world, id)
 	return cur ~= nil and cur > 0
 end
