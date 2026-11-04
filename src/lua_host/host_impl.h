@@ -42,6 +42,15 @@ struct KeyWatch {
     uint64_t pressed_at = 0;  // GetTickCount64 of a press not handed to the function yet (0: none)
 };
 
+// A callback registered through emf.bus.subscribe(). Every callback is valid only for messages
+// published at or after first_sequence. A token keeps unsubscribe() during a callback safe.
+struct BusSubscription {
+    int ref = LUA_NOREF;
+    int kind = EMF_WORLD_SERVER;
+    uint64_t first_sequence = 0;
+    uint64_t token = 0;
+};
+
 struct Script {
     Host::Impl* host = nullptr;
     Memory mem;
@@ -63,6 +72,8 @@ struct Script {
     std::vector<KeyWatch> keys;                        // emf.on_key
     std::vector<int> chat_cbs;                         // emf.on_chat (lua 1.6)
     std::vector<int> ws_cbs;                           // emf.on_world_setting_changed (lua 1.10)
+    std::map<std::string, std::vector<BusSubscription>> bus_subs;  // cross-mod message callbacks
+    uint64_t next_bus_subscription = 0;             // unique callback tokens, even after unsubscribe
     // While a take's callback runs: the taken items not handed on yet (emf.put / emf.give of that item lower it). If the
     // callback raises, what is left goes back into the source.
     struct TakeHand {
@@ -84,6 +95,16 @@ struct Script {
     int world_cb = LUA_NOREF;      // emf.on_world_data's function
     uint64_t world_delivered = 0;  // the load (loads) the world's text was last handed to
     bool world_pending = false;    // on_world_data came after that: the next server tick hands the text to it
+};
+
+// A copied message between otherwise isolated Lua states.
+struct BusMessage {
+    std::string source;
+    std::string topic;
+    std::string payload;
+    int kind = EMF_WORLD_SERVER;
+    uint64_t sequence = 0;  // global publication order, protected by the host mutex
+    uint64_t source_epoch = 0;  // invalidated when the publishing mod reloads or stops
 };
 
 struct QueuedEvent {
@@ -116,6 +137,7 @@ struct Host::Impl {
     std::atomic<uint64_t> last_check{0};  // GetTickCount64 of the last reload check (tick runs on several world threads)
     size_t memory_limit = kMemoryLimit;   // per script, for states made from now on
     std::mutex m;  // the maps below
+    std::mutex world_step_m[3];  // serialize steps of the same world kind; preserves bus delivery order
     std::map<std::string, std::vector<WheelSection>> wheel_groups;  // group name -> sections in publishing order
     std::map<std::string, std::string> command_owner;  // full command name (lower case) -> script id
     std::map<std::string, void*> command_slots;        // full command name (lower case) -> its CommandSlot (the user)
@@ -125,6 +147,11 @@ struct Host::Impl {
     bool load_done = false;                            // after load_all: no new subscriptions
     std::atomic<bool> rechecked{false};                // the first tick compared the scripts with the core's list
     std::deque<std::pair<uint8_t, QueuedEvent>> outbox;  // (world kind, event) waiting for the host's program
+    std::deque<BusMessage> bus_outbox;                 // queued for the next world step
+    std::map<std::string, size_t> bus_queued_by_source; // 256 pending publications per publisher
+    std::map<std::string, uint64_t> bus_source_epoch;   // invalidates publications already drained on stop/reload
+    std::set<std::string> bus_refusal_logged;          // one warning per rejection streak and publisher
+    uint64_t bus_next_sequence = 0;                    // guarded by m
     std::function<bool(uint32_t)> key_down;              // a key is held and the game is in front (tests replace it)
     std::atomic<uint64_t> server_seen{0};                // GetTickCount64 of the last server world step
     std::atomic<int> chat_hooked{0};                     // the core's on_chat for emf.on_chat: 0 not asked, 1 on, -1 refused
@@ -141,6 +168,7 @@ struct Host::Impl {
     void unload(Script& s);
     void pause(Script& s, const std::string& why);
     void drop_sections(const std::string& id);  // the mod's wheel sections leave every group (unload, pause)
+    void drop_bus(const std::string& id);       // discard this mod's queued outgoing publications (unload, pause)
     // Stops scripts whose mod the core no longer lists as a script mod (a dependency failed after the host loaded).
     void recheck();
 };

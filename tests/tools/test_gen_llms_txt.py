@@ -157,6 +157,15 @@ class OtherSourcesTests(unittest.TestCase):
         self.assertIn("account", methods)
         self.assertEqual(g.check_lua_documented(), [], "lua.md describes every function the Lua host registers")
 
+    def test_lua_bus_namespace_and_documentation(self):
+        host = g.read(os.path.join("src", "lua_host", "host.cpp"))
+        self.assertIn('lua_setfield(L, -2, "bus")', host)
+        for name in ("subscribe", "publish", "unsubscribe"):
+            self.assertRegex(host, r'\{"' + name + r'",\s*l_bus_' + name + r'\}')
+            self.assertIn("emf.bus." + name, g.generate())
+        self.assertNotIn('{"bus_publish", l_bus_publish}', host)
+        self.assertNotIn('{"bus_subscribe", l_bus_subscribe}', host)
+
     def test_md_table_rows(self):
         md = "intro\n**t:**\n\n| a | b |\n|---|---|\n| `x` | one \\| two |\n| y | z |\n\nafter | not a row\n"
         self.assertEqual(g.md_table_rows(md, "**t:**"), [["`x`", "one | two"], ["y", "z"]])
