@@ -688,7 +688,9 @@ Swiftness, Second Wind, Ambush, Guard, Menace, Taunt), spent on its tab of the B
 `/beastmaster talent`. Monsters in a fight split between you and your beasts (a tank 50 %, another beast 20 %, at
 most 90 %; a boss 35 %), keep a target at least 8 s, and at least 1 in 4 stay on you. Send them at
 what you look at (`/beastmaster attack`), dismiss one or all; a beast that falls rests 60 s. While you build,
-your beasts step aside and come back after (`/beastmaster aside` does it by hand). Your beasts' kills give you XP and
+your beasts step aside and come back after (`/beastmaster aside` does it by hand). While you stand still for 10 s
+they pass the time (a wolf lies down, a beast sits by a fire or watches a villager, one keeps watch at night) and
+follow again the moment you move. Your beasts' kills give you XP and
 loot. Hold **F3** for the beast wheel (the host; B is the game's backpack key); every player has `/beastmaster` in the
 chat. The bear and the aurochs come in the **EMF creature packs** download (EML content, which EMF builds when the
 game starts: install the packs with EMF.exe, no EML needed). The bear pack

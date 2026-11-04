@@ -205,6 +205,27 @@ between it and you or your beasts for twice the hold, 16 s, or it goes home, fle
 leave, you switch to passive mode or turn **Beasts draw monsters** off. `beastmaster.threat` (console) lists the
 monsters in your fights now and who they are on.
 
+## When you stand still
+
+When you have stood still (moved less than 1 m) for 10 s, out of a fight (no hit to or from you or your beasts for
+10 s, no monster held in your fight) and not building, your beasts that are out and following you within 15 m pass
+the time, each in a scene of its own, and pick a new one every 30 to 60 s:
+
+- **Settle:** a wolf or a hound lies down where it is. The other beasts do not settle.
+- **By the fire:** with a campfire, a fireplace or a base's flame altar within 15 m of it, the beast turns to face the
+  nearest and stays there (a wolf or a hound lies down facing it).
+- **Watching:** with a villager within 15 m of it, it turns to face them; a wolf or a hound stays up, the others stay
+  put.
+- **Night watch:** at night (18:00 to 06:00) with two or more beasts out, one keeps watch facing away from you (one
+  that is not a wolf or a hound, when you have one), while the wolves and hounds settle. A lone wolf or hound settles.
+- **Sniffing about:** it wanders around you, as it does anyway.
+
+They get up and follow you the moment you are 2 m from where you stood, a fight starts (a hit to or from you or one
+of them, or a monster joins a fight with you), you call, dismiss or store a beast or send them with Attack, you start
+building, or one of them is more than 15 m from you; then they wait for another 10 s of stillness. Each player's
+beasts follow only that player's stillness. **Beasts pass the time while you stand still** (`idle`) turns it off;
+**After you stand still for** (`idle_s`) sets the 10 s. `beastmaster.idle` (console) says what each beast does now.
+
 ## Commands
 
 All of these work from the game's chat for every player (`/beastmaster <word>`), and in the console
@@ -231,6 +252,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster mode [passive, defending or aggressive]` | how all your beasts fight; without a word, the mode now |
 | `beastmaster.stable mark`, `unmark`, `list` | **host or admins:** the prop you look at (no camera data: the one within 3 m of you) is a stable; the marked prop nearest you (within 8 m) is no stable; this world's stables |
 | `beastmaster.threat` | **console:** the monsters held on you or your beasts now, and for how long |
+| `beastmaster.idle` | **console:** what your beasts do while you stand still now (their scenes), or how long you have stood still |
 | `beastmaster.loyalty <name or number> <1-10>` | **host console only:** set a beast's loyalty (tests); the reply says its talent points |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
@@ -258,6 +280,8 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Aggressive beasts go at foes within (`aggro_m`) | 25 m | |
 | You get your beasts' kills (`xp_credit`) | on | XP and loot for the owner |
 | Beasts step aside while someone builds next to them (`make_room`) | on | while you, or a player within 20 m of them, hold something to build or place, your beasts leave and come back after |
+| Beasts pass the time while you stand still (`idle`) | on | off: they keep following you as before (see When you stand still) |
+| After you stand still for (`idle_s`) | 10 s | 5-60 |
 | Beasts draw monsters to them (`threat`) | on | off: monsters pick their targets as the game does |
 | A monster keeps its target at least (`threat_hold_s`) | 8 s | |
 | A tank (boar, bear, aurochs) draws, Another beast draws (`tank_share_pct`, `damage_share_pct`) | 50 %, 20 % | of the monsters in a fight, before Menace |
@@ -347,3 +371,9 @@ does not ship this file.
   (`DynamicAggro.allowTargetSwitches`) off; the game's threat event alone does not move a monster. A `species_extra.lua`
   beast is a tank with `tank = true` in its entry.
 - Second Wind's 5 minutes are not kept with the world: after a reload it is ready again.
+- A beast stays put through the game's own sleep: Beastmaster switches the Sleep feature on in the beast's AI
+  (`DynamicEnemy01BehaviorState`: the Sleep bit in `enabledFeatures`, `sleepEndTime` far ahead, state Sleep), and the
+  game plays the sleep animation of a graph that has one (the wolf's, which the hound runs too); a beast whose graph has
+  none stands there. A turn is the game's teleport in place with a yaw. A player-side creature left with the Sleep bit
+  (after a reload of the mod, for example) is woken at the next search of the world. A `species_extra.lua` beast lies
+  down with `sleeps = true` in its entry; `stays = false` keeps a kind out of the Sleep state (it only turns).
