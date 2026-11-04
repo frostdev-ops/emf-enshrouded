@@ -499,3 +499,94 @@ TEST_CASE("content splash: its size follows the screen's DPI") {
     CHECK(r.right - r.left == emf::loader::splash_scaled(620, emf::loader::screen_dpi()));
     splash.end();
 }
+
+namespace {
+emf::loader::PortraitItem wolf_item() {
+    emf::loader::PortraitItem p;
+    p.mod = "beastmaster";
+    p.key = "wolf";
+    p.template_guid = "503fa1d1-dce2-45a1-85a5-185a22666d33";
+    return p;
+}
+void with_portraits(Recorder& r, emf::loader::StartSteps& s, bool unloads = true) {
+    s.run_portraits = [&r, unloads](const std::vector<emf::loader::PortraitItem>& items, bool shadow,
+                                    const std::atomic<bool>&) {
+        r.add(std::string("portraits(") + (shadow ? "shadow" : "game") + ")");
+        emf::loader::PortraitsOutcome o;
+        o.call.code = 0;
+        o.call.unloaded = unloads;
+        for (const auto& i : items) o.drawn.push_back(i.key);
+        return o;
+    };
+}
+}  // namespace
+
+TEST_CASE("content start: missing portraits on a current shadow hold the start, are drawn from it, then all goes on") {
+    Recorder r;
+    auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), good_state("sha256:now")));
+    REQUIRE(plan.path == ContentPath::UseCurrent);
+    plan.portraits = {wolf_item()};
+    r.calls.clear();
+    auto steps = start_steps(r);
+    with_portraits(r, steps);
+    CHECK(emf::loader::start_in_dllmain(plan, steps));
+    CHECK(r.joined() == "hold");  // the chained DLLs and the core wait for the pictures
+    r.calls.clear();
+    emf::loader::run_held_content(plan, steps);
+    CHECK(r.joined() == "splash, portraits(shadow), splash end, chain, hooks(content on), status(current), core");
+    CHECK(r.logged("drew 1"));
+}
+
+TEST_CASE("content start: no portraits missing: no hold (a start with every picture cached is not slower)") {
+    Recorder r;
+    auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), good_state("sha256:now")));
+    r.calls.clear();
+    auto steps = start_steps(r);
+    with_portraits(r, steps);
+    CHECK_FALSE(emf::loader::start_in_dllmain(plan, steps));
+    CHECK(r.joined() == "chain, hooks(content on), status(current), core");
+}
+
+TEST_CASE("content start: a build start draws the portraits after the build: from the shadow when it built, else the game") {
+    for (const bool ok : {true, false}) {
+        Recorder r;
+        auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), std::nullopt));
+        REQUIRE(plan.path == ContentPath::BuildHeld);
+        plan.portraits = {wolf_item()};
+        emf::loader::BuildOutcome failed = built_ok();
+        failed.code = 2;
+        auto steps = start_steps(r, true, ok ? built_ok() : failed);
+        with_portraits(r, steps);
+        CHECK(emf::loader::start_in_dllmain(plan, steps));
+        r.calls.clear();
+        emf::loader::run_held_content(plan, steps);
+        CHECK(r.joined().find(ok ? "run_build, portraits(shadow)" : "run_build, portraits(game)") != std::string::npos);
+        CHECK(r.joined().find("core") != std::string::npos);
+    }
+}
+
+TEST_CASE("content start: portraits that leave emf_content.dll in the game start neither the chained DLLs nor the core") {
+    Recorder r;
+    auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), good_state("sha256:now")));
+    plan.portraits = {wolf_item()};
+    auto steps = start_steps(r);
+    with_portraits(r, steps, false);
+    CHECK(emf::loader::start_in_dllmain(plan, steps));
+    r.calls.clear();
+    emf::loader::run_held_content(plan, steps);
+    CHECK(r.joined().find("chain") == std::string::npos);
+    CHECK(r.joined().find("core") == std::string::npos);
+    CHECK(r.joined().find("alert") != std::string::npos);
+}
+
+TEST_CASE("content start: a start that cannot be held draws no portraits and goes on as before") {
+    Recorder r;
+    auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), good_state("sha256:now")));
+    plan.portraits = {wolf_item()};
+    r.calls.clear();
+    auto steps = start_steps(r, false);
+    with_portraits(r, steps);
+    CHECK_FALSE(emf::loader::start_in_dllmain(plan, steps));
+    CHECK(r.joined() == "hold, chain, hooks(content on), status(current), core");
+    CHECK(r.logged("later start"));
+}

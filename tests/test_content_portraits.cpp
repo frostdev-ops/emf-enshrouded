@@ -6,6 +6,7 @@
 #include <windows.h>
 
 #include <filesystem>
+#include <fstream>
 #include <string>
 #include <vector>
 
@@ -53,4 +54,32 @@ TEST_CASE("content portraits: a DLL with another ABI is refused, a missing one i
     CHECK(wrong.call.unloaded);
     const auto none = emf::loader::run_portraits(exe_dir() + L"\\no_such\\emf_content.dll", "{}", nullptr);
     CHECK(none.call.code == emf::loader::kBuildNoDll);
+}
+
+TEST_CASE("content portraits: wanted_portraits reads emf\\mods\\*\\mod.json and leaves out the cached pictures") {
+    const std::wstring root = test_scratch::temp_path(L"emf_portraits_wanted");
+    test_scratch::remove_at_exit(root);
+    const std::wstring mods = root + L"\\mods", cache = root + L"\\cache";
+    const auto write = [](const std::wstring& path, const std::string& text) {
+        std::filesystem::create_directories(std::filesystem::path(path).parent_path());
+        std::ofstream f(std::filesystem::path(path), std::ios::binary);
+        REQUIRE(f.good());
+        f << text;
+    };
+    const std::string guid = "503fa1d1-dce2-45a1-85a5-185a22666d33";
+    write(mods + L"\\b_second\\mod.json", "{\"portraits\": [{\"key\": \"wolf\", \"template\": \"" + guid + "\"}]}");
+    write(mods + L"\\a_first\\mod.json", "{\"portraits\": [{\"key\": \"wolf\", \"template\": \"" + guid +
+                                             "\"}, {\"key\": \"bear\", \"template\": \"" + guid + "\"}]}");
+    std::filesystem::create_directories(mods + L"\\c_no_manifest");
+    write(cache + L"\\bear\\index.json", "{}");
+    std::vector<std::string> problems;
+    const auto items = emf::loader::wanted_portraits(mods, cache, &problems);
+    REQUIRE(items.size() == 1u);  // bear is cached; b_second's wolf comes after a_first's
+    CHECK(items[0].key == "wolf");
+    CHECK(items[0].mod == "a_first");
+    REQUIRE(problems.size() == 1u);
+    CHECK(problems[0].rfind("b_second: ", 0) == 0);
+    CHECK(emf::loader::wanted_portraits(root + L"\\no_such", cache, nullptr).empty());
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
 }

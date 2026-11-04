@@ -432,13 +432,14 @@ emf::loader::ContentPlan plan_this_start(emf::loader::PlayOnce play) {
     }
 }
 
-// <game>\emf\content.log: what a build did, emptied at each build. Written from the build's thread.
+// <game>\emf\content.log: what a build did, emptied at each build; <game>\emf\portraits.log the same for the
+// creature pictures. Written from the build's thread.
 struct ContentLog {
     HANDLE file = INVALID_HANDLE_VALUE;
     ULONGLONG t0 = 0;
     SRWLOCK lock = SRWLOCK_INIT;
-    void open() {
-        file = CreateFileW((g_dir + L"\\emf\\content.log").c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE,
+    void open(const wchar_t* name = L"content.log") {
+        file = CreateFileW((g_dir + L"\\emf\\" + name).c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_DELETE,
                            nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
         t0 = GetTickCount64();
     }
@@ -456,6 +457,25 @@ struct ContentLog {
     }
 };
 ContentLog g_content_log;
+ContentLog g_portraits_log;
+
+std::wstring portrait_cache() { return g_dir + L"\\emf\\cache\\portraits"; }  // the core's portrait_dir
+
+// The creature pictures mods ask for (mod.json "portraits") that the cache lacks: in the game client with EMF's core
+// only (the dedicated server draws nothing, and Play without EMF mods loads no mod that shows them).
+std::vector<emf::loader::PortraitItem> portraits_this_start() {
+    try {
+        if (!emf::loader::is_game_client_exe(g_exe) || !g_start.core) return {};
+        const DWORD a = GetFileAttributesW(content_dll().c_str());
+        if (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY)) return {};
+        std::vector<std::string> problems;
+        auto items = emf::loader::wanted_portraits(g_dir + L"\\emf\\mods", portrait_cache(), &problems);
+        for (const auto& p : problems) loader_log(g_dir, ("creature pictures: " + p).c_str());
+        return items;
+    } catch (...) {
+        return {};
+    }
+}
 
 std::string utc_now() {
     SYSTEMTIME t{};
@@ -576,6 +596,28 @@ emf::loader::StartSteps make_start_steps() {
         MessageBoxW(nullptr, emf::loader::cio::from_utf8(text).c_str(), L"EMF", MB_OK | MB_ICONWARNING | MB_TOPMOST);
     };
     s.now = [] { return utc_now(); };
+    s.run_portraits = [](const std::vector<emf::loader::PortraitItem>& items, bool shadow,
+                         const std::atomic<bool>& abandoned) {
+        const std::wstring from = shadow ? shadow_dir() : g_dir;  // the shadow copy has the EML content's creatures
+        g_portraits_log.open(L"portraits.log");
+        g_portraits_log.line("emf", "EMF " EMF_VERSION ": drawing " + std::to_string(items.size()) +
+                                        " creature picture(s) from " + emf::loader::cio::to_utf8(from));
+        build_progress("Drawing pictures of creatures for mods...");
+        const auto out = emf::loader::run_portraits(
+            content_dll(), emf::loader::portraits_request(from, portrait_cache(), items),
+            [](int level, const std::string& line) {
+                static const char* names[] = {"error", "warning", "info", "debug"};
+                g_portraits_log.line(level >= 0 && level <= 3 ? names[level] : "log", line);
+                if (level <= 2) build_progress(line);
+            },
+            emf::loader::kReplyCapacity, &abandoned);
+        g_portraits_log.line("emf", emf::loader::portraits_text(out) + (out.call.unloaded
+                                                                          ? "; emf_content.dll is unloaded"
+                                                                          : "; emf_content.dll stays loaded"));
+        for (const auto& f : out.failed) g_portraits_log.line("error", f);
+        g_portraits_log.close();
+        return out;
+    };
     return s;
 }
 
@@ -638,6 +680,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
         g_start = emf::loader::start_plan(play);
         // EML content: off (today's order), the current shadow copy, or a build on the held entry (content_start.h)
         g_content = plan_this_start(play);
+        g_content.portraits = portraits_this_start();  // drawn at this start, on a held entry (content_start.h)
         emf::loader::start_in_dllmain(g_content, steps());
     }
     return TRUE;

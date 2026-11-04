@@ -5,13 +5,16 @@
 // without the export (one from before portraits) is an outcome too (kBuildNoExport): the start goes on without them.
 #include <windows.h>
 
+#include <algorithm>
 #include <atomic>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "content_abi.h"
 #include "content_build.h"
 #include "core/json.h"
+#include "portraits_plan.h"
 
 namespace emf::loader {
 
@@ -104,6 +107,33 @@ inline PortraitsOutcome run_portraits(const std::wstring& dll, const std::string
     }
     if (module) detail::unload(module, dll, out.call);
     return out;
+}
+
+// The portraits the mods in <mods_dir>\<id>\mod.json ask for (in the order of the folder names) that the cache lacks
+// (<cache_dir>\<key>\index.json), at most kMaxPortraitsPerStart. A folder without a mod.json is no mod; a bad list
+// is a line in `problems`. No mods folder: none.
+inline std::vector<PortraitItem> wanted_portraits(const std::wstring& mods_dir, const std::wstring& cache_dir,
+                                                  std::vector<std::string>* problems) {
+    std::vector<std::wstring> names;
+    WIN32_FIND_DATAW fd{};
+    const HANDLE h = FindFirstFileExW((mods_dir + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchLimitToDirectories,
+                                      nullptr, 0);
+    if (h == INVALID_HANDLE_VALUE) return {};
+    do {
+        const std::wstring n = fd.cFileName;
+        if ((fd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) && n != L"." && n != L"..") names.push_back(n);
+    } while (FindNextFileW(h, &fd));
+    FindClose(h);
+    std::sort(names.begin(), names.end());
+    std::vector<std::pair<std::string, std::string>> manifests;
+    for (const auto& n : names)
+        if (auto text = cio::read_file(mods_dir + L"\\" + n + L"\\mod.json", 1u << 20))
+            manifests.emplace_back(cio::to_utf8(n), std::move(*text));
+    const auto cached = [&cache_dir](const std::string& key) {
+        const DWORD a = GetFileAttributesW((cache_dir + L"\\" + cio::from_utf8(key) + L"\\index.json").c_str());
+        return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
+    };
+    return missing_portraits(read_portrait_lists(manifests, problems), cached);
 }
 
 }  // namespace emf::loader

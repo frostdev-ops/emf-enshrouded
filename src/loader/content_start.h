@@ -28,6 +28,8 @@
 
 #include "content_build.h"
 #include "content_owner.h"
+#include "content_portraits.h"
+#include "portraits_plan.h"
 #include "content_shadow.h"
 #include "content_state.h"
 #include "content_status_env.h"
@@ -46,6 +48,10 @@ struct ContentPlan {
     uint64_t state_ms = 0;
     int attempts = 1;                    // BuildHeld: the how-many-th start in a row that begins this build
     std::optional<ContentState> failed;  // KnownFailed: the earlier failure with the same files
+    // Pictures of creatures mods asked for that the cache lacks (portraits_plan.h; the loader fills it, never on the
+    // dedicated server): drawn at this start, after the build or on a start held only for them (portraits_hold).
+    std::vector<PortraitItem> portraits;
+    bool portraits_hold = false;
 };
 
 // ---- the facts, gathered in the order of the checks: the first that says no ends it ----
@@ -193,18 +199,27 @@ struct StartSteps {
     std::function<bool()> dll_gone;     // emf_content.dll is not in the process
     std::function<void(const std::string&)> alert;  // a message box the player must see (OK only)
     std::function<std::string()> now;               // UTC, for built_at
+    // draws `items` through emf_content.dll (content_portraits.h) on run_work's thread, from the shadow copy (`shadow`)
+    // or the game's own files; null: no portraits
+    std::function<PortraitsOutcome(const std::vector<PortraitItem>& items, bool shadow,
+                                   const std::atomic<bool>& abandoned)>
+        run_portraits;
 };
 
-// True when the entry is held: the rest runs there (run_held_content), nothing more here.
-inline bool start_in_dllmain(ContentPlan& plan, const StartSteps& s) {
-    std::optional<ContentStatus> status;
+inline std::string portraits_text(const PortraitsOutcome& o) {
+    std::string t = "creature pictures: drew " + std::to_string(o.drawn.size());
+    if (!o.current.empty()) t += ", " + std::to_string(o.current.size()) + " current";
+    if (!o.failed.empty()) t += ", " + std::to_string(o.failed.size()) + " failed";
+    t += " in " + seconds_text(o.call.ms);
+    if (o.call.code != 0 && o.failed.empty()) t += " (" + o.call.message + ", code " + std::to_string(o.call.code) + ")";
+    return t;
+}
+
+// The start without a build: the chained DLLs, the file hooks for the plan's path, the core's status, the core.
+inline void start_unheld(const ContentPlan& plan, const StartSteps& s, std::optional<ContentStatus> status) {
     std::optional<ContentState> mark;  // a failure the core is told of now: recorded as told
-    if (plan.path == ContentPath::BuildHeld) {
-        if (s.hold_entry()) return true;
-        plan.path = ContentPath::Off;
-        plan.why = "off for this start: the game's start could not be held for the build";
-        s.log("EML content: " + plan.why);
-        status = ContentStatus{"failed", 0, 0, "EMF could not hold the game's start to build the EML content"};
+    if (status) {
+        // given: the start that could not be held for a build
     } else if (plan.path == ContentPath::UseCurrent) {
         status = ContentStatus{"current", plan.state_mods, plan.state_ms, ""};
     } else if (plan.path == ContentPath::KnownFailed && plan.failed) {
@@ -225,13 +240,73 @@ inline bool start_in_dllmain(ContentPlan& plan, const StartSteps& s) {
     if (mark && s.write_state) s.write_state(*mark);
     if (status) s.set_status(*status);
     s.start_core();
+}
+
+// True when the entry is held: the rest runs there (run_held_content), nothing more here.
+inline bool start_in_dllmain(ContentPlan& plan, const StartSteps& s) {
+    std::optional<ContentStatus> status;
+    if (plan.path == ContentPath::BuildHeld) {
+        if (s.hold_entry()) return true;
+        plan.path = ContentPath::Off;
+        plan.why = "off for this start: the game's start could not be held for the build";
+        s.log("EML content: " + plan.why);
+        status = ContentStatus{"failed", 0, 0, "EMF could not hold the game's start to build the EML content"};
+    } else if (!plan.portraits.empty() && s.run_portraits) {
+        if (s.hold_entry()) {
+            plan.portraits_hold = true;
+            return true;
+        }
+        s.log("creature pictures: the game's start could not be held; they are drawn at a later start");
+        plan.portraits.clear();
+    }
+    start_unheld(plan, s, status);
     return false;
+}
+
+// On the entry held only for portraits (no build at this start): draw them, then start as without a hold. The DLL
+// must be gone before the chained DLLs and the core, as after a build.
+inline void run_held_portraits(const ContentPlan& plan, const StartSteps& s) {
+    s.splash_begin("EMF is drawing pictures of creatures for mods (first start after a change)...");
+    struct Work {
+        std::vector<PortraitItem> items;
+        PortraitsOutcome out;
+        std::atomic<bool> abandoned{false};
+    };
+    auto work = std::make_shared<Work>();  // the worker owns it: one that does not come back must not write a dead frame
+    work->items = plan.portraits;
+    const bool shadow = plan.path == ContentPath::UseCurrent;
+    const bool done = s.run_work([work, &s, shadow] { work->out = s.run_portraits(work->items, shadow, work->abandoned); });
+    PortraitsOutcome out;
+    if (done) {
+        out = work->out;
+    } else {
+        work->abandoned = true;
+        out.call.code = kBuildTimedOut;
+        out.call.unloaded = false;
+        out.call.message = "the pictures did not finish in time, so emf_content.dll may still run";
+    }
+    if (out.call.unloaded && s.dll_gone && !s.dll_gone()) out.call.unloaded = false;
+    s.splash_end();
+    s.log(portraits_text(out));
+    for (const auto& f : out.failed) s.log("creature pictures: " + f);
+    if (!out.call.unloaded) {
+        s.log("creature pictures: emf_content.dll is still in the game: this start runs without the chained DLLs and "
+              "without EMF's core");
+        s.alert("EMF could not finish drawing creature pictures; the game starts without EMF's mods this time.\n\n" +
+                out.call.message + "\n\nThe details are in emf\\portraits.log.");
+        return;
+    }
+    start_unheld(plan, s, std::nullopt);
 }
 
 constexpr uint32_t kBuildTimeoutMs = 15 * 60 * 1000;
 
 // On the held entry (BuildHeld).
 inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
+    if (plan.portraits_hold && plan.path != ContentPath::BuildHeld) {
+        run_held_portraits(plan, s);
+        return;
+    }
     s.splash_begin("EMF is preparing EML content (first start after a change)...");
     ContentState state;
     state.fingerprint = plan.fingerprint;
@@ -244,10 +319,13 @@ inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
     struct Work {
         ShadowResult shadow;
         BuildOutcome out;
+        std::vector<PortraitItem> items;  // drawn after the build, on the same thread
+        std::optional<PortraitsOutcome> portraits;
         std::atomic<bool> abandoned{false};
     };
     // the worker owns its result too: one that does not come back in time must not write into a dead frame
     auto work = std::make_shared<Work>();
+    if (s.run_portraits) work->items = plan.portraits;
     const bool done = s.run_work([work, &s] {
         work->shadow = s.build_shadow();
         if (!work->shadow.ok) {
@@ -258,6 +336,8 @@ inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
         }
         if (work->abandoned) return;  // the time is up: the DLL is never loaded after that
         work->out = s.run_build(work->abandoned);
+        if (!work->items.empty() && work->out.unloaded && !work->abandoned)  // from the shadow when it is good
+            work->portraits = s.run_portraits(work->items, work->out.usable(), work->abandoned);
     });
     BuildOutcome out;
     if (done) {
@@ -268,6 +348,11 @@ inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
         out.unloaded = false;
         out.message = "the build did not finish in " + std::to_string(kBuildTimeoutMs / 60000) +
                       " minutes, so emf_content.dll may still run";
+    }
+    if (done && work->portraits && !work->portraits->call.unloaded) {
+        out.unloaded = false;  // the pictures left the DLL in the game: as a build that did
+        out.message += (out.message.empty() ? "" : "; ") + std::string("drawing creature pictures left emf_content.dll ") +
+                       "in the game (" + work->portraits->call.message + ")";
     }
     if (out.unloaded && s.dll_gone && !s.dll_gone()) {
         out.unloaded = false;
@@ -287,6 +372,10 @@ inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
     s.write_state(state);
     if (ok) s.write_record(work->shadow.record);
     s.splash_end();
+    if (done && work->portraits) {
+        s.log(portraits_text(*work->portraits));
+        for (const auto& f : work->portraits->failed) s.log("creature pictures: " + f);
+    }
     if (!out.unloaded) {
         s.drop_record();
         s.log("EML content: " + out.message + ": this start runs without the chained DLLs and without EMF's core (EML's "
