@@ -52,6 +52,12 @@ function M.new(env)
 		now = env.now,
 		setting = env.setting,
 		ids = function() return p.ids end,
+		busy = function(world, id)
+			local now = env.now(world)
+			return now < (p.sent[id] or 0) or now < (p.recall[id] or 0)
+		end,
+		held = function(account) return p.threat:holds(account) end,
+		building = function(world, account, owner) return aside_mod.building(world, owner) or p.aside:is_aside(account) end,
 	})
 	p:reset()
 	return p
@@ -335,6 +341,7 @@ function P:call(world, owner, account, beast)
 		return "The call failed: " .. why
 	end
 	if cost > 0 then emf.attribute_add(world, owner, "mana", -cost) end
+	self.idle:stop(world, account)  -- the beasts out get up
 	self.last_call[account] = now
 	self.aside:release(account)  -- the beasts that stepped aside come back too
 	self.env.save()
@@ -381,6 +388,7 @@ end
 -- beastmaster.dismiss: the beast leaves the world and waits at home.
 function P:dismiss(world, account, beast)
 	if not beast.out then return beast.name .. " is not out." end
+	self.idle:stop(world, account)  -- every beast of theirs gets up
 	if beast.entity and ours(world, beast.entity) then emf.destroy(world, beast.entity) end
 	if beast.entity then
 		self.ids[beast.entity] = nil
@@ -426,6 +434,7 @@ end
 function P:attack(world, account, target)
 	local n = 0
 	local now = self.env.now(world)
+	self.idle:stop(world, account)  -- every beast of theirs gets up
 	for _, b in ipairs(self.env.beasts():list(account)) do
 		if b.out and b.entity and ours(world, b.entity) then
 			self.sent[b.entity] = now + SENT_S
@@ -487,6 +496,7 @@ end
 -- its owner (P:credit), and counts for its talents in fights (fight.lua). `change`: the hit's health change.
 function P:on_hit(world, source, target, change)
 	self.threat:on_hit(world, source, target)
+	self.idle:on_hit(world, source, target)
 	if not (self.ids[source] or self.ids[target]) then return end
 	local now = self.env.now(world)
 	if self.ids[source] then self.fought[source] = now end

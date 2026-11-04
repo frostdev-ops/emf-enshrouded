@@ -327,6 +327,14 @@ function T:scan(world, present)
 	end
 end
 
+-- Whether a monster is held in `account`'s fight now.
+function T:holds(account)
+	for _, h in pairs(self.held) do
+		if h.account == account then return true end
+	end
+	return false
+end
+
 -- Monster `id` died (or is gone): nothing more for it.
 function T:forget(id)
 	self.held[id] = nil

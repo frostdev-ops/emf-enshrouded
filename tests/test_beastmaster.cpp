@@ -4053,3 +4053,104 @@ TEST_CASE("idle: each player's beasts follow only their own stillness") {
     CHECK(contains(b.r.fake.destroyed, 1234));  // out of the world while away
     CHECK(asleep(b, 1235));
 }
+
+TEST_CASE("idle: a hit wakes the beasts at once; idling waits 10 s after the last hit to or from the owner or a beast, and while the threat share holds a monster for them") {
+    RollRig b({{"idle_s", "5"}});
+    b.roll(0.0);
+    b.reply("beastmaster.give wolf");
+    roaming(b, "Wolf", 1234, 0, 4);
+    b.seconds(7);
+    REQUIRE(asleep(b, 1234));
+    creature(b, 70, 0, 20, kSkeletonFoe);
+    deliver(b.r.fake, "HitEvent", hit(70, 1234, -5));  // a monster bites the wolf
+    CHECK(awake(b, 1234));                             // in the event, before any step
+    b.seconds(8);
+    CHECK(awake(b, 1234));  // 10 s quiet first (idle_s is 5)
+    b.seconds(3);
+    REQUIRE(asleep(b, 1234));
+    deliver(b.r.fake, "HitEvent", hit(1, 70, -5));  // the owner hits a monster
+    CHECK(awake(b, 1234));
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    deliver(b.r.fake, "HitEvent", hit(0, 1, -5));        // a fall: no one's hit
+    deliver(b.r.fake, "HitEvent", hit(1234, 1234, -5));  // its own
+    CHECK(asleep(b, 1234));
+    monster(b, 71, 10, 2, 1);  // a monster goes for the owner: the threat share holds it (on the owner, roll 0)
+    b.seconds(2);
+    REQUIRE(has(b.reply("beastmaster.threat"), "71 on you"));
+    CHECK(awake(b, 1234));
+    b.seconds(12);
+    CHECK(awake(b, 1234));  // held still
+    b.r.fake.attrs[{71, EMF_ATTR_HEALTH}] = 0;  // it falls: let go
+    b.seconds(2);
+    CHECK(asleep(b, 1234));
+}
+
+TEST_CASE("idle: Attack, dismiss and call wake every beast of that owner at once; idling starts anew after idle_s") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.0);
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give wolf");
+    roaming(b, "Wolf", 1234, 0, 4);
+    roaming(b, "Wolf 2", 1235, 0, -4);
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    REQUIRE(asleep(b, 1235));
+    b.reply("beastmaster.dismiss Wolf 2");
+    CHECK(awake(b, 1234));
+    b.seconds(9);
+    CHECK(awake(b, 1234));
+    b.seconds(2);
+    REQUIRE(asleep(b, 1234));
+    roaming(b, "Wolf 2", 1236, 0, -4);  // called again
+    CHECK(awake(b, 1234));
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    REQUIRE(asleep(b, 1236));
+    creature(b, 70, 0, 8, kSkeletonFoe);
+    b.look(1, 0, 10.5, 0, 0);  // the owner looks at it
+    REQUIRE(has(b.reply("beastmaster.attack"), "Your beasts attack (2)"));
+    CHECK(awake(b, 1234));
+    CHECK(awake(b, 1236));
+    b.seconds(15);
+    CHECK(awake(b, 1234));  // Attack's order holds 20 s
+    CHECK(awake(b, 1236));
+}
+
+TEST_CASE("idle: building, the idle setting off, or a beast in a scene more than 15 m away end it; a beast not guarding its owner or farther than 15 m gets no scene") {
+    RollRig b({{"call_cooldown_s", "0"}, {"make_room", "false"}});
+    b.roll(0.0);
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give wolf");
+    roaming(b, "Wolf", 1234, 0, 4);
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 1234).guardEntityId.id = 0;  // not following its owner yet
+    b.seconds(11);
+    CHECK(awake(b, 1234));
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 1234).guardEntityId.id = 1;
+    b.seconds(1);
+    REQUIRE(asleep(b, 1234));
+    building(b.r.fake, 1, true);  // the owner holds something to build (make_room off: the beasts stay)
+    one_step(b);
+    CHECK(awake(b, 1234));
+    b.seconds(15);
+    CHECK(awake(b, 1234));
+    building(b.r.fake, 1, false);
+    b.r.fake.settings["beastmaster.idle"] = "false";
+    b.seconds(15);
+    CHECK(awake(b, 1234));
+    b.r.fake.settings["beastmaster.idle"] = "1";
+    b.seconds(1);
+    REQUIRE(asleep(b, 1234));
+    b.r.fake.settings["beastmaster.idle"] = "false";
+    one_step(b);
+    CHECK(awake(b, 1234));
+    b.r.fake.settings["beastmaster.idle"] = "1";
+    roaming(b, "Wolf 2", 1235, 0, -16);  // 16 m from the owner
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    CHECK(awake(b, 1235));
+    CHECK(ai_now(b, 1235).state == AiState::Roaming);
+    place(b.r.fake, 1234, 0, 10, 16);  // the sleeping wolf is 16 m away now
+    one_step(b);
+    CHECK(awake(b, 1234));
+}
