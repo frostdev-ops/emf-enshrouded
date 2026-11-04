@@ -26,6 +26,8 @@ pub const ABI: u32 = 1;
 
 pub const OK: i32 = 0;
 pub const MODS_FAILED: i32 = 1;
+/// emf_content_portraits: some items failed, the others were drawn or current (the same number as MODS_FAILED).
+pub const ITEMS_FAILED: i32 = 1;
 pub const RUN_FAILED: i32 = 2;
 pub const BAD_REQUEST: i32 = 3;
 pub const REPLY_TOO_SMALL: i32 = 4;

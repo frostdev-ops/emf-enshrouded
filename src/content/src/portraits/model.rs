@@ -10,7 +10,8 @@
 //!   normals n*4, tangents n*4, colours n*4, UVs n*4 ("PNTCT", 24 bytes a vertex). Every LOD of a model shares them.
 //! - A position is two u32 w0, w1: x = w0 >> 11, y = (w0 & 0x7FF) << 10 | (w1 >> 21) & 0x3FF, z = w1 & 0x1FFFFF,
 //!   each / (2^21 - 1) * positionScale + positionOffset ("x21y21z21_unorm"; bit 31 of w1 is not used).
-//! - A normal is three signed 10-bit fields (x in the low bits) / 511; a UV two f16 (u in the low half).
+//! - A normal is three signed 10-bit fields (x in the low bits) / 511; a colour RGBA8; a UV two f16 (u in the low
+//!   half).
 //! - `indexData`: triangle lists, mesh-local, `indexOffset` counted in indices; u16 (u32 when the data's size says so).
 //! - The model's `lods[0]` names the meshes of the finest level.
 
@@ -322,6 +323,15 @@ pub fn decode_lod0(info: &RenderModelInfo, blob: &[u8]) -> Result<(Vec<raster::M
                 [snorm10(w), snorm10(w >> 10), snorm10(w >> 20)]
             })
             .collect();
+        // The vertex colours tint the albedo (the fur cards' colour is in them); all black, no shader multiplies by
+        // them, so they are left out.
+        let colours_at = base + n * 16;
+        let colour_bytes = &blob[colours_at..colours_at + n * 4];
+        let colors = if colour_bytes.chunks_exact(4).all(|c| c[..3] == [0, 0, 0]) {
+            Vec::new()
+        } else {
+            colour_bytes.chunks_exact(4).map(|c| [0, 1, 2].map(|k| c[k] as f32 / 255.0)).collect()
+        };
         let uvs_at = base + n * 20;
         let uvs = (0..n)
             .map(|v| {
@@ -347,7 +357,7 @@ pub fn decode_lod0(info: &RenderModelInfo, blob: &[u8]) -> Result<(Vec<raster::M
                 }
             })
             .collect::<Result<Vec<_>, _>>()?;
-        meshes.push(raster::Mesh { positions, normals, uvs, triangles, material: m.material_index });
+        meshes.push(raster::Mesh { positions, normals, uvs, colors, triangles, material: m.material_index });
     }
     Ok((meshes, notes))
 }
@@ -363,6 +373,7 @@ pub(crate) mod tests {
         pub position: [f32; 3],
         pub normal: [f32; 3],
         pub uv: [f32; 2],
+        pub colour: [u8; 4],
     }
 
     fn snorm10(v: f32) -> u32 {
@@ -388,7 +399,10 @@ pub(crate) mod tests {
                 let n = snorm10(v.normal[0]) | (snorm10(v.normal[1]) << 10) | (snorm10(v.normal[2]) << 20);
                 vertex_bytes.extend_from_slice(&n.to_le_bytes());
             }
-            vertex_bytes.extend(std::iter::repeat_n(0u8, vertices.len() * 8)); // tangents and colours
+            vertex_bytes.extend(std::iter::repeat_n(0u8, vertices.len() * 4)); // tangents
+            for v in vertices {
+                vertex_bytes.extend_from_slice(&v.colour);
+            }
             for v in vertices {
                 vertex_bytes.extend_from_slice(&half::f16::from_f32(v.uv[0]).to_le_bytes());
                 vertex_bytes.extend_from_slice(&half::f16::from_f32(v.uv[1]).to_le_bytes());
@@ -430,7 +444,12 @@ pub(crate) mod tests {
         let vertices = p
             .iter()
             .enumerate()
-            .map(|(i, &position)| Vertex { position, normal: [0.0, 1.0, 0.0], uv: [i as f32 * 0.25, 1.0 - i as f32 * 0.25] })
+            .map(|(i, &position)| Vertex {
+                position,
+                normal: [0.0, 1.0, 0.0],
+                uv: [i as f32 * 0.25, 1.0 - i as f32 * 0.25],
+                colour: [0, 0, 0, 255],
+            })
             .collect();
         (vertices, vec![[0, 1, 2], [0, 2, 3], [0, 3, 1], [1, 3, 2]], material)
     }
@@ -496,6 +515,21 @@ pub(crate) mod tests {
                 assert_eq!(mesh.uvs[i], v.uv);
             }
         }
+    }
+
+    #[test]
+    fn vertex_colours_decode_as_a_tint_unless_all_black() {
+        let mut coloured = tetrahedron(0);
+        for (i, v) in coloured.0.iter_mut().enumerate() {
+            v.colour = [255, 51 * i as u8, 0, 7];
+        }
+        let black = tetrahedron(1);
+        let (blob, record) = encode(&[coloured, black], [0.0; 3], [1.0; 3]);
+        let (meshes, _) = decode_lod0(&parse_render_model(&record).unwrap(), &blob).unwrap();
+        assert_eq!(meshes[0].colors.len(), 4);
+        assert_eq!(meshes[0].colors[2], [1.0, 102.0 / 255.0, 0.0]);
+        // Colours that are all black are no tint (a shader that multiplied by them would draw the mesh black).
+        assert!(meshes[1].colors.is_empty());
     }
 
     #[test]

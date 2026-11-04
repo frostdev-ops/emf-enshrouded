@@ -3,9 +3,11 @@
 //!
 //! Part of emf_content.dll, which as a whole is GPL-3.0-or-later (README.md).
 //!
-//! The model's space is the game's: +Y is up and the model's front faces +Z. Every frame is an orthographic view
+//! The model's space is the game's: left-handed, +Y up, the model's front facing +Z and its right side at +X (so
+//! seen from the front its right side is on the viewer's left, as in the game). Every frame is an orthographic view
 //! from a camera raised by `View::elevation_deg`; frame i shows the model turned by `start_yaw_deg + 360 * i /
 //! frames` degrees about +Y (0: the front faces the viewer; a negative angle turns the front to the viewer's left).
+//! The albedo is multiplied by the vertex colours when a mesh has them.
 //! One scale and one centre hold for all frames, so the model neither grows nor wanders while it turns. The light
 //! is fixed to the camera (from the upper left, in front), plus a sky and ground ambient.
 //!
@@ -47,6 +49,8 @@ pub struct Mesh {
     pub normals: Vec<[f32; 3]>,
     /// Per vertex, or empty: then the material's texture is not used.
     pub uvs: Vec<[f32; 2]>,
+    /// Per vertex, or empty (white): a tint the albedo is multiplied by, linear 0 to 1.
+    pub colors: Vec<[f32; 3]>,
     pub triangles: Vec<[u32; 3]>,
     /// Index into `Model::materials`.
     pub material: usize,
@@ -145,12 +149,19 @@ fn check_model(model: &Model) -> Result<(), String> {
         if !mesh.uvs.is_empty() && mesh.uvs.len() != n {
             return Err(format!("mesh {m}: {} UVs for {n} vertices", mesh.uvs.len()));
         }
+        if !mesh.colors.is_empty() && mesh.colors.len() != n {
+            return Err(format!("mesh {m}: {} vertex colours for {n} vertices", mesh.colors.len()));
+        }
         if let Some(bad) = mesh.triangles.iter().flatten().find(|&&i| i as usize >= n) {
             return Err(format!("mesh {m}: vertex index {bad} out of range ({n} vertices)"));
         }
         let finite = |v: &[[f32; 3]]| v.iter().flatten().all(|c| c.is_finite());
-        if !finite(&mesh.positions) || !finite(&mesh.normals) || !mesh.uvs.iter().flatten().all(|c| c.is_finite()) {
-            return Err(format!("mesh {m}: a position, normal or UV that is not a finite number"));
+        if !finite(&mesh.positions)
+            || !finite(&mesh.normals)
+            || !finite(&mesh.colors)
+            || !mesh.uvs.iter().flatten().all(|c| c.is_finite())
+        {
+            return Err(format!("mesh {m}: a position, normal, UV or colour that is not a finite number"));
         }
     }
     Ok(())
@@ -172,8 +183,8 @@ fn pivot(model: &Model) -> Option<[f32; 3]> {
     lo[0].is_finite().then(|| [(lo[0] + hi[0]) / 2.0, 0.0, (lo[2] + hi[2]) / 2.0])
 }
 
-/// One frame's rotation: a turn about +Y, then the camera's tilt about +X. View space: x to the right, y up, z
-/// towards the viewer.
+/// One frame's rotation: the game's left-handed space mirrored in X into right-handed view space (x to the right,
+/// y up, z towards the viewer), a turn about +Y, then the camera's tilt about +X.
 struct Turn {
     cos_yaw: f32,
     sin_yaw: f32,
@@ -189,8 +200,9 @@ impl Turn {
     }
 
     fn apply(&self, v: [f32; 3]) -> [f32; 3] {
-        let x = v[0] * self.cos_yaw + v[2] * self.sin_yaw;
-        let z = -v[0] * self.sin_yaw + v[2] * self.cos_yaw;
+        let mirrored = -v[0];
+        let x = mirrored * self.cos_yaw + v[2] * self.sin_yaw;
+        let z = -mirrored * self.sin_yaw + v[2] * self.cos_yaw;
         let y = v[1];
         [x, y * self.cos_tilt - z * self.sin_tilt, y * self.sin_tilt + z * self.cos_tilt]
     }
@@ -354,10 +366,10 @@ impl Target {
 
 /// The light, fixed to the camera: from the upper left, in front (view space, the direction towards the light).
 const LIGHT: [f32; 3] = [-0.45, 0.65, 0.61];
-const DIFFUSE: f32 = 0.85;
+const DIFFUSE: f32 = 1.0;
 /// The ambient light on a normal pointing down, and on one pointing up.
-const AMBIENT_GROUND: f32 = 0.22;
-const AMBIENT_SKY: f32 = 0.42;
+const AMBIENT_GROUND: f32 = 0.28;
+const AMBIENT_SKY: f32 = 0.5;
 
 fn draw_mesh(target: &mut Target, mesh: &Mesh, surface: &Surface, pivot: [f32; 3], turn: &Turn, fit: &Fit) {
     let view: Vec<[f32; 3]> = mesh.positions.iter().map(|&p| turn.apply(sub(p, pivot))).collect();
@@ -366,6 +378,7 @@ fn draw_mesh(target: &mut Target, mesh: &Mesh, surface: &Surface, pivot: [f32; 3
     let light = normalize(LIGHT);
     let has_normals = !normals.is_empty();
     let textured = !mesh.uvs.is_empty();
+    let tinted = !mesh.colors.is_empty();
     for tri in &mesh.triangles {
         let [a, b, c] = tri.map(|i| i as usize);
         // The face's normal in view space, turned to the side its vertex normals point to (the outside).
@@ -426,9 +439,14 @@ fn draw_mesh(target: &mut Target, mesh: &Mesh, surface: &Surface, pivot: [f32; 3
                 };
                 let ambient = AMBIENT_GROUND + (AMBIENT_SKY - AMBIENT_GROUND) * (n[1] * 0.5 + 0.5);
                 let shade = ambient + DIFFUSE * dot(n, light).max(0.0);
+                let tint = if tinted {
+                    add(add(scale(mesh.colors[a], wa), scale(mesh.colors[b], wb)), scale(mesh.colors[c], wc))
+                } else {
+                    [1.0; 3]
+                };
                 target.depth[i] = z;
                 target.covered[i] = true;
-                target.colour[i] = [albedo[0] * shade, albedo[1] * shade, albedo[2] * shade];
+                target.colour[i] = [0, 1, 2].map(|k| albedo[k] * tint[k] * shade);
             }
         }
     }
@@ -483,26 +501,29 @@ fn linear_to_srgb8(c: f32) -> u8 {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
-    fn solid(width: u32, height: u32, rgba: [u8; 4]) -> Texture {
+    pub(crate) fn solid(width: u32, height: u32, rgba: [u8; 4]) -> Texture {
         Texture { width, height, rgba: rgba.iter().copied().cycle().take((width * height * 4) as usize).collect() }
     }
 
-    /// A unit quad in the XY plane at z, facing +Z (towards the viewer at yaw 0), UVs (0,0) top left.
+    /// A unit quad in the XY plane at z, facing +Z (towards the viewer at yaw 0). Seen from the front, +X is on
+    /// the viewer's left (the game's space is left-handed), so u grows towards -X: UV (0, 0) is at the viewer's top
+    /// left.
     fn quad(z: f32, material: usize) -> Mesh {
         Mesh {
             positions: vec![[-0.5, -0.5, z], [0.5, -0.5, z], [0.5, 0.5, z], [-0.5, 0.5, z]],
             normals: vec![[0.0, 0.0, 1.0]; 4],
-            uvs: vec![[0.0, 1.0], [1.0, 1.0], [1.0, 0.0], [0.0, 0.0]],
+            uvs: vec![[1.0, 1.0], [0.0, 1.0], [0.0, 0.0], [1.0, 0.0]],
+            colors: Vec::new(),
             triangles: vec![[0, 1, 2], [0, 2, 3]],
             material,
         }
     }
 
     /// A cube from -h to h on every axis, each face its own 4 vertices with outward normals.
-    fn cube(h: f32, material: usize) -> Mesh {
+    pub(crate) fn cube(h: f32, material: usize) -> Mesh {
         let mut mesh = Mesh { material, ..Default::default() };
         let faces: [([f32; 3], [f32; 3], [f32; 3]); 6] = [
             ([0.0, 0.0, 1.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]),
@@ -678,6 +699,59 @@ mod tests {
         assert!(!blue.is_empty(), "the marker shows");
         let mean = blue.iter().sum::<u32>() as f32 / blue.len() as f32;
         assert!(mean < 28.0, "the marker is left of the middle: mean x {mean}");
+    }
+
+    /// The cube with a blue marker block on the model's right side (+X in the game's left-handed space).
+    fn cube_with_right_marker() -> Model {
+        let mut marker = cube(0.2, 1);
+        for p in &mut marker.positions {
+            p[0] += 1.2;
+        }
+        let materials = vec![
+            Material { texture: Some(solid(2, 2, [200, 200, 200, 255])), ..Default::default() },
+            Material { texture: Some(solid(2, 2, [20, 20, 230, 255])), ..Default::default() },
+        ];
+        Model { meshes: vec![cube(1.0, 0), marker], materials }
+    }
+
+    fn mean_blue_x(frame: &Frame) -> Option<f32> {
+        let size = frame.size;
+        let xs: Vec<u32> = (0..size)
+            .flat_map(|y| (0..size).map(move |x| (x, y)))
+            .filter(|&(x, y)| {
+                let p = frame.pixel(x, y);
+                p[3] == 255 && p[2] as u32 > 2 * (p[0] as u32).max(1)
+            })
+            .map(|(x, _)| x)
+            .collect();
+        (!xs.is_empty()).then(|| xs.iter().sum::<u32>() as f32 / xs.len() as f32)
+    }
+
+    #[test]
+    fn the_models_right_is_on_the_viewers_left_from_the_front() {
+        // The game's space is left-handed: facing the model's front, its right side (+X) is on the viewer's left.
+        let frame = &render_turntable(&cube_with_right_marker(), &front_view(1, 64)).unwrap()[0];
+        let x = mean_blue_x(frame).expect("the marker shows");
+        assert!(x < 24.0, "the marker is on the left: mean x {x}");
+    }
+
+    #[test]
+    fn vertex_colours_tint_the_albedo() {
+        let white = vec![Material { texture: Some(solid(2, 2, [255, 255, 255, 255])), ..Default::default() }];
+        let mut tinted = quad(0.0, 0);
+        tinted.colors = vec![[1.0, 0.0, 0.0]; 4];
+        let frame = &render_turntable(&Model { meshes: vec![tinted], materials: white.clone() }, &front_view(1, 32))
+            .unwrap()[0];
+        let [r, g, b, _] = frame.pixel(16, 16);
+        assert!(r > 150 && g == 0 && b == 0, "red: {r} {g} {b}");
+        let plain = &render_turntable(&Model { meshes: vec![quad(0.0, 0)], materials: white }, &front_view(1, 32))
+            .unwrap()[0];
+        let [r, g, b, _] = plain.pixel(16, 16);
+        assert!(r > 150 && r == g && g == b, "no colours: white, lit: {r} {g} {b}");
+        let mut uneven = quad(0.0, 0);
+        uneven.colors = vec![[1.0; 3]; 3];
+        let error = render_turntable(&Model { meshes: vec![uneven], materials: vec![] }, &front_view(1, 32)).unwrap_err();
+        assert!(error.contains("colours"), "{error}");
     }
 
     #[test]
