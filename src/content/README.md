@@ -135,7 +135,8 @@ Request:
 - An item: `key` (1 to 64 of `A-Z a-z 0-9 _ . -`, the overlay's rule, and not ending in a dot or being a Windows
   device name such as `CON` or `COM1`; unique, ignoring case); `model` (a `keen::RenderModel`) or `template` (a
   `keen::ecs::TemplateResource`, drawn with the model of its `keen::ecs::ModelResource`), a GUID as text, exactly one;
-  `frames` 1 to 64 (24); `size` 8 to 512 (256). A bad item fails alone; the others are drawn.
+  `frames` 1 to 64 (24); `size` 8 to 512 (256). A bad item fails alone; the others are drawn. So does an item whose
+  drawing panics (the panic and its place go to the log, the item gets `"drawing it panicked: ..."`).
 
 What it writes, per item, in `<cache_dir>\<key>\`:
 

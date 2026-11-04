@@ -373,7 +373,17 @@ pub fn run<S: Source>(request: Request, file_name: &str, open: impl FnOnce(&Path
             continue;
         };
         let started = std::time::Instant::now();
-        match draw_item(source, &item, cache_dir) {
+        // A panic while drawing one item (in EML's decoders, say) fails that item; the export's hook has logged it.
+        let drawn = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| draw_item(source, &item, cache_dir)))
+            .unwrap_or_else(|payload| {
+                let text = payload
+                    .downcast_ref::<&str>()
+                    .map(|s| s.to_string())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_default();
+                Err(format!("drawing it panicked: {text}"))
+            });
+        match drawn {
             Ok((status, inputs, notes)) => {
                 if status == Status::Drawn {
                     tracing::info!(target: "emf::portraits", "Portrait {}: drew {} frames of {} px of {} ({}) in {} ms",
@@ -494,6 +504,9 @@ mod tests {
 
         fn model(&mut self, inputs: &Inputs) -> Result<(raster::Model, Vec<String>), String> {
             self.calls.models.set(self.calls.models.get() + 1);
+            if self.broken.as_deref() == Some("panic") && inputs.model == BOAR {
+                panic!("the boar's texture decoder fell over");
+            }
             let colour = if inputs.model == WOLF { [150, 150, 160, 255] } else { [120, 80, 40, 255] };
             let materials = vec![raster::Material { texture: Some(solid(2, 2, colour)), ..Default::default() }];
             Ok((raster::Model { meshes: vec![cube(1.0, 0)], materials }, vec!["a note".into()]))
@@ -714,6 +727,19 @@ mod tests {
         assert_eq!(run.reply.items[0].status, Status::Failed);
         assert_eq!(run.reply.items[1].status, Status::Drawn);
         assert_eq!(frame_files(&cache.0.join("wolf")), ["00.png", "01.png"]);
+    }
+
+    #[test]
+    fn a_panic_in_one_item_fails_that_item_alone() {
+        let cache = TempDir::new("panic");
+        let items = json!([{"key": "boar", "model": BOAR, "frames": 2, "size": 16},
+                           {"key": "wolf", "model": WOLF, "frames": 2, "size": 16}]);
+        let run = run_fake(&cache, items, 1, Some("panic"));
+        assert_eq!(run.reply.code, ITEMS_FAILED);
+        assert_eq!(run.reply.items[0].status, Status::Failed);
+        let error = run.reply.items[0].error.as_deref().unwrap();
+        assert!(error.contains("panicked") && error.contains("fell over"), "{error}");
+        assert_eq!(run.reply.items[1].status, Status::Drawn);
     }
 
     #[test]

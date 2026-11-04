@@ -68,7 +68,8 @@ typedef int32_t (*emf_content_portraits_fn)(const char* request_json, emf_conten
    64 of A-Z a-z 0-9 _ . -, not ending in a dot, not a Windows device name such as CON or COM1, unique ignoring case);
    model (a keen::RenderModel) or template (a keen::ecs::TemplateResource, drawn with its ModelResource's model), a
    GUID as text, exactly one of them; frames 1 to 64 (default 24); size 8 to 512 (default 256). A bad item fails
-   alone. For tests only, "test_panic": "<message>" makes the call panic with that message.
+   alone, and so does one whose drawing panics (the panic goes to the log). For tests only, "test_panic":
+   "<message>" makes the call panic with that message.
 
    For each item: <cache_dir>\<key>\00.png, 01.png, ... (size x size RGBA8 PNG, sRGB, straight alpha, transparent
    background; frame i is the model turned by 360 * i / frames degrees, frame 0 a three-quarter view) and index.json
