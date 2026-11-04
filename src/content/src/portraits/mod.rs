@@ -10,7 +10,9 @@
 //! Its frames go to `<cache_dir>\<key>\00.png, 01.png, ...` with an `index.json` beside them (the frame count, the
 //! size and the inputs: the render model, the content hashes of its render data and albedo textures, and a hash of
 //! its records). An item whose index already matches is left as it is; a game update that changes the model, or a
-//! request with other frames or size, draws it again. Stale frames past the new count are removed.
+//! request with other frames or size, draws it again. A drawing is written into a staging folder beside the item's
+//! folder and replaces it whole (`write_portrait`), so the folder never mixes two drawings or keeps frames past the
+//! new count.
 //!
 //! Part of emf_content.dll, which as a whole is GPL-3.0-or-later (README.md).
 
@@ -92,7 +94,9 @@ pub enum Status {
     Drawn,
     /// Its index matched: left as it was.
     Current,
-    /// Not drawn: see `error`. Frames from an earlier call stay.
+    /// Not drawn: see `error`. The item's folder is as it was before the call, but for one case: when the new folder
+    /// could not be moved in and the old one could not be moved back, the old one is left as `<key>~old-<pid>-<time>`,
+    /// which `error` names.
     Failed,
 }
 
@@ -244,52 +248,137 @@ fn is_current(folder: &Path, index: &Index) -> bool {
     found == *index && (0..index.frames as usize).all(|i| folder.join(frame_name(i)).is_file())
 }
 
-/// Writes `bytes` to `path` through a `.tmp` beside it, so a file is either whole or the old one.
-fn write_file(path: &Path, bytes: &[u8]) -> Result<(), String> {
-    let mut tmp = path.as_os_str().to_owned();
-    tmp.push(".tmp");
-    let tmp = std::path::PathBuf::from(tmp);
-    std::fs::write(&tmp, bytes).map_err(|e| format!("could not write {}: {e}", tmp.display()))?;
-    std::fs::rename(&tmp, path).map_err(|e| {
-        let _ = std::fs::remove_file(&tmp);
-        format!("could not write {}: {e}", path.display())
-    })
+/// Renames a file or folder: `std::fs::rename`, or a stand-in in tests.
+type Rename<'a> = dyn Fn(&Path, &Path) -> std::io::Result<()> + 'a;
+
+/// Another process's staging or old folder is left alone until it is this old, in seconds; while a call draws, its
+/// folders are seconds old.
+const LEFTOVER_AGE: u64 = 3600;
+
+fn unix_time() -> u64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |d| d.as_secs())
 }
 
-/// Removes the frame files other than 00.png .. (frames-1).png: files named by a number alone, and `.tmp` files.
-fn remove_stale_frames(folder: &Path, frames: usize) -> Result<(), String> {
-    let entries = std::fs::read_dir(folder).map_err(|e| format!("could not list {}: {e}", folder.display()))?;
+/// The process id and time (seconds since 1970) in the name of a staging or old folder, `<key>~new-<pid>-<time>` or
+/// `<key>~old-<pid>-<time>`; None for any other name. A key has no `~`, so no portrait's folder has such a name.
+fn side_folder_owner(name: &str) -> Option<(u32, u64)> {
+    let (key, rest) = name.split_once('~')?;
+    check_key(key).ok()?;
+    let (pid, time) = rest.strip_prefix("new-").or_else(|| rest.strip_prefix("old-"))?.split_once('-')?;
+    let digits = |s: &str| !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+    if !(digits(pid) && digits(time)) {
+        return None;
+    }
+    Some((pid.parse().ok()?, time.parse().ok()?))
+}
+
+/// Removes the staging and old folders earlier calls left in the cache (a call cut short, an old folder that could
+/// not be removed or moved back): this process's, and another process's once they are LEFTOVER_AGE old.
+fn remove_leftovers(cache_dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(cache_dir) else { return };
+    let now = unix_time();
     for entry in entries.flatten() {
-        let name = entry.file_name().to_string_lossy().into_owned();
-        let stale = match name.strip_suffix(".png") {
-            Some(stem) if !stem.is_empty() && stem.bytes().all(|b| b.is_ascii_digit()) => {
-                stem.parse::<usize>().map_or(true, |n| n >= frames || stem != format!("{n:02}"))
+        let Some((pid, time)) = side_folder_owner(&entry.file_name().to_string_lossy()) else { continue };
+        let left = pid == std::process::id() || now.saturating_sub(time) >= LEFTOVER_AGE;
+        if left && entry.file_type().is_ok_and(|t| t.is_dir()) {
+            if let Err(e) = std::fs::remove_dir_all(entry.path()) {
+                tracing::warn!(target: "emf::portraits", "Could not remove {}: {e}", entry.path().display());
             }
-            _ => name.ends_with(".tmp"),
-        };
-        if stale && entry.path().is_file() {
-            std::fs::remove_file(entry.path()).map_err(|e| format!("could not remove {name}: {e}"))?;
         }
     }
-    Ok(())
 }
 
-/// Writes the frames and then the index (removed first, so a write cut short is drawn again next time), and
-/// removes stale frames.
-fn write_portrait(folder: &Path, pngs: &[Vec<u8>], index: &Index) -> Result<(), String> {
-    std::fs::create_dir_all(folder).map_err(|e| format!("could not make {}: {e}", folder.display()))?;
-    match std::fs::remove_file(folder.join(INDEX)) {
+/// Writes the frames, then the index, into `folder`.
+fn write_frames(
+    folder: &Path,
+    pngs: impl IntoIterator<Item = Result<Vec<u8>, String>>,
+    index: &Index,
+) -> Result<(), String> {
+    let write = |name: &str, bytes: &[u8]| {
+        let path = folder.join(name);
+        std::fs::write(&path, bytes).map_err(|e| format!("could not write {}: {e}", path.display()))
+    };
+    let mut count = 0;
+    for (i, png) in pngs.into_iter().enumerate() {
+        write(&frame_name(i), &png?)?;
+        count += 1;
+    }
+    if count != index.frames as usize {
+        return Err(format!("{count} frames were drawn for an index of {}", index.frames));
+    }
+    write(INDEX, &serde_json::to_vec_pretty(index).map_err(|e| format!("{INDEX}: {e}"))?)
+}
+
+/// Writes a portrait into a staging folder beside its folder, `<key>~new-<pid>-<time>`, and swaps it in: the folder
+/// is moved aside to `<key>~old-<pid>-<time>`, the staging folder takes its name, and the old one is removed. So the
+/// folder holds one drawing's frames and index, never a mix. When writing or the swap fails, the folder is as it was
+/// (moved back when it had been moved aside) and the staging folder is removed; only when the folder cannot be moved
+/// back either is it left under its old name, which the error gives (`remove_leftovers` removes it later, and the
+/// next call draws the item again).
+fn write_portrait(
+    cache_dir: &Path,
+    key: &str,
+    pngs: impl IntoIterator<Item = Result<Vec<u8>, String>>,
+    index: &Index,
+    rename: &Rename,
+) -> Result<(), String> {
+    std::fs::create_dir_all(cache_dir).map_err(|e| format!("could not make {}: {e}", cache_dir.display()))?;
+    let (pid, now) = (std::process::id(), unix_time());
+    let live = cache_dir.join(key);
+    // Only a folder is ever moved aside: never a file, a link or a junction of that name.
+    match std::fs::symlink_metadata(&live) {
+        Ok(meta) if !meta.is_dir() => return Err(format!("{} is not a folder: left as it is", live.display())),
         Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
-            return Err(format!("could not remove the old {INDEX}: {e}"));
+            return Err(format!("could not read {}: {e}", live.display()));
         }
         _ => {}
     }
-    for (i, png) in pngs.iter().enumerate() {
-        write_file(&folder.join(frame_name(i)), png)?;
+    let staging = cache_dir.join(format!("{key}~new-{pid}-{now}"));
+    let old = cache_dir.join(format!("{key}~old-{pid}-{now}"));
+    // Folders of these names are this process's own, left by a call in the same second
+    for leftover in [&staging, &old] {
+        match std::fs::remove_dir_all(leftover) {
+            Err(e) if e.kind() != std::io::ErrorKind::NotFound => {
+                return Err(format!("could not remove {}: {e}", leftover.display()));
+            }
+            _ => {}
+        }
     }
-    remove_stale_frames(folder, pngs.len())?;
-    let json = serde_json::to_vec_pretty(index).map_err(|e| format!("{INDEX}: {e}"))?;
-    write_file(&folder.join(INDEX), &json)
+    std::fs::create_dir(&staging).map_err(|e| format!("could not make {}: {e}", staging.display()))?;
+    let discard_staging = || {
+        if let Err(e) = std::fs::remove_dir_all(&staging) {
+            tracing::warn!(target: "emf::portraits", "Could not remove {}: {e}", staging.display());
+        }
+    };
+    if let Err(e) = write_frames(&staging, pngs, index) {
+        discard_staging();
+        return Err(e);
+    }
+    let moved_aside = match rename(&live, &old) {
+        Ok(()) => true,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => false,
+        Err(e) => {
+            discard_staging();
+            return Err(format!("could not move {} aside: {e}", live.display()));
+        }
+    };
+    if let Err(e) = rename(&staging, &live) {
+        let mut error = format!("could not move the new frames into {}: {e}", live.display());
+        if moved_aside {
+            if let Err(back) = rename(&old, &live) {
+                error = format!("{error}; the old frames could not be moved back either and are in {}: {back}",
+                    old.display());
+            }
+        }
+        discard_staging();
+        return Err(error);
+    }
+    if moved_aside {
+        if let Err(e) = std::fs::remove_dir_all(&old) {
+            tracing::warn!(target: "emf::portraits", "Could not remove {} (a later call does): {e}", old.display());
+        }
+    }
+    Ok(())
 }
 
 /// Draws one item unless it is current.
@@ -300,14 +389,13 @@ fn draw_item<S: Source>(source: &mut S, item: &Item, cache_dir: &Path) -> Result
         Target::Model(_) => None,
     };
     let index = Index { renderer: RENDERER, frames: item.frames, size: item.size, template, inputs };
-    let folder = cache_dir.join(&item.key);
-    if is_current(&folder, &index) {
+    if is_current(&cache_dir.join(&item.key), &index) {
         return Ok((Status::Current, index.inputs, Vec::new()));
     }
     let (model, notes) = source.model(&index.inputs)?;
     let frames = raster::render_turntable(&model, &raster::View::new(item.frames, item.size))?;
-    let pngs = frames.iter().map(raster::encode_png).collect::<Result<Vec<_>, _>>()?;
-    write_portrait(&folder, &pngs, &index)?;
+    let pngs = frames.iter().map(raster::encode_png);
+    write_portrait(cache_dir, &item.key, pngs, &index, &|from, to| std::fs::rename(from, to))?;
     Ok((Status::Drawn, index.inputs, notes))
 }
 
@@ -348,6 +436,7 @@ pub fn run<S: Source>(request: Request, file_name: &str, open: impl FnOnce(&Path
     let mut source = None;
     let mut open_error = None;
     if checked.iter().any(|(_, item)| item.is_ok()) {
+        remove_leftovers(cache_dir);
         match open(Path::new(&request.game_dir), file_name) {
             Ok(s) => source = Some(s),
             Err(e) => {
@@ -647,7 +736,7 @@ mod tests {
     }
 
     #[test]
-    fn fewer_frames_remove_the_stale_ones() {
+    fn fewer_frames_leave_only_the_new_ones() {
         let cache = TempDir::new("fewer");
         run_fake(&cache, json!([{"key": "wolf", "model": WOLF, "frames": 8, "size": 32}]), 1, None);
         let folder = cache.0.join("wolf");
@@ -657,10 +746,177 @@ mod tests {
         std::fs::write(folder.join("notes.txt"), b"not a frame").unwrap();
         let run = run_fake(&cache, json!([{"key": "wolf", "model": WOLF, "frames": 3, "size": 32}]), 1, None);
         assert_eq!(run.reply.items[0].status, Status::Drawn);
-        assert_eq!(frame_files(&folder), ["00.png", "01.png", "02.png", "notes.txt"]);
+        assert_eq!(frame_files(&folder), ["00.png", "01.png", "02.png"], "the folder is the new drawing alone");
         assert_eq!(index_of(&folder)["frames"], 3, "the index's count matches the frames written");
+        assert_eq!(side_folders(&cache.0), Vec::<String>::new());
         let run = run_fake(&cache, json!([{"key": "wolf", "model": WOLF, "frames": 3, "size": 32}]), 1, None);
         assert_eq!(run.reply.items[0].status, Status::Current);
+    }
+
+    /// Every file in a folder with its bytes, by name.
+    fn snapshot(folder: &Path) -> Vec<(String, Vec<u8>)> {
+        let mut files: Vec<(String, Vec<u8>)> = std::fs::read_dir(folder)
+            .unwrap()
+            .flatten()
+            .map(|e| (e.file_name().to_string_lossy().into_owned(), std::fs::read(e.path()).unwrap()))
+            .collect();
+        files.sort();
+        files
+    }
+
+    /// The names in the cache with a `~`: staging and old folders, and the test's own leftovers.
+    fn side_folders(cache: &Path) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(cache)
+            .unwrap()
+            .flatten()
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| n.contains('~'))
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn wolf_index(frames: u32) -> Index {
+        let inputs = Inputs {
+            model: WOLF.into(),
+            name: "wolf".into(),
+            render_data: "render".into(),
+            albedo: vec![None],
+            records: "records".into(),
+        };
+        Index { renderer: RENDERER, frames, size: 32, template: None, inputs }
+    }
+
+    fn new_pngs(frames: usize) -> impl Iterator<Item = Result<Vec<u8>, String>> {
+        (0..frames).map(|i| Ok(format!("new frame {i}").into_bytes()))
+    }
+
+    fn fs_rename(from: &Path, to: &Path) -> std::io::Result<()> {
+        std::fs::rename(from, to)
+    }
+
+    /// The cache with the wolf drawn: 4 frames of 32 px and its index.
+    fn drawn_wolf(name: &str) -> (TempDir, PathBuf, Vec<(String, Vec<u8>)>) {
+        let cache = TempDir::new(name);
+        run_fake(&cache, json!([{"key": "wolf", "model": WOLF, "frames": 4, "size": 32}]), 1, None);
+        let folder = cache.0.join("wolf");
+        let before = snapshot(&folder);
+        assert_eq!(before.len(), 5);
+        (cache, folder, before)
+    }
+
+    #[test]
+    fn a_failure_while_the_new_frames_are_written_leaves_the_folder_as_it_was() {
+        let (cache, folder, before) = drawn_wolf("midwrite");
+        let pngs = new_pngs(2).chain([Err("the disk is full".to_string())]);
+        let error = write_portrait(&cache.0, "wolf", pngs, &wolf_index(6), &fs_rename).unwrap_err();
+        assert!(error.contains("the disk is full"), "{error}");
+        assert_eq!(snapshot(&folder), before, "the old frames and index, unchanged");
+        assert_eq!(side_folders(&cache.0), Vec::<String>::new());
+    }
+
+    /// Windows does not rename a folder while a file in it is open (a scanner reading a frame, say).
+    #[cfg(windows)]
+    #[test]
+    fn a_folder_that_cannot_be_moved_aside_is_left_as_it_was() {
+        let (cache, folder, before) = drawn_wolf("held");
+        let held = std::fs::File::open(folder.join("01.png")).unwrap();
+        let run = run_fake(&cache, json!([{"key": "wolf", "model": WOLF, "frames": 6, "size": 40}]), 1, None);
+        drop(held);
+        assert_eq!(run.reply.code, ITEMS_FAILED);
+        assert_eq!(run.reply.items[0].status, Status::Failed);
+        let error = run.reply.items[0].error.as_deref().unwrap();
+        assert!(error.contains("wolf"), "{error}");
+        assert_eq!(snapshot(&folder), before, "the old frames and index, unchanged");
+        assert_eq!(side_folders(&cache.0), Vec::<String>::new());
+        // Let go of, it is drawn at the next call.
+        let run = run_fake(&cache, json!([{"key": "wolf", "model": WOLF, "frames": 6, "size": 40}]), 1, None);
+        assert_eq!(run.reply.items[0].status, Status::Drawn, "{:?}", run.reply.items[0].error);
+        assert_eq!(frame_files(&folder).len(), 6);
+        assert_eq!(png_size(&folder.join("05.png")), (40, 40));
+    }
+
+    #[test]
+    fn a_refused_move_into_place_puts_the_old_folder_back() {
+        let (cache, folder, before) = drawn_wolf("putback");
+        let refuse = |from: &Path, to: &Path| -> std::io::Result<()> {
+            if to == folder.as_path() && from.to_string_lossy().contains("~new") {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "held by a scanner"));
+            }
+            std::fs::rename(from, to)
+        };
+        let error = write_portrait(&cache.0, "wolf", new_pngs(6), &wolf_index(6), &refuse).unwrap_err();
+        assert!(error.contains("held by a scanner"), "{error}");
+        assert_eq!(snapshot(&folder), before, "the old frames and index, moved back");
+        assert_eq!(side_folders(&cache.0), Vec::<String>::new());
+    }
+
+    #[test]
+    fn an_old_folder_that_cannot_be_moved_back_is_named_and_removed_at_the_next_call() {
+        let (cache, folder, before) = drawn_wolf("noway");
+        let refuse = |from: &Path, to: &Path| -> std::io::Result<()> {
+            if to == folder.as_path() {
+                return Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "held by a scanner"));
+            }
+            std::fs::rename(from, to)
+        };
+        let error = write_portrait(&cache.0, "wolf", new_pngs(6), &wolf_index(6), &refuse).unwrap_err();
+        let left = side_folders(&cache.0);
+        assert_eq!(left.len(), 1, "{left:?}");
+        assert!(left[0].starts_with(&format!("wolf~old-{}-", std::process::id())), "{left:?}");
+        assert!(error.contains(&left[0]), "the error says where the old frames are: {error}");
+        assert_eq!(snapshot(&cache.0.join(&left[0])), before);
+        assert!(!folder.exists());
+        let run = run_fake(&cache, json!([{"key": "wolf", "model": WOLF, "frames": 4, "size": 32}]), 1, None);
+        assert_eq!(run.reply.items[0].status, Status::Drawn);
+        assert_eq!(side_folders(&cache.0), Vec::<String>::new());
+    }
+
+    #[test]
+    fn a_file_where_the_folder_would_be_is_left_alone() {
+        // A cache_dir that holds other files (the game folder, say) and a key that names one of them
+        let cache = TempDir::new("file");
+        std::fs::write(cache.0.join("enshrouded.kfc"), b"not ours").unwrap();
+        let run = run_fake(&cache, json!([{"key": "enshrouded.kfc", "model": WOLF, "frames": 2, "size": 16}]), 1, None);
+        assert_eq!(run.reply.items[0].status, Status::Failed);
+        let error = run.reply.items[0].error.as_deref().unwrap();
+        assert!(error.contains("not a folder"), "{error}");
+        assert_eq!(std::fs::read(cache.0.join("enshrouded.kfc")).unwrap(), b"not ours");
+        assert_eq!(side_folders(&cache.0), Vec::<String>::new());
+    }
+
+    #[test]
+    fn leftovers_are_removed_but_not_another_processs_recent_ones() {
+        let cache = TempDir::new("leftovers");
+        let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
+        let pid = std::process::id();
+        let other = if pid == 999_999 { 999_998 } else { 999_999 };
+        let folder = |name: &str| {
+            std::fs::create_dir_all(cache.0.join(name)).unwrap();
+            std::fs::write(cache.0.join(name).join("00.png"), b"left").unwrap();
+            name.to_string()
+        };
+        // Removed: this process's, and another's an hour old
+        folder(&format!("wolf~new-{pid}-{now}"));
+        folder(&format!("boar~old-{pid}-{}", now - 10));
+        folder(&format!("wolf~new-{other}-{}", now - 7200));
+        folder(&format!("boar~old-{other}-{}", now - 3600));
+        // Kept: another process's recent ones, and names that are not ours
+        let mut kept = vec![
+            folder(&format!("wolf~new-{other}-{now}")),
+            folder(&format!("boar~old-{other}-{}", now - 3500)),
+            folder("notes~1"),
+            folder("a b~new-1-1"),
+            folder(&format!("wolf~tmp-{pid}-{now}")),
+            folder(&format!("wolf~new-x{pid}-{now}")),
+        ];
+        let file = format!("deer~new-{other}-{}", now - 7200);
+        std::fs::write(cache.0.join(&file), b"a file, not a folder").unwrap();
+        kept.push(file);
+        kept.sort();
+        let run = run_fake(&cache, json!([{"key": "deer", "model": WOLF, "frames": 1, "size": 8}]), 1, None);
+        assert_eq!(run.reply.items[0].status, Status::Drawn);
+        assert_eq!(side_folders(&cache.0), kept);
     }
 
     #[test]

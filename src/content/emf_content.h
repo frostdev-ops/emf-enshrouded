@@ -75,9 +75,14 @@ typedef int32_t (*emf_content_portraits_fn)(const char* request_json, emf_conten
    background; frame i is the model turned by 360 * i / frames degrees, frame 0 a three-quarter view) and index.json
    (frames, size, the renderer's version, the template, and the inputs: the render model, its debugName, the content
    hashes of its render data and albedo textures, a hash of its records). An item whose index.json matches and whose
-   frames are all there is left as it is ("current"); otherwise it is drawn again, index.json last, and frame files
-   past the new count are removed. A failed item keeps the frames it had. The game's archive is opened once, and only
-   when an item is good; nothing in the game folder is written.
+   frames are all there is left as it is ("current"); otherwise it is drawn again into a staging folder beside it,
+   <key>~new-<pid>-<time> (time in seconds since 1970), which then replaces <cache_dir>\<key> whole: the old folder is
+   moved aside to <key>~old-<pid>-<time> and removed. So the folder never mixes two drawings or keeps frames past the
+   new count. A failed item's folder is as it was before the call, but for one case: when the new folder could not be
+   moved in and the old one could not be moved back, the old one is left as <key>~old-<pid>-<time>, which the item's
+   error names. A <cache_dir>\<key> that is not a folder (a file, a link) is never moved: that item fails. Staging and
+   old folders left by earlier calls are removed when a call has a good item: this process's, and other processes'
+   after an hour. The game's archive is opened once, and only when an item is good. No game file is written.
 
    reply: a NUL-terminated UTF-8 JSON
      {"code": n, "message": "...", "items": [{"key": "...", "status": "drawn" | "current" | "failed",

@@ -146,10 +146,17 @@ What it writes, per item, in `<cache_dir>\<key>\`:
   its debugName, the content hashes of its render data and of its albedo textures, an FNV-64 of its records).
 
 An item whose `index.json` matches and whose frames are all there is left alone (`"current"`; only its records are
-read). Anything else is drawn again: `index.json` is removed first and written last (so a write cut short is drawn
-again at the next call), frames go through `.tmp` files, and frame files past the new count are removed. A failed
-item keeps the frames it had. Nothing in `game_dir` is written. A game update that changes a model (its records or
-the content they name) draws it again; so does a new renderer version.
+read). Anything else is drawn again, into a staging folder beside it, `<key>~new-<pid>-<time>` (`~` is never in a
+key), which then replaces `<cache_dir>\<key>` whole: the old folder is moved aside to `<key>~old-<pid>-<time>` and
+removed. So the folder never mixes two drawings or keeps frames past the new count, and two processes on one cache
+never write into each other's files. A failed item's folder is as it was before the call, but for one case: when the
+new folder could not be moved in and the old one could not be moved back, the old one is left as
+`<key>~old-<pid>-<time>`, which the item's error names. Windows does not move a folder while a file in it is open
+(a virus scanner reading a frame, say): that item fails and keeps its folder, and a later call draws it. A
+`<cache_dir>\<key>` that is not a folder (a file, a link) is never moved: that item fails. Staging and old folders
+left by earlier calls are removed when a call has a good item: this process's, and other processes' after an hour.
+No game file is written. A game update that changes a model (its records or the content they name) draws it again;
+so does a new renderer version.
 
 Reply: `{"code": n, "message": "...", "items": [{"key": "...", "status": "drawn" | "current" | "failed", "model":
 "<render model GUID>", "name": "<debugName>", "frames": n, "size": n, "error": "...", "notes": ["..."]}], "ms": n}`,
