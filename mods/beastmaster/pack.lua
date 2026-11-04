@@ -12,6 +12,7 @@ local aside_mod = require("aside")
 local talents = require("talents")
 local fight_mod = require("fight")
 local threat_mod = require("threat")
+local idle_mod = require("idle")
 
 local M = {}
 local P = {}
@@ -47,6 +48,18 @@ function M.new(env)
 		owner = function(world, account) return p:owner(world, account) end,
 		strike = function(world, e, id, target, amount) p:strike(world, e, id, target, amount) end,
 	})
+	p.idle = idle_mod.new({
+		now = env.now,
+		setting = env.setting,
+		ids = function() return p.ids end,
+		busy = function(world, id)
+			local now = env.now(world)
+			return now < (p.sent[id] or 0) or now < (p.recall[id] or 0)
+		end,
+		held = function(account) return p.threat:holds(account) end,
+		building = function(world, account, owner) return aside_mod.building(world, owner) or p.aside:is_aside(account) end,
+		called_at = function(id) return p.called[id] end,
+	})
 	p:reset()
 	return p
 end
@@ -71,9 +84,12 @@ function P:reset()
 	self.fought = {}     -- entity id -> when it last hit or was hit (it heals HEAL_AFTER_S after that)
 	self.hits = {}       -- hostile creature id -> {beast entity id -> when it hit it} (loyalty for the kill)
 	self.speeds = {}     -- entity id -> {base, wrote} by Movement entry: the game's values and Swiftness's (talents.lua)
+	self.present = nil   -- account -> player entity, for the players in the world (as of the last check)
+	self.called = {}     -- entity id -> when Beastmaster spawned it (idle.lua's clock: its SpawnTime is the game's then)
 	self.aside:reset()
 	self.fight:reset()
 	self.threat:reset()
+	self.idle:reset()
 end
 
 local function mmss(s)
@@ -174,6 +190,7 @@ function P:spawn(world, owner, account, beast)
 	emf.emit("server", "StartGuardingEvent", { guardingEntityId = id, guardedEntityId = owner })
 	self:fresh(id)
 	self.fought[id] = self.env.now(world)
+	self.called[id] = self.env.now(world)
 	self:strengthen(world, id, beast)
 	beast.entity = id
 	beast.out = true
@@ -186,7 +203,7 @@ end
 -- goes.
 function P:fresh(id)
 	self.base[id], self.sent[id], self.recall[id], self.fought[id] = nil, nil, nil, nil
-	self.speeds[id] = nil
+	self.speeds[id], self.called[id] = nil, nil
 	self.fight:forget(id)
 end
 
@@ -327,6 +344,7 @@ function P:call(world, owner, account, beast)
 		return "The call failed: " .. why
 	end
 	if cost > 0 then emf.attribute_add(world, owner, "mana", -cost) end
+	self.idle:stop(world, account)  -- the beasts out get up
 	self.last_call[account] = now
 	self.aside:release(account)  -- the beasts that stepped aside come back too
 	self.env.save()
@@ -373,6 +391,7 @@ end
 -- beastmaster.dismiss: the beast leaves the world and waits at home.
 function P:dismiss(world, account, beast)
 	if not beast.out then return beast.name .. " is not out." end
+	self.idle:stop(world, account)  -- every beast of theirs gets up
 	if beast.entity and ours(world, beast.entity) then emf.destroy(world, beast.entity) end
 	if beast.entity then
 		self.ids[beast.entity] = nil
@@ -418,6 +437,7 @@ end
 function P:attack(world, account, target)
 	local n = 0
 	local now = self.env.now(world)
+	self.idle:stop(world, account)  -- every beast of theirs gets up
 	for _, b in ipairs(self.env.beasts():list(account)) do
 		if b.out and b.entity and ours(world, b.entity) then
 			self.sent[b.entity] = now + SENT_S
@@ -479,6 +499,7 @@ end
 -- its owner (P:credit), and counts for its talents in fights (fight.lua). `change`: the hit's health change.
 function P:on_hit(world, source, target, change)
 	self.threat:on_hit(world, source, target)
+	self.idle:on_hit(world, source, target)
 	if not (self.ids[source] or self.ids[target]) then return end
 	local now = self.env.now(world)
 	if self.ids[source] then self.fought[source] = now end
@@ -534,6 +555,7 @@ function P:on_died(id, world)
 	end
 	self.credited[id] = nil
 	self.threat:forget(id)
+	self.idle:forget(id)
 	self.sent[id], self.recall[id], self.base[id], self.fought[id] = nil, nil, nil, nil
 	local e = self.ids[id]
 	if not e then return end
@@ -639,6 +661,7 @@ function P:step(world)
 	end
 	self.fight:step(world, self.ids)
 	self.threat:step(world)
+	self.idle:step(world, self.present or {})
 	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now
 	if now < self.next_check then return end
 	self.next_check = now + 1
@@ -650,6 +673,7 @@ function P:step(world)
 		if next(hitters) == nil then self.hits[target] = nil end
 	end
 	local present = players(world)
+	self.present = present
 	self.threat:scan(world, present)
 	self.aside:set_players(present)
 	for _, e in ipairs(self.fallen) do

@@ -1848,7 +1848,8 @@ uint32_t parse_colour(lua_State* L, const char* text) {
 void lua_window(lua_State* L, Script& s, const char* id, int t, LuaWindow* out) {
     static const char* const kRowFields[] = {"heading", "text",  "button",  "row",      "slot",  "bar",
                                              "separator", "value", "count", "tooltip",  "color", "same_line",
-                                             "selected", "disabled", "dim", "empty", "locked"};
+                                             "selected", "disabled", "dim", "empty", "locked",
+                                             "image", "icon", "fps", "height", "key"};  // lua 1.15 pictures
     out->id = window_full_id(s, id);
     lua_getfield(L, t, "title");
     if (!lua_isnil(L, -1)) out->title = luaL_checkstring(L, -1);
@@ -1929,12 +1930,27 @@ void lua_window(lua_State* L, Script& s, const char* id, int t, LuaWindow* out) 
                 text_field = "bar";
             } else if (lua_pop(L, 1), field("separator")) {
                 w.type = EMF_UI_SEPARATOR;
+            } else if (lua_pop(L, 1), field("image")) {  // lua 1.15: {image = emf.image(...), height, fps, key}
+                w.type = EMF_UI_IMAGE;
+                w.icon = static_cast<uint32_t>(luaL_checkinteger(L, -1));
+                lua_getfield(L, row, "key");  // a picture's key is its own field (image holds the picture)
+                if (!lua_isnil(L, -1)) w.key = out->keep(luaL_checkstring(L, -1));
+                lua_pop(L, 1);
             } else if (lua_pop(L, 1), field("text")) {
                 w.type = EMF_UI_TEXT;
             } else {
-                luaL_error(L, "row %d has no kind (text, heading, button, row, slot, bar or separator)",
+                luaL_error(L, "row %d has no kind (text, heading, button, row, slot, bar, separator or image)",
                            static_cast<int>(i));
             }
+            lua_pop(L, 1);
+            lua_getfield(L, row, "icon");  // a slot's or a row's picture (lua 1.15)
+            if (!lua_isnil(L, -1)) w.icon = static_cast<uint32_t>(luaL_checkinteger(L, -1));
+            lua_pop(L, 1);
+            lua_getfield(L, row, "fps");
+            if (!lua_isnil(L, -1)) w.fps = static_cast<uint32_t>(luaL_checkinteger(L, -1));
+            lua_pop(L, 1);
+            lua_getfield(L, row, "height");
+            if (!lua_isnil(L, -1)) w.height = static_cast<float>(luaL_checknumber(L, -1));
             lua_pop(L, 1);
             lua_getfield(L, row, text_field);
             if (!lua_isnil(L, -1)) w.text = out->keep(luaL_checkstring(L, -1));
@@ -1970,6 +1986,42 @@ void lua_window(lua_State* L, Script& s, const char* id, int t, LuaWindow* out) 
     d.widgets = out->widgets.data();
     d.count = static_cast<uint32_t>(out->widgets.size());
     d.widget_size = sizeof(EmfUiWidget);
+}
+
+bool has_v26(const EmfApi* a) {
+    return a && a->version >= 26 && a->size >= offsetof(EmfApi, image_load) + sizeof(a->image_load) && a->image_load;
+}
+
+// emf.image(path) (lua 1.15): a picture for windows, a .png or a folder of frame .pngs inside the script's own mod folder
+// ("pics/wolf.png"), or "portrait:<key>" (EMF's portrait cache). The handle, or 0 (refused, or a core before v26). A
+// path that leaves the mod's folder is an error.
+int l_image(lua_State* L) {
+    Script* s = script_of(L);
+    const std::string p = luaL_checkstring(L, 1);
+    std::string arg;
+    if (p.rfind("portrait:", 0) == 0) {
+        arg = p;
+    } else {
+        bool ok = !p.empty() && p[0] != '/' && p[0] != '\\' && p.find(':') == std::string::npos;
+        std::string part;
+        for (size_t i = 0; ok && i <= p.size(); ++i) {  // no ".." part anywhere
+            if (i == p.size() || p[i] == '/' || p[i] == '\\') {
+                ok = part != "..";
+                part.clear();
+            } else {
+                part += p[i];
+            }
+        }
+        if (!ok) luaL_error(L, "emf.image: a path inside the mod's folder (\"pics/wolf.png\") or \"portrait:<key>\", not %s", p.c_str());
+        std::string rel = p;
+        for (char& c : rel)
+            if (c == '/') c = '\\';
+        arg = utf8(s->folder) + "\\" + rel;
+    }
+    const EmfApi* a = s->host->api;
+    const uint32_t h = has_v26(a) ? a->image_load(arg.c_str()) : 0;
+    lua_pushinteger(L, static_cast<lua_Integer>(h));  // 0 when refused: a row with it keeps its place, draws nothing
+    return 1;
 }
 
 // emf.window(id, {title, width, place, close_key, world, rows = {...}}, fn(world, ev)) (lua 1.13): true when it opened.
@@ -2393,6 +2445,25 @@ void free_offer_slot(OfferSlot* slot) {
     delete slot;
 }
 
+// emf.offered(world, id) (lua 1.15): true while this script's offer on `id` is in EMF's hands (not removed, not dropped
+// by EMF: then emf.offer again takes it back).
+int l_offered(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const auto entity = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    Host::Impl& h = *s->host;
+    bool mine = false;
+    {
+        std::lock_guard<std::mutex> g(h.m);
+        const auto it = h.offer_slots.find(entity);
+        mine = it != h.offer_slots.end() && static_cast<const OfferSlot*>(it->second)->id == s->id;
+    }
+    const EmfApi* a = h.api;
+    const bool v26 = a && a->version >= 26 && a->size >= offsetof(EmfApi, offer_active) + sizeof(a->offer_active);
+    lua_pushboolean(L, mine && v26 && a->offer_active && a->offer_active(w, entity));
+    return 1;
+}
+
 struct VerbName {
     const char* name;
     uint32_t id;
@@ -2654,6 +2725,7 @@ void open_bindings(lua_State* L, Script&) {
                                    {"xp_required", l_xp_required}, {"level_cap", l_level_cap}, {"set_level", l_set_level},
                                    {"add_component", l_add_component}, {"remove_component", l_remove_component},
                                    {"window", l_window}, {"window_update", l_window_update}, {"window_close", l_window_close},
+                                   {"image", l_image}, {"offered", l_offered},
                                    {"offer", l_offer}, {"spawn_offer", l_spawn_offer}, {"offer_remove", l_offer_remove},
                                    {"tell", l_tell},       {"broadcast", l_broadcast}, {"on_chat", l_on_chat},
                                    {"request_save", l_request_save}, {"teleport", l_teleport},

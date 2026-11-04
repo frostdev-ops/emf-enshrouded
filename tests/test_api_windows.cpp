@@ -258,3 +258,64 @@ TEST_CASE("window_open: refused when no world of the asked kind runs (its events
     d.def.world_kind = EMF_WORLD_SERVER;
     CHECK(api_table()->window_open(&d.def));
 }
+
+TEST_CASE("api v26: image_load follows offer_remove; the widget struct grew to 64 bytes") {
+    const EmfApi* api = api_table();
+    CHECK(api->version >= 26u);
+    CHECK(offsetof(EmfApi, image_load) == kApiV25Size);
+    CHECK(api->size >= kApiV26Size);
+    CHECK(api->image_load != nullptr);
+    CHECK(sizeof(EmfUiWidget) == 64u);
+    CHECK(offsetof(EmfUiWidget, fps) == 56u);
+}
+
+TEST_CASE("image_load: a mod's path is read from its own folder, portrait:<key> from EMF's portrait cache") {
+    Fixture f;
+    std::vector<std::pair<std::wstring, std::string>> asked;
+    f.state.portrait_dir = L"C:\\Game\\emf\\cache\\portraits";
+    f.state.load_image = [&](const std::wstring& path, const std::string& key, std::string* why) -> uint32_t {
+        asked.emplace_back(path, key);
+        if (path.find(L"broken") != std::wstring::npos) {
+            *why = "the folder has no .png files";
+            return 0;
+        }
+        return 7;
+    };
+    const EmfApi* api = api_table();
+    CHECK(api->image_load("pics\\wolf.png") == 7u);
+    REQUIRE(asked.size() == 1u);
+    wchar_t exe[MAX_PATH];
+    GetModuleFileNameW(nullptr, exe, MAX_PATH);  // the caller is this test exe: its folder
+    std::wstring folder(exe);
+    folder = folder.substr(0, folder.find_last_of(L"\\/"));
+    CHECK(asked[0].first == folder + L"\\pics\\wolf.png");
+    CHECK(api->image_load("C:\\Mods\\X\\a.png") == 7u);
+    CHECK(asked[1].first == L"C:\\Mods\\X\\a.png");
+    CHECK(asked[1].second == "c:\\mods\\x\\a.png");  // the key: the full path, lower case (one picture per file)
+    CHECK(api->image_load("portrait:wolf_t1") == 7u);
+    CHECK(asked[2].first == L"C:\\Game\\emf\\cache\\portraits\\wolf_t1");
+    CHECK(asked[2].second == "portrait:wolf_t1");
+    CHECK(api->image_load("portrait:../secrets") == 0u);  // a key is A-Z a-z 0-9 _ . - only
+    CHECK(api->image_load("portrait:") == 0u);
+    CHECK(api->image_load("portrait:wolf.") == 0u);  // as the portrait cache: no trailing dot,
+    CHECK(api->image_load("portrait:CON") == 0u);    // no Windows device names
+    CHECK(api->image_load("portrait:nul.png") == 0u);
+    CHECK(api->image_load("portrait:com1") == 0u);
+    CHECK(asked.size() == 3u);
+    CHECK(api->image_load(nullptr) == 0u);
+    CHECK(api->image_load("") == 0u);
+    g_lines.clear();
+    CHECK(api->image_load("broken") == 0u);
+    CHECK(logged("image_load"));
+    CHECK(logged("no .png files"));
+    g_lines.clear();
+    CHECK(api->image_load("broken") == 0u);  // a refusal is logged once per path
+    CHECK_FALSE(logged("image_load"));
+}
+
+TEST_CASE("image_load: 0 without the in-game overlay (a dedicated server, or the overlay off)") {
+    Fixture f(true, false);
+    g_lines.clear();
+    CHECK(api_table()->image_load("pics\\wolf.png") == 0u);
+    CHECK(logged("overlay"));
+}

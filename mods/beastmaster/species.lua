@@ -21,6 +21,9 @@
 --               template's, without health_mul), before loyalty: a wolf hunts (x1.2, x1.15), a boar holds (x1.7, x0.9)
 --   tank:       a tamed one draws the tanks' share of the monsters in a fight (threat.lua; the others the damage
 --               beasts')
+--   sleeps:     its animation graph has sleep states: held in the game's Sleep state while its owner stands still, it
+--               lies down (idle.lua); without them it stands there
+--   stays:      false: the Sleep state never holds it while its owner stands still (it only turns, and roams)
 -- Baits are settings ("bait_<id>"), read when used.
 local M = {}
 
@@ -33,20 +36,20 @@ local PACK = "the beasts pack (emf_beastmaster_beasts)"
 
 M.list = {
 	{ id = "wolf", name = "Wolf", role_health = 1.2, role_damage = 1.15, template = "478381c5-585f-4264-b373-dbb1ea596eca",
-		graph = WOLF_GRAPH, factions = { [WILDBEAST] = true }, max_scale = BEAR_SCALE },
+		graph = WOLF_GRAPH, factions = { [WILDBEAST] = true }, max_scale = BEAR_SCALE, sleeps = true },
 	{ id = "boar", name = "Boar", tank = true, role_health = 1.7, role_damage = 0.9, template = "255fd8d9-4447-445d-8ffc-4d9dc0afdd16",
 		graph = BOAR_GRAPH, max_scale = AUROCHS_SCALE },
 	{ id = "sabretooth", name = "Sabretooth", role_health = 1.15, role_damage = 1.25, template = "50b96064-3ffc-47a2-8c7d-1d592a3c459c",
 		graph = "9c1b120e-4901-495c-9cc0-5de134fbe140" },
 	{ id = "hound", name = "Hound", role_health = 1.3, role_damage = 1.1, template = "87575915-bc75-4611-ab71-0cd4e79535b1",
-		graph = WOLF_GRAPH, factions = { [SCAVENGER] = true } },
+		graph = WOLF_GRAPH, factions = { [SCAVENGER] = true }, sleeps = true },
 	-- the bear pack (tools/models/packs/beastmaster_bear.json); GUIDs fixed forever. Pack 2.0: a bear on a skeleton
 	-- of its own with its own graph copy; 1.0's bear ran the wolf's graph (both at 1.4x)
 	{ id = "bear", name = "Bear", tank = true, scale = 1.4, role_health = 2.2, role_damage = 1.1, template = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02",
 		model = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f01", pack = "the bear pack (emf_beastmaster_bear)", health_mul = 2.5,
 		plural = "bears",
 		graph = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f05", also = WOLF_GRAPH,
-		factions = { [WILDBEAST] = true }, min_scale = BEAR_SCALE },
+		factions = { [WILDBEAST] = true }, min_scale = BEAR_SCALE, sleeps = true },
 	-- the beasts pack (tools/models/packs/beastmaster_beasts.json); GUIDs fixed forever
 	{ id = "aurochs", name = "Aurochs", tank = true, scale = 1.3, role_health = 2.0, role_damage = 1.0, template = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02",
 		model = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f01", pack = PACK, health_mul = 3,
@@ -130,6 +133,17 @@ add_extra()
 -- A tamed beast's role: its health and damage against a wild one of its kind at the same level (x1 when not given).
 function M.role(sp)
 	return (sp and sp.role_health) or 1, (sp and sp.role_damage) or 1
+end
+
+-- Whether a beast of kind `sp` lies down in the Sleep state (its graph has sleep states).
+function M.sleeps(sp)
+	return sp ~= nil and sp.sleeps == true
+end
+
+-- Whether the Sleep state may hold a beast of kind `sp` still while its owner stands still (every kind unless its
+-- entry says stays = false).
+function M.stays(sp)
+	return sp ~= nil and sp.stays ~= false
 end
 
 -- How a text names a kind (a species or its id): "albino snake", its name in lower case.

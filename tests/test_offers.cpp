@@ -312,6 +312,7 @@ TEST_CASE("offer service: upkeep drops a lost offer and a gone entity (the mod o
     CHECK(s.list().empty());   // both gone: EMF never puts an offer back on an id by itself (the id may be another
     CHECK(f.changes.empty());  // entity's by then); the mod offers again when it finds its entity
     f.comps[5000].insert(ecs::InteractionOfferRuntime::kHash);
+    f.ior[5000] = {0x79CB89E4u, 0xABCDu};  // a vanilla offer came back (not what EMF writes)
     CHECK(s.offer(f.world, 5000, OfferSpec{}, "m", nullptr, nullptr) == false);  // its parts came back: the game's now
     f.prop(5005);
     CHECK(s.offer(f.world, 5005, OfferSpec{}, "m", nullptr, nullptr));
@@ -417,4 +418,64 @@ TEST_CASE("offer service: the same offer again replaces the callback; other opti
     std::string why;
     CHECK_FALSE(s.offer(f.world, 5000, b, "m", nullptr, &why));
     CHECK(why.find("remove it first") != std::string::npos);
+}
+
+TEST_CASE("offer service: active says whether the mod's offer is still in EMF's hands (not after a drop or a remove)") {
+    Fake f;
+    OfferService s(f.deps());
+    OfferSpec spec;
+    spec.verb = EMF_VERB_OPEN;
+    f.prop(5000);
+    CHECK(s.offer(f.world, 5000, spec, "bm", nullptr, nullptr));
+    CHECK(s.active(5000, "bm"));
+    CHECK_FALSE(s.active(5000, "other"));
+    CHECK_FALSE(s.active(5001, "bm"));
+    f.answer_all();
+    f.ior[5000] = {0x79CB89E4u, 0xABCDu};  // the game changed the offer: no longer EMF's
+    for (int i = 0; i < kOfferUpkeepTicks; ++i) s.on_server_tick(f.world);
+    CHECK_FALSE(s.active(5000, "bm"));  // dropped
+    f.prop(5002);
+    CHECK(s.offer(f.world, 5002, spec, "bm", nullptr, nullptr));
+    f.answer_all();
+    CHECK(s.remove(f.world, 5002, "bm", nullptr));
+    CHECK_FALSE(s.active(5002, "bm"));
+}
+
+TEST_CASE("offer service: an offer EMF dropped while its parts stayed EMF's is taken back by the same mod, nobody else") {
+    Fake f;
+    OfferService s(f.deps());
+    OfferSpec spec;
+    spec.verb = EMF_VERB_OPEN;
+    f.prop(5000);
+    CHECK(s.offer(f.world, 5000, spec, "bm", nullptr, nullptr));
+    f.answer_all();
+    const auto ours = f.ior[5000];
+    f.ior[5000] = {0x79CB89E4u, 0xABCDu};  // for a moment not EMF's: upkeep drops it, the parts stay
+    for (int i = 0; i < kOfferUpkeepTicks; ++i) s.on_server_tick(f.world);
+    REQUIRE_FALSE(s.active(5000, "bm"));
+    f.ior[5000] = ours;  // EMF's offer is what the entity carries again
+    std::string why;
+    CHECK_FALSE(s.offer(f.world, 5000, spec, "other", nullptr, &why));  // never another mod
+    f.changes.clear();
+    CHECK(s.offer(f.world, 5000, spec, "bm", nullptr, &why));  // taken back: no new parts asked for
+    CHECK(f.changes.empty());
+    CHECK(s.active(5000, "bm"));
+    int calls = 0;
+    CHECK(s.offer(f.world, 5000, spec, "bm", [&](EmfWorld*, uint32_t, uint32_t) { ++calls; }, nullptr));
+    const auto ev = f.accepted(1, 5000);
+    s.on_accept(f.world, ev.data(), static_cast<uint32_t>(ev.size()));
+    CHECK(calls == 1);
+}
+
+TEST_CASE("offer service: a vanilla offer that looks like EMF's is never taken (only one EMF itself dropped)") {
+    Fake f;
+    OfferService s(f.deps());
+    OfferSpec spec;
+    spec.verb = EMF_VERB_OPEN;
+    f.prop(6000);
+    f.comps[6000].insert(ecs::InteractionOfferRuntime::kHash);
+    f.ior[6000] = {kOfferDefaultSequence, EMF_VERB_OPEN};  // the same sequence and verb, but the game's own
+    std::string why;
+    CHECK_FALSE(s.offer(f.world, 6000, spec, "bm", nullptr, &why));
+    CHECK(why.find("its own offer") != std::string::npos);
 }

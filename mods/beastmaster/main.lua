@@ -22,6 +22,7 @@ local last_hit = {}           -- player entity -> {id, at}: what hit them last (
 local taming                  -- the taming channels (made below; reset with each world)
 local window                  -- the Beasts window (made below)
 local on_first_stable         -- the world's first stable was found or marked (made below)
+local at_stable_open          -- a player pressed E at a stable's prompt (made below)
 local release_asked = {}      -- account -> {name, at}: a release by chat asked once (reset with each world)
 local next_hud = 0            -- when the HUD line is written next (reset with each world: the clock may restart)
 
@@ -39,7 +40,8 @@ local function now(world)
 end
 
 -- the stables in the world (built ones and the host's marks; the marks are kept with the world)
-local stables = stable_mod.new({ now = now, log = emf.log, on_found = function(world) on_first_stable(world) end })
+local stables = stable_mod.new({ now = now, log = emf.log, on_found = function(world) on_first_stable(world) end,
+	on_open = function(world, player, entity) at_stable_open(world, player, entity) end })
 
 -- The level of a player's character.
 local function level_of(world, player)
@@ -198,11 +200,32 @@ window = window_mod.new({
 	reset_talents = stable_do.reset_talents,
 })
 
+-- What a player who joined (no window) can do at a stable, by chat.
+local AT_STABLE_CHAT = "At a stable: /beastmaster active <name or number> (it can be called), /beastmaster store " ..
+	"<name or number>, /beastmaster release <name or number> (twice), /beastmaster talents <name or number> [reset], " ..
+	"/beastmaster talent <name or number> <talent>. /beastmaster list shows your beasts."
+
+-- E at a stable's prompt (on `entity`): the host gets the Beasts window; a player who joined (and everyone on a
+-- dedicated server), the stable's chat commands. An entity that is no stable's now (its id given out again) does nothing.
+at_stable_open = function(world, player, entity)
+	if not world:is_server() or not loaded or not player or player == 0 then return end
+	if not stables:stable_of(world, entity) then return end
+	local host = emf.local_player()
+	if host and host ~= 0 and player == host then
+		window:show(world, player)
+	else
+		emf.tell(world, player, AT_STABLE_CHAT)
+	end
+end
+
+-- The E key (stable_key): the Beasts window at a stable under the host's crosshair that has no prompt (the game refused
+-- it there, or it has no entity for one); at a stable with the prompt the prompt opens it.
 emf.on_key("stable_key", function(world)
 	if not world:is_server() or not loaded then return end
 	local player = emf.local_player()
 	if not player or player == 0 then return end
-	if not stables:under_crosshair(world, player, STABLE_REACH_M) then return end
+	local b = stables:under_crosshair(world, player, STABLE_REACH_M)
+	if not b or stables:prompted(world, b) then return end
 	window:show(world, player)
 end)
 
@@ -753,6 +776,12 @@ end)
 emf.command("threat", ": the monsters held on you or your beasts now, and for how long", function(world, args)
 	local _, account = who(world)
 	emf.reply(account and pack.threat:held_text(world, account) or "Your account is not known yet.")
+end)
+
+-- What your beasts do while you stand still now (for live checks).
+emf.command("idle", ": what your beasts do while you stand still now", function(world, args)
+	local _, account = who(world)
+	emf.reply(account and pack.idle:text(world, account) or "Your account is not known yet.")
 end)
 
 -- Admin: set a beast's loyalty (console only, not from the chat; for tests and live checks).
