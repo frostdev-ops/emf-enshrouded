@@ -268,6 +268,12 @@ std::array<Resolved, kSigCount> resolve_all(const void* module_base, int build) 
     return out;
 }
 
+std::array<Resolved, kSigCount> rebased(std::array<Resolved, kSigCount> res, uintptr_t from, uintptr_t to) {
+    for (auto& r : res)
+        if (r.addr) r.addr = r.addr - from + to;
+    return res;
+}
+
 bool required_signatures_ok(const std::array<Resolved, kSigCount>& res, bool known_build) {
     for (size_t i = 0; i < kSigCount; ++i)
         if (kSignatures[i].required && !is_usable(res[i], known_build)) return false;

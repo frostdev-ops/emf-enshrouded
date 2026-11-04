@@ -605,7 +605,6 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         emf::logf("game sha256 %s (UNKNOWN build: signatures only)", sha.c_str());
 
     g_state = std::make_unique<emf::core::CoreState>();
-    g_state->sigs = emf::resolve_all(GetModuleHandleW(nullptr), build);
     g_state->known_build = known;
     {  // the exe as find_pattern / game_build see it
         const auto* base = reinterpret_cast<const uint8_t*>(GetModuleHandleW(nullptr));
@@ -631,6 +630,12 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             emf::logf("could not map the exe file (error %lu): patterns are matched against the live code",
                       GetLastError());
     }
+    // EMF's own signatures too: a DLL mod in the chain that hooked one of these functions before the core started
+    // (put_items' inventory transaction, say) no longer switches EMF's use of it off. The addresses are the live ones.
+    const uintptr_t live_base = g_state->exe.base;
+    const uintptr_t scan_base = g_state->exe.pristine_base ? g_state->exe.pristine_base : live_base;
+    const auto scan_sigs = emf::resolve_all(reinterpret_cast<const void*>(scan_base), build);
+    g_state->sigs = emf::rebased(scan_sigs, scan_base, live_base);
     // Every inline hook goes through one table, so hooks on the same function chain (API v14).
     emf::hooks_init();
     g_state->hooks = std::make_unique<emf::core::HookTable>([](uintptr_t target, void* detour, void** original,
@@ -664,7 +669,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     }
     // Struct offsets read from instructions in the located functions (common/code_offsets.h), before any hook: the
     // world's own offsets first (build 1283531 moved the world's block by +0x1C00; common/world_offsets.h).
-    const auto code_offsets = emf::resolve_code_offsets(GetModuleHandleW(nullptr), g_state->sigs, build);
+    const auto code_offsets = emf::resolve_code_offsets(reinterpret_cast<const void*>(scan_base), scan_sigs, build);
     for (const auto& note : emf::unconfirmed_offset_notes(code_offsets)) emf::logf("%s", note.c_str());
     const emf::WorldOffsetPlan world_plan = emf::plan_world_offsets(code_offsets, known);
     emf::logf("%s", world_plan.line.c_str());

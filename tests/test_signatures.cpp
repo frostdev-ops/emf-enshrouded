@@ -518,3 +518,24 @@ TEST_CASE("the signatures with a world or UI offset in their bytes match the cod
     CHECK(matches_in("GetComponent",
                      hex_bytes("48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B BA C0 79 E1 00 44 89")) == 0);
 }
+
+TEST_CASE("rebased: a function another DLL hooked is found in the exe's file copy and called in the live module") {
+    // the exe's bytes as shipped (pristine, mapped at 0x10000) and the live module (at 0x7000000) where another DLL
+    // put a jump over the function's first bytes
+    std::vector<uint8_t> pristine(64, 0xCC);
+    const uint8_t start[] = {0x48, 0x8B, 0x11, 0x05};
+    std::memcpy(pristine.data() + 3, start, sizeof start);  // RVA 0x1003, build 1's
+    std::vector<uint8_t> live = pristine;
+    const uint8_t jump[] = {0xE9, 0x10, 0x20, 0x30, 0x40};
+    std::memcpy(live.data() + 3, jump, sizeof jump);
+    CHECK(resolve_one(live, 0x7001000, 0x7000000, kDef, 1).count == 0);  // matched in the live code: lost
+    std::array<Resolved, kSigCount> found{};
+    found[0] = resolve_one(pristine, 0x11000, 0x10000, kDef, 1);
+    REQUIRE(is_usable(found[0], true));
+    const auto at = rebased(found, 0x10000, 0x7000000);
+    CHECK(at[0].addr == 0x7001003);  // the same RVA in the live module
+    CHECK(at[0].count == 1);
+    CHECK(at[0].rva_matches);
+    CHECK(at[1].addr == 0);  // nothing found stays nothing
+    CHECK(at[1].count == 0);
+}

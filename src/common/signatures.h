@@ -98,6 +98,11 @@ Resolved resolve_one(std::span<const uint8_t> text, uintptr_t text_base, uintptr
 bool is_usable(const Resolved& r, bool known_build);
 // Resolves every signature against the .text section of the module mapped at module_base (build: as resolve_one).
 std::array<Resolved, kSigCount> resolve_all(const void* module_base, int build);
+// The same results at the same RVAs of the module mapped at `to`, from the image mapped at `from` (an address of 0 stays
+// 0). EMF scans the exe's file mapped as an image (pe_image.h map_image_file): another DLL's hook on a function's first
+// bytes in the live module does not hide it, and calling it at the live address goes through that hook as the game's
+// own calls do.
+std::array<Resolved, kSigCount> rebased(std::array<Resolved, kSigCount> res, uintptr_t from, uintptr_t to);
 // True if every signature marked "required" is usable.
 bool required_signatures_ok(const std::array<Resolved, kSigCount>& res, bool known_build);
 
