@@ -1,5 +1,5 @@
 // emf_content.dll (src/content, Rust around EML's mod loader), loaded the way EMF will load it: LoadLibrary, one or two
-// builds, FreeLibrary. The DLL must export only its two functions, answer every request with JSON, survive small
+// builds, FreeLibrary. The DLL must export only its three functions, answer every request with JSON, survive small
 // buffers, non-ASCII folders and repeated use, and leave no thread behind. Built only when CMake has EMF_CONTENT on.
 #ifdef EMF_CONTENT_DLL
 
@@ -106,6 +106,8 @@ struct ContentDll {
         module ? reinterpret_cast<emf_content_abi_fn>(GetProcAddress(module, "emf_content_abi")) : nullptr;
     emf_content_build_fn build_fn =
         module ? reinterpret_cast<emf_content_build_fn>(GetProcAddress(module, "emf_content_build")) : nullptr;
+    emf_content_portraits_fn portraits_fn =
+        module ? reinterpret_cast<emf_content_portraits_fn>(GetProcAddress(module, "emf_content_portraits")) : nullptr;
 
     ContentDll() = default;
     ContentDll(const ContentDll&) = delete;
@@ -124,6 +126,14 @@ struct ContentDll {
         std::vector<char> buf(cap, '#');
         r.code = build_fn(request.c_str(), log ? &LogLines::collect : nullptr, log, cap ? buf.data() : nullptr, cap,
                           &r.len);
+        if (r.code != EMF_CONTENT_REPLY_TOO_SMALL && r.len > 0 && r.len <= cap) r.reply.assign(buf.data(), r.len - 1);
+        return r;
+    }
+
+    Result portraits(const std::string& request, size_t cap = 64 * 1024) const {
+        Result r;
+        std::vector<char> buf(cap, '#');
+        r.code = portraits_fn(request.c_str(), nullptr, nullptr, cap ? buf.data() : nullptr, cap, &r.len);
         if (r.code != EMF_CONTENT_REPLY_TOO_SMALL && r.len > 0 && r.len <= cap) r.reply.assign(buf.data(), r.len - 1);
         return r;
     }
@@ -246,15 +256,48 @@ ProcessResult run_capture(const std::wstring& exe, const std::wstring& args) {
 
 }  // namespace
 
-TEST_CASE("content dll: exports only the two functions") {
-    const std::set<std::string> expected{"emf_content_abi", "emf_content_build"};
+TEST_CASE("content dll: exports only its three functions") {
+    const std::set<std::string> expected{"emf_content_abi", "emf_content_build", "emf_content_portraits"};
     const PeTables pe = pe_tables(dll_path());
     REQUIRE(pe.mapped);
     std::string listed;
     for (const auto& n : pe.exports) listed += n + " ";
     INFO("exports: " << listed);
     CHECK(pe.exports == expected);
-    CHECK(pe.export_functions == 2);  // no export by ordinal only either
+    CHECK(pe.export_functions == 3);  // no export by ordinal only either
+}
+
+TEST_CASE("content dll: portraits answer with JSON, also without a game") {
+    Folder game(L"emf_content_portraits_game");
+    Folder cache(L"emf_content_portraits_cache");
+    ContentDll dll;
+    REQUIRE(dll.portraits_fn != nullptr);
+
+    const Result bad = dll.portraits("{");
+    CHECK(bad.code == EMF_CONTENT_BAD_REQUEST);
+    const json::Value bad_reply = parse_reply(bad);
+    REQUIRE(bad_reply.get("items") != nullptr);
+    CHECK(bad_reply.get("items")->is(json::Value::Type::Array));
+
+    // No items: OK, and the archive is not opened.
+    const std::string none = "{\"game_dir\": " + json_string(utf8(game.path)) +
+                             ", \"cache_dir\": " + json_string(utf8(cache.path)) + ", \"items\": []}";
+    CHECK(dll.portraits(none).code == EMF_CONTENT_OK);
+
+    // A folder without the game's archive: code 2, the folder named, the item failed, nothing written.
+    const std::string one = "{\"game_dir\": " + json_string(utf8(game.path)) +
+                            ", \"cache_dir\": " + json_string(utf8(cache.path)) +
+                            ", \"items\": [{\"key\": \"wolf\", \"model\": \"91e2d4cc-01c9-4203-a92e-b08769364522\"}]}";
+    const Result r = dll.portraits(one);
+    CHECK(r.code == EMF_CONTENT_RUN_FAILED);
+    const json::Value reply = parse_reply(r);
+    CHECK(message_of(reply).find(utf8(game.path)) != std::string::npos);
+    const json::Value* items = reply.get("items");
+    REQUIRE(items != nullptr);
+    REQUIRE(items->arr.size() == 1);
+    REQUIRE(items->arr[0].get("status") != nullptr);
+    CHECK(items->arr[0].get("status")->s == "failed");
+    CHECK(std::filesystem::is_empty(cache.path));
 }
 
 TEST_CASE("content dll: imports only Windows' own DLLs") {

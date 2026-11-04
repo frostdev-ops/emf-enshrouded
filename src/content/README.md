@@ -6,6 +6,10 @@ library crates, which are copied in `third_party/eml/`. One call does what `emm.
 loads the folder's `mods\` (`ModEnvironment::load`) and runs them (`mod_loader::lua::run`), with patching on, export
 off and runtime DLLs off.
 
+A second call, `emf_content_portraits`, draws portraits: frames of a game model turning, from the player's own game
+files, into a cache folder (below, [Portraits](#portraits)). Nothing of the game's art is shipped; the frames are made
+on the player's PC.
+
 Nothing in EMF loads it yet. `emf_content_run.exe` (`tools/content_run/`, built next to `emf_tests.exe`, never
 packaged) runs builds from the command line:
 
@@ -46,16 +50,25 @@ From `emf_content.h`:
 #define EMF_CONTENT_ABI 1
 enum { EMF_CONTENT_OK = 0, EMF_CONTENT_MODS_FAILED = 1, EMF_CONTENT_RUN_FAILED = 2, EMF_CONTENT_BAD_REQUEST = 3,
        EMF_CONTENT_REPLY_TOO_SMALL = 4, EMF_CONTENT_PANIC = 5 };
+/* emf_content_portraits: some items failed, the others are drawn or current (the same number as MODS_FAILED) */
+enum { EMF_CONTENT_ITEMS_FAILED = 1 };
 /* level: 0 error, 1 warning, 2 info, 3 debug; line: one UTF-8 log line without a newline */
 typedef void (*emf_content_log_fn)(void* ctx, int level, const char* line);
 uint32_t emf_content_abi(void);
 int32_t emf_content_build(const char* request_json, emf_content_log_fn log, void* log_ctx,
                           char* reply, size_t reply_cap, size_t* reply_len);
-/* The two exports as GetProcAddress gives them */
+int32_t emf_content_portraits(const char* request_json, emf_content_log_fn log, void* log_ctx,
+                              char* reply, size_t reply_cap, size_t* reply_len);
+/* The exports as GetProcAddress gives them. emf_content_portraits came after ABI 1 without changing it: a DLL
+   without it is an older one (GetProcAddress gives NULL). */
 typedef uint32_t (*emf_content_abi_fn)(void);
 typedef int32_t (*emf_content_build_fn)(const char* request_json, emf_content_log_fn log, void* log_ctx,
                                         char* reply, size_t reply_cap, size_t* reply_len);
+typedef int32_t (*emf_content_portraits_fn)(const char* request_json, emf_content_log_fn log, void* log_ctx,
+                                            char* reply, size_t reply_cap, size_t* reply_len);
 ```
+
+The build's request and reply (the portraits call's are [below](#portraits)):
 
 - Request (UTF-8 JSON): `{"game_dir": "<folder>", "file_name": "enshrouded", "force": false, "server": null}`. Only
   `game_dir` is needed. `file_name` defaults to `enshrouded` or `enshrouded_server`, whichever has a `.kfc` or `.exe`
@@ -73,14 +86,14 @@ typedef int32_t (*emf_content_build_fn)(const char* request_json, emf_content_lo
 - A missing folder, or one without `<file_name>.kfc` or `.exe`, gives code 2 and a message that names the folder.
 - `log` may be NULL. It is called only on the calling thread, during the call. It must return normally: no C++
   exception and no longjmp may leave it.
-- One call at a time. A call made while another runs (from another thread, or from inside the log callback) gives
-  `EMF_CONTENT_BAD_REQUEST` at once.
+- One call at a time, over both calls. A call made while another runs (from another thread, or from inside the log
+  callback) gives `EMF_CONTENT_BAD_REQUEST` at once.
 
 ## Rules for the caller
 
 - Load it only at the held start of the game, before any chain-loaded DLL, emf_core or mod starts, and only when the
-  content needs building. Unload it (`FreeLibrary`) before anything else starts.
-- Call `emf_content_build` and `FreeLibrary` on the same thread.
+  content needs building (or portraits drawing). Unload it (`FreeLibrary`) before anything else starts.
+- Call `emf_content_build`, `emf_content_portraits` and `FreeLibrary` on the same thread.
 - After the build and before `FreeLibrary`, check that no thread has its start address inside the DLL
   (`emf::loader::threads_started_in` in `src/loader/module_threads.h`). If one has, do not unload the DLL: unloading
   would crash the game the next time that thread runs.
@@ -89,7 +102,8 @@ typedef int32_t (*emf_content_build_fn)(const char* request_json, emf_content_lo
 
 What the DLL promises in return, and the tests in `tests/test_content_dll.cpp` and `src/lib.rs` check:
 
-- It exports only `emf_content_abi` and `emf_content_build` (no `lua_*`), and imports only Windows' own DLLs.
+- It exports only `emf_content_abi`, `emf_content_build` and `emf_content_portraits` (no `lua_*`), and imports only
+  Windows' own DLLs.
 - No panic leaves it: a panic becomes code 5 with its message, and the message and its place go to the log (not to
   stderr). The panic hook is set for the length of a call only; the caller's hook is back afterwards.
 - It starts no thread. The shim starts none, and EML's image crate is built without rayon and EXR (patch P3), the
@@ -99,6 +113,69 @@ What the DLL promises in return, and the tests in `tests/test_content_dll.cpp` a
 - It keeps no log subscriber after a call (logging is set for the length of one call), and drops control characters
   (all but tab) from log lines.
 - It uses its own static C runtime and never frees the caller's memory.
+
+## Portraits
+
+`emf_content_portraits` draws frames of game models turning (`src/portraits/`), for mod windows to show a beast as
+the game's own model (`emf.image("portrait:<key>")` on the window side). The frames are drawn on the player's PC from
+the player's own game files, read-only; no game art is in EMF's repository or its zips. Which models a start draws,
+and calling it after the content build, is the loader's part (not built yet).
+
+Request:
+
+```json
+{"game_dir": "<folder holding enshrouded.kfc and enshrouded.exe>", "file_name": "enshrouded",
+ "cache_dir": "<game>\\emf\\cache\\portraits",
+ "items": [{"key": "wolf", "template": "478381c5-585f-4264-b373-dbb1ea596eca", "frames": 24, "size": 256},
+           {"key": "boar", "model": "f58abca2-8332-48eb-99a3-79c9f8e94a1f"}]}
+```
+
+- `game_dir` and `cache_dir` (a full path) are needed; `file_name` as for the build. `game_dir` can be the shadow
+  folder, so a content mod's own models can be drawn too.
+- An item: `key` (1 to 64 of `A-Z a-z 0-9 _ . -`, the overlay's rule, and not ending in a dot or being a Windows
+  device name such as `CON` or `COM1`; unique, ignoring case); `model` (a `keen::RenderModel`) or `template` (a
+  `keen::ecs::TemplateResource`, drawn with the model of its `keen::ecs::ModelResource`), a GUID as text, exactly one;
+  `frames` 1 to 64 (24); `size` 8 to 512 (256). A bad item fails alone; the others are drawn.
+
+What it writes, per item, in `<cache_dir>\<key>\`:
+
+- `00.png`, `01.png`, ...: `size` x `size` RGBA8 PNGs, sRGB, straight alpha, transparent background. Frame i shows
+  the model turned by `360 * i / frames` degrees; frame 0 is a three-quarter view with its front to the viewer's left.
+- `index.json`: the frame count, the size, the renderer's version, the template, and the inputs (the render model,
+  its debugName, the content hashes of its render data and of its albedo textures, an FNV-64 of its records).
+
+An item whose `index.json` matches and whose frames are all there is left alone (`"current"`; only its records are
+read). Anything else is drawn again: `index.json` is removed first and written last (so a write cut short is drawn
+again at the next call), frames go through `.tmp` files, and frame files past the new count are removed. A failed
+item keeps the frames it had. Nothing in `game_dir` is written. A game update that changes a model (its records or
+the content they name) draws it again; so does a new renderer version.
+
+Reply: `{"code": n, "message": "...", "items": [{"key": "...", "status": "drawn" | "current" | "failed", "model":
+"<render model GUID>", "name": "<debugName>", "frames": n, "size": n, "error": "...", "notes": ["..."]}], "ms": n}`,
+items in the request's order. Codes: 0 every item drawn or current (also for no items: the archive is then not
+opened), 1 some items failed, 2 the game's archive or types could not be read (every good item fails with that), 3
+not JSON, no `game_dir`, or no full `cache_dir`. Cut, too small and panic replies as for the build (a cut reply has
+`"items": []`).
+
+How a model is drawn:
+
+- The game's types come from `<file_name>.exe` (EML's reader, about 0.2 s; EML's `.cache\types.json` when the exe
+  cannot be read and the cache's version matches the archive). The records are read with them as EML's Lua sees them.
+- LOD 0's meshes, decoded from the render data the way `tools/models/rendermodel.py` does (PNTCT vertex streams,
+  21-bit positions); other vertex formats are left out with a note. The rest pose: the vertices as stored.
+- Per material, the albedo (the image whose name holds "albedo"), the largest mip of at most 256 px, read alone
+  from its content and decoded with EML's `kfc_content::image::decode`; `AlphaTested` materials are cut out at alpha
+  0.5, `DoubleSided` ones drawn from both sides. The albedo is multiplied by the vertex colours, which hold the fur
+  cards' colour (all black colours are no tint).
+- A CPU rasteriser (`src/portraits/raster.rs`, no threads): orthographic, the camera 15 degrees up, one scale for
+  all frames, a light fixed to the camera, 2 to 4 samples per pixel side averaged in linear light. The game's space
+  is left-handed (a creature's right side at +X), so seen from the front its right side is on the viewer's left.
+- The game's wolf: 24 frames of 256 px in about 2.5 s in a debug build of the tests.
+
+Tests that read game data are skipped unless an environment variable names it (read-only, never copied into the
+repository): `EMF_PORTRAIT_GAME` (the game folder: the wolf by template and by model, its meshes and textures, 24
+frames drawn into `EMF_PORTRAIT_OUT` or `%TEMP%\emf_portraits_wolf`) and `EMF_PORTRAIT_DUMP` (a folder with
+`char_enemy_wolf_01.json`, `.render.bin`, `.material1.json` and `.material2.json` from the `model_survey` dump).
 
 ## Building
 

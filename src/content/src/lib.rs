@@ -316,27 +316,48 @@ fn build(request: Request) -> Reply {
     }
 }
 
+/// Runs `f` with the caller's log callback as the tracing subscriber (none when there is no callback).
+fn with_log<R>(logger: Logger, f: impl FnOnce() -> R) -> R {
+    if logger.callback.is_some() {
+        let subscriber = tracing_subscriber::fmt()
+            .with_ansi(false)
+            .without_time()
+            .with_level(false)
+            .with_target(true)
+            .with_max_level(tracing::Level::DEBUG)
+            .with_writer(CallbackWriter(logger))
+            .finish();
+        tracing::subscriber::with_default(subscriber, f)
+    } else {
+        f()
+    }
+}
+
 /// Parses the request, runs the build with the caller's log callback, and gives the code and the reply JSON.
 pub fn build_json(request_json: &str, logger: Logger) -> (i32, String) {
     let started = Instant::now();
     let mut reply = match serde_json::from_str::<Request>(request_json) {
         Err(e) => Reply::failed(BAD_REQUEST, format!("The request is not valid JSON for emf_content: {e}")),
         Ok(request) if request.game_dir.is_empty() => Reply::failed(BAD_REQUEST, "The request's game_dir is empty"),
-        Ok(request) => {
-            if logger.callback.is_some() {
-                let subscriber = tracing_subscriber::fmt()
-                    .with_ansi(false)
-                    .without_time()
-                    .with_level(false)
-                    .with_target(true)
-                    .with_max_level(tracing::Level::DEBUG)
-                    .with_writer(CallbackWriter(logger))
-                    .finish();
-                tracing::subscriber::with_default(subscriber, || build(request))
-            } else {
-                build(request)
-            }
-        }
+        Ok(request) => with_log(logger, || build(request)),
+    };
+    reply.ms = started.elapsed().as_millis() as u64;
+    (reply.code, reply.to_json())
+}
+
+/// Parses a portraits request, draws what is not current with the caller's log callback, and gives the code and the
+/// reply JSON (portraits/mod.rs).
+pub fn portraits_json(request_json: &str, logger: Logger) -> (i32, String) {
+    let started = Instant::now();
+    let mut reply = match serde_json::from_str::<portraits::Request>(request_json) {
+        Err(e) => portraits::Reply::failed(
+            BAD_REQUEST,
+            format!("The request is not valid JSON for emf_content_portraits: {e}"),
+        ),
+        Ok(request) => with_log(logger, || {
+            let file_name = resolve_file_name(Path::new(&request.game_dir), request.file_name.clone());
+            portraits::run(request, &file_name, portraits::game::Archive::open)
+        }),
     };
     reply.ms = started.elapsed().as_millis() as u64;
     (reply.code, reply.to_json())
@@ -352,11 +373,16 @@ fn panic_text(payload: &(dyn std::any::Any + Send)) -> String {
 
 /// Runs `f` and turns a panic into a PANIC reply that carries the panic's message.
 pub fn guarded<F: FnOnce() -> (i32, String)>(f: F) -> (i32, String) {
+    guarded_with(f, BUILD.failed)
+}
+
+/// Runs `f` and turns a panic into a PANIC reply made by `failed`, carrying the panic's message.
+fn guarded_with<F: FnOnce() -> (i32, String)>(f: F, failed: fn(i32, String) -> String) -> (i32, String) {
     match catch_unwind(AssertUnwindSafe(f)) {
         Ok(result) => result,
         Err(payload) => {
             let text = panic_text(payload.as_ref());
-            (PANIC, Reply::failed(PANIC, format!("emf_content panicked: {text}")).to_json())
+            (PANIC, failed(PANIC, format!("emf_content panicked: {text}")))
         }
     }
 }
@@ -368,35 +394,60 @@ fn log_panic(logger: Logger, info: &std::panic::PanicHookInfo<'_>) {
     logger.send(0, &format!("emf::content: panicked{place}: {}", panic_text(info.payload())));
 }
 
-/// A reply that fits `cap` bytes with its NUL: the real code and ms, `"truncated": true`, no lists, and as much of
-/// the message as fits. None when even an empty message does not fit.
-fn cut_reply(json: &str, cap: usize) -> Option<String> {
-    let full: Reply = serde_json::from_str(json).ok()?;
-    let mut cut = Reply { code: full.code, message: full.message, truncated: true, ms: full.ms, ..Default::default() };
+/// The longest reply `render(message cut)` that fits `cap` bytes with its NUL, cutting the message at a character
+/// boundary. None when even an empty message does not fit.
+fn cut_to_fit(mut message: String, cap: usize, render: impl Fn(&str) -> String) -> Option<String> {
     loop {
-        let text = cut.to_json();
+        let text = render(&message);
         if text.len() < cap {
             return Some(text);
         }
-        if cut.message.is_empty() {
+        if message.is_empty() {
             return None;
         }
         let over = text.len() + 1 - cap;
-        let mut keep = cut.message.len().saturating_sub(over);
-        while !cut.message.is_char_boundary(keep) {
+        let mut keep = message.len().saturating_sub(over);
+        while !message.is_char_boundary(keep) {
             keep -= 1;
         }
-        cut.message.truncate(keep);
+        message.truncate(keep);
     }
 }
 
+/// A build reply that fits `cap` bytes with its NUL: the real code and ms, `"truncated": true`, no lists, and as
+/// much of the message as fits. None when even an empty message does not fit.
+fn cut_reply(json: &str, cap: usize) -> Option<String> {
+    let full: Reply = serde_json::from_str(json).ok()?;
+    cut_to_fit(full.message, cap, |message| {
+        Reply { code: full.code, message: message.to_string(), truncated: true, ms: full.ms, ..Default::default() }
+            .to_json()
+    })
+}
+
+/// A portraits reply cut the same way: the real code and ms, `"truncated": true`, no items.
+fn cut_portraits_reply(json: &str, cap: usize) -> Option<String> {
+    let full: portraits::Reply = serde_json::from_str(json).ok()?;
+    cut_to_fit(full.message, cap, |message| {
+        let cut = portraits::Reply { code: full.code, message: message.to_string(), truncated: true, ms: full.ms,
+            ..Default::default() };
+        cut.to_json()
+    })
+}
+
 /// Copies the reply and a NUL into the caller's buffer and gives the call's result. `*reply_len` always gets the
-/// full reply's length with the NUL. When the full reply does not fit, a cut one (cut_reply) goes in and the call
+/// full reply's length with the NUL. When the full reply does not fit, a cut one (`cut`) goes in and the call
 /// still gives `code`; when not even that fits (or `reply` is NULL), nothing is written: REPLY_TOO_SMALL.
 ///
 /// # Safety
 /// `reply` is NULL or points to `reply_cap` writable bytes; `reply_len` points to a writable size_t.
-unsafe fn write_reply(json: &str, code: i32, reply: *mut c_char, reply_cap: usize, reply_len: *mut usize) -> i32 {
+unsafe fn write_reply(
+    json: &str,
+    code: i32,
+    reply: *mut c_char,
+    reply_cap: usize,
+    reply_len: *mut usize,
+    cut: fn(&str, usize) -> Option<String>,
+) -> i32 {
     unsafe { *reply_len = json.len() + 1 };
     if reply.is_null() {
         return REPLY_TOO_SMALL;
@@ -404,7 +455,7 @@ unsafe fn write_reply(json: &str, code: i32, reply: *mut c_char, reply_cap: usiz
     let text = if json.len() < reply_cap {
         json.to_string()
     } else {
-        match cut_reply(json, reply_cap) {
+        match cut(json, reply_cap) {
             Some(cut) => cut,
             None => return REPLY_TOO_SMALL,
         }
@@ -416,8 +467,84 @@ unsafe fn write_reply(json: &str, code: i32, reply: *mut c_char, reply_cap: usiz
     code
 }
 
-/// One call at a time: the call swaps the process's panic hook, and EML's state is not made for two runs at once.
+/// One call at a time, over both exports: a call swaps the process's panic hook, and EML's state is not made for two
+/// runs at once.
 static CALL: Mutex<()> = Mutex::new(());
+
+/// What differs between the exports: the work, and the shape of a failed or cut reply.
+struct Export {
+    run: fn(&str, Logger) -> (i32, String),
+    failed: fn(i32, String) -> String,
+    cut: fn(&str, usize) -> Option<String>,
+}
+
+const BUILD: Export = Export {
+    run: build_json,
+    failed: |code, message| Reply::failed(code, message).to_json(),
+    cut: cut_reply,
+};
+
+const PORTRAITS: Export = Export {
+    run: portraits_json,
+    failed: |code, message| portraits::Reply::failed(code, message).to_json(),
+    cut: cut_portraits_reply,
+};
+
+/// The body of both exports: one call at a time, the caller's log and a panic hook for the length of the call, no
+/// panic out, the reply into the caller's buffer.
+///
+/// # Safety
+/// As for the exports.
+unsafe fn export_call(
+    export: &Export,
+    request_json: *const c_char,
+    log: LogFn,
+    log_ctx: *mut c_void,
+    reply: *mut c_char,
+    reply_cap: usize,
+    reply_len: *mut usize,
+) -> i32 {
+    if reply_len.is_null() {
+        return BAD_REQUEST;
+    }
+    let outcome = catch_unwind(AssertUnwindSafe(|| {
+        let turn = match CALL.try_lock() {
+            Ok(guard) => Some(guard),
+            Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
+            Err(TryLockError::WouldBlock) => None,
+        };
+        let (code, json) = match turn {
+            None => {
+                let message = "emf_content is already running a call (emf_content_build or emf_content_portraits): \
+                               one call at a time, never from the log callback";
+                (BAD_REQUEST, (export.failed)(BAD_REQUEST, message.to_string()))
+            }
+            Some(_turn) => {
+                let logger = Logger::new(log, log_ctx);
+                let previous = std::panic::take_hook();
+                std::panic::set_hook(Box::new(move |info| log_panic(logger, info)));
+                let run = || {
+                    if request_json.is_null() {
+                        return (BAD_REQUEST, (export.failed)(BAD_REQUEST, "The request is NULL".to_string()));
+                    }
+                    match unsafe { CStr::from_ptr(request_json) }.to_str() {
+                        Ok(text) => (export.run)(text, logger),
+                        Err(e) => {
+                            let message = format!("The request is not UTF-8: {e}");
+                            (BAD_REQUEST, (export.failed)(BAD_REQUEST, message))
+                        }
+                    }
+                };
+                let result = guarded_with(run, export.failed);
+                drop(std::panic::take_hook());
+                std::panic::set_hook(previous);
+                result
+            }
+        };
+        unsafe { write_reply(&json, code, reply, reply_cap, reply_len, export.cut) }
+    }));
+    outcome.unwrap_or(PANIC)
+}
 
 /// The ABI version: 1.
 #[unsafe(no_mangle)]
@@ -439,44 +566,23 @@ pub unsafe extern "C" fn emf_content_build(
     reply_cap: usize,
     reply_len: *mut usize,
 ) -> i32 {
-    if reply_len.is_null() {
-        return BAD_REQUEST;
-    }
-    let outcome = catch_unwind(AssertUnwindSafe(|| {
-        let turn = match CALL.try_lock() {
-            Ok(guard) => Some(guard),
-            Err(TryLockError::Poisoned(poisoned)) => Some(poisoned.into_inner()),
-            Err(TryLockError::WouldBlock) => None,
-        };
-        let (code, json) = match turn {
-            None => {
-                let message = "emf_content_build is already running: one call at a time, never from the log callback";
-                (BAD_REQUEST, Reply::failed(BAD_REQUEST, message).to_json())
-            }
-            Some(_turn) => {
-                let logger = Logger::new(log, log_ctx);
-                let previous = std::panic::take_hook();
-                std::panic::set_hook(Box::new(move |info| log_panic(logger, info)));
-                let result = guarded(|| {
-                    if request_json.is_null() {
-                        return (BAD_REQUEST, Reply::failed(BAD_REQUEST, "The request is NULL").to_json());
-                    }
-                    match unsafe { CStr::from_ptr(request_json) }.to_str() {
-                        Ok(text) => build_json(text, logger),
-                        Err(e) => {
-                            let message = format!("The request is not UTF-8: {e}");
-                            (BAD_REQUEST, Reply::failed(BAD_REQUEST, message).to_json())
-                        }
-                    }
-                });
-                drop(std::panic::take_hook());
-                std::panic::set_hook(previous);
-                result
-            }
-        };
-        unsafe { write_reply(&json, code, reply, reply_cap, reply_len) }
-    }));
-    outcome.unwrap_or(PANIC)
+    unsafe { export_call(&BUILD, request_json, log, log_ctx, reply, reply_cap, reply_len) }
+}
+
+/// Draws portraits of game models into a cache folder, from the game's own files. See emf_content.h.
+///
+/// # Safety
+/// As for emf_content_build.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn emf_content_portraits(
+    request_json: *const c_char,
+    log: LogFn,
+    log_ctx: *mut c_void,
+    reply: *mut c_char,
+    reply_cap: usize,
+    reply_len: *mut usize,
+) -> i32 {
+    unsafe { export_call(&PORTRAITS, request_json, log, log_ctx, reply, reply_cap, reply_len) }
 }
 
 #[cfg(test)]
@@ -781,5 +887,168 @@ mod tests {
     #[test]
     fn abi_is_one() {
         assert_eq!(emf_content_abi(), 1);
+    }
+
+    /// Calls emf_content_portraits the way C does.
+    fn call_portraits_logged(
+        request: &str,
+        cap: usize,
+        fill: u8,
+        log: Option<&mut Vec<(i32, String)>>,
+    ) -> (i32, Vec<u8>, usize) {
+        let request = std::ffi::CString::new(request).unwrap();
+        let mut buf = vec![fill; cap];
+        let mut len = 0usize;
+        let ptr = if cap == 0 { std::ptr::null_mut() } else { buf.as_mut_ptr() as *mut c_char };
+        let (callback, ctx): (LogFn, *mut c_void) = match log {
+            Some(lines) => (Some(collect), lines as *mut _ as *mut c_void),
+            None => (None, std::ptr::null_mut()),
+        };
+        let code = unsafe { emf_content_portraits(request.as_ptr(), callback, ctx, ptr, cap, &mut len) };
+        (code, buf, len)
+    }
+
+    fn call_portraits(request: &str, cap: usize) -> (i32, serde_json::Value) {
+        let _turn = export_turn();
+        let (code, buf, len) = call_portraits_logged(request, cap, 0, None);
+        (code, parse(reply_text(&buf, len)))
+    }
+
+    fn portraits_request(game: &str, cache: &str, items: serde_json::Value) -> String {
+        serde_json::json!({ "game_dir": game, "cache_dir": cache, "items": items }).to_string()
+    }
+
+    #[test]
+    fn portraits_bad_json_is_bad_request_with_items() {
+        let (code, reply) = call_portraits("{", 64 * 1024);
+        assert_eq!(code, BAD_REQUEST);
+        assert_eq!(reply["code"], BAD_REQUEST);
+        assert!(reply["message"].as_str().unwrap().contains("emf_content_portraits"));
+        assert!(reply["items"].as_array().unwrap().is_empty(), "the portraits reply's shape: {reply}");
+        assert!(reply.get("mods").is_none());
+        let (code, reply) = call_portraits("{\"game_dir\": \"C:\\\\Game\", \"items\": []}", 64 * 1024);
+        assert_eq!(code, BAD_REQUEST);
+        assert!(reply["message"].as_str().unwrap().contains("cache_dir"));
+    }
+
+    #[test]
+    fn portraits_with_nothing_to_draw_are_ok_without_a_game() {
+        let cache = TempDir::new("portraits_none");
+        let (code, reply) = call_portraits(&portraits_request("C:\\no\\game", cache.utf8(), serde_json::json!([])), 4096);
+        assert_eq!(code, OK, "{reply}");
+        assert!(reply["ms"].is_u64());
+    }
+
+    #[test]
+    fn portraits_without_an_archive_fail_and_name_the_folder() {
+        let game = TempDir::new("portraits_nogame");
+        let cache = TempDir::new("portraits_cache");
+        let items = serde_json::json!([
+            {"key": "wolf", "template": "478381c5-585f-4264-b373-dbb1ea596eca"},
+            {"key": "bad key", "model": "91e2d4cc-01c9-4203-a92e-b08769364522"}
+        ]);
+        let (code, reply) = call_portraits(&portraits_request(game.utf8(), cache.utf8(), items), 64 * 1024);
+        assert_eq!(code, RUN_FAILED, "{reply}");
+        assert!(reply["message"].as_str().unwrap().contains(game.utf8()), "{reply}");
+        assert_eq!(reply["items"][0]["status"], "failed");
+        assert!(reply["items"][0]["error"].as_str().unwrap().contains("enshrouded.kfc"), "{reply}");
+        assert_eq!(reply["items"][1]["key"], "bad key");
+        assert!(reply["items"][1]["error"].as_str().unwrap().contains("key"), "{reply}");
+    }
+
+    #[test]
+    fn portraits_too_small_and_cut_replies() {
+        let game = TempDir::new("portraits_small");
+        let cache = TempDir::new("portraits_small_cache");
+        let items = serde_json::json!([{"key": "wolf", "model": "91e2d4cc-01c9-4203-a92e-b08769364522"}]);
+        let request = portraits_request(game.utf8(), cache.utf8(), items);
+        let _turn = export_turn();
+        let (code, buf, len) = call_portraits_logged(&request, 4, b'#', None);
+        assert_eq!(code, REPLY_TOO_SMALL);
+        assert!(len > 4);
+        assert_eq!(buf, b"####".to_vec());
+        let (code, buf, len) = call_portraits_logged(&request, 120, b'#', None);
+        assert_eq!(code, RUN_FAILED, "the real code");
+        assert!(len > 120);
+        let end = buf.iter().position(|&b| b == 0).expect("a NUL inside the buffer");
+        let reply = parse(std::str::from_utf8(&buf[..end]).unwrap());
+        assert_eq!(reply["code"], RUN_FAILED);
+        assert_eq!(reply["truncated"], true);
+        assert!(reply["items"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn portraits_panic_is_caught_and_logged() {
+        let _turn = export_turn();
+        let mut lines: Vec<(i32, String)> = Vec::new();
+        let request = serde_json::json!({ "game_dir": "unused", "cache_dir": "C:\\x", "test_panic": "portrait boom" });
+        let (code, buf, len) = call_portraits_logged(&request.to_string(), 64 * 1024, 0, Some(&mut lines));
+        assert_eq!(code, PANIC);
+        let reply = parse(reply_text(&buf, len));
+        assert!(reply["message"].as_str().unwrap().contains("portrait boom"));
+        assert!(reply["items"].as_array().unwrap().is_empty(), "the portraits reply's shape: {reply}");
+        assert!(lines.iter().any(|(level, line)| *level == 0 && line.contains("portrait boom")), "{lines:?}");
+    }
+
+    #[test]
+    fn portraits_log_lines_reach_the_callback() {
+        let game = TempDir::new("portraits_log");
+        let cache = TempDir::new("portraits_log_cache");
+        let items = serde_json::json!([{"key": "wolf", "model": "91e2d4cc-01c9-4203-a92e-b08769364522"}]);
+        let _turn = export_turn();
+        let mut lines: Vec<(i32, String)> = Vec::new();
+        let _ = call_portraits_logged(&portraits_request(game.utf8(), cache.utf8(), items), 64 * 1024, 0,
+            Some(&mut lines));
+        let line = lines.iter().find(|(level, line)| *level == 0 && line.starts_with("emf::portraits"));
+        assert!(line.is_some_and(|(_, l)| l.contains(game.utf8())), "{lines:?}");
+    }
+
+    #[test]
+    fn a_portraits_call_from_inside_a_builds_log_callback_is_refused() {
+        let _turn = export_turn();
+        unsafe extern "C" fn call_portraits_again(ctx: *mut c_void, _level: c_int, _line: *const c_char) {
+            let inner = unsafe { &mut *(ctx as *mut Vec<(i32, String)>) };
+            if !inner.is_empty() {
+                return;
+            }
+            let request = std::ffi::CString::new("{\"game_dir\": \"unused\", \"cache_dir\": \"C:\\\\x\"}").unwrap();
+            let mut buf = vec![0u8; 4096];
+            let mut len = 0usize;
+            let code = unsafe {
+                emf_content_portraits(request.as_ptr(), None, std::ptr::null_mut(), buf.as_mut_ptr() as *mut c_char,
+                    buf.len(), &mut len)
+            };
+            let text = if len > 0 && len <= buf.len() {
+                String::from_utf8_lossy(&buf[..len - 1]).into_owned()
+            } else {
+                String::new()
+            };
+            inner.push((code, text));
+        }
+        let dir = TempDir::new("reentry_portraits");
+        let mut inner: Vec<(i32, String)> = Vec::new();
+        let request = std::ffi::CString::new(request_for(dir.utf8())).unwrap();
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut len = 0usize;
+        let code = unsafe {
+            emf_content_build(request.as_ptr(), Some(call_portraits_again), &mut inner as *mut _ as *mut c_void,
+                buf.as_mut_ptr() as *mut c_char, buf.len(), &mut len)
+        };
+        assert_eq!(code, RUN_FAILED, "the outer build goes on");
+        assert_eq!(inner.len(), 1);
+        assert_eq!(inner[0].0, BAD_REQUEST, "{:?}", inner[0].1);
+        assert!(inner[0].1.contains("already"), "{:?}", inner[0].1);
+        assert!(parse(&inner[0].1)["items"].is_array(), "the portraits reply's shape: {:?}", inner[0].1);
+    }
+
+    #[test]
+    fn portraits_need_a_reply_len() {
+        let request = std::ffi::CString::new("{}").unwrap();
+        let mut buf = vec![0u8; 64];
+        let code = unsafe {
+            emf_content_portraits(request.as_ptr(), None, std::ptr::null_mut(), buf.as_mut_ptr() as *mut c_char, 64,
+                std::ptr::null_mut())
+        };
+        assert_eq!(code, BAD_REQUEST);
     }
 }
