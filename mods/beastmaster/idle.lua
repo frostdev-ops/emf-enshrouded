@@ -27,7 +27,10 @@
 -- is still Sleep: the game's AI follows its owner again from the next step.
 -- Fires and villagers come from a search of the server world, SCAN_PER_STEP entities a step: at the first step after a
 -- reset, and when a player with a beast out has stood still for half of idle_s while the last search began FIND_EVERY_S
--- ago or more (or none did since the reset).
+-- ago or more (or none did since the reset). Every search also wakes a player-side creature (Faction PLAYER_ALLY) whose
+-- runtime enabledFeatures has the Sleep bit and that no scene of ours holds: no beast's template has the bit, so it is
+-- one a scene held before the mod's start, a reload or a world load.
+-- An error in the idle code (step, a hit, an end) is logged and lets every beast of the idling up; idling starts anew.
 -- M.new(env) where env has: now(world), setting(key), ids() (the beasts out: entity id -> {account, beast}),
 -- busy(world, id) (an Attack order on the beast, or it comes back from a chase), held(account) (the threat share holds
 -- a monster in that player's fight), building(world, account, owner) (the player builds, or their beasts are aside).
@@ -49,6 +52,7 @@ local SCENE_MIN_S, SCENE_MAX_S = 30, 60  -- a scene lasts this long, then the be
 local NIGHT_FROM, NIGHT_TO = 18, 6  -- the game's night: its clock's night start and day start (hours)
 local SCAN_PER_STEP = 250  -- entities looked at per step while the world is searched
 local FIND_EVERY_S = 30    -- s between two searches for fires and villagers while players stand still
+local PLAYER_ALLY = 11
 -- ComfortProvider categories that are fires: Hearth (campfires, fireplaces) and Flame
 local FIRE_COMFORT = { [0] = true, [12] = true }
 -- the scenes a beast picks from, in this order, with their weights (a pick among the ones it can have)
@@ -143,13 +147,28 @@ local function turn(world, id, tx, tz)
 	return emf.teleport(world, id, x, y, z, { yaw = math.deg(math.atan(dx, dz)) }) == true
 end
 
--- One step of the search for fires and villagers; its finds replace the old ones when it ends.
+-- Wakes `id` when it is a player-side creature in the Sleep state with the bit on; true when it was one.
+local function wake_stray(world, id)
+	local f = get(world, "Faction", id)
+	if not (f and f.faction == PLAYER_ALLY) then return false end
+	local ai = get(world, "DynamicEnemy01BehaviorState", id)
+	if not (ai and (ai.enabledFeatures & M.SLEEP_BIT) ~= 0) then return false end
+	ai.enabledFeatures = ai.enabledFeatures & ~M.SLEEP_BIT
+	ai.sleepEndTime = 0
+	if ai.state == SLEEP then ai.state = IDLE end
+	return true
+end
+
+-- One step of the search for fires and villagers (and creatures left asleep); its finds replace the old ones when it
+-- ends.
 function I:walk_step(world)
-	if not self.walk then self.walk = { ids = world:entities(), i = 1, fires = {}, villagers = {} } end
+	if not self.walk then self.walk = { ids = world:entities(), i = 1, fires = {}, villagers = {}, woke = 0 } end
 	local w = self.walk
 	local last = math.min(#w.ids, w.i + SCAN_PER_STEP - 1)
 	for k = w.i, last do
 		local id = w.ids[k]
+		local sc = self.scenes[id]
+		if not (sc and sc.held) and wake_stray(world, id) then w.woke = w.woke + 1 end
 		if is_fire(world, id) then
 			local x, y, z = world:position(id)
 			if x then w.fires[#w.fires + 1] = { x = x, y = y, z = z } end
@@ -160,6 +179,9 @@ function I:walk_step(world)
 	w.i = last + 1
 	if w.i <= #w.ids then return end
 	self.fires, self.villagers, self.walk = w.fires, w.villagers, nil
+	if w.woke > 0 then
+		emf.log(string.format("idle: %d player-side creature%s left in the Sleep state woken", w.woke, w.woke == 1 and "" or "s"))
+	end
 end
 
 -- Whether a search starts now: a player with a beast out stands still (half of idle_s, or idles) and the last search
@@ -264,7 +286,7 @@ function I:pick(world, id, account, owner, group, now)
 end
 
 -- Idling ends for `account`: every beast of theirs is let up, and their stillness counts from now.
-function I:stop(world, account)
+function I:run_stop(world, account)
 	for id, sc in pairs(self.scenes) do
 		if sc.account == account then
 			wake(world, id, sc)
@@ -290,7 +312,7 @@ end
 
 -- A HitEvent: a hit to or from a player or a beast of theirs (not a fall, nor its own) ends their idling at once, and
 -- the next waits QUIET_S.
-function I:on_hit(world, source, target)
+function I:run_hit(world, source, target)
 	if source == 0 or source == target then return end
 	local now = self.env.now(world)
 	for _, id in ipairs({ source, target }) do
@@ -376,7 +398,7 @@ function I:step_player(world, account, owner, list, now)
 end
 
 -- Every server step: `owners` (account -> player entity) the players in the world as of the last look.
-function I:step(world, owners)
+function I:run_step(world, owners)
 	local now = self.env.now(world)
 	if self.walk then
 		self:walk_step(world)
@@ -402,5 +424,55 @@ function I:step(world, owners)
 		self:step_player(world, account, owners[account], list, now)
 	end
 end
+
+local SAYS = { settle = "settles", fire = "sits by the fire", watch = "watches a villager", night = "keeps watch",
+	sniff = "sniffs about" }
+
+-- What `account`'s beasts do now, for beastmaster.idle: "Your beasts idle: Wolf settles (lying down, 25 s), ...".
+function I:text(world, account)
+	if not self.env.setting("idle") then return "Idling is off (the setting idle)." end
+	local now = self.env.now(world)
+	local p = self.players[account]
+	if not (p and p.idle) then
+		local still = p and math.max(0, math.floor(now - p.since)) or 0
+		return string.format("Your beasts are not idling: you have stood still %d s of %d.", still, self.env.setting("idle_s"))
+	end
+	local ids, list = self.env.ids(), {}
+	for id, sc in pairs(self.scenes) do
+		if sc.account == account and ids[id] then list[#list + 1] = id end
+	end
+	table.sort(list)
+	local parts = {}
+	for _, id in ipairs(list) do
+		local sc, e = self.scenes[id], ids[id]
+		local how = "free"
+		if sc.held then how = species.sleeps(species.by_id(e.beast.species)) and "lying down" or "standing still" end
+		parts[#parts + 1] = string.format("%s %s (%s%s, %d s)", e.beast.name, SAYS[sc.scene] or sc.scene, how,
+			sc.turned and ", turned" or "", math.max(0, math.ceil(sc.until_s - now)))
+	end
+	return "Your beasts idle: " .. table.concat(parts, ", ")
+end
+
+-- An error in the idle code: logged, every beast of the idling let up (each on its own), and no one idles; their
+-- stillness counts from now.
+function I:fail(world, err)
+	emf.log("idle: " .. tostring(err) .. " (every beast of the idling is let up)")
+	for id, sc in pairs(self.scenes) do pcall(wake, world, id, sc) end
+	self.scenes = {}
+	local ok, now = pcall(self.env.now, world)
+	for _, p in pairs(self.players) do
+		p.idle = false
+		if ok then p.since = now end
+	end
+end
+
+local function guarded(self, world, fn, ...)
+	local ok, err = pcall(fn, self, world, ...)
+	if not ok then self:fail(world, err) end
+end
+
+function I:step(world, owners) guarded(self, world, I.run_step, owners) end
+function I:on_hit(world, source, target) guarded(self, world, I.run_hit, source, target) end
+function I:stop(world, account) guarded(self, world, I.run_stop, account) end
 
 return M

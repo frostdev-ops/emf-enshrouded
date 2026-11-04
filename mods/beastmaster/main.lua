@@ -778,6 +778,12 @@ emf.command("threat", ": the monsters held on you or your beasts now, and for ho
 	emf.reply(account and pack.threat:held_text(world, account) or "Your account is not known yet.")
 end)
 
+-- What your beasts do while you stand still now (for live checks).
+emf.command("idle", ": what your beasts do while you stand still now", function(world, args)
+	local _, account = who(world)
+	emf.reply(account and pack.idle:text(world, account) or "Your account is not known yet.")
+end)
+
 -- Admin: set a beast's loyalty (console only, not from the chat; for tests and live checks).
 emf.command("loyalty", "<name or number> <1-10>: set a beast's loyalty (admin)", function(world, args)
 	local sender = emf.sender()

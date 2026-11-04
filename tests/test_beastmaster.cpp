@@ -4312,3 +4312,54 @@ TEST_CASE("idle: a beast that comes within 15 m of its owner while they idle get
     CHECK(asleep(b, 1235));
     CHECK(asleep(b, 1234));
 }
+
+TEST_CASE("idle: at the mod's start or a reload every player-side creature left with the Sleep bit is woken; a wild one is left alone") {
+    BeastRig b;
+    for (uint32_t id : {1300u, 1301u}) {
+        creature(b, id, 5, 5, id == 1300u ? kPlayerAlly : kWildBeast);
+        auto& ai = component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, id);
+        ai.enabledFeatures = kSleepBit | 4u;
+        ai.state = AiState::Sleep;
+        ai.sleepEndTime.value = 1000000000000000000LL;
+    }
+    b.edit_main("local wild_mod = require(\"wild\")\n", "-- reloaded\n");  // the script reloads; a second is played
+    CHECK(awake(b, 1300));
+    CHECK(ai_now(b, 1300).enabledFeatures == 4u);
+    CHECK(ai_now(b, 1300).state == AiState::Idle);
+    CHECK(asleep(b, 1301));
+}
+
+TEST_CASE("idle: an error in the idle code wakes every beast of the idling and is logged; the mod runs on") {
+    RollRig b;
+    b.edit_main("local wild_mod = require(\"wild\")\n", "emf.teleport = function() error(\"teleport broke\") end\n");
+    b.roll(0.0);  // settle; the next pick 30 s later
+    b.reply("beastmaster.give wolf");
+    fire_at(b, 900, 4, 4);
+    roaming(b, "Wolf", 1234, 0, 4);
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    b.roll(0.6);  // by the fire: the turn fails with an error
+    b.seconds(30);
+    CHECK(awake(b, 1234));
+    bool logged = false;
+    for (const auto& l : b.r.fake.log) logged = logged || has(l, "idle: ");
+    CHECK(logged);
+    CHECK(b.host->status("beastmaster") == "running");
+}
+
+TEST_CASE("idle: beastmaster.idle says what each beast does") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.0);
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give boar");
+    fire_at(b, 900, 4, -4);  // 4 m east of the boar
+    roaming(b, "Wolf", 1234, 0, 4);
+    roaming(b, "Boar", 1235, 0, -4);
+    b.seconds(5);
+    CHECK(has(b.reply("beastmaster.idle"), "Your beasts are not idling"));
+    b.seconds(6);
+    const std::string idle = b.reply("beastmaster.idle");
+    CAPTURE(idle);
+    CHECK(has(idle, "Wolf settles (lying down"));
+    CHECK(has(idle, "Boar sits by the fire (standing still, turned"));
+}
