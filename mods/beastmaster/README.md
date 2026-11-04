@@ -208,23 +208,27 @@ monsters in your fights now and who they are on.
 ## When you stand still
 
 When you have stood still (moved less than 1 m) for 10 s, out of a fight (no hit to or from you or your beasts for
-10 s, no monster held in your fight) and not building, your beasts that are out and following you within 15 m pass
-the time, each in a scene of its own, and pick a new one every 30 to 60 s:
+10 s, no monster held in your fight) and not building, your beasts pass the time, each in a scene of its own, and pick
+a new one every 30 to 60 s. A beast takes part while it follows you within 15 m and is not busy (no Attack order, not
+falling, in water or fighting); one that wanders farther, or that the game moves on, drops out alone and joins again
+when it is back. The wolf, the hound and the bear can lie down; the other beasts stand still where a scene keeps them.
 
-- **Settle:** a wolf or a hound lies down where it is. The other beasts do not settle.
+- **Settle:** a wolf, a hound or a bear lies down where it is. The other beasts do not settle.
 - **By the fire:** with a campfire, a fireplace or a base's flame altar within 15 m of it, the beast turns to face the
-  nearest and stays there (a wolf or a hound lies down facing it).
-- **Watching:** with a villager within 15 m of it, it turns to face them; a wolf or a hound stays up, the others stay
-  put.
-- **Night watch:** at night (18:00 to 06:00) with two or more beasts out, one keeps watch facing away from you (one
-  that is not a wolf or a hound, when you have one), while the wolves and hounds settle. A lone wolf or hound settles.
+  nearest and stays there (a wolf, a hound or a bear lies down facing it).
+- **Watching:** with a villager within 15 m of it, it turns to face them and stays there (a wolf, a hound or a bear
+  lies down facing them).
+- **Night watch:** at night (18:00 to 06:00) with two or more beasts taking part, one that is not a wolf, a hound or a
+  bear keeps watch, standing and facing away from you, while the wolves, hounds and bears settle. With only wolves,
+  hounds and bears, all of them settle. A lone wolf, hound or bear settles; another lone beast picks as by day.
 - **Sniffing about:** it wanders around you, as it does anyway.
 
-They get up and follow you the moment you are 2 m from where you stood, a fight starts (a hit to or from you or one
-of them, or a monster joins a fight with you), you call, dismiss or store a beast or send them with Attack, you start
-building, or one of them is more than 15 m from you; then they wait for another 10 s of stillness. Each player's
-beasts follow only that player's stillness. **Beasts pass the time while you stand still** (`idle`) turns it off;
-**After you stand still for** (`idle_s`) sets the 10 s. `beastmaster.idle` (console) says what each beast does now.
+A beast that turned keeps facing that way while it stays. They all get up and follow you the moment you are 2 m from
+where you stood, a fight starts (a hit to or from you or one of them, or a monster joins a fight with you), you call,
+dismiss or store a beast or send them with Attack, or you start building; then they wait for another 10 s of
+stillness. Each player's beasts follow only that player's stillness. **Beasts pass the time while you stand still**
+(`idle`) turns it off; **After you stand still for** (`idle_s`) sets the 10 s. `beastmaster.idle` (console) says what
+each beast does now.
 
 ## Commands
 
@@ -372,8 +376,14 @@ does not ship this file.
   beast is a tank with `tank = true` in its entry.
 - Second Wind's 5 minutes are not kept with the world: after a reload it is ready again.
 - A beast stays put through the game's own sleep: Beastmaster switches the Sleep feature on in the beast's AI
-  (`DynamicEnemy01BehaviorState`: the Sleep bit in `enabledFeatures`, `sleepEndTime` far ahead, state Sleep), and the
-  game plays the sleep animation of a graph that has one (the wolf's, which the hound runs too); a beast whose graph has
-  none stands there. A turn is the game's teleport in place with a yaw. A player-side creature left with the Sleep bit
-  (after a reload of the mod, for example) is woken at the next search of the world. A `species_extra.lua` beast lies
-  down with `sleeps = true` in its entry; `stays = false` keeps a kind out of the Sleep state (it only turns).
+  (`DynamicEnemy01BehaviorState`: the Sleep bit in `enabledFeatures`, state Sleep, `sleepEndTime` 2 minutes ahead and
+  renewed every 5 s, the game's own sleep check pushed far ahead), and the game plays the sleep animation of a graph
+  that has one (the wolf's, which the hound runs too, and the bear pack's copy of it, whose sleep clips are the bear's
+  lying idle); a beast whose graph has none stands there. If Beastmaster stops (an error), a lying beast gets up by
+  itself within about two minutes. A turn is the game's teleport in place with a yaw; while a turned beast stays, its
+  AI's own turning (Rotate, RotateWhileStanding, IdleTurn in `disabledFeatures`) is off, and back as it was when it
+  gets up. Lua is not given the game's time: Beastmaster takes it from a called beast's `SpawnTime`, or from an AI's
+  state change; a beast tamed in this session and not called since waits for that before it lies down. A player-side
+  creature left with the Sleep bit (after a reload of the mod, for example) is woken at the next search of the world.
+  A `species_extra.lua` beast lies down with `sleeps = true` in its entry; `stays = false` keeps a kind out of the Sleep
+  state (it only turns).
