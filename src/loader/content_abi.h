@@ -44,5 +44,8 @@ typedef void (*emf_content_log_fn)(void* ctx, int level, const char* line);
 typedef uint32_t (*emf_content_abi_fn)(void);
 typedef int32_t (*emf_content_build_fn)(const char* request_json, emf_content_log_fn log, void* log_ctx, char* reply,
                                         size_t reply_cap, size_t* reply_len);
+// emf_content_portraits (src/content/emf_content.h): came after ABI 1 without changing it; an older DLL has none
+typedef int32_t (*emf_content_portraits_fn)(const char* request_json, emf_content_log_fn log, void* log_ctx,
+                                            char* reply, size_t reply_cap, size_t* reply_len);
 
 }  // namespace emf::loader::content_abi

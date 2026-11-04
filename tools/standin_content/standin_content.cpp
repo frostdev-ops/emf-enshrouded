@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <optional>
 #include <string>
 #include <vector>
@@ -242,6 +243,48 @@ extern "C" __declspec(dllexport) int32_t emf_content_build(const char* request_j
     const int32_t rc = finish(r, reply, reply_cap, reply_len);
     busy = false;
     return rc;
+}
+
+// Portraits, in small: each item gets <cache_dir>\<key>\00.png and index.json ("drawn"); the key "broken" fails.
+extern "C" __declspec(dllexport) int32_t emf_content_portraits(const char* request_json, abi::emf_content_log_fn log,
+                                                               void* log_ctx, char* reply, size_t reply_cap,
+                                                               size_t* reply_len) {
+    if (!reply_len) return abi::EMF_CONTENT_BAD_REQUEST;
+    const auto parsed = emf::core::json::parse(request_json ? request_json : "");
+    const auto* cache = parsed.value ? parsed.value->get("cache_dir") : nullptr;
+    const auto* items = parsed.value ? parsed.value->get("items") : nullptr;
+    std::string json = "{\"code\": ";
+    int32_t code = abi::EMF_CONTENT_OK;
+    std::string list;
+    if (!cache || !items) {
+        code = abi::EMF_CONTENT_BAD_REQUEST;
+    } else {
+        for (const auto& i : items->arr) {
+            const auto* key = i.get("key");
+            const std::string k = key ? key->s : "";
+            if (log) log(log_ctx, 2, ("standin: portrait " + k).c_str());
+            const bool broken = k == "broken";
+            if (!broken) {
+                const std::wstring dir = cio::join(cio::from_utf8(cache->s), cio::from_utf8(k));
+                CreateDirectoryW(cio::from_utf8(cache->s).c_str(), nullptr);
+                CreateDirectoryW(dir.c_str(), nullptr);
+                for (const wchar_t* f : {L"00.png", L"index.json"}) {
+                    const HANDLE h = CreateFileW(cio::join(dir, f).c_str(), GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS,
+                                                 FILE_ATTRIBUTE_NORMAL, nullptr);
+                    if (h != INVALID_HANDLE_VALUE) CloseHandle(h);
+                }
+            } else {
+                code = 1;  // EMF_CONTENT_ITEMS_FAILED
+            }
+            list += (list.empty() ? "" : ", ") + std::string("{\"key\": \"") + k + "\", \"status\": \"" +
+                    (broken ? "failed\", \"error\": \"broken on purpose\"}" : "drawn\"}");
+        }
+    }
+    json += std::to_string(code) + ", \"message\": \"standin portraits\", \"items\": [" + list + "], \"ms\": 1}";
+    *reply_len = json.size() + 1;
+    if (!reply || reply_cap < json.size() + 1) return abi::EMF_CONTENT_REPLY_TOO_SMALL;
+    std::memcpy(reply, json.c_str(), json.size() + 1);
+    return code;
 }
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {

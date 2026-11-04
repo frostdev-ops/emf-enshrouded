@@ -507,6 +507,8 @@ add_executable(emf_tests
   tests/test_settings_ui.cpp
   tests/test_window_ui.cpp
   tests/test_png_decode.cpp
+  tests/test_portraits_plan.cpp
+  tests/test_content_portraits.cpp
   tests/test_image_store.cpp
   tests/test_pattern_find.cpp
   tests/test_hook_table.cpp
