@@ -2,7 +2,8 @@
 
 #include <cstdio>
 
-#include "wheel_ui.h"  // wheel_label_lines: "Name (detail)"
+#include "wheel_ui.h"
+#include "window_model.h"  // wheel_label_lines: "Name (detail)"
 
 namespace emf::core {
 
@@ -13,8 +14,27 @@ ImU32 rgba_u32(uint32_t rgba) {
 }
 ImVec4 rgba_vec(uint32_t rgba) { return ImGui::ColorConvertU32ToFloat4(rgba_u32(rgba)); }
 
-// A square slot: frame, its look (empty, locked, selected), the text centred and cut to fit, the count in the corner.
-bool draw_slot(const WindowWidget& w, bool clickable, const TextLook& look) {
+// The widget's picture now (API v26), when it has one that is on the GPU.
+std::optional<ImageDraw> picture(const ImageLookup* images, const WindowWidget& w) {
+    if (!images || !*images || !w.icon) return std::nullopt;
+    return (*images)(w.icon, ImGui::GetTime(), w.fps);
+}
+
+// `pic` inside the box p..q, as large as it fits with its own width / height, centred.
+void add_fitted(ImDrawList* dl, const ImageDraw& pic, ImVec2 p, ImVec2 q) {
+    const float bw = q.x - p.x, bh = q.y - p.y;
+    float w = bw, h = bw / (pic.aspect > 0 ? pic.aspect : 1.0f);
+    if (h > bh) {
+        h = bh;
+        w = bh * pic.aspect;
+    }
+    const ImVec2 a(p.x + (bw - w) * 0.5f, p.y + (bh - h) * 0.5f);
+    dl->AddImage(pic.tex, a, ImVec2(a.x + w, a.y + h), pic.uv0, pic.uv1);
+}
+
+// A square slot: frame, its look (empty, locked, selected), its picture (v26), the text centred and cut to fit (with a
+// picture: a caption at the bottom), the count in the corner.
+bool draw_slot(const WindowWidget& w, bool clickable, const TextLook& look, const std::optional<ImageDraw>& pic) {
     const float side = ImGui::GetTextLineHeightWithSpacing() * 3.0f;
     const ImVec2 size(side, side);
     const ImVec2 p = ImGui::GetCursorScreenPos();
@@ -30,6 +50,7 @@ bool draw_slot(const WindowWidget& w, bool clickable, const TextLook& look) {
     if (w.flags & EMF_UI_EMPTY) fill = ImGui::GetColorU32(ImGuiCol_FrameBg, 0.4f);
     if (w.flags & EMF_UI_LOCKED) fill = ImGui::GetColorU32(ImGuiCol_TextDisabled, 0.25f);
     dl->AddRectFilled(p, q, fill, 4.0f);
+    if (pic) add_fitted(dl, *pic, ImVec2(p.x + 4.0f, p.y + 4.0f), ImVec2(q.x - 4.0f, q.y - 4.0f));
     const bool lit = (w.flags & EMF_UI_SELECTED) != 0;
     dl->AddRect(p, q, lit ? rgba_u32(look.accent) : ImGui::GetColorU32(ImGuiCol_Border), 4.0f, 0, lit ? 2.5f : 1.0f);
     if (w.flags & EMF_UI_LOCKED) {  // a locked slot: two strokes across
@@ -43,7 +64,14 @@ bool draw_slot(const WindowWidget& w, bool clickable, const TextLook& look) {
         return ImGui::CalcTextSize(s.c_str()).x;
     });
     const ImVec2 ts = ImGui::CalcTextSize(text.c_str());
-    dl->AddText(ImVec2(p.x + (side - ts.x) * 0.5f, p.y + (side - ts.y) * 0.5f), text_col, text.c_str());
+    if (pic && !text.empty()) {  // a caption over the picture's bottom edge
+        const float top = q.y - ts.y - 4.0f;
+        dl->AddRectFilled(ImVec2(p.x + 1.0f, top), ImVec2(q.x - 1.0f, q.y - 1.0f), IM_COL32(0, 0, 0, 150), 4.0f,
+                          ImDrawFlags_RoundCornersBottom);
+        dl->AddText(ImVec2(p.x + (side - ts.x) * 0.5f, top + 2.0f), text_col, text.c_str());
+    } else if (!pic) {
+        dl->AddText(ImVec2(p.x + (side - ts.x) * 0.5f, p.y + (side - ts.y) * 0.5f), text_col, text.c_str());
+    }
     if (w.count) {
         char n[16];
         std::snprintf(n, sizeof n, "%u", w.count);
@@ -58,7 +86,7 @@ bool draw_slot(const WindowWidget& w, bool clickable, const TextLook& look) {
 std::string window_imgui_name(const WindowRequest& w) { return w.title + "###emf.window." + w.id; }
 
 std::optional<WindowClick> draw_window(const WindowRequest& w, WindowUiState& st, bool input, ImVec2 display,
-                                       const TextLook& look) {
+                                       const TextLook& look, const ImageLookup* images) {
     if (st.id != w.id) st = WindowUiState{w.id};
     st.hit.clear();
     if (look.font) ImGui::PushFont(look.font);
@@ -88,8 +116,7 @@ std::optional<WindowClick> draw_window(const WindowRequest& w, WindowUiState& st
             ImGui::PushID(static_cast<int>(i));
             if (i > 0 && (x.flags & EMF_UI_SAME_LINE) && x.type != EMF_UI_SEPARATOR) ImGui::SameLine();
             const bool disabled = (x.flags & EMF_UI_DISABLED) != 0;
-            const bool clickable = input && !disabled && !x.key.empty() &&
-                                   (x.type == EMF_UI_BUTTON || x.type == EMF_UI_ROW || x.type == EMF_UI_SLOT);
+            const bool clickable = input && !disabled && !x.key.empty() && widget_takes_clicks(x.type);
             int colours = 0;
             if (x.rgba) {
                 ImGui::PushStyleColor(ImGuiCol_Text, rgba_vec(x.rgba));
@@ -122,6 +149,14 @@ std::optional<WindowClick> draw_window(const WindowRequest& w, WindowUiState& st
                 }
                 case EMF_UI_ROW: {
                     const auto lines = wheel_label_lines(x.text);
+                    if (x.icon) {  // a square one line high before the text (kept without the picture: rows align)
+                        const float s = ImGui::GetTextLineHeight();
+                        const ImVec2 p = ImGui::GetCursorScreenPos();
+                        ImGui::Dummy(ImVec2(s, s));
+                        if (const auto pic = picture(images, x))
+                            add_fitted(ImGui::GetWindowDrawList(), *pic, p, ImVec2(p.x + s, p.y + s));
+                        ImGui::SameLine();
+                    }
                     if (disabled) ImGui::BeginDisabled();
                     pressed = ImGui::Selectable(lines.first.empty() ? " " : lines.first.c_str(),
                                                 (x.flags & EMF_UI_SELECTED) != 0);
@@ -135,7 +170,26 @@ std::optional<WindowClick> draw_window(const WindowRequest& w, WindowUiState& st
                     }
                     break;
                 }
-                case EMF_UI_SLOT: pressed = draw_slot(x, clickable, look); break;
+                case EMF_UI_SLOT: pressed = draw_slot(x, clickable, look, picture(images, x)); break;
+                case EMF_UI_IMAGE: {  // `height` text lines high (0 = 6), as wide as its frames, at most the window
+                    const auto pic = picture(images, x);
+                    float h = (x.height > 0 ? x.height : 6.0f) * ImGui::GetTextLineHeightWithSpacing();
+                    float wd = h * (pic ? pic->aspect : 1.0f);
+                    const float avail = ImGui::GetContentRegionAvail().x;
+                    if (avail > 0 && wd > avail) {
+                        h *= avail / wd;
+                        wd = avail;
+                    }
+                    const ImVec2 p = ImGui::GetCursorScreenPos();
+                    if (clickable)
+                        pressed = ImGui::InvisibleButton("image", ImVec2(wd, h), ImGuiButtonFlags_MouseButtonLeft);
+                    else
+                        ImGui::Dummy(ImVec2(wd, h));
+                    if (pic)
+                        ImGui::GetWindowDrawList()->AddImage(pic->tex, p, ImVec2(p.x + wd, p.y + h), pic->uv0,
+                                                             pic->uv1);
+                    break;
+                }
                 case EMF_UI_BAR:
                     ImGui::ProgressBar(static_cast<float>(x.value) / 1000.0f, ImVec2(-1.0f, 0.0f),
                                        x.text.empty() ? "" : x.text.c_str());

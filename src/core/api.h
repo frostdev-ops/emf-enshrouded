@@ -76,6 +76,10 @@ struct CoreState {
     std::function<bool(WindowRequest, std::optional<WindowRequest>*, std::string*)> open_window;
     std::function<bool(const WindowRequest&)> update_window;
     std::function<bool(const std::string&, std::optional<WindowRequest>*)> close_window;
+    // The overlay's pictures (API v26 image_load; null: no overlay): the picture at `path` (a file or a folder of frames)
+    // under `key` (one handle per key), 0 and why when refused.
+    std::function<uint32_t(const std::wstring& path, const std::string& key, std::string* why)> load_image;
+    std::wstring portrait_dir;  // <game>\emf\cache\portraits ("portrait:<key>" pictures)
     std::function<void(const std::string&)> notify;        // the overlay's top-of-screen note (null: log only)
     ModRegistry mods;                                    // every mod found in emf/mods and what became of it
     std::unique_ptr<IniBackend> settings_backend;         // emf/config/<mod>.ini

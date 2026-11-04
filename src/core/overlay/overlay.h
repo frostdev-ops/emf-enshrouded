@@ -89,6 +89,11 @@ bool overlay_close_window_by_player();
 // A note for [hud] notes_seconds where [hud] notes_place says (top centre by default), also kept in the console. Any
 // thread.
 void overlay_notify(const std::string& text);
+// The pictures mods loaded (API v26 image_load): decoded now, uploaded by the render thread before its next frame.
+// Any thread.
+uint32_t overlay_load_image(const std::wstring& path, const std::string& key, std::string* why);
+class ImageStore;
+ImageStore& overlay_images();
 
 // What the debug bridge's state reports about the overlay. Any thread.
 struct OverlayStatus {

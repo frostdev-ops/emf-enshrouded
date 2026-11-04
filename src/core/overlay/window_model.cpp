@@ -43,6 +43,7 @@ EmfUiWidget widget_at(const EmfWindowDef& def, uint32_t i) {
     EmfUiWidget w{};
     const auto* base = reinterpret_cast<const uint8_t*>(def.widgets) + static_cast<size_t>(i) * def.widget_size;
     std::memcpy(&w, base, def.widget_size < sizeof w ? def.widget_size : sizeof w);
+    if (def.widget_size < sizeof w) w.icon = 0;  // a v24/v25 mod: icon was reserved there, whatever it holds
     return w;
 }
 
@@ -77,7 +78,10 @@ bool copy_window_def(const EmfWindowDef* def, bool for_update, WindowRequest* ou
     for (uint32_t i = 0; i < def->count; ++i) {
         const EmfUiWidget w = widget_at(*def, i);
         const std::string at = "widget " + std::to_string(i) + ": ";
-        if (w.type > EMF_UI_SEPARATOR) return refuse(at + "unknown type " + std::to_string(w.type));
+        if (w.type > EMF_UI_IMAGE) return refuse(at + "unknown type " + std::to_string(w.type));
+        if (!std::isfinite(w.height) || w.height < 0 || w.height > 40)
+            return refuse(at + "height must be 0 (the default) to 40 text lines");
+        if (w.fps > 60) return refuse(at + "fps must be 0 to 60");
         WindowWidget c;
         c.type = w.type;
         c.flags = w.flags;
@@ -88,6 +92,9 @@ bool copy_window_def(const EmfWindowDef* def, bool for_update, WindowRequest* ou
         c.count = w.count;
         c.value = w.value > 1000 ? 1000 : w.value;
         c.rgba = w.rgba;
+        c.icon = w.icon;
+        c.fps = w.fps;
+        c.height = w.height;
         r.widgets.push_back(std::move(c));
     }
     r.close_vk = static_cast<uint16_t>(ck);
@@ -102,8 +109,12 @@ bool copy_window_def(const EmfWindowDef* def, bool for_update, WindowRequest* ou
     return true;
 }
 
+bool widget_takes_clicks(uint32_t type) {
+    return type == EMF_UI_BUTTON || type == EMF_UI_ROW || type == EMF_UI_SLOT || type == EMF_UI_IMAGE;
+}
+
 std::vector<std::string> describe_window(const WindowRequest& w) {
-    static const char* const kTypes[] = {"text", "heading", "button", "row", "slot", "bar", "separator"};
+    static const char* const kTypes[] = {"text", "heading", "button", "row", "slot", "bar", "separator", "image"};
     static const std::pair<uint32_t, const char*> kFlags[] = {
         {EMF_UI_SAME_LINE, "same_line"}, {EMF_UI_DISABLED, "disabled"}, {EMF_UI_SELECTED, "selected"},
         {EMF_UI_DIM, "dim"},             {EMF_UI_EMPTY, "empty"},       {EMF_UI_LOCKED, "locked"}};
@@ -112,11 +123,12 @@ std::vector<std::string> describe_window(const WindowRequest& w) {
                   (w.world_kind == EMF_WORLD_CLIENT ? "client" : "server") + " world");
     for (size_t i = 0; i < w.widgets.size(); ++i) {
         const WindowWidget& x = w.widgets[i];
-        std::string line = "  " + std::to_string(i) + " " + (x.type <= EMF_UI_SEPARATOR ? kTypes[x.type] : "?");
+        std::string line = "  " + std::to_string(i) + " " + (x.type <= EMF_UI_IMAGE ? kTypes[x.type] : "?");
         if (!x.key.empty()) line += " " + x.key;
         if (!x.text.empty()) line += " \"" + x.text + "\"";
         if (x.type == EMF_UI_SLOT && x.count) line += " count " + std::to_string(x.count);
         if (x.type == EMF_UI_BAR) line += " " + std::to_string(x.value) + "/1000";
+        if (x.icon) line += " picture " + std::to_string(x.icon) + (x.fps ? " at " + std::to_string(x.fps) + " fps" : "");
         std::string flags;
         for (const auto& [bit, name] : kFlags)
             if (x.flags & bit) flags += (flags.empty() ? "" : " ") + std::string(name);

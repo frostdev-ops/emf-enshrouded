@@ -13,6 +13,8 @@
 
 #include "core/emf_settings.h"
 #include "console_ui.h"
+#include "image_store.h"
+#include "window_model.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
 #include "font_plan.h"
@@ -365,9 +367,18 @@ TextLook text_look() {
     return t;
 }
 
+// A mod window's pictures (API v26): the image store's frame, once the render thread uploaded the picture.
+std::optional<ImageDraw> window_picture(uint32_t handle, double seconds, uint32_t fps) {
+    const auto f = overlay_images().frame(handle, seconds, fps);
+    if (!f) return std::nullopt;
+    return ImageDraw{static_cast<ImTextureID>(f->texture), ImVec2(f->uv.u0, f->uv.v0), ImVec2(f->uv.u1, f->uv.v1),
+                     f->aspect};
+}
+
 void build(ImVec2 display) {
     if (g_window) {  // under the console: drawn first, and without input while the console is open
-        const auto click = draw_window(*g_window, g_window_ui, !g_router->open(), display, text_look());
+        static const ImageLookup pictures = window_picture;
+        const auto click = draw_window(*g_window, g_window_ui, !g_router->open(), display, text_look(), &pictures);
         if (click && g_deps.window_event)
             g_deps.window_event(*g_window, click->right ? EMF_UI_RIGHT_CLICK : EMF_UI_CLICK, click->key, 0);
         if (g_window_ui.close_clicked) {
@@ -626,6 +637,15 @@ void overlay_notify(const std::string& text) {
     g_model->add_line(text);
 }
 
+ImageStore& overlay_images() {
+    static ImageStore store;  // lives as long as the process: pictures stay until the game closes
+    return store;
+}
+
+uint32_t overlay_load_image(const std::wstring& path, const std::string& key, std::string* why) {
+    return load_image(overlay_images(), path, key, why);
+}
+
 OverlayStatus overlay_status() {
     OverlayStatus s;
     if (!g_model || !g_router) return s;
@@ -665,7 +685,7 @@ bool overlay_click_window(const std::string& key, bool right, std::string* why) 
         return false;
     }
     for (const auto& x : w->widgets) {
-        if (x.key != key || (x.type != EMF_UI_BUTTON && x.type != EMF_UI_ROW && x.type != EMF_UI_SLOT)) continue;
+        if (x.key != key || !widget_takes_clicks(x.type)) continue;
         if (x.flags & EMF_UI_DISABLED) {
             if (why) *why = key + " is disabled";
             return false;
@@ -673,7 +693,7 @@ bool overlay_click_window(const std::string& key, bool right, std::string* why) 
         if (g_deps.window_event) g_deps.window_event(*w, right ? EMF_UI_RIGHT_CLICK : EMF_UI_CLICK, key, 0);
         return true;
     }
-    if (why) *why = "no button, row or slot with the key " + key;
+    if (why) *why = "no button, row, slot or picture with the key " + key;
     return false;
 }
 

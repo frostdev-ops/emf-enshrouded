@@ -10,6 +10,7 @@ namespace emf::core {
 struct SwapchainRecord {
     VkSwapchainKHR handle = VK_NULL_HANDLE;
     VkFormat format = VK_FORMAT_UNDEFINED;
+    VkColorSpaceKHR color_space = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;  // HDR10 or scRGB: mods' pictures are converted
     VkExtent2D extent{};
     uint32_t min_images = 2;
     bool retired = false;   // replaced by a newer swapchain (oldSwapchain), not destroyed yet

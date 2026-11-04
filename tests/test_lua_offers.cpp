@@ -143,3 +143,27 @@ TEST_CASE("lua 1.14: only the touch and button sequences; a slot the core had dr
     r.run_command("bb.go 5000");  // the slot is gone: another script may offer there now
     CHECK(r.fake.replies.back() == "true");
 }
+
+TEST_CASE("lua 1.15: emf.offered is true while the script's own offer is in EMF's hands") {
+    Rig r(L"luaoffered");
+    with_offers(r.api);
+    add_script(r.dir, "bm", std::string(kStable) +
+        "emf.command('has', '', function(w, args) emf.reply(tostring(emf.offered(w, tonumber(args[1])))) end)\n");
+    add_script(r.dir, "xx", "emf.command('has', '', function(w, args) emf.reply(tostring(emf.offered(w, tonumber(args[1])))) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("bm.has 5000");
+    CHECK(r.fake.replies.back() == "false");  // not offered
+    r.run_command("bm.go 5000");
+    r.run_command("bm.has 5000");
+    CHECK(r.fake.replies.back() == "true");
+    r.run_command("xx.has 5000");
+    CHECK(r.fake.replies.back() == "false");  // another script's
+    r.fake.offer_active = false;  // the core dropped it
+    r.run_command("bm.has 5000");
+    CHECK(r.fake.replies.back() == "false");
+    r.fake.offer_active = true;
+    r.run_command("bm.off 5000");
+    r.run_command("bm.has 5000");
+    CHECK(r.fake.replies.back() == "false");
+}

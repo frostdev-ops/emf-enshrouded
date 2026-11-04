@@ -254,6 +254,7 @@ uint32_t OfferService::spawn_offer(EmfWorld* w, const uint8_t guid[16], double x
     AcquireSRWLockExclusive(&lock_);
     const std::string stale = registry_.owner(cur, id);  // a fresh spawn: an entry on its id was another entity's
     if (!stale.empty()) registry_.remove(cur, id, stale);
+    dropped_.erase({cur, id});
     registry_.add(cur, id, owner, spec, std::move(cb));
     State st;
     st.range_added = true;
@@ -294,6 +295,19 @@ bool OfferService::offer(EmfWorld* w, uint32_t entity, const OfferSpec& spec, co
         return true;
     }
     if (has(ecs::InteractionOfferRuntime::kHash)) {
+        // EMF's own offer that upkeep dropped, its parts still EMF's: the same mod takes it back (nothing is added)
+        const auto d = dropped_.find({cur, entity});
+        if (d != dropped_.end() && d->second.first == owner &&
+            offer_runtime_bytes(d->second.second) == offer_runtime_bytes(spec) &&
+            offer_range_bytes(d->second.second) == offer_range_bytes(spec) && still_ours(w, entity, spec)) {
+            dropped_.erase(d);
+            registry_.add(cur, entity, owner, spec, std::move(cb));
+            State st;
+            st.range_added = has(ecs::CheckPlayerInRange::kHash);
+            state_[{cur, entity}] = st;
+            ReleaseSRWLockExclusive(&lock_);
+            return true;
+        }
         ReleaseSRWLockExclusive(&lock_);
         return refuse("it has its own offer from the game (a chest, a bench, a bed...)");
     }
@@ -345,7 +359,19 @@ void OfferService::forget(uint32_t entity) {
     const std::string owner = registry_.owner(cur, entity);
     if (!owner.empty()) registry_.remove(cur, entity, owner);
     state_.erase({cur, entity});
+    dropped_.erase({cur, entity});
     ReleaseSRWLockExclusive(&lock_);
+}
+
+bool OfferService::active(uint32_t entity, const std::string& owner) const {
+    const uint32_t cur = session();
+    AcquireSRWLockShared(&lock_);
+    const OfferRegistry::Entry* e = registry_.find(cur, entity);
+    bool on = e && e->owner == owner;
+    if (on)
+        if (const auto st = state_.find({cur, entity}); st != state_.end() && st->second.removing) on = false;
+    ReleaseSRWLockShared(&lock_);
+    return on;
 }
 
 std::vector<uint32_t> OfferService::remove_owner(EmfWorld* w, const std::string& owner) {
@@ -388,6 +414,8 @@ void OfferService::on_server_tick(EmfWorld* w) {
     if (cur != session_seen_) {  // a new world: the old one's offers went with it, and its ids mean other entities now
         registry_.new_session(cur);
         for (auto it = state_.begin(); it != state_.end();) it = it->first.first == cur ? std::next(it) : state_.erase(it);
+        for (auto it = dropped_.begin(); it != dropped_.end();)
+            it = it->first.first == cur ? std::next(it) : dropped_.erase(it);
         session_seen_ = cur;
     }
     if (++ticks_ >= kOfferUpkeepTicks) {
@@ -399,8 +427,12 @@ void OfferService::on_server_tick(EmfWorld* w) {
             const auto has = [&](uint32_t hash) { return deps_.has && deps_.has(w, hash, e.entity); };
             const auto st = state_.find({cur, e.entity});
             if (st != state_.end() && st->second.pending > 0) continue;  // under way
-            if (!has(ecs::CurrentTransform::kHash) || !still_ours(w, e.entity, e.spec)) {
-                gone.push_back(std::to_string(e.entity) + " (" + e.owner + ")");
+            const bool here = has(ecs::CurrentTransform::kHash);
+            if (!here || !still_ours(w, e.entity, e.spec)) {
+                gone.push_back(std::to_string(e.entity) + " (" + e.owner + (here ? ", its offer is not EMF's now" : "") +
+                               ")");
+                if (here) dropped_[{cur, e.entity}] = {e.owner, e.spec};
+                else dropped_.erase({cur, e.entity});
                 registry_.remove(cur, e.entity, e.owner);
                 state_.erase({cur, e.entity});
             }
