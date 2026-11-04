@@ -140,6 +140,19 @@ struct Fake {
     std::vector<std::string> images_loaded;
     bool image_ok = true;
     uint32_t next_image = 50;
+    // v27 net: channels registered (name copied), messages sent (channel, data, player), answers
+    struct NetCh {
+        std::string name;
+        EmfNetChannel def;
+    };
+    std::vector<NetCh> net_channels;
+    struct NetMsg {
+        std::string channel, data;
+        uint32_t player = 0;
+    };
+    std::vector<NetMsg> net_sent;
+    bool net_ok = true;
+    uint32_t net_peer_version = 4;
     // v21 world settings: two settings, what set and reset were asked (key as passed, "" for NULL; flags), the
     // change listeners; ws_world false = no hosted world (every call answers false)
     struct WsField {
@@ -461,6 +474,32 @@ bool f_offer_remove(EmfWorld*, uint32_t entity) {
 uint32_t f_image_load(const char* path) {
     g->images_loaded.emplace_back(path ? path : "");
     return g->image_ok ? g->next_image++ : 0;
+}
+bool f_net_channel(const EmfNetChannel* d) {
+    if (!g->net_ok) return false;
+    g->net_channels.push_back({d->name ? d->name : "", *d});
+    return true;
+}
+bool f_net_to_server(const char* ch, const void* data, uint32_t n) {
+    g->net_sent.push_back({ch, std::string(static_cast<const char*>(data), n), 0});
+    return g->net_ok;
+}
+bool f_net_to_player(EmfWorld*, uint32_t player, const char* ch, const void* data, uint32_t n) {
+    g->net_sent.push_back({ch, std::string(static_cast<const char*>(data), n), player});
+    return g->net_ok;
+}
+uint32_t f_net_to_players(EmfWorld*, const char* ch, const void* data, uint32_t n) {
+    g->net_sent.push_back({ch, std::string(static_cast<const char*>(data), n), 0xFFFFFFFFu});
+    return 2;
+}
+uint32_t f_net_peer(EmfWorld*, uint32_t, const char*) { return g->net_peer_version; }
+// A v27 core (fake_api leaves the net calls out: emf.net answers false without them).
+void with_net(EmfApi& a) {
+    a.net_channel = f_net_channel;
+    a.net_to_server = f_net_to_server;
+    a.net_to_player = f_net_to_player;
+    a.net_to_players = f_net_to_players;
+    a.net_peer = f_net_peer;
 }
 // A v26 core (fake_api leaves image_load out: emf.image answers nil without it).
 void with_images(EmfApi& a) { a.image_load = f_image_load; }

@@ -606,7 +606,30 @@ slot.type = EMF_UI_SLOT;  slot.icon = wolf;  slot.text = "Wolf";  slot.key = "ac
   mod's stays). `<game>/emf/portraits.log` has the
   last run.
 
-## Lua
+## v27: mod messages
+
+Your mod on a player's game and the same mod on the server send each other messages on named channels. **For now only
+in process**: the host's own game and an offline game (the server world and the player's game in one process). Joined
+players and the dedicated server come with the chat transport in a later version; until then `net_to_server` from a
+joined game is false and `net_to_players` reaches only the host.
+
+```c
+EmfNetChannel c = {sizeof c};
+c.name = "mymod/pick";  c.version = 1;  c.flags = EMF_NET_TO_SERVER;
+c.on_server = on_pick;  // void on_pick(EmfWorld* w, const EmfNetFrom* from, const void* data, uint32_t size, void* u)
+api->net_channel(&c);
+api->net_to_server("mymod/pick", "3", 1);                    // a player's game -> the server
+api->net_to_player(w, from->player, "mymod/show", "ok", 2);  // the server -> that player's game
+```
+
+- A channel is `<mod id>/<name>` (your DLL's file name, then 1-32 of a-z 0-9 _ . -), a version (1..65535), its
+  directions, a size limit (default 4096 bytes, at most 16384) and a rate (messages one sender may send in 10 s,
+  default 100). Register it once, from `emf_mod_load`; the core keeps it until the game closes.
+- Handlers run on the world's thread after its step: `on_server` on the server world (components, spawn), `on_player`
+  on the player's client world. `from` names the sender: the player entity and account on the server (from the
+  server's own records, never from the message), `local` in process, `admin` for the host's own game.
+- Refusals (a bad channel, too large, over the rate, the wrong direction) are false and logged once per reason; a
+  player whose game has no such channel is false without a log.
 
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
 

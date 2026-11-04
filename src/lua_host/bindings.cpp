@@ -2721,6 +2721,193 @@ void push_world(lua_State* L, Script& s, EmfWorld* world) {
     lua_setfield(L, LUA_REGISTRYINDEX, "emf.world_now");
 }
 
+// ---- lua 1.18: mod messages (API v27) ----
+bool has_v27(const EmfApi* a) {
+    return a && a->version >= 27 && a->size >= offsetof(EmfApi, net_peer) + sizeof(a->net_peer) && a->net_channel;
+}
+
+// A script's channel for the life of the game (the core keeps a channel until the game closes): a reload binds the
+// reloaded script's functions to it; its version and directions stay.
+struct NetSlot {
+    Host::Impl* host;
+    std::string id;  // the script
+    uint32_t version, flags;
+    int ref_server = LUA_NOREF, ref_player = LUA_NOREF;
+    uint64_t load = 0;  // the script load the functions belong to
+};
+
+void push_net_from(lua_State* L, const EmfNetFrom* f) {
+    lua_createtable(L, 0, 5);
+    lua_pushinteger(L, f ? f->player : 0);
+    lua_setfield(L, -2, "player");
+    char account[24];
+    std::snprintf(account, sizeof account, "0x%016llx", static_cast<unsigned long long>(f ? f->account : 0));
+    lua_pushstring(L, account);
+    lua_setfield(L, -2, "account");
+    lua_pushboolean(L, f && f->admin);
+    lua_setfield(L, -2, "admin");
+    lua_pushboolean(L, f && f->local);
+    lua_setfield(L, -2, "is_local");
+    lua_pushinteger(L, f ? f->peer_version : 0);
+    lua_setfield(L, -2, "version");
+}
+
+void net_cb_body(EmfWorld* w, const EmfNetFrom* f, const void* data, uint32_t n, NetSlot* slot, bool server) {
+    if (!slot) return;
+    Script* s = slot->host->find(slot->id);
+    if (!s) return;
+    std::lock_guard<std::recursive_mutex> l(s->m);
+    const int ref = server ? slot->ref_server : slot->ref_player;
+    if (ref == LUA_NOREF || !s->L || s->paused || slot->load != s->loads) return;
+    lua_rawgeti(s->L, LUA_REGISTRYINDEX, ref);
+    push_world(s->L, *s, w);
+    push_net_from(s->L, f);
+    lua_pushlstring(s->L, static_cast<const char*>(data ? data : ""), n);
+    call_lua(*s, 3);
+    ++s->generation;
+}
+
+// Called by EMF: nothing may escape into the game.
+void net_server_cb(EmfWorld* w, const EmfNetFrom* f, const void* d, uint32_t n, void* u) {
+    try {
+        net_cb_body(w, f, d, n, static_cast<NetSlot*>(u), true);
+    } catch (...) {
+    }
+}
+void net_player_cb(EmfWorld* w, const EmfNetFrom* f, const void* d, uint32_t n, void* u) {
+    try {
+        net_cb_body(w, f, d, n, static_cast<NetSlot*>(u), false);
+    } catch (...) {
+    }
+}
+
+uint32_t opt_uint(lua_State* L, int t, const char* key, uint32_t def) {
+    lua_getfield(L, t, key);
+    const uint32_t v = lua_isnil(L, -1) ? def : static_cast<uint32_t>(luaL_checkinteger(L, -1));
+    lua_pop(L, 1);
+    return v;
+}
+
+// emf.net.channel(name, {version = 1, to = "server" | "players" | "both", max = 4096, per_10s = 100,
+// on_server = fn(world, from, data), on_player = fn(world, from, data)}) (lua 1.18): true when the channel
+// "<script id>/<name>" is there. `to` defaults to where the given handlers are.
+int l_net_channel(lua_State* L) {
+    Script* s = script_of(L);
+    const std::string name = luaL_checkstring(L, 1);
+    luaL_checktype(L, 2, LUA_TTABLE);
+    const uint32_t version = opt_uint(L, 2, "version", 1);
+    const uint32_t max = opt_uint(L, 2, "max", 0);
+    const uint32_t per = opt_uint(L, 2, "per_10s", 0);
+    lua_getfield(L, 2, "on_server");
+    const bool has_server = lua_isfunction(L, -1);
+    lua_pop(L, 1);
+    lua_getfield(L, 2, "on_player");
+    const bool has_player = lua_isfunction(L, -1);
+    lua_pop(L, 1);
+    uint32_t flags = (has_server ? EMF_NET_TO_SERVER : 0u) | (has_player ? EMF_NET_TO_PLAYERS : 0u);
+    lua_getfield(L, 2, "to");
+    if (!lua_isnil(L, -1)) {
+        const std::string to = luaL_checkstring(L, -1);
+        if (to == "server") flags = EMF_NET_TO_SERVER;
+        else if (to == "players") flags = EMF_NET_TO_PLAYERS;
+        else if (to == "both") flags = EMF_NET_TO_SERVER | EMF_NET_TO_PLAYERS;
+        else luaL_error(L, "emf.net.channel: to is \"server\", \"players\" or \"both\", not %s", to.c_str());
+    }
+    lua_pop(L, 1);
+    const std::string full = s->id + "/" + name;
+    Host::Impl& h = *s->host;
+    const EmfApi* a = h.api;
+    if (!has_v27(a)) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    NetSlot* slot = nullptr;
+    {
+        std::lock_guard<std::mutex> g(h.m);
+        const auto it = h.net_slots.find(full);
+        if (it != h.net_slots.end()) slot = static_cast<NetSlot*>(it->second);
+    }
+    if (slot) {
+        if (slot->version != version || slot->flags != flags)
+            luaL_error(L, "emf.net.channel: %s changed its version or directions: the game keeps a channel's first "
+                          "definition until you restart it", full.c_str());
+    } else {
+        auto fresh = std::make_unique<NetSlot>(NetSlot{&h, s->id, version, flags});
+        EmfNetChannel c{};
+        c.size = sizeof c;
+        c.version = version;
+        c.name = full.c_str();
+        c.flags = flags;
+        c.max_size = max;
+        c.per_10s = per;
+        c.on_server = net_server_cb;
+        c.on_player = net_player_cb;
+        c.user = fresh.get();
+        if (!a->net_channel(&c)) {  // refused: the core logged why
+            lua_pushboolean(L, false);
+            return 1;
+        }
+        slot = fresh.release();  // the core keeps calling it for the life of the game
+        std::lock_guard<std::mutex> g(h.m);
+        h.net_slots[full] = slot;
+    }
+    lua_getfield(L, 2, "on_server");
+    slot->ref_server = lua_isfunction(L, -1) ? luaL_ref(L, LUA_REGISTRYINDEX) : (lua_pop(L, 1), LUA_NOREF);
+    lua_getfield(L, 2, "on_player");
+    slot->ref_player = lua_isfunction(L, -1) ? luaL_ref(L, LUA_REGISTRYINDEX) : (lua_pop(L, 1), LUA_NOREF);
+    slot->load = s->loads;
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+// emf.net.send(name, data) (lua 1.18): this game -> the server. true when on its way.
+int l_net_send(lua_State* L) {
+    Script* s = script_of(L);
+    const std::string full = s->id + "/" + luaL_checkstring(L, 1);
+    size_t n = 0;
+    const char* data = luaL_checklstring(L, 2, &n);
+    const EmfApi* a = s->host->api;
+    lua_pushboolean(L, has_v27(a) && a->net_to_server(full.c_str(), data, static_cast<uint32_t>(n)));
+    return 1;
+}
+
+// emf.net.send_to(world, player, name, data) (lua 1.18): the server -> one player's game.
+int l_net_send_to(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const auto player = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    const std::string full = s->id + "/" + luaL_checkstring(L, 3);
+    size_t n = 0;
+    const char* data = luaL_checklstring(L, 4, &n);
+    const EmfApi* a = s->host->api;
+    lua_pushboolean(L, has_v27(a) && a->net_to_player(w, player, full.c_str(), data, static_cast<uint32_t>(n)));
+    return 1;
+}
+
+// emf.net.send_all(world, name, data) (lua 1.18): the server -> every player whose game has the channel; how many.
+int l_net_send_all(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const std::string full = s->id + "/" + luaL_checkstring(L, 2);
+    size_t n = 0;
+    const char* data = luaL_checklstring(L, 3, &n);
+    const EmfApi* a = s->host->api;
+    lua_pushinteger(L, has_v27(a) ? a->net_to_players(w, full.c_str(), data, static_cast<uint32_t>(n)) : 0);
+    return 1;
+}
+
+// emf.net.peer(world, player, name) (lua 1.18): the channel version that player's game has (the server's: nil, 0); 0 =
+// none.
+int l_net_peer(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = lua_isnil(L, 1) ? nullptr : world_arg(L, 1);
+    const auto player = static_cast<uint32_t>(luaL_optinteger(L, 2, 0));
+    const std::string full = s->id + "/" + luaL_checkstring(L, 3);
+    const EmfApi* a = s->host->api;
+    lua_pushinteger(L, has_v27(a) ? a->net_peer(w, player, full.c_str()) : 0);
+    return 1;
+}
+
 void open_bindings(lua_State* L, Script&) {
     static const luaL_Reg fns[] = {{"item", l_item},       {"item_info", l_item_info}, {"give", l_give},
                                    {"put", l_put},         {"take", l_take},           {"move", l_move},           {"spawn", l_spawn},
@@ -2743,6 +2930,10 @@ void open_bindings(lua_State* L, Script&) {
                                       {"list", l_ws_list},   {nullptr, nullptr}};
     luaL_newlib(L, ws_fns);  // emf.world_settings (lua 1.10)
     lua_setfield(L, -2, "world_settings");
+    static const luaL_Reg net_fns[] = {{"channel", l_net_channel}, {"send", l_net_send}, {"send_to", l_net_send_to},
+                                       {"send_all", l_net_send_all}, {"peer", l_net_peer}, {nullptr, nullptr}};
+    luaL_newlib(L, net_fns);  // emf.net (lua 1.18)
+    lua_setfield(L, -2, "net");
     if (luaL_newmetatable(L, kWorldMeta)) {
         static const luaL_Reg methods[] = {{"is_server", w_is_server}, {"is_client", w_is_client}, {"tick", w_tick},
                                            {"get", w_get},             {"entities", w_entities},   {"position", w_position},

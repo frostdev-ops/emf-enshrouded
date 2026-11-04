@@ -175,6 +175,7 @@ struct Host::Impl {
     uint64_t (*file_clock)() = nullptr;                  // the world-data files' clock (nullptr: GetTickCount64)
     // lua 1.14 offers: to the core every script is one owner, so the host keeps which script offered which entity
     std::map<uint32_t, void*> offer_slots;               // entity -> its OfferSlot (bindings.cpp)
+    std::map<std::string, void*> net_slots;              // "<script>/<name>" -> its NetSlot (bindings.cpp; kept)
     std::vector<std::pair<uint32_t, void*>> offer_drops;  // (entity, slot) of an unloaded script: off on the next step
 
     Script* find(const std::string& id);
