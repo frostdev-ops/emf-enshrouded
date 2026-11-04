@@ -3955,3 +3955,101 @@ TEST_CASE("stable: a window from before a world load that closes late does not c
     click(b, "beast.Tusk");             // the open window still answers
     CHECK(text_at(shown(b), "tab.beast") == "Tusk");
 }
+
+// ---- idle: while their owner stands still the beasts pass the time; they follow the moment the owner moves ----
+namespace {
+constexpr uint32_t kSleepBit = 1u << 21;  // EnemyFeature Sleep (DynamicEnemy01BehaviorState.enabledFeatures)
+using AiState = emf::gen::enemy01::State;
+const ecs::DynamicEnemy01BehaviorState& ai_now(BeastRig& b, uint32_t id) {
+    return now_of<ecs::DynamicEnemy01BehaviorState>(b, id);
+}
+// Held by the game's sleep: the Sleep state, its feature bit on and its end far ahead (a creature whose graph has sleep
+// states lies down).
+bool asleep(BeastRig& b, uint32_t id) {
+    const auto& ai = ai_now(b, id);
+    return ai.state == AiState::Sleep && (ai.enabledFeatures & kSleepBit) != 0 &&
+           ai.sleepEndTime.value > 500000000000000000LL;
+}
+// Up and free: not in the Sleep state, the bit off, no end time.
+bool awake(BeastRig& b, uint32_t id) {
+    const auto& ai = ai_now(b, id);
+    return ai.state != AiState::Sleep && (ai.enabledFeatures & kSleepBit) == 0 && ai.sleepEndTime.value == 0;
+}
+// Player 1's beast `name` (in the collection) called as `id` at (x, 10, z), guarding them, in the game's Roaming.
+void roaming(BeastRig& b, const std::string& name, uint32_t id, double x, double z) {
+    out_at(b, name, id, x, z);
+    auto& ai = live_of<ecs::DynamicEnemy01BehaviorState>(b, id);
+    ai.state = AiState::Roaming;
+    ai.stateChangeTime.value = 1000000000;
+}
+}  // namespace
+
+TEST_CASE("idle: a wolf out lies down after its owner stands still 10 s and gets up at once when the owner moves 2 m") {
+    RollRig b;
+    b.roll(0.0);
+    b.reply("beastmaster.give wolf");
+    roaming(b, "Wolf", 1234, 0, 4);
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 1234).disabledFeatures = kSleepBit | 1u;  // the game's own off-list
+    b.seconds(9);
+    CHECK(awake(b, 1234));
+    CHECK(ai_now(b, 1234).state == AiState::Roaming);
+    b.seconds(2);
+    REQUIRE(asleep(b, 1234));
+    CHECK(ai_now(b, 1234).disabledFeatures == 1u);  // not off while it sleeps
+    place(b.r.fake, 1, 0.5, 10, 0);                 // a step: under 2 m from where idling began
+    b.seconds(2);
+    CHECK(asleep(b, 1234));
+    place(b.r.fake, 1, 2.1, 10, 0);  // 2 m from it
+    one_step(b);
+    CHECK(awake(b, 1234));
+    CHECK(ai_now(b, 1234).state == AiState::Idle);
+    CHECK(ai_now(b, 1234).disabledFeatures == (kSleepBit | 1u));  // as it was
+    b.seconds(9);
+    CHECK(awake(b, 1234));  // 10 s of stillness again
+    b.seconds(2);
+    CHECK(asleep(b, 1234));
+}
+
+TEST_CASE("idle: a hound lies down like a wolf; a sabretooth (no sleep states) with nothing to look at is left to roam") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.0);
+    b.reply("beastmaster.give hound");
+    b.reply("beastmaster.give sabretooth");
+    roaming(b, "Hound", 1234, 0, 4);
+    roaming(b, "Sabretooth", 1235, 0, -4);
+    b.seconds(11);
+    CHECK(asleep(b, 1234));
+    b.seconds(10);
+    CHECK(awake(b, 1235));
+    CHECK(ai_now(b, 1235).state == AiState::Roaming);
+}
+
+TEST_CASE("idle: each player's beasts follow only their own stillness") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.0);
+    write(b.data, "b 0x00000000000000bb wolf 0 1 Grey\n");  // player 2's wolf, out
+    b.r.fake.session = 2;
+    fire_load(1);
+    next_beast(b, 1234);
+    b.seconds(1);
+    REQUIRE(has(b.reply("beastmaster.list", 2, 0xBB), "1. Grey - wolf, loyalty 1, out"));
+    auto& grey = component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 1234);
+    grey.guardEntityId.id = 2;
+    grey.state = AiState::Roaming;
+    place(b.r.fake, 1234, 30, 10, 4);
+    b.reply("beastmaster.give wolf");
+    roaming(b, "Wolf", 1235, 0, 4);
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    REQUIRE(asleep(b, 1235));
+    place(b.r.fake, 2, 33, 10, 0);  // player 2 moves on
+    one_step(b);
+    CHECK(awake(b, 1234));
+    CHECK(asleep(b, 1235));
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    remove_entity(b.r.fake, 2);  // player 2 leaves
+    b.seconds(2);
+    CHECK(contains(b.r.fake.destroyed, 1234));  // out of the world while away
+    CHECK(asleep(b, 1235));
+}

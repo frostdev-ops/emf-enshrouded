@@ -48,6 +48,8 @@
     {"key": "beasts_share_max_pct", "type": "slider", "min": 0, "max": 90, "step": 5, "default": 90, "label": "All your beasts draw at most (%)", "live": true, "group": "Monsters"},
     {"key": "boss_share_max_pct", "type": "slider", "min": 0, "max": 90, "step": 5, "default": 35, "label": "Of a boss, your beasts draw at most (%)", "live": true, "group": "Monsters"},
     {"key": "make_room", "type": "bool", "default": true, "label": "Beasts step aside while someone builds next to them", "live": true, "group": "Behaviour"},
+    {"key": "idle", "type": "bool", "default": true, "label": "Beasts pass the time while you stand still", "live": true, "group": "Behaviour"},
+    {"key": "idle_s", "type": "slider", "min": 5, "max": 60, "step": 1, "default": 10, "label": "After you stand still for (s)", "live": true, "group": "Behaviour"},
     {"key": "wild_bears", "type": "bool", "default": true, "label": "Rare wild bears, aurochs and snakes (needs their content pack)", "live": true, "group": "World"},
     {"key": "wild_bear_minutes", "type": "slider", "min": 5, "max": 120, "step": 5, "default": 30, "label": "A wild pack beast about every (minutes)", "live": true, "group": "World"}
   ]

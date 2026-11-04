@@ -12,6 +12,7 @@ local aside_mod = require("aside")
 local talents = require("talents")
 local fight_mod = require("fight")
 local threat_mod = require("threat")
+local idle_mod = require("idle")
 
 local M = {}
 local P = {}
@@ -47,6 +48,11 @@ function M.new(env)
 		owner = function(world, account) return p:owner(world, account) end,
 		strike = function(world, e, id, target, amount) p:strike(world, e, id, target, amount) end,
 	})
+	p.idle = idle_mod.new({
+		now = env.now,
+		setting = env.setting,
+		ids = function() return p.ids end,
+	})
 	p:reset()
 	return p
 end
@@ -71,9 +77,11 @@ function P:reset()
 	self.fought = {}     -- entity id -> when it last hit or was hit (it heals HEAL_AFTER_S after that)
 	self.hits = {}       -- hostile creature id -> {beast entity id -> when it hit it} (loyalty for the kill)
 	self.speeds = {}     -- entity id -> {base, wrote} by Movement entry: the game's values and Swiftness's (talents.lua)
+	self.present = nil   -- account -> player entity, for the players in the world (as of the last check)
 	self.aside:reset()
 	self.fight:reset()
 	self.threat:reset()
+	self.idle:reset()
 end
 
 local function mmss(s)
@@ -534,6 +542,7 @@ function P:on_died(id, world)
 	end
 	self.credited[id] = nil
 	self.threat:forget(id)
+	self.idle:forget(id)
 	self.sent[id], self.recall[id], self.base[id], self.fought[id] = nil, nil, nil, nil
 	local e = self.ids[id]
 	if not e then return end
@@ -639,6 +648,7 @@ function P:step(world)
 	end
 	self.fight:step(world, self.ids)
 	self.threat:step(world)
+	self.idle:step(world, self.present or {})
 	if self.aside:watch(world, now) then self.next_check = now end  -- someone started building: step aside now
 	if now < self.next_check then return end
 	self.next_check = now + 1
@@ -650,6 +660,7 @@ function P:step(world)
 		if next(hitters) == nil then self.hits[target] = nil end
 	end
 	local present = players(world)
+	self.present = present
 	self.threat:scan(world, present)
 	self.aside:set_players(present)
 	for _, e in ipairs(self.fallen) do
