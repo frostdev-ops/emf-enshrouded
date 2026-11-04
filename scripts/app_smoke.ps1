@@ -170,6 +170,18 @@ $out = Join-Path $game "smoke.json"
 # and where the page is, as .probe). Unless EMF_TEST_APPDATA names one, the run gets an app-data folder of its own
 # (nothing carries over from another run: the key, folders.json) with the tester switch for Nexus on (New-AppData).
 function Invoke-Smoke([string]$Eval = "", [string]$SelectMod = "", [string[]]$More = @()) {
+    # WebView2's browser process sometimes ends at start inside a full verify run (0x80004005; never seen when this script
+    # runs alone): one more try then, said in the output, after any stand-in server of this run is stopped
+    $r = Invoke-SmokeOnce $Eval $SelectMod $More
+    if ($r.Json -match "browser process ended") {
+        Write-Host "retry: WebView2's browser process ended at start; trying this smoke step once more"
+        Get-Process enshrouded_server -ErrorAction SilentlyContinue | Where-Object { $_.Path -like "$runTemp*" } |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+        $r = Invoke-SmokeOnce $Eval $SelectMod $More
+    }
+    return $r
+}
+function Invoke-SmokeOnce([string]$Eval = "", [string]$SelectMod = "", [string[]]$More = @()) {
     if (Test-Path -LiteralPath $out) { Remove-Item -LiteralPath $out -Force }
     $a = @("--game", "`"$game`"", "--smoke", "`"$out`"") + $More
     if ($SelectMod) { $a += @("--select", $SelectMod) }
