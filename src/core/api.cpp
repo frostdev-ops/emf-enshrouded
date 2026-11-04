@@ -1618,7 +1618,14 @@ bool portrait_key_ok(const std::string& k) {
         if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' ||
               c == '-'))
             return false;
-    return k.find("..") == std::string::npos;
+    if (k.find("..") != std::string::npos || k.back() == '.') return false;  // as the portrait cache's own keys
+    std::string base = k.substr(0, k.find('.'));  // Windows device names, with or without an extension
+    for (char& c : base) c = static_cast<char>(c >= 'a' && c <= 'z' ? c - 'a' + 'A' : c);
+    if (base == "CON" || base == "PRN" || base == "AUX" || base == "NUL") return false;
+    const bool port = base.rfind("COM", 0) == 0 || base.rfind("LPT", 0) == 0;
+    if (base.size() == 4 && port && base[3] >= '0' && base[3] <= '9')
+        return false;
+    return true;
 }
 
 std::mutex g_image_refusals_m;

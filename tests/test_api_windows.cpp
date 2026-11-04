@@ -297,6 +297,10 @@ TEST_CASE("image_load: a mod's path is read from its own folder, portrait:<key> 
     CHECK(asked[2].second == "portrait:wolf_t1");
     CHECK(api->image_load("portrait:../secrets") == 0u);  // a key is A-Z a-z 0-9 _ . - only
     CHECK(api->image_load("portrait:") == 0u);
+    CHECK(api->image_load("portrait:wolf.") == 0u);  // as the portrait cache: no trailing dot,
+    CHECK(api->image_load("portrait:CON") == 0u);    // no Windows device names
+    CHECK(api->image_load("portrait:nul.png") == 0u);
+    CHECK(api->image_load("portrait:com1") == 0u);
     CHECK(asked.size() == 3u);
     CHECK(api->image_load(nullptr) == 0u);
     CHECK(api->image_load("") == 0u);
