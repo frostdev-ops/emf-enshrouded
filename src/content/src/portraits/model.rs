@@ -243,21 +243,55 @@ pub fn level_size(format: &str, width: u32, height: u32) -> Option<u64> {
     Some(kfc::content::image::size_of_format(format, width as usize, height as usize) as u64)
 }
 
-/// The largest mip level whose sides are at most `max_side`, among the levels the content holds (else the smallest
-/// level it holds). A level whose data does not fit its range or the content is skipped. None when no level is left.
+/// The longest side of a mip level that is ever decoded. A level decodes to 4 bytes a pixel and the renderer keeps
+/// 16 more a pixel (raster's linear texels): about 5 MB at 512 px, where a 4096 px level 0 would take 320 MB.
+pub const MAX_DECODED_SIDE: u32 = 512;
+
+/// Mip level `level`'s size, or None past 1 x 1 or for a format EML does not know.
+fn level_at(texture: &TextureInfo, level: usize, offset: u64) -> Option<MipPick> {
+    let side = |full: u32| full.checked_shr(level as u32).map(|s| s.max(1));
+    let (width, height) = (side(texture.width)?, side(texture.height)?);
+    let len = level_size(&texture.format, width, height)?;
+    Some(MipPick { level, width, height, offset, len })
+}
+
+/// The mip levels found in a texture's content, from the largest. Range i of `mip_chain` starts at level i and runs
+/// to the end of the chain, the levels stored one after another (every texture of the game's build 1285601 is laid
+/// out so). Each range gives its own level; a chain of one range gives every level in it, level k after the sizes
+/// of the levels before it, up to the first level that runs past the range or the content. A range whose own level
+/// runs past it or the content gives none.
+fn found_levels(texture: &TextureInfo) -> Vec<MipPick> {
+    let content = texture.content.size() as u64;
+    let fits = |pick: &MipPick, end: u64| pick.offset.saturating_add(pick.len) <= end.min(content);
+    match texture.mip_chain.as_slice() {
+        [(start, count)] => {
+            let end = start.saturating_add(*count);
+            let mut levels = Vec::new();
+            let mut offset = *start;
+            while let Some(pick) = level_at(texture, levels.len(), offset).filter(|p| fits(p, end)) {
+                offset += pick.len;
+                levels.push(pick);
+                if pick.width == 1 && pick.height == 1 {
+                    break;
+                }
+            }
+            levels
+        }
+        chain => chain
+            .iter()
+            .enumerate()
+            .filter_map(|(level, &(start, count))| {
+                level_at(texture, level, start).filter(|p| fits(p, start.saturating_add(count)))
+            })
+            .collect(),
+    }
+}
+
+/// The largest mip level whose sides are at most `max_side` among the levels found in the content (else the smallest
+/// found), never one whose longer side is over MAX_DECODED_SIDE. None when no level is left.
 pub fn pick_mip(texture: &TextureInfo, max_side: u32) -> Option<MipPick> {
-    let levels: Vec<MipPick> = texture
-        .mip_chain
-        .iter()
-        .enumerate()
-        .filter_map(|(level, &(start, chain))| {
-            let width = (texture.width >> level).max(1);
-            let height = (texture.height >> level).max(1);
-            let len = level_size(&texture.format, width, height)?;
-            let fits = len <= chain && start + len <= texture.content.size() as u64;
-            fits.then_some(MipPick { level, width, height, offset: start, len })
-        })
-        .collect();
+    let levels: Vec<MipPick> =
+        found_levels(texture).into_iter().filter(|m| m.width.max(m.height) <= MAX_DECODED_SIDE).collect();
     levels.iter().find(|m| m.width.max(m.height) <= max_side).or(levels.last()).copied()
 }
 
@@ -630,7 +664,7 @@ pub(crate) mod tests {
         // 1024 BC7 (one byte a pixel): 256 px is level 2, 64 KB at 1310720.
         assert_eq!(pick_mip(&albedo, 256), Some(MipPick { level: 2, width: 256, height: 256, offset: 1310720, len: 65536 }));
         assert_eq!(pick_mip(&albedo, 300).unwrap().level, 2);
-        assert_eq!(pick_mip(&albedo, 1024).unwrap().level, 0);
+        assert_eq!(pick_mip(&albedo, 512).unwrap().level, 1);
         // Smaller than every level the content holds: the smallest one (64 px, level 4).
         assert_eq!(pick_mip(&albedo, 16).unwrap().level, 4);
         let mut no_chain = albedo.clone();
@@ -640,6 +674,56 @@ pub(crate) mod tests {
         let mut short = albedo.clone();
         short.mip_chain[2] = (1310720, 100);
         assert_eq!(pick_mip(&short, 256).unwrap().level, 3, "a level shorter than its data is skipped");
+    }
+
+    fn texture(width: u32, height: u32, format: &str, content: u32, mip_chain: Vec<(u64, u64)>) -> TextureInfo {
+        TextureInfo {
+            debug_name: "synthetic_albedo_map_0".into(),
+            width,
+            height,
+            format: format.into(),
+            content: ContentHash::new(content, 1, 2, 3),
+            mip_chain,
+        }
+    }
+
+    #[test]
+    fn a_chain_of_one_range_is_walked_by_the_levels_sizes() {
+        // 1024 BC7 (16 bytes a 4x4 block): levels of 1 MB, 256 KB, 64 KB, ... one after another, 1398128 in all.
+        let bc7 = texture(1024, 1024, "BC7_srgb_block", 1398128, vec![(0, 1398128)]);
+        assert_eq!(pick_mip(&bc7, 256), Some(MipPick { level: 2, width: 256, height: 256, offset: 1310720, len: 65536 }));
+        assert_eq!(pick_mip(&bc7, 64), Some(MipPick { level: 4, width: 64, height: 64, offset: 1392640, len: 4096 }));
+        // 2048 BC1 (8 bytes a block): 2 MB, 512 KB, 128 KB, then 256 px at 2752512.
+        let bc1 = texture(2048, 2048, "BC1_RGB_unorm_block", 2796216, vec![(0, 2796216)]);
+        assert_eq!(pick_mip(&bc1, 256), Some(MipPick { level: 3, width: 256, height: 256, offset: 2752512, len: 32768 }));
+        // Not square: 512 x 1024 BC7, level 2 is 128 x 256.
+        let tall = texture(512, 1024, "BC7_srgb_block", 699088, vec![(0, 699088)]);
+        assert_eq!(pick_mip(&tall, 256), Some(MipPick { level: 2, width: 128, height: 256, offset: 655360, len: 32768 }));
+        // The levels are counted from where the range starts.
+        let later = texture(1024, 1024, "BC7_srgb_block", 1398128 + 4096, vec![(4096, 1398128)]);
+        assert_eq!(pick_mip(&later, 256).unwrap().offset, 4096 + 1310720);
+        // The walk stops where the range or the content ends: here after 1024 and 512 px, so 512 px is the smallest.
+        let two = texture(1024, 1024, "BC7_srgb_block", 1398128, vec![(0, 1310720)]);
+        assert_eq!(pick_mip(&two, 256), Some(MipPick { level: 1, width: 512, height: 512, offset: 1048576, len: 262144 }));
+        let cut = texture(1024, 1024, "BC7_srgb_block", 1310720 + 100, vec![(0, 1398128)]);
+        assert_eq!(pick_mip(&cut, 256).unwrap().level, 1);
+    }
+
+    #[test]
+    fn no_level_over_512_px_is_picked() {
+        // A range that holds only level 0 has no smaller levels to find.
+        let bc7 = texture(4096, 4096, "BC7_srgb_block", 16777216, vec![(0, 16777216)]);
+        assert_eq!(pick_mip(&bc7, 256), None);
+        let bc1 = texture(4096, 4096, "BC1_RGB_unorm_block", 8388608, vec![(0, 8388608)]);
+        assert_eq!(pick_mip(&bc1, 256), None);
+        let one = texture(1024, 1024, "BC7_srgb_block", 1398128, vec![(0, 1048576)]);
+        assert_eq!(pick_mip(&one, 256), None, "1024 px alone");
+        // Ranges of their own for 4096 and 2048 px only.
+        let big = texture(4096, 4096, "BC7_srgb_block", 22369648, vec![(0, 22369648), (16777216, 5592432)]);
+        assert_eq!(pick_mip(&big, 256), None);
+        // Asked for more than 512 px: 512 px.
+        let albedo = material_albedo(&wolf_fur_material()).unwrap().unwrap();
+        assert_eq!(pick_mip(&albedo, 1024).unwrap().width, 512);
     }
 
     /// The game's wolf, from a dump of its records and render data (game data: read from the private analysis

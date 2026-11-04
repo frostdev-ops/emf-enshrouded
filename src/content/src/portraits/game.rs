@@ -108,20 +108,62 @@ impl Archive {
         file.read_exact(&mut bytes).map_err(|e| format!("{name}: {e}"))?;
         Ok(bytes)
     }
+}
 
-    /// A material's albedo, decoded at the largest mip of at most TEXTURE_SIDE px, as sRGB RGBA8.
-    fn albedo(&self, texture: &TextureInfo) -> Result<raster::Texture, String> {
-        let name = &texture.debug_name;
-        let pick = model::pick_mip(texture, TEXTURE_SIDE)
-            .ok_or_else(|| format!("{name}: no mip level of {} in its content", texture.format))?;
-        let bytes = self.read_level(texture, pick)?;
-        let format: kfc::content::image::PixelFormat =
-            serde_json::from_value(serde_json::Value::String(texture.format.clone()))
-                .map_err(|_| format!("{name}: an unknown pixel format {}", texture.format))?;
-        let mut rgba = vec![0u8; pick.width as usize * pick.height as usize * 4];
-        kfc::content::image::decode(format, pick.width as usize, pick.height as usize, &bytes, &mut rgba)
-            .map_err(|e| format!("{name}: {e}"))?;
-        Ok(raster::Texture { width: pick.width, height: pick.height, rgba })
+/// Reads one mip level's bytes from a texture's content.
+type ReadLevel<'a> = dyn FnMut(&TextureInfo, model::MipPick) -> Result<Vec<u8>, String> + 'a;
+
+/// A material's albedo, decoded at the mip level `model::pick_mip` gives for TEXTURE_SIDE (never over
+/// `model::MAX_DECODED_SIDE` px), as sRGB RGBA8.
+fn decode_albedo(texture: &TextureInfo, read: &mut ReadLevel) -> Result<raster::Texture, String> {
+    let name = &texture.debug_name;
+    let pick = model::pick_mip(texture, TEXTURE_SIDE).ok_or_else(|| {
+        format!(
+            "{name}: no mip level of at most {} px found in its content ({} x {} {})",
+            model::MAX_DECODED_SIDE,
+            texture.width,
+            texture.height,
+            texture.format
+        )
+    })?;
+    let bytes = read(texture, pick)?;
+    let format: kfc::content::image::PixelFormat =
+        serde_json::from_value(serde_json::Value::String(texture.format.clone()))
+            .map_err(|_| format!("{name}: an unknown pixel format {}", texture.format))?;
+    let mut rgba = vec![0u8; pick.width as usize * pick.height as usize * 4];
+    kfc::content::image::decode(format, pick.width as usize, pick.height as usize, &bytes, &mut rgba)
+        .map_err(|e| format!("{name}: {e}"))?;
+    Ok(raster::Texture { width: pick.width, height: pick.height, rgba })
+}
+
+/// Material slot `i` for the renderer: its albedo decoded, or plain with a note when it has none or the albedo was not
+/// decoded.
+fn material(
+    i: usize,
+    slot: &MaterialSlot,
+    flags: &[String],
+    albedo: Option<&TextureInfo>,
+    read: &mut ReadLevel,
+    notes: &mut Vec<String>,
+) -> raster::Material {
+    let has = |flag: &str| flags.iter().any(|f| f == flag);
+    let texture = match albedo {
+        None => {
+            notes.push(format!("material {i} has no albedo texture: drawn plain"));
+            None
+        }
+        Some(t) => match decode_albedo(t, read) {
+            Ok(texture) => Some(texture),
+            Err(e) => {
+                notes.push(format!("material {i}'s albedo was not decoded, drawn plain: {e}"));
+                None
+            }
+        },
+    };
+    raster::Material {
+        texture,
+        alpha_cut: slot.alpha_tested || has("AlphaTested"),
+        double_sided: slot.double_sided || has("DoubleSided"),
     }
 }
 
@@ -178,28 +220,13 @@ impl Source for Archive {
             .map_err(|e| format!("{}: render data: {e}", inputs.name))?
             .ok_or_else(|| format!("{}: its render data {hash} is not in the game's archive", inputs.name))?;
         let (meshes, mut notes) = model::decode_lod0(&records.info, &blob).map_err(|e| format!("{}: {e}", inputs.name))?;
-        let mut materials = Vec::with_capacity(records.materials.len());
-        for (i, (slot, flags, albedo)) in records.materials.iter().enumerate() {
-            let has = |flag: &str| flags.iter().any(|f| f == flag);
-            let texture = match albedo {
-                None => {
-                    notes.push(format!("material {i} has no albedo texture: drawn plain"));
-                    None
-                }
-                Some(t) => match self.albedo(t) {
-                    Ok(texture) => Some(texture),
-                    Err(e) => {
-                        notes.push(format!("material {i}'s albedo was not decoded, drawn plain: {e}"));
-                        None
-                    }
-                },
-            };
-            materials.push(raster::Material {
-                texture,
-                alpha_cut: slot.alpha_tested || has("AlphaTested"),
-                double_sided: slot.double_sided || has("DoubleSided"),
-            });
-        }
+        let mut read = |texture: &TextureInfo, pick| self.read_level(texture, pick);
+        let materials = records
+            .materials
+            .iter()
+            .enumerate()
+            .map(|(i, (slot, flags, albedo))| material(i, slot, flags, albedo.as_ref(), &mut read, &mut notes))
+            .collect();
         Ok((raster::Model { meshes, materials }, notes))
     }
 }
@@ -222,6 +249,59 @@ mod tests {
         assert!(error.contains("enshrouded") && error.contains(dir.to_str().unwrap()), "{error}");
         let error = Archive::open(Path::new("Z:\\no\\such\\folder"), "enshrouded").err().expect("an error");
         assert!(error.contains("Z:\\no\\such\\folder"), "{error}");
+    }
+
+    fn plain_slot() -> MaterialSlot {
+        MaterialSlot { material: None, alpha_tested: false, double_sided: false }
+    }
+
+    fn bc7_albedo(side: u32, content: u32, mip_chain: Vec<(u64, u64)>) -> TextureInfo {
+        TextureInfo {
+            debug_name: "synthetic_albedo_map_0".into(),
+            width: side,
+            height: side,
+            format: "BC7_srgb_block".into(),
+            content: ContentHash::new(content, 1, 2, 3),
+            mip_chain,
+        }
+    }
+
+    #[test]
+    fn an_albedo_without_a_level_of_at_most_512_px_is_drawn_plain_with_a_note() {
+        // One range that holds only a 4096 px level 0: 16 MB of BC7, 64 MB decoded, 256 MB as the renderer's texels.
+        let texture = bc7_albedo(4096, 16777216, vec![(0, 16777216)]);
+        let mut asked = Vec::new();
+        let mut notes = Vec::new();
+        let mut read = |_: &TextureInfo, pick: model::MipPick| -> Result<Vec<u8>, String> {
+            asked.push(pick);
+            Err("not read".into())
+        };
+        let drawn = material(0, &plain_slot(), &[], Some(&texture), &mut read, &mut notes);
+        assert!(drawn.texture.is_none());
+        assert!(asked.is_empty(), "no level is read: {asked:?}");
+        assert_eq!(notes.len(), 1, "{notes:?}");
+        let note = &notes[0];
+        for part in ["synthetic_albedo_map_0", "512 px", "drawn plain"] {
+            assert!(note.contains(part), "{note}");
+        }
+    }
+
+    #[test]
+    fn a_one_range_albedo_is_read_and_decoded_at_256_px() {
+        let texture = bc7_albedo(1024, 1398128, vec![(0, 1398128)]);
+        let mut asked = Vec::new();
+        let mut notes = Vec::new();
+        // BC7 mode 6 blocks (the low byte's bit 6 names the mode)
+        let mut read = |_: &TextureInfo, pick: model::MipPick| -> Result<Vec<u8>, String> {
+            asked.push(pick);
+            Ok((0..pick.len).map(|i| if i % 16 == 0 { 0x40 } else { 0 }).collect())
+        };
+        let drawn = material(1, &plain_slot(), &["AlphaTested".into()], Some(&texture), &mut read, &mut notes);
+        assert_eq!(asked, [model::MipPick { level: 2, width: 256, height: 256, offset: 1310720, len: 65536 }]);
+        let decoded = drawn.texture.expect("decoded");
+        assert_eq!((decoded.width, decoded.height, decoded.rgba.len()), (256, 256, 256 * 256 * 4));
+        assert!(drawn.alpha_cut && !drawn.double_sided);
+        assert!(notes.is_empty(), "{notes:?}");
     }
 
     /// The game folder for the tests that read the real game (read-only), or None: they are skipped.

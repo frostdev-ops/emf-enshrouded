@@ -165,9 +165,11 @@ How a model is drawn:
 - LOD 0's meshes, decoded from the render data the way `tools/models/rendermodel.py` does (PNTCT vertex streams,
   21-bit positions); other vertex formats are left out with a note. The rest pose: the vertices as stored.
 - Per material, the albedo (the image whose name holds "albedo"), the largest mip of at most 256 px, read alone
-  from its content and decoded with EML's `kfc_content::image::decode`; `AlphaTested` materials are cut out at alpha
-  0.5, `DoubleSided` ones drawn from both sides. The albedo is multiplied by the vertex colours, which hold the fur
-  cards' colour (all black colours are no tint).
+  from its content and decoded with EML's `kfc_content::image::decode`. Each of a texture's `mipChainContentRanges`
+  starts at its own level; in a texture with one range, a level is found after the sizes of the larger levels. No
+  level over 512 px is decoded: an albedo without a level of at most 512 px is drawn plain, with a note.
+  `AlphaTested` materials are cut out at alpha 0.5, `DoubleSided` ones drawn from both sides. The albedo is
+  multiplied by the vertex colours, which hold the fur cards' colour (all black colours are no tint).
 - A CPU rasteriser (`src/portraits/raster.rs`, no threads): orthographic, the camera 15 degrees up, one scale for
   all frames, a light fixed to the camera, 2 to 4 samples per pixel side averaged in linear light. The game's space
   is left-handed (a creature's right side at +X), so seen from the front its right side is on the viewer's left.
