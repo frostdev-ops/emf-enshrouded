@@ -4154,3 +4154,161 @@ TEST_CASE("idle: building, the idle setting off, or a beast in a scene more than
     one_step(b);
     CHECK(awake(b, 1234));
 }
+
+namespace {
+// A campfire or a fireplace at (x, 10, z): a ComfortProvider of category Hearth.
+void fire_at(BeastRig& b, uint32_t id, double x, double z) {
+    place(b.r.fake, id, x, 10, z);
+    component<ecs::ComfortProvider>(b.r.fake, id).category = emf::gen::ecs::ComfortCategory::Hearth;
+    add_entity(b.r.fake, id);
+}
+// A villager at (x, 10, z): the ActiveNpcState template half.
+void villager_at(BeastRig& b, uint32_t id, double x, double z) {
+    place(b.r.fake, id, x, 10, z);
+    b.r.fake.templates[{ecs::ActiveNpcState::kHash, id}] = std::vector<uint8_t>(ecs::ActiveNpcState::kSize, 0);
+    add_entity(b.r.fake, id);
+}
+// The game's teleports asked for entity `id` (a turn in place is one with a yaw).
+std::vector<EmfTeleport> turns_of(BeastRig& b, uint32_t id) {
+    std::vector<EmfTeleport> out;
+    for (const auto& t : b.r.fake.teleports)
+        if (t.entity == id) out.push_back(t);
+    return out;
+}
+}  // namespace
+
+TEST_CASE("idle: by the fire: a beast turns to face a fire within 15 m (a teleport in place with a yaw) and stays put; a wolf lies down facing it") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.6);  // by the fire
+    b.reply("beastmaster.give boar");
+    b.reply("beastmaster.give wolf");
+    fire_at(b, 900, 4, 4);        // a campfire 4 m east of the boar
+    flame_altar(b, 901, 0, -8);   // a flame altar 4 m south of the wolf
+    roaming(b, "Boar", 1234, 0, 4);
+    roaming(b, "Wolf", 1235, 0, -4);
+    b.seconds(11);
+    const auto boar = turns_of(b, 1234);
+    REQUIRE(boar.size() == 1u);
+    CHECK(boar[0].x == doctest::Approx(0.0));  // where it stands
+    CHECK(boar[0].y == doctest::Approx(10.0));
+    CHECK(boar[0].z == doctest::Approx(4.0));
+    CHECK((boar[0].flags & EMF_TELEPORT_FACE_YAW) != 0u);
+    CHECK((boar[0].flags & EMF_TELEPORT_FIND_GROUND) == 0u);
+    CHECK(boar[0].yaw_deg == doctest::Approx(90.0));  // +x
+    CHECK(asleep(b, 1234));  // held in the Sleep state (a boar's graph has no sleep states: it stands there)
+    const auto wolf = turns_of(b, 1235);
+    REQUIRE(wolf.size() == 1u);
+    CHECK(std::abs(wolf[0].yaw_deg) == doctest::Approx(180.0));  // -z
+    CHECK(asleep(b, 1235));
+}
+
+TEST_CASE("idle: watching: a beast turns to a villager within 15 m; a non-sleeper stays put, a sleeper stays up") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.6);  // watching
+    b.reply("beastmaster.give boar");
+    b.reply("beastmaster.give wolf");
+    villager_at(b, 902, -3, 4);  // 3 m west of the boar
+    roaming(b, "Boar", 1234, 0, 4);
+    roaming(b, "Wolf", 1235, 0, -4);
+    b.seconds(11);
+    const auto boar = turns_of(b, 1234);
+    REQUIRE(boar.size() == 1u);
+    CHECK(boar[0].yaw_deg == doctest::Approx(-90.0));  // -x
+    CHECK(asleep(b, 1234));
+    const auto wolf = turns_of(b, 1235);
+    REQUIRE(wolf.size() == 1u);
+    CHECK(wolf[0].yaw_deg == doctest::Approx(std::atan2(-3.0, 8.0) * 180.0 / 3.14159265358979));
+    CHECK(awake(b, 1235));  // lying asleep is no watching
+    CHECK(ai_now(b, 1235).state == AiState::Roaming);
+}
+
+TEST_CASE("idle: a fire or a villager farther than 15 m from the beast is not looked at") {
+    RollRig b;
+    b.roll(0.0);  // the first scene it can have
+    b.reply("beastmaster.give boar");
+    fire_at(b, 900, 0, 24);       // 20 m from the boar
+    villager_at(b, 902, 20, 4);   // 20 m from it
+    roaming(b, "Boar", 1234, 0, 4);
+    b.seconds(11);
+    CHECK(turns_of(b, 1234).empty());
+    CHECK(awake(b, 1234));
+    CHECK(ai_now(b, 1234).state == AiState::Roaming);
+}
+
+TEST_CASE("idle: a new scene every 30 to 60 s; the same scene is kept without a second turn") {
+    RollRig b;
+    b.roll(0.0);  // settle; the next pick 30 s later
+    b.reply("beastmaster.give wolf");
+    fire_at(b, 900, 4, 4);
+    roaming(b, "Wolf", 1234, 0, 4);
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    CHECK(turns_of(b, 1234).empty());
+    b.roll(0.6);  // by the fire; the next pick 60 s later
+    b.seconds(29);
+    CHECK(turns_of(b, 1234).empty());
+    b.seconds(1);
+    REQUIRE(turns_of(b, 1234).size() == 1u);
+    CHECK(turns_of(b, 1234)[0].yaw_deg == doctest::Approx(90.0));
+    CHECK(asleep(b, 1234));
+    b.seconds(60);  // by the fire again
+    CHECK(turns_of(b, 1234).size() == 1u);
+    CHECK(asleep(b, 1234));
+    b.roll(0.99);  // sniffing about
+    b.seconds(60);
+    CHECK(awake(b, 1234));
+}
+
+TEST_CASE("idle: at night one beast keeps watch facing away from its owner while the sleepers settle; a lone wolf settles") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.99);  // by day this is sniffing about
+    set_daytime(b.r.fake, 23.0);
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give boar");
+    roaming(b, "Wolf", 1234, 0, 4);
+    roaming(b, "Boar", 1235, 0, -4);
+    b.seconds(11);
+    CHECK(asleep(b, 1234));  // the wolf settles
+    const auto watch = turns_of(b, 1235);
+    REQUIRE(watch.size() == 1u);
+    CHECK(std::abs(watch[0].yaw_deg) == doctest::Approx(180.0));  // away from its owner at (0, 10, 0)
+    CHECK(asleep(b, 1235));                                      // a boar on watch stands still
+    CHECK(turns_of(b, 1234).empty());
+    set_daytime(b.r.fake, 12.0);
+    b.seconds(60);  // the next picks are the day's
+    CHECK(awake(b, 1234));
+    CHECK(awake(b, 1235));
+    b.reply("beastmaster.dismiss Boar");
+    set_daytime(b.r.fake, 23.0);
+    b.seconds(11);
+    CHECK(asleep(b, 1234));  // alone it settles
+}
+
+TEST_CASE("idle: a turn the game refuses is skipped; the beast still stays put") {
+    RollRig b;
+    b.roll(0.0);
+    b.reply("beastmaster.give boar");
+    fire_at(b, 900, 4, 4);
+    roaming(b, "Boar", 1234, 0, 4);
+    b.r.fake.teleport_ok = false;  // e.g. a beast spawned a moment ago reads as dead
+    b.seconds(11);
+    CHECK(turns_of(b, 1234).size() == 1u);
+    CHECK(asleep(b, 1234));
+    CHECK(b.host->status("beastmaster") == "running");
+}
+
+TEST_CASE("idle: a beast that comes within 15 m of its owner while they idle gets a scene too") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.0);
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give wolf");
+    roaming(b, "Wolf", 1234, 0, 4);
+    roaming(b, "Wolf 2", 1235, 0, -16);  // 16 m away: not in the idling
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    REQUIRE(awake(b, 1235));
+    place(b.r.fake, 1235, 0, 10, -5);  // it comes back to its owner
+    one_step(b);
+    CHECK(asleep(b, 1235));
+    CHECK(asleep(b, 1234));
+}
