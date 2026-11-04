@@ -49,7 +49,7 @@ M.list = {
 		model = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f01", pack = "the bear pack (emf_beastmaster_bear)", health_mul = 2.5,
 		plural = "bears",
 		graph = "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f05", also = WOLF_GRAPH,
-		factions = { [WILDBEAST] = true }, min_scale = BEAR_SCALE },
+		factions = { [WILDBEAST] = true }, min_scale = BEAR_SCALE, sleeps = true },
 	-- the beasts pack (tools/models/packs/beastmaster_beasts.json); GUIDs fixed forever
 	{ id = "aurochs", name = "Aurochs", tank = true, scale = 1.3, role_health = 2.0, role_damage = 1.0, template = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02",
 		model = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f01", pack = PACK, health_mul = 3,

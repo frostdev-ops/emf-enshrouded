@@ -58,6 +58,7 @@ function M.new(env)
 		end,
 		held = function(account) return p.threat:holds(account) end,
 		building = function(world, account, owner) return aside_mod.building(world, owner) or p.aside:is_aside(account) end,
+		called_at = function(id) return p.called[id] end,
 	})
 	p:reset()
 	return p
@@ -84,6 +85,7 @@ function P:reset()
 	self.hits = {}       -- hostile creature id -> {beast entity id -> when it hit it} (loyalty for the kill)
 	self.speeds = {}     -- entity id -> {base, wrote} by Movement entry: the game's values and Swiftness's (talents.lua)
 	self.present = nil   -- account -> player entity, for the players in the world (as of the last check)
+	self.called = {}     -- entity id -> when Beastmaster spawned it (idle.lua's clock: its SpawnTime is the game's then)
 	self.aside:reset()
 	self.fight:reset()
 	self.threat:reset()
@@ -188,6 +190,7 @@ function P:spawn(world, owner, account, beast)
 	emf.emit("server", "StartGuardingEvent", { guardingEntityId = id, guardedEntityId = owner })
 	self:fresh(id)
 	self.fought[id] = self.env.now(world)
+	self.called[id] = self.env.now(world)
 	self:strengthen(world, id, beast)
 	beast.entity = id
 	beast.out = true
@@ -200,7 +203,7 @@ end
 -- goes.
 function P:fresh(id)
 	self.base[id], self.sent[id], self.recall[id], self.fought[id] = nil, nil, nil, nil
-	self.speeds[id] = nil
+	self.speeds[id], self.called[id] = nil, nil
 	self.fight:forget(id)
 end
 

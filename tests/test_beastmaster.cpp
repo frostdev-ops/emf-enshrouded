@@ -677,11 +677,14 @@ template <class T>
 T& live_of(BeastRig& b, uint32_t id) {
     return *reinterpret_cast<T*>(b.r.fake.components.at({T::kHash, id}).data());
 }
-// The creature the next call spawns (id): its template's damage multiplier 1, its base health 100, optionally a scale.
+constexpr int64_t kSpawnNs = 7000000000000LL;  // the game's time (ns) at a called beast's spawn: its SpawnTime
+// The creature the next call spawns (id): its template's damage multiplier 1, its base health 100, its SpawnTime
+// kSpawnNs, optionally a scale.
 void next_beast(BeastRig& b, uint32_t id, float scale = 0.0f) {
     b.spawnable(1);
     component<ecs::DamageMod>(b.r.fake, id).dataStorage[2] = 1.0f;
     component<ecs::Health>(b.r.fake, id).dataStorage[2] = 100;
+    component<ecs::SpawnTime>(b.r.fake, id).spawnTime.value = kSpawnNs;
     if (scale > 0.0f) component<ecs::ScaleComponent>(b.r.fake, id).uniformScale = scale;
 }
 }  // namespace
@@ -3959,16 +3962,17 @@ TEST_CASE("stable: a window from before a world load that closes late does not c
 // ---- idle: while their owner stands still the beasts pass the time; they follow the moment the owner moves ----
 namespace {
 constexpr uint32_t kSleepBit = 1u << 21;  // EnemyFeature Sleep (DynamicEnemy01BehaviorState.enabledFeatures)
+constexpr uint32_t kRotate = 1u << 5;      // EnemyFeature Rotate
+constexpr uint32_t kRotateBits = kRotate | (1u << 6) | (1u << 17);  // Rotate, RotateWhileStanding, IdleTurn
 using AiState = emf::gen::enemy01::State;
 const ecs::DynamicEnemy01BehaviorState& ai_now(BeastRig& b, uint32_t id) {
     return now_of<ecs::DynamicEnemy01BehaviorState>(b, id);
 }
-// Held by the game's sleep: the Sleep state, its feature bit on and its end far ahead (a creature whose graph has sleep
-// states lies down).
+// Held by the game's sleep: the Sleep state, its feature bit on and an end time (its lease; a creature whose graph has
+// sleep states lies down).
 bool asleep(BeastRig& b, uint32_t id) {
     const auto& ai = ai_now(b, id);
-    return ai.state == AiState::Sleep && (ai.enabledFeatures & kSleepBit) != 0 &&
-           ai.sleepEndTime.value > 500000000000000000LL;
+    return ai.state == AiState::Sleep && (ai.enabledFeatures & kSleepBit) != 0 && ai.sleepEndTime.value > 0;
 }
 // Up and free: not in the Sleep state, the bit off, no end time.
 bool awake(BeastRig& b, uint32_t id) {
@@ -4010,7 +4014,7 @@ TEST_CASE("idle: a wolf out lies down after its owner stands still 10 s and gets
     CHECK(asleep(b, 1234));
 }
 
-TEST_CASE("idle: a hound lies down like a wolf; a sabretooth (no sleep states) with nothing to look at is left to roam") {
+TEST_CASE("idle: a hound lies down like a wolf; a sabretooth (no sleep states) with nothing to look at is left to roam, and roaming off past 15 m it drops out alone") {
     RollRig b({{"call_cooldown_s", "0"}});
     b.roll(0.0);
     b.reply("beastmaster.give hound");
@@ -4022,6 +4026,19 @@ TEST_CASE("idle: a hound lies down like a wolf; a sabretooth (no sleep states) w
     b.seconds(10);
     CHECK(awake(b, 1235));
     CHECK(ai_now(b, 1235).state == AiState::Roaming);
+    place(b.r.fake, 1235, 0, 10, -17);  // it roams off to 17 m: nothing written, the hound sleeps on
+    one_step(b);
+    CHECK(asleep(b, 1234));
+    CHECK(ai_now(b, 1235).state == AiState::Roaming);
+}
+
+TEST_CASE("idle: a bear lies down too (its pack's graph is a copy of the wolf's)") {
+    RollRig b;
+    b.roll(0.0);
+    b.reply("beastmaster.give bear");
+    roaming(b, "Bear", 1234, 0, 4);
+    b.seconds(11);
+    CHECK(asleep(b, 1234));
 }
 
 TEST_CASE("idle: each player's beasts follow only their own stillness") {
@@ -4117,7 +4134,7 @@ TEST_CASE("idle: Attack, dismiss and call wake every beast of that owner at once
     CHECK(awake(b, 1236));
 }
 
-TEST_CASE("idle: building, the idle setting off, or a beast in a scene more than 15 m away end it; a beast not guarding its owner or farther than 15 m gets no scene") {
+TEST_CASE("idle: building or the idle setting off end it; a beast not guarding its owner or farther than 15 m takes no part, and one that goes farther drops out alone") {
     RollRig b({{"call_cooldown_s", "0"}, {"make_room", "false"}});
     b.roll(0.0);
     b.reply("beastmaster.give wolf");
@@ -4150,9 +4167,16 @@ TEST_CASE("idle: building, the idle setting off, or a beast in a scene more than
     REQUIRE(asleep(b, 1234));
     CHECK(awake(b, 1235));
     CHECK(ai_now(b, 1235).state == AiState::Roaming);
-    place(b.r.fake, 1234, 0, 10, 16);  // the sleeping wolf is 16 m away now
+    place(b.r.fake, 1235, 0, 10, -4);  // it comes within 15 m
+    one_step(b);
+    REQUIRE(asleep(b, 1235));
+    place(b.r.fake, 1234, 0, 10, 16);  // the first wolf is 16 m away now: it alone gets up
     one_step(b);
     CHECK(awake(b, 1234));
+    CHECK(asleep(b, 1235));
+    place(b.r.fake, 1234, 0, 10, 5);  // back within 15 m: it takes part again
+    one_step(b);
+    CHECK(asleep(b, 1234));
 }
 
 namespace {
@@ -4202,7 +4226,7 @@ TEST_CASE("idle: by the fire: a beast turns to face a fire within 15 m (a telepo
     CHECK(asleep(b, 1235));
 }
 
-TEST_CASE("idle: watching: a beast turns to a villager within 15 m; a non-sleeper stays put, a sleeper stays up") {
+TEST_CASE("idle: watching: a beast turns to a villager within 15 m and stays put; a sleeper lies down facing them") {
     RollRig b({{"call_cooldown_s", "0"}});
     b.roll(0.6);  // watching
     b.reply("beastmaster.give boar");
@@ -4218,8 +4242,7 @@ TEST_CASE("idle: watching: a beast turns to a villager within 15 m; a non-sleepe
     const auto wolf = turns_of(b, 1235);
     REQUIRE(wolf.size() == 1u);
     CHECK(wolf[0].yaw_deg == doctest::Approx(std::atan2(-3.0, 8.0) * 180.0 / 3.14159265358979));
-    CHECK(awake(b, 1235));  // lying asleep is no watching
-    CHECK(ai_now(b, 1235).state == AiState::Roaming);
+    CHECK(asleep(b, 1235));
 }
 
 TEST_CASE("idle: a fire or a villager farther than 15 m from the beast is not looked at") {
@@ -4341,10 +4364,16 @@ TEST_CASE("idle: an error in the idle code wakes every beast of the idling and i
     b.roll(0.6);  // by the fire: the turn fails with an error
     b.seconds(30);
     CHECK(awake(b, 1234));
-    bool logged = false;
-    for (const auto& l : b.r.fake.log) logged = logged || has(l, "idle: ");
-    CHECK(logged);
+    auto logged = [&] {
+        size_t n = 0;
+        for (const auto& l : b.r.fake.log) n += has(l, "idle: ") && has(l, "teleport broke");
+        return n;
+    };
+    CHECK(logged() == 1u);
     CHECK(b.host->status("beastmaster") == "running");
+    b.seconds(11);  // idling again, by the fire again: the same error, not logged again
+    CHECK(awake(b, 1234));
+    CHECK(logged() == 1u);
 }
 
 TEST_CASE("idle: beastmaster.idle says what each beast does") {
@@ -4362,4 +4391,142 @@ TEST_CASE("idle: beastmaster.idle says what each beast does") {
     CAPTURE(idle);
     CHECK(has(idle, "Wolf settles (lying down"));
     CHECK(has(idle, "Boar sits by the fire (standing still, turned"));
+}
+
+TEST_CASE("idle: at night with only wolves and hounds out none keeps watch: they all settle") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.99);  // by day this is sniffing about
+    set_daytime(b.r.fake, 23.0);
+    b.reply("beastmaster.give wolf");
+    b.reply("beastmaster.give hound");
+    roaming(b, "Wolf", 1234, 0, 4);
+    roaming(b, "Hound", 1235, 0, -4);
+    b.seconds(11);
+    CHECK(asleep(b, 1234));
+    CHECK(asleep(b, 1235));
+    CHECK(turns_of(b, 1234).empty());
+    CHECK(turns_of(b, 1235).empty());
+}
+
+TEST_CASE("idle: a turned beast keeps facing: the game's turning (Rotate, RotateWhileStanding, IdleTurn) is off while it is held, and back as it was when it gets up") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.0);
+    b.reply("beastmaster.give boar");
+    b.reply("beastmaster.give wolf");
+    fire_at(b, 900, 4, 4);
+    roaming(b, "Boar", 1234, 0, 4);
+    roaming(b, "Wolf", 1235, 0, -4);
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 1234).disabledFeatures = kRotate | 1u;  // Rotate off already
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    REQUIRE(turns_of(b, 1234).size() == 1u);
+    CHECK(ai_now(b, 1234).disabledFeatures == (kRotateBits | 1u));
+    REQUIRE(asleep(b, 1235));  // settled, not turned: its turning is left alone
+    CHECK(ai_now(b, 1235).disabledFeatures == 0u);
+    place(b.r.fake, 1, 2.5, 10, 0);
+    one_step(b);
+    CHECK(awake(b, 1234));
+    CHECK(ai_now(b, 1234).disabledFeatures == (kRotate | 1u));  // only what was on before stays off
+}
+
+TEST_CASE("idle: the Sleep state is a lease: the game's time plus 120 s, renewed every 5 s while held; the game's own sleep check is pushed far ahead") {
+    RollRig b;
+    b.roll(0.0);
+    b.reply("beastmaster.give wolf");
+    const double called = b.r.fake.tick / 60.0;
+    roaming(b, "Wolf", 1234, 0, 4);  // spawned at the game's time kSpawnNs
+    auto lease = [&] { return kSpawnNs + static_cast<int64_t>((b.r.fake.tick / 60.0 - called) * 1e9) + 120000000000LL; };
+    b.seconds(11);
+    REQUIRE(asleep(b, 1234));
+    CHECK(ai_now(b, 1234).sleepEndTime.value == lease());
+    CHECK(ai_now(b, 1234).nextSleepCheckTime.value > kSpawnNs + 900000000000000000LL);
+    const int64_t first = ai_now(b, 1234).sleepEndTime.value;
+    b.seconds(4);
+    CHECK(ai_now(b, 1234).sleepEndTime.value == first);
+    b.seconds(1);
+    CHECK(ai_now(b, 1234).sleepEndTime.value == lease());  // renewed
+    CHECK(ai_now(b, 1234).sleepEndTime.value == first + 5000000000LL);
+}
+
+TEST_CASE("idle: without a call's spawn time the game's time is taken from the AI's own state change; until then nothing is held") {
+    RollRig b;
+    b.roll(0.0);
+    b.look(1, 0, 10.5, 0, 0);
+    b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);
+    REQUIRE(has(b.reply("beastmaster.tame"), "Taming"));
+    b.seconds(4);
+    REQUIRE(has(b.reply("beastmaster.list"), "1. Wolf - wolf, loyalty 1, out"));  // tamed, never called
+    auto& ai = component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 50);
+    ai.guardEntityId.id = 1;
+    ai.state = AiState::Roaming;
+    ai.stateChangeTime.value = 1000000000;
+    b.seconds(12);
+    CHECK(awake(b, 50));  // idling, but the game's time is not known yet
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 50).stateChangeTime.value = 3000000000000LL;  // its state changes now
+    one_step(b);
+    CHECK(asleep(b, 50));
+    CHECK(ai_now(b, 50).sleepEndTime.value == 3000000000000LL + 120000000000LL);
+}
+
+TEST_CASE("idle: a beast's Sleep bit is off once it gets up, also when the bit was on before") {
+    RollRig b;
+    b.roll(0.0);
+    b.reply("beastmaster.give wolf");
+    roaming(b, "Wolf", 1234, 0, 4);
+    b.seconds(8);  // after the search at half of idle_s
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 1234).enabledFeatures = kSleepBit | 2u;
+    b.seconds(3);
+    REQUIRE(asleep(b, 1234));
+    place(b.r.fake, 1, 2.5, 10, 0);
+    one_step(b);
+    CHECK(awake(b, 1234));
+    CHECK(ai_now(b, 1234).enabledFeatures == 2u);
+}
+
+TEST_CASE("idle: a beast takes part only while its AI idles, roams or guards; one the game moves on (a fall, water) drops out alone") {
+    RollRig b;
+    b.roll(0.0);
+    b.reply("beastmaster.give wolf");
+    roaming(b, "Wolf", 1234, 0, 4);
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 1234).state = AiState::AvoidWater;
+    b.seconds(11);
+    CHECK(awake(b, 1234));
+    CHECK(ai_now(b, 1234).state == AiState::AvoidWater);  // nothing written
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 1234).state = AiState::Roaming;
+    one_step(b);
+    REQUIRE(asleep(b, 1234));
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 1234).state = AiState::Falling;  // the game moves it on
+    one_step(b);
+    CHECK(awake(b, 1234));
+    CHECK(ai_now(b, 1234).state == AiState::Falling);
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 1234).state = AiState::Guard;
+    one_step(b);
+    CHECK(asleep(b, 1234));
+}
+
+TEST_CASE("idle: an error drops the search under way; the next waits 30 s") {
+    RollRig b({{"idle_s", "5"}});
+    b.edit_main("local wild_mod = require(\"wild\")\n", "emf.teleport = function() error(\"teleport broke\") end\n");
+    b.roll(0.0);  // settle; the next pick 30 s later
+    b.reply("beastmaster.give wolf");
+    fire_at(b, 900, 4, 4);
+    for (uint32_t id = 5000; id < 6000; ++id) add_entity(b.r.fake, id);  // a search takes 5 steps
+    roaming(b, "Wolf", 1234, 0, 4);
+    b.seconds(10);  // searched from 3 s of stillness on (5 steps); idling from 5 s
+    REQUIRE(asleep(b, 1234));
+    creature(b, 6100, 30, 30, kPlayerAlly);  // a player-side creature left asleep, the last entity
+    auto& stray = component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 6100);
+    stray.enabledFeatures = kSleepBit;
+    stray.state = AiState::Sleep;
+    stray.sleepEndTime.value = 1000000000000000000LL;
+    b.seconds(25);  // 35 s: the next search has begun (30 s after the first)
+    REQUIRE(asleep(b, 6100));
+    b.roll(0.6);  // the pick at 36 s: by the fire, whose turn fails with an error
+    b.seconds(1);
+    REQUIRE(awake(b, 1234));
+    b.roll(0.0);
+    b.seconds(5);
+    CHECK(asleep(b, 6100));  // the search under way was dropped
+    b.seconds(30);
+    CHECK(awake(b, 6100));  // the next one, 30 s after the error
 }
