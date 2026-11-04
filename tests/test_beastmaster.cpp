@@ -3885,6 +3885,21 @@ TEST_CASE("stable: the E key opens the window at a stable whose prompt the game 
     CHECK(c.r.fake.windows.size() == 1u);
 }
 
+TEST_CASE("stable: the E key opens the window at a stable whose offer EMF dropped (the prompt's parts left on it), and it is offered again") {
+    BeastRig b;
+    with_offers(b.r.api);
+    three_beasts(b);
+    at_stable(b);
+    component<ecs::InteractionOfferRuntime>(b.r.fake, 960);  // the game's prompt is on it
+    REQUIRE(offers_on(b, 960) == 1u);
+    press(b, kE);
+    REQUIRE(b.r.fake.windows.empty());  // the prompt opens it, not the key
+    b.r.fake.offer_active = false;  // EMF dropped the offer; its parts stay on the entity
+    press(b, kE);
+    CHECK(b.r.fake.windows.size() == 1u);
+    CHECK(offers_on(b, 960) == 2u);  // searched again at once: offered again (EMF takes its dropped offer back)
+}
+
 TEST_CASE("stable: an id that names something elsewhere now is not offered again, and E Open from it does nothing") {
     BeastRig b;
     with_offers(b.r.api);

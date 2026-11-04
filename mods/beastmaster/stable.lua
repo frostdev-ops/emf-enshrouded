@@ -167,13 +167,14 @@ function S:sync_offers(world)
 	end
 end
 
--- Whether stable `b` (from the list) has the game's prompt now: offered, its entity still at its place, and the game's
--- prompt there (InteractionOfferRuntime, where it can be read). A prompt the game dropped since (the entity streamed out
--- and back) starts a new search, which offers it again.
+-- Whether stable `b` (from the list) has the game's prompt now: offered, still held by EMF (emf.offered, Lua 1.15), its
+-- entity still at its place, and the game's prompt there (InteractionOfferRuntime, where it can be read). A prompt the
+-- game or EMF dropped since (the entity streamed out and back) starts a new search, which offers it again.
 function S:prompted(world, b)
 	if not (b and b.entity and self.offered[b.entity]) then return false end
+	local held = not emf.offered or emf.offered(world, b.entity)
 	local ok, prompt = pcall(world.get, world, "InteractionOfferRuntime", b.entity)
-	if at_place(world, b) and not (ok and prompt == nil) then return true end
+	if held and at_place(world, b) and not (ok and prompt == nil) then return true end
 	if not self.walk then self.walk_after = 0 end
 	return false
 end
