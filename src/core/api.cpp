@@ -1581,6 +1581,11 @@ bool api_window_close(const char* id) {
     return true;
 }
 
+bool api_offer_active(EmfWorld*, uint32_t entity) {
+    if (!g_state || !g_state->offers || !entity) return false;
+    return g_state->offers->active(entity, module_name_of(_ReturnAddress()));
+}
+
 // ---- v26 pictures in windows ----
 
 // The folder of the module that holds `address` (the mod calling the API), without a trailing slash.
@@ -1988,6 +1993,7 @@ const EmfApi kApi = {
     api_offer,
     api_offer_remove,
     api_image_load,
+    api_offer_active,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

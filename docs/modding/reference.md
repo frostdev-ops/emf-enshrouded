@@ -556,8 +556,10 @@ void on_e(EmfWorld* w, uint32_t player, uint32_t entity, void* user) { /* server
 - The entity needs a collider (the game's target choice tests it): `offer` accepts one without, but no prompt shows.
   Refused also: your own offer there with other options (`offer_remove` it first; an identical one only replaces the
   callback).
-- EMF drops your offer, without telling you, when the entity is gone or loses its offer (streaming, destroyed); it
-  never puts one back by itself, since the id may be another entity's by then. Offer again when your mod finds the
+- EMF drops your offer, without telling you, when the entity is gone or its offer is no longer EMF's (streaming,
+  destroyed, the game changed it); it never puts one back by itself, since the id may be another entity's by then.
+  `offer_active(world, entity)` (v26) says whether yours is still in EMF's hands. Offering again after a drop takes
+  your own offer back when its parts are still EMF's (no "the game's own offer" refusal). Offer again when your mod finds the
   entity (a stable search, a scan). A new world forgets all; a spawned prop inside a base stays in the save without its
   offer and comes back with a new id: find it, offer again, don't spawn another. `offer_remove` takes yours off.
   Console: `offers.list`.

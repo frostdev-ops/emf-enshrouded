@@ -129,6 +129,7 @@ struct Fake {
     std::vector<uint32_t> offers_removed;
     bool offer_ok = true;
     bool offer_remove_ok = true;  // false: the core had dropped the offer already
+    bool offer_active = true;     // v26 offer_active's answer
     uint32_t next_offer_spawn = 9000;
     std::vector<std::string> windows_closed;
     // v26 pictures: the paths image_load got, its answers
@@ -458,7 +459,9 @@ uint32_t f_image_load(const char* path) {
 // A v26 core (fake_api leaves image_load out: emf.image answers nil without it).
 void with_images(EmfApi& a) { a.image_load = f_image_load; }
 // A v25 core (fake_api leaves the offer calls out: emf.offer answers false without them).
+bool f_offer_active(EmfWorld*, uint32_t) { return g->offer_active; }
 void with_offers(EmfApi& a) {
+    a.offer_active = f_offer_active;
     a.spawn_offer = f_spawn_offer;
     a.offer = f_offer;
     a.offer_remove = f_offer_remove;

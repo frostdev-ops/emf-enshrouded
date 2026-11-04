@@ -40,7 +40,7 @@ constexpr uint32_t kApiV22Size = EMF_FIELD_END(EmfApi, player_level_set);
 constexpr uint32_t kApiV23Size = EMF_FIELD_END(EmfApi, change_component);
 constexpr uint32_t kApiV24Size = EMF_FIELD_END(EmfApi, window_close);
 constexpr uint32_t kApiV25Size = EMF_FIELD_END(EmfApi, offer_remove);
-constexpr uint32_t kApiV26Size = EMF_FIELD_END(EmfApi, image_load);
+constexpr uint32_t kApiV26Size = EMF_FIELD_END(EmfApi, offer_active);
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
@@ -98,8 +98,9 @@ static_assert(kApiV24Size == 648, "EmfApi size (v24)");
 static_assert(offsetof(EmfApi, spawn_offer) == kApiV24Size,
               "EmfApi layout (v25 appends spawn_offer, offer, offer_remove after window_close)");
 static_assert(kApiV25Size == 672, "EmfApi size (v25)");
-static_assert(offsetof(EmfApi, image_load) == kApiV25Size && kApiV26Size == 680 && sizeof(EmfApi) == kApiV26Size,
-              "EmfApi layout (v26 appends image_load after offer_remove)");
+static_assert(offsetof(EmfApi, image_load) == kApiV25Size && offsetof(EmfApi, offer_active) == kApiV25Size + 8 &&
+                  kApiV26Size == 688 && sizeof(EmfApi) == kApiV26Size,
+              "EmfApi layout (v26 appends image_load and offer_active after offer_remove)");
 static_assert(kOfferV25Size == 24 && sizeof(EmfOffer) == 24 && offsetof(EmfOffer, text) == 8 &&
                   offsetof(EmfOffer, sequence) == 16 && offsetof(EmfOffer, range_m) == 20,
               "EmfOffer layout (v25)");

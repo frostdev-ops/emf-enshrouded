@@ -2445,6 +2445,25 @@ void free_offer_slot(OfferSlot* slot) {
     delete slot;
 }
 
+// emf.offered(world, id) (lua 1.15): true while this script's offer on `id` is in EMF's hands (not removed, not dropped
+// by EMF: then emf.offer again takes it back).
+int l_offered(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    const auto entity = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    Host::Impl& h = *s->host;
+    bool mine = false;
+    {
+        std::lock_guard<std::mutex> g(h.m);
+        const auto it = h.offer_slots.find(entity);
+        mine = it != h.offer_slots.end() && static_cast<const OfferSlot*>(it->second)->id == s->id;
+    }
+    const EmfApi* a = h.api;
+    const bool v26 = a && a->version >= 26 && a->size >= offsetof(EmfApi, offer_active) + sizeof(a->offer_active);
+    lua_pushboolean(L, mine && v26 && a->offer_active && a->offer_active(w, entity));
+    return 1;
+}
+
 struct VerbName {
     const char* name;
     uint32_t id;
@@ -2706,7 +2725,7 @@ void open_bindings(lua_State* L, Script&) {
                                    {"xp_required", l_xp_required}, {"level_cap", l_level_cap}, {"set_level", l_set_level},
                                    {"add_component", l_add_component}, {"remove_component", l_remove_component},
                                    {"window", l_window}, {"window_update", l_window_update}, {"window_close", l_window_close},
-                                   {"image", l_image},
+                                   {"image", l_image}, {"offered", l_offered},
                                    {"offer", l_offer}, {"spawn_offer", l_spawn_offer}, {"offer_remove", l_offer_remove},
                                    {"tell", l_tell},       {"broadcast", l_broadcast}, {"on_chat", l_on_chat},
                                    {"request_save", l_request_save}, {"teleport", l_teleport},

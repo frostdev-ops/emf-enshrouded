@@ -116,6 +116,8 @@ public:
     std::vector<uint32_t> remove_owner(EmfWorld* w, const std::string& owner);
     // The entity was destroyed (through EMF): its offer is forgotten at once (its id may soon be another entity's).
     void forget(uint32_t entity);
+    // True while `owner`'s offer on `entity` is in EMF's hands (offered, not removed, not dropped). Any thread.
+    bool active(uint32_t entity, const std::string& owner) const;
     // InteractionAcceptedEvent in the server world.
     void on_accept(EmfWorld* w, const void* event, uint32_t size);
     // After every server step.
@@ -147,6 +149,9 @@ private:
     mutable SRWLOCK lock_ = SRWLOCK_INIT;
     OfferRegistry registry_;
     std::map<Key, State> state_;
+    // Offers upkeep dropped while their entity stayed: the same mod may take one back (its parts still EMF's) instead of
+    // being refused for "the game's own offer".
+    std::map<Key, std::pair<std::string, OfferSpec>> dropped_;
     uint32_t session_seen_ = 0;
     int ticks_ = 0;
 };

@@ -912,6 +912,10 @@ typedef struct EmfApi {
      * (logged once per path) and on a dedicated server (no windows). Pictures stay until the game closes (at most 128,
      * 64 MB). Any thread. */
     uint32_t (*image_load)(const char* path);
+    /* True while your mod's offer (v25) on `entity` is in EMF's hands: offered, not removed, not dropped. After a drop
+     * offer again: your own dropped offer is taken back when its parts are still EMF's, without being refused for "the
+     * game's own offer". Any thread. */
+    bool (*offer_active)(EmfWorld* world, uint32_t entity);
 } EmfApi;
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);
