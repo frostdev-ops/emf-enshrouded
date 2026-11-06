@@ -782,3 +782,279 @@ TEST_CASE("lua host: emf.on_key across a reload: the new function only, once; a 
     CHECK(r.fake.log.empty());  // nothing is watched any more (and nothing stale is called)
     CHECK(host.status("rl") == "running");
 }
+
+// Inter-mod bus (Lua host 1.17): mod states are isolated, callbacks run on matching world steps.
+TEST_CASE("lua host: bus ping pong between two mods, including publication before the receiver loads") {
+    Rig r(L"bus_pingpong_117");
+    add_script(r.dir, "bus_a",
+               "emf.bus.subscribe('example.pong', function(w, sender, payload) "
+               "emf.log('BUS_A_PONG', w:is_server(), sender, payload) end)\n"
+               "emf.log('BUS_A_SEND', tostring(emf.bus.publish('example.ping','ping-1')))\n");
+    add_script(r.dir, "bus_b",
+               "emf.bus.subscribe('example.ping', function(w, sender, payload) "
+               "emf.log('BUS_B_PING', sender, payload); "
+               "emf.bus.publish('example.pong','pong-for-' .. payload) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    REQUIRE(host.status("bus_a") == "running");
+    REQUIRE(host.status("bus_b") == "running");
+    CHECK(logged("BUS_A_SEND true"));
+    host.tick(kServer);
+    CHECK(logged("BUS_B_PING bus_a ping-1"));
+    CHECK_FALSE(logged("BUS_A_PONG"));  // callback publications wait until the next server step
+    host.tick(kServer);
+    CHECK(logged("BUS_A_PONG true bus_b pong-for-ping-1"));
+}
+
+TEST_CASE("lua host: bus defaults to server and keeps server/client channels separate") {
+    Rig r(L"bus_world_117");
+    add_script(r.dir, "sender", "emf.bus.publish('example.client','hello-client','client')\n"
+                                "emf.bus.publish('example.server','hello-server')\n");
+    add_script(r.dir, "receiver",
+               "emf.bus.subscribe('example.client', function(w, id, payload) "
+               "emf.log('BUS_CLIENT', w:is_client(), id, payload) end, 'client')\n"
+               "emf.bus.subscribe('example.client', function() emf.log('BUS_WRONG_CLIENT_ON_SERVER') end)\n"
+               "emf.bus.subscribe('example.server', function(w, id, payload) "
+               "emf.log('BUS_SERVER', w:is_server(), id, payload) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    host.tick(kServer);
+    CHECK(logged("BUS_SERVER true sender hello-server"));
+    CHECK_FALSE(logged("BUS_CLIENT true"));
+    host.tick(kClient);
+    CHECK(logged("BUS_CLIENT true sender hello-client"));
+    CHECK_FALSE(logged("BUS_WRONG_CLIENT_ON_SERVER"));
+}
+
+TEST_CASE("lua host: bus gives the sender its own publications on the next world step in FIFO order") {
+    Rig r(L"bus_self_fifo_117");
+    add_script(r.dir, "self",
+               "emf.bus.subscribe('self.topic', function(w, source, value)\n"
+               "  emf.log('SELF_RECEIVED', source, value)\n"
+               "  if value == 'one' then emf.bus.publish('self.topic', 'three') end\n"
+               "end)\n"
+               "emf.bus.publish('self.topic', 'one')\n"
+               "emf.bus.publish('self.topic', 'two')\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK_FALSE(logged("SELF_RECEIVED"));
+    host.tick(kServer);
+    REQUIRE(host.status("self") == "running");
+    std::vector<std::string> deliveries;
+    for (const auto& line : r.fake.log)
+        if (line.find("SELF_RECEIVED") != std::string::npos) deliveries.push_back(line);
+    REQUIRE(deliveries.size() == 2);
+    CHECK(deliveries[0].find("self one") != std::string::npos);
+    CHECK(deliveries[1].find("self two") != std::string::npos);
+    host.tick(kServer);
+    deliveries.clear();
+    for (const auto& line : r.fake.log)
+        if (line.find("SELF_RECEIVED") != std::string::npos) deliveries.push_back(line);
+    REQUIRE(deliveries.size() == 3);
+    CHECK(deliveries[2].find("self three") != std::string::npos);
+}
+
+TEST_CASE("lua host: bus unsubscribe during callback prevents using already-freed callback references") {
+    Rig r(L"bus_unsub_callback_117");
+    add_script(r.dir, "receiver",
+               "emf.bus.subscribe('topic', function(w, source, payload)\n"
+               "  emf.log('FIRST', payload)\n"
+               "  emf.log('UNSUB', emf.bus.unsubscribe('topic'))\n"
+               "  emf.bus.subscribe('topic', function(w, source, value) emf.log('NEW', value) end)\n"
+               "end)\n"
+               "emf.bus.subscribe('topic', function() emf.log('STALE_SECOND_HANDLER') end)\n"
+               "emf.log('MISSING_UNSUB', emf.bus.unsubscribe('missing'))\n");
+    add_script(r.dir, "sender",
+               "emf.bus.publish('topic', 'one')\n"
+               "emf.bus.publish('topic', 'two')\n"
+               "emf.command('send', '', function() emf.bus.publish('topic', 'three') end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK(logged("MISSING_UNSUB false"));
+    host.tick(kServer);
+    CHECK(logged("FIRST one"));
+    CHECK(logged("UNSUB true"));
+    CHECK_FALSE(logged("STALE_SECOND_HANDLER"));
+    CHECK_FALSE(logged("NEW two"));  // re-subscription cannot consume an already queued publication
+    r.run_command("sender.send");
+    host.tick(kServer);
+    CHECK(logged("NEW three"));
+}
+
+TEST_CASE("lua host: bus reload drops queued deliveries for the old subscriber but keeps other mods' deliveries") {
+    Rig r(L"bus_reload_117");
+    add_script(r.dir, "sender",
+               "emf.command('send', '', function() emf.bus.publish('topic','old-queued') end)\n");
+    add_script(r.dir, "reloader",
+               "emf.bus.subscribe('topic', function() emf.log('OLD_CALLBACK') end)\n");
+    add_script(r.dir, "observer",
+               "emf.bus.subscribe('topic', function(w, id, p) emf.log('OBSERVER', p) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("sender.send");
+    rewrite_main(r.dir, "reloader",
+                 "emf.bus.subscribe('topic', function(w, id, p) emf.log('NEW_CALLBACK', p) end)\n", 1);
+    host.check_reload_now();
+    REQUIRE(host.status("reloader") == "running");
+    host.tick(kServer);
+    CHECK_FALSE(logged("OLD_CALLBACK"));
+    CHECK_FALSE(logged("NEW_CALLBACK old-queued"));
+    CHECK(logged("OBSERVER old-queued"));
+    r.run_command("sender.send");
+    host.tick(kServer);
+    CHECK(logged("NEW_CALLBACK old-queued"));
+}
+
+TEST_CASE("lua host: bus unsubscribe removes both world subscriptions; new ones only see later messages") {
+    Rig r(L"bus_unsub_both_117");
+    add_script(r.dir, "receiver",
+               "emf.bus.subscribe('topic', function() emf.log('SERVER_OLD') end)\n"
+               "emf.bus.subscribe('topic', function() emf.log('CLIENT_OLD') end, 'client')\n"
+               "emf.log('UNSUB_RESULT', emf.bus.unsubscribe('topic'))\n"
+               "emf.bus.subscribe('topic', function() emf.log('SERVER_NEW') end)\n");
+    add_script(r.dir, "sender",
+               "emf.bus.publish('topic', 'sv')\n"
+               "emf.bus.publish('topic', 'cl', 'client')\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    host.tick(kServer);
+    host.tick(kClient);
+    CHECK(logged("UNSUB_RESULT true"));
+    CHECK(logged("SERVER_NEW"));
+    CHECK_FALSE(logged("SERVER_OLD"));
+    CHECK_FALSE(logged("CLIENT_OLD"));
+}
+
+TEST_CASE("lua host: bus invalid publications return false without pausing and log once per refusal streak") {
+    Rig r(L"bus_invalid_117");
+    add_script(r.dir, "validator",
+               "emf.log('BAD_EMPTY', emf.bus.publish('', 'x'))\n"
+               "emf.log('BAD_LONG', emf.bus.publish(string.rep('a', 97), 'x'))\n"
+               "emf.log('BAD_NUL', emf.bus.publish('aa' .. string.char(0) .. 'bb', 'x'))\n"
+               "emf.log('BAD_PAYLOAD', emf.bus.publish('ok', string.rep('x', 65537)))\n"
+               "emf.log('EDGE_PAYLOAD', emf.bus.publish('ok', string.rep('x', 65536)))\n"
+               "emf.log('EDGE_TOPIC', emf.bus.publish(string.rep('a', 96), 'x'))\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    REQUIRE(host.status("validator") == "running");
+    CHECK(logged("BAD_EMPTY false"));
+    CHECK(logged("BAD_LONG false"));
+    CHECK(logged("BAD_NUL false"));
+    CHECK(logged("BAD_PAYLOAD false"));
+    CHECK(logged("EDGE_PAYLOAD true"));
+    CHECK(logged("EDGE_TOPIC true"));
+    int refusals = 0;
+    for (const auto& line : r.fake.log)
+        if (line.find("emf.bus.publish refused") != std::string::npos) ++refusals;
+    CHECK(refusals == 1);
+}
+
+TEST_CASE("lua host: bus per-publisher quota preserves space for another mod") {
+    Rig r(L"bus_fairness_117");
+    add_script(r.dir, "flood",
+               "local yes, no = 0, 0\n"
+               "for i=1,260 do if emf.bus.publish('busy', tostring(i)) then yes=yes+1 else no=no+1 end end\n"
+               "emf.log('FLOOD_TOTAL', yes, no)\n");
+    add_script(r.dir, "quiet", "emf.log('QUIET_SENT', emf.bus.publish('busy','quiet'))\n");
+    add_script(r.dir, "receiver", "emf.bus.subscribe('busy', function(w, id, data) "
+                                  "if data == 'quiet' then emf.log('QUIET_ARRIVED', id) end end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK(logged("FLOOD_TOTAL 256 4"));
+    CHECK(logged("QUIET_SENT true"));
+    int refused = 0;
+    for (const auto& line : r.fake.log)
+        if (line.find("emf.bus.publish refused") != std::string::npos) ++refused;
+    CHECK(refused == 1);
+    host.tick(kServer);
+    CHECK(logged("QUIET_ARRIVED quiet"));
+}
+
+TEST_CASE("lua host: bus refusal logging resets after a successful publication") {
+    Rig r(L"bus_refusal_reset_117");
+    add_script(r.dir, "publisher",
+               "for i=1,257 do emf.bus.publish('topic','x') end\n"
+               "emf.command('again', '', function()\n"
+               "  for i=1,257 do emf.bus.publish('topic','x') end\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    int refusals = 0;
+    for (const auto& line : r.fake.log)
+        if (line.find("emf.bus.publish refused") != std::string::npos) ++refusals;
+    CHECK(refusals == 1);
+    host.tick(kServer);  // frees quota
+    r.run_command("publisher.again");
+    refusals = 0;
+    for (const auto& line : r.fake.log)
+        if (line.find("emf.bus.publish refused") != std::string::npos) ++refusals;
+    CHECK(refusals == 2);
+}
+
+TEST_CASE("lua host: bus global cap is 4096 publications across separate publishers") {
+    Rig r(L"bus_global_117");
+    for (int n = 0; n < 16; ++n) {
+        const std::string id = "mod" + std::to_string(n);
+        add_script(r.dir, id.c_str(),
+                   "local ok=0; for i=1,256 do if emf.bus.publish('full','x') then ok=ok+1 end end\n"
+                   "emf.log('ACCEPTED', ok)\n");
+    }
+    add_script(r.dir, "extra", "emf.log('EXTRA', emf.bus.publish('full','one-more'))\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    REQUIRE(host.status("extra") == "running");
+    CHECK(logged("EXTRA false"));
+    host.tick(kServer);  // drains the queue without deliveries; capacity becomes available
+}
+
+TEST_CASE("lua host: bus paused or disabled mods do not leave their queued publications behind") {
+    Rig r(L"bus_stopped_117");
+    add_script(r.dir, "paused", "emf.bus.publish('orphan','bad'); error('stopped')\n");
+    add_script(r.dir, "receiver", "emf.bus.subscribe('orphan', function() emf.log('ORPHAN_DELIVERED') end)\n");
+    add_script(r.dir, "disabled",
+               "emf.bus.subscribe('orphan', function() emf.log('DISABLED_CALLBACK') end)\n"
+               "emf.bus.publish('orphan','switched-off')\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK(host.status("paused").find("paused:") == 0);
+    for (auto& mod : r.fake.mods)
+        if (std::string(mod.id) == "disabled") mod.status = EMF_MOD_DISABLED;
+    host.check_reload_now();
+    CHECK(host.status("disabled").find("not run:") == 0);
+    host.tick(kServer);
+    CHECK_FALSE(logged("ORPHAN_DELIVERED"));
+    CHECK_FALSE(logged("DISABLED_CALLBACK"));
+}
+
+TEST_CASE("lua host: bus publish made by a reload during tick waits until the following world step") {
+    Rig r(L"bus_reload_next_step_117");
+    add_script(r.dir, "sender", "emf.log('ORIGINAL_LOAD')\n");
+    add_script(r.dir, "receiver",
+               "emf.bus.subscribe('tick.reload', function(w, id, data) "
+               "emf.log('RELOAD_DELIVERED', id, data) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    rewrite_main(r.dir, "sender",
+                 "emf.log('RELOAD_SENT', emf.bus.publish('tick.reload', 'after-reload'))\n", 1);
+    host.tick(kServer);  // this step detects and runs sender/main.lua's new publish
+    REQUIRE(host.status("sender") == "running");
+    CHECK(logged("RELOAD_SENT true"));
+    CHECK_FALSE(logged("RELOAD_DELIVERED"));
+    host.tick(kServer);
+    CHECK(logged("RELOAD_DELIVERED sender after-reload"));
+}
+
+TEST_CASE("lua host: bus drops drained publications after their sender pauses in the same tick") {
+    Rig r(L"bus_sender_paused_drained_117");
+    add_script(r.dir, "sender",
+               "emf.bus.publish('stop.event', 'must-not-deliver')\n"
+               "emf.on_tick(function(w) if w:is_server() then error('sender-stopped') end end)\n");
+    add_script(r.dir, "receiver",
+               "emf.bus.subscribe('stop.event', function(w, id, data) "
+               "emf.log('STALE_FROM_PAUSED_SENDER', id, data) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    host.tick(kServer);  // outbox was drained, then sender's on_tick throws before receiver runs
+    CHECK(host.status("sender").find("paused:") == 0);
+    CHECK_FALSE(logged("STALE_FROM_PAUSED_SENDER"));
+}

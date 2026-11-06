@@ -206,7 +206,7 @@ EMF_API_VERSION=26, EMF_WORLD_SERVER=0, EMF_WORLD_PREDICTION=1, EMF_WORLD_CLIENT
 
 ## Lua (the lua mod; docs/modding/lua.md)
 
-mod.json has "main": "main.lua" and "depends": {"lua": ">=1.15"} (the Lua host is 1.15.0). Callbacks get a
+mod.json has "main": "main.lua" and "depends": {"lua": ">=1.17"} (the Lua host is 1.17.0). Callbacks get a
 `world` valid only during the callback. world:get(component, id) returns a component as a table with its real
 field names (sdk/include/emf/generated/components.hpp); assigning a field writes the game's data.
 
@@ -216,6 +216,9 @@ field names (sdk/include/emf/generated/components.hpp); assigning a field writes
 - `emf.notify(text)`: a note at the top of the screen for a few seconds
 - `emf.hud(id, text [, place [, rgba]])`: a line kept on screen; `""` removes it; place `"top_right"` (below the quest tracker), `"bottom_right"` or `"bottom_left"` (or 0, 1, 2), so a `select` setting's value fits; `rgba` a `color` setting's `"#rrggbb"`, `"#rrggbbaa"` (with alpha: a line can fade), a number like `0xFFD070FF` or the text `"0xFFD070FF"`; 0 (or none) means the usual colour
 - `emf.on_tick(fn)`: `fn(world)` after every world step (server, client)
+- `emf.bus.subscribe(topic, fn [, world])`: (1.17) listen for a topic in `"server"` (default) or `"client"` world; `fn(world, source_mod_id, payload)` runs on that world's next step when a publication arrives; true when registered
+- `emf.bus.publish(topic, payload [, world])`: (1.17) queue a copy of a text/binary payload for `"server"` (default) or `"client"`; true when queued, false if the topic, payload or queue limit is invalid (logged once per rejection streak)
+- `emf.bus.unsubscribe(topic)`: (1.17) remove all this mod's callbacks for a topic in both worlds; true if any were removed, false if none existed
 - `emf.on_event(name, fn [, "server"/"client"])`: `fn(world, event)` for each engine event `name`, with its fields as a table (see below); call it at the top of `main.lua`
 - `emf.command(name, help, fn [, {players = true}])`: a console command `<id>.<name>` (1.6: a `name` that is exactly your mod's id is the command `<id>` itself); `fn(world, args)` (`args` is a table of words); answer with `emf.reply(text)`. The full name is 1-32 letters, digits, `_ . -` (with `<id>.`) and ignores case; another name is not added: false and a log line, the rest of the mod runs. `{players = true}` (1.4): every player may run it from the game's chat, not only the `[chat] admins` ([server.md](server.md)); use it for commands that read or act on their sender (`emf.sender()`). A reload can add or take off the mark. Write `help` as `<args>: what it does` (`"<name>: call a beast"`, `": your life skills"`): the console shows it as players type and offers `a|b` choices and item names for an `<item>` argument
 - `emf.local_player()`: your player's entity id
