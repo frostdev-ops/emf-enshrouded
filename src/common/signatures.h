@@ -42,7 +42,7 @@ struct KnownBuild {
     const char* sha256;  // the exe, lower-case hex
     bool server = false; // enshrouded_server.exe (the dedicated server of that build)
 };
-constexpr size_t kKnownBuildCount = 7;
+constexpr size_t kKnownBuildCount = 9;
 std::span<const KnownBuild> known_builds();
 // Index into known_builds() of the exe with this sha256 (hex, any case), or -1 for an unknown build.
 int find_known_build(std::string_view sha256);

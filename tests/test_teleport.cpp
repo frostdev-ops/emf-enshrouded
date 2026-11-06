@@ -888,6 +888,8 @@ TEST_CASE("teleport: QueuePush is a signature with a checked RVA on both exes of
     // 1285601: queuePush is 1283531's instruction for instruction (game and server)
     CHECK(teleport_layouts_checked(emf::known_build_index(1285601u)));
     CHECK(teleport_layouts_checked(emf::known_build_index(1285601u, true)));
+    CHECK(teleport_layouts_checked(emf::known_build_index(1287369u)));  // 1287369: every reflected type unchanged
+    CHECK(teleport_layouts_checked(emf::known_build_index(1287369u, true)));
     CHECK_FALSE(teleport_layouts_checked(-1));
     // 1283531 (both exes): queuePush's body is the old one byte for byte (the server's compared), Teleport and
     // Actor.currentState kept their layouts, and the job's command buffer (+0x08) is below the part that grew

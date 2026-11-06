@@ -33,6 +33,8 @@ KNOWN_BUILDS = {
     "4429653ac0cfa154bc08e138853caa5d8557f82129b7488031f40345816aa6dc": (1283531, True),
     "ce6fdba63e27744943b695921383a29133285d359e07671f6ca33a47e2147618": (1285601, False),
     "c5c9fe50c6398d2adedd98923c2d04bf9d9b4af64c1447ac167cdf8f874ff84f": (1285601, True),
+    "5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77": (1287369, False),
+    "f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2": (1287369, True),
 }
 
 # The low byte of a descriptor's kind word. 0x0B is not used by build 1273043 (between float32 and enum).

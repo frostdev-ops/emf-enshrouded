@@ -1,6 +1,6 @@
 # EMF: Enshrouded Modding Framework
 
-Native code mods for Enshrouded (known builds 1269579, 1273043, 1283531 and 1285601; other builds run on signatures only), in the spirit of BepInEx + Jotunn.
+Native code mods for Enshrouded (known builds 1269579, 1273043, 1283531, 1285601 and 1287369; other builds run on signatures only), in the spirit of BepInEx + Jotunn.
 EMF loads your mod DLLs into the game, finds engine functions by byte signature, and gives mods a small,
 stable C API to read and change the game's ECS (entities, components, singletons) at a safe point every tick.
 

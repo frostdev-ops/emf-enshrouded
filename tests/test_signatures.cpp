@@ -30,10 +30,10 @@ TEST_CASE("resolve_one: the expected RVA is the detected build's own") {
     CHECK(is_usable(resolve_one(text, 0x1000, 0x0, kDef, -1), false));  // ...but a unique match is still usable
 }
 
-TEST_CASE("known builds: client 1269579, 1273043, 1283531 and 1285601, and the dedicated servers of 1273043, 1283531 and 1285601, by sha256") {
+TEST_CASE("known builds: client 1269579, 1273043, 1283531, 1285601 and 1287369, and the dedicated servers of 1273043, 1283531, 1285601 and 1287369, by sha256") {
     auto builds = known_builds();
     REQUIRE(builds.size() == kKnownBuildCount);
-    REQUIRE(kKnownBuildCount == 7);
+    REQUIRE(kKnownBuildCount == 9);
     CHECK(builds[0].number == 1269579u);
     CHECK_FALSE(builds[0].server);
     CHECK(builds[1].number == 1273043u);
@@ -48,6 +48,10 @@ TEST_CASE("known builds: client 1269579, 1273043, 1283531 and 1285601, and the d
     CHECK_FALSE(builds[5].server);
     CHECK(builds[6].number == 1285601u);
     CHECK(builds[6].server);
+    CHECK(builds[7].number == 1287369u);  // the update of 2026-11-04
+    CHECK_FALSE(builds[7].server);
+    CHECK(builds[8].number == 1287369u);
+    CHECK(builds[8].server);
     CHECK(find_known_build("82e5020a8736348cd0374f004b2f5e5ef456b5bd27aa5420df34c7dd241cfeeb") == 0);
     CHECK(find_known_build("d64966e23b1a458ee6f147bcbceac0b577fa7e39a212f371287d8cc119817882") == 1);
     CHECK(find_known_build("d7baa768eb00aa895d9f5a1cd8747ccf66858c7b542f50983092b2e3261588ee") == 2);
@@ -55,6 +59,8 @@ TEST_CASE("known builds: client 1269579, 1273043, 1283531 and 1285601, and the d
     CHECK(find_known_build("4429653ac0cfa154bc08e138853caa5d8557f82129b7488031f40345816aa6dc") == 4);
     CHECK(find_known_build("ce6fdba63e27744943b695921383a29133285d359e07671f6ca33a47e2147618") == 5);
     CHECK(find_known_build("c5c9fe50c6398d2adedd98923c2d04bf9d9b4af64c1447ac167cdf8f874ff84f") == 6);
+    CHECK(find_known_build("5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77") == 7);
+    CHECK(find_known_build("f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2") == 8);
     CHECK(find_known_build("") == -1);
     CHECK(find_known_build("D64966E23B1A458EE6F147BCBCEAC0B577FA7E39A212F371287D8CC119817882") == 1);  // any case
     CHECK(find_known_build("0000000000000000000000000000000000000000000000000000000000000000") == -1);
@@ -64,6 +70,8 @@ TEST_CASE("known builds: client 1269579, 1273043, 1283531 and 1285601, and the d
     CHECK(known_build_index(1283531, true) == 4);
     CHECK(known_build_index(1285601) == 5);
     CHECK(known_build_index(1285601, true) == 6);
+    CHECK(known_build_index(1287369) == 7);
+    CHECK(known_build_index(1287369, true) == 8);
     CHECK(known_build_index(1269579, true) == -1);
     CHECK(known_build_index(1) == -1);
 }

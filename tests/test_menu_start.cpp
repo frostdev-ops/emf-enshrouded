@@ -195,6 +195,8 @@ TEST_CASE("load_world layout: 1273043's and 1283531's game exes; build 1283531's
     CHECK(c.play_slot_set == b.play_slot_set);
     CHECK(c.adventure == b.adventure);
     CHECK_FALSE(menu_app_layout(emf::known_build_index(1285601, true)).has_value());
+    REQUIRE(menu_app_layout(emf::known_build_index(1287369)).has_value());  // 1287369: 1283531's fields again
+    CHECK_FALSE(menu_app_layout(emf::known_build_index(1287369, true)).has_value());
     // the dedicated servers have no menu; 1269579 and unknown builds were never checked
     CHECK_FALSE(menu_app_layout(emf::known_build_index(1273043, true)).has_value());
     CHECK_FALSE(menu_app_layout(emf::known_build_index(1283531, true)).has_value());

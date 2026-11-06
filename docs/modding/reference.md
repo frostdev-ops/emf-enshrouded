@@ -285,7 +285,7 @@ The game keeps current and maximum health, stamina and mana as **attributes**: s
 `Mana` components whose meaning comes from the game's attribute registry (which slot is the maximum differs per
 creature). These functions go through that registry and the game's own functions, the way the game does
 ([re_attributes_menu.md](../engine_parts/re_attributes_menu.md) Part 1). Server world only: a joined client has no
-`Health`, only the replicated `NetworkHealth`. Only on game builds whose layouts EMF checked (1273043, 1283531 and 1285601,
+`Health`, only the replicated `NetworkHealth`. Only on game builds whose layouts EMF checked (1273043, 1283531, 1285601 and 1287369,
 game and server): on an unknown build (after a game update) or 1269579 the three functions are off (logged) and `emf::kill`
 takes its old path, so a shifted offset can never turn a hit into something else.
 
@@ -391,7 +391,7 @@ the entity to the new place (no slide, no rubber-banding). Server world only (th
 entity 0, unknown flags, a non-finite number, x or z outside 0-10240 m or y outside -1000-5000 m, a teleport of that
 entity already under way (one at a time per entity, so two requests in one step never reach the game), 64 under way,
 or teleport is off on this game build (it needs the `QueuePush` signature and a build whose layouts EMF checked:
-1273043, 1283531 and 1285601, game and dedicated server). Called inside a world callback on that world, the entity is checked at once as
+1273043, 1283531, 1285601 and 1287369, game and dedicated server). Called inside a world callback on that world, the entity is checked at once as
 well: it needs `CurrentTransform`, `LastTransform` and `TeleportCount` (players, villagers, animals and enemies have
 them; props, chests, altars and spawned barrels do not, and a `Teleport` on them would never go away), and it must not be
 dead: its health attribute at 0 (a player in the server world has `Health` but no `NetworkHealth`; `NetworkHealth` 0

@@ -1,7 +1,8 @@
 #pragma once
 // Starting a LOCAL save offline from the main menu without clicks (the debug bridge's load_world), the way the menu's
 // own "Play -> Start a Session -> Start... -> Offline: Start" does it: commands posted to the pregame command queue from
-// inside the UI frame (docs/engine_parts/re_attributes_menu.md, Part 2). The game exes of builds 1273043, 1283531 and 1285601.
+// inside the UI frame (docs/engine_parts/re_attributes_menu.md, Part 2). The game exes of builds 1273043, 1283531, 1285601 and
+// 1287369.
 //
 // The bridge thread only stores a request; every game call happens in the UI frame hook. While an EMF-started load runs,
 // and only then, a post-hook on the game's "character selected?" check refuses a Steam character or world (and, when
@@ -199,7 +200,7 @@ private:
     CharacterSelection character_;  // the last note_character (under character_lock_)
 };
 
-// The game app layout of a known build's game exe whose menu offsets EMF checked (1273043, 1283531, 1285601); nothing for
+// The game app layout of a known build's game exe whose menu offsets EMF checked (1273043, 1283531, 1285601, 1287369); nothing for
 // another build, an unknown build or a dedicated server (no menu).
 std::optional<menu_layout::AppLayout> menu_app_layout(int build_index);
 // "" when postStart's own code (its first bytes, `size` of them) reads the UI's command queue where `app` says
