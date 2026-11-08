@@ -6,6 +6,7 @@
 #include "core/hud_editor/elements.h"
 #include "core/hud_editor/keys.h"
 #include "core/hud_editor/layout.h"
+#include "hud_pick.h"
 
 namespace emf::core {
 
@@ -71,6 +72,34 @@ void apply_keys(HudEditor& editor, HudPageState& st, const HudView& v) {
         }
         break;  // one key per frame
     }
+}
+
+// A click on the game's HUD (no ImGui window under the pointer) selects the part under it; dragging moves it.
+void apply_mouse(HudEditor& editor, HudPageState& st, const HudView& v, ImVec2 display) {
+    ImGuiIO& io = ImGui::GetIO();
+    if (st.dragging >= 0) {
+        if (!io.MouseDown[0]) {
+            st.dragging = -1;
+            return;
+        }
+        const ElementLayout moved =
+            dragged(ElementLayout{st.drag_start_x, st.drag_start_y, 1, false},
+                    ImVec2(io.MousePos.x - st.drag_start_mouse.x, io.MousePos.y - st.drag_start_mouse.y), display);
+        editor.set_offset(static_cast<size_t>(st.dragging), moved.x, moved.y, Save::Later);
+        return;
+    }
+    if (!io.MouseClicked[0] || ImGui::IsWindowHovered(ImGuiHoveredFlags_AnyWindow)) return;
+    const UiSpace ui = hud_ui_space();
+    std::array<std::optional<ScreenRect>, kHudElementCount> rects{};
+    for (size_t i = 0; i < kHudElementCount; ++i)
+        if (v.live[i].seen && !v.elements[i].hidden) rects[i] = to_screen(v.live[i].rect, ui, display);
+    const int hit = pick_part(rects, io.MousePos);
+    if (hit < 0) return;
+    st.selected = static_cast<size_t>(hit);
+    st.dragging = hit;
+    st.drag_start_mouse = io.MousePos;
+    st.drag_start_x = v.elements[static_cast<size_t>(hit)].x;
+    st.drag_start_y = v.elements[static_cast<size_t>(hit)].y;
 }
 
 void draw_layout_bar(HudEditor& editor, HudPageState& st, const HudView& v) {
@@ -205,6 +234,7 @@ void draw_hud_page(HudEditor& editor, HudPageState& st, ImVec2 display) {
     ImGui::EndChild();
     ImGui::PopItemFlag();
     apply_keys(editor, st, v);
+    apply_mouse(editor, st, v, display);
     editor.page_frame(st.selected);
 }
 
