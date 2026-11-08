@@ -189,3 +189,21 @@ TEST_CASE("portraits memory: wanted_portraits with a memory leaves a failed key 
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
 }
+
+TEST_CASE("portraits memory: a mod.json over 1 MiB is skipped with a line saying so") {
+    const std::wstring root = test_scratch::temp_path(L"emf_portraits_big_manifest");
+    test_scratch::remove_at_exit(root);
+    const std::wstring mods = root + L"\\mods";
+    std::filesystem::create_directories(mods + L"\\big");
+    {
+        std::ofstream f(std::filesystem::path(mods + L"\\big\\mod.json"), std::ios::binary);
+        f << "{\"portraits\": [], \"pad\": \"" << std::string((1u << 20) + 10, 'x') << "\"}";
+    }
+    std::vector<std::string> problems;
+    CHECK(emf::loader::wanted_portraits(mods, root + L"\\cache", &problems).empty());
+    REQUIRE(problems.size() == 1u);
+    CHECK(problems[0].rfind("big: ", 0) == 0);
+    CHECK(problems[0].find("1 MiB") != std::string::npos);
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}

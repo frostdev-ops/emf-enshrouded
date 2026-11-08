@@ -468,6 +468,7 @@ std::wstring portrait_attempts_path() { return g_dir + L"\\emf\\cache\\portraits
 std::vector<emf::loader::PortraitItem> portraits_this_start() {
     try {
         if (!emf::loader::is_game_client_exe(g_exe) || !g_start.core) return {};
+        if (facts_io().mode() == emf::loader::ContentMode::Off) return {};  // the player's off switch: no DLL at all
         const DWORD a = GetFileAttributesW(content_dll().c_str());
         if (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY)) return {};
         std::vector<std::string> problems;
@@ -537,6 +538,9 @@ emf::loader::StartSteps make_start_steps() {
     };
     s.run_work = [](const std::function<void()>& work) {
         return emf::loader::run_with_splash(target().server ? nullptr : &g_splash, work, emf::loader::kBuildTimeoutMs);
+    };
+    s.run_pictures_work = [](const std::function<void()>& work, uint32_t timeout_ms) {
+        return emf::loader::run_with_splash(target().server ? nullptr : &g_splash, work, timeout_ms);
     };
     s.build_shadow = [] {
         g_content_log.open();
@@ -659,10 +663,20 @@ DWORD WINAPI held_content_entry(void* arg) {
     try {
         emf::loader::run_held_content(g_content, steps());
     } catch (...) {
-        loader_log(g_dir, "EML content: the build stopped on an error in the loader; the game starts without it");
+        const bool pictures_only = g_content.portraits_hold && g_content.path != emf::loader::ContentPath::BuildHeld;
+        loader_log(g_dir, pictures_only
+                              ? "creature pictures: the pictures stopped on an error in the loader; the game starts without "
+                                "waiting for them (EML content is as it was)"
+                              : "EML content: the build stopped on an error in the loader; the game starts without it");
         if (!GetModuleHandleW(content_dll().c_str())) {
             try {
-                steps().set_status({"failed", 0, 0, "the build stopped on an error in EMF's loader"});
+                if (pictures_only) {
+                    // the build did not fail: the file hooks of the plan's path stay (a good shadow copy is applied);
+                    // they go in after the chained DLLs, so once the chain ran they are in already
+                    if (!g_chain_ran) steps().hooks(emf::loader::hooks_for(g_content));
+                } else {
+                    steps().set_status({"failed", 0, 0, "the build stopped on an error in EMF's loader"});
+                }
                 if (!g_chain_ran) run_chain(g_dir, g_start.chain);
                 if (!g_core_ran) start_core_today();
             } catch (...) {

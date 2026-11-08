@@ -49,6 +49,12 @@ inline bool portrait_guid_ok(const std::string& g) {
     return true;
 }
 
+// Windows folders (the cache's) do not tell "Wolf" from "wolf": the same key.
+inline std::string lower_key(std::string k) {
+    for (char& c : k) c = static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+    return k;
+}
+
 // The lists of (mod id, mod.json text) in order. A bad entry, or a mod.json that is not JSON, is skipped with a line
 // in `problems` ("<mod>: <why>"); a key a mod before named already keeps that mod's entry.
 inline std::vector<PortraitItem> read_portrait_lists(const std::vector<std::pair<std::string, std::string>>& manifests,
@@ -79,8 +85,12 @@ inline std::vector<PortraitItem> read_portrait_lists(const std::vector<std::pair
             const auto int_of = [&](const char* name, int def, bool* ok) -> int {
                 const auto* f = e.get(name);
                 if (!f) return def;
-                if (!f->is(T::Number) || f->n != static_cast<double>(static_cast<int>(f->n))) *ok = false;
-                return f->is(T::Number) ? static_cast<int>(f->n) : def;
+                // range first: a double outside int's range cast to int is undefined
+                if (!f->is(T::Number) || !(f->n >= -1e9 && f->n <= 1e9) || f->n != static_cast<double>(static_cast<int>(f->n))) {
+                    *ok = false;
+                    return def;
+                }
+                return static_cast<int>(f->n);
             };
             PortraitItem p;
             p.mod = mod;
@@ -99,10 +109,10 @@ inline std::vector<PortraitItem> read_portrait_lists(const std::vector<std::pair
                 say(mod, at + "not a GUID");
             } else if (!whole || p.frames < 1 || p.frames > 64 || p.size < 8 || p.size > 512) {
                 say(mod, at + "frames are 1-64 and size 8-512 (whole numbers)");
-            } else if (keys.count(p.key)) {
+            } else if (keys.count(lower_key(p.key))) {
                 say(mod, at + "another mod named that key first; its picture is used");
             } else {
-                keys.insert(p.key);
+                keys.insert(lower_key(p.key));
                 out.push_back(std::move(p));
             }
         }

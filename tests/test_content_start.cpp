@@ -560,7 +560,7 @@ TEST_CASE("content start: a build start draws the portraits after the build: fro
         CHECK(emf::loader::start_in_dllmain(plan, steps));
         r.calls.clear();
         emf::loader::run_held_content(plan, steps);
-        CHECK(r.joined().find(ok ? "run_build, portraits(shadow)" : "run_build, portraits(game)") != std::string::npos);
+        CHECK(r.joined().find(ok ? "portraits(shadow)" : "portraits(game)") != std::string::npos);
         CHECK(r.joined().find("core") != std::string::npos);
     }
 }
@@ -631,9 +631,9 @@ TEST_CASE("content start: every pictures call is recorded for its items, also on
         };
         CHECK(emf::loader::start_in_dllmain(plan, steps));
         emf::loader::run_held_content(plan, steps);
-        REQUIRE(recorded.size() == 1u);
+        REQUIRE(recorded.size() == (finishes ? 2u : 1u));  // the failed mark before the call, the result after
         CHECK(recorded[0] == "wolf");
-        CHECK(code == (finishes ? 0 : emf::loader::kBuildTimedOut));
+        CHECK(code == (finishes ? 0 : emf::loader::kBuildError));  // not done: the mark before the call stays
     }
 }
 
@@ -649,5 +649,164 @@ TEST_CASE("content start: the pictures after a build are recorded too") {
     };
     CHECK(emf::loader::start_in_dllmain(plan, steps));
     emf::loader::run_held_content(plan, steps);
-    CHECK(recorded == 1);
+    CHECK(recorded == 2);
+}
+
+namespace {
+// A pictures start with its own recorder: what record_portraits was told, in order, and the pictures' work timeouts.
+struct PicturesRig {
+    Recorder r;
+    emf::loader::StartSteps steps;
+    std::vector<std::string> told;  // "<key>:<ok|failed> " per record_portraits call
+    std::vector<uint32_t> timeouts;
+    bool pictures_finish = true;
+    bool unloads = true;
+    bool dll_there_after_pictures = false;
+    int dll_checks = 0;
+    explicit PicturesRig(bool build_dll_gone = true, emf::loader::BuildOutcome outcome = built_ok(), bool finishes = true)
+        : steps(start_steps(r, true, outcome, true, finishes)) {
+        steps.run_portraits = [this](const std::vector<emf::loader::PortraitItem>& items, bool shadow,
+                                     const std::atomic<bool>&) {
+            r.add(std::string("portraits(") + (shadow ? "shadow" : "game") + ")");
+            r.log.push_back(std::string("pending before the call: ") + (told.empty() ? "none" : told.back()));
+            emf::loader::PortraitsOutcome o;
+            o.call.unloaded = unloads;
+            for (const auto& i : items) o.drawn.push_back(i.key);
+            return o;
+        };
+        steps.record_portraits = [this](const std::vector<emf::loader::PortraitItem>& items,
+                                        const emf::loader::PortraitsOutcome& o) {
+            std::string t;
+            for (const auto& i : items) {
+                bool ok = false;
+                for (const auto& d : o.drawn) ok = ok || d == i.key;
+                t += i.key + (ok ? ":ok " : ":failed ");
+            }
+            told.push_back(t);
+            r.add("record");
+        };
+        steps.run_pictures_work = [this](const std::function<void()>& work, uint32_t timeout_ms) {
+            timeouts.push_back(timeout_ms);
+            r.add("pictures work");
+            if (!pictures_finish) return false;
+            work();
+            return true;
+        };
+        // the first check is the build's own, the later ones are after the pictures call
+        steps.dll_gone = [this, build_dll_gone] { return ++dll_checks == 1 ? build_dll_gone : !dll_there_after_pictures; };
+    }
+};
+}  // namespace
+
+TEST_CASE("content start: the build's final state is written before the pictures, and a record marks the keys failed before the call") {
+    PicturesRig rig;
+    auto plan = emf::loader::plan_content(plan_steps(rig.r, owned_facts(), std::nullopt));
+    plan.portraits = {wolf_item()};
+    CHECK(emf::loader::start_in_dllmain(plan, rig.steps));
+    rig.r.calls.clear();
+    rig.r.log.clear();
+    emf::loader::run_held_content(plan, rig.steps);
+    const std::string j = rig.r.joined();
+    CHECK(rig.r.states.back().code == 0);  // what stays if the game dies while drawing is the good state
+    REQUIRE(j.find("portraits(shadow)") != std::string::npos);
+    CHECK(j.find("write_state", j.find("portraits(shadow)")) == std::string::npos);  // none written after the pictures
+    CHECK(rig.r.logged("pending before the call: wolf:failed"));  // overwritten by the real result after
+    REQUIRE(rig.told.size() == 2u);
+    CHECK(rig.told[1] == "wolf:ok ");
+}
+
+TEST_CASE("content start: pictures that hang after a good build time out on their own, short, and leave the build's state alone") {
+    PicturesRig rig;
+    rig.pictures_finish = false;
+    auto plan = emf::loader::plan_content(plan_steps(rig.r, owned_facts(), std::nullopt));
+    plan.portraits = {wolf_item()};
+    CHECK(emf::loader::start_in_dllmain(plan, rig.steps));
+    rig.r.calls.clear();
+    emf::loader::run_held_content(plan, rig.steps);
+    REQUIRE(rig.timeouts.size() == 1u);
+    CHECK(rig.timeouts[0] < emf::loader::kBuildTimeoutMs / 2);
+    CHECK(rig.timeouts[0] >= 60u * 1000u);
+    CHECK(rig.r.states.back().code == 0);
+    CHECK(rig.r.states.back().unloaded);
+    CHECK(rig.r.joined().find("drop_record") == std::string::npos);
+    REQUIRE_FALSE(rig.told.empty());
+    CHECK(rig.told.back() == "wolf:failed ");  // not again until the DLL, the game or the entry changes
+    CHECK(rig.r.joined().find("core") == std::string::npos);
+}
+
+TEST_CASE("content start: pictures that leave the DLL loaded still put the good shadow copy in place (hooks), without chain or core") {
+    for (const bool build : {true, false}) {
+        PicturesRig rig;
+        rig.unloads = false;
+        auto plan = emf::loader::plan_content(
+            plan_steps(rig.r, owned_facts(), build ? std::nullopt : std::optional(good_state("sha256:now"))));
+        plan.portraits = {wolf_item()};
+        CHECK(emf::loader::start_in_dllmain(plan, rig.steps));
+        rig.r.calls.clear();
+        emf::loader::run_held_content(plan, rig.steps);
+        const std::string j = rig.r.joined();
+        CHECK(j.find("hooks(content on)") != std::string::npos);
+        CHECK(j.find("chain") == std::string::npos);
+        CHECK(j.find("core") == std::string::npos);
+        CHECK(j.find("alert") != std::string::npos);
+    }
+}
+
+TEST_CASE("content start: the DLL still in the game after the build: no pictures are asked for, none recorded") {
+    PicturesRig rig(false);  // the build's own check finds the DLL
+    auto plan = emf::loader::plan_content(plan_steps(rig.r, owned_facts(), std::nullopt));
+    plan.portraits = {wolf_item()};
+    CHECK(emf::loader::start_in_dllmain(plan, rig.steps));
+    rig.r.calls.clear();
+    emf::loader::run_held_content(plan, rig.steps);
+    CHECK(rig.r.joined().find("portraits(") == std::string::npos);
+    CHECK(rig.told.empty());
+    CHECK_FALSE(rig.r.states.back().unloaded);
+}
+
+TEST_CASE("content start: a build that does not come back in time asks for no pictures and records none") {
+    PicturesRig rig(true, built_ok(), false);
+    auto plan = emf::loader::plan_content(plan_steps(rig.r, owned_facts(), std::nullopt));
+    plan.portraits = {wolf_item()};
+    CHECK(emf::loader::start_in_dllmain(plan, rig.steps));
+    rig.r.calls.clear();
+    emf::loader::run_held_content(plan, rig.steps);
+    CHECK(rig.r.joined().find("portraits(") == std::string::npos);
+    CHECK(rig.told.empty());
+    CHECK(rig.r.joined().find("core") == std::string::npos);
+}
+
+TEST_CASE("content start: the DLL found still loaded after the pictures call counts as left loaded") {
+    PicturesRig rig;
+    rig.dll_there_after_pictures = true;  // the call said unloaded, the process says otherwise
+    rig.dll_checks = 1;  // no build at this start: the first check is the pictures'
+    auto plan = emf::loader::plan_content(plan_steps(rig.r, owned_facts(), good_state("sha256:now")));
+    plan.portraits = {wolf_item()};
+    CHECK(emf::loader::start_in_dllmain(plan, rig.steps));
+    rig.r.calls.clear();
+    emf::loader::run_held_content(plan, rig.steps);
+    CHECK(rig.r.joined().find("core") == std::string::npos);
+    CHECK(rig.r.joined().find("alert") != std::string::npos);
+}
+
+TEST_CASE("content start: a pictures-only hold on a start whose build failed before, or with content off, draws from the game") {
+    for (const bool failed : {true, false}) {
+        PicturesRig rig;
+        emf::loader::ContentPlan plan;
+        if (failed) {
+            auto bad = good_state("sha256:now");
+            bad.code = 3;
+            bad.message = "boom";
+            plan = emf::loader::plan_content(plan_steps(rig.r, owned_facts(), bad));
+            REQUIRE(plan.path == ContentPath::KnownFailed);
+        }
+        plan.portraits = {wolf_item()};
+        rig.dll_checks = 1;  // no build at this start: the first check is the pictures'
+        CHECK(emf::loader::start_in_dllmain(plan, rig.steps));
+        rig.r.calls.clear();
+        emf::loader::run_held_content(plan, rig.steps);
+        CHECK(rig.r.joined().find("portraits(game)") != std::string::npos);
+        CHECK(rig.r.joined().find(failed ? "hooks(content off)" : "hooks(spike)") != std::string::npos);
+        CHECK(rig.r.joined().find("core") != std::string::npos);
+    }
 }

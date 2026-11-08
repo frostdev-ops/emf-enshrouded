@@ -6,8 +6,10 @@
 //   2. it is unloaded before they start; when it cannot be (a thread of its own still runs, the module is still there,
 //      or the build does not come back), this start runs without the chained DLLs and without EMF's core, and says why
 //      (a message box: the player gets no mods this time);
-//   3. it is never loaded when the fingerprint and the state say the shadow copy is current, nor after a build with the
-//      same files failed (until a mod, the game or the DLL changes).
+//   3. it is never loaded for a build when the fingerprint and the state say the shadow copy is current, nor after a
+//      build with the same files failed (until a mod, the game or the DLL changes). It can still be loaded at such a
+//      start, on the held entry and under rules 1 and 2, to draw the creature pictures mods ask for (portraits_plan.h);
+//      never with [content] mode=off, on the dedicated server, or in Play without EMF mods.
 //
 // In DllMain: plan_content (the facts, the decision, the fingerprint and the state), then start_in_dllmain:
 //   Off          today's order: the chained DLLs, the file hooks of the redirect spike's switches, the core
@@ -17,7 +19,10 @@
 //                cannot be held, content is off for this start and the order is today's.
 // On the held entry, run_held_content: the splash, a state that is never current, the shadow and the build (on a
 // worker thread while the splash is kept alive), the state, shadow.txt after a good build, then the chained DLLs, the
-// hooks (redirect on only after a good build) and the core.
+// hooks (redirect on only after a good build) and the core. The pictures come after the build's state is written (a
+// pictures call never changes it), each call in a work of its own with its own time (draw_pictures), and with the
+// attempt recorded as failed before the call, so that a crash or a hang there is remembered. Without a build the entry
+// is held for them alone (run_held_portraits).
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
@@ -207,6 +212,8 @@ struct StartSteps {
     // remembers what a pictures call did for each item it asked for (portraits_attempts.h), on the loader's thread
     // after the call, also when it did not come back; null: nothing is remembered
     std::function<void(const std::vector<PortraitItem>& items, const PortraitsOutcome&)> record_portraits;
+    // like run_work, for a pictures call, with a time of its own (draw_pictures); null: run_work
+    std::function<bool(const std::function<void()>& work, uint32_t timeout_ms)> run_pictures_work;
 };
 
 inline std::string portraits_text(const PortraitsOutcome& o) {
@@ -216,6 +223,12 @@ inline std::string portraits_text(const PortraitsOutcome& o) {
     t += " in " + seconds_text(o.call.ms);
     if (o.call.code != 0 && o.failed.empty()) t += " (" + o.call.message + ", code " + std::to_string(o.call.code) + ")";
     return t;
+}
+
+inline Hooks hooks_for(const ContentPlan& plan) {
+    return plan.path == ContentPath::UseCurrent ? Hooks::ContentOn
+           : plan.emf_owns                      ? Hooks::ContentOff  // the spike's switch never redirects there
+                                                : Hooks::Spike;
 }
 
 // The start without a build: the chained DLLs, the file hooks for the plan's path, the core's status, the core.
@@ -237,9 +250,7 @@ inline void start_unheld(const ContentPlan& plan, const StartSteps& s, std::opti
         status = ContentStatus{"off", 0, 0, plan.why};
     }
     s.run_chain();
-    s.hooks(plan.path == ContentPath::UseCurrent ? Hooks::ContentOn
-            : plan.emf_owns                      ? Hooks::ContentOff  // the spike's switch never redirects there
-                                                 : Hooks::Spike);
+    s.hooks(hooks_for(plan));
     if (mark && s.write_state) s.write_state(*mark);
     if (status) s.set_status(*status);
     s.start_core();
@@ -266,19 +277,32 @@ inline bool start_in_dllmain(ContentPlan& plan, const StartSteps& s) {
     return false;
 }
 
-// On the entry held only for portraits (no build at this start): draw them, then start as without a hold. The DLL
-// must be gone before the chained DLLs and the core, as after a build.
-inline void run_held_portraits(const ContentPlan& plan, const StartSteps& s) {
-    s.splash_begin("EMF is drawing pictures of creatures for mods (first start after a change)...");
+// The pictures' own time: they never share the build's (a hang there must not touch the build's state).
+constexpr uint32_t kPicturesBaseMs = 2 * 60 * 1000;
+constexpr uint32_t kPicturesPerItemMs = 5 * 1000;
+inline uint32_t pictures_timeout_ms(size_t items) { return kPicturesBaseMs + static_cast<uint32_t>(items) * kPicturesPerItemMs; }
+
+// One pictures call in its own work with its own time. Before it, every key is recorded as failed ("the game stopped
+// while it was drawn"): a crash, a kill or a hang that never comes back then leaves a record, and the next start does
+// not hold again for the same keys; the real result replaces it after. The DLL still in the process afterwards counts
+// as left loaded.
+inline PortraitsOutcome draw_pictures(const std::vector<PortraitItem>& items, bool shadow, const StartSteps& s) {
+    if (s.record_portraits) {
+        PortraitsOutcome pending;
+        pending.call.code = kBuildError;
+        pending.call.message = "the game stopped while the pictures were drawn";
+        s.record_portraits(items, pending);
+    }
     struct Work {
         std::vector<PortraitItem> items;
         PortraitsOutcome out;
         std::atomic<bool> abandoned{false};
     };
     auto work = std::make_shared<Work>();  // the worker owns it: one that does not come back must not write a dead frame
-    work->items = plan.portraits;
-    const bool shadow = plan.path == ContentPath::UseCurrent;
-    const bool done = s.run_work([work, &s, shadow] { work->out = s.run_portraits(work->items, shadow, work->abandoned); });
+    work->items = items;
+    const auto job = [work, &s, shadow] { work->out = s.run_portraits(work->items, shadow, work->abandoned); };
+    const uint32_t ms = pictures_timeout_ms(items.size());
+    const bool done = s.run_pictures_work ? s.run_pictures_work(job, ms) : s.run_work(job);
     PortraitsOutcome out;
     if (done) {
         out = work->out;
@@ -286,18 +310,38 @@ inline void run_held_portraits(const ContentPlan& plan, const StartSteps& s) {
         work->abandoned = true;
         out.call.code = kBuildTimedOut;
         out.call.unloaded = false;
-        out.call.message = "the pictures did not finish in time, so emf_content.dll may still run";
+        out.call.message = "the pictures did not finish in " + std::to_string(ms / 1000) +
+                           " seconds, so emf_content.dll may still run";
     }
     if (out.call.unloaded && s.dll_gone && !s.dll_gone()) out.call.unloaded = false;
-    s.splash_end();
-    if (s.record_portraits) s.record_portraits(work->items, out);
+    if (done && s.record_portraits) s.record_portraits(items, out);  // not done: the record before the call stays
+    return out;
+}
+
+
+inline void log_pictures(const PortraitsOutcome& out, const StartSteps& s) {
     s.log(portraits_text(out));
     for (const auto& f : out.failed) s.log("creature pictures: " + f);
+}
+
+inline void pictures_left_dll(const PortraitsOutcome& out, const StartSteps& s) {
+    s.log("creature pictures: emf_content.dll is still in the game (" + out.call.message +
+          "): this start runs without the chained DLLs and without EMF's core");
+    s.alert("EMF could not finish drawing creature pictures; the game starts without EMF's mods this time.\n\n" +
+            out.call.message + "\n\nThe details are in emf\\portraits.log.");
+}
+
+// On the entry held only for portraits (no build at this start): draw them, then start as without a hold. The DLL
+// must be gone before the chained DLLs and the core, as after a build; when it is not, the file hooks still go in
+// (the shadow copy of a current start is applied, without EMF's core) and the chained DLLs and the core wait.
+inline void run_held_portraits(const ContentPlan& plan, const StartSteps& s) {
+    s.splash_begin("EMF is drawing pictures of creatures for mods (first start after a change)...");
+    const PortraitsOutcome out = draw_pictures(plan.portraits, plan.path == ContentPath::UseCurrent, s);
+    s.splash_end();
+    log_pictures(out, s);
     if (!out.call.unloaded) {
-        s.log("creature pictures: emf_content.dll is still in the game: this start runs without the chained DLLs and "
-              "without EMF's core");
-        s.alert("EMF could not finish drawing creature pictures; the game starts without EMF's mods this time.\n\n" +
-                out.call.message + "\n\nThe details are in emf\\portraits.log.");
+        s.hooks(hooks_for(plan));
+        pictures_left_dll(out, s);
         return;
     }
     start_unheld(plan, s, std::nullopt);
@@ -323,14 +367,10 @@ inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
     struct Work {
         ShadowResult shadow;
         BuildOutcome out;
-        std::vector<PortraitItem> items;  // drawn after the build, on the same thread
-        std::optional<PortraitsOutcome> portraits;
-        bool build_checked = false;  // run_build ran and its DLL check is made
         std::atomic<bool> abandoned{false};
     };
     // the worker owns its result too: one that does not come back in time must not write into a dead frame
     auto work = std::make_shared<Work>();
-    if (s.run_portraits) work->items = plan.portraits;
     const bool done = s.run_work([work, &s] {
         work->shadow = s.build_shadow();
         if (!work->shadow.ok) {
@@ -341,16 +381,6 @@ inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
         }
         if (work->abandoned) return;  // the time is up: the DLL is never loaded after that
         work->out = s.run_build(work->abandoned);
-        // the build's own result is settled before the pictures: a DLL that is still there now is the build's
-        if (work->out.unloaded && s.dll_gone && !s.dll_gone()) {
-            work->out.unloaded = false;
-            work->out.message += (work->out.message.empty() ? "" : "; ") + std::string("emf_content.dll is still in the game");
-        }
-        work->build_checked = true;
-        if (!work->items.empty() && work->out.unloaded && !work->abandoned) {  // from the shadow when it is good
-            work->portraits = s.run_portraits(work->items, work->out.usable(), work->abandoned);
-            if (work->portraits->call.unloaded && s.dll_gone && !s.dll_gone()) work->portraits->call.unloaded = false;
-        }
     });
     BuildOutcome out;
     if (done) {
@@ -362,13 +392,7 @@ inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
         out.message = "the build did not finish in " + std::to_string(kBuildTimeoutMs / 60000) +
                       " minutes, so emf_content.dll may still run";
     }
-    // The pictures leaving the DLL in the game is no fault of the build: the state below stays the build's own (a good
-    // build stays a good build, current at the next start); only this start goes without the chained DLLs and the core.
-    const bool pictures_left_dll = done && work->portraits && !work->portraits->call.unloaded;
-    // remembered when the pictures call came back; a build that did not come back in time is the build's trouble, and
-    // whether the pictures were tried after it is not known: no record, they are asked again at the next start
-    if (done && work->portraits && s.record_portraits) s.record_portraits(work->items, *work->portraits);
-    if (out.unloaded && !(done && work->build_checked) && s.dll_gone && !s.dll_gone()) {
+    if (out.unloaded && s.dll_gone && !s.dll_gone()) {
         out.unloaded = false;
         out.message += (out.message.empty() ? "" : "; ") + std::string("emf_content.dll is still in the game");
     }
@@ -382,22 +406,11 @@ inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
     state.unloaded = out.unloaded;
     state.truncated = out.truncated;
     state.attempts = 0;
-    state.reported = out.unloaded && !pictures_left_dll;  // the core starts below and is told; without it, at the next start
-    s.write_state(state);
+    state.reported = out.unloaded;  // the core starts below and is told; without it, at the next start
+    s.write_state(state);  // the build's own, final: written before the pictures, which never change it
     if (ok) s.write_record(work->shadow.record);
-    s.splash_end();
-    if (done && work->portraits) {
-        s.log(portraits_text(*work->portraits));
-        for (const auto& f : work->portraits->failed) s.log("creature pictures: " + f);
-    }
-    if (pictures_left_dll && out.unloaded) {
-        s.log("creature pictures: emf_content.dll is still in the game (" + work->portraits->call.message +
-              "): this start runs without the chained DLLs and without EMF's core; the build's state is kept");
-        s.alert("EMF could not finish drawing creature pictures; the game starts without EMF's mods this time.\n\n" +
-                work->portraits->call.message + "\n\nThe details are in emf\\portraits.log.");
-        return;
-    }
     if (!out.unloaded) {
+        s.splash_end();
         s.drop_record();
         s.log("EML content: " + out.message + ": this start runs without the chained DLLs and without EMF's core (EML's "
               "code and the mods are never in the game together)");
@@ -405,6 +418,11 @@ inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
                 out.message + "\n\nThe details are in emf\\content.log.");
         return;
     }
+    // the pictures, after the build, with their own time: from the shadow when it is good, else the game's files
+    std::optional<PortraitsOutcome> pictures;
+    if (s.run_portraits && !plan.portraits.empty()) pictures = draw_pictures(plan.portraits, ok, s);
+    s.splash_end();
+    if (pictures) log_pictures(*pictures, s);
     if (ok) {
         s.log("EML content: built " + mods_text(out.mods.size()) + " in " + seconds_text(out.ms) +
               "; the game reads the shadow copy");
@@ -413,6 +431,12 @@ inline void run_held_content(const ContentPlan& plan, const StartSteps& s) {
         s.log("EML content could not be built: " + out.message + " (code " + std::to_string(out.code) +
               "); the game starts without it (emf\\content.log has the details)");
         for (const auto& e : out.errors) s.log("EML content: " + e);
+    }
+    if (pictures && !pictures->call.unloaded) {
+        // the build's state above stays the build's own; only this start goes without the chained DLLs and the core
+        s.hooks(ok ? Hooks::ContentOn : Hooks::ContentOff);
+        pictures_left_dll(*pictures, s);
+        return;
     }
     s.run_chain();
     s.hooks(ok ? Hooks::ContentOn : Hooks::ContentOff);

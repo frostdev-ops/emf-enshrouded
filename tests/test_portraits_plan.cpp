@@ -92,3 +92,27 @@ TEST_CASE("portraits plan: the request names the folders and gives frames and si
     CHECK(req.find("\"size\": 128") != std::string::npos);
     CHECK(v.get("items")->arr[1].get("model")->s == kBoar);
 }
+
+TEST_CASE("portraits plan: keys that differ only in case are one key (one folder on Windows); the first mod's stays") {
+    const std::string g = "503fa1d1-dce2-45a1-85a5-185a22666d33";
+    std::vector<std::string> problems;
+    const auto items = emf::loader::read_portrait_lists(
+        {{"a", "{\"portraits\": [{\"key\": \"Wolf\", \"template\": \"" + g + "\"}]}"},
+         {"b", "{\"portraits\": [{\"key\": \"wolf\", \"template\": \"" + g + "\"}]}"}},
+        &problems);
+    REQUIRE(items.size() == 1u);
+    CHECK(items[0].key == "Wolf");
+    REQUIRE(problems.size() == 1u);
+    CHECK(problems[0].find("another mod named that key first") != std::string::npos);
+}
+
+TEST_CASE("portraits plan: a number far outside the int range is refused, not cast") {
+    const std::string g = "503fa1d1-dce2-45a1-85a5-185a22666d33";
+    std::vector<std::string> problems;
+    const auto items = emf::loader::read_portrait_lists(
+        {{"a", "{\"portraits\": [{\"key\": \"w\", \"template\": \"" + g + "\", \"frames\": 1e30}, {\"key\": \"x\", \"template\": \"" +
+                   g + "\", \"size\": -1e30}]}"}},
+        &problems);
+    CHECK(items.empty());
+    CHECK(problems.size() == 2u);
+}

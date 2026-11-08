@@ -180,9 +180,14 @@ inline std::vector<PortraitItem> wanted_portraits(const std::wstring& mods_dir, 
     FindClose(h);
     std::sort(names.begin(), names.end());
     std::vector<std::pair<std::string, std::string>> manifests;
-    for (const auto& n : names)
-        if (auto text = cio::read_file(mods_dir + L"\\" + n + L"\\mod.json", 1u << 20))
+    for (const auto& n : names) {
+        const std::wstring path = mods_dir + L"\\" + n + L"\\mod.json";
+        if (auto text = cio::read_file(path, 1u << 20)) {
             manifests.emplace_back(cio::to_utf8(n), std::move(*text));
+        } else if (problems && GetFileAttributesW(path.c_str()) != INVALID_FILE_ATTRIBUTES) {
+            problems->push_back(cio::to_utf8(n) + ": mod.json is over 1 MiB or cannot be read; its portraits are left out");
+        }
+    }
     const auto cached = [&cache_dir](const std::string& key) {
         const DWORD a = GetFileAttributesW((cache_dir + L"\\" + cio::from_utf8(key) + L"\\index.json").c_str());
         return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
