@@ -100,9 +100,15 @@ static_assert(offsetof(EmfApi, spawn_offer) == kApiV24Size,
               "EmfApi layout (v25 appends spawn_offer, offer, offer_remove after window_close)");
 static_assert(kApiV25Size == 672, "EmfApi size (v25)");
 static_assert(offsetof(EmfApi, image_load) == kApiV25Size && offsetof(EmfApi, offer_active) == kApiV25Size + 8 &&
-                  kApiV26Size == 688 && sizeof(EmfApi) == kApiV26Size,
+                  kApiV26Size == 688,
               "EmfApi layout (v26 appends image_load and offer_active after offer_remove)");
-constexpr uint32_t kApiV27Size = EMF_FIELD_END(EmfApi, net_peer);
+static_assert(offsetof(EmfApi, net_channel) == kApiV26Size && kApiV27Size == 728 && sizeof(EmfApi) == kApiV27Size,
+              "EmfApi layout (v27 appends net_channel, net_to_server, net_to_player, net_to_players, net_peer)");
+static_assert(sizeof(EmfNetFrom) == 24 && offsetof(EmfNetFrom, account) == 8 && offsetof(EmfNetFrom, admin) == 20,
+              "EmfNetFrom layout (v27)");
+static_assert(sizeof(EmfNetChannel) == 56 && offsetof(EmfNetChannel, name) == 8 &&
+                  offsetof(EmfNetChannel, on_server) == 32 && offsetof(EmfNetChannel, user) == 48,
+              "EmfNetChannel layout (v27)");
 static_assert(kOfferV25Size == 24 && sizeof(EmfOffer) == 24 && offsetof(EmfOffer, text) == 8 &&
                   offsetof(EmfOffer, sequence) == 16 && offsetof(EmfOffer, range_m) == 20,
               "EmfOffer layout (v25)");

@@ -185,7 +185,7 @@ class OutputTests(unittest.TestCase):
         self.assertEqual(text, g.generate())  # deterministic
         size = len(text.encode("utf-8"))
         self.assertGreater(size, 15 * 1024)
-        self.assertLess(size, 64 * 1024)  # v25 (E prompts) passed 56 KB, the HUD editor commands 60 KB; still small enough for an agent to read whole
+        self.assertLess(size, 64 * 1024)  # v25 (E prompts) passed 56 KB, the HUD editor commands 60 KB, v27 (mod messages) more; still small enough for an agent to read whole
         for heading in ("## C API", "## Lua", "## mod.json", "## Console commands", "## Debug bridge",
                         "## Tools for agents"):
             self.assertIn(heading, text)
