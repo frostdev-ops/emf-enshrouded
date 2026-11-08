@@ -74,19 +74,38 @@ bool NetService::to_server(const std::string& owner, const std::string& channel,
     uint32_t local = 0;
     NetHandler handler;
     NetFrom from;
+    uint32_t version = 0;
     {
         const std::lock_guard<std::mutex> g(m_);
         Channel* c = find(channel);
         if (!sendable(owner, c, kToServer, data, 0, why)) return false;
-        if (!d_.hosted(&local)) return fail(why, "no server to send to yet (it has not welcomed this game)");
-        handler = c->def.on_server;
-        from.player = local;
-        from.local = true;
-        from.admin = true;
-        from.peer_version = c->def.version;
+        version = c->def.version;
+        if (d_.hosted(&local)) {
+            handler = c->def.on_server;
+            from.player = local;
+            from.local = true;
+            from.admin = true;
+            from.peer_version = version;
+        }
+    }
+    if (!local) {  // a joined game: through the chat, once the server has welcomed it
+        if (!client_) return fail(why, "no server to send to yet (it has not welcomed this game)");
+        return client_->send(channel, version, data, why);
     }
     if (handler) d_.post(EMF_WORLD_SERVER, [handler, from, data](EmfWorld* w) { handler(w, from, data); });
     return true;
+}
+
+bool NetService::send_remote(const std::string& owner, uint32_t handle, uint64_t account, const std::string& channel,
+                             const std::string& data, std::string* why) {
+    uint32_t version = 0;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        Channel* c = find(channel);
+        if (!sendable(owner, c, kToPlayers, data, account, why)) return false;
+        version = c->def.version;
+    }
+    return server_->send(handle, account, channel, version, data, why);
 }
 
 bool NetService::to_player(const std::string& owner, uint32_t player, const std::string& channel,
@@ -94,34 +113,199 @@ bool NetService::to_player(const std::string& owner, uint32_t player, const std:
     uint32_t local = 0;
     NetHandler handler;
     NetFrom from;
+    bool loopback = false;
     {
         const std::lock_guard<std::mutex> g(m_);
         Channel* c = find(channel);
         if (!c) return fail(why, "no such channel");
-        if (!d_.hosted(&local) || player != local)
-            return fail(why, "that player's game has not said hello with this channel");
-        if (!sendable(owner, c, kToPlayers, data, player, why)) return false;
-        handler = c->def.on_player;
-        from.local = true;
-        from.peer_version = c->def.version;
+        loopback = d_.hosted(&local) && player == local;
+        if (loopback) {
+            if (!sendable(owner, c, kToPlayers, data, player, why)) return false;
+            handler = c->def.on_player;
+            from.local = true;
+            from.peer_version = c->def.version;
+        }
+    }
+    if (!loopback) {  // another player's game, over the chat
+        if (!server_ || !d_.connection_of) return fail(why, "that player's game has not said hello with this channel");
+        const auto conn = d_.connection_of(player);
+        if (!conn) return fail(why, "that player's game has not said hello with this channel");
+        return send_remote(owner, conn->first, conn->second, channel, data, why);
     }
     if (handler) d_.post(EMF_WORLD_CLIENT, [handler, from, data](EmfWorld* w) { handler(w, from, data); });
     return true;
 }
 
 uint32_t NetService::to_players(const std::string& owner, const std::string& channel, const std::string& data) {
+    uint32_t count = 0;
     uint32_t local = 0;
-    if (!d_.hosted(&local)) return 0;  // remote peers come with the chat transport
-    return to_player(owner, local, channel, data, nullptr) ? 1u : 0u;
+    if (d_.hosted(&local) && to_player(owner, local, channel, data, nullptr)) ++count;
+    if (!server_) return count;
+    uint32_t version = 0;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        Channel* c = find(channel);
+        if (!c) return count;
+        version = c->def.version;
+    }
+    for (const auto& peer : server_->peers_with(channel)) {
+        if (server_->peer_version(peer.handle, peer.account, channel) != version) continue;  // another version: none
+        if (send_remote(owner, peer.handle, peer.account, channel, data, nullptr)) ++count;
+    }
+    return count;
 }
 
 uint32_t NetService::peer(uint32_t player, const std::string& channel) {
+    uint32_t version = 0, local = 0;
+    bool hosted = false;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        Channel* c = find(channel);
+        if (!c) return 0;
+        version = c->def.version;
+        hosted = d_.hosted(&local);
+    }
+    if (hosted && (player == 0 || player == local)) return version;
+    if (player == 0) return client_ ? client_->server_version(channel) : 0;  // a joined game: the server's
+    if (!server_ || !d_.connection_of) return 0;
+    const auto conn = d_.connection_of(player);
+    return conn ? server_->peer_version(conn->first, conn->second, channel) : 0;
+}
+
+std::map<std::string, uint32_t> NetService::channel_versions() {
     const std::lock_guard<std::mutex> g(m_);
-    Channel* c = find(channel);
-    if (!c) return 0;
-    uint32_t local = 0;
-    if (!d_.hosted(&local)) return 0;
-    return (player == 0 || player == local) ? c->def.version : 0;
+    std::map<std::string, uint32_t> out;
+    for (const auto& [name, c] : channels_) out[name] = c.def.version;
+    return out;
+}
+
+void NetService::enable_server(ServerEnv env) {
+    ServerLinkDeps l;
+    l.channels = [this] { return channel_versions(); };
+    l.send = std::move(env.send);
+    l.room = std::move(env.room);
+    l.is_local = std::move(env.is_local);
+    l.now_ms = d_.now_ms;
+    l.log = d_.log;
+    l.emf_version = env.emf_version;
+    l.api = env.api;
+    l.build = env.build;
+    l.greet = env.greet;
+    l.on_message = [this](uint32_t handle, uint64_t account, const std::string& channel, uint32_t peer_version,
+                          const std::string& data) { remote_to_server(handle, account, channel, peer_version, data); };
+    server_ = std::make_unique<ServerLink>(std::move(l));
+}
+
+void NetService::enable_client(ClientEnv env) {
+    ClientLinkDeps l;
+    l.channels = [this] { return channel_versions(); };
+    l.self_account = std::move(env.self_account);
+    l.log = d_.log;
+    l.emf_version = env.emf_version;
+    l.api = env.api;
+    l.build = env.build;
+    l.on_message = [this](const std::string& channel, uint32_t version, const std::string& data) {
+        remote_to_client(channel, version, data);
+    };
+    client_ = std::make_unique<ClientLink>(std::move(l));
+}
+
+void NetService::remote_to_server(uint32_t, uint64_t account, const std::string& channel, uint32_t peer_version,
+                                  const std::string& data) {
+    NetHandler handler;
+    NetFrom from;
+    std::string why;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        Channel* c = find(channel);
+        if (!c || !(c->def.flags & kToServer)) {
+            why = "no such channel here that takes messages from players";
+        } else if (peer_version != c->def.version) {
+            why = "the player's game has " + channel + " at version " + std::to_string(peer_version) +
+                  ", the server at " + std::to_string(c->def.version);
+        } else if (data.size() > c->def.max_size) {
+            why = "a message over the channel's limit of " + std::to_string(c->def.max_size) + " bytes";
+        } else {
+            auto& rl = c->senders[account];
+            if (!rl) rl = std::make_unique<RateLimit>(c->def.per_10s / 10.0, static_cast<double>(c->def.per_10s));
+            if (!rl->take(d_.now_ms())) why = "over the channel's rate (" + std::to_string(c->def.per_10s) + " in 10 s)";
+        }
+        if (why.empty()) {
+            handler = c->def.on_server;
+            from.account = account;
+            from.peer_version = peer_version;
+        } else if (!logged_.insert("in " + channel + ": " + why).second) {
+            why.clear();  // told before
+        }
+    }
+    if (!why.empty()) {
+        if (d_.log) d_.log("a message from a player on " + channel + " was dropped: " + why);
+        return;
+    }
+    if (!handler) return;
+    from.admin = d_.is_admin ? d_.is_admin(account) : false;
+    auto entity_of = d_.entity_of;
+    d_.post(EMF_WORLD_SERVER, [handler, from, data, entity_of](EmfWorld* w) mutable {
+        if (entity_of) from.player = entity_of(from.account);  // on the server world's thread
+        handler(w, from, data);
+    });
+}
+
+void NetService::remote_to_client(const std::string& channel, uint32_t server_version, const std::string& data) {
+    NetHandler handler;
+    NetFrom from;
+    std::string why;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        Channel* c = find(channel);
+        if (!c || !(c->def.flags & kToPlayers)) {
+            why = "no such channel here that takes messages from the server";
+        } else if (server_version != c->def.version) {
+            why = "the server has " + channel + " at version " + std::to_string(server_version) + ", this game at " +
+                  std::to_string(c->def.version);
+        } else if (data.size() > c->def.max_size) {
+            why = "a message over the channel's limit of " + std::to_string(c->def.max_size) + " bytes";
+        } else {
+            auto& rl = c->senders[~0ull];  // the server's messages to this game
+            if (!rl) rl = std::make_unique<RateLimit>(c->def.per_10s / 10.0, static_cast<double>(c->def.per_10s));
+            if (!rl->take(d_.now_ms())) why = "over the channel's rate (" + std::to_string(c->def.per_10s) + " in 10 s)";
+        }
+        if (why.empty()) {
+            handler = c->def.on_player;
+            from.peer_version = server_version;
+        } else if (!logged_.insert("from the server on " + channel + ": " + why).second) {
+            why.clear();
+        }
+    }
+    if (!why.empty()) {
+        if (d_.log) d_.log("a message from the server on " + channel + " was dropped: " + why);
+        return;
+    }
+    if (handler) d_.post(EMF_WORLD_CLIENT, [handler, from, data](EmfWorld* w) { handler(w, from, data); });
+}
+
+bool NetService::server_line(uint32_t handle, uint64_t account, std::string_view text) {
+    return server_ && server_->on_line(handle, account, text);
+}
+
+void NetService::server_tick(const std::vector<Connection>& connected) {
+    if (server_) server_->tick(connected);
+}
+
+bool NetService::client_line(std::string_view text, uint64_t speaker) {
+    return client_ && client_->on_chat_line(text, speaker);
+}
+
+std::vector<std::string> NetService::client_take(size_t max) {
+    return client_ ? client_->take_lines(max) : std::vector<std::string>{};
+}
+
+void NetService::client_put_back(std::vector<std::string> lines) {
+    if (client_) client_->put_back(std::move(lines));
+}
+
+void NetService::client_reset() {
+    if (client_) client_->reset();
 }
 
 }  // namespace emf::core::net

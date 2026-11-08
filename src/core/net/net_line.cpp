@@ -106,7 +106,7 @@ std::optional<NetLine> parse_line(std::string_view line, std::string* why) {
         rest = rest.substr(sp + 1);
     }
     NetLine l;
-    if (f[0].size() != 1 || std::strchr("HWMBE", f[0][0]) == nullptr) return fail("unknown type");
+    if (f[0].size() != 1 || std::strchr("HWMBES", f[0][0]) == nullptr) return fail("unknown type");
     l.type = f[0][0];
     if (!parse_base36(f[1], &l.seq)) return fail("the sequence number is not base36");
     const size_t at = f[2].rfind('@');

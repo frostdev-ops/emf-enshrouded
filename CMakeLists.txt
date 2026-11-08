@@ -189,6 +189,7 @@ add_library(emf_core_lib STATIC
   src/core/overlay/png_decode.cpp
   src/core/overlay/image_store.cpp
   src/core/net/net_line.cpp
+  src/core/net/net_link.cpp
   src/core/net/net_peers.cpp
   src/core/net/net_service.cpp
   src/core/overlay/submit.cpp
@@ -523,7 +524,9 @@ add_executable(emf_tests
   tests/test_portraits_attempts.cpp
   tests/test_image_store.cpp
   tests/test_net_line.cpp
+  tests/test_net_link.cpp
   tests/test_net_peers.cpp
+  tests/test_net_remote.cpp
   tests/test_net_service.cpp
   tests/test_api_net.cpp
   tests/test_lua_net.cpp

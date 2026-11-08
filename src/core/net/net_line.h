@@ -15,7 +15,7 @@ constexpr size_t kMaxLine = 1024;      // the game's chat line limit (chatClient
 constexpr size_t kMaxFragments = 24;   // so a message is at most about 16 KiB
 
 struct NetLine {
-    char type = 'M';       // H hello, W welcome, M message, B bye, E refused
+    char type = 'M';       // S server beacon, H hello, W welcome, M message, B bye, E refused
     uint32_t seq = 0;      // per peer and direction; base36 on the wire
     std::string channel;   // "<mod id>/<name>"
     uint32_t version = 1;  // the channel's version, 1..65535

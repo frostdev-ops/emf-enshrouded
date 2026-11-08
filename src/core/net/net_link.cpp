@@ -1,0 +1,484 @@
+#include "net_link.h"
+
+#include <algorithm>
+#include <cstdio>
+#include <cstring>
+#include <iterator>
+
+namespace emf::core::net {
+
+namespace {
+
+constexpr uint64_t kNoteEveryMs = 60000;
+constexpr uint32_t kDropsBeforeIgnore = 400;  // 10 times the burst within 10 s: that account's lines are ignored
+constexpr uint64_t kIgnoreMs = 60000;
+
+std::string clean_version(const std::string& v) {
+    std::string out;
+    for (const char c : v)
+        out += ((c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' || c == '-' ||
+                c == '_')
+                   ? c
+                   : '_';
+    return out;
+}
+
+bool parse_u32(std::string_view s, uint32_t* out) {
+    if (s.empty() || s.size() > 10) return false;
+    uint64_t v = 0;
+    for (const char c : s) {
+        if (c < '0' || c > '9') return false;
+        v = v * 10 + static_cast<uint64_t>(c - '0');
+    }
+    if (v > 0xFFFFFFFFull) return false;
+    *out = static_cast<uint32_t>(v);
+    return true;
+}
+
+std::vector<std::string> encoded(const std::vector<NetLine>& lines) {
+    std::vector<std::string> out;
+    for (const auto& l : lines) out.push_back(encode_line(l));
+    return out;
+}
+
+const std::string kControl = kControlChannel;
+
+}  // namespace
+
+std::string channels_text(const std::map<std::string, uint32_t>& channels) {
+    std::string out;
+    for (const auto& [name, version] : channels) {
+        if (!out.empty()) out += ',';
+        out += name + '@' + std::to_string(version);
+    }
+    return out;
+}
+
+std::map<std::string, uint32_t> parse_channels_text(std::string_view text) {
+    std::map<std::string, uint32_t> out;
+    while (!text.empty()) {
+        const size_t comma = text.find(',');
+        const std::string_view item = text.substr(0, comma);
+        text = comma == std::string_view::npos ? std::string_view{} : text.substr(comma + 1);
+        const size_t at = item.rfind('@');
+        const size_t slash = item.find('/');
+        uint32_t v = 0;
+        if (at == std::string_view::npos || slash == std::string_view::npos || slash == 0 || slash + 1 >= at ||
+            !parse_u32(item.substr(at + 1), &v) || v == 0 || v > 65535)
+            continue;
+        out[std::string(item.substr(0, at))] = v;
+    }
+    return out;
+}
+
+std::string hello_text(const HelloInfo& h) {
+    return "p" + std::to_string(h.protocol) + ';' + clean_version(h.emf_version) + ';' + std::to_string(h.api) + ';' +
+           std::to_string(h.build) + ';' + channels_text(h.channels);
+}
+
+std::optional<HelloInfo> parse_hello_text(std::string_view text) {
+    std::string_view f[5];
+    for (int i = 0; i < 5; ++i) {
+        const size_t semi = i < 4 ? text.find(';') : std::string_view::npos;
+        if (i < 4 && semi == std::string_view::npos) return std::nullopt;
+        f[i] = text.substr(0, semi);
+        if (i < 4) text = text.substr(semi + 1);
+    }
+    if (f[0].size() < 2 || f[0][0] != 'p') return std::nullopt;
+    HelloInfo h;
+    if (!parse_u32(f[0].substr(1), &h.protocol) || !parse_u32(f[2], &h.api) || !parse_u32(f[3], &h.build))
+        return std::nullopt;
+    h.emf_version = std::string(f[1]);
+    h.channels = parse_channels_text(f[4]);
+    return h;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// ServerLink
+
+void ServerLink::note(uint64_t account, const std::string& what) {
+    // called with m_ held: the log function must not call back in
+    const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
+    Budget& b = budgets_[account];
+    if (b.last_note && now < b.last_note + kNoteEveryMs) return;
+    b.last_note = now ? now : 1;
+    if (d_.log) d_.log("mod messages from account 0x" + [&] {
+        char h[20];
+        std::snprintf(h, sizeof h, "%016llx", static_cast<unsigned long long>(account));
+        return std::string(h);
+    }() + ": " + what + " (logged once a minute per account)");
+}
+
+bool ServerLink::allowed(uint64_t account, size_t bytes) {
+    const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
+    Budget& b = budgets_[account];
+    if (now < b.ignore_until) return false;
+    if (b.lines.take(now) && b.bytes.take(now, static_cast<double>(bytes))) return true;
+    if (now >= b.window_start + 10000) {
+        b.window_start = now;
+        b.window_drops = 0;
+    }
+    if (++b.window_drops >= kDropsBeforeIgnore) {
+        b.ignore_until = now + kIgnoreMs;
+        b.window_drops = 0;
+        note(account, "far over the line rate: its lines are ignored for 60 s");
+    } else {
+        note(account, "over the line rate (20 lines a second, 16 KiB a second): lines dropped");
+    }
+    return false;
+}
+
+void ServerLink::drop_peer(uint32_t handle, uint64_t account, bool tell) {
+    bool had = false;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        had = peers_.find(handle, account) != nullptr;
+        if (had) peers_.bye(handle);
+        joining_.erase({handle, account});
+    }
+    if (had && tell && d_.on_peer) d_.on_peer(handle, account, false);
+}
+
+bool ServerLink::on_line(uint32_t handle, uint64_t account, std::string_view text) {
+    std::string why;
+    std::optional<NetLine> line;
+    std::optional<Reassembly::Message> msg;
+    uint32_t peer_ver = 0;
+    std::vector<Connection> replaced;
+    bool joined = false;
+    std::string reply;  // an error line for the player
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        if (!allowed(account, text.size())) return true;
+        if (d_.is_local && d_.is_local(handle, account)) {
+            note(account, "a marked line from this game's own player is ignored (it is delivered in process)");
+            return true;
+        }
+        line = parse_line(text, &why);
+        if (!line) {
+            note(account, "a marked line dropped: " + why);
+            return true;
+        }
+        const Connection conn{handle, account};
+        switch (line->type) {
+            case 'H': {
+                if (line->channel != kControl) {
+                    note(account, "a hello on the wrong channel");
+                    return true;
+                }
+                msg = joining_[conn].in.add(*line, &why);
+                if (!msg) {
+                    if (!why.empty()) note(account, "a hello line dropped: " + why);
+                    return true;
+                }
+                break;  // whole: handled below, outside the lock
+            }
+            case 'M': {
+                Peer* p = peers_.find(handle, account);
+                if (!p) {
+                    note(account, "a message before a hello: dropped");
+                    return true;
+                }
+                msg = p->in.add(*line, &why);
+                if (!msg) {
+                    if (!why.empty()) note(account, "a line dropped: " + why);
+                    return true;
+                }
+                const auto it = p->channels.find(msg->channel);
+                if (msg->channel == kControl || it == p->channels.end()) {
+                    note(account, "a message on " + msg->channel + ", which its hello did not name: dropped");
+                    return true;
+                }
+                if (it->second != msg->version) {
+                    note(account, "a message on " + msg->channel + " at version " + std::to_string(msg->version) +
+                                      ", its hello said " + std::to_string(it->second) + ": dropped");
+                    return true;
+                }
+                peer_ver = it->second;
+                break;
+            }
+            case 'B':
+                break;
+            default:
+                note(account, std::string("a '") + line->type + "' line is the server's, not a player's: dropped");
+                return true;
+        }
+        if (line->type == 'H') {
+            auto hello = parse_hello_text(msg->data);
+            Reassembly in = std::move(joining_[conn].in);
+            joining_.erase(conn);
+            if (!hello || hello->protocol != kProtocol) {
+                note(account, "a hello this server does not understand (protocol " +
+                                  (hello ? std::to_string(hello->protocol) : std::string("?")) + ")");
+                const auto lines = split_message('E', 0, kControl, kControlVersion, "unsupported protocol", nullptr);
+                reply = lines.empty() ? std::string() : encode_line(lines.front());
+                msg.reset();
+            } else {
+                for (Peer* old : peers_.all())
+                    if (old->account == account && old->handle != handle) replaced.push_back({old->handle, old->account});
+                Peer& p = peers_.hello(handle, account, hello->channels);
+                p.in = std::move(in);
+                HelloInfo mine;
+                mine.emf_version = d_.emf_version;
+                mine.api = d_.api;
+                mine.build = d_.build;
+                if (d_.channels) mine.channels = d_.channels();
+                const auto lines =
+                    split_message('W', p.peek_seq(), kControl, kControlVersion, hello_text(mine), nullptr);
+                p.reserve(static_cast<uint32_t>(lines.size()));
+                for (const auto& l : encoded(lines))
+                    if (d_.send) d_.send(handle, account, l);  // the outbox is not locked by us
+                joined = true;
+                msg.reset();
+            }
+        }
+    }
+    if (!reply.empty() && d_.send) d_.send(handle, account, reply);
+    for (const auto& r : replaced)
+        if (d_.on_peer) d_.on_peer(r.handle, r.account, false);
+    if (joined && d_.on_peer) d_.on_peer(handle, account, true);
+    if (line && line->type == 'B') drop_peer(handle, account, true);
+    if (msg && line && line->type == 'M' && d_.on_message) d_.on_message(handle, account, msg->channel, peer_ver, msg->data);
+    return true;
+}
+
+void ServerLink::tick(const std::vector<Connection>& connected) {
+    std::set<Connection> now;
+    for (const auto& c : connected)
+        if (!(d_.is_local && d_.is_local(c.handle, c.account))) now.insert(c);
+    std::vector<Connection> left, fresh;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        for (auto it = greeted_.begin(); it != greeted_.end();)
+            it = now.count(*it) ? std::next(it) : greeted_.erase(it);
+        for (auto it = joining_.begin(); it != joining_.end();)
+            it = now.count(it->first) ? std::next(it) : joining_.erase(it);
+        for (Peer* p : peers_.all())
+            if (!now.count({p->handle, p->account})) left.push_back({p->handle, p->account});
+        for (const auto& c : left) peers_.bye(c.handle);
+        if (d_.greet && d_.channels && !d_.channels().empty())
+            for (const auto& c : now)
+                if (greeted_.insert(c).second) fresh.push_back(c);
+        // an account with no connection any more starts over with a full budget
+        for (auto it = budgets_.begin(); it != budgets_.end();) {
+            bool seen = false;
+            for (const auto& c : now) seen |= c.account == it->first;
+            it = seen ? std::next(it) : budgets_.erase(it);
+        }
+    }
+    const std::string beacon = [&] {
+        const auto lines = split_message('S', 0, kControl, kControlVersion,
+                                         "This server uses EMF mods (EMF " + clean_version(d_.emf_version) +
+                                             "). If you can read this, your game does not run EMF.",
+                                         nullptr);
+        return lines.empty() ? std::string() : encode_line(lines.front());
+    }();
+    for (const auto& c : fresh)
+        if (d_.send && !beacon.empty()) d_.send(c.handle, c.account, beacon);
+    for (const auto& c : left)
+        if (d_.on_peer) d_.on_peer(c.handle, c.account, false);
+}
+
+bool ServerLink::send(uint32_t handle, uint64_t account, const std::string& channel, uint32_t version,
+                      const std::string& data, std::string* why) {
+    const auto fail = [&](const std::string& r) {
+        if (why) *why = r;
+        return false;
+    };
+    std::vector<std::string> out;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        Peer* p = peers_.find(handle, account);
+        if (!p) return fail("that player's game has not said hello");
+        const auto it = p->channels.find(channel);
+        if (it == p->channels.end()) return fail("that player's game has no channel " + channel);
+        if (it->second != version)
+            return fail("that player's game has " + channel + " at version " + std::to_string(it->second) +
+                        ", the server at " + std::to_string(version));
+        std::string split_why;
+        const auto lines = split_message('M', p->peek_seq(), channel, version, data, &split_why);
+        if (lines.empty()) return fail(split_why);
+        if (d_.room && d_.room() < lines.size()) return fail("the chat outbox is full");
+        const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
+        if (!budgets_[account].out.take(now, static_cast<double>(lines.size())))
+            return fail("over the line rate to that player (20 lines a second)");
+        p->reserve(static_cast<uint32_t>(lines.size()));
+        out = encoded(lines);
+    }
+    for (const auto& l : out)
+        if (!d_.send || !d_.send(handle, account, l)) return fail("the chat outbox refused a line");
+    return true;
+}
+
+uint32_t ServerLink::peer_version(uint32_t handle, uint64_t account, const std::string& channel) {
+    const std::lock_guard<std::mutex> g(m_);
+    Peer* p = peers_.find(handle, account);
+    if (!p) return 0;
+    const auto it = p->channels.find(channel);
+    return it == p->channels.end() ? 0 : it->second;
+}
+
+std::vector<Connection> ServerLink::peers() {
+    const std::lock_guard<std::mutex> g(m_);
+    std::vector<Connection> out;
+    for (Peer* p : peers_.all()) out.push_back({p->handle, p->account});
+    return out;
+}
+
+std::vector<Connection> ServerLink::peers_with(const std::string& channel) {
+    const std::lock_guard<std::mutex> g(m_);
+    std::vector<Connection> out;
+    for (Peer* p : peers_.all())
+        if (p->channels.count(channel)) out.push_back({p->handle, p->account});
+    return out;
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+// ClientLink
+
+bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
+    if (!is_marked(text)) return false;
+    std::string why;
+    const auto line = parse_line(text, &why);
+    if (!line) {
+        if (d_.log) d_.log("mod messages: a marked chat line dropped: " + why);
+        return true;
+    }
+    std::optional<Reassembly::Message> msg;
+    bool up = false, down = false;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        std::optional<uint64_t> self = d_.self_account ? d_.self_account() : std::nullopt;
+        if (!self && !learned_self_ && line->type == 'S') learned_self_ = speaker;  // until the game says who "self" is
+        if (!self) self = learned_self_;
+        if (!self || speaker != *self) return true;  // spoken by someone else: a forged line (never shown)
+        switch (line->type) {
+            case 'S': {
+                const bool was = state_ == State::Welcomed;
+                state_ = State::Idle;
+                server_channels_.clear();
+                in_ = Reassembly();
+                out_.clear();
+                out_seq_ = 0;
+                down = was;
+                HelloInfo mine;
+                mine.emf_version = d_.emf_version;
+                mine.api = d_.api;
+                mine.build = d_.build;
+                if (d_.channels) mine.channels = d_.channels();
+                if (mine.channels.empty()) break;  // no mod of this game talks to a server
+                const auto lines =
+                    split_message('H', out_seq_, kControl, kControlVersion, hello_text(mine), nullptr);
+                out_seq_ += static_cast<uint32_t>(lines.size());
+                for (const auto& l : encoded(lines)) out_.push_back(l);
+                state_ = State::HelloSent;
+                break;
+            }
+            case 'W': {
+                if (state_ == State::Idle || line->channel != kControl) break;
+                msg = in_.add(*line, &why);
+                if (!msg) break;
+                const auto hello = parse_hello_text(msg->data);
+                msg.reset();
+                if (!hello || hello->protocol != kProtocol) {
+                    if (d_.log) d_.log("mod messages: the server's welcome is not protocol 1: not used");
+                    break;
+                }
+                server_channels_ = hello->channels;
+                const bool was = state_ == State::Welcomed;
+                state_ = State::Welcomed;
+                up = !was;
+                break;
+            }
+            case 'M': {
+                if (state_ != State::Welcomed) break;
+                msg = in_.add(*line, &why);
+                if (!msg) break;
+                const auto it = server_channels_.find(msg->channel);
+                if (msg->channel == kControl || it == server_channels_.end() || it->second != msg->version) msg.reset();
+                break;
+            }
+            case 'B':
+                down = state_ == State::Welcomed;
+                state_ = State::Idle;
+                server_channels_.clear();
+                break;
+            case 'E':
+                if (d_.log) d_.log("mod messages: the server refused this game: " + line->payload);
+                break;
+            default:
+                break;  // an 'H' is the player's, not the server's
+        }
+    }
+    if (up && d_.on_server) d_.on_server(true);
+    if (down && d_.on_server) d_.on_server(false);
+    if (msg && d_.on_message) d_.on_message(msg->channel, msg->version, msg->data);
+    return true;
+}
+
+bool ClientLink::send(const std::string& channel, uint32_t version, const std::string& data, std::string* why) {
+    const auto fail = [&](const std::string& r) {
+        if (why) *why = r;
+        return false;
+    };
+    const std::lock_guard<std::mutex> g(m_);
+    if (state_ != State::Welcomed) return fail("no server has welcomed this game yet");
+    const auto it = server_channels_.find(channel);
+    if (it == server_channels_.end()) return fail("the server has no channel " + channel);
+    if (it->second != version)
+        return fail("the server has " + channel + " at version " + std::to_string(it->second) + ", this game at " +
+                    std::to_string(version));
+    std::string split_why;
+    const auto lines = split_message('M', out_seq_, channel, version, data, &split_why);
+    if (lines.empty()) return fail(split_why);
+    if (out_.size() + lines.size() > kClientOutboxLines) return fail("too many messages are waiting to be sent");
+    out_seq_ += static_cast<uint32_t>(lines.size());
+    for (const auto& l : encoded(lines)) out_.push_back(l);
+    return true;
+}
+
+std::vector<std::string> ClientLink::take_lines(size_t max) {
+    const std::lock_guard<std::mutex> g(m_);
+    const size_t n = std::min(max, out_.size());
+    std::vector<std::string> out(out_.begin(), out_.begin() + static_cast<std::ptrdiff_t>(n));
+    out_.erase(out_.begin(), out_.begin() + static_cast<std::ptrdiff_t>(n));
+    return out;
+}
+
+void ClientLink::put_back(std::vector<std::string> lines) {
+    const std::lock_guard<std::mutex> g(m_);
+    out_.insert(out_.begin(), std::make_move_iterator(lines.begin()), std::make_move_iterator(lines.end()));
+}
+
+size_t ClientLink::waiting() {
+    const std::lock_guard<std::mutex> g(m_);
+    return out_.size();
+}
+
+bool ClientLink::welcomed() {
+    const std::lock_guard<std::mutex> g(m_);
+    return state_ == State::Welcomed;
+}
+
+uint32_t ClientLink::server_version(const std::string& channel) {
+    const std::lock_guard<std::mutex> g(m_);
+    if (state_ != State::Welcomed) return 0;
+    const auto it = server_channels_.find(channel);
+    return it == server_channels_.end() ? 0 : it->second;
+}
+
+void ClientLink::reset() {
+    bool down = false;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        down = state_ == State::Welcomed;
+        state_ = State::Idle;
+        server_channels_.clear();
+        in_ = Reassembly();
+        out_.clear();
+        out_seq_ = 0;
+    }
+    if (down && d_.on_server) d_.on_server(false);
+}
+
+}  // namespace emf::core::net

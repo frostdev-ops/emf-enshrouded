@@ -39,6 +39,8 @@ struct Peer {
     std::map<std::string, uint32_t> channels;  // name -> version
     Reassembly in;
     uint32_t next_seq() { return out_seq_++; }
+    uint32_t peek_seq() const { return out_seq_; }
+    void reserve(uint32_t lines) { out_seq_ += lines; }  // the numbers of a message just split
 
 private:
     uint32_t out_seq_ = 0;

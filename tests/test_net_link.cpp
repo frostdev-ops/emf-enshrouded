@@ -1,0 +1,485 @@
+// Mod messages (API v27), the chat transport without the game: a ServerLink and a ClientLink joined by a fake chat. The
+// handshake (beacon, hello, welcome), messages both ways (fragments, binary), forged lines, lines out of order, rate
+// limits, reconnects and reused handles.
+#include <doctest.h>
+
+#include <map>
+#include <optional>
+#include <string>
+#include <vector>
+
+#include "core/net/net_link.h"
+
+using namespace emf::core::net;
+
+namespace {
+
+constexpr uint64_t kAcct = 0xAABBCCDD11223344ull;
+constexpr uint32_t kHandle = 0x40;
+
+struct Got {
+    uint32_t handle;
+    uint64_t account;
+    std::string channel;
+    uint32_t version;
+    std::string data;
+};
+
+struct Rig {
+    uint64_t now = 1000;
+    size_t room = 1000;
+    bool greet = true;
+    std::map<std::string, uint32_t> server_channels{{"bm/pick", 2}, {"bm/show", 1}};
+    std::map<std::string, uint32_t> client_channels{{"bm/pick", 2}, {"bm/show", 1}};
+    std::optional<uint64_t> self = kAcct;
+    std::vector<std::pair<Connection, std::string>> to_players;  // lines the server queued
+    std::vector<std::string> logs;
+    std::vector<Got> at_server;
+    std::vector<Got> at_client;
+    std::vector<std::pair<Connection, bool>> peer_events;
+    std::vector<bool> server_events;
+    uint32_t local_handle = 0xFFFF;
+    ServerLink server;
+    ClientLink client;
+
+    explicit Rig(bool greet_ = true) : greet(greet_), server(server_deps()), client(client_deps()) {}
+
+    ServerLinkDeps server_deps() {
+        ServerLinkDeps d;
+        d.channels = [this] { return server_channels; };
+        d.send = [this](uint32_t h, uint64_t a, const std::string& line) {
+            to_players.push_back({{h, a}, line});
+            return true;
+        };
+        d.room = [this] { return room; };
+        d.is_local = [this](uint32_t h, uint64_t) { return h == local_handle; };
+        d.now_ms = [this] { return now; };
+        d.log = [this](const std::string& l) { logs.push_back(l); };
+        d.on_message = [this](uint32_t h, uint64_t a, const std::string& c, uint32_t v, const std::string& data) {
+            at_server.push_back({h, a, c, v, data});
+        };
+        d.on_peer = [this](uint32_t h, uint64_t a, bool joined) { peer_events.push_back({{h, a}, joined}); };
+        d.emf_version = "0.5.1";
+        d.api = 27;
+        d.build = 1287369;
+        d.greet = greet;
+        return d;
+    }
+    ClientLinkDeps client_deps() {
+        ClientLinkDeps d;
+        d.channels = [this] { return client_channels; };
+        d.self_account = [this] { return self; };
+        d.on_message = [this](const std::string& c, uint32_t v, const std::string& data) {
+            at_client.push_back({0, 0, c, v, data});
+        };
+        d.on_server = [this](bool up) { server_events.push_back(up); };
+        d.log = [this](const std::string& l) { logs.push_back(l); };
+        d.emf_version = "0.5.1";
+        d.api = 27;
+        d.build = 1287369;
+        return d;
+    }
+
+    // The server's lines for a connection go to the client (spoken as itself), and the other way round.
+    void deliver_to_client(const Connection& c = {kHandle, kAcct}) {
+        auto lines = std::move(to_players);
+        to_players.clear();
+        for (auto& [conn, line] : lines)
+            if (conn.handle == c.handle && conn.account == c.account) client.on_chat_line(line, kAcct);
+            else to_players.push_back({conn, line});
+    }
+    void deliver_to_server(const Connection& c = {kHandle, kAcct}) {
+        for (const auto& line : client.take_lines(100)) server.on_line(c.handle, c.account, line);
+    }
+    // beacon, hello, welcome
+    void join(const Connection& c = {kHandle, kAcct}) {
+        server.tick({c});
+        deliver_to_client(c);
+        deliver_to_server(c);
+        deliver_to_client(c);
+    }
+};
+
+}  // namespace
+
+TEST_CASE("net link: channel lists and hello texts round trip; bad entries are skipped") {
+    const std::map<std::string, uint32_t> ch{{"a/b", 1}, {"c.d/e_f", 65535}};
+    CHECK(channels_text(ch) == "a/b@1,c.d/e_f@65535");
+    CHECK(parse_channels_text(channels_text(ch)) == ch);
+    CHECK(parse_channels_text("a/b@0,nope@1,/x@1,a/b@70000,c/d@2,e/f@x") == std::map<std::string, uint32_t>{{"c/d", 2}});
+    CHECK(parse_channels_text("").empty());
+    HelloInfo h;
+    h.emf_version = "0.5 1";  // not printable text for a field: cleaned
+    h.api = 27;
+    h.build = 1287369;
+    h.channels = ch;
+    const auto back = parse_hello_text(hello_text(h));
+    REQUIRE(back);
+    CHECK(back->protocol == 1);
+    CHECK(back->emf_version == "0.5_1");
+    CHECK(back->api == 27);
+    CHECK(back->build == 1287369);
+    CHECK(back->channels == ch);
+    HelloInfo none;
+    CHECK(parse_hello_text(hello_text(none))->channels.empty());
+    CHECK_FALSE(parse_hello_text("hello"));
+    CHECK_FALSE(parse_hello_text("p1;0.5;27"));
+    CHECK_FALSE(parse_hello_text("q1;0.5;27;1;"));
+    CHECK_FALSE(parse_hello_text("p1;0.5;x;1;"));
+}
+
+TEST_CASE("net link: the beacon goes once to each new remote connection, only when the server has channels") {
+    Rig r;
+    r.local_handle = 0x41;
+    r.server.tick({{0x40, 1}, {0x41, 2}});  // the second is this process's own player
+    REQUIRE(r.to_players.size() == 1);
+    CHECK(r.to_players[0].first.handle == 0x40);
+    const auto line = parse_line(r.to_players[0].second, nullptr);
+    REQUIRE(line);
+    CHECK(line->type == 'S');
+    CHECK(line->channel == "emf/net");
+    CHECK(line->payload.find("EMF") != std::string::npos);
+    r.server.tick({{0x40, 1}, {0x41, 2}});
+    CHECK(r.to_players.size() == 1);  // not again
+    r.server.tick({{0x40, 1}, {0x41, 2}, {0x42, 3}});
+    CHECK(r.to_players.size() == 2);
+    r.server.tick({{0x42, 3}});  // 0x40 left ...
+    r.server.tick({{0x40, 1}, {0x42, 3}});  // ... and came back: a new connection, a new beacon
+    CHECK(r.to_players.size() == 3);
+
+    Rig none;
+    none.server_channels.clear();
+    none.server.tick({{0x40, 1}});
+    CHECK(none.to_players.empty());
+    Rig quiet(false);
+    quiet.server.tick({{0x40, 1}});
+    CHECK(quiet.to_players.empty());
+}
+
+TEST_CASE("net link: beacon, hello, welcome; each side then knows the other's channels") {
+    Rig r;
+    r.server.tick({{kHandle, kAcct}});
+    REQUIRE(r.to_players.size() == 1);
+    CHECK(r.client.on_chat_line(r.to_players[0].second, kAcct));  // the beacon: taken, never shown
+    r.to_players.clear();
+    CHECK_FALSE(r.client.welcomed());
+    CHECK(r.client.waiting() == 1);  // its hello
+    r.deliver_to_server();
+    CHECK(r.server.peers().size() == 1);
+    CHECK(r.server.peer_version(kHandle, kAcct, "bm/pick") == 2);
+    CHECK(r.server.peer_version(kHandle, kAcct, "bm/none") == 0);
+    REQUIRE(r.peer_events.size() == 1);
+    CHECK(r.peer_events[0].second);
+    r.deliver_to_client();  // the welcome
+    CHECK(r.client.welcomed());
+    CHECK(r.server_events == std::vector<bool>{true});
+    CHECK(r.client.server_version("bm/pick") == 2);
+    CHECK(r.client.server_version("bm/show") == 1);
+    CHECK(r.client.server_version("bm/other") == 0);
+}
+
+TEST_CASE("net link: a client with no channels sends no hello") {
+    Rig r;
+    r.client_channels.clear();
+    r.server.tick({{kHandle, kAcct}});
+    r.deliver_to_client();
+    CHECK(r.client.waiting() == 0);
+    CHECK(r.server.peers().empty());
+}
+
+TEST_CASE("net link: messages both ways; text, binary and a message of many lines") {
+    Rig r;
+    r.join();
+    std::string why;
+    REQUIRE(r.client.send("bm/pick", 2, "3", &why));
+    REQUIRE(r.client.send("bm/pick", 2, std::string("\x00\x01\xff binary \x7f", 13), &why));
+    std::string big;
+    for (int i = 0; i < 5000; ++i) big += static_cast<char>('a' + i % 26);
+    REQUIRE(r.client.send("bm/pick", 2, big, &why));
+    std::string wide;
+    for (int i = 0; i < 3000; ++i) wide += static_cast<char>(i % 256);
+    REQUIRE(r.client.send("bm/pick", 2, wide, &why));
+    r.deliver_to_server();
+    REQUIRE(r.at_server.size() == 4);
+    CHECK(r.at_server[0].data == "3");
+    CHECK(r.at_server[0].channel == "bm/pick");
+    CHECK(r.at_server[0].version == 2);
+    CHECK(r.at_server[0].handle == kHandle);
+    CHECK(r.at_server[0].account == kAcct);
+    CHECK(r.at_server[1].data == std::string("\x00\x01\xff binary \x7f", 13));
+    CHECK(r.at_server[2].data == big);
+    CHECK(r.at_server[3].data == wide);
+
+    REQUIRE(r.server.send(kHandle, kAcct, "bm/show", 1, "hello player", &why));
+    REQUIRE(r.server.send(kHandle, kAcct, "bm/show", 1, wide, &why));
+    r.deliver_to_client();
+    REQUIRE(r.at_client.size() == 2);
+    CHECK(r.at_client[0].data == "hello player");
+    CHECK(r.at_client[0].channel == "bm/show");
+    CHECK(r.at_client[1].data == wide);
+}
+
+TEST_CASE("net link: nothing is sent without a welcome, to a channel the other side lacks, or at another version") {
+    Rig r;
+    std::string why;
+    CHECK_FALSE(r.client.send("bm/pick", 2, "x", &why));  // no welcome yet
+    CHECK(why.find("welcomed") != std::string::npos);
+    CHECK_FALSE(r.server.send(kHandle, kAcct, "bm/show", 1, "x", &why));  // no hello yet
+    CHECK(why.find("hello") != std::string::npos);
+    r.client_channels = {{"bm/pick", 3}};  // this game has pick at version 3, the server at 2
+    r.join();
+    CHECK_FALSE(r.client.send("bm/pick", 3, "x", &why));
+    CHECK(why.find("version") != std::string::npos);
+    CHECK_FALSE(r.server.send(kHandle, kAcct, "bm/show", 1, "x", &why));  // the client did not say it has bm/show
+    CHECK(why.find("no channel") != std::string::npos);
+    CHECK_FALSE(r.server.send(kHandle, kAcct, "bm/pick", 2, "x", &why));  // it has it at 3
+    CHECK(why.find("version") != std::string::npos);
+    CHECK_FALSE(r.server.send(kHandle, kAcct ^ 1, "bm/pick", 3, "x", &why));  // a reused handle: another player
+}
+
+TEST_CASE("net link: a message over 24 lines, a full outbox and the line rate refuse the whole message") {
+    Rig r;
+    r.join();
+    std::string why;
+    CHECK_FALSE(r.client.send("bm/pick", 2, std::string(30000, 'x'), &why));
+    CHECK(why.find("24") != std::string::npos);
+    CHECK(r.client.waiting() == 0);
+    std::string big(1500, 'y');
+    int sent = 0;
+    while (r.client.send("bm/pick", 2, big, &why)) ++sent;
+    CHECK(sent >= 20);
+    CHECK(r.client.waiting() <= kClientOutboxLines);
+    CHECK(why.find("waiting") != std::string::npos);
+
+    r.to_players.clear();
+    r.room = 1;  // a two-line message does not fit: nothing goes out, not even the first line
+    CHECK_FALSE(r.server.send(kHandle, kAcct, "bm/show", 1, std::string(1500, 'z'), &why));
+    CHECK(why.find("outbox") != std::string::npos);
+    CHECK(r.to_players.empty());
+    r.room = 1000;
+    int to_player = 0;
+    while (r.server.send(kHandle, kAcct, "bm/show", 1, std::string(100, 'q'), &why)) ++to_player;
+    CHECK(to_player >= 30);
+    CHECK(to_player <= 41);  // the bucket of 40 lines (the welcome was free)
+    CHECK(why.find("rate") != std::string::npos);
+    r.now += 2000;
+    CHECK(r.server.send(kHandle, kAcct, "bm/show", 1, "again", &why));
+}
+
+TEST_CASE("net link: a forged line (another speaker) is taken and does nothing; a forged beacon cannot start a hello") {
+    Rig r;
+    r.join();
+    std::string why;
+    REQUIRE(r.server.send(kHandle, kAcct, "bm/show", 1, "real", &why));
+    const std::string real = r.to_players.back().second;
+    r.to_players.clear();
+    CHECK(r.client.on_chat_line(real, kAcct + 1));  // spoken by someone else
+    CHECK(r.at_client.empty());
+    CHECK(r.client.on_chat_line(real, kAcct));
+    REQUIRE(r.at_client.size() == 1);
+    // a beacon spoken by another player: no new session, the welcome stays
+    const auto beacon = encode_line(split_message('S', 0, "emf/net", 1, "fake", nullptr)[0]);
+    CHECK(r.client.on_chat_line(beacon, kAcct + 1));
+    CHECK(r.client.welcomed());
+    CHECK(r.client.waiting() == 0);
+    // not an EMF line at all: left to the game
+    CHECK_FALSE(r.client.on_chat_line("hello there", kAcct));
+    CHECK_FALSE(r.client.on_chat_line("#!emf2 M 0 a/b@1 0/1 t x", kAcct));
+    // malformed: taken (hidden), logged, nothing delivered
+    CHECK(r.client.on_chat_line("#!emf1 M zz", kAcct));
+}
+
+TEST_CASE("net link: without a known self the first beacon's speaker is taken for it") {
+    Rig r;
+    r.self.reset();
+    const uint64_t me = 0x1234;
+    r.server.tick({{kHandle, me}});
+    CHECK(r.client.on_chat_line(r.to_players[0].second, me));
+    CHECK(r.client.waiting() == 1);
+    // a later beacon from someone else changes nothing
+    const auto beacon = encode_line(split_message('S', 0, "emf/net", 1, "fake", nullptr)[0]);
+    r.client.on_chat_line(beacon, me + 5);
+    CHECK(r.client.waiting() == 1);
+}
+
+TEST_CASE("net link: the server drops marked lines it should not read") {
+    Rig r;
+    const std::string m = encode_line(split_message('M', 0, "bm/pick", 2, "x", nullptr)[0]);
+    CHECK(r.server.on_line(kHandle, kAcct, m));  // taken, but no hello yet: dropped
+    CHECK(r.at_server.empty());
+    r.join();
+    CHECK(r.server.on_line(kHandle, kAcct, "#!emf1 W 0 emf/net@1 0/1 t p1;x;1;1;"));  // a player's 'W': not theirs
+    CHECK(r.server.on_line(kHandle, kAcct, "#!emf1 S 0 emf/net@1 0/1 t hi"));
+    CHECK(r.server.on_line(kHandle, kAcct, "#!emf1 M"));  // malformed
+    // a channel its hello did not name
+    CHECK(r.server.on_line(kHandle, kAcct, encode_line(split_message('M', 1, "bm/zzz", 1, "x", nullptr)[0])));
+    // a channel at another version than its hello said
+    CHECK(r.server.on_line(kHandle, kAcct, encode_line(split_message('M', 2, "bm/pick", 9, "x", nullptr)[0])));
+    CHECK(r.at_server.empty());
+    CHECK(r.server.peers().size() == 1);
+    // from another account on the same handle: no peer
+    CHECK(r.server.on_line(kHandle, kAcct + 1, encode_line(split_message('M', 1, "bm/pick", 2, "x", nullptr)[0])));
+    CHECK(r.at_server.empty());
+}
+
+TEST_CASE("net link: a hello of another protocol gets an E line and no peer") {
+    Rig r;
+    CHECK(r.server.on_line(kHandle, kAcct, "#!emf1 H 0 emf/net@1 0/1 t p9;0.9;99;1;bm/pick@2"));
+    CHECK(r.server.peers().empty());
+    REQUIRE(r.to_players.size() == 1);
+    CHECK(parse_line(r.to_players[0].second, nullptr)->type == 'E');
+}
+
+TEST_CASE("net link: a duplicate line is dropped, a lost line drops only the message it broke") {
+    Rig r;
+    r.join();
+    std::string why;
+    const std::string big(2500, 'k');  // 3 lines
+    REQUIRE(r.client.send("bm/pick", 2, "one", &why));
+    REQUIRE(r.client.send("bm/pick", 2, big, &why));
+    REQUIRE(r.client.send("bm/pick", 2, "three", &why));
+    auto lines = r.client.take_lines(100);
+    REQUIRE(lines.size() == 5);
+    r.server.on_line(kHandle, kAcct, lines[0]);
+    r.server.on_line(kHandle, kAcct, lines[0]);  // a duplicate
+    r.server.on_line(kHandle, kAcct, lines[1]);
+    // lines[2] is lost
+    r.server.on_line(kHandle, kAcct, lines[3]);
+    r.server.on_line(kHandle, kAcct, lines[4]);
+    REQUIRE(r.at_server.size() == 2);
+    CHECK(r.at_server[0].data == "one");
+    CHECK(r.at_server[1].data == "three");
+}
+
+TEST_CASE("net link: too many lines from one account are dropped, then ignored for a while") {
+    Rig r;
+    r.join();
+    std::string why;
+    REQUIRE(r.client.send("bm/pick", 2, "x", &why));
+    const std::string line = r.client.take_lines(1)[0];
+    int delivered = 0;
+    for (int i = 0; i < 1000; ++i) {
+        r.server.on_line(kHandle, kAcct, line);  // the same line: all but the first are duplicates anyway
+    }
+    delivered = static_cast<int>(r.at_server.size());
+    CHECK(delivered == 1);
+    CHECK_FALSE(r.logs.empty());
+    size_t notes = r.logs.size();
+    for (int i = 0; i < 1000; ++i) r.server.on_line(kHandle, kAcct, line);
+    CHECK(r.logs.size() <= notes + 1);  // one note a minute
+    // far over the rate: a good line is dropped now, and heard again after a minute
+    REQUIRE(r.client.send("bm/pick", 2, "later", &why));
+    const std::string later = r.client.take_lines(1)[0];
+    r.server.on_line(kHandle, kAcct, later);
+    CHECK(r.at_server.size() == 1);
+    r.now += 61000;
+    r.server.on_line(kHandle, kAcct, later);
+    REQUIRE(r.at_server.size() == 2);
+    CHECK(r.at_server.back().data == "later");
+}
+
+TEST_CASE("net link: a reconnect with a new handle replaces the peer; leaving ends it; a reused handle is no peer") {
+    Rig r;
+    r.join();
+    CHECK(r.server.peers().size() == 1);
+    // the same account on another handle says hello: the old peer goes
+    Rig& q = r;
+    q.client.reset();
+    q.peer_events.clear();
+    const Connection second{0x41, kAcct};
+    q.server.tick({second});  // the old connection is gone, the new one is greeted
+    REQUIRE(q.peer_events.size() == 1);
+    CHECK_FALSE(q.peer_events[0].second);
+    CHECK(q.peer_events[0].first.handle == kHandle);
+    q.deliver_to_client(second);
+    q.deliver_to_server(second);
+    q.deliver_to_client(second);
+    CHECK(q.server.peers().size() == 1);
+    CHECK(q.server.peers()[0].handle == 0x41);
+    CHECK(q.server.peer_version(kHandle, kAcct, "bm/pick") == 0);
+    // leaving
+    q.peer_events.clear();
+    q.server.tick({});
+    CHECK(q.server.peers().empty());
+    REQUIRE(q.peer_events.size() == 1);
+    CHECK_FALSE(q.peer_events[0].second);
+    // a handle another account took
+    Rig r2;
+    r2.join();
+    r2.peer_events.clear();
+    r2.server.tick({{kHandle, kAcct + 7}});
+    CHECK(r2.server.peers().empty());
+    CHECK(r2.peer_events.size() == 1);
+}
+
+TEST_CASE("net link: the same account saying hello again on its handle replaces its state") {
+    Rig r;
+    r.join();
+    r.client.reset();
+    r.server.tick({{kHandle, kAcct}});  // still connected, already greeted: no new beacon
+    CHECK(r.to_players.empty());
+    // a client that restarted its session (a new beacon was never sent: it sends hello on its own)
+    r.server_channels.clear();
+    r.server.on_line(kHandle, kAcct, "#!emf1 H 0 emf/net@1 0/1 t p1;0.5.1;27;1287369;bm/pick@2");
+    CHECK(r.server.peers().size() == 1);
+    CHECK(r.server.peer_version(kHandle, kAcct, "bm/pick") == 2);
+}
+
+TEST_CASE("net link: bye ends the peer and the welcome; a lines from the host's own player are ignored") {
+    Rig r;
+    r.join();
+    r.peer_events.clear();
+    const auto bye = encode_line(split_message('B', 9, "emf/net", 1, "bye", nullptr)[0]);
+    r.server.on_line(kHandle, kAcct, bye);
+    CHECK(r.server.peers().empty());
+    REQUIRE(r.peer_events.size() == 1);
+    CHECK_FALSE(r.peer_events[0].second);
+
+    Rig q;
+    q.join();
+    q.server.on_line(kHandle, kAcct, "x");  // not marked: the caller never sends it, but it is safe
+    const auto bye2 = encode_line(split_message('B', 0, "emf/net", 1, "bye", nullptr)[0]);
+    CHECK(q.client.on_chat_line(bye2, kAcct));
+    CHECK_FALSE(q.client.welcomed());
+    CHECK(q.server_events == std::vector<bool>{true, false});
+
+    Rig l;
+    l.local_handle = kHandle;
+    CHECK(l.server.on_line(kHandle, kAcct, "#!emf1 H 0 emf/net@1 0/1 t p1;0.5.1;27;1;bm/pick@2"));
+    CHECK(l.server.peers().empty());
+}
+
+TEST_CASE("net link: the client's world going away ends the welcome and empties its queue; lines go back in front") {
+    Rig r;
+    r.join();
+    std::string why;
+    REQUIRE(r.client.send("bm/pick", 2, "a", &why));
+    REQUIRE(r.client.send("bm/pick", 2, "b", &why));
+    auto taken = r.client.take_lines(1);
+    REQUIRE(taken.size() == 1);
+    r.client.put_back(taken);  // the game would not take it (pool full)
+    auto all = r.client.take_lines(10);
+    REQUIRE(all.size() == 2);
+    CHECK(parse_line(all[0], nullptr)->payload == "a");  // the order kept
+    CHECK(parse_line(all[1], nullptr)->payload == "b");
+    r.client.put_back(all);
+    r.client.reset();
+    CHECK(r.client.waiting() == 0);
+    CHECK_FALSE(r.client.welcomed());
+    CHECK(r.server_events == std::vector<bool>{true, false});
+    CHECK_FALSE(r.client.send("bm/pick", 2, "c", &why));
+}
+
+TEST_CASE("net link: a second beacon starts the conversation again") {
+    Rig r;
+    r.join();
+    r.server_events.clear();
+    r.server.tick({});
+    r.server.tick({{kHandle, kAcct}});  // a new connection of the same player
+    r.deliver_to_client();
+    CHECK(r.server_events == std::vector<bool>{false});  // the old welcome is gone
+    r.deliver_to_server();
+    r.deliver_to_client();
+    CHECK(r.client.welcomed());
+    CHECK(r.server_events == (std::vector<bool>{false, true}));
+}

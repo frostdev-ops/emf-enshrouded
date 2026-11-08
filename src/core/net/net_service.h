@@ -1,16 +1,23 @@
 #pragma once
 // Mod messages (API v27): the channels mods register and the delivery of their messages. Loopback in a game this
 // process hosts (or an offline one): the local game's messages reach the server's handler, the server's messages to the
-// host's own player reach the local handler, each after the next step of the world it is for. Remote peers come with
-// the chat transport. Testable: the game is reached only through NetDeps.
+// host's own player reach the local handler, each after the next step of the world it is for. Remote peers (joined
+// players, the dedicated server) go through the chat transport (net_link.h): enable_server / enable_client switch each
+// end on, and the game's chat hooks feed it. Testable: the game is reached only through NetDeps and the Envs.
 #include <cstdint>
 #include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
+#include <set>
 #include <string>
+#include <string_view>
+#include <utility>
+#include <vector>
 
 #include "emf/emf_api.h"
+#include "net_link.h"
 #include "net_peers.h"
 
 namespace emf::core::net {
@@ -45,6 +52,25 @@ struct NetDeps {
     std::function<void(uint8_t world_kind, std::function<void(EmfWorld*)>)> post;  // run after that world's next step
     std::function<uint64_t()> now_ms;
     std::function<void(const std::string&)> log;
+    // server side, for remote peers (the chat transport)
+    std::function<std::optional<std::pair<uint32_t, uint64_t>>(uint32_t entity)> connection_of;  // entity -> (handle, account)
+    std::function<uint32_t(uint64_t account)> entity_of;  // the server world's thread: account -> player entity (0: none)
+    std::function<bool(uint64_t account)> is_admin;       // as EmfCommandSender.admin
+};
+
+// The game-facing parts of the two ends of the chat transport (the service adds the channels and the delivery).
+struct ServerEnv {
+    std::function<bool(uint32_t handle, uint64_t account, const std::string& line)> send;  // one marked line to a player
+    std::function<size_t()> room;                                                           // lines the outbox takes
+    std::function<bool(uint32_t handle, uint64_t account)> is_local;  // this process's own player (loopback, no chat)
+    std::string emf_version;
+    uint32_t api = 0, build = 0;
+    bool greet = true;
+};
+struct ClientEnv {
+    std::function<std::optional<uint64_t>()> self_account;  // empty or nullopt: the first beacon's speaker
+    std::string emf_version;
+    uint32_t api = 0, build = 0;
 };
 
 class NetService {
@@ -63,6 +89,24 @@ public:
     // The channel version `player`'s game has (server side), or the server's (player 0, a player's game); 0 = none.
     uint32_t peer(uint32_t player, const std::string& channel);
 
+    // ---- the chat transport ----
+    void enable_server(ServerEnv env);
+    void enable_client(ClientEnv env);
+    // A marked chat line a player sent (the server's receive loop): true when EMF took it (always for a marked line once
+    // the server end is on).
+    bool server_line(uint32_t handle, uint64_t account, std::string_view text);
+    // The connections the server has now (after a run of the receive loop).
+    void server_tick(const std::vector<Connection>& connected);
+    // A marked line the client's chat got: true when it is EMF's (never shown).
+    bool client_line(std::string_view text, uint64_t speaker);
+    std::vector<std::string> client_take(size_t max);
+    void client_put_back(std::vector<std::string> lines);
+    void client_reset();
+    bool server_on() const { return server_ != nullptr; }
+    bool client_on() const { return client_ != nullptr; }
+    // This game's channels with their versions (what hello and welcome say).
+    std::map<std::string, uint32_t> channel_versions();
+
 private:
     struct Channel {
         ChannelDef def;
@@ -72,10 +116,19 @@ private:
     Channel* find(const std::string& name);
     bool sendable(const std::string& owner, Channel* c, uint32_t flag, const std::string& data, uint64_t sender,
                   std::string* why);
+    void remote_to_server(uint32_t handle, uint64_t account, const std::string& channel, uint32_t peer_version,
+                          const std::string& data);
+    void remote_to_client(const std::string& channel, uint32_t server_version, const std::string& data);
+    // server -> the peer on (handle, account), whole or not at all
+    bool send_remote(const std::string& owner, uint32_t handle, uint64_t account, const std::string& channel,
+                     const std::string& data, std::string* why);
 
     NetDeps d_;
     std::mutex m_;
     std::map<std::string, Channel> channels_;
+    std::set<std::string> logged_;
+    std::unique_ptr<ServerLink> server_;
+    std::unique_ptr<ClientLink> client_;
 };
 
 }  // namespace emf::core::net
