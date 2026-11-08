@@ -90,7 +90,7 @@ bool NetService::to_server(const std::string& owner, const std::string& channel,
     }
     if (!local) {  // a joined game: through the chat, once the server has welcomed it
         if (!client_) return fail(why, "no server to send to yet (it has not welcomed this game)");
-        return client_->send(channel, version, data, why);
+        return client_.load()->send(channel, version, data, why);
     }
     if (handler) d_.post(EMF_WORLD_SERVER, [handler, from, data](EmfWorld* w) { handler(w, from, data); });
     return true;
@@ -105,7 +105,7 @@ bool NetService::send_remote(const std::string& owner, uint32_t handle, uint64_t
         if (!sendable(owner, c, kToPlayers, data, account, why)) return false;
         version = c->def.version;
     }
-    return server_->send(handle, account, channel, version, data, why);
+    return server_.load()->send(handle, account, channel, version, data, why);
 }
 
 bool NetService::to_player(const std::string& owner, uint32_t player, const std::string& channel,
@@ -128,8 +128,11 @@ bool NetService::to_player(const std::string& owner, uint32_t player, const std:
     }
     if (!loopback) {  // another player's game, over the chat
         if (!server_ || !d_.connection_of) return fail(why, "that player's game has not said hello with this channel");
-        const auto conn = d_.connection_of(player);
+        auto conn = d_.connection_of(player);
         if (!conn) return fail(why, "that player's game has not said hello with this channel");
+        if (!server_.load()->peer_version(conn->first, conn->second, channel))
+            for (const auto& peer : server_.load()->peers_with(channel))
+                if (peer.account == conn->second) conn = std::make_pair(peer.handle, peer.account);
         return send_remote(owner, conn->first, conn->second, channel, data, why);
     }
     if (handler) d_.post(EMF_WORLD_CLIENT, [handler, from, data](EmfWorld* w) { handler(w, from, data); });
@@ -148,8 +151,8 @@ uint32_t NetService::to_players(const std::string& owner, const std::string& cha
         if (!c) return count;
         version = c->def.version;
     }
-    for (const auto& peer : server_->peers_with(channel)) {
-        if (server_->peer_version(peer.handle, peer.account, channel) != version) continue;  // another version: none
+    for (const auto& peer : server_.load()->peers_with(channel)) {
+        if (server_.load()->peer_version(peer.handle, peer.account, channel) != version) continue;  // another version: none
         if (send_remote(owner, peer.handle, peer.account, channel, data, nullptr)) ++count;
     }
     return count;
@@ -166,10 +169,10 @@ uint32_t NetService::peer(uint32_t player, const std::string& channel) {
         hosted = d_.hosted(&local);
     }
     if (hosted && (player == 0 || player == local)) return version;
-    if (player == 0) return client_ ? client_->server_version(channel) : 0;  // a joined game: the server's
+    if (player == 0) return client_ ? client_.load()->server_version(channel) : 0;  // a joined game: the server's
     if (!server_ || !d_.connection_of) return 0;
     const auto conn = d_.connection_of(player);
-    return conn ? server_->peer_version(conn->first, conn->second, channel) : 0;
+    return conn ? server_.load()->peer_version(conn->first, conn->second, channel) : 0;
 }
 
 std::map<std::string, uint32_t> NetService::channel_versions() {
@@ -183,6 +186,7 @@ void NetService::enable_server(ServerEnv env) {
     ServerLinkDeps l;
     l.channels = [this] { return channel_versions(); };
     l.send = std::move(env.send);
+    l.send_lines = std::move(env.send_lines);
     l.room = std::move(env.room);
     l.is_local = std::move(env.is_local);
     l.now_ms = d_.now_ms;
@@ -194,7 +198,8 @@ void NetService::enable_server(ServerEnv env) {
     l.beacon_delay_ms = env.beacon_delay_ms;
     l.on_message = [this](uint32_t handle, uint64_t account, const std::string& channel, uint32_t peer_version,
                           const std::string& data) { remote_to_server(handle, account, channel, peer_version, data); };
-    server_ = std::make_unique<ServerLink>(std::move(l));
+    server_owned_ = std::make_unique<ServerLink>(std::move(l));
+    server_.store(server_owned_.get());
 }
 
 void NetService::enable_client(ClientEnv env) {
@@ -212,7 +217,8 @@ void NetService::enable_client(ClientEnv env) {
     l.on_message = [this](const std::string& channel, uint32_t version, const std::string& data) {
         remote_to_client(channel, version, data);
     };
-    client_ = std::make_unique<ClientLink>(std::move(l));
+    client_owned_ = std::make_unique<ClientLink>(std::move(l));
+    client_.store(client_owned_.get());
 }
 
 void NetService::remote_to_server(uint32_t, uint64_t account, const std::string& channel, uint32_t peer_version,
@@ -290,27 +296,27 @@ void NetService::remote_to_client(const std::string& channel, uint32_t server_ve
 }
 
 bool NetService::server_line(uint32_t handle, uint64_t account, std::string_view text) {
-    return server_ && server_->on_line(handle, account, text);
+    return server_ && server_.load()->on_line(handle, account, text);
 }
 
 void NetService::server_tick(const std::vector<Connection>& connected) {
-    if (server_) server_->tick(connected);
+    if (server_) server_.load()->tick(connected);
 }
 
 bool NetService::client_line(std::string_view text, uint64_t speaker) {
-    return client_ && client_->on_chat_line(text, speaker);
+    return client_ && client_.load()->on_chat_line(text, speaker);
 }
 
 std::vector<std::string> NetService::client_take(size_t max) {
-    return client_ ? client_->take_lines(max) : std::vector<std::string>{};
+    return client_ ? client_.load()->take_lines(max) : std::vector<std::string>{};
 }
 
 void NetService::client_put_back(std::vector<std::string> lines) {
-    if (client_) client_->put_back(std::move(lines));
+    if (client_) client_.load()->put_back(std::move(lines));
 }
 
 void NetService::client_reset() {
-    if (client_) client_->reset();
+    if (client_) client_.load()->reset();
 }
 
 }  // namespace emf::core::net

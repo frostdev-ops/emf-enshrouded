@@ -4,6 +4,7 @@
 // host's own player reach the local handler, each after the next step of the world it is for. Remote peers (joined
 // players, the dedicated server) go through the chat transport (net_link.h): enable_server / enable_client switch each
 // end on, and the game's chat hooks feed it. Testable: the game is reached only through NetDeps and the Envs.
+#include <atomic>
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -61,6 +62,7 @@ struct NetDeps {
 // The game-facing parts of the two ends of the chat transport (the service adds the channels and the delivery).
 struct ServerEnv {
     std::function<bool(uint32_t handle, uint64_t account, const std::string& line)> send;  // one marked line to a player
+    std::function<bool(uint32_t handle, uint64_t account, const std::vector<std::string>& lines)> send_lines;  // all or none
     std::function<size_t()> room;                                                           // lines the outbox takes
     std::function<bool(uint32_t handle, uint64_t account)> is_local;  // this process's own player (loopback, no chat)
     std::string emf_version;
@@ -128,8 +130,11 @@ private:
     std::mutex m_;
     std::map<std::string, Channel> channels_;
     std::set<std::string> logged_;
-    std::unique_ptr<ServerLink> server_;
-    std::unique_ptr<ClientLink> client_;
+    // set once, then published: the chat hooks can already run on other threads while the ends are made
+    std::unique_ptr<ServerLink> server_owned_;
+    std::unique_ptr<ClientLink> client_owned_;
+    std::atomic<ServerLink*> server_{nullptr};
+    std::atomic<ClientLink*> client_{nullptr};
 };
 
 }  // namespace emf::core::net

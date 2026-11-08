@@ -30,6 +30,7 @@ struct Rig {
     size_t room = 1000;
     bool greet = true;
     bool client_enabled = true;
+    bool refuse_lines = false;  // the outbox refuses a message's lines (all of them)
     std::map<std::string, uint32_t> server_channels{{"bm/pick", 2}, {"bm/show", 1}};
     std::map<std::string, uint32_t> client_channels{{"bm/pick", 2}, {"bm/show", 1}};
     std::optional<uint64_t> self = kAcct;
@@ -50,6 +51,11 @@ struct Rig {
         d.channels = [this] { return server_channels; };
         d.send = [this](uint32_t h, uint64_t a, const std::string& line) {
             to_players.push_back({{h, a}, line});
+            return true;
+        };
+        d.send_lines = [this](uint32_t h, uint64_t a, const std::vector<std::string>& lines) {
+            if (refuse_lines) return false;
+            for (const auto& line : lines) to_players.push_back({{h, a}, line});
             return true;
         };
         d.room = [this] { return room; };
@@ -242,6 +248,61 @@ TEST_CASE("net link: each step of the greeting is one log line on its side (beac
     r.client.on_chat_line(beacon, kAcct + 1);
     r.client.on_chat_line(beacon, kAcct + 1);
     CHECK(has("not spoken as this player") == 1);
+}
+
+TEST_CASE("net link: a message the outbox refuses is queued not at all and uses up no line numbers") {
+    Rig r;
+    r.join();
+    std::string why;
+    r.refuse_lines = true;
+    CHECK_FALSE(r.server.send(kHandle, kAcct, "bm/show", 1, "lost", &why));
+    CHECK(r.to_players.empty());
+    r.refuse_lines = false;
+    REQUIRE(r.server.send(kHandle, kAcct, "bm/show", 1, "next", &why));
+    r.deliver_to_client();
+    REQUIRE(r.at_client.size() == 1);
+    CHECK(r.at_client[0].data == "next");
+    bool gap = false;
+    for (const auto& l : r.logs) gap |= l.find("gap") != std::string::npos;
+    CHECK_FALSE(gap);  // the numbers went on where they were
+}
+
+TEST_CASE("net link: a welcome the outbox refuses makes no peer; the beacon comes again and the hello is answered then") {
+    Rig r;
+    ServerLinkDeps d = r.server_deps();
+    d.beacon_retry_ms = 15000;
+    ServerLink server(d);
+    server.tick({{kHandle, kAcct}});
+    REQUIRE(r.to_players.size() == 1);
+    r.client.on_chat_line(r.to_players[0].second, kAcct);
+    r.to_players.clear();
+    r.refuse_lines = true;
+    for (const auto& line : r.client.take_lines(100)) server.on_line(kHandle, kAcct, line);
+    CHECK(server.peers().empty());  // no welcome went: not a peer
+    r.refuse_lines = false;
+    r.now += 15000;
+    server.tick({{kHandle, kAcct}});
+    REQUIRE(r.to_players.size() == 1);  // the beacon again
+    r.client.on_chat_line(r.to_players[0].second, kAcct);
+    r.to_players.clear();
+    for (const auto& line : r.client.take_lines(100)) server.on_line(kHandle, kAcct, line);
+    CHECK(server.peers().size() == 1);
+}
+
+TEST_CASE("net link: no beacon again while a hello is still coming in (a second one would restart the conversation)") {
+    Rig r;
+    ServerLinkDeps d = r.server_deps();
+    d.beacon_retry_ms = 15000;
+    ServerLink server(d);
+    server.tick({{kHandle, kAcct}});
+    REQUIRE(r.to_players.size() == 1);
+    // the first line of a two-line hello arrives, the second is late
+    const auto lines = split_message('H', 0, "emf/net", 1, std::string(1500, 'h'), nullptr);
+    REQUIRE(lines.size() == 2);
+    server.on_line(kHandle, kAcct, encode_line(lines[0]));
+    r.now += 15000;
+    server.tick({{kHandle, kAcct}});
+    CHECK(r.to_players.size() == 1);  // no second beacon
 }
 
 TEST_CASE("net link: a client with no channels sends no hello") {

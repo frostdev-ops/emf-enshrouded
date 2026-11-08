@@ -77,6 +77,7 @@ struct CoreState {
     OfferService* offers = nullptr;                     // v25 E prompts (null when change_component is off)
     net::NetService* net = nullptr;                     // v27 mod messages
     std::atomic<uint32_t> server_session{0};            // +1 per server world set up (API v9 server_session)
+    std::atomic<uint32_t> client_session{0};            // +1 per client world set up (mod messages: a new session)
     std::function<bool(const WheelRequest&)> open_wheel;   // the overlay's wheel (null: no overlay)
     // The overlay's mod window (API v24; null: no overlay): open (replaced: the window it replaced; why: a refusal),
     // new contents for the open one, close by id (closed: the window closed).

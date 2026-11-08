@@ -77,6 +77,7 @@ struct ChatReply {
     bool raw = false;
     bool everyone = false;
     bool net = false;  // a mod message line (API v27): waits while the player's chat reader has too much pending
+    uint64_t queued_ms = 0;  // net: when it was queued (a line that waits too long is dropped)
 };
 // Lines waiting for the receive loop's thread (commands and mods run on the server world's thread). Any thread. At most
 // kMaxChatOutbox lines wait: add refuses more (false).
@@ -88,6 +89,8 @@ class ChatOutbox {
 public:
     bool add(uint32_t handle, uint64_t account, std::string text, bool raw = false, bool net = false);
     bool add_everyone(std::string text);
+    // A mod message's lines for one player, all or none (false: they do not all fit).
+    bool add_net_lines(uint32_t handle, uint64_t account, const std::vector<std::string>& lines, uint64_t now_ms);
     std::vector<ChatReply> take();
     // Puts lines that were taken but not sent yet back in front of the others (their order kept).
     void put_back(std::vector<ChatReply> lines);
@@ -278,6 +281,10 @@ struct ServerChatDeps {
 };
 // Chat bytes a player's reader may have waiting before more mod message lines go to it (the rest wait for a later run).
 constexpr int32_t kMaxNetPendingBytes = 16384;
+// A mod message line that waited this long for a lagging reader is dropped, and at most this many wait per player (the
+// outbox is shared with every player's lines and command replies).
+constexpr uint64_t kNetMaxWaitMs = 30000;
+constexpr size_t kMaxNetWaitingLines = 256;
 // Hooks the server's receive loop and chatLogAdd (both found by signature; 0 = not found). True if both are in place.
 bool install_server_chat(uintptr_t receive, uintptr_t chat_log_add, ServerChatDeps deps);
 
@@ -290,6 +297,9 @@ bool queue_chat_tell(uint32_t handle_hint, uint64_t account, std::string line);
 bool queue_chat_everyone(std::string line);
 // A mod message line (API v27) for one player: as queue_chat_tell, but it waits while that player's reader is behind.
 bool queue_net_line(uint32_t handle, uint64_t account, std::string line);
+// A mod message's lines for one player, all or none. Sent only on that very connection (never to another connection
+// of the account: the lines are numbered for this one).
+bool queue_net_lines(uint32_t handle, uint64_t account, const std::vector<std::string>& lines);
 // How many more lines the outbox takes.
 size_t chat_outbox_room();
 // The server object the receive loop last ran for (its connection records), or nullptr before the first run.

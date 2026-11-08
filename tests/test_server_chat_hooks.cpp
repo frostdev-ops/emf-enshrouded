@@ -504,6 +504,47 @@ TEST_CASE("server chat hooks v27: a mod message line reaches only its player; it
     CHECK(g_added[0] == "#!emf1 M 0 bm/show@1 0/1 t one");
 }
 
+TEST_CASE("server chat hooks v27: a mod line for a connection that is gone is dropped, never sent to the account's new connection") {
+    Rig r(with_net);
+    // the player reconnected: their record is on kPlayerHandle now; a line for their old handle 0x99 waited
+    REQUIRE(queue_net_line(0x99, kPlayer, "#!emf1 M 900 bm/show@1 0/1 t old"));
+    r.receive();
+    CHECK(g_added.empty());
+}
+
+TEST_CASE("server chat hooks v27: mod lines that waited 30 s for a lagging reader are dropped; at most 256 wait per player") {
+    Rig r(with_net);
+    const int32_t behind = kMaxNetPendingBytes + 1;
+    std::memcpy(r.fs.sys.data() + 0x0C + 12 * 1 + 8, &behind, 4);
+    REQUIRE(queue_net_line(kPlayerHandle, kPlayer, "#!emf1 M 0 bm/show@1 0/1 t one"));
+    r.receive();
+    CHECK(chat_outbox_room() == kMaxChatOutbox - 1);  // waiting
+    g_chat_now += 31000;
+    r.receive();
+    CHECK(chat_outbox_room() == kMaxChatOutbox);  // too old: dropped
+    const int32_t caught_up = 0;
+    std::memcpy(r.fs.sys.data() + 0x0C + 12 * 1 + 8, &caught_up, 4);
+    r.receive();
+    CHECK(g_added.empty());
+    // a flood for one lagging player: at most kMaxNetWaitingLines of them wait
+    std::memcpy(r.fs.sys.data() + 0x0C + 12 * 1 + 8, &behind, 4);
+    for (int i = 0; i < 300; ++i) REQUIRE(queue_net_line(kPlayerHandle, kPlayer, "#!emf1 M " + std::to_string(i) + " bm/show@1 0/1 t x"));
+    r.receive();
+    CHECK(chat_outbox_room() == kMaxChatOutbox - kMaxNetWaitingLines);
+}
+
+TEST_CASE("server chat hooks v27: queue_net_lines queues a message's lines whole or not at all") {
+    Rig r(with_net);
+    std::vector<std::string> lines(kMaxChatOutbox - 2, "x");
+    REQUIRE(queue_net_lines(kPlayerHandle, kPlayer, lines));
+    CHECK(chat_outbox_room() == 2);
+    CHECK_FALSE(queue_net_lines(kPlayerHandle, kPlayer, {"a", "b", "c"}));  // 3 do not fit: none goes in
+    CHECK(chat_outbox_room() == 2);
+    CHECK(queue_net_lines(kPlayerHandle, kPlayer, {"a", "b"}));
+    CHECK(chat_outbox_room() == 0);
+    r.receive();  // (empties some of it)
+}
+
 TEST_CASE("server chat hooks v27: the outbox room shrinks with waiting lines") {
     Rig r(with_net);
     const size_t room = chat_outbox_room();

@@ -122,6 +122,13 @@ void ServerLink::note(uint64_t account, const std::string& what) {
     }() + ": " + what + " (logged once a minute per account)");
 }
 
+bool ServerLink::queue(uint32_t handle, uint64_t account, const std::vector<std::string>& lines) {
+    if (d_.send_lines) return d_.send_lines(handle, account, lines);
+    for (const auto& l : lines)
+        if (!d_.send || !d_.send(handle, account, l)) return false;
+    return true;
+}
+
 bool ServerLink::allowed(uint64_t account, size_t bytes) {
     const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
     Budget& b = budgets_[account];
@@ -228,10 +235,13 @@ bool ServerLink::on_line(uint32_t handle, uint64_t account, std::string_view tex
                 reply = lines.empty() ? std::string() : encode_line(lines.front());
                 msg.reset();
             } else {
+                uint32_t keep_seq = 0;  // the same connection saying hello again: its numbers go on
+                if (Peer* same = peers_.find(handle, account)) keep_seq = same->peek_seq();
                 for (Peer* old : peers_.all())
                     if (old->account == account && old->handle != handle) replaced.push_back({old->handle, old->account});
                 Peer& p = peers_.hello(handle, account, hello->channels);
                 p.in = std::move(in);
+                p.reserve(keep_seq);
                 HelloInfo mine;
                 mine.emf_version = d_.emf_version;
                 mine.api = d_.api;
@@ -239,14 +249,19 @@ bool ServerLink::on_line(uint32_t handle, uint64_t account, std::string_view tex
                 if (d_.channels) mine.channels = d_.channels();
                 const auto lines =
                     split_message('W', p.peek_seq(), kControl, kControlVersion, hello_text(mine), nullptr);
-                p.reserve(static_cast<uint32_t>(lines.size()));
-                for (const auto& l : encoded(lines))
-                    if (d_.send) d_.send(handle, account, l);  // the outbox is not locked by us
-                joined = true;
-                greeting = "mod messages: hello from account " + acct_hex(account) + " on connection " +
-                           handle_hex(handle) + " (EMF " + clean_version(hello->emf_version) + ", API " +
-                           std::to_string(hello->api) + ", " + std::to_string(hello->channels.size()) +
-                           " channel(s)); welcome sent";
+                if (queue(handle, account, encoded(lines))) {
+                    p.reserve(static_cast<uint32_t>(lines.size()));
+                    joined = true;
+                } else {  // no welcome went: not a peer, so the beacon comes again
+                    peers_.bye(handle);
+                    note(account, "the welcome could not be queued (the chat outbox is full); the beacon comes again");
+                }
+                if (joined) {
+                    greeting = "mod messages: hello from account " + acct_hex(account) + " on connection " +
+                               handle_hex(handle) + " (EMF " + clean_version(hello->emf_version) + ", API " +
+                               std::to_string(hello->api) + ", " + std::to_string(hello->channels.size()) +
+                               " channel(s)); welcome sent";
+                }
                 msg.reset();
             }
         }
@@ -280,7 +295,8 @@ void ServerLink::tick(const std::vector<Connection>& connected) {
         if (d_.greet && d_.channels && !d_.channels().empty())
             for (const auto& c : now) {
                 Beaconing& b = greeted_.try_emplace(c, Beaconing{ms, 0, 0}).first->second;
-                if (b.sent >= d_.beacon_tries || peers_.find(c.handle, c.account)) continue;  // done, or said hello
+                // done, said hello, or a hello is coming in (another beacon would restart the conversation)
+                if (b.sent >= d_.beacon_tries || peers_.find(c.handle, c.account) || joining_.count(c)) continue;
                 const bool due = b.sent == 0 ? ms >= b.seen + d_.beacon_delay_ms : ms >= b.last + d_.beacon_retry_ms;
                 if (!due) continue;
                 b.last = ms;
@@ -339,11 +355,11 @@ bool ServerLink::send(uint32_t handle, uint64_t account, const std::string& chan
         const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
         if (!budgets_[account].out.take(now, static_cast<double>(lines.size())))
             return fail("over the line rate to that player (20 lines a second)");
-        p->reserve(static_cast<uint32_t>(lines.size()));
         out = encoded(lines);
+        // queued under the lock: the numbers are used only when the whole message went in, in order
+        if (!queue(handle, account, out)) return fail("the chat outbox refused the message");
+        p->reserve(static_cast<uint32_t>(lines.size()));
     }
-    for (const auto& l : out)
-        if (!d_.send || !d_.send(handle, account, l)) return fail("the chat outbox refused a line");
     return true;
 }
 

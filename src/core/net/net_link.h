@@ -15,7 +15,9 @@
 //   server -> client                E n emf/net@1   a refusal (the reason as text)
 // Nothing but the beacon goes to a connection before its hello; a marked line from a connection that did not say hello
 // (or, on the client, before a welcome) is dropped. Lines come numbered per peer and direction, so a lost or doubled line
-// never delivers half a message or one twice. Thread-safe: no lock is held while a Deps function runs.
+// never delivers half a message or one twice. Thread-safe. The link's lock is held while it calls the game-side Deps
+// (send, send_lines, room, channels, is_local, now_ms, log): they must not call back into the link; the mods'
+// callbacks (on_message, on_peer, on_server) run with no lock held.
 #include <cstdint>
 #include <functional>
 #include <map>
@@ -57,6 +59,9 @@ struct ServerLinkDeps {
     std::function<std::map<std::string, uint32_t>()> channels;
     // one marked line for the player on (handle, account); false: it could not be queued
     std::function<bool(uint32_t handle, uint64_t account, const std::string& line)> send;
+    // a message's (or welcome's) lines for the player on (handle, account), all or none; when set it is used for them
+    // (under the link's lock, so the numbers and the queue order agree)
+    std::function<bool(uint32_t handle, uint64_t account, const std::vector<std::string>& lines)> send_lines;
     // how many more lines the chat outbox takes (a message goes out whole or not at all)
     std::function<size_t()> room;
     // the connection that is this process's own player (a hosted game's host): never a peer, never sent a beacon
@@ -118,6 +123,7 @@ private:
         Reassembly in;
     };
     bool allowed(uint64_t account, size_t bytes);
+    bool queue(uint32_t handle, uint64_t account, const std::vector<std::string>& lines);  // send_lines, else send
     void note(uint64_t account, const std::string& what);
     void drop_peer(uint32_t handle, uint64_t account, bool tell);
 

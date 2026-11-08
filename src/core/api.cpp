@@ -2277,10 +2277,17 @@ net::NetDeps net_deps(CoreState* s) {
     d.hosted = [](uint32_t* id) { return hosted_with_local_player(id); };
     d.post = [s](uint8_t kind, std::function<void(EmfWorld*)> fn) {
         using Fn = std::function<void(EmfWorld*)>;
+        // a message for this session's world: when a new world of that kind began meanwhile, it is not delivered there
+        const auto session = [s, kind] {
+            return kind == EMF_WORLD_SERVER ? s->server_session.load() : s->client_session.load();
+        };
+        const uint32_t then = session();
         s->dispatcher.post(kind, [](EmfWorld* w, void* u) {
             const std::unique_ptr<Fn> f(static_cast<Fn*>(u));  // freed even when the handler faults (it is guarded)
             (*f)(w);
-        }, new Fn(std::move(fn)));
+        }, new Fn([fn = std::move(fn), session, then](EmfWorld* w) {
+            if (session() == then) fn(w);
+        }));
     };
     d.now_ms = [s] { return s->now_ms ? s->now_ms() : GetTickCount64(); };
     d.log = [](const std::string& line) { core_log(line); };

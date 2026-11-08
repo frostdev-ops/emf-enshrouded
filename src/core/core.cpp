@@ -263,6 +263,9 @@ void start_net_transport(bool known, const std::wstring& ini) {
     senv.send = [](uint32_t handle, uint64_t account, const std::string& line) {
         return emf::core::queue_net_line(handle, account, line);
     };
+    senv.send_lines = [](uint32_t handle, uint64_t account, const std::vector<std::string>& lines) {
+        return emf::core::queue_net_lines(handle, account, lines);
+    };
     senv.room = [] { return emf::core::chat_outbox_room(); };
     senv.is_local = net_is_local;
     senv.emf_version = EMF_VERSION;
@@ -583,7 +586,10 @@ void hk_register_all_programs(void* world) {
             ++g_state->server_session;                    // mods notice the new session (API v9)
         }
         // a new client world (a new session): the server the last one talked to is forgotten (its welcome, its lines)
-        if (kind == EMF_WORLD_CLIENT && g_state->net) g_state->net->client_reset();
+        if (kind == EMF_WORLD_CLIENT) {
+            ++g_state->client_session;
+            if (g_state->net) g_state->net->client_reset();
+        }
         g_state->relay.forget_world(world);                  // nothing an earlier world left at this address
         if (g_register_program_addr && !g_state->relay.closed()) {
             const size_t relays = emf::core::add_relay_programs(

@@ -145,6 +145,21 @@ TEST_CASE("net remote: a player's message reaches on_server with the sender the 
     CHECK(p.at_server[1].from.admin);
 }
 
+TEST_CASE("net remote: a player who reconnected gets the server's message on the connection that said hello, while the old record lingers") {
+    Pair p;
+    const uint32_t kNew = kHandle + 1;  // connection_of still names the old kHandle
+    p.server.s.server_tick({{kNew, kAcct}});
+    p.to_client();
+    for (const auto& line : p.client.s.client_take(100)) p.server.s.server_line(kNew, kAcct, line);
+    p.to_client();  // the welcome
+    std::string why;
+    REQUIRE(p.server.s.to_player("bm", kEntity, "bm/show", "here", &why));
+    p.to_client();
+    p.client.step(EMF_WORLD_CLIENT);
+    REQUIRE(p.at_client.size() == 1);
+    CHECK(p.at_client[0].data == "here");
+}
+
 TEST_CASE("net remote: the server's message reaches on_player on the client world's thread") {
     Pair p;
     p.join();

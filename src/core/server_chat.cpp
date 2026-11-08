@@ -111,6 +111,23 @@ bool ChatOutbox::add_everyone(std::string text) {
     return true;
 }
 
+bool ChatOutbox::add_net_lines(uint32_t handle, uint64_t account, const std::vector<std::string>& lines,
+                               uint64_t now_ms) {
+    std::lock_guard<std::mutex> l(m_);
+    if (items_.size() + lines.size() > kMaxChatOutbox) return false;
+    for (const auto& line : lines) {
+        ChatReply r;
+        r.handle = handle;
+        r.account = account;
+        r.text = line;
+        r.raw = true;
+        r.net = true;
+        r.queued_ms = now_ms;
+        items_.push_back(std::move(r));
+    }
+    return true;
+}
+
 std::vector<ChatReply> ChatOutbox::take() {
     std::lock_guard<std::mutex> l(m_);
     std::vector<ChatReply> out;

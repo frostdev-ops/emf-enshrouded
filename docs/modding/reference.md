@@ -651,11 +651,16 @@ api->net_to_player(w, from->player, "mymod/show", "ok", 2);  // the server -> th
   and answers with a hello (its EMF version, API, game build and channels); the server answers with a welcome (its
   channels). A game without EMF shows the beacon text, up to 4 times ("This server uses EMF mods ..."); `[net] greet=0` in `emf\emf_core.ini` turns the beacon
   off (and with it the whole transport for that server). A server without EMF sends no beacon, so an EMF game sends
-  nothing to it; a marked line another player types is dropped (the line must be spoken as the player itself).
+  nothing to it; a marked line another player types is dropped (the line must be spoken as the player itself: the
+  game knows its own account from its world's player list and answers no marked line before it does). Each new
+  session (another world, another server) starts the conversation over: nothing from the last server's welcome or
+  queue goes to the next one.
 - **Limits.** A player's game: 20 lines a second (burst 40) and 16 KiB a second; a flood of ten times that gets the
   account ignored for a minute. Per channel and sender: `per_10s`. The server holds a player's mod lines back while
-  that player's chat reader has more than 16 KiB waiting, and adds at most 32 lines per receive-loop run (shared with
-  command replies). A game sends at most 4 lines a frame (up to 64 wait).
+  that player's chat reader has more than 16 KiB waiting (at most 256 lines wait per player; one that waited 30 s is
+  dropped), and adds at most 32 lines per receive-loop run (shared with command replies). A message goes into the
+  outbox whole or not at all, and only to the connection that said hello (after a reconnect, the new one). A game
+  sends at most 4 lines a frame (up to 64 wait).
 - **Settings** (`emf\emf_core.ini`): `[net] enabled=0` leaves the chat hooks out (messages stay in process),
   `greet=0` as above. On a game that hosts, the hooks are installed even without `[chat] players=1` (only the
   command policy stays behind that switch).

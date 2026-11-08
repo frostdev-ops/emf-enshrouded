@@ -7,6 +7,7 @@
 #include <windows.h>
 
 #include <cstring>
+#include <map>
 #include <memory>
 
 #include "api.h"
@@ -243,6 +244,18 @@ void flush_replies(uint8_t* server) {
         return records.empty() ? nullptr : records.data();
     };
     int sent = 0;  // lines added in this run (kMaxChatLinesPerRun)
+    const uint64_t now = g_deps.now_ms ? g_deps.now_ms() : GetTickCount64();
+    std::map<uint32_t, size_t> held;  // readers with a mod line waiting in this run, and how many wait
+    size_t stale = 0, over = 0;       // mod lines dropped: waited too long / too many for one player
+    struct Report {
+        size_t* stale;
+        size_t* over;
+        ~Report() {
+            if ((*stale || *over) && g_deps.log)
+                g_deps.log("mod messages: " + std::to_string(*stale) + " line(s) for lagging players waited too long and " +
+                           std::to_string(*over) + " more than a player may have waiting: dropped");
+        }
+    } report{&stale, &over};
     for (size_t i = 0; i < items.size(); ++i) {
         const auto& reply = items[i];
         if (reply.everyone) {  // v19 chat_broadcast: each connected player gets the line as its own speaker
@@ -270,7 +283,9 @@ void flush_replies(uint8_t* server) {
         // under that player's name).
         uint32_t handle = reply.handle;
         auto reader = sender_reader(server, handle, reply.account);
-        if (!reader && reply.raw) {  // v19 chat_tell: the handle came from BasicPlayerInfos; find the account's record
+        // v19 chat_tell: the handle came from BasicPlayerInfos; find the account's record. Never for a mod line: it is
+        // numbered for its own connection, another one of the account would read it as a gap
+        if (!reader && reply.raw && !reply.net) {
             if (const auto c = connection_of(connections(), reply.account)) {
                 handle = c->handle;
                 reader = c->reader;
@@ -279,15 +294,25 @@ void flush_replies(uint8_t* server) {
                                hex(reply.handle) + " did not match its connection record; used 0x" + hex(handle));
             }
         }
+        if (!reader && reply.net) continue;  // the player left (or reconnected): the line was for that connection
         if (!reader) {
             if (g_deps.log)
                 g_deps.log("chat replies: no chat reader for connection 0x" + hex(reply.handle) +
                            " (the player left?); reply dropped: " + printable(reply.text));
             continue;
         }
-        if (reply.net && reader_pending(sys, *reader) > kMaxNetPendingBytes) {  // a lagging player: later, not now
-            deferred.push_back(reply);
+        // a lagging player: later, not now (and once one of its lines waits, the rest of this run waits behind it)
+        if (reply.net && (held.count(*reader) || reader_pending(sys, *reader) > kMaxNetPendingBytes)) {
             --sent;
+            if (reply.queued_ms && now > reply.queued_ms + kNetMaxWaitMs) {
+                ++stale;
+                continue;
+            }
+            if (++held[*reader] > kMaxNetWaitingLines) {
+                ++over;
+                continue;
+            }
+            deferred.push_back(reply);
             continue;
         }
         if (!send_line(sys, reply.raw ? reply.text : "[EMF] " + reply.text, handle, reply.account, *reader)) return;
@@ -471,7 +496,12 @@ bool queue_chat_tell(uint32_t handle_hint, uint64_t account, std::string line) {
 bool queue_chat_everyone(std::string line) { return g_on.load() && g_outbox.add_everyone(std::move(line)); }
 
 bool queue_net_line(uint32_t handle, uint64_t account, std::string line) {
-    return g_on.load() && g_outbox.add(handle, account, std::move(line), true, true);
+    return queue_net_lines(handle, account, {std::move(line)});
+}
+
+bool queue_net_lines(uint32_t handle, uint64_t account, const std::vector<std::string>& lines) {
+    const uint64_t now = g_deps.now_ms ? g_deps.now_ms() : GetTickCount64();
+    return g_on.load() && g_outbox.add_net_lines(handle, account, lines, now);
 }
 
 size_t chat_outbox_room() {
