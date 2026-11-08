@@ -90,6 +90,9 @@ struct Script {
     std::string timeout;                               // the time limit's message with file:line, while it unwinds
     std::string not_run;                               // the core did not keep it as a script mod: never runs again
     uint64_t generation = 1;                         // worlds and proxies made in an older generation are stale
+    // Steps in a row of each world kind that left this script out because it was busy in another world's step (only
+    // that kind's step, under its world_step_m, uses its slot): tick_body waits after kMaxBusySkips.
+    uint32_t busy_skips[3] = {0, 0, 0};
     uint64_t loads = 0;                                // +1 per load: answers meant for an older load are dropped
     // data per world: <game>\emf\config\<id>\<slot>.txt (lives as long as the script; attached once)
     std::unique_ptr<emf::WorldFile> file;

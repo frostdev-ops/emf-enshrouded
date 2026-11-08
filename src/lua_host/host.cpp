@@ -15,6 +15,9 @@ namespace emf::lua {
 namespace {
 
 constexpr uint64_t kCallLimitMs = 250;
+// A client or prediction step leaves out a script busy in another world's step at most this many steps in a row (half a
+// second at 60 steps a second), then waits for it.
+constexpr uint32_t kMaxBusySkips = 30;
 constexpr uint64_t kSaveCreditMs = 1000;  // world-data writes left out of the time limit, per call
 constexpr size_t kBusMaxTopic = 96;
 constexpr size_t kBusMaxPayload = 64 * 1024;
@@ -1054,16 +1057,21 @@ void Host::tick_body(EmfWorld* world) {
     }
     if (!h.rechecked.exchange(true)) h.recheck();
     const uint64_t now = GetTickCount64();
+    const bool server = kind == EMF_WORLD_SERVER;
+    if (server) h.server_seen = now;
+    const uint64_t server_at = h.server_seen.load();
+    const bool hosting_now = server_at != 0 && now >= server_at && now - server_at < 1000;  // a server step this second
     uint64_t last = h.last_check.load();
-    // the server and client worlds tick on their own threads: only the one that moves the clock on checks
-    if (now > last && now - last >= 1000 && h.last_check.compare_exchange_strong(last, now)) {
+    // The worlds tick on their own threads: only the one that moves the clock on checks. The check takes every
+    // script's lock, so while this process hosts a server world only that world checks: a client step (the game's
+    // frame waits for it) must not wait for a script busy in the server world's step.
+    if ((server || !hosting_now) && now > last && now - last >= 1000 &&
+        h.last_check.compare_exchange_strong(last, now)) {
         const double start = perf_now(h);
         check_reload_now();
         static const std::string kReload = "reload check (once a second)";
         h.perf.add(kReload, perf_now(h) - start);
     }
-    const bool server = kind == EMF_WORLD_SERVER;
-    if (server) h.server_seen = now;
     // Drain this world's FIFO once. A callback's publication stays queued until its next step.
     // Sequence watermarks invalidate pre-reload and pre-subscribe messages without stealing
     // the same publication from other mods that are still subscribed.
@@ -1082,8 +1090,26 @@ void Host::tick_body(EmfWorld* world) {
             }
         }
     }
+    double lock_wait = 0;  // time this step waited for scripts busy in another world's step (perf_report)
     for (auto& s : h.scripts) {
-        std::lock_guard<std::recursive_mutex> l(s->m);
+        std::unique_lock<std::recursive_mutex> l(s->m, std::defer_lock);
+        // A client (or prediction) step does not wait for a script busy in the server world's step on another thread:
+        // the game's frame waits for the client world, and a server step's Lua work (a search through every entity)
+        // would become a hitch. The script is left out of this step (its keys stay for the next one), at most
+        // kMaxBusySkips steps in a row; a step that delivers bus messages always waits (they are this step's).
+        uint32_t& skips = s->busy_skips[lock_kind];
+        if (server || !bus.empty() || !l.try_lock()) {
+            if (!server && bus.empty() && ++skips <= kMaxBusySkips) {
+                static const std::string kLeftOut[3] = {"", "a script busy in another world, left out (prediction)",
+                                                        "a script busy in another world, left out (client)"};
+                h.perf.add(kLeftOut[lock_kind], 0.0);
+                continue;
+            }
+            const double wait_start = perf_now(h);
+            l.lock();
+            lock_wait += perf_now(h) - wait_start;
+        }
+        skips = 0;
         if (!s->L || s->paused) continue;
         const ScriptStepTimer step_timer(h, *s, kind);
         if (server && s->file) {  // the world's data: once per session after its save loaded, again after a reload
@@ -1171,6 +1197,7 @@ void Host::tick_body(EmfWorld* world) {
         ++s->generation;
     }
     // after the scripts' ticks: a reloaded script that offered again kept its entities; the rest come off
+    if (lock_wait > 0.01) h.perf.add(std::string("waiting for scripts busy in another world (") + world_name(kind) + ")", lock_wait);
     if (server) run_offer_drops(h, world);
 }
 
