@@ -590,3 +590,64 @@ TEST_CASE("content start: a start that cannot be held draws no portraits and goe
     CHECK(r.joined() == "hold, chain, hooks(content on), status(current), core");
     CHECK(r.logged("later start"));
 }
+
+TEST_CASE("content start: pictures that leave emf_content.dll loaded after a good build keep the build's own state") {
+    Recorder r;
+    auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), std::nullopt));
+    REQUIRE(plan.path == ContentPath::BuildHeld);
+    plan.portraits = {wolf_item()};
+    auto steps = start_steps(r);
+    with_portraits(r, steps, false);  // the build unloads the DLL, the pictures call does not
+    CHECK(emf::loader::start_in_dllmain(plan, steps));
+    r.calls.clear();
+    emf::loader::run_held_content(plan, steps);
+    REQUIRE_FALSE(r.states.empty());
+    const auto& last = r.states.back();
+    CHECK(last.code == 0);
+    CHECK(last.unloaded);  // a good build stays a good build: the next start finds the shadow copy current
+    CHECK(emf::loader::state_current(last, "sha256:now"));
+    CHECK(last.message.find("pictures") == std::string::npos);
+    CHECK(r.joined().find("write_record") != std::string::npos);
+    CHECK(r.joined().find("drop_record") == std::string::npos);  // the shadow copy is good: it stays redirected next start
+    CHECK(r.joined().find("chain") == std::string::npos);  // only this start goes without the chained DLLs and the core
+    CHECK(r.joined().find("core") == std::string::npos);
+    CHECK(r.joined().find("alert") != std::string::npos);
+    CHECK(r.logged("pictures"));
+    CHECK(r.logged("without the chained DLLs"));
+}
+
+TEST_CASE("content start: every pictures call is recorded for its items, also one that did not come back") {
+    for (const bool finishes : {true, false}) {
+        Recorder r;
+        auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), good_state("sha256:now")));
+        plan.portraits = {wolf_item()};
+        auto steps = start_steps(r, true, built_ok(), true, finishes);
+        with_portraits(r, steps);
+        std::vector<std::string> recorded;
+        int code = -1;
+        steps.record_portraits = [&](const std::vector<emf::loader::PortraitItem>& items, const emf::loader::PortraitsOutcome& o) {
+            for (const auto& i : items) recorded.push_back(i.key);
+            code = o.call.code;
+        };
+        CHECK(emf::loader::start_in_dllmain(plan, steps));
+        emf::loader::run_held_content(plan, steps);
+        REQUIRE(recorded.size() == 1u);
+        CHECK(recorded[0] == "wolf");
+        CHECK(code == (finishes ? 0 : emf::loader::kBuildTimedOut));
+    }
+}
+
+TEST_CASE("content start: the pictures after a build are recorded too") {
+    Recorder r;
+    auto plan = emf::loader::plan_content(plan_steps(r, owned_facts(), std::nullopt));
+    plan.portraits = {wolf_item()};
+    auto steps = start_steps(r);
+    with_portraits(r, steps);
+    int recorded = 0;
+    steps.record_portraits = [&](const std::vector<emf::loader::PortraitItem>&, const emf::loader::PortraitsOutcome&) {
+        ++recorded;
+    };
+    CHECK(emf::loader::start_in_dllmain(plan, steps));
+    emf::loader::run_held_content(plan, steps);
+    CHECK(recorded == 1);
+}
