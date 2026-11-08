@@ -18,4 +18,11 @@ constexpr uint32_t fnv1a32(std::string_view s) {
     return h;
 }
 
+// FNV-1a 64-bit: the hash the game passes with a UI scope's name.
+constexpr uint64_t fnv1a64(std::string_view s) {
+    uint64_t h = 0xcbf29ce484222325ull;
+    for (char c : s) h = (h ^ static_cast<unsigned char>(c)) * 0x100000001b3ull;
+    return h;
+}
+
 }  // namespace emf
