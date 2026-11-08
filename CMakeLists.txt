@@ -761,3 +761,4 @@ target_sources(emf_core_lib PRIVATE src/core/hud_editor/elements.cpp src/core/hu
 target_sources(emf_tests PRIVATE tests/test_hud_elements.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_layout.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_layout_store.cpp)
+target_sources(emf_tests PRIVATE tests/test_hud_snapshot.cpp)
