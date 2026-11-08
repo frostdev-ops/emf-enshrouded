@@ -593,6 +593,14 @@ slot.type = EMF_UI_SLOT;  slot.icon = wolf;  slot.text = "Wolf";  slot.key = "ac
   linear) and again when the game switches HDR on or off.
 - Renders of the game's own creatures or items are the game's art: don't ship them. The portrait cache is written on
   the player's PC from their own game files.
+- A mod asks for pictures in its mod.json: `"portraits": [{"key": "wolf", "template": "<template GUID>" | "model":
+  "<RenderModel GUID>", "frames": 24, "size": 256}]` (frames 1-64, size 8-512). The loader draws them at game start (never on
+  the dedicated server, never in Play without EMF mods), at most 32 per start; a start that draws holds the game's entry
+  and shows a splash. It asks again for a key whose picture is missing, whose entry in mod.json changed, or when the
+  game's exe or data, or `emf_content.dll`, changed since (the DLL answers "current" without drawing when what the
+  picture is drawn from is unchanged). A key that failed is not tried again at every start: the loader remembers each
+  attempt in `<game>/emf/cache/portraits_attempts.json` and retries only after `emf_content.dll`, the game or the entry
+  changed. `<game>/emf/portraits.log` has the last run.
 
 ## Lua
 

@@ -460,6 +460,8 @@ ContentLog g_content_log;
 ContentLog g_portraits_log;
 
 std::wstring portrait_cache() { return g_dir + L"\\emf\\cache\\portraits"; }  // the core's portrait_dir
+// what the loader remembers of its pictures calls (portraits_attempts.h), beside the cache folder
+std::wstring portrait_attempts_path() { return g_dir + L"\\emf\\cache\\portraits_attempts.json"; }
 
 // The creature pictures mods ask for (mod.json "portraits") that the cache lacks: in the game client with EMF's core
 // only (the dedicated server draws nothing, and Play without EMF mods loads no mod that shows them).
@@ -469,7 +471,11 @@ std::vector<emf::loader::PortraitItem> portraits_this_start() {
         const DWORD a = GetFileAttributesW(content_dll().c_str());
         if (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY)) return {};
         std::vector<std::string> problems;
-        auto items = emf::loader::wanted_portraits(g_dir + L"\\emf\\mods", portrait_cache(), &problems);
+        emf::loader::PortraitMemory memory;
+        memory.stamps = emf::loader::portraits_stamps(g_dir, stem(), content_dll());
+        if (const auto text = emf::loader::cio::read_file(portrait_attempts_path(), 4u << 20))
+            memory.attempts = emf::loader::read_attempts(*text);
+        auto items = emf::loader::wanted_portraits(g_dir + L"\\emf\\mods", portrait_cache(), &problems, &memory);
         for (const auto& p : problems) loader_log(g_dir, ("creature pictures: " + p).c_str());
         return items;
     } catch (...) {
@@ -617,6 +623,19 @@ emf::loader::StartSteps make_start_steps() {
         for (const auto& f : out.failed) g_portraits_log.line("error", f);
         g_portraits_log.close();
         return out;
+    };
+    s.record_portraits = [](const std::vector<emf::loader::PortraitItem>& items,
+                            const emf::loader::PortraitsOutcome& out) {
+        try {
+            auto memory = emf::loader::read_attempts(
+                emf::loader::cio::read_file(portrait_attempts_path(), 4u << 20).value_or(std::string()));
+            memory = emf::loader::record_attempts(std::move(memory), items, out,
+                                                  emf::loader::portraits_stamps(g_dir, stem(), content_dll()));
+            CreateDirectoryW((g_dir + L"\\emf\\cache").c_str(), nullptr);  // the DLL makes it with the first picture
+            if (!emf::loader::cio::write_file_atomic(portrait_attempts_path(), emf::loader::attempts_text(memory)))
+                loader_log(g_dir, "creature pictures: could not write emf\\cache\\portraits_attempts.json");
+        } catch (...) {
+        }
     };
     return s;
 }

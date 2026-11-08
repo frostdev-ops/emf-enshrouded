@@ -12,8 +12,11 @@
 #include <vector>
 
 #include "content_abi.h"
+#include "common/sha256.h"
 #include "content_build.h"
+#include "content_fingerprint.h"
 #include "core/json.h"
+#include "portraits_attempts.h"
 #include "portraits_plan.h"
 
 namespace emf::loader {
@@ -109,11 +112,62 @@ inline PortraitsOutcome run_portraits(const std::wstring& dll, const std::string
     return out;
 }
 
-// The portraits the mods in <mods_dir>\<id>\mod.json ask for (in the order of the folder names) that the cache lacks
-// (<cache_dir>\<key>\index.json), at most kMaxPortraitsPerStart. A folder without a mod.json is no mod; a bad list
-// is a line in `problems`. No mods folder: none.
+// The stamps of this start (portraits_attempts.h): emf_content.dll's, and the game's exe, .kfc, .kfc_resources and .dat
+// count, as facts of the kind the content build's fingerprint takes (size and time, nothing hashed).
+inline PortraitStamps portraits_stamps(const std::wstring& game, const std::string& file_name, const std::wstring& dll) {
+    const std::wstring name = cio::from_utf8(file_name);
+    std::string game_text = "emf portraits game stamp 1\n";
+    game_text += detail::fact_line("exe", fact_of(cio::join(game, name + L".exe"), file_name + ".exe"));
+    game_text += detail::fact_line("kfc", fact_of(cio::join(game, name + L".kfc"), file_name + ".kfc"));
+    game_text += detail::fact_line("resources", fact_of(cio::join(game, name + L".kfc_resources"), file_name + ".kfc_resources"));
+    game_text += "dats\t" + std::to_string(count_game_dats(game, file_name)) + "\n";
+    const std::string dll_text = "emf portraits dll stamp 1\n" + detail::fact_line("dll", fact_of(dll, "emf_content.dll"));
+    const auto hex = [](const std::string& t) {
+        emf::Sha256 h;
+        h.update(t.data(), t.size());
+        return "sha256:" + h.hex();
+    };
+    return {hex(dll_text), hex(game_text)};
+}
+
+// The memory after a call that asked for `asked`: each key's result from the reply; a key the reply says nothing of
+// (the call failed whole, or the reply was cut) failed with the call's message. Other keys' records stay.
+inline std::vector<PortraitAttempt> record_attempts(std::vector<PortraitAttempt> memory,
+                                                    const std::vector<PortraitItem>& asked, const PortraitsOutcome& out,
+                                                    const PortraitStamps& now) {
+    const auto has = [](const std::vector<std::string>& keys, const std::string& k) {
+        return std::find(keys.begin(), keys.end(), k) != keys.end();
+    };
+    for (const auto& item : asked) {
+        PortraitAttempt a;
+        a.key = item.key;
+        a.entry = portrait_entry(item);
+        a.dll = now.dll;
+        a.game = now.game;
+        a.ok = has(out.drawn, item.key) || has(out.current, item.key);
+        if (!a.ok) {
+            const std::string prefix = item.key + ": ";
+            for (const auto& f : out.failed)
+                if (f.rfind(prefix, 0) == 0) a.message = f.substr(prefix.size());
+            if (a.message.empty())
+                a.message = out.call.message.empty() ? "the call gave no result for it (code " + std::to_string(out.call.code) + ")"
+                                                     : out.call.message;
+        }
+        memory.erase(std::remove_if(memory.begin(), memory.end(), [&](const PortraitAttempt& m) { return m.key == a.key; }),
+                     memory.end());
+        memory.push_back(std::move(a));
+    }
+    return memory;
+}
+
+// The portraits the mods in <mods_dir>\<id>\mod.json ask for (in the order of the folder names) to ask the DLL for: the
+// ones the cache lacks (<cache_dir>\<key>\index.json), and, with a `memory` (portraits_attempts.h), the ones last asked
+// about under another DLL, game or entry, while a failed key the memory has for this DLL, game and entry is left out
+// (a line in `problems` says so). At most kMaxPortraitsPerStart. A folder without a mod.json is no mod; a bad list is a
+// line in `problems`. No mods folder: none.
 inline std::vector<PortraitItem> wanted_portraits(const std::wstring& mods_dir, const std::wstring& cache_dir,
-                                                  std::vector<std::string>* problems) {
+                                                  std::vector<std::string>* problems,
+                                                  const PortraitMemory* memory = nullptr) {
     std::vector<std::wstring> names;
     WIN32_FIND_DATAW fd{};
     const HANDLE h = FindFirstFileExW((mods_dir + L"\\*").c_str(), FindExInfoBasic, &fd, FindExSearchLimitToDirectories,
@@ -133,7 +187,12 @@ inline std::vector<PortraitItem> wanted_portraits(const std::wstring& mods_dir, 
         const DWORD a = GetFileAttributesW((cache_dir + L"\\" + cio::from_utf8(key) + L"\\index.json").c_str());
         return a != INVALID_FILE_ATTRIBUTES && !(a & FILE_ATTRIBUTE_DIRECTORY);
     };
-    return missing_portraits(read_portrait_lists(manifests, problems), cached);
+    const auto items = read_portrait_lists(manifests, problems);
+    if (!memory) return missing_portraits(items, cached);
+    std::vector<std::string> remembered;
+    auto out = portraits_to_ask(items, memory->attempts, memory->stamps, cached, &remembered);
+    if (problems) problems->insert(problems->end(), remembered.begin(), remembered.end());
+    return out;
 }
 
 }  // namespace emf::loader
