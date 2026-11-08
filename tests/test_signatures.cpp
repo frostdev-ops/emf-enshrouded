@@ -102,7 +102,9 @@ TEST_CASE("signature table: build 1283531's RVAs, game and dedicated server, as 
         CHECK(d->rva[static_cast<size_t>(server)] == w.server);
     }
     // every signature was checked on both exes of 1283531 (none is kRvaUnchecked there)
+    // (except the HUD editor's UI signatures, checked on 1287369 alone)
     for (const auto& d : all_signatures()) {
+        if (d.id >= Sig::UiScopeOpen && d.id <= Sig::UiPopTransform) continue;
         CHECK(d.rva[static_cast<size_t>(client)] != kRvaUnchecked);
         CHECK(d.rva[static_cast<size_t>(server)] != kRvaUnchecked);
     }
@@ -179,7 +181,8 @@ TEST_CASE("signature table: one entry per Sig, in order, unique names, valid pat
         for (size_t b = 0; b < kKnownBuildCount; ++b) {
             CAPTURE(all[i].name);
             const bool client_only = all[i].id == Sig::ClientWorldSetup || all[i].id == Sig::QueueChatMessage ||
-                                     (all[i].id >= Sig::UiFrame && all[i].id <= Sig::CharacterSelected);
+                                     (all[i].id >= Sig::UiFrame && all[i].id <= Sig::CharacterSelected) ||
+                                     (all[i].id >= Sig::UiScopeOpen && all[i].id <= Sig::UiPopTransform);
             CHECK((all[i].rva[b] == 0) == (known_builds()[b].server && client_only));
         }
     }
@@ -254,7 +257,7 @@ TEST_CASE("signature table has the inventory transaction and readOther, optional
         CHECK(d->rva[1] == w.rva_1273043);
         CHECK_FALSE(d->required);
     }
-    CHECK(kSigCount == 53);
+    CHECK(kSigCount == 57);
 }
 
 TEST_CASE("signature table has XpRequired and MaxPlayerLevel (API v22 levels), optional, on both exes of 1283531") {
@@ -546,4 +549,44 @@ TEST_CASE("rebased: a function another DLL hooked is found in the exe's file cop
     CHECK(at[0].rva_matches);
     CHECK(at[1].addr == 0);  // nothing found stays nothing
     CHECK(at[1].count == 0);
+}
+
+TEST_CASE("signature table has the UI scope open and close and the layer's transform push and pop (client only, checked on 1287369)") {
+    struct Want {
+        const char* name;
+        uint32_t rva;
+    } const want[] = {{"UiScopeOpen", 0xa3cb10u}, {"UiScopeClose", 0xa40080u}, {"UiPushTransform", 0x11c4aa0u}, {"UiPopTransform", 0x11c2850u}};
+    for (const auto& w : want) {
+        CAPTURE(w.name);
+        const SigDef* d = find_signature(w.name);
+        REQUIRE(d != nullptr);
+        CHECK(d->rva[7] == w.rva);
+        CHECK(rva_checked(*d, 7));
+        CHECK(d->rva[8] == 0u);
+        CHECK(absent_on(*d, 8));
+        CHECK(d->rva[5] == kRvaUnchecked);
+        CHECK_FALSE(rva_checked(*d, 5));
+        CHECK_FALSE(d->required);
+        // the pattern's own bytes, each ?? as 00, match exactly once in a buffer that holds them once
+        const Pattern p = parse_pattern(d->pattern);
+        std::vector<uint8_t> buf(64, 0xCC);
+        buf.insert(buf.end(), p.bytes.begin(), p.bytes.end());
+        buf.insert(buf.end(), 64, 0xCC);
+        const ScanResult r = scan(buf, 0x1000, p);
+        CHECK(r.count == 1);
+        CHECK(r.first == 0x1000 + 64);
+    }
+    // the offsets the editor uses are inside the patterns
+    auto has = [](const char* name, const char* bytes) {
+        const std::string pat = find_signature(name)->pattern;
+        return pat.find(bytes) != std::string::npos;
+    };
+    CHECK(has("UiScopeClose", "80 79 20 00"));
+    CHECK(has("UiPushTransform", "83 79 08 04"));
+    CHECK(has("UiPushTransform", "E0 6C 00 00"));
+    CHECK(has("UiPopTransform", "10 42 00 00"));
+    CHECK(has("UiPopTransform", "08 42 00 00"));
+    CHECK(has("UiPopTransform", "E0 21 00 00"));
+    CHECK(has("UiPopTransform", "2C 52 03 00"));
+    CHECK(has("UiPopTransform", "D2 52 03 00"));
 }

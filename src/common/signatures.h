@@ -32,6 +32,8 @@ enum class Sig : size_t {
     SendServerInfo,
     // a player's XP curve and level cap (API v22: player_xp_required, player_level_cap, player_level_set)
     XpRequired, MaxPlayerLevel,
+    // the game's UI scopes and the UI layer's transform stack, client only (the HUD editor; docs/engine_parts/re_ui_scopes.md)
+    UiScopeOpen, UiScopeClose, UiPushTransform, UiPopTransform,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

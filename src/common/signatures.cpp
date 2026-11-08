@@ -157,6 +157,12 @@ constexpr SigDef kSignatures[] = {
     // u32 maxPlayerLevel(const BalancingRegistry* reg): the balancing table's playerLevelCap (+0x10); pending XP at the
     // cap is thrown away by player_level.
     {Sig::MaxPlayerLevel, "MaxPlayerLevel", "48 8B 41 20 48 85 C0 75 06 B8 01 00 00 00 C3 8B 40 10 C3", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xe99270u, 0x9404f0u, 0xe99250u, 0x940580u, 0xe99330u, 0x940570u}, false},
+    // The game's UI scopes (docs/engine_parts/re_ui_scopes.md): UiScopeOpen(scope, nameInfo) and UiScopeClose(scope) around every
+    // named part of the UI, and the UI layer's transform stack push and pop. Client only; checked on 1287369 alone.
+    {Sig::UiScopeOpen, "UiScopeOpen", "48 89 5C 24 08 57 48 83 EC 20 48 8B 05 ?? ?? ?? ?? 48 8B F9 48 8B DA 45 33 C0 48 8B 52 10 48 8B 48 18 48 89 0F 48 C7 47 08 00 00 00 00 48 C7 47 10 00 00 00 00 E8 ?? ?? ?? ?? 48 8B CF 48 89 47 08 C6 47 14 01 E8 ?? ?? ?? ?? 48 8B 4F 08 48 8B D3 48 C7 47 18 00 00 00 00 C6 47 20 00 C6 47 22 00 E8", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xa3cb10u, 0u}, false},
+    {Sig::UiScopeClose, "UiScopeClose", "48 89 5C 24 18 48 89 74 24 20 57 48 83 EC 60 80 79 20 00 48 8B D9 74 6A 48 8B 49 08 0F 29 74 24 50 66 0F 6F 35 ?? ?? ?? ?? C7 44 24 70 FF 00 FF FF C7 44 24 74 00 00 80 3F", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xa40080u, 0u}, false},
+    {Sig::UiPushTransform, "UiPushTransform", "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 30 83 79 08 04 48 8B EA F2 0F 10 02 48 8B F9 0F B7 35 ?? ?? ?? ?? 8B 42 08 F2 0F 11 44 24 20 66 89 74 24 2C 89 44 24 28 0F 85 ?? ?? ?? ?? 48 8B CA E8 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? ?? ?? 48 8B B7 E0 6C 00 00 48 8D 9E E8 04 03 00", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x11c4aa0u, 0u}, false},
+    {Sig::UiPopTransform, "UiPopTransform", "48 83 EC 28 48 8B 81 10 42 00 00 4C 8B C1 48 FF C8 48 89 81 10 42 00 00 83 79 08 04 75 41 48 85 C0 74 3C 48 8B D0 48 8B 81 08 42 00 00 0F B7 4C 50 FE 49 8B 80 E0 21 00 00 48 03 C9 0F B7 44 C8 0C 49 8B 88 E0 6C 00 00 66 39 81 2C 52 03 00 74 0E 66 89 81 2C 52 03 00 C6 81 D2 52 03 00 00 49 8B C8 E8 ?? ?? ?? ?? 49 FF 88 E8 21 00 00 48 83 C4 28 C3", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x11c2850u, 0u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace
