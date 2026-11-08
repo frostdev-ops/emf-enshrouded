@@ -199,6 +199,25 @@ void enable_vulkan_layer() {
     put_first(L"VK_INSTANCE_LAYERS", L"VK_LAYER_EMF_console");
 }
 
+// EMF's frame-time recorder (src/frametime, diagnostics: emf\emf_frametime.dll, a Vulkan layer that notes every
+// present): on with [debug] frame_times=1 in emf\emf_core.ini, for the game client, in every way of starting (Play
+// without any mods too, so starts can be compared). EMF's console layer, put first later, comes before it.
+void enable_frame_times(const std::wstring& dir, emf::loader::PlayOnce play) {
+    if (GetPrivateProfileIntW(L"debug", L"frame_times", 0, (dir + L"\\emf\\emf_core.ini").c_str()) != 1) return;
+    const std::wstring vk = dir + L"\\emf\\vk";
+    if (GetFileAttributesW((vk + L"\\VkLayer_EMF_frametime.json").c_str()) == INVALID_FILE_ATTRIBUTES ||
+        GetFileAttributesW((dir + L"\\emf\\emf_frametime.dll").c_str()) == INVALID_FILE_ATTRIBUTES) {
+        loader_log(dir, "frame times: [debug] frame_times=1, but emf\\emf_frametime.dll or its manifest is missing");
+        return;
+    }
+    put_first(L"VK_ADD_LAYER_PATH", vk);
+    put_first(L"VK_INSTANCE_LAYERS", L"VK_LAYER_EMF_frametime");
+    SetEnvironmentVariableW(L"EMF_FRAME_TIMES_START", play == emf::loader::PlayOnce::NoMods  ? L"Play without any mods"
+                                                      : play == emf::loader::PlayOnce::NoEmf ? L"Play without EMF mods"
+                                                                                             : L"normal");
+    loader_log(dir, "frame times: on ([debug] frame_times=1): emf\\logs\\frame_times_*.csv and .log");
+}
+
 // The content redirect spike's hooks (file_hooks.h, docs/engine_parts/file_redirect_spike.md) in the game client
 // (enshrouded.exe) or the dedicated server (enshrouded_server.exe, with its own names: `target`); not in another program
 // that loads this DLL. They go into the exe's import table before the exe's own code runs (its entry point comes after
@@ -636,6 +655,7 @@ BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID) {
         // EMF.exe's "Play without EMF mods": taken first of all, so that it counts for this one start only
         const auto play = emf::loader::is_server_exe(exe) ? emf::loader::PlayOnce::Normal : take_play_once_flag(g_dir);
         g_start = emf::loader::start_plan(play);
+        if (!emf::loader::is_server_exe(exe)) enable_frame_times(g_dir, play);
         // EML content: off (today's order), the current shadow copy, or a build on the held entry (content_start.h)
         g_content = plan_this_start(play);
         emf::loader::start_in_dllmain(g_content, steps());
