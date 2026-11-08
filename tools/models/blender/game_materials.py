@@ -8,10 +8,14 @@ each slot: nothing of the game's art is copied.
       <in.glb> <its albedo.png> <look.json> <out.glb>
 
 look.json: {"rules": [{"material": 0, "min_saturation": 0.55, "min_value": 0.45}], "default": 1,
-            "materials": {"0": {"repeat": [2.8, 1.4], "region": [u0, v0, u1, v1]}, "1": {...}}}
+            "materials": {"0": {"repeat": [2.8, 1.4], "region": [u0, v0, u1, v1]}, "1": {...}},
+            "smooth_angle": 40,   (optional: smooth shading, sharp edges only where faces meet at more than 40 degrees)
+            "drop_low": [{"material": 0, "below": 0.05}, {"below": 0.025}]}   (optional: faces of that slot (no
+            "material": any) wholly in the lowest 5 % (2.5 %) of the height are dropped, e.g. loose straw on the ground)
 Prints GAME_MATERIALS {json}: the faces per slot.
 """
 import json
+import math
 import os
 import sys
 
@@ -49,12 +53,22 @@ def main():
         new = bm.loops.layers.uv.new("game")
         mw = obj.matrix_world
         rot = mw.to_3x3()
+        zs = [(mw @ v.co).z for v in bm.verts]
+        z0, height = min(zs), (max(zs) - min(zs)) or 1.0
+        drops = look.get("drop_low", [])  # [{"material": n (none: any), "below": f}]: faces wholly in the lowest f of
+        if isinstance(drops, dict):       # the height
+            drops = [drops]
+        doomed = []
         for f in bm.faces:
             uvs = [l[old].uv for l in f.loops] if old else [(0.0, 0.0)] * len(f.loops)
             u = sum(x[0] for x in uvs) / len(uvs)
             v = sum(x[1] for x in uvs) / len(uvs)
             r, g, b, _ = px[min(h - 1, max(0, int(v * h))), min(w - 1, max(0, int(u * w)))]
             slot = atlas_uv.classify((float(r), float(g), float(b)), look.get("rules", []), look["default"])
+            top = max((mw @ l.vert.co).z for l in f.loops)
+            if any(d.get("material", slot) == slot and top < z0 + d["below"] * height for d in drops):
+                doomed.append(f)
+                continue
             f.material_index = slot
             counts[slot] = counts.get(slot, 0) + 1
             spec = look["materials"][str(slot)]
@@ -65,10 +79,16 @@ def main():
             game_uvs = atlas_uv.face_uvs(gl, (n.x, n.z, -n.y), spec["repeat"], spec["region"])
             for l, (gu, gv) in zip(f.loops, game_uvs):
                 l[new].uv = (gu, 1.0 - gv)  # Blender's v grows upwards; the glTF export turns it back
+        if doomed:
+            bmesh.ops.delete(bm, geom=doomed, context="FACES")
+            counts["dropped"] = counts.get("dropped", 0) + len(doomed)
         if old:
             bm.loops.layers.uv.remove(old)
         bm.to_mesh(me)
         bm.free()
+        if look.get("smooth_angle"):  # smooth shading, sharp only where faces meet at more than this many degrees
+            me.shade_smooth()
+            me.set_sharp_from_angle(angle=math.radians(float(look["smooth_angle"])))
     bpy.ops.export_scene.gltf(filepath=out, export_format="GLB", export_materials="EXPORT", export_texcoords=True,
                               export_normals=True)
     print("GAME_MATERIALS " + json.dumps({"faces": counts, "out": out}))
