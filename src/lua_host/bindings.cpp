@@ -2721,7 +2721,7 @@ void push_world(lua_State* L, Script& s, EmfWorld* world) {
     lua_setfield(L, LUA_REGISTRYINDEX, "emf.world_now");
 }
 
-// ---- lua 1.18: mod messages (API v27) ----
+// ---- lua 1.19: mod messages (API v27) ----
 bool has_v27(const EmfApi* a) {
     return a && a->version >= 27 && a->size >= offsetof(EmfApi, net_peer) + sizeof(a->net_peer) && a->net_channel;
 }
@@ -2789,7 +2789,7 @@ uint32_t opt_uint(lua_State* L, int t, const char* key, uint32_t def) {
 }
 
 // emf.net.channel(name, {version = 1, to = "server" | "players" | "both", max = 4096, per_10s = 100,
-// on_server = fn(world, from, data), on_player = fn(world, from, data)}) (lua 1.18): true when the channel
+// on_server = fn(world, from, data), on_player = fn(world, from, data)}) (lua 1.19): true when the channel
 // "<script id>/<name>" is there. `to` defaults to where the given handlers are.
 int l_net_channel(lua_State* L) {
     Script* s = script_of(L);
@@ -2860,7 +2860,7 @@ int l_net_channel(lua_State* L) {
     return 1;
 }
 
-// emf.net.send(name, data) (lua 1.18): this game -> the server. true when on its way.
+// emf.net.send(name, data) (lua 1.19): this game -> the server. true when on its way.
 int l_net_send(lua_State* L) {
     Script* s = script_of(L);
     const std::string full = s->id + "/" + luaL_checkstring(L, 1);
@@ -2871,7 +2871,7 @@ int l_net_send(lua_State* L) {
     return 1;
 }
 
-// emf.net.send_to(world, player, name, data) (lua 1.18): the server -> one player's game.
+// emf.net.send_to(world, player, name, data) (lua 1.19): the server -> one player's game.
 int l_net_send_to(lua_State* L) {
     Script* s = script_of(L);
     EmfWorld* w = world_arg(L, 1);
@@ -2884,7 +2884,7 @@ int l_net_send_to(lua_State* L) {
     return 1;
 }
 
-// emf.net.send_all(world, name, data) (lua 1.18): the server -> every player whose game has the channel; how many.
+// emf.net.send_all(world, name, data) (lua 1.19): the server -> every player whose game has the channel; how many.
 int l_net_send_all(lua_State* L) {
     Script* s = script_of(L);
     EmfWorld* w = world_arg(L, 1);
@@ -2896,7 +2896,7 @@ int l_net_send_all(lua_State* L) {
     return 1;
 }
 
-// emf.net.peer(world, player, name) (lua 1.18): the channel version that player's game has (the server's: nil, 0); 0 =
+// emf.net.peer(world, player, name) (lua 1.19): the channel version that player's game has (the server's: nil, 0); 0 =
 // none.
 int l_net_peer(lua_State* L) {
     Script* s = script_of(L);
@@ -2932,7 +2932,7 @@ void open_bindings(lua_State* L, Script&) {
     lua_setfield(L, -2, "world_settings");
     static const luaL_Reg net_fns[] = {{"channel", l_net_channel}, {"send", l_net_send}, {"send_to", l_net_send_to},
                                        {"send_all", l_net_send_all}, {"peer", l_net_peer}, {nullptr, nullptr}};
-    luaL_newlib(L, net_fns);  // emf.net (lua 1.18)
+    luaL_newlib(L, net_fns);  // emf.net (lua 1.19)
     lua_setfield(L, -2, "net");
     if (luaL_newmetatable(L, kWorldMeta)) {
         static const luaL_Reg methods[] = {{"is_server", w_is_server}, {"is_client", w_is_client}, {"tick", w_tick},

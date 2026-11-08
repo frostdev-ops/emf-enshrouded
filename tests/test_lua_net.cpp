@@ -1,4 +1,4 @@
-// Lua 1.18: mod messages (API v27) from Lua: emf.net.channel (the script's id in front, registered with the core once;
+// Lua 1.19: mod messages (API v27) from Lua: emf.net.channel (the script's id in front, registered with the core once;
 // a reload binds the new functions), emf.net.send / send_to / send_all / peer, the handlers called with the world, who
 // sent it and the data.
 #include <doctest.h>
@@ -37,7 +37,7 @@ EmfNetFrom from(uint32_t player, uint8_t local) {
 }
 }  // namespace
 
-TEST_CASE("lua 1.18: channels get the script's id; sends reach the core; the handler gets world, sender and data") {
+TEST_CASE("lua 1.19: channels get the script's id; sends reach the core; the handler gets world, sender and data") {
     Rig r(L"luanet");
     with_net(r.api);
     add_script(r.dir, "nm", kNet);
@@ -70,7 +70,7 @@ TEST_CASE("lua 1.18: channels get the script's id; sends reach the core; the han
     CHECK(logged("server got abc from 7 local true admin true v2"));
 }
 
-TEST_CASE("lua 1.18: a reload binds the new handler to the channel the core already has; a changed version is an error") {
+TEST_CASE("lua 1.19: a reload binds the new handler to the channel the core already has; a changed version is an error") {
     Rig r(L"luanet2");
     with_net(r.api);
     add_script(r.dir, "nr", "emf.net.channel('pick', {to = 'server', on_server = function(w, f, d) emf.log('old ' .. d) end})\n");
@@ -93,7 +93,7 @@ TEST_CASE("lua 1.18: a reload binds the new handler to the channel the core alre
     CHECK(logged("restart"));  // the core keeps a channel's version until the game restarts
 }
 
-TEST_CASE("lua 1.18: on a core before v27 emf.net.channel and send answer false") {
+TEST_CASE("lua 1.19: on a core before v27 emf.net.channel and send answer false") {
     Rig r(L"luanet3");
     add_script(r.dir, "no", kNet);
     Host host(&r.api, r.dir);
