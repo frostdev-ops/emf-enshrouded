@@ -11,6 +11,7 @@
 
 #include "core/hud_editor/gate.h"
 #include "core/hud_editor/hook.h"
+#include "core/hud_editor/keys.h"
 #include "core/hud_editor/layout.h"
 #include "core/hud_editor/layout_store.h"
 #include "core/hud_editor/scale.h"
@@ -68,6 +69,13 @@ public:
     void reset(size_t element, Save save);
     void flush();  // a pending Later save now
 
+    // Named layouts. Each result message is the reply text without the "hud: " prefix.
+    LayoutResult reset_all();
+    LayoutResult save_as(const std::string& name);
+    LayoutResult load(const std::string& name_or_slug);
+    LayoutResult remove(const std::string& name_or_slug);
+    void page_frame(size_t selected);  // the HUD page is drawn this frame; the selected part blinks
+
 private:
     // all with mu_ held
     uint64_t now_locked() const;
@@ -81,6 +89,14 @@ private:
     void publish_locked();
     void mark_changed_locked(Save save);
     void write_active_locked();
+    void write_layout_locked(const HudLayout& l);
+    void refresh_settings_locked();
+    std::string find_layout_locked(const std::string& name_or_slug) const;  // the map key, or ""
+    std::string layout_list_locked() const;
+    LayoutResult not_found_locked(const std::string& name) const;
+    LayoutResult reset_all_locked();
+    void use_default_locked();
+    void set_active_setting_locked(const std::string& name);
 
     HudEditorDeps deps_;
     mutable std::mutex mu_;
@@ -105,6 +121,12 @@ private:
     uint32_t fault_ = 0;
     uint64_t last_conflict_check_ = 0;
     bool scale_off_logged_ = false;
+
+    // keys and the page
+    Hotkeys hotkeys_;
+    bool page_seen_ = false;
+    uint64_t last_page_frame_ = 0;
+    size_t selected_ = 0;
 
     // saves
     bool dirty_ = false;

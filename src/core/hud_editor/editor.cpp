@@ -48,7 +48,15 @@ void HudEditor::read_settings_locked() {
     enabled_ = truthy(get("enabled"));
     show_outlines_ = truthy(get("show_outlines"));
     allow_other_ = truthy(get("allow_with_shroudhud"));
+    hotkeys_.set_keys(key_setting_vk(get("key_page")), key_setting_vk(get("key_reset")));
     settings_version_ = deps_.settings->version();
+}
+
+// The settings changed elsewhere (the page, `set emf ...`, the ini): follow them.
+void HudEditor::refresh_settings_locked() {
+    if (!deps_.settings || deps_.settings->version() == settings_version_) return;
+    read_settings_locked();
+    select_layout_locked(deps_.settings->get(kEmfSettingsId, std::string(kPrefix) + "active_layout"), false);
 }
 
 void HudEditor::select_layout_locked(const std::string& wanted, bool /*first*/) {
@@ -112,6 +120,8 @@ void HudEditor::update_gate_locked(bool log_change) {
 void HudEditor::publish_locked() {
     HudSnapshot next;
     next.active = gate_.state == GateState::On && hooked_;
+    const uint64_t now = now_locked();
+    const bool outlines_on = show_outlines_ && page_seen_ && now - last_page_frame_ < kPageGoneMs;
     const HudLayout& l = active_locked();
     for (size_t i = 0; i < kHudElementCount; ++i) {
         ElementEdit& e = next.edits[i];
@@ -119,15 +129,17 @@ void HudEditor::publish_locked() {
         e.y_percent = l.elements[i].y;
         e.scale = l.elements[i].scale;
         e.hidden = l.elements[i].hidden;
-        e.outline = false;
+        e.outline = outlines_on && (i != selected_ || (now / kBlinkMs) % 2 == 0);
     }
     if (same_snapshot(*box_.current(), next)) return;
     next.serial = ++serial_;
     box_.publish(next, now_locked());
 }
 
-void HudEditor::write_active_locked() {
-    const HudLayout copy = active_locked();
+void HudEditor::write_active_locked() { write_layout_locked(active_locked()); }
+
+void HudEditor::write_layout_locked(const HudLayout& l) {
+    const HudLayout copy = l;
     const std::wstring dir = deps_.dir;
     const uint32_t build = deps_.build_number;
     auto log = deps_.log;
@@ -164,6 +176,7 @@ void HudEditor::start() {
     const std::string wanted = deps_.settings ? deps_.settings->get(kEmfSettingsId, std::string(kPrefix) + "active_layout")
                                               : std::string();
     select_layout_locked(wanted, true);
+    hotkeys_.poll(deps_.key_down);  // a key held now does not fire later
     other_mod_ = deps_.other_hud_mod ? deps_.other_hud_mod() : std::string();
     last_conflict_check_ = now_locked();
     fault_ = deps_.fault_code ? deps_.fault_code() : 0;
@@ -175,11 +188,8 @@ void HudEditor::start() {
 }
 
 void HudEditor::tick() {
-    std::lock_guard<std::mutex> lock(mu_);
-    if (deps_.settings && deps_.settings->version() != settings_version_) {
-        read_settings_locked();
-        select_layout_locked(deps_.settings->get(kEmfSettingsId, std::string(kPrefix) + "active_layout"), false);
-    }
+    std::unique_lock<std::mutex> lock(mu_);
+    refresh_settings_locked();
     const uint64_t now = now_locked();
     if (now - last_conflict_check_ >= kConflictCheckMs) {
         other_mod_ = deps_.other_hud_mod ? deps_.other_hud_mod() : std::string();
@@ -194,6 +204,14 @@ void HudEditor::tick() {
             "HUD editor: scale is off until the game restarts (the game's transform stack did not match at a close); move "
             "and hide go on");
     }
+    const Hotkeys::Pressed pressed = hotkeys_.poll(deps_.key_down);
+    if (pressed.reset) {
+        const LayoutResult res = reset_all_locked();
+        log_locked("HUD editor: the reset key put every part back (" + res.message + ")");
+    }
+    const bool toggle = pressed.page && deps_.toggle_page;
+    lock.unlock();
+    if (toggle) deps_.toggle_page();  // outside the lock: it reaches into the console
 }
 
 HudView HudEditor::view() const {
@@ -269,6 +287,140 @@ void HudEditor::reset(size_t element, Save save) {
 void HudEditor::flush() {
     std::lock_guard<std::mutex> lock(mu_);
     if (dirty_) write_active_locked();
+}
+
+std::string HudEditor::find_layout_locked(const std::string& name_or_slug) const {
+    const std::string wanted = trim_profile_name(name_or_slug);
+    if (wanted.empty()) return "";
+    const std::string slug = profile_slug(wanted);
+    if (layouts_.count(slug)) return slug;
+    const std::string low = lower(wanted);
+    for (const auto& [key, l] : layouts_)
+        if (lower(l.name) == low || key == low) return key;
+    return "";
+}
+
+std::string HudEditor::layout_list_locked() const {
+    std::vector<std::string> names;
+    for (const auto& [slug, l] : layouts_) names.push_back(l.name);
+    std::sort(names.begin(), names.end(), [](const std::string& a, const std::string& b) {
+        const std::string x = lower(a), y = lower(b);
+        return x != y ? x < y : a < b;
+    });
+    std::string out;
+    for (size_t i = 0; i < names.size(); ++i) out += (i ? ", " : "") + names[i];
+    return out;
+}
+
+LayoutResult HudEditor::not_found_locked(const std::string& name) const {
+    return {false, "no layout \"" + name + "\"; layouts: " + layout_list_locked()};
+}
+
+void HudEditor::set_active_setting_locked(const std::string& name) {
+    if (!deps_.settings) return;
+    deps_.settings->set(kEmfSettingsId, std::string(kPrefix) + "active_layout", name);
+    // our own write: the next tick must not re-resolve it as a change from elsewhere
+    settings_version_ = deps_.settings->version();
+}
+
+void HudEditor::use_default_locked() {
+    if (!layouts_.count("default")) {
+        HudLayout d;
+        d.name = kDefaultLayoutName;
+        layouts_["default"] = d;
+    }
+    active_slug_ = "default";
+}
+
+LayoutResult HudEditor::reset_all_locked() {
+    HudLayout& a = active_locked();
+    if (a.is_default()) return {true, "the HUD is already the game's own"};
+    const bool backup = active_slug_ != "before-reset";
+    if (backup) {
+        HudLayout before = a;
+        before.name = kBeforeResetName;
+        layouts_["before-reset"] = before;
+        write_layout_locked(before);
+    }
+    HudLayout& now_active = active_locked();
+    now_active.elements = {};
+    publish_locked();
+    write_active_locked();
+    if (!backup) return {true, "every part is back where the game draws it"};
+    return {true,
+            "every part is back where the game draws it; the layout before is saved as \"Before reset\" (hud.layout load "
+            "\"Before reset\" brings it back)"};
+}
+
+LayoutResult HudEditor::reset_all() {
+    std::lock_guard<std::mutex> lock(mu_);
+    return reset_all_locked();
+}
+
+LayoutResult HudEditor::save_as(const std::string& name) {
+    std::lock_guard<std::mutex> lock(mu_);
+    const std::string trimmed = trim_profile_name(name);
+    const std::string problem = profile_name_problem(trimmed);
+    if (!problem.empty()) return {false, problem};
+    const std::string slug = profile_slug(trimmed);
+    const bool existed = layouts_.count(slug) > 0;
+    HudLayout copy = active_locked();
+    copy.name = trimmed;
+    layouts_[slug] = copy;
+    active_slug_ = slug;
+    dirty_ = false;
+    write_layout_locked(layouts_[slug]);
+    set_active_setting_locked(trimmed);
+    publish_locked();
+    return {true, "saved as \"" + trimmed + "\"" + (existed ? " (replaced the layout of that name)" : "")};
+}
+
+LayoutResult HudEditor::load(const std::string& name_or_slug) {
+    std::lock_guard<std::mutex> lock(mu_);
+    const std::string key = find_layout_locked(name_or_slug);
+    if (key.empty()) return not_found_locked(name_or_slug);
+    if (dirty_) write_active_locked();  // a pending save belongs to the layout being left
+    active_slug_ = key;
+    set_active_setting_locked(layouts_[key].name);
+    publish_locked();
+    return {true, "layout \"" + layouts_[key].name + "\" is in use"};
+}
+
+LayoutResult HudEditor::remove(const std::string& name_or_slug) {
+    std::lock_guard<std::mutex> lock(mu_);
+    const std::string key = find_layout_locked(name_or_slug);
+    if (key.empty()) return not_found_locked(name_or_slug);
+    const std::string name = layouts_[key].name;
+    const std::wstring dir = deps_.dir;
+    auto log = deps_.log;
+    auto job = [dir, key, log] {
+        std::string err;
+        if (!delete_layout_file(dir, key, &err) && log)
+            log("HUD editor: could not delete emf\\hud\\" + key + ".json (" + err + ")");
+    };
+    if (deps_.run)
+        deps_.run(job);
+    else
+        job();
+    const bool was_active = key == active_slug_;
+    layouts_.erase(key);
+    if (!was_active) return {true, "layout \"" + name + "\" deleted"};
+    dirty_ = false;
+    use_default_locked();
+    set_active_setting_locked(layouts_["default"].name);
+    publish_locked();
+    return {true, "layout \"" + name + "\" deleted; \"Default\" is in use"};
+}
+
+void HudEditor::page_frame(size_t selected) {
+    std::lock_guard<std::mutex> lock(mu_);
+    refresh_settings_locked();
+    const uint64_t now = now_locked();
+    page_seen_ = true;
+    last_page_frame_ = now;
+    selected_ = selected < kHudElementCount ? selected : 0;
+    publish_locked();
+    if (dirty_ && now - last_change_ >= kSaveDelayMs) write_active_locked();
 }
 
 }  // namespace emf::core::hud

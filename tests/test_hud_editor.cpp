@@ -5,6 +5,7 @@
 
 #include <fstream>
 
+#include "core/profiles.h"
 #include "hud_editor_rig.h"
 
 using namespace emf::core;
@@ -254,4 +255,204 @@ TEST_CASE("editor: scale works, is not available, or stops after a mismatch (log
           "hide still work.");
     CHECK(r.count_logged("HUD editor: scale is off until the game restarts") == 1);
     CHECK(e.view().elements[2].scale == 1.5f);
+}
+
+TEST_CASE("editor: reset_all keeps the layout before as \"Before reset\"") {
+    HudRig r;
+    HudEditor& e = r.make();
+    e.set_offset(0, 5, 5, Save::Now);
+    const LayoutResult res = e.reset_all();
+    CHECK(res.ok);
+    CHECK(res.message ==
+          "every part is back where the game draws it; the layout before is saved as \"Before reset\" (hud.layout load "
+          "\"Before reset\" brings it back)");
+    CHECK(e.view().elements[0].is_default());
+    CHECK(e.snapshots().current()->edits[0].x_percent == 0.0f);
+    bool found = false;
+    for (const auto& f : r.files())
+        if (f.slug == "before-reset") {
+            found = true;
+            REQUIRE(f.layout.has_value());
+            CHECK(f.layout->name == "Before reset");
+            CHECK(f.layout->elements[0].x == 5.0f);
+        }
+    CHECK(found);
+    const auto again = e.reset_all();
+    CHECK(again.ok);
+    CHECK(again.message == "the HUD is already the game's own");
+    const auto names = e.view().layouts;
+    CHECK(names == std::vector<std::string>{"Before reset", "Default"});
+}
+
+TEST_CASE("editor: reset_all after hiding everything") {  // Review Focus 2
+    HudRig r;
+    HudEditor& e = r.make();
+    for (size_t i = 0; i < kHudElementCount; ++i) e.set_hidden(i, true, Save::Now);
+    e.reset_all();
+    for (size_t i = 0; i < kHudElementCount; ++i) {
+        CAPTURE(i);
+        CHECK_FALSE(e.view().elements[i].hidden);
+        CHECK_FALSE(e.snapshots().current()->edits[i].hidden);
+    }
+    for (const auto& f : r.files())
+        if (f.slug == "before-reset") {
+            REQUIRE(f.layout.has_value());
+            for (size_t i = 0; i < kHudElementCount; ++i) CHECK(f.layout->elements[i].hidden);
+        }
+}
+
+TEST_CASE("editor: reset_all on the \"Before reset\" layout itself writes no backup") {
+    HudRig r;
+    HudEditor& e = r.make();
+    e.set_offset(0, 5, 5, Save::Now);
+    e.reset_all();
+    REQUIRE(e.load("before reset").ok);
+    CHECK(e.view().elements[0].x == 5.0f);
+    const size_t before = r.files().size();
+    const LayoutResult res = e.reset_all();
+    CHECK(res.message == "every part is back where the game draws it");
+    CHECK(r.files().size() == before);
+    CHECK(e.view().layout_name == "Before reset");
+    CHECK(e.view().elements[0].is_default());
+}
+
+TEST_CASE("editor: save_as, load and remove") {
+    HudRig r;
+    HudEditor& e = r.make();
+    e.set_offset(3, 7, 1, Save::Now);
+    LayoutResult res = e.save_as("Building 2");
+    CHECK(res.ok);
+    CHECK(res.message == "saved as \"Building 2\"");
+    bool has_file = false;
+    for (const auto& f : r.files()) has_file = has_file || f.slug == "building-2";
+    CHECK(has_file);
+    CHECK(r.store.get(kEmfSettingsId, "hud_editor.active_layout") == "Building 2");
+    CHECK(e.view().layout_name == "Building 2");
+    CHECK(e.view().layouts == std::vector<std::string>{"Building 2", "Default"});
+    res = e.load("default");
+    CHECK(res.ok);
+    CHECK(res.message == "layout \"Default\" is in use");
+    CHECK(e.view().layout_name == "Default");
+    CHECK(e.view().elements[3].x == 7.0f);  // the Default layout got the first edit
+    res = e.load("BUILDING-2");
+    CHECK(e.view().layout_name == "Building 2");
+    CHECK(r.store.get(kEmfSettingsId, "hud_editor.active_layout") == "Building 2");
+    res = e.load("nope");
+    CHECK_FALSE(res.ok);
+    CHECK(res.message == "no layout \"nope\"; layouts: Building 2, Default");
+    res = e.remove("Building 2");
+    CHECK(res.ok);
+    CHECK(res.message == "layout \"Building 2\" deleted; \"Default\" is in use");
+    CHECK(e.view().layout_name == "Default");
+    CHECK(r.store.get(kEmfSettingsId, "hud_editor.active_layout") == "Default");
+    for (const auto& f : r.files()) CHECK(f.slug != "building-2");
+    res = e.remove("nope");
+    CHECK_FALSE(res.ok);
+    res = e.save_as("a/b");
+    CHECK_FALSE(res.ok);
+    CHECK(res.message == profile_name_problem("a/b"));
+}
+
+TEST_CASE("editor: remove a layout that is not active keeps the active one") {
+    HudRig r;
+    HudEditor& e = r.make();
+    e.save_as("Other");
+    e.load("Default");
+    const LayoutResult res = e.remove("other");
+    CHECK(res.message == "layout \"Other\" deleted");
+    CHECK(e.view().layout_name == "Default");
+}
+
+TEST_CASE("editor: save_as and load: names by slug") {  // Review Focus 3
+    HudRig r;
+    HudEditor& e = r.make();
+    e.set_offset(0, 2, 2, Save::Now);
+    LayoutResult res = e.save_as("Default ");
+    CHECK(res.ok);
+    CHECK(res.message == "saved as \"Default\" (replaced the layout of that name)");
+    res = e.save_as("CON");
+    CHECK(res.ok);
+    const std::string slug = profile_slug("CON");
+    CHECK(slug == "con-profile");
+    bool has_file = false;
+    for (const auto& f : r.files()) has_file = has_file || f.slug == "con-profile";
+    CHECK(has_file);
+    CHECK(e.load("con").ok);
+    CHECK(e.view().layout_name == "CON");
+}
+
+TEST_CASE("editor: the page key toggles the page, the reset key resets") {
+    HudRig r;
+    HudEditor& e = r.make();
+    r.down = {VK_F9};
+    e.tick();
+    CHECK(r.toggles == 1);
+    e.tick();
+    CHECK(r.toggles == 1);
+    r.down = {};
+    e.tick();
+    r.down = {VK_F9};
+    e.tick();
+    CHECK(r.toggles == 2);
+    r.down = {};
+    e.tick();
+    e.set_offset(0, 5, 5, Save::Now);
+    r.down = {VK_PAUSE};
+    e.tick();
+    CHECK(e.view().elements[0].is_default());
+    CHECK(r.logged("the reset key"));
+}
+
+TEST_CASE("editor: hotkeys follow their settings") {  // Review Focus 5
+    HudRig r;
+    HudEditor& e = r.make();
+    r.set("key_page", "F8");
+    e.tick();
+    r.down = {VK_F8};
+    e.tick();
+    CHECK(r.toggles == 1);
+    r.down = {VK_F9};
+    e.tick();
+    CHECK(r.toggles == 1);
+    r.down = {};
+    e.tick();
+    r.set("key_page", "");
+    e.tick();
+    r.down = {VK_F8};
+    e.tick();
+    r.down = {};
+    e.tick();
+    r.down = {VK_F8, VK_F9};
+    e.tick();
+    CHECK(r.toggles == 1);
+}
+
+TEST_CASE("editor: outlines only while the page is drawn; the selected part blinks") {
+    HudRig r;
+    HudEditor& e = r.make();
+    r.now = 100000;
+    e.page_frame(2);
+    for (size_t i = 0; i < kHudElementCount; ++i) CHECK(e.snapshots().current()->edits[i].outline);
+    r.now += 250;
+    e.page_frame(2);
+    for (size_t i = 0; i < kHudElementCount; ++i) {
+        CAPTURE(i);
+        CHECK(e.snapshots().current()->edits[i].outline == (i != 2));
+    }
+    r.now += 300;
+    e.tick();
+    for (size_t i = 0; i < kHudElementCount; ++i) CHECK_FALSE(e.snapshots().current()->edits[i].outline);
+    r.now = 200000;
+    r.set("show_outlines", "0");
+    e.page_frame(2);
+    for (size_t i = 0; i < kHudElementCount; ++i) CHECK_FALSE(e.snapshots().current()->edits[i].outline);
+}
+
+TEST_CASE("editor: page_frame writes a due Later save (the main menu has no ticks)") {
+    HudRig r;
+    HudEditor& e = r.make();
+    e.set_offset(0, 1, 1, Save::Later);
+    r.now += 600;
+    e.page_frame(0);
+    CHECK(r.writes == 1);
 }
