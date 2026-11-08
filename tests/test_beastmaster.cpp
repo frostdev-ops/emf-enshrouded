@@ -4709,3 +4709,336 @@ TEST_CASE("rig: write_later gives every write a newer modification time, however
         last = now;
     }
 }
+
+// ---- home: the beasts a player left at home live in the Large Stable near them ----
+namespace {
+constexpr double kPi = 3.14159265358979;
+constexpr const char* kHomeBoar = "255fd8d9-4447-445d-8ffc-4d9dc0afdd16";
+constexpr const char* kHomeHound = "87575915-bc75-4611-ab71-0cd4e79535b1";
+constexpr const char* kHomeSabretooth = "50b96064-3ffc-47a2-8c7d-1d592a3c459c";
+constexpr const char* kHomeAurochs = "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02";
+// A Large Stable (the beasts pack's) `id` at (x, 10, z) in the base of the flame altar 900 at (0, 0), turned `yaw_deg`
+// (0: its open side +z, 90: +x).
+void large_stable(BeastRig& b, uint32_t id, double x, double z, double yaw_deg = 0) {
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, id, x, 10, z, kLargeOwnStableModel);
+    auto& q = live_of<ecs::CurrentTransform>(b, id).transform.orientation;
+    const double h = yaw_deg * kPi / 360.0;
+    q.x = 0;
+    q.y = static_cast<float>(std::sin(h));
+    q.z = 0;
+    q.w = static_cast<float>(std::cos(h));
+}
+// The creatures the next `n` spawns make: wild, level 1, 100 health, a SpawnTime (the game's clock), an AI state.
+void homes_ready(BeastRig& b, int n) {
+    const uint32_t first = b.r.fake.next_spawn_id;
+    b.spawnable(n);
+    for (int i = 0; i < n; ++i) {
+        const uint32_t id = first + static_cast<uint32_t>(i);
+        component<ecs::SpawnTime>(b.r.fake, id).spawnTime.value = kSpawnNs;
+        component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, id);
+    }
+}
+bool spawned_as(const Fake::Spawn& s, const char* guid) {
+    const auto g = guid_bytes(guid);
+    return std::memcmp(s.guid, g.data(), 16) == 0;
+}
+// A world point (x, z) in the frame of a stable at (sx, sz) turned yaw_deg: across it (first) and out of its open side.
+std::pair<double, double> local_of(double x, double z, double sx, double sz, double yaw_deg) {
+    const double a = yaw_deg * kPi / 180.0, dx = x - sx, dz = z - sz;
+    return {dx * std::cos(a) - dz * std::sin(a), dx * std::sin(a) + dz * std::cos(a)};
+}
+// On the Large Stable's plank floor, between its walls (the Stable's inner floor times 1.6).
+bool on_floor(const std::pair<double, double>& l) {
+    return l.first > -2.34 && l.first < 2.49 && l.second > -1.44 && l.second < 2.27;
+}
+// The yaw of the last turn (a teleport with a yaw) asked for entity `id`, in [-180, 180); nan when none.
+double last_yaw(BeastRig& b, uint32_t id) {
+    double yaw = std::nan("");
+    for (const auto& t : b.r.fake.teleports)
+        if (t.entity == id && (t.flags & EMF_TELEPORT_FACE_YAW)) yaw = t.yaw_deg;
+    return std::isnan(yaw) ? yaw : std::fmod(std::fmod(yaw + 180.0, 360.0) + 360.0, 360.0) - 180.0;
+}
+// Teleports with a ground search (a put-back, not a turn in place) asked for entity `id` to (x, z).
+size_t moves_to(BeastRig& b, uint32_t id, double x, double z) {
+    size_t n = 0;
+    for (const auto& t : b.r.fake.teleports)
+        n += t.entity == id && (t.flags & EMF_TELEPORT_FIND_GROUND) && std::abs(t.x - x) < 0.01 && std::abs(t.z - z) < 0.01;
+    return n;
+}
+bool destroyed(BeastRig& b, uint32_t id) {
+    return std::count(b.r.fake.destroyed.begin(), b.r.fake.destroyed.end(), id) > 0;
+}
+// A save of player 1's beasts (`lines`: "b ..." lines) in a world that has had a stable, loaded.
+void home_save(BeastRig& b, const std::string& lines) {
+    write(b.data, lines + "s 1\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+}
+// Player 1's three beasts at home (three_beasts: Fang the wolf, Tusk the boar, Rex the hound) and a Large Stable at
+// (10, 10, 0), found by the next search: they show up in it as 1234, 1235, 1236.
+void home_three(BeastRig& b, double yaw_deg = 0) {
+    three_beasts(b);
+    large_stable(b, 950, 10, 0, yaw_deg);
+    homes_ready(b, 3);
+    b.seconds(32);
+}
+}  // namespace
+
+TEST_CASE("home: the beasts a player left at home show up in the Large Stable near them, each on a spot of its own on "
+          "its floor, as their allies keeping to the stable") {
+    BeastRig b;
+    home_three(b);
+    REQUIRE(b.r.fake.spawns.size() == 3);
+    CHECK(spawned_as(b.r.fake.spawns[0], kWolfTemplate));
+    CHECK(spawned_as(b.r.fake.spawns[1], kHomeBoar));
+    CHECK(spawned_as(b.r.fake.spawns[2], kHomeHound));
+    const auto guards = b.guards();
+    for (uint32_t i = 0; i < 3; ++i) {
+        const auto& s = b.r.fake.spawns[i];
+        CHECK(on_floor(local_of(s.x, s.z, 10, 0, 0)));
+        CHECK(s.y > 10.0);
+        CHECK(s.y < 11.0);
+        CHECK(b.faction(1234 + i) == kPlayerAlly);
+        CHECK(std::count(guards.begin(), guards.end(), std::make_pair(1234 + i, 950u)) >= 1);
+        for (uint32_t j = 0; j < i; ++j)
+            CHECK(std::hypot(s.x - b.r.fake.spawns[j].x, s.z - b.r.fake.spawns[j].z) >= 1.0);
+    }
+    b.seconds(5);
+    CHECK(b.r.fake.spawns.size() == 3);  // once
+    CHECK(b.r.fake.destroyed.empty());
+}
+
+TEST_CASE("home: a Large Stable turned 90 degrees has its spots turned with it; the beasts turn to face out of its open "
+          "side") {
+    BeastRig b;
+    home_three(b, 90);
+    REQUIRE(b.r.fake.spawns.size() == 3);
+    // the first spot, 1.75 m to the left and 0.45 m out, turned with the stable: 0.45 m along +x, 1.75 m along +z
+    CHECK(b.r.fake.spawns[0].x == doctest::Approx(10.45));
+    CHECK(b.r.fake.spawns[0].z == doctest::Approx(1.75));
+    for (const auto& s : b.r.fake.spawns) CHECK(on_floor(local_of(s.x, s.z, 10, 0, 90)));
+    b.seconds(2);
+    for (uint32_t id : {1234u, 1235u, 1236u}) {
+        const double yaw = last_yaw(b, id);
+        REQUIRE_FALSE(std::isnan(yaw));
+        CHECK(std::abs(yaw - 90) <= 20.5);
+    }
+}
+
+TEST_CASE("home: a beast at home strolls first, then rests in the game's Sleep state (a wolf lies down, a boar stands "
+          "still), then strolls again near the stable") {
+    RollRig b;
+    b.roll(0.0);  // the shortest scenes: a first stroll of 5 s, a rest of 40 s, a stroll of 15 s
+    home_three(b);
+    CHECK(awake(b, 1234));
+    b.seconds(6);
+    CHECK(asleep(b, 1234));
+    CHECK(asleep(b, 1235));
+    const size_t guarded = b.guards().size();
+    b.seconds(40);
+    CHECK(awake(b, 1234));
+    CHECK(b.guards().size() > guarded);  // told to keep to the stable again
+    b.seconds(15);
+    CHECK(asleep(b, 1234));
+}
+
+TEST_CASE("home: a beast off the floor when its stroll ends is put back on its spot before it rests; one 6 m or more "
+          "from the middle for 3 s at once") {
+    RollRig b;
+    b.roll(0.0);
+    home_three(b);
+    REQUIRE(b.r.fake.spawns.size() == 3);
+    const Fake::Spawn spot = b.r.fake.spawns[0];
+    place(b.r.fake, 1234, 10, 10, 4);  // it strolled out of the open side, 4 m from the middle
+    b.seconds(6);
+    REQUIRE(asleep(b, 1234));
+    CHECK(moves_to(b, 1234, spot.x, spot.z) == 1);
+    place(b.r.fake, 1234, spot.x, spot.y, spot.z);
+    place(b.r.fake, 1235, 10, 10, 9);  // 9 m out
+    const size_t before = moves_to(b, 1235, b.r.fake.spawns[1].x, b.r.fake.spawns[1].z);
+    b.seconds(2);
+    CHECK(moves_to(b, 1235, b.r.fake.spawns[1].x, b.r.fake.spawns[1].z) == before);
+    b.seconds(3);
+    CHECK(moves_to(b, 1235, b.r.fake.spawns[1].x, b.r.fake.spawns[1].z) == before + 1);
+}
+
+TEST_CASE("home: a beast at home never fights (its aggro and chosen targets are cleared every step) and is healed to "
+          "full every second") {
+    BeastRig b;
+    home_three(b);
+    creature(b, 70, 20, 10, kSkeletonFoe);
+    fighting(b, 1234, 70);
+    one_step(b);
+    CHECK_FALSE(still_fighting(b, 1234));
+    b.r.fake.attrs[{1235, EMF_ATTR_HEALTH}] = 40;
+    b.seconds(1);
+    CHECK(b.added(1235, EMF_ATTR_HEALTH, 60));
+}
+
+TEST_CASE("home: a beast called leaves the stable at once and comes beside its owner; sent home, it shows up in the "
+          "stable again") {
+    BeastRig b;
+    home_three(b);
+    next_beast(b, 1237);
+    CHECK(b.reply("beastmaster.call Fang").find("comes") != std::string::npos);
+    CHECK(destroyed(b, 1234));
+    REQUIRE(b.r.fake.spawns.size() == 4);
+    CHECK(b.r.fake.spawns[3].x == doctest::Approx(2));  // beside its owner
+    b.seconds(3);
+    CHECK(b.r.fake.spawns.size() == 4);
+    homes_ready(b, 1);
+    b.reply("beastmaster.dismiss Fang");
+    b.seconds(2);
+    REQUIRE(b.r.fake.spawns.size() == 5);
+    CHECK(spawned_as(b.r.fake.spawns[4], kWolfTemplate));
+    CHECK(on_floor(local_of(b.r.fake.spawns[4].x, b.r.fake.spawns[4].z, 10, 0, 0)));
+}
+
+TEST_CASE("home: the beasts leave when their owner is more than 70 m from the stable, and show up again within 50 m") {
+    BeastRig b;
+    home_three(b);
+    place(b.r.fake, 1, 70, 10, 0);  // 60 m: they stay
+    b.seconds(2);
+    CHECK(b.r.fake.destroyed.empty());
+    place(b.r.fake, 1, 90, 10, 0);  // 80 m
+    b.seconds(2);
+    for (uint32_t id : {1234u, 1235u, 1236u}) CHECK(destroyed(b, id));
+    homes_ready(b, 3);
+    place(b.r.fake, 1, 65, 10, 0);  // 55 m: not yet
+    b.seconds(2);
+    CHECK(b.r.fake.spawns.size() == 3);
+    place(b.r.fake, 1, 40, 10, 0);  // 30 m
+    b.seconds(2);
+    CHECK(b.r.fake.spawns.size() == 6);
+}
+
+TEST_CASE("home: a Large Stable has room for 4 beasts: with 6 at home, the first 4 in list order show") {
+    BeastRig b;
+    home_save(b, "b 0x00000000000000aa wolf 0 0 A\nb 0x00000000000000aa boar 0 0 B\nb 0x00000000000000aa hound 0 0 C\n"
+                 "b 0x00000000000000aa sabretooth 0 0 D\nb 0x00000000000000aa wolf 0 0 E\nb 0x00000000000000aa boar 0 0 F\n");
+    large_stable(b, 950, 10, 0);
+    homes_ready(b, 6);
+    b.seconds(32);
+    REQUIRE(b.r.fake.spawns.size() == 4);
+    CHECK(spawned_as(b.r.fake.spawns[3], kHomeSabretooth));
+}
+
+TEST_CASE("home: the Stable and the animal beds show no beasts; a Large Stable more than 50 m from the player shows none") {
+    BeastRig b;
+    three_beasts(b);
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 951, 10, 10, 0, kOwnStableModel);
+    stable_prop(b, 952, -10, 10, 0, kLargeStableModel);  // the large animal bed
+    large_stable(b, 950, 60, 0);
+    homes_ready(b, 3);
+    b.seconds(32);
+    CHECK(b.reply("beastmaster.stable list").find("3. ") != std::string::npos);  // all three are stables
+    CHECK(b.r.fake.spawns.empty());
+    place(b.r.fake, 1, 15, 10, 0);  // 45 m from the Large Stable
+    b.seconds(2);
+    CHECK(b.r.fake.spawns.size() == 3);
+}
+
+TEST_CASE("home: a beast at home that dies anyway is removed and shows up again 60 s later; its owner loses nothing") {
+    BeastRig b;
+    home_three(b);
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 0;
+    deliver(b.r.fake, "EntityDiedEvent", died_event(1234));
+    b.seconds(2);
+    CHECK(destroyed(b, 1234));  // its body
+    homes_ready(b, 1);
+    b.seconds(50);
+    CHECK(b.r.fake.spawns.size() == 3);
+    b.seconds(10);
+    REQUIRE(b.r.fake.spawns.size() == 4);
+    CHECK(spawned_as(b.r.fake.spawns[3], kWolfTemplate));
+    next_beast(b, 1238);
+    CHECK(b.reply("beastmaster.call Fang").find("comes") != std::string::npos);  // no rest
+}
+
+TEST_CASE("home: a player building within 20 m of the Large Stable sends its beasts away; they come back 5 s after the "
+          "building stops") {
+    BeastRig b;
+    home_three(b);
+    building(b.r.fake, 1, true);
+    b.seconds(2);
+    for (uint32_t id : {1234u, 1235u, 1236u}) CHECK(destroyed(b, id));
+    homes_ready(b, 3);
+    b.seconds(5);
+    CHECK(b.r.fake.spawns.size() == 3);
+    building(b.r.fake, 1, false);
+    b.seconds(3);
+    CHECK(b.r.fake.spawns.size() == 3);
+    b.seconds(4);
+    CHECK(b.r.fake.spawns.size() == 6);
+}
+
+TEST_CASE("home: with the setting home_beasts off no beast shows; turned off while they show, they leave") {
+    BeastRig off({{"home_beasts", "false"}});
+    home_three(off);
+    CHECK(off.r.fake.spawns.empty());
+    BeastRig b;
+    home_three(b);
+    REQUIRE(b.r.fake.spawns.size() == 3);
+    b.r.fake.settings["beastmaster.home_beasts"] = "false";
+    b.seconds(2);
+    for (uint32_t id : {1234u, 1235u, 1236u}) CHECK(destroyed(b, id));
+    b.seconds(5);
+    CHECK(b.r.fake.spawns.size() == 3);
+}
+
+TEST_CASE("home: a beast whose pack is not installed does not show (the others do) and is tried again after 5 minutes") {
+    BeastRig b;
+    home_save(b, "b 0x00000000000000aa aurochs 0 0 Horns\nb 0x00000000000000aa wolf 0 0 Fang\n");
+    b.r.fake.missing_templates.insert(guid_bytes(kHomeAurochs));
+    large_stable(b, 950, 10, 0);
+    homes_ready(b, 1);
+    b.seconds(32);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(spawned_as(b.r.fake.spawns[0], kWolfTemplate));
+    b.r.fake.missing_templates.clear();
+    homes_ready(b, 1);
+    b.seconds(60);
+    CHECK(b.r.fake.spawns.size() == 1);
+    b.seconds(250);
+    REQUIRE(b.r.fake.spawns.size() == 2);
+    CHECK(spawned_as(b.r.fake.spawns[1], kHomeAurochs));
+}
+
+TEST_CASE("home: idle's search for player-side creatures left asleep leaves the beasts resting at home asleep") {
+    RollRig b;
+    b.roll(0.0);
+    home_three(b);
+    b.seconds(6);
+    REQUIRE(asleep(b, 1236));
+    out_at(b, "Fang", 1237, 0, 4);  // a beast out: its owner stands still, idle searches the world
+    b.seconds(8);
+    CHECK(asleep(b, 1236));
+    CHECK(asleep(b, 1235));
+}
+
+TEST_CASE("home: after a reload of the script the beasts it had at home are taken out of the world before new ones "
+          "show up") {
+    BeastRig b;
+    home_three(b);
+    for (uint32_t id : {1234u, 1235u, 1236u}) live_of<ecs::DynamicEnemy01BehaviorState>(b, id).guardEntityId.id = 950;
+    homes_ready(b, 3);
+    b.edit_main("local wild_mod = require(\"wild\")\n", "-- reloaded\n");
+    b.seconds(33);
+    for (uint32_t id : {1234u, 1235u, 1236u}) CHECK(destroyed(b, id));
+    CHECK(b.r.fake.spawns.size() == 6);
+}
+
+TEST_CASE("home: beastmaster.home says where your beasts at home are and what they do") {
+    BeastRig b;
+    three_beasts(b);
+    CHECK(b.reply("beastmaster.home").find("None of your beasts is in a Large Stable now") != std::string::npos);
+    large_stable(b, 950, 10, 0);
+    homes_ready(b, 3);
+    b.seconds(32);
+    const std::string text = b.reply("beastmaster.home");
+    CHECK(text.find("Fang: in the Large Stable at 10, 10, 0, strolling") != std::string::npos);
+    CHECK(text.find("Rex: in the Large Stable at 10, 10, 0") != std::string::npos);
+}

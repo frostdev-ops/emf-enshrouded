@@ -68,7 +68,8 @@ at 30 (settings; 0 turns a slot off). `/beastmaster slots` tells you yours and w
 
 **The stable** is a prop Beastmaster knows: the **Stable** of the beasts pack (crafted at the Workbench from 6 wood
 logs, 8 plant fibre and 2 animal fur, listed after the crude chair; a small open stable with a thatched roof, 4.5 m
-wide),
+wide), its **Large Stable** (12 wood logs, 16 plant fibre and 4 animal fur; the same stable 1.6 times as big, 7.2 m
+wide, where your beasts at home live: see below),
 or the game's **animal bed** (the straw
 bed for farm animals, large or small), built in your base, within 80 m of a flame altar (on the host a new one counts
 within seconds), or any prop the host
@@ -80,6 +81,17 @@ stays so, kept with the world):
 - at the first stable, each player's beasts that are out become active, then the first of their list, up to their
   slots;
 - a beast you tame takes a free active slot; with none free it goes to your stable.
+
+**Beasts at home in the Large Stable.** While you are within 50 m of a Large Stable, the beasts of your collection that
+are not out with you (active or in the stable) show up in it: each on a spot of its own on its floor, facing out of its
+open side. They stroll about near it for a while, then rest: wolves, hounds and bears lie down, the others stand still.
+One that wanders off is put back on its spot. They never fight and cannot be worn down (healed every second); one that
+dies anyway comes back a minute later, and you lose nothing. A Large Stable has room for 4 beasts, all players
+together (the beasts shown stay; then by player and list order); more beasts need another Large Stable. They leave when
+you call them (the called one comes to your side as always), go farther than 70 m away, someone builds within 20 m of
+the stable (back 5 s after the building stops: the game blocks building next to creatures), or the setting
+`home_beasts` is off. The small Stable and the animal beds stay empty. `beastmaster.home` (console) says where yours
+are and what they do.
 
 **The Beasts window:** every stable shows the game's own **E Open** prompt; press E there (the host). Where a stable has
 no prompt (a marked prop with an E use of its own, a prop without a collider, or one whose prompt the game dropped
@@ -262,6 +274,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `beastmaster.stable mark`, `unmark`, `list` | **host or admins:** the prop you look at (no camera data: the one within 3 m of you) is a stable; the marked prop nearest you (within 8 m) is no stable; this world's stables |
 | `beastmaster.threat` | **console:** the monsters held on you or your beasts now, and for how long |
 | `beastmaster.idle` | **console:** what your beasts do while you stand still now (their scenes), or how long you have stood still |
+| `beastmaster.home` | **console:** where your beasts at home are (in a Large Stable) and whether they stroll or rest |
 | `beastmaster.loyalty <name or number> <1-10>` | **host console only:** set a beast's loyalty (tests); the reply says its talent points |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
@@ -273,6 +286,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Beast wheel (`wheel_key`) | F3 | hold it for the wheel (any key the game does not use; B is its backpack key) |
 | Beasts window (at a stable without the prompt) (`stable_key`) | E | a stable has the game's E Open prompt; this key opens the window only at a stable without the prompt (a marked prop with its own E use or no collider, a prompt the game or EMF dropped), under your crosshair within 4 m; elsewhere E does what the game does |
 | Active slot 2, 3, 4 at level (`slot2_level`, `slot3_level`, `slot4_level`) | 10, 20, 30 | 0: that slot never opens |
+| Beasts at home live in a Large Stable (`home_beasts`) | on | off: the Large Stable stays empty, like the Stable |
 | One wheel with Necromancer's undead (`shared_wheel`) | on | off: Beastmaster's own wheel |
 | Mana to call a beast (`call_mana_pct`) | 15 % | of your maximum mana; 0 = free |
 | Seconds between calls (`call_cooldown_s`) | 10 | |
@@ -336,6 +350,10 @@ An EML data patch with new beasts:
   and left walls or the low rail on the right. Crafted at the Workbench. Like every
   placed object it is saved only inside a base, and removing the pack removes placed Stables from the world when it
   next loads (pick them up first).
+- the Large Stable, `Prop_Beastmaster_Large_Stable` (template `c110e001-4b38-462f-a317-3a6b0d627511`, pack 2.2.0): the
+  Stable 1.6 times as big (7.2 m wide, 4.7 m deep, 5.5 m high), its thatch and planks as big as on the Stable, its own
+  model (Beastmaster shows your beasts at home in it), its floor, walls and rail solid like the Stable's. Crafted at the
+  Workbench; saved and removed like the Stable.
 
 Installed and rebuilt like the bear pack (`tools/models/packs/beastmaster_beasts.json`). Without the pack (or when its
 content was not built), an aurochs or snake in your collection stays at home: calling it says that it comes with the

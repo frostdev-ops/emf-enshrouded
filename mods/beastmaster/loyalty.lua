@@ -33,4 +33,12 @@ function M.size(level)
 	return 1 + (level - 1) / 9 * 0.25
 end
 
+-- The components a beast of kind `sp` with `points` is spawned with (emf.spawn's): its size from loyalty on top of its
+-- kind's (the game draws a creature at the size it is made with); nil at loyalty 1.
+function M.spawn_size(sp, points, pace)
+	local lvl = M.level(points, pace)
+	if lvl <= 1 then return nil end
+	return { ScaleComponent = { uniformScale = (sp.scale or 1) * M.size(lvl) } }
+end
+
 return M

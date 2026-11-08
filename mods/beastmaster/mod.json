@@ -1,8 +1,8 @@
 {
   "id": "beastmaster",
   "name": "Beastmaster",
-  "version": "1.12.0",
-  "description": "A Beastmaster class: tame wild wolves, boars, sabretooths and hounds (beat them down or feed them bait), and bears, aurochs and snakes with the EMF creature packs (a wild snake is now and then a rare crimson, golden king or albino one, with a bonus for whoever slays it), keep up to 8 in your collection, call as many to fight beside you as your active slots (1 at the start, up to 4 with your level), and choose them at a stable (the game's animal bed in your base, or the Stable of the beasts pack, crafted at the Workbench: press E at it). Loyal beasts earn talent points (Strength, Toughness, Swiftness, Second Wind, Ambush, Guard, Menace, Taunt), spent on each beast's tab of the Beasts window (it shows the beast slowly turning, drawn from your own game). Monsters split between you and your beasts: a tank draws half of them. They follow you, come back when far away, pass the time while you stand still (lie down, sit by a fire, watch a villager, keep watch at night), and are kept with the world. Hold F3 for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
+  "version": "1.13.0",
+  "description": "A Beastmaster class: tame wild wolves, boars, sabretooths and hounds (beat them down or feed them bait), and bears, aurochs and snakes with the EMF creature packs (a wild snake is now and then a rare crimson, golden king or albino one, with a bonus for whoever slays it), keep up to 8 in your collection, call as many to fight beside you as your active slots (1 at the start, up to 4 with your level), and choose them at a stable (the game's animal bed in your base, or the Stable or Large Stable of the beasts pack, crafted at the Workbench: press E at it). In a Large Stable the beasts you left at home walk about and lie down. Loyal beasts earn talent points (Strength, Toughness, Swiftness, Second Wind, Ambush, Guard, Menace, Taunt), spent on each beast's tab of the Beasts window (it shows the beast slowly turning, drawn from your own game). Monsters split between you and your beasts: a tank draws half of them. They follow you, come back when far away, pass the time while you stand still (lie down, sit by a fire, watch a villager, keep watch at night), and are kept with the world. Hold F3 for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
   "authors": ["EMF contributors"],
   "enabled": false,
   "emf": 14,
@@ -50,6 +50,7 @@
     {"key": "slot2_level", "type": "slider", "min": 0, "max": 50, "step": 1, "default": 10, "label": "Active slot 2 at level (0: never)", "live": true, "group": "Stable"},
     {"key": "slot3_level", "type": "slider", "min": 0, "max": 50, "step": 1, "default": 20, "label": "Active slot 3 at level (0: never)", "live": true, "group": "Stable"},
     {"key": "slot4_level", "type": "slider", "min": 0, "max": 50, "step": 1, "default": 30, "label": "Active slot 4 at level (0: never)", "live": true, "group": "Stable"},
+    {"key": "home_beasts", "type": "bool", "default": true, "label": "Beasts at home live in a Large Stable (the beasts pack's)", "live": true, "group": "Stable"},
     {"key": "loyalty_pace", "type": "slider", "min": 0.25, "max": 4, "step": 0.25, "default": 1, "label": "Loyalty grows (x the normal pace)", "live": true, "group": "Behaviour"},
     {"key": "aggro_m", "type": "slider", "min": 5, "max": 40, "step": 1, "default": 25, "label": "Aggressive beasts go at foes within (m)", "live": true, "group": "Behaviour"},
     {"key": "xp_credit", "type": "bool", "default": true, "label": "You get your beasts' kills (XP and loot)", "live": true, "group": "Behaviour"},

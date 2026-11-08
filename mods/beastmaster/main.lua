@@ -11,6 +11,7 @@ local rare_mod = require("rare")
 local loyalty = require("loyalty")
 local slots = require("slots")
 local stable_mod = require("stable")
+local home_mod = require("home")
 local window_mod = require("beasts_window")
 local talents = require("talents")
 
@@ -72,6 +73,7 @@ local function spawned(world, id, sp, mul)
 end
 
 -- the beasts out in the world
+local home  -- the beasts at home in a Large Stable (made below)
 local pack = pack_mod.new({
 	setting = setting,
 	now = now,
@@ -82,6 +84,17 @@ local pack = pack_mod.new({
 	mode = function(account) return beasts:mode(account) end,
 	slots = open_slots,
 	stabled = function() return beasts:stabled() end,
+	leave_home = function(world, b) home:leave(world, b) end,
+	at_home = function(id) return home:has(id) end,
+})
+
+home = home_mod.new({
+	now = now,
+	setting = setting,
+	beasts = function() return beasts end,
+	homes = function() return stables:homes() end,
+	present = function() return pack.present end,
+	log = emf.log,
 })
 
 -- rare wild bears, aurochs and snakes (with their content packs)
@@ -96,6 +109,7 @@ emf.on_world_data(function(world, text)
 	window:reset()
 	release_asked = {}
 	pack:reset()
+	home:reset()
 	health:reset()
 	wild:reset()
 	rare:reset()
@@ -711,6 +725,7 @@ end)
 emf.on_event("EntityDiedEvent", function(world, e)
 	taming:on_died(e.deadEntityId)
 	pack:on_died(e.deadEntityId, world)
+	home:on_died(world, e.deadEntityId)
 	rare:on_died(world, e.deadEntityId)
 end)
 
@@ -722,6 +737,7 @@ emf.on_tick(function(world)
 	stables:step(world)
 	taming:step(world)
 	pack:step(world)
+	home:step(world)
 	wild:step(world)
 	health:step(world)
 	if pending then
@@ -781,6 +797,12 @@ end)
 emf.command("threat", ": the monsters held on you or your beasts now, and for how long", function(world, args)
 	local _, account = who(world)
 	emf.reply(account and pack.threat:held_text(world, account) or "Your account is not known yet.")
+end)
+
+-- Where your beasts at home are and what they do (for live checks).
+emf.command("home", ": where your beasts at home are (in a Large Stable) and what they do", function(world, args)
+	local _, account = who(world)
+	emf.reply(account and home:text(world, account) or "Your account is not known yet.")
 end)
 
 -- What your beasts do while you stand still now (for live checks).

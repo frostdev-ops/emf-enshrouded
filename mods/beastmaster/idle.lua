@@ -41,7 +41,8 @@
 -- M.new(env) where env has: now(world), setting(key), ids() (the beasts out: entity id -> {account, beast}),
 -- busy(world, id) (an Attack order on the beast, or it comes back from a chase), held(account) (the threat share holds
 -- a monster in that player's fight), building(world, account, owner) (the player builds, or their beasts are aside),
--- called_at(id) (env.now when Beastmaster spawned that beast, or nil).
+-- called_at(id) (env.now when Beastmaster spawned that beast, or nil), kept(id) (optional: a creature another part of
+-- the mod holds asleep, a beast at home: the search leaves it as it is).
 local species = require("species")
 
 local M = {}
@@ -157,19 +158,19 @@ function I:calibrate(world, ids, now)
 	end
 end
 
--- Holds beast `id` in the game's Sleep state (`sc` keeps what its masks had), on a lease; while a turned scene holds it,
--- the game's own turning is off. False while the game's time is not known.
-function I:lie(world, id, sc, now)
+-- Holds creature `id` in the game's Sleep state (`sc` keeps what its masks had) on a lease: `lease` and `check` are the
+-- game's times (ns) for its sleepEndTime and nextSleepCheckTime, nil while the game's time is not known (then false);
+-- `now` (env.now) is when the lease was given. While sc.turned the game's own turning is off.
+function M.hold(world, id, sc, now, lease, check)
 	local ai = world:get("DynamicEnemy01BehaviorState", id)
 	if not ai then return false end
 	if not sc.held then
-		local lease = self:game_now(world, LEASE_S * NS)
-		if not lease then return false end
+		if not (lease and check) then return false end
 		sc.had_off = (ai.disabledFeatures & M.SLEEP_BIT) ~= 0
 		ai.enabledFeatures = ai.enabledFeatures | M.SLEEP_BIT
 		if sc.had_off then ai.disabledFeatures = ai.disabledFeatures & ~M.SLEEP_BIT end
 		ai.sleepEndTime = lease
-		ai.nextSleepCheckTime = self:game_now(world, CHECK_AHEAD_NS)
+		ai.nextSleepCheckTime = check
 		ai.state = SLEEP
 		sc.held, sc.leased = true, now
 	end
@@ -181,6 +182,11 @@ function I:lie(world, id, sc, now)
 		sc.rot = nil
 	end
 	return true
+end
+
+-- Holds beast `id` in the game's Sleep state on a lease from the idle's clock; false while the game's time is not known.
+function I:lie(world, id, sc, now)
+	return M.hold(world, id, sc, now, self:game_now(world, LEASE_S * NS), self:game_now(world, CHECK_AHEAD_NS))
 end
 
 -- A held beast's lease, renewed every RENEW_S.
@@ -210,6 +216,7 @@ local function wake(world, id, sc)
 	sc.rot = nil
 	sc.held = false
 end
+M.wake = wake
 
 -- Turns beast `id` where it stands to face the point (tx, tz): true when the game took the teleport.
 local function turn(world, id, tx, tz)
@@ -241,7 +248,8 @@ function I:walk_step(world)
 	for k = w.i, last do
 		local id = w.ids[k]
 		local sc = self.scenes[id]
-		if not (sc and sc.held) and wake_stray(world, id) then w.woke = w.woke + 1 end
+		local kept = self.env.kept and self.env.kept(id)
+		if not (sc and sc.held) and not kept and wake_stray(world, id) then w.woke = w.woke + 1 end
 		if is_fire(world, id) then
 			local x, y, z = world:position(id)
 			if x then w.fires[#w.fires + 1] = { x = x, y = y, z = z } end

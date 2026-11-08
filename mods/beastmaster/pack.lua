@@ -5,7 +5,8 @@
 -- M.new(env) where env has: setting(key), now(world), tell(world, player, text), beasts() (the roster), save(),
 -- slots(world, owner) (how many beasts the owner may have out: their active slots), stabled() (the world has had a
 -- stable: only active beasts are called), and optionally on_spawn(world, id, species, health_mul) after a beast was
--- put into the world or its loyalty grew.
+-- put into the world or its loyalty grew, leave_home(world, beast) before a beast is put into the world (it leaves the
+-- Large Stable: home.lua) and at_home(id) (a beast at home in a Large Stable: idle.lua leaves it asleep).
 local species = require("species")
 local loyalty = require("loyalty")
 local aside_mod = require("aside")
@@ -60,6 +61,7 @@ function M.new(env)
 		held = function(account) return p.threat:holds(account) end,
 		building = function(world, account, owner) return aside_mod.building(world, owner) or p.aside:is_aside(account) end,
 		called_at = function(id) return p.called[id] end,
+		kept = function(id) return env.at_home ~= nil and env.at_home(id) end,
 	})
 	p:reset()
 	return p
@@ -145,6 +147,8 @@ local function calm(world, id)
 	end
 end
 
+M.calm = calm
+
 -- Still our beast: there, alive, and an ally.
 local function ours(world, id)
 	if not id or not world:position(id) then return false end
@@ -174,9 +178,8 @@ function P:spawn(world, owner, account, beast)
 	if not sp then return nil, "unknown species " .. tostring(beast.species) end
 	local x, y, z = world:position(owner)
 	if not x then return nil, "your position is not known" end
-	-- its size from loyalty is given at the spawn: the game draws a creature at the size it is made with
-	local lvl = loyalty.level(beast.points, self.env.setting("loyalty_pace"))
-	local size = lvl > 1 and { ScaleComponent = { uniformScale = (sp.scale or 1) * loyalty.size(lvl) } } or nil
+	if self.env.leave_home then self.env.leave_home(world, beast) end  -- out of the Large Stable first
+	local size = loyalty.spawn_size(sp, beast.points, self.env.setting("loyalty_pace"))
 	local id = emf.spawn(world, sp.template, x + 2, y + 0.5, z, size)
 	if not id or id == 0 then
 		if sp.pack then return nil, no_pack(sp), true end
