@@ -465,6 +465,7 @@ request {"id": n, "cmd": "...", ...}; reply {"id": n, "ok": true, ...} or {"id":
 - mod_key: Presses L for mods and answers after the release: {"ok":true,"key":"L","vk":76,"action":"press","mod_reads":9}. e.g. {"id":9,"cmd":"mod_key","key":"L"}
 - quit: Answers {"ok":true,"quitting":true}, then asks the game's window to close (as its close button does): the game saves and exits a few seconds later. e.g. {"id":10,"cmd":"quit"}
 - load_world: Starts a **LOCAL** save offline from the main menu, without clicks, the way "Play, Start a Session, Start..., Offline: Start" does, and answers once the world runs and the local player is in it: {"ok":true,"slot":1,"character":1,"world" ... e.g. {"id":11,"cmd":"load_world","slot":1,"character":1,"expect_name":"<character name>"}
+- join: Joins a server with a **LOCAL** character, for tests with a dedicated server on the same PC. e.g. {"id":12,"cmd":"join","character":1,"expect_name":"<character name>"}
 
 ## Tools for agents (docs/modding/ai_agents.md)
 

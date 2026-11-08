@@ -106,7 +106,7 @@ TEST_CASE("signature table: build 1283531's RVAs, game and dedicated server, as 
     // 1273043 (their RVAs from the notes), 1285601 (client) and 1287369 were at hand
     for (const auto& d : all_signatures()) {
         if (d.id >= Sig::UiScopeOpen && d.id <= Sig::UiPopTransform) continue;
-        if (d.id == Sig::ChatClientSend || d.id == Sig::ClientOutboxFlush) continue;
+        if (d.id == Sig::ChatClientSend || d.id == Sig::ClientOutboxFlush || d.id == Sig::PostJoinPending) continue;
         CHECK(d.rva[static_cast<size_t>(client)] != kRvaUnchecked);
         CHECK(d.rva[static_cast<size_t>(server)] != kRvaUnchecked);
     }
@@ -183,7 +183,7 @@ TEST_CASE("signature table: one entry per Sig, in order, unique names, valid pat
         for (size_t b = 0; b < kKnownBuildCount; ++b) {
             CAPTURE(all[i].name);
             const bool client_only = all[i].id == Sig::ClientWorldSetup || all[i].id == Sig::QueueChatMessage ||
-                                     all[i].id == Sig::ClientOutboxFlush ||
+                                     all[i].id == Sig::ClientOutboxFlush || all[i].id == Sig::PostJoinPending ||
                                      (all[i].id >= Sig::UiFrame && all[i].id <= Sig::CharacterSelected) ||
                                      (all[i].id >= Sig::UiScopeOpen && all[i].id <= Sig::UiPopTransform);
             CHECK((all[i].rva[b] == 0) == (known_builds()[b].server && client_only));
@@ -260,7 +260,7 @@ TEST_CASE("signature table has the inventory transaction and readOther, optional
         CHECK(d->rva[1] == w.rva_1273043);
         CHECK_FALSE(d->required);
     }
-    CHECK(kSigCount == 59);
+    CHECK(kSigCount == 60);
 }
 
 TEST_CASE("signature table has XpRequired and MaxPlayerLevel (API v22 levels), optional, on both exes of 1283531") {
@@ -274,6 +274,18 @@ TEST_CASE("signature table has XpRequired and MaxPlayerLevel (API v22 levels), o
     CHECK(cap->rva[3] == 0xe99270u);
     CHECK(cap->rva[4] == 0x9404f0u);
     CHECK_FALSE(cap->required);
+}
+
+TEST_CASE("signature table has PostJoinPending (the bridge's join), optional, the game exe of 1287369 only") {
+    const SigDef* d = find_signature("PostJoinPending");
+    REQUIRE(d != nullptr);
+    CHECK(d->id == Sig::PostJoinPending);
+    CHECK_FALSE(d->required);
+    CHECK(d->rva[7] == 0xd6fa30u);  // 1287369 client
+    CHECK(d->rva[8] == 0u);         // its dedicated server has no menu
+    CHECK_FALSE(rva_checked(*d, 1));
+    CHECK_FALSE(rva_checked(*d, 3));
+    CHECK_FALSE(rva_checked(*d, 5));
 }
 
 TEST_CASE("signature table has ChatClientSend and ClientOutboxFlush (API v27 mod messages), optional") {

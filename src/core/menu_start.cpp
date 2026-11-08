@@ -92,7 +92,9 @@ bool MenuStart::request(const LoadWorldRequest& r, Done done, LoadWorldResult* r
         }
         return false;
     };
-    if (r.world < 1 || r.world > L::kWorldSlots)
+    if (r.join && !deps_.join_pending)
+        return no("unavailable", "join is off: the game's join command (PostJoinPending) was not found on this build");
+    if (!r.join && (r.world < 1 || r.world > L::kWorldSlots))
         return no("bad_request", "slot must be a LOCAL world slot from 1 to " + std::to_string(L::kWorldSlots));
     if (r.character < 1 || r.character > L::kCharacterSlots)
         return no("bad_request", "character must be a LOCAL character slot from 1 to " + std::to_string(L::kCharacterSlots));
@@ -113,9 +115,9 @@ bool MenuStart::request(const LoadWorldRequest& r, Done done, LoadWorldResult* r
     guard_fired_ = false;
     guard_name_ = r.expect_name;
     step_ = Step::Waiting;
-    deps_.log("load_world: LOCAL world slot " + std::to_string(r.world) + ", LOCAL character " +
-              std::to_string(r.character) + (r.expect_name.empty() ? "" : " ('" + r.expect_name + "')") +
-              ": waiting for the main menu's UI frame");
+    deps_.log(std::string(r.join ? "join: the pending session" : "load_world: LOCAL world slot " + std::to_string(r.world)) +
+              ", LOCAL character " + std::to_string(r.character) +
+              (r.expect_name.empty() ? "" : " ('" + r.expect_name + "')") + ": waiting for the main menu's UI frame");
     return true;
 }
 
@@ -156,7 +158,8 @@ void MenuStart::disarm_locked(const std::string& why) {
 
 void MenuStart::linger_check_locked(uint64_t now) {
     if (!lingering_) return;
-    if (deps_.world_ready && deps_.world_ready()) disarm_locked("the world runs");
+    if ((deps_.world_ready && deps_.world_ready()) || (deps_.client_ready && deps_.client_ready()))
+        disarm_locked("the world runs");
     else if (now >= linger_until_ms_) disarm_locked("60 s after the start");
 }
 
@@ -228,26 +231,30 @@ std::optional<MenuStart::Pending> MenuStart::frame_a_locked(void* ui, uint64_t n
         return std::nullopt;
     }
     // LOCAL storage only: the storage byte of both slot ids is 0
-    const uintptr_t world_rec = save2 + L::kWorldRecords + (req_.world - 1) * L::kWorldRecordSize;
+    const uintptr_t world_rec = save2 + L::kWorldRecords + ((req_.join ? 1 : req_.world) - 1) * L::kWorldRecordSize;
     const uintptr_t char_rec = save2 + L::kCharacterRecords + (req_.character - 1) * L::kCharacterRecordSize;
     uint8_t world_state = 0, char_state = 0;
-    if (!read_u8(world_rec, &world_state) || !record_exists(world_state))
+    if (!req_.join && (!read_u8(world_rec, &world_state) || !record_exists(world_state)))
         return finish_locked(false, "refused", "LOCAL world slot " + std::to_string(req_.world) + " does not exist");
     if (!read_u8(char_rec, &char_state) || !record_exists(char_state))
         return finish_locked(false, "refused", "LOCAL character slot " + std::to_string(req_.character) + " does not exist");
-    world_name_ = read_name(world_rec + L::kWorldRecordName).value_or("");
+    world_name_ = req_.join ? "" : read_name(world_rec + L::kWorldRecordName).value_or("");
     character_name_ = read_name(char_rec + L::kCharacterRecordName).value_or("");
     if (!req_.expect_name.empty() && character_name_ != req_.expect_name)
         return finish_locked(false, "refused",
                              "LOCAL character slot " + std::to_string(req_.character) + " is '" + character_name_ +
                                  "', not '" + req_.expect_name + "'");
     armed_ = true;  // from the first post on, a Steam slot can never start
-    if (!deps_.select_character(ui, local_slot_id(req_.character)) || !deps_.select_world(ui, local_slot_id(req_.world))) {
+    if (!deps_.select_character(ui, local_slot_id(req_.character)) ||
+        (!req_.join && !deps_.select_world(ui, local_slot_id(req_.world)))) {
         waiting_for_ = "room in the menu's command queue";
         return std::nullopt;  // tried again next frame
     }
-    deps_.log("load_world: selected LOCAL character " + std::to_string(req_.character) + " ('" + character_name_ +
-              "') and LOCAL world slot " + std::to_string(req_.world) + " ('" + world_name_ + "')");
+    if (req_.join)
+        deps_.log("join: selected LOCAL character " + std::to_string(req_.character) + " ('" + character_name_ + "')");
+    else
+        deps_.log("load_world: selected LOCAL character " + std::to_string(req_.character) + " ('" + character_name_ +
+                  "') and LOCAL world slot " + std::to_string(req_.world) + " ('" + world_name_ + "')");
     step_ = Step::Selected;
     selected_ms_ = now;
     waiting_for_ = "the game to take the selection";
@@ -268,8 +275,9 @@ std::optional<MenuStart::Pending> MenuStart::frame_b_locked(void* ui, uint64_t n
                       read_u16(app + deps_.app.play_slot, &play) && read_u8(app + deps_.app.play_slot_set, &play_set) &&
                       read_u8(app + deps_.app.adventure, &adventure);
     const uint16_t want_char = local_slot_id(req_.character), want_world = local_slot_id(req_.world);
-    const bool taken = read && sel_char == want_char && char_valid && sel_world == want_world && world_valid &&
-                       play == want_world && play_set == 1 && adventure == 0;
+    const bool taken = req_.join ? (read && sel_char == want_char && char_valid)
+                                 : read && sel_char == want_char && char_valid && sel_world == want_world && world_valid &&
+                                       play == want_world && play_set == 1 && adventure == 0;
     if (!taken) {
         if (now - selected_ms_ <= kSelectMs) return std::nullopt;
         return finish_locked(false, "unavailable",
@@ -284,6 +292,25 @@ std::optional<MenuStart::Pending> MenuStart::frame_b_locked(void* ui, uint64_t n
     if (!read_u32(app + deps_.app.mode, &mode) || mode != 0)
         return finish_locked(false, "unavailable",
                              "the menu's session mode is " + std::to_string(mode) + ", not Lobby: not started");
+    if (req_.join) {
+        // only into an empty queue, like the start; the game runs Start Play as a client of the pending session
+        if (deps_.queued_commands && deps_.queued_commands(ui) != 0) {
+            waiting_for_ = "the menu's command queue to empty";
+            return std::nullopt;
+        }
+        uint8_t pending = 0;
+        if (deps_.app.pending_join && (!read_u8(app + deps_.app.pending_join, &pending) || pending == 0)) {
+            waiting_for_ = "a session to join (the game's 'About to join' prompt for +connect's server)";
+            return std::nullopt;
+        }
+        if (!deps_.join_pending(ui)) return std::nullopt;  // tried again next frame
+        start_posted_ = true;
+        start_posted_ms_ = now;
+        deps_.log("join: the game's 'Join Session' posted");
+        step_ = Step::Started;
+        waiting_for_ = "the joined world to run (no pending session to join: the game ignores the command)";
+        return std::nullopt;
+    }
     if (!area_posted_) {
         // only into an empty queue: nothing the menu queued itself (a click) runs between the selection and the start
         if (deps_.queued_commands && deps_.queued_commands(ui) != 0) {
@@ -321,8 +348,10 @@ void MenuStart::on_ui_frame(void* ui) {
         } else if (step_ == Step::Selected) {
             done = frame_b_locked(ui, now);
         } else if (step_ == Step::Started) {
-            if (deps_.world_ready && deps_.world_ready()) {
-                if (const auto name = session_world_name()) world_name_ = *name;
+            const bool ready = req_.join ? (deps_.client_ready && deps_.client_ready())
+                                         : (deps_.world_ready && deps_.world_ready());
+            if (ready) {
+                if (const auto name = session_world_name(); name && !req_.join) world_name_ = *name;
                 done = finish_locked(true, "", "");
             } else if (left_menu_ && menu_active_.load()) {  // Start Play gave up: the game is back at the main menu
                 done = guard_fired_.load()
@@ -425,6 +454,7 @@ using PostSlotFn = bool (*)(void*, uint16_t);
 using PostCharacterFn = bool (*)(void*, uint32_t, uint16_t);
 using PostAreaFn = bool (*)(void*, uint8_t);
 using PostStartFn = bool (*)(void*);
+using PostJoinFn = bool (*)(void*, const void*);  // (ui, const StringView* password)
 
 void hk_ui_frame() {
     o_ui_frame();
@@ -481,6 +511,11 @@ bool post_character(PostCharacterFn fn, void* ui, uint16_t slot) { return guarde
 bool post_slot(PostSlotFn fn, void* ui, uint16_t slot) { return guarded_post(fn, ui, slot); }
 bool post_area(PostAreaFn fn, void* ui, uint8_t area) { return guarded_post(fn, ui, area); }
 bool post_start(PostStartFn fn, void* ui) { return guarded_post(fn, ui); }
+// an empty password, as the prompt's button passes it when +password gave one
+bool post_join(PostJoinFn fn, void* ui) {
+    static const uint64_t kNoPassword[2] = {0, 0};  // {const char* data; u64 length}
+    return guarded_post(fn, ui, static_cast<const void*>(kNoPassword));
+}
 }  // namespace
 
 MenuStart* menu_start() { return g_menu.get(); }
@@ -554,6 +589,14 @@ bool install_menu_start(const std::array<Resolved, kSigCount>& sigs, bool known_
         return post_area(reinterpret_cast<PostAreaFn>(p_area), ui, area);
     };
     deps.start = [p_start](void* ui) { return post_start(reinterpret_cast<PostStartFn>(p_start), ui); };
+    // join (optional): postJoinPending must read the command queue where postStart does (`mov rsi, [rax+disp32]` at
+    // +0x1C, which its signature leaves open)
+    if (const uintptr_t p_join = addr(Sig::PostJoinPending)) {
+        int32_t q = 0;
+        if (emf::seh_read(reinterpret_cast<const void*>(p_join + 0x1F), &q, 4) &&
+            static_cast<uint32_t>(q) == app->ui_command_queue)
+            deps.join_pending = [p_join](void* ui) { return post_join(reinterpret_cast<PostJoinFn>(p_join), ui); };
+    }
     const uint32_t queue_at = app->ui_command_queue;
     deps.queued_commands = [queue_at](void* ui) -> size_t {
         uintptr_t data = 0, queue = 0;

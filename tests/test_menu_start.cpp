@@ -29,6 +29,8 @@ struct FakeGame {
     std::vector<Post> posts;
     size_t applied = 0;
     bool server_running = false, player = false, any_running = false, started = false, queue_full = false;
+    bool client_running = false;  // a joined server's world steps here (with the player in it: client_ready)
+    bool join_posted_ok = true;   // the 0x2a poster's answer
     MenuStart* menu = nullptr;  // set: 0x28 runs Start Play as the game does (the guard, back to the menu on 0x1F)
     int refused_starts = 0;     // Start Play runs that the character check stopped ("No Character selected")
     size_t foreign_queued = 0;  // commands other code queued that the game has not run yet (the menu's own clicks)
@@ -60,6 +62,7 @@ struct FakeGame {
         put_name(save2, rec + L::kCharacterRecordName, name);
     }
     void set16(std::vector<uint8_t>& mem, size_t at, uint16_t v) { std::memcpy(mem.data() + at, &v, 2); }
+    void set32(std::vector<uint8_t>& mem, size_t at, uint32_t v) { std::memcpy(mem.data() + at, &v, 4); }
     // The game's pregame dispatcher: runs the commands posted since the last call, as 0x140869090 does.
     void dispatch() {
         for (; applied < posts.size(); ++applied) {
@@ -76,6 +79,24 @@ struct FakeGame {
                 const size_t rec = L::kWorldRecords + (p.value >> 8) * L::kWorldStorageStride +
                                    ((p.value & 0xFF) - 1) * L::kWorldRecordSize;
                 std::memcpy(app.data() + lay.session_name, save2.data() + rec + L::kWorldRecordName, 16);
+            } else if (p.cmd == 0x2a) {  // join the pending session: mode Client_Online, then Start Play
+                set32(app, lay.mode, 3);  // Client_Online
+                if (!menu) {
+                    started = true;
+                    continue;
+                }
+                menu->on_menu_state(pg(), 2);
+                menu->on_other_state(pg(), 3, 0);
+                uint8_t result[16] = {};
+                menu->guard(result, s2());
+                if (result[0] == L::kNoCharacterSelected) {
+                    ++refused_starts;
+                    set32(app, lay.mode, 0);  // back to Lobby
+                    menu->on_other_state(pg(), 3, 2);
+                    menu->on_menu_state(pg(), 0);
+                } else {
+                    started = true;
+                }
             } else if (p.cmd == 0x28) {
                 if (!menu) {
                     started = true;
@@ -106,8 +127,10 @@ struct FakeGame {
         d.select_world = [this](void* ui, uint16_t slot) { return post(0x16, slot, ui); };
         d.session_area = [this](void* ui, uint8_t area) { return post(0x27, area, ui); };
         d.start = [this](void* ui) { return post(0x28, 0, ui); };
+        d.join_pending = [this](void* ui) { return join_posted_ok && post(0x2a, 0, ui); };
+        d.client_ready = [this] { return client_running && player; };
         d.world_ready = [this] { return server_running && player; };
-        d.any_world_running = [this] { return any_running || server_running; };
+        d.any_world_running = [this] { return any_running || server_running || client_running; };
         d.queued_commands = [this](void* ui) -> size_t { return ui ? posts.size() - applied + foreign_queued : SIZE_MAX; };
         d.now_ms = [this] { return now; };
         d.log = [this](const std::string& s) { log.push_back(s); };
@@ -184,6 +207,8 @@ TEST_CASE("load_world layout: 1273043's and 1283531's game exes; build 1283531's
     CHECK(b.play_slot == a.play_slot + 0x20);
     CHECK(b.play_slot_set == a.play_slot_set + 0x20);
     CHECK(b.adventure == a.adventure + 0x20);
+    CHECK(a.pending_join == 0u);       // not read on 1273043: join does not wait for it there
+    CHECK(b.pending_join == 0x35250u);  // 1287369's dispatcher, command 0x2a: gameApp+0x35120, +0x130 != 0
     // 1285601 (a hotfix): each of those offsets is used in its client's code as often as in 1283531's
     const int c1285601 = emf::known_build_index(1285601);
     REQUIRE(menu_app_layout(c1285601).has_value());
@@ -477,6 +502,126 @@ TEST_CASE_TEMPLATE("local_only: the guard refuses every start with a Steam chara
     CHECK(m.armed());
     uint8_t r4[16] = {};
     CHECK(m.guard(r4, g.s2()));
+}
+
+LoadWorldRequest join_req(uint32_t character = 1, const char* name = "") {
+    LoadWorldRequest r = req(1, character, name);
+    r.join = true;
+    return r;
+}
+
+TEST_CASE_TEMPLATE("join: frame A selects the LOCAL character only, frame B posts the game's 'Join Session' (0x2a); done when the joined world runs with the player", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
+    standard_saves(g);
+    MenuStart m(g.deps());
+    g.menu = &m;
+    m.on_menu_state(g.pg(), 0);
+    Capture c;
+    LoadWorldResult no;
+    if (g.lay.pending_join) g.app[g.lay.pending_join] = 1;  // the game pinged the server: the prompt is up
+    REQUIRE(m.request(join_req(1, "Character 2"), c.done(), &no));
+    m.on_ui_frame(kUi);  // frame A: the character, no world
+    REQUIRE(g.posts.size() == 1);
+    CHECK(g.posts[0].cmd == 0x11);
+    CHECK(g.posts[0].value == 0x0001);
+    CHECK(m.armed());
+    g.dispatch();
+    m.on_ui_frame(kUi);  // frame B: only the join, no offline and no start
+    REQUIRE(g.posts.size() == 2);
+    CHECK(g.posts[1].cmd == 0x2a);
+    g.dispatch();  // the game runs Start Play as a client: the guard lets the LOCAL character through
+    CHECK(g.started);
+    CHECK(g.refused_starts == 0);
+    g.now += 8000;
+    g.client_running = true;  // the server's world arrives; the player is not in it yet
+    m.on_ui_frame(kUi);
+    CHECK(c.calls == 0);
+    g.player = true;
+    m.on_ui_frame(kUi);
+    REQUIRE(c.calls == 1);
+    CHECK(c.last.ok);
+    CHECK(c.last.character == 1u);
+    CHECK(c.last.character_name == "Character 2");
+    CHECK_FALSE(m.armed());
+}
+
+TEST_CASE_TEMPLATE("join: a Steam character that slipped in, or another name, never joins (the guard), and the request ends refused", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
+    standard_saves(g);
+    MenuStart m(g.deps());
+    g.menu = &m;
+    m.on_menu_state(g.pg(), 0);
+    Capture c;
+    LoadWorldResult no;
+    if (g.lay.pending_join) g.app[g.lay.pending_join] = 1;
+    REQUIRE(m.request(join_req(1, "Character 2"), c.done(), &no));
+    m.on_ui_frame(kUi);
+    g.dispatch();
+    m.on_ui_frame(kUi);  // 0x2a posted
+    REQUIRE(g.posts.size() == 2);
+    g.set16(g.save2, L::kSelectedCharacter, 0x0101);  // the user picked the Steam character in between
+    g.dispatch();
+    CHECK(g.refused_starts == 1);
+    CHECK_FALSE(g.started);
+    m.on_ui_frame(kUi);
+    REQUIRE(c.calls == 1);
+    CHECK(c.last.code == "refused");
+}
+
+TEST_CASE("join: frame B waits for the pending session (the game's ping of the server) before it posts; the timeout names it") {
+    FakeGame g(L::kApp1283531);
+    standard_saves(g);
+    MenuStart m(g.deps());
+    m.on_menu_state(g.pg(), 0);
+    Capture c;
+    LoadWorldResult no;
+    REQUIRE(m.request(join_req(1, "Character 2"), c.done(), &no));
+    m.on_ui_frame(kUi);
+    g.dispatch();
+    m.on_ui_frame(kUi);
+    CHECK(g.posts.size() == 1);  // only the character: no session to join yet
+    g.now += 2000;
+    m.on_ui_frame(kUi);
+    CHECK(g.posts.size() == 1);
+    g.app[g.lay.pending_join] = 1;  // the server answered: the "About to join" prompt is up
+    m.on_ui_frame(kUi);
+    REQUIRE(g.posts.size() == 2);
+    CHECK(g.posts[1].cmd == 0x2a);
+    // another request that never gets a pending session times out naming it
+    FakeGame g2(L::kApp1283531);
+    standard_saves(g2);
+    MenuStart m2(g2.deps());
+    m2.on_menu_state(g2.pg(), 0);
+    Capture c2;
+    REQUIRE(m2.request(join_req(1, "Character 2"), c2.done(), &no));
+    m2.on_ui_frame(kUi);
+    g2.dispatch();
+    m2.on_ui_frame(kUi);
+    g2.now += 61000;
+    m2.on_ui_frame(kUi);
+    REQUIRE(c2.calls == 1);
+    CHECK(c2.last.code == "timeout");
+    CHECK(c2.last.error.find("session to join") != std::string::npos);
+}
+
+TEST_CASE_TEMPLATE("join: refused at once without the game's join command; a wrong name is refused before anything is posted", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
+    standard_saves(g);
+    auto d = g.deps();
+    d.join_pending = nullptr;  // PostJoinPending not found on this build
+    MenuStart m(d);
+    m.on_menu_state(g.pg(), 0);
+    Capture c;
+    LoadWorldResult no;
+    CHECK_FALSE(m.request(join_req(1, "Character 2"), c.done(), &no));
+    CHECK(no.code == "unavailable");
+    MenuStart m2(g.deps());
+    m2.on_menu_state(g.pg(), 0);
+    REQUIRE(m2.request(join_req(1, "Somebody Else"), c.done(), &no));
+    m2.on_ui_frame(kUi);
+    CHECK(g.posts.empty());
+    REQUIRE(c.calls == 1);
+    CHECK(c.last.code == "refused");
 }
 
 TEST_CASE_TEMPLATE("menu commands: each command a pregame state gets is logged with its first bytes", Build, On1273043, On1283531) {

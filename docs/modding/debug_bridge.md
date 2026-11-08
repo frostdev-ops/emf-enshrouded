@@ -79,6 +79,7 @@ PC.
 | `emf_bridge.ps1 key L` | presses L for mods (`-HoldMs`, `-Down`, `-Up`) |
 | `emf_bridge.ps1 quit` | the game saves and closes |
 | `emf_bridge.ps1 load_world 1 1 "<character name>"` | from the main menu: starts LOCAL world slot 1 with LOCAL character 1 offline, answers when the world runs (`load_world` below) |
+| `emf_bridge.ps1 join 1 "<character name>"` | joins the server the game was started for (`+connect`) with LOCAL character 1, answers when its world runs (`join` below) |
 | `emf_bridge.ps1 raw '{"cmd":"hello"}'` | sends one request and prints the reply as it came |
 
 ### Python: `emf_bridge.py`
@@ -346,6 +347,26 @@ world runs and the local player is in it:
   a Steam character, or another LOCAL character than the named one, gets "No Character selected" instead of joining.
   `emf_core.log` says `local_only: on` at start and names each refusal. Your own play with a Steam character does not
   start while it is set.
+
+### join
+
+`{"id":12,"cmd":"join","character":1,"expect_name":"<character name>"}` joins a server with a **LOCAL** character, for
+tests with a dedicated server on the same PC. Start the game with the server's address and password:
+`enshrouded.exe +connect <address>:<queryPort> +password <password>`. The game asks the server for its details, then
+shows "About to join: <server>" with Join Session and Cancel in the main menu. `join` presses Join Session the way the
+button does, and answers once the server's world runs here with the local player in it:
+`{"ok":true,"character":1,"character_name":"<character name>","ms":9000}`.
+
+- How: like `load_world`. In one UI frame EMF selects the LOCAL character (the command the character screen posts);
+  in a later frame it checks the selection, Lobby mode, no world and an empty command queue, waits until the game
+  has the session to join (its prompt is up), then posts the prompt's own command (0x2a, "join the pending
+  session"). The guard is on from the first post, as for `load_world`: a Steam character, or another name than
+  `expect_name`, gets "No Character selected" and nothing is joined. Keep `local_only=1` on as well.
+- Give the server time: a dedicated server answers the game's query only about 10 s after it starts, and on the
+  PC's network address, not on 127.0.0.1. When the game asked too early its log says "Server failed to respond" and
+  no prompt comes (`join` then times out, naming the session it waited for).
+- Only on the game exe of build 1287369 (the command's poster, `PostJoinPending`, is checked there); `emf_core.log`
+  says `join: on` or off next to `load_world: on`.
 
 ## A test with the bridge
 

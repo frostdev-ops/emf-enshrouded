@@ -11,6 +11,7 @@
 #   emf_bridge.ps1 key <name> [-Down | -Up] [-HoldMs 150]
 #   emf_bridge.ps1 quit                                   (the game saves and closes)
 #   emf_bridge.ps1 load_world 1 1 ["<character name>"] [-TimeoutMs 180000]   (from the main menu: LOCAL world slot 1, LOCAL character 1, offline)
+#   emf_bridge.ps1 join 1 ["<character name>"] [-TimeoutMs 180000]   (the main menu's "About to join" prompt of +connect: Join Session with LOCAL character 1)
 #   emf_bridge.ps1 raw '{"cmd":"hello"}'
 # -Json prints the game's reply as it came. It finds the game through -GamePid, -Game <folder>, its own place (installed
 # as <game>\emf\tools\), a running enshrouded.exe / enshrouded_server.exe, or Steam; only a pipe the game named in
@@ -186,13 +187,13 @@ $script:lastLine = ""
 # load_world answers when the local player is in the world, at the latest after its timeout_ms (default 180 s) and a
 # 10 s backstop of the game's own.
 function Get-ReplyTimeoutMs([hashtable]$request) {
-    $ms = if ($request["timeout_ms"]) { [int]$request["timeout_ms"] } else { @{ console = 10000; wait = 30000; screenshot = 5000; load_world = 180000 }[$request["cmd"]] }
+    $ms = if ($request["timeout_ms"]) { [int]$request["timeout_ms"] } else { @{ console = 10000; wait = 30000; screenshot = 5000; load_world = 180000; join = 180000 }[$request["cmd"]] }
     if (-not $ms) { $ms = 0 }
     if ($request["cmd"] -eq "console") { $ms += $(if ($null -ne $request["settle_ms"]) { [Math]::Min([Math]::Max([int]$request["settle_ms"], 0), 5000) } else { 300 }) }
     if ($request["cmd"] -eq "mod_key" -and (-not $request["action"] -or $request["action"] -eq "press")) {
         $ms += $(if ($request["hold_ms"]) { [int]$request["hold_ms"] } else { 150 })
     }
-    if ($request["cmd"] -eq "load_world") { $ms += 10000 }
+    if ($request["cmd"] -eq "load_world" -or $request["cmd"] -eq "join") { $ms += 10000 }
     $margin = 15000
     if ("$env:EMF_BRIDGE_REPLY_MARGIN_MS" -match '^\d+$') { $margin = [int]$env:EMF_BRIDGE_REPLY_MARGIN_MS }
     return $ms + $margin
@@ -389,6 +390,16 @@ switch ($Command) {
         Check-Ok $r
         "'$($r.world)' runs with '$($r.character_name)' (LOCAL world slot $($r.slot), character $($r.character), $($r.ms) ms)"
     }
+    "join" {
+        if (-not $Arg1) { Fail "usage: emf_bridge.ps1 join <LOCAL character slot> [<expected character name>] [-TimeoutMs n]" 2 }
+        $req = @{ cmd = "join"; character = [int]$Arg1 }
+        if ($Arg2) { $req["expect_name"] = $Arg2 }
+        if ($TimeoutMs -gt 0) { $req["timeout_ms"] = $TimeoutMs }
+        $r = Invoke-Bridge $req
+        if ($Json) { Show-Json $r }
+        Check-Ok $r
+        "joined with '$($r.character_name)' (LOCAL character $($r.character), $($r.ms) ms)"
+    }
     "raw" {
         if (-not $Arg1) { Fail "usage: emf_bridge.ps1 raw '{`"cmd`":`"hello`"}'" 2 }
         $obj = $Arg1 | ConvertFrom-Json
@@ -397,7 +408,7 @@ switch ($Command) {
         $r = Invoke-Bridge $req
         Show-Json $r
     }
-    default { Fail "unknown command '$Command' (hello, console, state, mods, wait, log, events, shot, key, quit, load_world, raw)" 2 }
+    default { Fail "unknown command '$Command' (hello, console, state, mods, wait, log, events, shot, key, quit, load_world, join, raw)" 2 }
 }
 $client.Dispose()
 exit 0

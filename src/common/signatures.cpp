@@ -170,6 +170,11 @@ constexpr SigDef kSignatures[] = {
     // void clientOutboxFlush(GameClient*): sends the client's queued chat lines as ChatMessageClientMessages; called from
     // the GameClient update every frame. Client only. 12 bytes, one match on 1273043, 1285601 and 1287369.
     {Sig::ClientOutboxFlush, "ClientOutboxFlush", "40 55 53 56 48 8D AC 24 10 FC FF FF", {kRvaUnchecked, 0x867710u, 0u, kRvaUnchecked, 0u, 0x871e10u, 0u, 0x871ef0u, 0u}, false},
+    // bool postJoinPending(UiCtx* ui, const StringView* password): command 0x2a, "join the pending session" (the one
+    // enshrouded.exe +connect asked for), as the main menu's "About to join" prompt posts it ("Join Session", with an
+    // empty password when +password gave one). The pregame dispatcher sets Client_Online and enters Start Play. Client
+    // only; checked on 1287369 alone (one match).
+    {Sig::PostJoinPending, "PostJoinPending", "48 89 5C 24 10 48 89 6C 24 18 56 57 41 56 48 83 EC 20 48 8B 81 D0 00 00 00 4C 8B F2 48 8B B0 ?? ?? 03 00 8B 46 10 48 3B 46 18 0F 84 ?? ?? ?? ?? 8B 5E 40 8B C3 83 E0 0F 74 05 2B D8 83 C3 10 48 8B 7E 30 33 D2 8B CB 41 B8 01 04 00 00 48 03 F9 48 8D 4F 01 E8 ?? ?? ?? ?? 33 C0 C6 07 2A", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xd6fa30u, 0u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

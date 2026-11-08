@@ -36,6 +36,8 @@ enum class Sig : size_t {
     UiScopeOpen, UiScopeClose, UiPushTransform, UiPopTransform,
     // mod messages (API v27): the client's chat send and the outbox flush that sends the lines on
     ChatClientSend, ClientOutboxFlush,
+    // the main menu's "About to join" prompt: "Join Session" posts this command (the debug bridge's join)
+    PostJoinPending,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

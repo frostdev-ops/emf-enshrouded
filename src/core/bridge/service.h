@@ -64,6 +64,7 @@ struct LoadWorldParams {
     std::string expect_name;   // "" = any; else the character's name must be this
     uint32_t timeout_ms = 180000;
     bool test_refuse = false;  // dev check: the guard refuses even the LOCAL pair (the game stays in the menu)
+    bool join = false;  // join: the pending session (+connect) with the LOCAL character; slot is not used
 };
 struct LoadWorldReply {
     bool ok = false;

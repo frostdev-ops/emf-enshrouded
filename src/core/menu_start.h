@@ -55,11 +55,15 @@ struct AppLayout {
     uint32_t play_slot;         // gameApp: u16 slot id of the save to load (its high byte, the next one, the storage)
     uint32_t play_slot_set;     // gameApp: u8
     uint32_t adventure;         // gameApp: u8: an adventure instead of a save (playWorld clears it)
+    // gameApp: u8 != 0 while a session to join is pending (+connect's server answered: the "About to join" prompt);
+    // command 0x2a does nothing without it. 0 = not known for this layout (join does not wait for it)
+    uint32_t pending_join;
 };
-inline constexpr AppLayout kApp1273043{0x33CC0, 0x34FA8, 0x34FE8, 0x35058, 0x3505A, 0x35270};
+inline constexpr AppLayout kApp1273043{0x33CC0, 0x34FA8, 0x34FE8, 0x35058, 0x3505A, 0x35270, 0};
 // every field 0x20 later: counted as disp32 in 1283531's client (the queue 356 times, the old value 3 times; mode 27,
 // session name 8, play slot 19, adventure 25), and the four post* functions read the queue there
-inline constexpr AppLayout kApp1283531{0x33CE0, 0x34FC8, 0x35008, 0x35078, 0x3507A, 0x35290};
+// pending_join: read in 1287369's pregame dispatcher (command 0x2a: gameApp+0x35120, then +0x130)
+inline constexpr AppLayout kApp1283531{0x33CE0, 0x34FC8, 0x35008, 0x35078, 0x3507A, 0x35290, 0x35250};
 // record states (u8 at +0)
 constexpr uint8_t kRecordExists = 2, kRecordLoaded = 3, kRecordChanged = 4;
 constexpr uint8_t kNoCharacterSelected = 0x1F;  // the "character selected?" check's error: back to the menu
@@ -74,6 +78,9 @@ struct LoadWorldRequest {
     std::string expect_name;   // "" = any; else the character must have this name
     uint32_t timeout_ms = 180000;
     bool test_refuse = false;  // dev check of the refusal path: the guard refuses even the LOCAL pair
+    // join the session the game was asked to join (enshrouded.exe +connect <address> +password <password>, the menu's
+    // "About to join" prompt) as its "Join Session" button does, instead of starting a LOCAL world: world is not used
+    bool join = false;
 };
 
 // The character the game has selected (save2+0x1192BE, the slot id the menu's character screen and load_world set, and
@@ -104,9 +111,13 @@ public:
         std::function<bool(void* ui, uint16_t slot)> select_world;
         std::function<bool(void* ui, uint8_t area)> session_area;
         std::function<bool(void* ui)> start;
+        // the "About to join" prompt's "Join Session" (0x2a: join the pending session); null when not found
+        std::function<bool(void* ui)> join_pending;
         // the started world is ready: a world this game hosts steps and the local player is in it (the server world
         // steps about a second after the start, long before the save has loaded and the player exists)
         std::function<bool()> world_ready;
+        // a joined session is ready: its world steps here (as a client) and the local player is in it
+        std::function<bool()> client_ready;
         std::function<bool()> any_world_running;     // any world steps (hosted or someone else's)
         // commands waiting in the UI's pregame command queue (SIZE_MAX: unreadable); the start is posted only into an
         // empty queue
@@ -146,6 +157,7 @@ public:
     void note_command(uint8_t state, const void* cmd) const;
 
     bool armed() const { return armed_.load() || local_only_.load(); }
+    bool can_join() const { return static_cast<bool>(deps_.join_pending); }
     void log_line(const std::string& s) const { deps_.log(s); }
     bool busy() const;
     bool menu_active() const { return menu_active_.load(); }

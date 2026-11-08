@@ -15,7 +15,7 @@ namespace emf::core::bridge {
 
 const std::vector<std::string>& command_names() {
     static const std::vector<std::string> k = {"hello",  "console",    "state",   "mods", "log",       "wait",
-                                               "events", "screenshot", "mod_key", "quit", "load_world"};
+                                               "events", "screenshot", "mod_key", "quit", "load_world", "join"};
     return k;
 }
 
@@ -331,14 +331,18 @@ struct Service::Impl : std::enable_shared_from_this<Impl> {
         o.str("character_name", r.character_name).num("ms", static_cast<double>(r.ms));
         reply_ok(p->client, p->id, o.members());
     }
-    void do_load_world(ClientId c, const Request& r) {
+    void do_load_world(ClientId c, const Request& r, bool join = false) {
         std::string err;
         LoadWorldParams lp;
         std::optional<std::string> name;
-        const char* usage = "load_world needs \"slot\" and \"character\": LOCAL slots (1-based), e.g. "
-                            "{\"cmd\":\"load_world\",\"slot\":1,\"character\":1}";
-        if (!r.body.get("slot") || !r.body.get("character")) return bad(c, r.id, usage);
-        if (!read_ms(r.body, "slot", 0, 1, 255, &lp.slot, &err)) return bad(c, r.id, err);
+        const char* usage = join ? "join needs \"character\": a LOCAL character slot (1-based), e.g. "
+                                   "{\"cmd\":\"join\",\"character\":1,\"expect_name\":\"Character 2\"}"
+                                 : "load_world needs \"slot\" and \"character\": LOCAL slots (1-based), e.g. "
+                                   "{\"cmd\":\"load_world\",\"slot\":1,\"character\":1}";
+        if ((!join && !r.body.get("slot")) || !r.body.get("character")) return bad(c, r.id, usage);
+        lp.join = join;
+        if (join) lp.slot = 1;
+        else if (!read_ms(r.body, "slot", 0, 1, 255, &lp.slot, &err)) return bad(c, r.id, err);
         if (!read_ms(r.body, "character", 0, 1, 255, &lp.character, &err)) return bad(c, r.id, err);
         if (!read_text(r.body, "expect_name", &name, &err)) return bad(c, r.id, err);
         if (name) lp.expect_name = *name;
@@ -752,6 +756,7 @@ struct Service::Impl : std::enable_shared_from_this<Impl> {
         if (cmd == "mod_key") return do_mod_key(c, r);
         if (cmd == "quit") return do_quit(c, r);
         if (cmd == "load_world") return do_load_world(c, r);
+        if (cmd == "join") return do_load_world(c, r, true);
         reply_error(c, r.id, code::kUnknownCommand,
                     "unknown command '" + cmd + "' (commands: " + joined(command_names()) + ")");
     }

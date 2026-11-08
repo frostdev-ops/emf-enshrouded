@@ -802,6 +802,31 @@ TEST_CASE("bridge service: load_world hands the LOCAL slots to the game and answ
     CHECK(f.sent.size() == 1);
 }
 
+TEST_CASE("bridge service: join hands a join of the pending session with the LOCAL character to the game") {
+    Fake f;
+    Service s(f.sources(), f.output());
+    s.on_connect(1);
+    s.on_line(1, R"({"id":1,"cmd":"join","character":1,"expect_name":"Character 2","timeout_ms":60000})");
+    REQUIRE(f.loads == 1);
+    CHECK(f.load_params.join);
+    CHECK(f.load_params.character == 1u);
+    CHECK(f.load_params.expect_name == "Character 2");
+    CHECK(f.load_params.timeout_ms == 60000u);
+    LoadWorldReply r;
+    r.ok = true;
+    r.character = 1;
+    r.character_name = "Character 2";
+    r.ms = 9000;
+    f.load_done(r);
+    const auto v = last(f);
+    CHECK(ok(v));
+    CHECK(str(v, "character_name") == "Character 2");
+    s.on_line(1, R"({"id":2,"cmd":"join"})");  // the character is needed
+    CHECK(str(last(f), "code") == "bad_request");
+    s.on_line(1, R"({"id":3,"cmd":"load_world","slot":1,"character":1})");
+    CHECK_FALSE(f.load_params.join);  // load_world never joins
+}
+
 TEST_CASE("bridge service: load_world needs both slots as whole numbers; refusals and errors come back with their code") {
     Fake f;
     Service s(f.sources(), f.output());

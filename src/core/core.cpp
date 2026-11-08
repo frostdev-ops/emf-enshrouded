@@ -837,6 +837,10 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             return g_state->tracker.latest(EMF_WORLD_SERVER, GetTickCount64()) != nullptr &&
                    emf::core::api_table()->local_player() != 0;
         };
+        menu.client_ready = [] {
+            return g_state->tracker.latest(EMF_WORLD_CLIENT, GetTickCount64()) != nullptr &&
+                   emf::core::api_table()->local_player() != 0;
+        };
         menu.any_world_running = [] {
             const uint64_t now = GetTickCount64();
             return g_state->tracker.latest(EMF_WORLD_SERVER, now) || g_state->tracker.latest(EMF_WORLD_CLIENT, now);
@@ -844,7 +848,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         menu.now_ms = [] { return GetTickCount64(); };
         menu.log = [](const std::string& s) { emf::logf("%s", s.c_str()); };
         if (emf::core::install_menu_start(g_state->sigs, known, build, std::move(menu), &g_load_world_off)) {
-            emf::logf("load_world: on (main-menu hooks installed; the guard acts only during a load_world)");
+            emf::logf("load_world: on (main-menu hooks installed; the guard acts only during a load_world); join: %s",
+                      emf::core::menu_start()->can_join() ? "on" : "off (PostJoinPending not usable on this build)");
             // [debug] local_only=1: tests that join a server at boot (+connect) post no load_world, so the guard is on for
             // every start of this process; [debug] local_only_name: the LOCAL character must have this name too
             const std::wstring ini = dir + L"\\emf\\emf_core.ini";
