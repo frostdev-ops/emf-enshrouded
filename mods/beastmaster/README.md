@@ -368,8 +368,9 @@ does not ship this file. A beast added here has no picture on its tab (the pictu
 - The picture on a beast's tab: EMF draws one of each kind from your own game files when the game starts (the
   `portraits` list in `mod.json`; EMF 0.5.2 or newer). The first start after installing shows a short splash while it
   draws. Nothing of the game's art ships with the mod. A pack beast's picture is drawn when its pack is installed at
-  that start; with a pack added later it comes after the next game or EMF update (EMF does not try a failed picture
-  again before then). Until a picture is there, or with an older EMF, the tab shows the rest as before.
+  that start; with a pack added later it comes at the next start (with EMF 0.5.2 itself only after the next game or EMF
+  update: that version does not try a failed picture again before then). Until a picture is there, or with an older
+  EMF, the tab shows the rest as before.
 - A beast that is out is taken out of the world while its owner is away, and comes back when they return.
 - Beasts are ordinary game creatures with the enemy AI: they guard you as the game's companions do, and sometimes take
   their own path to a foe.
