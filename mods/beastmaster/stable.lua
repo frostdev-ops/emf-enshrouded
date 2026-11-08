@@ -21,13 +21,16 @@ local M = {}
 
 -- The render models of the props players build as a stable, and the names the list shows: the game's animal beds (the
 -- straw beds for farm animals; items Animal_Farm_Housing_Sleeping_Bed and ..._YAK_Sanddigger), which have no E use of
--- their own, and the beasts pack's Stable (crafted at the Workbench; a model record of its own, the large bed's mesh).
+-- their own, and the beasts pack's Stable and Large Stable (crafted at the Workbench; render models of their own).
 M.MODELS = {
 	["daeb81bb-8398-4128-9107-c75b2e3e7d5b"] = "Animal bed",        -- animalprops_farm_animal_sleep_01
 	["7dd9139a-fba7-4e60-8b5a-fa853c250ef7"] = "Large animal bed",  -- animalprops_farm_animal_sleep_large_01
 	["1a49170a-b3d2-498d-9062-8946f6469613"] = "Stable",            -- beastmaster_stable (the beasts pack)
+	["5879f304-0050-4ecb-96f4-5cc0e66155d9"] = "Large Stable",      -- beastmaster_large_stable (the beasts pack)
 }
-M.STABLE_ITEM = "Prop_Beastmaster_Stable"  -- the beasts pack's Stable: its item's debug name
+-- The stables the beasts at home live in (home.lua): the Large Stable.
+M.HOMES = { ["5879f304-0050-4ecb-96f4-5cc0e66155d9"] = true }
+M.STABLE_ITEM = "Prop_Beastmaster_Stable"  -- the beasts pack's Stable: its item's debug name (the pack has both)
 
 local ASK_AGAIN_S = 60  -- s: craftable(t) asks again this long after an item lookup that found nothing
 local craftable = false  -- the Stable's item was found (it stays: the game's items do not change while it runs)
@@ -47,13 +50,13 @@ end
 
 -- What players build as a stable, for the hints.
 function M.what_to_build()
-	if M.craftable() then return "a Stable (crafted at the Workbench) or an animal bed" end
+	if M.craftable() then return "a Stable or a Large Stable (crafted at the Workbench) or an animal bed" end
 	return "an animal bed (the straw bed for farm animals)"
 end
 
 -- What a stable is, in brackets after "a stable": "(an animal bed in your base)".
 function M.what_it_is()
-	return "(" .. (M.craftable() and "a Stable or an animal bed" or "an animal bed") .. " in your base)"
+	return "(" .. (M.craftable() and "a Stable, a Large Stable or an animal bed" or "an animal bed") .. " in your base)"
 end
 
 local SCAN_PER_STEP = 250  -- entities looked at per step while a world is searched
@@ -81,6 +84,14 @@ local function is_player(world, id)
 	return id >= 1 and id <= 1023 and has(world, "PlayerState", id)
 end
 
+-- An entity's turn in the world: its CurrentTransform orientation {x, y, z, w}, or nil.
+local function turn_of(world, id)
+	local ok, t = pcall(world.get, world, "CurrentTransform", id)
+	local q = ok and t and t.transform and t.transform.orientation
+	if not q then return nil end
+	return { x = q.x, y = q.y, z = q.z, w = q.w }
+end
+
 -- The camera ray of `player`, or nil when the server has no camera for them.
 local function camera(world, player)
 	local ok, input = pcall(world.get, world, "PlayerInput", player)
@@ -105,11 +116,12 @@ end
 function S:reset()
 	self.walk, self.walk_after = nil, 0
 	self.cwalk, self.cwalk_after = nil, 0
-	self.client_models = {}  -- entity -> {model, x, y, z}: the beds the host's client world showed in its last search
+	self.client_models = {}  -- entity -> {model, x, y, z, q}: the beds the host's client world showed in its last search
 	self.client_steps = 0
 	self.altars = {}         -- the flame altars the last search of the server world found: {x, z}
-	self.server_found = {}   -- the props with a stable's model the server world itself showed: {id, x, y, z, name}
-	self.found = {}          -- the built stables (in a base): {id, x, y, z, name, entity}
+	self.server_found = {}   -- the props with a stable's model the server world itself showed: {id, x, y, z, name,
+	                         -- model, q}
+	self.found = {}          -- the built stables (in a base): {id, x, y, z, name, model, q (its turn), entity}
 	self.t = 0               -- the server world's last time
 	self.stables = {}
 	self.client_server = {}  -- a client world bed's id -> the server world's entity at its place (for its prompt)
@@ -152,7 +164,8 @@ end
 function S:rebuild(world)
 	local list = {}
 	for _, f in ipairs(self.found) do
-		list[#list + 1] = { id = f.id, x = f.x, y = f.y, z = f.z, kind = "built", name = f.name, entity = f.entity }
+		list[#list + 1] = { id = f.id, x = f.x, y = f.y, z = f.z, kind = "built", name = f.name, entity = f.entity,
+			model = f.model, q = f.q }
 	end
 	for _, m in ipairs(self.marks) do
 		local twice = false
@@ -220,6 +233,16 @@ function S:count()
 	return #self.stables
 end
 
+-- The built stables the beasts at home live in (M.HOMES): {x, y, z, q (its turn, or nil), entity (its server-world
+-- entity, or nil), name}.
+function S:homes()
+	local out = {}
+	for _, b in ipairs(self.stables) do
+		if b.kind == "built" and b.model and M.HOMES[b.model] then out[#out + 1] = b end
+	end
+	return out
+end
+
 -- A prompt's entity at a place: an entity with a StaticCollider, the nearest (`best` {id, d} so far, or nil).
 local function nearer(world, best, id, d)
 	if (best and d >= best.d) or is_player(world, id) or not has(world, "StaticCollider", id) then return best end
@@ -262,7 +285,10 @@ function S:walk_step(world)
 		local model = okm and t and t.model
 		if model and M.MODELS[model] then
 			local x, y, z = world:position(id)
-			if x then w.found[#w.found + 1] = { id = id, x = x, y = y, z = z, name = M.MODELS[model] } end
+			if x then
+				w.found[#w.found + 1] = { id = id, x = x, y = y, z = z, name = M.MODELS[model], model = model,
+					q = turn_of(world, id) }
+			end
 		end
 	end
 	w.i = last + 1
@@ -287,7 +313,7 @@ end
 function S:refound(world)
 	local all = {}
 	for _, f in ipairs(self.server_found) do
-		all[#all + 1] = { id = f.id, x = f.x, y = f.y, z = f.z, name = f.name, entity = f.id }
+		all[#all + 1] = { id = f.id, x = f.x, y = f.y, z = f.z, name = f.name, entity = f.id, model = f.model, q = f.q }
 	end
 	local ids = {}
 	for id in pairs(self.client_models) do ids[#ids + 1] = id end
@@ -299,7 +325,8 @@ function S:refound(world)
 			if dist(f, c.x, c.y, c.z) <= SAME_M then twice = true end
 		end
 		if not twice then
-			all[#all + 1] = { id = id, x = c.x, y = c.y, z = c.z, name = M.MODELS[c.model], entity = self.client_server[id] }
+			all[#all + 1] = { id = id, x = c.x, y = c.y, z = c.z, name = M.MODELS[c.model], entity = self.client_server[id],
+				model = c.model, q = c.q }
 		end
 	end
 	self.found = {}
@@ -336,7 +363,7 @@ function S:client_step(world)
 		local ok, t = pcall(world.template, world, "ModelResource", id)
 		if ok and t and M.MODELS[t.model] then
 			local x, y, z = world:position(id)
-			if x then w.models[id] = { model = t.model, x = x, y = y, z = z } end
+			if x then w.models[id] = { model = t.model, x = x, y = y, z = z, q = turn_of(world, id) } end
 		end
 	end
 	w.i = last + 1

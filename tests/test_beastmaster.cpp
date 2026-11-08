@@ -1500,8 +1500,10 @@ TEST_CASE("stable: before the world has a stable the wheel says what to build; a
           "Tusk is in the stable: make it active at a stable (an animal bed in your base).");
 }
 
-// The beasts pack's Stable (tools/models/packs/beastmaster_stable.lua): its render model of its own and its item.
+// The beasts pack's Stable and Large Stable (tools/models/packs/beastmaster_stable.lua): their render models of their
+// own, and the Stable's item.
 constexpr const char* kOwnStableModel = "1a49170a-b3d2-498d-9062-8946f6469613";
+constexpr const char* kLargeOwnStableModel = "5879f304-0050-4ecb-96f4-5cc0e66155d9";
 constexpr uint32_t kStableItem = 0x5AB1E0u;
 
 TEST_CASE("stable: the beasts pack's Stable (its own model) in a base is a stable named Stable") {
@@ -1512,13 +1514,21 @@ TEST_CASE("stable: the beasts pack's Stable (its own model) in a base is a stabl
     CHECK(b.reply("beastmaster.stable list").find("1. Stable at 5, 10, 0 (5 m from you)") != std::string::npos);
 }
 
+TEST_CASE("stable: the beasts pack's Large Stable (its own model) in a base is a stable named Large Stable") {
+    BeastRig b;
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 950, 5, 10, 0, kLargeOwnStableModel);
+    b.seconds(32);
+    CHECK(b.reply("beastmaster.stable list").find("1. Large Stable at 5, 10, 0 (5 m from you)") != std::string::npos);
+}
+
 TEST_CASE("stable: with the beasts pack's Stable item the hints name the Stable crafted at the Workbench, besides the "
           "animal bed") {
     BeastRig b;
     b.r.fake.item_names[kStableItem] = "Prop_Beastmaster_Stable";
-    CHECK(b.reply("beastmaster.stable list") == "No stable in this world yet: build a Stable (crafted at the Workbench) "
-                                                 "or an animal bed in your base, or mark a prop with beastmaster.stable "
-                                                 "mark.");
+    CHECK(b.reply("beastmaster.stable list") == "No stable in this world yet: build a Stable or a Large Stable (crafted "
+                                                 "at the Workbench) or an animal bed in your base, or mark a prop with "
+                                                 "beastmaster.stable mark.");
     b.reply("beastmaster.give wolf");
     press(b, VK_F3);
     REQUIRE(b.r.fake.wheels.size() == 1);
@@ -1527,12 +1537,12 @@ TEST_CASE("stable: with the beasts pack's Stable item the hints name the Stable 
     REQUIRE(hint >= 0);
     b.r.fake.wheels[0].cb(kClient, hint, b.r.fake.wheels[0].user);
     b.seconds(1);
-    CHECK(noted(b, "Build a Stable (crafted at the Workbench) or an animal bed in your base"));
+    CHECK(noted(b, "Build a Stable or a Large Stable (crafted at the Workbench) or an animal bed in your base"));
     three_beasts(b);  // Tusk is stored
     at_stable(b);
     b.seconds(1);
     CHECK(b.reply("beastmaster.call Tusk") ==
-          "Tusk is in the stable: make it active at a stable (a Stable or an animal bed in your base).");
+          "Tusk is in the stable: make it active at a stable (a Stable, a Large Stable or an animal bed in your base).");
 }
 
 TEST_CASE("stable: without the beasts pack the Stable's item is looked up at most once a minute (the wheel is built every "
