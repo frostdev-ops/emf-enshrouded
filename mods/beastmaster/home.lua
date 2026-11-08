@@ -9,14 +9,20 @@
 --   game's Sleep state as idle.lua holds a beast: one whose graph has sleep states lies down, the others stand still),
 --   facing out. A stroll that ends off the floor puts the beast back on its spot before it rests; a beast ROAM_M or more
 --   from the stable's middle for AWAY_S is put back at once (the game's teleport, with a ground search).
+--   A beast the Sleep state cannot hold (no enemy AI state) strolls on.
 --   It never fights (its aggro and chosen targets are cleared every step) and is healed to full every second; one that
 --   dies anyway is removed and shows up again after RESPAWN_S. Its owner loses nothing: the collection is not touched.
 --   They leave the world when they are called (leave, before the call's spawn), sent away or released, their owner is
---   away or left, the setting home_beasts is off, the stable is gone, or a player builds within BUILD_M of it (the game
---   blocks building next to creatures); back GRACE_S after the building stops.
---   A kind the game cannot spawn (its pack is not installed) is tried again after RETRY_S, logged once per kind.
---   The game's time (for the Sleep lease) is kept as an offset from env.now, from a home beast's SpawnTime.
---   After the script's start (a reload) the creatures guarding a Large Stable that are none of ours are the beasts the
+--   away or left, the setting home_beasts is off, the stable is gone, or (with the setting make_room) a player builds
+--   within BUILD_M of it (the game blocks building next to creatures); back GRACE_S after the building stops.
+--   A creature is ours while it is there with the SpawnTime first read from it (the game gives ids out again: another
+--   creature on the id is left alone); one of ours that is no longer player-side is taken out.
+--   A kind the game cannot spawn (its pack is not installed), or whose creature does not become player-side, is tried
+--   again after RETRY_S, logged once per kind.
+--   The game's time (for the Sleep lease) is kept as an offset from env.now, taken again from each new home beast's
+--   SpawnTime.
+--   After the script's start (a reload) the player-side creatures running a beast's animation graph within ROAM_M of a
+--   Large Stable's middle that are none of ours and guard no player (a beast out guards its owner) are the beasts the
 --   script had there before: taken out of the world at the first check that has a Large Stable.
 -- M.new(env) where env has: now(world), setting(key), beasts() (the roster), homes() (the Large Stables: stable.lua
 -- S:homes()), present() (account -> player entity, nil before the first check), log(text).
@@ -123,11 +129,30 @@ local function between(span)
 	return math.random(span[1], span[2])
 end
 
--- Still our creature: there and a player-side one (alive or a body).
+-- A player-side creature (alive or a body) is there on the id.
 local function ours(world, id)
 	if not world:position(id) then return false end
 	local f = get(world, "Faction", id)
 	return f ~= nil and f.faction == PLAYER_ALLY
+end
+
+-- Entry `e`'s creature is still the one spawned: there, with the SpawnTime first read from it.
+local function still(world, e)
+	if not world:position(e.id) then return false end
+	local s = get(world, "SpawnTime", e.id)
+	local t = s and s.spawnTime or 0
+	return not (e.stamp and t > 0 and t ~= e.stamp)
+end
+
+-- The animation graphs the beasts run (species.lua): a creature running none of them is no beast.
+local function beast_graph(world, id)
+	local ok, g = pcall(world.template, world, "AnimationGraphResourceComponent2", id)
+	local graph = ok and g and g.animationGraph and tostring(g.animationGraph):lower()
+	if not graph then return false end
+	for _, sp in ipairs(species.list) do
+		if sp.graph == graph or sp.also == graph then return true end
+	end
+	return false
 end
 local SPAWN_GRACE_S = 5  -- a creature spawned a moment ago reads as dead this long at most
 
@@ -158,8 +183,17 @@ end
 
 -- Entry `e`'s beast leaves the world (when it is still ours; an id the game gave out again is left alone).
 function H:remove(world, e)
-	if ours(world, e.id) then emf.destroy(world, e.id) end
+	if still(world, e) and ours(world, e.id) then emf.destroy(world, e.id) end
 	self.at[e.beast], self.ids[e.id] = nil, nil
+end
+
+-- Kind `sp` is not tried again for RETRY_S (logged once per kind).
+function H:refuse(sp, why, now)
+	self.refused[sp.id] = now + RETRY_S
+	if not self.told[sp.id] then
+		self.told[sp.id] = true
+		self.env.log(string.format("home: %s for a Large Stable (%s); tried again in %d s", why, species.word(sp), RETRY_S))
+	end
 end
 
 -- A beast leaves its Large Stable now (it is called).
@@ -190,24 +224,25 @@ function H:show(world, b, account, owner, h, spot, now)
 	local x, y, z = spot_at(h, spot)
 	local id = emf.spawn(world, sp.template, x, y, z, loyalty.spawn_size(sp, b.points, self.env.setting("loyalty_pace")))
 	if not id or id == 0 then
-		self.refused[sp.id] = now + RETRY_S
-		if not self.told[sp.id] then
-			self.told[sp.id] = true
-			self.env.log(string.format("home: the game has no %s to show in a Large Stable (%s); tried again in %d s",
-				species.word(sp), sp.pack and ("its pack: " .. sp.pack) or "see the log", RETRY_S))
-		end
+		self:refuse(sp, "the game refused the spawn" .. (sp.pack and (" (its pack: " .. sp.pack .. ")") or ""), now)
 		return nil
 	end
+	local e = { id = id, beast = b, account = account, key = key_of(h), spot = spot, scene = "stroll",
+		until_s = now + between(FIRST_S), sc = {}, faced = false, spawned = now }
+	self.at[b], self.ids[id] = e, e  -- kept before anything else: an error below leaves no creature nobody tracks
 	local f = get(world, "Faction", id)
 	if f then f.faction = PLAYER_ALLY end
+	if not ours(world, id) then
+		emf.destroy(world, id)
+		self.at[b], self.ids[id] = nil, nil
+		self:refuse(sp, "the creature spawned did not become player-side", now)
+		return nil
+	end
 	local lvl, mine = get(world, "Level", id), get(world, "Level", owner)
-	if lvl and mine and mine.dataStorage then lvl.dataStorage[1] = mine.dataStorage[1] end
+	if lvl and lvl.dataStorage and mine and mine.dataStorage then lvl.dataStorage[1] = mine.dataStorage[1] end
 	local scaling = get(world, "DynamicEnemyScaling", id)
 	if scaling then scaling.nextUpdateTime = 0 end
 	guard(world, id, h)
-	local e = { id = id, beast = b, account = account, key = key_of(h), spot = spot, scene = "stroll",
-		until_s = now + between(FIRST_S), sc = {}, faced = false, spawned = now }
-	self.at[b], self.ids[id] = e, e
 	return e
 end
 
@@ -219,20 +254,23 @@ function H:allowed(b, now)
 	return now >= (self.back_at[b] or 0)
 end
 
--- The creatures guarding a Large Stable that are none of ours: the script's beasts there before its reload.
+-- The player-side beasts near a Large Stable's middle that are none of ours and guard no player: the script's beasts
+-- there before its reload.
 function H:sweep(world, homes)
-	local guarded = {}
-	for _, h in ipairs(homes) do
-		if h.entity then guarded[h.entity] = true end
-	end
-	if not next(guarded) then return end
 	local n = 0
 	for _, id in ipairs(world:entities()) do
-		local ai = not self.ids[id] and get(world, "DynamicEnemy01BehaviorState", id)
-		local g = ai and ai.guardEntityId
-		if g and guarded[g] and ours(world, id) then
-			emf.destroy(world, id)
-			n = n + 1
+		if not self.ids[id] and ours(world, id) and not get(world, "PlayerState", id) then
+			local x, y, z = world:position(id)
+			local near = false
+			for _, h in ipairs(homes) do
+				if dist(h, x, y, z) < ROAM_M then near = true end
+			end
+			local ai = near and get(world, "DynamicEnemy01BehaviorState", id)
+			local g = ai and ai.guardEntityId or 0
+			if near and not (g ~= 0 and get(world, "PlayerState", g)) and beast_graph(world, id) then
+				emf.destroy(world, id)
+				n = n + 1
+			end
 		end
 	end
 	if n > 0 then self.env.log(string.format("home: %d beast%s left in a Large Stable before a reload taken out", n,
@@ -299,18 +337,17 @@ end
 
 -- The upkeep of entry `e` in stable `h` (every second): gone, the clock, health, facing, roaming off, the scenes.
 function H:upkeep(world, e, h, now)
-	if not ours(world, e.id) then  -- gone (or the id names another entity now): shown again at the next check
-		self.at[e.beast], self.ids[e.id] = nil, nil
-		return
-	end
 	local cur, max = emf.health(world, e.id)
 	if not cur or cur <= 0 then
 		if now - e.spawned >= SPAWN_GRACE_S then self:on_died(world, e.id) end  -- dead without the game's event
 		return
 	end
-	if not self.clock then
+	if not e.stamp then
 		local s = get(world, "SpawnTime", e.id)
-		if s and s.spawnTime > 0 then self.clock = s.spawnTime - e.spawned * NS end
+		if s and s.spawnTime > 0 then
+			e.stamp = s.spawnTime
+			self.clock = s.spawnTime - e.spawned * NS  -- the game's time again, from each new beast
+		end
 	end
 	if max and cur < max then emf.attribute_add(world, e.id, "health", max - cur) end
 	if not e.faced then e.faced = face(world, e, h) end
@@ -329,6 +366,8 @@ function H:upkeep(world, e, h, now)
 		if not on_floor(h, x, z) then self:put_back(world, e, h, now) else face(world, e, h) end
 		if idle_mod.hold(world, e.id, e.sc, now, lease, check) then
 			e.scene, e.until_s = "rest", now + between(REST_S)
+		else
+			e.until_s = now + between(STROLL_S)  -- the Sleep state cannot hold it: it strolls on
 		end
 	else
 		idle_mod.wake(world, e.id, e.sc)
@@ -352,7 +391,15 @@ function H:check(world, now)
 		self.swept = true
 		self:sweep(world, homes)
 	end
-	for _, player in pairs(present) do
+	for b, e in pairs(self.at) do  -- before anything is spawned: an id the game gave out again is not ours
+		if not still(world, e) then
+			self.at[b], self.ids[e.id] = nil, nil
+		elseif not ours(world, e.id) then
+			emf.destroy(world, e.id)
+			self.at[b], self.ids[e.id] = nil, nil
+		end
+	end
+	for _, player in pairs(self.env.setting("make_room") and present or {}) do
 		if aside_mod.building(world, player) then
 			local px, py, pz = world:position(player)
 			if px then
@@ -396,16 +443,19 @@ function H:step(world)
 	self:check(world, now)
 end
 
--- beastmaster.home: where `account`'s beasts at home are and what they do.
+-- beastmaster.home: where `account`'s beasts at home are, what they do and how far from the stable's middle they are.
 function H:text(world, account)
 	local lines = {}
 	for _, b in ipairs(self.env.beasts():list(account)) do
 		local e = self.at[b]
 		if e then
 			local x, y, z = e.key:match("^(%S+) (%S+) (%S+)$")
-			lines[#lines + 1] = string.format("%s: in the Large Stable at %d, %d, %d, %s", b.name,
-				math.floor(tonumber(x) + 0.5), math.floor(tonumber(y) + 0.5), math.floor(tonumber(z) + 0.5),
-				e.scene == "rest" and "resting" or "strolling")
+			x, y, z = tonumber(x), tonumber(y), tonumber(z)
+			local bx, by, bz = world:position(e.id)
+			local far = bx and string.format(", %.1f m from its middle", dist({ x = x, y = y, z = z }, bx, by, bz)) or ""
+			lines[#lines + 1] = string.format("%s: in the Large Stable at %d, %d, %d, %s%s", b.name,
+				math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5), e.scene == "rest" and "resting" or "strolling",
+				far)
 		end
 	end
 	if #lines == 0 then

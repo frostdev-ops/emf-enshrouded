@@ -5020,15 +5020,88 @@ TEST_CASE("home: idle's search for player-side creatures left asleep leaves the 
 }
 
 TEST_CASE("home: after a reload of the script the beasts it had at home are taken out of the world before new ones "
-          "show up") {
+          "show up; a player's beast out that stands in the stable stays") {
     BeastRig b;
     home_three(b);
-    for (uint32_t id : {1234u, 1235u, 1236u}) live_of<ecs::DynamicEnemy01BehaviorState>(b, id).guardEntityId.id = 950;
+    creature(b, 1300, 10.5, 0.5, kPlayerAlly);  // someone's beast out, on the floor: it guards its owner
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 1300).guardEntityId.id = 1;
+    creature(b, 1301, 9.5, 0.5, kPlayerAlly);  // a player-side creature that is no beast (another graph): a villager
+    for (uint32_t id : {1234u, 1235u, 1236u, 1300u}) {  // beasts: they run a beast's animation graph
+        auto g = guid_bytes(kWolfGraph);
+        g.resize(ecs::AnimationGraphResourceComponent2::kSize, 0);
+        b.r.fake.templates[{ecs::AnimationGraphResourceComponent2::kHash, id}] = g;
+    }
     homes_ready(b, 3);
     b.edit_main("local wild_mod = require(\"wild\")\n", "-- reloaded\n");
     b.seconds(33);
     for (uint32_t id : {1234u, 1235u, 1236u}) CHECK(destroyed(b, id));
+    CHECK_FALSE(destroyed(b, 1300));
+    CHECK_FALSE(destroyed(b, 1301));
     CHECK(b.r.fake.spawns.size() == 6);
+}
+
+TEST_CASE("home: an entity id the game gave to another creature is not ours any more: it is left alone, and the beast "
+          "shows up again on a new one") {
+    BeastRig b;
+    home_three(b);
+    b.seconds(2);                                                                 // its SpawnTime is known
+    live_of<ecs::SpawnTime>(b, 1234).spawnTime.value = kSpawnNs + 5000000000LL;  // another creature on the id now
+    homes_ready(b, 1);
+    b.seconds(2);
+    CHECK_FALSE(destroyed(b, 1234));
+    REQUIRE(b.r.fake.spawns.size() == 4);
+    CHECK(spawned_as(b.r.fake.spawns[3], kWolfTemplate));
+}
+
+TEST_CASE("home: a creature that does not become a player-side one is taken out at once, and its beast is not tried "
+          "again for 5 minutes") {
+    BeastRig b;
+    home_save(b, "b 0x00000000000000aa wolf 0 0 Fang\n");
+    large_stable(b, 950, 10, 0);
+    homes_ready(b, 3);
+    b.r.fake.components.erase({ecs::Faction::kHash, 1234});  // nothing to write its faction into
+    b.seconds(32);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(destroyed(b, 1234));
+    b.seconds(10);
+    CHECK(b.r.fake.spawns.size() == 1);
+}
+
+TEST_CASE("home: the game's time is taken again from each new beast at home, so its Sleep lease follows the game's "
+          "clock") {
+    RollRig b;
+    b.roll(0.0);
+    home_three(b);
+    b.r.fake.attrs[{1234, EMF_ATTR_HEALTH}] = 0;
+    deliver(b.r.fake, "EntityDiedEvent", died_event(1234));
+    b.seconds(2);
+    homes_ready(b, 1);  // 1237: the game's clock runs 1000 s ahead of the first beast's by now
+    live_of<ecs::SpawnTime>(b, 1237).spawnTime.value = kSpawnNs + 1000000000000LL;
+    b.seconds(60);
+    REQUIRE(b.r.fake.spawns.size() == 4);
+    b.seconds(8);
+    REQUIRE(asleep(b, 1237));
+    const int64_t ahead = ai_now(b, 1237).sleepEndTime.value - (kSpawnNs + 1000000000000LL);
+    CHECK(ahead >= 120000000000LL);  // the lease: the game's time plus 120 s
+    CHECK(ahead <= 140000000000LL);
+}
+
+TEST_CASE("home: a beast the game's Sleep state cannot hold strolls on, without being turned again every second") {
+    RollRig b;
+    b.roll(0.0);
+    home_three(b);
+    b.r.fake.components.erase({ecs::DynamicEnemy01BehaviorState::kHash, 1235});
+    const size_t before = turns_of(b, 1235).size();
+    b.seconds(12);
+    CHECK(turns_of(b, 1235).size() <= before + 2);
+}
+
+TEST_CASE("home: with make_room off the beasts at home stay while someone builds near the stable") {
+    BeastRig b({{"make_room", "false"}});
+    home_three(b);
+    building(b.r.fake, 1, true);
+    b.seconds(3);
+    CHECK(b.r.fake.destroyed.empty());
 }
 
 TEST_CASE("home: beastmaster.home says where your beasts at home are and what they do") {

@@ -89,8 +89,8 @@ One that wanders off is put back on its spot. They never fight and cannot be wor
 dies anyway comes back a minute later, and you lose nothing. A Large Stable has room for 4 beasts, all players
 together (the beasts shown stay; then by player and list order); more beasts need another Large Stable. They leave when
 you call them (the called one comes to your side as always), go farther than 70 m away, someone builds within 20 m of
-the stable (back 5 s after the building stops: the game blocks building next to creatures), or the setting
-`home_beasts` is off. The small Stable and the animal beds stay empty. `beastmaster.home` (console) says where yours
+the stable (with the setting `make_room`; back 5 s after the building stops: the game blocks building next to
+creatures), or the setting `home_beasts` is off. The small Stable and the animal beds stay empty. `beastmaster.home` (console) says where yours
 are and what they do.
 
 **The Beasts window:** every stable shows the game's own **E Open** prompt; press E there (the host). Where a stable has
