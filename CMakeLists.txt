@@ -756,6 +756,8 @@ target_sources(emf_app_lib PRIVATE app/content_panel.cpp app/bridge_content.cpp)
 target_sources(emf_tests PRIVATE tests/test_app_content_panel.cpp tests/test_app_content_bridge.cpp)
 
 # --- HUD editor (docs/engine_parts/re_ui_scopes.md): move, scale and hide the game's HUD parts, client only ---
-target_sources(emf_core_lib PRIVATE src/core/hud_editor/elements.cpp src/core/hud_editor/layout.cpp)
+target_sources(emf_core_lib PRIVATE src/core/hud_editor/elements.cpp src/core/hud_editor/layout.cpp
+  src/core/hud_editor/layout_store.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_elements.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_layout.cpp)
+target_sources(emf_tests PRIVATE tests/test_hud_layout_store.cpp)
