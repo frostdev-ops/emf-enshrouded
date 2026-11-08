@@ -64,6 +64,7 @@ struct HandoverRig {
         r.fake.item_names[kSword] = "Weapon_T1_1H_Sword";
         const std::string mods = EMF_SOURCE_DIR "/mods";
         host = std::make_unique<Host>(&r.api, std::wstring(mods.begin(), mods.end()));
+        host->set_clock([this] { return static_cast<uint64_t>(r.fake.tick) * 1000 / 60; });  // not the machine's speed
         host->set_key_reader([this](uint32_t vk) { return key_held && vk == key_vk; });
         host->load_all();
         REQUIRE(host->status("handover") == "running");
