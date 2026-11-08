@@ -112,9 +112,11 @@ inline PortraitsOutcome run_portraits(const std::wstring& dll, const std::string
     return out;
 }
 
-// The stamps of this start (portraits_attempts.h): emf_content.dll's, and the game's exe, .kfc, .kfc_resources and .dat
-// count, as facts of the kind the content build's fingerprint takes (size and time, nothing hashed).
-inline PortraitStamps portraits_stamps(const std::wstring& game, const std::string& file_name, const std::wstring& dll) {
+// The stamps of this start (portraits_attempts.h): emf_content.dll's, the game's exe, .kfc, .kfc_resources and .dat
+// count, and the EML content mods' (id, version and every file's path, size and time, in the order given: the list the
+// content fingerprint takes), as facts of the kind the content build's fingerprint takes (nothing hashed per file).
+inline PortraitStamps portraits_stamps(const std::wstring& game, const std::string& file_name, const std::wstring& dll,
+                                       const std::vector<EmlMod>& mods) {
     const std::wstring name = cio::from_utf8(file_name);
     std::string game_text = "emf portraits game stamp 1\n";
     game_text += detail::fact_line("exe", fact_of(cio::join(game, name + L".exe"), file_name + ".exe"));
@@ -122,12 +124,25 @@ inline PortraitStamps portraits_stamps(const std::wstring& game, const std::stri
     game_text += detail::fact_line("resources", fact_of(cio::join(game, name + L".kfc_resources"), file_name + ".kfc_resources"));
     game_text += "dats\t" + std::to_string(count_game_dats(game, file_name)) + "\n";
     const std::string dll_text = "emf portraits dll stamp 1\n" + detail::fact_line("dll", fact_of(dll, "emf_content.dll"));
+    std::string mods_text = "emf portraits mods stamp 1\n";
+    for (const auto& m : mods) {
+        const auto files = mod_files(cio::join(cio::join(game, L"mods"), m.folder));
+        mods_text += "mod\t" + m.id + "\t" + m.version + "\t" + std::to_string(files.size()) + "\n";
+        for (const auto& f : files) {
+            FileFact x;
+            x.name = cio::to_utf8(f.rel);
+            x.size = f.size;
+            x.written = f.written;
+            x.exists = true;
+            mods_text += detail::fact_line("file", x);
+        }
+    }
     const auto hex = [](const std::string& t) {
         emf::Sha256 h;
         h.update(t.data(), t.size());
         return "sha256:" + h.hex();
     };
-    return {hex(dll_text), hex(game_text)};
+    return {hex(dll_text), hex(game_text), hex(mods_text)};
 }
 
 // The memory after a call that asked for `asked`: each key's result from the reply; a key the reply says nothing of
@@ -144,6 +159,7 @@ inline std::vector<PortraitAttempt> record_attempts(std::vector<PortraitAttempt>
         a.entry = portrait_entry(item);
         a.dll = now.dll;
         a.game = now.game;
+        a.mods = now.mods;
         a.ok = has(out.drawn, item.key) || has(out.current, item.key);
         if (!a.ok) {
             const std::string prefix = item.key + ": ";

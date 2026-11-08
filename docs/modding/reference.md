@@ -597,14 +597,13 @@ slot.type = EMF_UI_SLOT;  slot.icon = wolf;  slot.text = "Wolf";  slot.key = "ac
   "<RenderModel GUID>", "frames": 24, "size": 256}]` (frames 1-64, size 8-512). The loader draws them at game start (never on
   the dedicated server, never in Play without EMF mods), at most 32 per start; a start that draws holds the game's entry
   and shows a splash. It asks again for a key whose picture is missing, whose entry in mod.json changed, or when the
-  game's exe or data, or `emf_content.dll`, changed since (the DLL answers "current" without drawing when what the
+  game's exe or data, `emf_content.dll` or the EML content mods changed since (the DLL answers "current" without drawing when what the
   picture is drawn from is unchanged). A key that failed is not tried again at every start: the loader remembers each
-  attempt in `<game>/emf/cache/portraits_attempts.json` and retries only after `emf_content.dll`, the game or the entry
-  changed. A key is written to that file as failed before each call, so a crash or hang while drawing is remembered the
+  attempt in `<game>/emf/cache/portraits_attempts.json` and retries only after `emf_content.dll`, the game, the EML content mods (`<game>/mods`: a creature pack installed or
+  changed since) or the entry changed. A key is written to that file as failed before each call, so a crash or hang while drawing is remembered the
   same way. Drawing has its own time limit (2 minutes and 5 s per picture), and never touches the EML content build's
   state. `[content] mode=off` in `emf_core.ini` also stops this. Keys that differ only in case are one key (the first
-  mod's stays). Known limitation: the "changed" check ignores EML content changes (a content mod that alters a creature's
-  model does not redraw its picture until the game or `emf_content.dll` changes). `<game>/emf/portraits.log` has the
+  mod's stays). `<game>/emf/portraits.log` has the
   last run.
 
 ## Lua

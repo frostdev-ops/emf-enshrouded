@@ -482,6 +482,8 @@ std::wstring portrait_cache() { return g_dir + L"\\emf\\cache\\portraits"; }  //
 // what the loader remembers of its pictures calls (portraits_attempts.h), beside the cache folder
 std::wstring portrait_attempts_path() { return g_dir + L"\\emf\\cache\\portraits_attempts.json"; }
 
+// g_facts is filled by plan_this_start (plan_content always asks for the facts first), which runs before this and
+// before record_portraits, so both stamp the same EML content mods the content fingerprint takes.
 // The creature pictures mods ask for (mod.json "portraits") that the cache lacks: in the game client with EMF's core
 // only (the dedicated server draws nothing, and Play without EMF mods loads no mod that shows them).
 std::vector<emf::loader::PortraitItem> portraits_this_start() {
@@ -492,7 +494,7 @@ std::vector<emf::loader::PortraitItem> portraits_this_start() {
         if (a == INVALID_FILE_ATTRIBUTES || (a & FILE_ATTRIBUTE_DIRECTORY)) return {};
         std::vector<std::string> problems;
         emf::loader::PortraitMemory memory;
-        memory.stamps = emf::loader::portraits_stamps(g_dir, stem(), content_dll());
+        memory.stamps = emf::loader::portraits_stamps(g_dir, stem(), content_dll(), g_facts.mods.usable);
         if (const auto text = emf::loader::cio::read_file(portrait_attempts_path(), 4u << 20))
             memory.attempts = emf::loader::read_attempts(*text);
         auto items = emf::loader::wanted_portraits(g_dir + L"\\emf\\mods", portrait_cache(), &problems, &memory);
@@ -653,7 +655,7 @@ emf::loader::StartSteps make_start_steps() {
             auto memory = emf::loader::read_attempts(
                 emf::loader::cio::read_file(portrait_attempts_path(), 4u << 20).value_or(std::string()));
             memory = emf::loader::record_attempts(std::move(memory), items, out,
-                                                  emf::loader::portraits_stamps(g_dir, stem(), content_dll()));
+                                                  emf::loader::portraits_stamps(g_dir, stem(), content_dll(), g_facts.mods.usable));
             CreateDirectoryW((g_dir + L"\\emf\\cache").c_str(), nullptr);  // the DLL makes it with the first picture
             if (!emf::loader::cio::write_file_atomic(portrait_attempts_path(), emf::loader::attempts_text(memory)))
                 loader_log(g_dir, "creature pictures: could not write emf\\cache\\portraits_attempts.json");

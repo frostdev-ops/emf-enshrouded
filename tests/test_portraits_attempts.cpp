@@ -30,6 +30,7 @@ emf::loader::PortraitAttempt attempt(const emf::loader::PortraitItem& p, const e
     a.entry = emf::loader::portrait_entry(p);
     a.dll = s.dll;
     a.game = s.game;
+    a.mods = s.mods;
     a.ok = ok;
     a.message = message;
     return a;
@@ -37,7 +38,7 @@ emf::loader::PortraitAttempt attempt(const emf::loader::PortraitItem& p, const e
 }  // namespace
 
 TEST_CASE("portraits memory: a failed key is not asked again until the DLL, the game or the entry changes") {
-    const emf::loader::PortraitStamps now{"dll1", "game1"};
+    const emf::loader::PortraitStamps now{"dll1", "game1", "mods1"};
     const auto cached = [](const std::string&) { return false; };
     const auto bad = item("bad");
     const std::vector<emf::loader::PortraitAttempt> memory{attempt(bad, now, false, "no such model")};
@@ -45,26 +46,87 @@ TEST_CASE("portraits memory: a failed key is not asked again until the DLL, the 
     CHECK(emf::loader::portraits_to_ask({bad, item("new")}, memory, now, cached, &remembered).size() == 1u);
     REQUIRE(remembered.size() == 1u);
     CHECK(remembered[0].find("no such model") != std::string::npos);
-    CHECK(emf::loader::portraits_to_ask({bad}, memory, {"dll2", "game1"}, cached).size() == 1u);  // a new DLL
-    CHECK(emf::loader::portraits_to_ask({bad}, memory, {"dll1", "game2"}, cached).size() == 1u);  // a game update
+    CHECK(emf::loader::portraits_to_ask({bad}, memory, {"dll2", "game1", "mods1"}, cached).size() == 1u);  // a new DLL
+    CHECK(emf::loader::portraits_to_ask({bad}, memory, {"dll1", "game2", "mods1"}, cached).size() == 1u);  // a game update
     CHECK(emf::loader::portraits_to_ask({item("bad", 12)}, memory, now, cached).size() == 1u);    // the mod's entry
 }
 
-TEST_CASE("portraits memory: a drawn key is asked again after a game or DLL change, not before") {
-    const emf::loader::PortraitStamps before{"dll1", "game1"};
+TEST_CASE("portraits memory: a failed key is asked again when the EML content mods changed, not before") {
+    const emf::loader::PortraitStamps now{"dll1", "game1", "mods1"};
+    const auto cached = [](const std::string&) { return false; };
+    const auto bad = item("bad");
+    const std::vector<emf::loader::PortraitAttempt> memory{attempt(bad, now, false, "no such model")};
+    std::vector<std::string> remembered;
+    CHECK(emf::loader::portraits_to_ask({bad}, memory, now, cached, &remembered).empty());  // same stamps: left alone
+    REQUIRE(remembered.size() == 1u);
+    CHECK(remembered[0].find("EML content mods") != std::string::npos);
+    CHECK(emf::loader::portraits_to_ask({bad}, memory, {"dll1", "game1", "mods2"}, cached).size() == 1u);  // a pack installed
+}
+
+TEST_CASE("portraits memory: a drawn and cached key is asked again when only the EML content mods changed") {
+    const emf::loader::PortraitStamps before{"dll1", "game1", "mods1"};
     const auto wolf = item("wolf");
     const std::vector<emf::loader::PortraitAttempt> memory{attempt(wolf, before, true)};
     const auto cached = [](const std::string&) { return true; };
     CHECK(emf::loader::portraits_to_ask({wolf}, memory, before, cached).empty());
-    CHECK(emf::loader::portraits_to_ask({wolf}, memory, {"dll1", "game2"}, cached).size() == 1u);
-    CHECK(emf::loader::portraits_to_ask({wolf}, memory, {"dll2", "game1"}, cached).size() == 1u);
+    CHECK(emf::loader::portraits_to_ask({wolf}, memory, {"dll1", "game1", "mods2"}, cached).size() == 1u);
+}
+
+TEST_CASE("portraits memory: a record without a mods stamp reads as empty and its key is asked once more") {
+    const auto back = emf::loader::read_attempts(
+        "{\"attempts\": [{\"key\": \"bad\", \"entry\": \"" + emf::loader::portrait_entry(item("bad")) +
+        "\", \"dll\": \"d\", \"game\": \"g\", \"result\": \"failed\", \"message\": \"x\"}]}");
+    REQUIRE(back.size() == 1u);
+    CHECK(back[0].mods.empty());
+    const emf::loader::PortraitStamps now{"d", "g", "sha256:abc"};
+    CHECK(emf::loader::portraits_to_ask({item("bad")}, back, now, [](const std::string&) { return false; }).size() == 1u);
+}
+
+TEST_CASE("portraits memory: the mods stamp changes with an EML content mod's files, version or presence") {
+    const std::wstring root = test_scratch::temp_path(L"emf_portraits_mods_stamp");
+    test_scratch::remove_at_exit(root);
+    std::filesystem::create_directories(root + L"\\mods\\pack");
+    const auto write = [&](const wchar_t* name, const std::string& text) {
+        std::ofstream f(std::filesystem::path(root + L"\\mods\\pack\\" + name), std::ios::binary);
+        f << text;
+    };
+    write(L"a.bin", "one");
+    emf::loader::EmlMod pack;
+    pack.folder = L"pack";
+    pack.id = "pack";
+    pack.version = "1.0";
+    const auto stamp = [&](const std::vector<emf::loader::EmlMod>& m) {
+        return emf::loader::portraits_stamps(root, "enshrouded", root + L"\\emf_content.dll", m).mods;
+    };
+    const auto none = stamp({});
+    const auto one = stamp({pack});
+    CHECK(none.rfind("sha256:", 0) == 0);
+    CHECK(one != none);
+    CHECK(stamp({pack}) == one);
+    write(L"a.bin", "a longer file");
+    const auto two = stamp({pack});
+    CHECK(two != one);
+    pack.version = "1.1";
+    CHECK(stamp({pack}) != two);
+    std::error_code ec;
+    std::filesystem::remove_all(root, ec);
+}
+
+TEST_CASE("portraits memory: a drawn key is asked again after a game or DLL change, not before") {
+    const emf::loader::PortraitStamps before{"dll1", "game1", "mods1"};
+    const auto wolf = item("wolf");
+    const std::vector<emf::loader::PortraitAttempt> memory{attempt(wolf, before, true)};
+    const auto cached = [](const std::string&) { return true; };
+    CHECK(emf::loader::portraits_to_ask({wolf}, memory, before, cached).empty());
+    CHECK(emf::loader::portraits_to_ask({wolf}, memory, {"dll1", "game2", "mods1"}, cached).size() == 1u);
+    CHECK(emf::loader::portraits_to_ask({wolf}, memory, {"dll2", "game1", "mods1"}, cached).size() == 1u);
     CHECK(emf::loader::portraits_to_ask({wolf}, memory, before, [](const std::string&) { return false; }).size() == 1u);
     // a cache from before the memory: asked once
     CHECK(emf::loader::portraits_to_ask({wolf}, {}, before, cached).size() == 1u);
 }
 
 TEST_CASE("portraits memory: the limit of 32 counts the keys asked, not the ones left alone") {
-    const emf::loader::PortraitStamps now{"d", "g"};
+    const emf::loader::PortraitStamps now{"d", "g", "m"};
     std::vector<emf::loader::PortraitItem> items;
     std::vector<emf::loader::PortraitAttempt> memory;
     for (int i = 0; i < 40; ++i) {
@@ -77,13 +139,14 @@ TEST_CASE("portraits memory: the limit of 32 counts the keys asked, not the ones
 }
 
 TEST_CASE("portraits memory: the file's text reads back, and a damaged file is no memory") {
-    const emf::loader::PortraitStamps s{"dll\"1", "game1"};
+    const emf::loader::PortraitStamps s{"dll\"1", "game1", "mods\"1"};
     const auto text =
         emf::loader::attempts_text({attempt(item("wolf"), s, true), attempt(item("bad"), s, false, "line\nbreak")});
     const auto back = emf::loader::read_attempts(text);
     REQUIRE(back.size() == 2u);
     CHECK(back[0].ok);
     CHECK(back[0].dll == "dll\"1");
+    CHECK(back[0].mods == "mods\"1");  // the mods stamp is kept
     CHECK(back[1].message == "line\nbreak");
     CHECK_FALSE(back[1].ok);
     CHECK(emf::loader::read_attempts("{not json").empty());
@@ -91,9 +154,9 @@ TEST_CASE("portraits memory: the file's text reads back, and a damaged file is n
 }
 
 TEST_CASE("portraits memory: record_attempts takes each key's result; a call that failed whole fails every key asked") {
-    const emf::loader::PortraitStamps s{"d", "g"};
+    const emf::loader::PortraitStamps s{"d", "g", "m"};
     const auto a = item("a"), b = item("b"), c = item("c");
-    const auto old_a = attempt(a, {"old", "old"}, false, "old failure");
+    const auto old_a = attempt(a, {"old", "old", "old"}, false, "old failure");
     emf::loader::PortraitsOutcome out;
     out.drawn = {"a"};
     out.failed = {"b: no such model"};
@@ -143,15 +206,15 @@ TEST_CASE("portraits memory: stamps change with the game's exe or data and with 
     write(L"enshrouded.exe", "exe");
     write(L"enshrouded.kfc", "kfc");
     write(L"emf_content.dll", "dll");
-    const auto one = emf::loader::portraits_stamps(root, "enshrouded", root + L"\\emf_content.dll");
+    const auto one = emf::loader::portraits_stamps(root, "enshrouded", root + L"\\emf_content.dll", {});
     CHECK(one.dll.rfind("sha256:", 0) == 0);
-    CHECK(emf::loader::portraits_stamps(root, "enshrouded", root + L"\\emf_content.dll").game == one.game);
+    CHECK(emf::loader::portraits_stamps(root, "enshrouded", root + L"\\emf_content.dll", {}).game == one.game);
     write(L"enshrouded.exe", "a longer exe, as after a game update");
-    const auto two = emf::loader::portraits_stamps(root, "enshrouded", root + L"\\emf_content.dll");
+    const auto two = emf::loader::portraits_stamps(root, "enshrouded", root + L"\\emf_content.dll", {});
     CHECK(two.game != one.game);
     CHECK(two.dll == one.dll);
     write(L"emf_content.dll", "another dll");
-    CHECK(emf::loader::portraits_stamps(root, "enshrouded", root + L"\\emf_content.dll").dll != one.dll);
+    CHECK(emf::loader::portraits_stamps(root, "enshrouded", root + L"\\emf_content.dll", {}).dll != one.dll);
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
 }
@@ -172,7 +235,7 @@ TEST_CASE("portraits memory: wanted_portraits with a memory leaves a failed key 
         std::ofstream f(std::filesystem::path(cache + L"\\wolf\\index.json"), std::ios::binary);
         f << "{}";
     }
-    const emf::loader::PortraitStamps s1{"d", "g1"};
+    const emf::loader::PortraitStamps s1{"d", "g1", "m"};
     const std::vector<emf::loader::PortraitAttempt> memory{attempt(item("bad"), s1, false, "nope"),
                                                            attempt(item("wolf"), s1, true)};
     std::vector<std::string> problems;
@@ -181,7 +244,7 @@ TEST_CASE("portraits memory: wanted_portraits with a memory leaves a failed key 
     REQUIRE(problems.size() == 1u);
     CHECK(problems[0].find("not tried again") != std::string::npos);
     problems.clear();
-    mem.stamps = {"d", "g2"};  // the game was updated
+    mem.stamps = {"d", "g2", "m"};  // the game was updated
     const auto asked = emf::loader::wanted_portraits(mods, cache, &problems, &mem);
     REQUIRE(asked.size() == 2u);
     CHECK(asked[0].key == "bad");
