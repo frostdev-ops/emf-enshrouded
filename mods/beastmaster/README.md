@@ -330,7 +330,7 @@ An EML data patch with new beasts:
   x5) comes from Beastmaster. With an older beasts pack that lacks them, a wild snake is always a plain one.
 - the Stable, `Prop_Beastmaster_Stable` (template `96a057d5-a1d9-4fc1-b313-9b923e9302fe`, pack 2.1.0): a small open
   stable with a thatched roof (its shape made with Meshy, its thatch and planks the game's own materials), 4 m wide
-  and 3.3 m high, on a copy of the game's large animal bed
+  and 3.5 m high, on a copy of the game's large animal bed
   without the parts farm animals and villagers use; its model is its own (Beastmaster knows the Stable by it), and you
   can stand on its hay platform but not walk through its back and left walls. Crafted at the Workbench. Like every
   placed object it is saved only inside a base, and removing the pack removes placed Stables from the world when it
