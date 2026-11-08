@@ -38,7 +38,7 @@ Small mods that each teach one part of the API, short enough to read in a few mi
 `examples\` folder and are not installed: copy a Lua example's folder into `<game>\emf\mods\` (it needs the `lua` mod,
 which is on by default), or build the C++ one with its own preset, as the template. Each folder's `README.md` says what
 it teaches and what to try. In a Lua example's `mod.json`, `depends` names the Lua host it needs and `"emf"` the API
-version that host needs: `"lua": ">=1.4"` with `"emf": 17`, `"lua": ">=1.3"` with `"emf": 14`, `"lua": ">=1.18"` with `"emf": 20`.
+version that host needs: `"lua": ">=1.4"` with `"emf": 17`, `"lua": ">=1.3"` with `"emf": 14`, `"lua": ">=1.18"` (or `">=1.19"`) with `"emf": 20`.
 
 | Example | Kind | Teaches |
 |---|---|---|
@@ -49,6 +49,7 @@ version that host needs: `"lua": ">=1.4"` with `"emf": 17`, `"lua": ">=1.3"` wit
 | [pet_follow](../../examples/lua/pet_follow/) | Lua | `emf.spawn` and `emf.destroy`, writing a component (`Faction`), sending a game event (`StartGuardingEvent`), sessions |
 | [loot_ticker](../../examples/lua/loot_ticker/) | Lua | a game event (`PickupEvent`), item names, fading HUD lines |
 | [bus_service](../../examples/lua/bus_service/) | Lua | a service on `emf.bus`: JSON requests and replies, a hello announcement, errors answered, never silence ([services.md](services.md)) |
+| [net_ping](../../examples/lua/net_ping/) | Lua | mod messages between a player's game and the server (`emf.net`): a channel both ways, the sender from the server's records, answering one player or all, waiting for the greeting |
 | [bus_client](../../examples/lua/bus_client/) | Lua | calling a bus service: request ids, a timeout counted in world steps, refused publishes, `emf.json` |
 | [waypoints](../../examples/cpp/waypoints/) | C++ | commands with arguments, a save per world (`emf::WorldFile`), a HUD line from the camera, logic kept apart and unit-tested; its own CMake preset |
 | [hello](../../examples/hello/hello.cpp) | C++ | the smallest mod: a command and `on_tick` (section 2 below) |

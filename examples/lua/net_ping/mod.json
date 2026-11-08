@@ -1,0 +1,10 @@
+{
+  "id": "net_ping",
+  "name": "Net Ping",
+  "version": "1.0.0",
+  "description": "Mod messages live check: a player's game and the server ping each other on the channel net_ping/ping.",
+  "authors": ["EMF"],
+  "emf": 20,
+  "main": "main.lua",
+  "depends": {"lua": ">=1.19"}
+}

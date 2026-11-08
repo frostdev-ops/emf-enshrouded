@@ -610,8 +610,9 @@ slot.type = EMF_UI_SLOT;  slot.icon = wolf;  slot.text = "Wolf";  slot.key = "ac
 
 Your mod on a player's game and the same mod on the server send each other messages on named channels. In the host's
 own game and in an offline game (the server world and the player's game in one process) they are delivered in process.
-Joined players and the dedicated server use the game's chat as the transport (below). The chat transport is built and
-tested without the game; it has not been run in a live game yet, so treat it as unproven until it has.
+Joined players and the dedicated server use the game's chat as the transport (below). Checked live on build 1287369:
+a game joined a dedicated server on the same PC; the greeting, text, 3000 bytes and all 256 byte values went both
+ways (answers in about 30 ms) and a send to every player arrived, with nothing shown in the chat.
 
 ```c
 EmfNetChannel c = {sizeof c};

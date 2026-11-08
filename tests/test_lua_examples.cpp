@@ -1210,7 +1210,8 @@ std::vector<std::string> lua_examples() {
 // The examples that have their own tests in this file. A new folder fails the first test until it is added here (with
 // tests of its own).
 const std::set<std::string> kTestedExamples = {"bus_client",  "bus_service", "chat_command", "hotkey_wheel",
-                                               "hud_widget",  "loot_ticker", "pet_follow",   "settings_tour"};
+                                               "hud_widget",  "loot_ticker", "net_ping",     "pet_follow",
+                                               "settings_tour"};
 
 EmfCommandSender sender_of(uint32_t entity, uint64_t account, bool chat, bool admin) {
     EmfCommandSender s{};
@@ -1242,6 +1243,7 @@ struct ExampleRig {
         r.api.setting_text = live_text;
         r.api.setting_set = live_set;
         r.api.hud_set = counting_hud;
+        with_net(r.api);  // a v27 core: emf.net (net_ping)
         folder = r.dir + L"\\" + std::wstring(id.begin(), id.end());
         emf_dir = r.dir.substr(0, r.dir.find_last_of(L'\\'));
         DeleteFileW((emf_dir + L"\\commands.txt").c_str());
@@ -1356,7 +1358,8 @@ TEST_CASE("lua examples: every folder in examples/lua loads, has its own tests h
         CHECK(x.host->status(id) == "running");
         // the rule (docs/modding/README.md, "Examples"): "emf" is the API version of the Lua host it depends on
         const std::string json = read_all(EMF_SOURCE_DIR "/examples/lua/" + id + "/mod.json");
-        const bool needs_18 = json.find(R"("lua": ">=1.18")") != std::string::npos;
+        const bool needs_18 = json.find(R"("lua": ">=1.18")") != std::string::npos ||
+                              json.find(R"("lua": ">=1.19")") != std::string::npos;  // 1.18 and later: "emf": 20
         const bool needs_14 = json.find(R"("lua": ">=1.4")") != std::string::npos;
         CHECK((needs_18 || needs_14 || json.find(R"("lua": ">=1.3")") != std::string::npos));
         CHECK(json.find(needs_18 ? R"("emf": 20)" : needs_14 ? R"("emf": 17)" : R"("emf": 14)") != std::string::npos);
@@ -1951,6 +1954,56 @@ TEST_CASE("lua example bus_service + bus_client: set, get, list and a missing no
     CHECK(ask("bus_client.get plum") == "get plum: (nothing)");
     CHECK(ask("bus_client.list") == "notes: [apple, pear]");
     CHECK(ask("bus_client.set") == "");  // usage line goes to the reply, not to the bus
+}
+
+TEST_CASE("lua example net_ping: one channel both ways; the server answers each message with pong to its sender") {
+    ExampleRig x("net_ping");
+    REQUIRE(x.r.fake.net_channels.size() == 1u);
+    const auto& ch = x.r.fake.net_channels[0];
+    CHECK(ch.name == "net_ping/ping");
+    CHECK(ch.def.version == 1u);
+    CHECK(ch.def.flags == (EMF_NET_TO_SERVER | EMF_NET_TO_PLAYERS));
+    CHECK(ch.def.max_size == 16384u);
+    EmfNetFrom f{};
+    f.size = sizeof f;
+    f.player = 1;
+    f.account = 0xAA;
+    f.peer_version = 1;
+    ch.def.on_server(kServer, &f, "hi", 2, ch.def.user);
+    REQUIRE(x.r.fake.net_sent.size() == 1u);
+    CHECK(x.r.fake.net_sent[0].player == 1u);
+    CHECK(x.r.fake.net_sent[0].data == "pong hi");
+    ch.def.on_player(kClient, &f, "ab", 2, ch.def.user);  // the player's game: the bytes and their sum
+    bool got = false;
+    for (const auto& l : x.r.fake.log) got |= l.find("NETPING player got 2 bytes (sum 195): ab") != std::string::npos;
+    CHECK(got);
+    CHECK(x.reply("net_ping.send hello") == "send: true");
+    CHECK(x.r.fake.net_sent.back().data == "hello");
+}
+
+TEST_CASE("lua example net_ping: a player's game sends its three test messages by itself once the server greeted it") {
+    ExampleRig x("net_ping");
+    x.r.fake.net_peer_version = 0;  // no greeting yet
+    x.seconds(5, kClient);
+    CHECK(x.r.fake.net_sent.empty());
+    x.r.fake.net_peer_version = 1;
+    x.seconds(1, kClient);  // greeted
+    CHECK(x.r.fake.net_sent.empty());
+    x.seconds(2, kClient);
+    REQUIRE(x.r.fake.net_sent.size() == 1u);
+    CHECK(x.r.fake.net_sent[0].data == "hello-from-client");
+    x.seconds(2, kClient);
+    REQUIRE(x.r.fake.net_sent.size() == 2u);
+    CHECK(x.r.fake.net_sent[1].data.size() == 3000u);
+    x.seconds(2, kClient);
+    REQUIRE(x.r.fake.net_sent.size() == 3u);
+    const std::string& bytes = x.r.fake.net_sent[2].data;
+    REQUIRE(bytes.size() == 256u);
+    CHECK(bytes[0] == '\0');
+    CHECK(static_cast<unsigned char>(bytes[255]) == 255);
+    x.seconds(10, kClient);
+    x.seconds(10, kServer);  // the server never sends these
+    CHECK(x.r.fake.net_sent.size() == 3u);
 }
 
 TEST_CASE("lua example bus_client: with no service a get retries once, then ends in a timeout, once") {
