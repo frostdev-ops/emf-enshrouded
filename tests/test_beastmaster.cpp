@@ -3885,6 +3885,21 @@ TEST_CASE("stable: the E key opens the window at a stable whose prompt the game 
     CHECK(c.r.fake.windows.size() == 1u);
 }
 
+TEST_CASE("stable: the E key opens the window at a stable whose offer EMF dropped (the prompt's parts left on it), and it is offered again") {
+    BeastRig b;
+    with_offers(b.r.api);
+    three_beasts(b);
+    at_stable(b);
+    component<ecs::InteractionOfferRuntime>(b.r.fake, 960);  // the game's prompt is on it
+    REQUIRE(offers_on(b, 960) == 1u);
+    press(b, kE);
+    REQUIRE(b.r.fake.windows.empty());  // the prompt opens it, not the key
+    b.r.fake.offer_active = false;  // EMF dropped the offer; its parts stay on the entity
+    press(b, kE);
+    CHECK(b.r.fake.windows.size() == 1u);
+    CHECK(offers_on(b, 960) == 2u);  // searched again at once: offered again (EMF takes its dropped offer back)
+}
+
 TEST_CASE("stable: an id that names something elsewhere now is not offered again, and E Open from it does nothing") {
     BeastRig b;
     with_offers(b.r.api);
@@ -4529,4 +4544,25 @@ TEST_CASE("idle: an error drops the search under way; the next waits 30 s") {
     CHECK(asleep(b, 6100));  // the search under way was dropped
     b.seconds(30);
     CHECK(awake(b, 6100));  // the next one, 30 s after the error
+}
+
+// edit_main's reload check compares modification times, so two edits in a row must never get the same one: the system
+// clock moves in steps of about 15 ms, and on a fast machine (CI) an edit made right after another fell in the same step,
+// was not seen as a change, and the test ran on the old script.
+TEST_CASE("rig: write_later gives every write a newer modification time, however fast they follow each other") {
+    BeastRig b;
+    const std::wstring path = b.folder + L"\scratch.lua";
+    auto stamp = [&] {
+        WIN32_FILE_ATTRIBUTE_DATA d{};
+        REQUIRE(GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &d));
+        return (static_cast<uint64_t>(d.ftLastWriteTime.dwHighDateTime) << 32) | d.ftLastWriteTime.dwLowDateTime;
+    };
+    write_later(path, "0", 1);
+    uint64_t last = stamp();
+    for (int i = 1; i < 300; ++i) {
+        write_later(path, std::to_string(i), 1);
+        const uint64_t now = stamp();
+        REQUIRE(now > last);
+        last = now;
+    }
 }

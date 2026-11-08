@@ -42,8 +42,9 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    mod windows (`emf.window`, `emf.window_update`, `emf.window_close`; EMF API v24): depend on `">=1.13"`. 1.14 adds
    E prompts (`emf.offer`, `emf.spawn_offer`, `emf.offer_remove`; EMF API v25): depend on `">=1.14"`. 1.15 adds
    pictures in windows (`emf.image`, the `image`, `icon`, `fps` and `height` row fields; EMF API v26): depend on
-   `">=1.15"`. Ranges are explained in [guide.md](guide.md), "Dependencies
-   and version ranges".)
+   `">=1.15"`. 1.17 adds the inter-mod message bus (`emf.bus.subscribe`, `.publish`, `.unsubscribe`): mods using it
+   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. Ranges are explained in
+   [guide.md](guide.md), "Dependencies and version ranges".)
 
 3. Put `main.lua` next to it:
 
@@ -101,6 +102,12 @@ right away.
 | `emf.notify(text)` | a note at the top of the screen for a few seconds |
 | `emf.hud(id, text [, place [, rgba]])` | a line kept on screen; `""` removes it; place `"top_right"` (below the quest tracker), `"bottom_right"` or `"bottom_left"` (or 0, 1, 2), so a `select` setting's value fits; `rgba` a `color` setting's `"#rrggbb"`, `"#rrggbbaa"` (with alpha: a line can fade), a number like `0xFFD070FF` or the text `"0xFFD070FF"`; 0 (or none) means the usual colour |
 | `emf.on_tick(fn)` | `fn(world)` after every world step (server, client) |
+| `emf.bus.subscribe(topic, fn [, world])` | (1.17) listen for a topic in `"server"` (default) or `"client"` world; `fn(world, source_mod_id, payload)` runs on that world's next step when a publication arrives; true when registered |
+| `emf.bus.publish(topic, payload [, world])` | (1.17) queue a copy of a text/binary payload for `"server"` (default) or `"client"`; true when queued, false if the topic, payload or queue limit is invalid (logged once per rejection streak) |
+| `emf.bus.unsubscribe(topic)` | (1.17) remove all this mod's callbacks for a topic in both worlds; true if any were removed, false if none existed |
+| `emf.json.encode(value)` | (1.18) a Lua value as JSON text; nil plus a message when it cannot be written (see "JSON (1.18)") |
+| `emf.json.decode(text)` | (1.18) JSON text as a Lua value; nil plus a message when the text is not valid JSON |
+| `emf.json.null` | (1.18) the value `decode` gives for JSON `null` and `encode` writes as `null` (a Lua table cannot hold nil) |
 | `emf.on_event(name, fn [, "server"/"client"])` | `fn(world, event)` for each engine event `name`, with its fields as a table (see below); call it at the top of `main.lua` |
 | `emf.command(name, help, fn [, {players = true}])` | a console command `<id>.<name>` (1.6: a `name` that is exactly your mod's id is the command `<id>` itself); `fn(world, args)` (`args` is a table of words); answer with `emf.reply(text)`. The full name is 1-32 letters, digits, `_ . -` (with `<id>.`) and ignores case; another name is not added: false and a log line, the rest of the mod runs. `{players = true}` (1.4): every player may run it from the game's chat, not only the `[chat] admins` ([server.md](server.md)); use it for commands that read or act on their sender (`emf.sender()`). A reload can add or take off the mark. Write `help` as `<args>: what it does` (`"<name>: call a beast"`, `": your life skills"`): the console shows it as players type and offers `a\|b` choices and item names for an `<item>` argument |
 | `emf.local_player()` | your player's entity id |
@@ -148,6 +155,83 @@ right away.
 | `emf.spawn_offer(world, guid, x, y, z [, opts] [, fn])` | (1.14) spawns a template with an offer on it (`emf.offer`'s options); the entity id, or nil. The prop may stay in the save without its offer: after a load offer it again, don't spawn another |
 | `emf.offer_remove(world, id)` | (1.14) takes your script's offer off the entity; false when it has none of yours |
 | `emf.emits(names [, kind])` / `emf.emit(kind, name, fields)` | send engine events (see below) |
+
+### Messages between Lua mods (1.17)
+
+The `emf.bus` table lets separate Lua mods exchange **copies** of messages without sharing their Lua state.
+This works on dedicated servers as well as in a hosted game. It does not provide network transport between the
+server and clients: `"server"` and `"client"` choose which local world step delivers a message. The default is
+`"server"`. A bus-using mod needs `"depends": {"lua": ">=1.17"}` in `mod.json`.
+
+```lua
+-- In a second Lua mod (the receiver):
+emf.bus.subscribe("example.event", function(world, sender, payload)
+  emf.log("received from", sender, payload)
+end) -- defaults to the server world
+
+-- In the sender mod:
+local ok = emf.bus.publish("example.event", "example-payload")
+if not ok then emf.log("message was refused") end
+```
+
+`topic` is 1-96 **bytes** (ASCII control characters, including NUL, are refused); `payload` is a Lua string of up to **65,536
+bytes** and may contain `\0`. A topic may have several callbacks in one mod. Calling `unsubscribe(topic)` removes
+all of them, including server and client callbacks. The callback's `sender` is the source mod's id, not a player id.
+
+Each world delivers accepted messages in **publish order**, on its **next world step**. A publication made *inside*
+a bus callback is held for the *following* step, never delivered recursively in the same step. A mod **does receive
+its own messages** if subscribed to that topic. During the initial load, a message published by one mod's `main.lua`
+can reach another mod even if that receiver's `main.lua` is loaded later, before the first world step. Subscriptions
+added at runtime do not consume older publications.
+
+Each publisher may have at most **256** pending messages; all publishers together may have at most **4,096**.
+A rejected publication returns `false` and EMF logs the reason once until that mod next publishes successfully.
+Messages are held in memory, not saved to disk. On reload, stop or Lua error, a mod's subscriptions
+and its pending outgoing messages are cleared. New subscriptions cannot receive messages queued for the previous
+load; messages still intended for other subscribed mods are preserved. Handle a refusal by retrying later or
+coalescing updates rather than publishing in a tight loop.
+
+### Services on the bus
+
+One mod can offer a *service* that other mods call with request and reply messages (a world database, navigation, ...).
+[services.md](services.md) is the short guide: topic names, the JSON envelope, request ids, timeouts, announcing a
+service, and the examples `bus_service` and `bus_client`.
+
+### JSON (1.18)
+
+Bus payloads are strings, so a mod that sends a table turns it into text first. `emf.json` does that the same way
+for every mod. It needs `"depends": {"lua": ">=1.18"}`.
+
+```lua
+local text = emf.json.encode({op = "get", args = {key = "apple"}, tags = {"a", "b"}})
+-- {"args":{"key":"apple"},"op":"get","tags":["a","b"]}
+local value, err = emf.json.decode(text)
+if not value then emf.log("bad json:", err) end
+```
+
+Bad input never raises a Lua error: `encode` and `decode` give `nil` and a message, so check the result (a call with
+a missing or wrong-typed argument is still a usage error, as for other `emf` functions).
+
+- **Tables**: keys exactly `1..n` (n at least 1) make a JSON array. Any other table is an object and all its keys must
+  be strings; a table with other keys (`{1, 2, x = 3}`, a sparse list, a number or table as key) is an error that names
+  the problem. An empty table is `{}`, so an empty list decodes and encodes as an object: test `next(t) == nil`.
+  Object keys are written in sorted order, so the same table always gives the same text.
+- **Numbers**: a Lua integer is written as an integer. A float is written in the shortest form that reads back as the
+  same number, and a whole float keeps a `.0` (`3.0`), so it stays a float. NaN and infinity are errors. When reading,
+  a number without a fraction or exponent that fits 64 bits is an integer, any other number a float.
+- **Null**: `emf.json.null` stands for JSON `null` (in either direction). Compare with `==`. A nil value in a table
+  does not exist in Lua, so use `emf.json.null` when "no value" must be sent.
+- **Strings** are UTF-8 and are checked: a string with invalid UTF-8 is an error in both directions. Quotes,
+  backslashes and control characters are escaped; `\uXXXX` escapes, including surrogate pairs, are decoded; a lone
+  surrogate is an error. Other text (`/`, accents, emoji) is written as it is.
+- **Also**: `emf.json.null` is truthy (`if value then` is true for null: compare with `== emf.json.null`). Metatables
+  are ignored (`__index`, `__pairs` have no effect; only the table's own entries are written). A repeated key in
+  the text keeps its last value. A UTF-8 byte order mark at the start of the text is an error. `-0` decodes as the
+  integer `0`. `decode` accepts a number as its argument (Lua converts it to text: `decode(5)` is `5`); other
+  non-text arguments are a usage error.
+- **Booleans** as usual. Functions, threads, userdata (except `emf.json.null`) and `nil` are errors.
+- **Limits**: 64 levels of nesting (this also stops a table that contains itself), 1 MiB of input text, 1 MiB of
+  output text. The bus carries at most 64 KiB, so encode first and check that `emf.bus.publish` returned true.
 
 ### Moving items
 

@@ -417,6 +417,8 @@ TEST_CASE("attributes: attributes, attribute_add and damage only on a build whos
     // reflected type is the same
     CHECK(attribute_layouts_checked(emf::known_build_index(1285601u)));
     CHECK(attribute_layouts_checked(emf::known_build_index(1285601u, true)));
+    CHECK(attribute_layouts_checked(emf::known_build_index(1287369u)));  // 1287369: every reflected type unchanged
+    CHECK(attribute_layouts_checked(emf::known_build_index(1287369u, true)));
     CHECK_FALSE(attribute_layouts_checked(emf::known_build_index(1269579u)));  // the exe was not at hand: unchecked
     CHECK_FALSE(attribute_layouts_checked(-1));                                // an unknown build (a game update)
     CHECK_FALSE(attribute_layouts_checked(99));

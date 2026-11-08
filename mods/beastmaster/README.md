@@ -266,7 +266,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Setting | Default | What it does |
 |---|---|---|
 | Beast wheel (`wheel_key`) | F3 | hold it for the wheel (any key the game does not use; B is its backpack key) |
-| Beasts window (at a stable without the prompt) (`stable_key`) | E | a stable has the game's E Open prompt; this key opens the window only at a stable without the prompt (a marked prop with its own E use or no collider, a prompt the game dropped), under your crosshair within 4 m; elsewhere E does what the game does |
+| Beasts window (at a stable without the prompt) (`stable_key`) | E | a stable has the game's E Open prompt; this key opens the window only at a stable without the prompt (a marked prop with its own E use or no collider, a prompt the game or EMF dropped), under your crosshair within 4 m; elsewhere E does what the game does |
 | Active slot 2, 3, 4 at level (`slot2_level`, `slot3_level`, `slot4_level`) | 10, 20, 30 | 0: that slot never opens |
 | One wheel with Necromancer's undead (`shared_wheel`) | on | off: Beastmaster's own wheel |
 | Mana to call a beast (`call_mana_pct`) | 15 % | of your maximum mana; 0 = free |
@@ -360,7 +360,8 @@ does not ship this file.
 - Render models are only on the game's client side: on a dedicated server a built stable is not seen; an admin marks it
   (`/beastmaster.stable mark`). There every player who presses E at a stable's prompt gets its chat commands.
 - A stable's prompt is on the stable's entity in the world the host or the server runs; Beastmaster offers it again at
-  every search of the world (every 30 s), so one the game dropped (the bed streamed out of view) comes back.
+  every search of the world (every 30 s), so one the game dropped (the bed streamed out of view) comes back. With
+  EMF's Lua 1.15 it also sees when EMF dropped it (`emf.offered`): the E key opens the window there meanwhile.
 - Your collection is kept with the world, per player (by Steam account).
 - A beast that is out is taken out of the world while its owner is away, and comes back when they return.
 - Beasts are ordinary game creatures with the enemy AI: they guard you as the game's companions do, and sometimes take

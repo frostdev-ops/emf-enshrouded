@@ -72,6 +72,20 @@ Seen with the drop-down console:
 - **Keys and the mouse with the console open (build 1273043):** closing the console with Esc in the world does not open the pause menu; ten repeated make codes of the console key (auto-repeat) toggle it once and type nothing; Shift+Tab opens the Steam overlay while the console is open and closes it again; moving the mouse with the console open leaves the camera where it was (it turns with the console closed).
 - **Text chat is off in an offline session:** the game binds "Open Text Chat" to Enter, but Enter opens nothing in the offline local world (matches the session's `isTextChatEnabled` gate in `docs/engine_parts/re_chat.md`). Chat commands therefore need an online session to test; they were checked on the dedicated server (`docs/engine_parts/re_chat.md`).
 
+## Game update: build 1287369 of 2026-11-04 (a known build)
+The Steam update of 2026-11-04 (15:49 on this PC; Steam build id 26430625) brought `enshrouded.exe` sha256
+`5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77` and `enshrouded_server.exe` sha256
+`f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2`. EMF 0.5.0 ran on it on signatures only
+(attributes, damage, teleport, change_component, offers, the save-slot recorder and Sleep off).
+- **Code.** Every signature matches once in both exes (53 of 53; the server 44, its 9 client-only ones absent as
+  before). The client's functions moved a little (InventoryCommit 0x40fd50 -> 0x40fe30); the server's RVAs are
+  1285601's. The 10 code offsets are 1285601's values in both exes.
+- **Types.** All 12,658 reflected types of the new client equal those of EML's types.json of 2026-11-02 (build
+  1283531, whose types 1285601 kept): kind, size, hashes, every field's name, offset and type. The server's 11,184
+  equal too, except 14 UI and ambience resources that name client-only types (not used by EMF on a server).
+- The client's menu offsets are taken as 1283531's (the app types are unchanged); save info and load_world as
+  before.
+
 ## Game update: build 1285601 of 2026-11-03 (game git 46e047ab4c02, a known build)
 The Steam update of 2026-11-03 (16:04 on this PC; `.kfc` version `1285601|^/game38/branches/release_1.0|2026-11-03T10:13:01`) brought `enshrouded.exe` sha256 `ce6fdba63e27744943b695921383a29133285d359e07671f6ca33a47e2147618` and `enshrouded_server.exe` sha256 `c5c9fe50c6398d2adedd98923c2d04bf9d9b4af64c1447ac167cdf8f874ff84f`. EMF 0.4.0 ran on it as an unknown build: 53 of 53 signatures, the world's offsets from code as on 1283531 (storage `+0xE179C0`, program count `+0xE16F50`, stride 0x1F28), and the features gated on checked layouts off (attribute_get, attribute_add, damage, teleport, change_component, load_world, the save-slot recorder).
 

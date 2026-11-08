@@ -473,6 +473,7 @@ std::optional<menu_layout::AppLayout> menu_app_layout(int build_index) {
     if (build_index == known_build_index(1273043u)) return menu_layout::kApp1273043;
     if (build_index == known_build_index(1283531u)) return menu_layout::kApp1283531;
     if (build_index == known_build_index(1285601u)) return menu_layout::kApp1283531;  // a hotfix: the same fields
+    if (build_index == known_build_index(1287369u)) return menu_layout::kApp1283531;  // the same fields again
     return std::nullopt;
 }
 
@@ -497,7 +498,7 @@ bool install_menu_start(const std::array<Resolved, kSigCount>& sigs, bool known_
     };
     if (g_menu) return fail("already installed");
     const auto app = menu_app_layout(build_index);
-    if (!app) return fail("the menu's offsets are known for the game exes of builds 1273043, 1283531 and 1285601 only");
+    if (!app) return fail("the menu's offsets are known for the game exes of builds 1273043, 1283531, 1285601 and 1287369 only");
     auto addr = [&](Sig s) -> uintptr_t {
         const auto& r = sigs[static_cast<size_t>(s)];
         return is_usable(r, known_build) ? r.addr : 0;

@@ -1,0 +1,11 @@
+{
+  "id": "bus_client",
+  "name": "Notes Client",
+  "version": "1.0.0",
+  "description": "Console commands that call the notes service (bus_service) over emf.bus and handle a missing service. An EMF example mod in Lua.",
+  "authors": ["EMF"],
+  "emf": 20,
+  "main": "main.lua",
+  "depends": {"lua": ">=1.18"},
+  "side": "server"
+}

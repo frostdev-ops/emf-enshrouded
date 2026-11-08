@@ -195,7 +195,7 @@ SaveInfoRecorder* save_info_recorder() { return g_recorder.get(); }
 bool slot_records_known(int build_index) {
     return build_index >= 0 &&
            (build_index == known_build_index(1273043u) || build_index == known_build_index(1283531u) ||
-            build_index == known_build_index(1285601u));
+            build_index == known_build_index(1285601u) || build_index == known_build_index(1287369u));
 }
 
 bool install_save_info(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index,

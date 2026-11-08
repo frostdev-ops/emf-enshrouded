@@ -1,0 +1,11 @@
+{
+  "id": "bus_service",
+  "name": "Notes Service",
+  "version": "1.0.0",
+  "description": "A tiny key-value 'notes' service other Lua mods call over emf.bus (set, get, list, delete). An EMF example mod in Lua.",
+  "authors": ["EMF"],
+  "emf": 20,
+  "main": "main.lua",
+  "depends": {"lua": ">=1.18"},
+  "side": "server"
+}

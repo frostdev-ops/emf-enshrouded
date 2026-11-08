@@ -116,13 +116,29 @@ void set_daytime(Fake& f, double hours) {
     f.singletons["g38_daytime::Daytime"] = d;
 }
 
-// Writes `text` with a modification time `step` (100 ns units << 32) later, so the host sees a change at once.
+// Writes `text` with a modification time `step` (100 ns units << 32) later, so the host sees a change at once. The
+// host sees a change only as another modification time, and the system clock moves in steps of about 15 ms: a write
+// right after another one (a fast machine) is given a time at least 1 ms after the file's last one.
 void write_later(const std::wstring& path, const std::string& text, int step) {
+    WIN32_FILE_ATTRIBUTE_DATA before{};
+    const bool had = GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &before) != 0;
     write(path, text);
     HANDLE h = CreateFileW(path.c_str(), FILE_WRITE_ATTRIBUTES, FILE_SHARE_READ, nullptr, OPEN_EXISTING, 0, nullptr);
     FILETIME ft;
     GetSystemTimeAsFileTime(&ft);
     ft.dwHighDateTime += static_cast<DWORD>(step);
+    if (had) {
+        ULARGE_INTEGER want, prev;
+        want.LowPart = ft.dwLowDateTime;
+        want.HighPart = ft.dwHighDateTime;
+        prev.LowPart = before.ftLastWriteTime.dwLowDateTime;
+        prev.HighPart = before.ftLastWriteTime.dwHighDateTime;
+        if (want.QuadPart <= prev.QuadPart + 10000) {
+            want.QuadPart = prev.QuadPart + 10000;
+            ft.dwLowDateTime = want.LowPart;
+            ft.dwHighDateTime = want.HighPart;
+        }
+    }
     SetFileTime(h, nullptr, nullptr, &ft);
     CloseHandle(h);
 }

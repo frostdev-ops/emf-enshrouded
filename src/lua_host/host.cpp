@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "emf/keys.hpp"
+#include "lua_host/lua_json.h"
 
 namespace emf::lua {
 
@@ -15,6 +16,10 @@ namespace {
 
 constexpr uint64_t kCallLimitMs = 250;
 constexpr uint64_t kSaveCreditMs = 1000;  // world-data writes left out of the time limit, per call
+constexpr size_t kBusMaxTopic = 96;
+constexpr size_t kBusMaxPayload = 64 * 1024;
+constexpr size_t kBusMaxPending = 4096;
+constexpr size_t kBusMaxPerMod = 256;
 constexpr const char* kScriptKey = "emf.script";
 
 std::wstring wide(const std::string& s) {
@@ -283,6 +288,126 @@ int l_on_tick(lua_State* L) {
     lua_pushvalue(L, 1);
     s->ticks.push_back(luaL_ref(L, LUA_REGISTRYINDEX));
     return 0;
+}
+
+int bus_kind_arg(lua_State* L, int index) {
+    if (lua_isnoneornil(L, index)) return EMF_WORLD_SERVER;
+    const std::string k = luaL_checkstring(L, index);
+    if (k == "server") return EMF_WORLD_SERVER;
+    if (k == "client") return EMF_WORLD_CLIENT;
+    return luaL_error(L, "the world kind is \"server\" or \"client\", not \"%s\"", k.c_str()), EMF_WORLD_SERVER;
+}
+
+bool bus_topic_ok(const std::string& topic) {
+    if (topic.empty() || topic.size() > kBusMaxTopic) return false;
+    for (unsigned char ch : topic)
+        if (ch < 0x20 || ch == 0x7f) return false;
+    return true;
+}
+
+// Length-aware: an embedded NUL in a topic must be rejected, not silently truncate it.
+std::string bus_topic_arg(lua_State* L, int index) {
+    size_t n = 0;
+    const char* text = luaL_checklstring(L, index, &n);
+    return std::string(text, n);
+}
+
+// A rejected publication is logged once until that publisher gets a successful publish again.
+// Validation refusals use the same rule as queue-limit refusals and do not pause the mod.
+bool bus_refuse(Script& s, const char* reason) {
+    Host::Impl& h = *s.host;
+    bool warn = false;
+    {
+        std::lock_guard<std::mutex> lock(h.m);
+        warn = h.bus_refusal_logged.insert(s.id).second;
+    }
+    if (warn) h.api->log(s.id.c_str(), "emf.bus.publish refused: %s", reason);
+    return false;
+}
+
+// emf.bus.subscribe(topic, fn [, "server"/"client"]): fn(world, source_mod_id, payload).
+// During the initial load all mods can receive startup publications, regardless of load order.
+// After startup, subscriptions only receive future publications (not a pre-reload backlog).
+int l_bus_subscribe(lua_State* L) {
+    Script* s = script_of(L);
+    const std::string topic = bus_topic_arg(L, 1);
+    if (!bus_topic_ok(topic)) return luaL_error(L, "bus topic must be 1..96 printable bytes");
+    luaL_checktype(L, 2, LUA_TFUNCTION);
+
+    BusSubscription sub;
+    sub.kind = bus_kind_arg(L, 3);
+    {
+        std::lock_guard<std::mutex> lock(s->host->m);
+        sub.first_sequence = (!s->host->load_done && s->loads == 1) ? 0 : s->host->bus_next_sequence + 1;
+    }
+    sub.token = ++s->next_bus_subscription;
+    lua_pushvalue(L, 2);
+    sub.ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    s->bus_subs[topic].push_back(sub);
+    lua_pushboolean(L, true);
+    return 1;
+}
+
+// Remove all callbacks for this topic, in both worlds. Messages published before a subsequent
+// subscribe are ignored by the replacement callback, including messages drained by this tick.
+int l_bus_unsubscribe(lua_State* L) {
+    Script* s = script_of(L);
+    const std::string topic = bus_topic_arg(L, 1);
+    if (!bus_topic_ok(topic)) return luaL_error(L, "bus topic must be 1..96 printable bytes");
+    auto it = s->bus_subs.find(topic);
+    const bool found = it != s->bus_subs.end();
+    if (found) {
+        for (const auto& sub : it->second) luaL_unref(L, LUA_REGISTRYINDEX, sub.ref);
+        s->bus_subs.erase(it);
+    }
+    lua_pushboolean(L, found);
+    return 1;
+}
+
+// emf.bus.publish(topic, payload [, "server"/"client"]): copy bytes to a bounded FIFO.
+// A publication is delivered only on the next step of that world, never during its callback.
+int l_bus_publish(lua_State* L) {
+    Script* s = script_of(L);
+    const std::string topic = bus_topic_arg(L, 1);
+    size_t n = 0;
+    const char* payload = luaL_checklstring(L, 2, &n);
+    const int kind = bus_kind_arg(L, 3);
+    if (!bus_topic_ok(topic)) {
+        lua_pushboolean(L, bus_refuse(*s, "topic must be 1..96 printable bytes"));
+        return 1;
+    }
+    if (n > kBusMaxPayload) {
+        lua_pushboolean(L, bus_refuse(*s, "payload exceeds 65536 bytes"));
+        return 1;
+    }
+
+    Host::Impl& h = *s->host;
+    const char* reason = nullptr;
+    bool warn = false;
+    {
+        std::lock_guard<std::mutex> lock(h.m);
+        const auto it = h.bus_queued_by_source.find(s->id);
+        const size_t own = it == h.bus_queued_by_source.end() ? 0 : it->second;
+        if (own >= kBusMaxPerMod) reason = "per-mod queue is full (256 messages)";
+        else if (h.bus_outbox.size() >= kBusMaxPending) reason = "global queue is full (4096 messages)";
+        if (reason) {
+            warn = h.bus_refusal_logged.insert(s->id).second;
+        } else {
+            BusMessage msg;
+            msg.source = s->id;
+            msg.topic = topic;
+            msg.payload.assign(payload, n);
+            msg.kind = kind;
+            msg.sequence = ++h.bus_next_sequence;
+            msg.source_epoch = h.bus_source_epoch[s->id];
+            h.bus_outbox.push_back(std::move(msg));
+            h.bus_queued_by_source[s->id] = own + 1;
+            h.bus_refusal_logged.erase(s->id);
+        }
+    }
+    if (reason && warn) h.api->log(s->id.c_str(), "emf.bus.publish refused: %s", reason);
+    lua_pushboolean(L, !reason);
+    return 1;
 }
 
 struct CommandSlot {
@@ -636,7 +761,26 @@ void Host::Impl::drop_sections(const std::string& id) {
                        sections.end());
 }
 
+void Host::Impl::drop_bus(const std::string& id) {
+    std::lock_guard<std::mutex> lock(m);
+    // Also invalidate publications already drained for this step but not yet delivered.
+    ++bus_source_epoch[id];
+    for (auto it = bus_outbox.begin(); it != bus_outbox.end();) {
+        if (it->source == id) it = bus_outbox.erase(it);
+        else ++it;
+    }
+    bus_queued_by_source.erase(id);
+    bus_refusal_logged.erase(id);
+}
+
 void Host::Impl::pause(Script& s, const std::string& why) {
+    drop_bus(s.id);
+    // The state is kept for error reporting, but no callback from it may run again.
+    // Dropping its subscriptions also releases Lua registry references immediately.
+    for (const auto& [topic, subs] : s.bus_subs)
+        for (const auto& sub : subs)
+            if (s.L) luaL_unref(s.L, LUA_REGISTRYINDEX, sub.ref);
+    s.bus_subs.clear();
     drop_sections(s.id);  // a paused mod's wheel section is not shown (its state stays: the refs go with it later)
     s.paused = true;
     s.error = why;
@@ -702,6 +846,14 @@ bool Host::Impl::load(Script& s) {
                                    {"key_down", l_key_down},
                                    {nullptr, nullptr}};
     luaL_newlib(L, fns);
+    static const luaL_Reg bus_fns[] = {{"subscribe", l_bus_subscribe},
+                                       {"publish", l_bus_publish},
+                                       {"unsubscribe", l_bus_unsubscribe},
+                                       {nullptr, nullptr}};
+    luaL_newlib(L, bus_fns);
+    lua_setfield(L, -2, "bus");
+    push_json_table(L);
+    lua_setfield(L, -2, "json");
     lua_pushstring(L, s.id.c_str());
     lua_setfield(L, -2, "id");
     lua_pushstring(L, folder.c_str());
@@ -748,6 +900,7 @@ void Host::Impl::unload(Script& s) {
     for (const auto& id : windows)
         if (api->window_close) api->window_close(id.c_str());
     queue_script_offers(*this, s);  // its offers come off on the next server step (only a world call may)
+    drop_bus(s.id);                 // also drops messages published from on_unload
     drop_sections(s.id);  // before the state (and its pick functions) goes
     lua_close(s.L);
     s.L = nullptr;
@@ -758,6 +911,7 @@ void Host::Impl::unload(Script& s) {
     s.keys.clear();
     s.chat_cbs.clear();
     s.ws_cbs.clear();
+    s.bus_subs.clear();
     s.commands.clear();  // the command names stay registered; they answer "not loaded" until registered again
     s.events.clear();
     ++s.generation;
@@ -832,7 +986,7 @@ void Host::Impl::recheck() {
     }
     for (auto& s : scripts) {
         auto it = status.find(s->id);
-        if (it == status.end() || it->second == EMF_MOD_SCRIPT) continue;
+        if (it == status.end() || it->second == EMF_MOD_SCRIPT || !s->not_run.empty()) continue;
         std::lock_guard<std::recursive_mutex> l(s->m);
         unload(*s);
         s->not_run = "the core did not load it (a dependency is switched off or failed; see the mods command)";
@@ -842,14 +996,42 @@ void Host::Impl::recheck() {
 
 void Host::tick_body(EmfWorld* world) {
     Impl& h = *impl_;
+    const int kind = h.api->world_kind ? h.api->world_kind(world) : EMF_WORLD_SERVER;
+    // Each world kind has one delivery order even if its steps arrive on different worker threads.
+    const int lock_kind = kind >= EMF_WORLD_SERVER && kind <= EMF_WORLD_CLIENT ? kind : EMF_WORLD_SERVER;
+    std::lock_guard<std::mutex> step_lock(h.world_step_m[lock_kind]);
+    // Freeze the publish boundary at the START of this step. Reload callbacks can publish
+    // before we drain the queue below, but those publications must wait for the NEXT step.
+    uint64_t ready_sequence;
+    {
+        std::lock_guard<std::mutex> l(h.m);
+        ready_sequence = h.bus_next_sequence;
+    }
     if (!h.rechecked.exchange(true)) h.recheck();
     const uint64_t now = GetTickCount64();
     uint64_t last = h.last_check.load();
     // the server and client worlds tick on their own threads: only the one that moves the clock on checks
     if (now > last && now - last >= 1000 && h.last_check.compare_exchange_strong(last, now)) check_reload_now();
-    const int kind = h.api->world_kind ? h.api->world_kind(world) : EMF_WORLD_SERVER;
     const bool server = kind == EMF_WORLD_SERVER;
     if (server) h.server_seen = now;
+    // Drain this world's FIFO once. A callback's publication stays queued until its next step.
+    // Sequence watermarks invalidate pre-reload and pre-subscribe messages without stealing
+    // the same publication from other mods that are still subscribed.
+    std::vector<BusMessage> bus;
+    {
+        std::lock_guard<std::mutex> l(h.m);
+        for (auto it = h.bus_outbox.begin(); it != h.bus_outbox.end();) {
+            if (it->kind == kind && it->sequence <= ready_sequence) {
+                auto count = h.bus_queued_by_source.find(it->source);
+                if (count != h.bus_queued_by_source.end() && --count->second == 0)
+                    h.bus_queued_by_source.erase(count);
+                bus.push_back(std::move(*it));
+                it = h.bus_outbox.erase(it);
+            } else {
+                ++it;
+            }
+        }
+    }
     for (auto& s : h.scripts) {
         std::lock_guard<std::recursive_mutex> l(s->m);
         if (!s->L || s->paused) continue;
@@ -871,6 +1053,37 @@ void Host::tick_body(EmfWorld* world) {
                 }
             }
         }
+        bool bus_stopped = false;
+        for (const auto& msg : bus) {
+            auto it = s->bus_subs.find(msg.topic);
+            if (it == s->bus_subs.end()) continue;
+            // A sender may have stopped after this message was drained. Do not deliver
+            // that old instance's publications to callbacks later in this same step.
+            {
+                std::lock_guard<std::mutex> l(h.m);
+                if (h.bus_source_epoch[msg.source] != msg.source_epoch) continue;
+            }
+            const std::vector<BusSubscription> subs = it->second;  // callbacks may subscribe again
+            for (const auto& sub : subs) {
+                if (sub.kind != kind || msg.sequence < sub.first_sequence) continue;
+                // unsubscribe() from an earlier callback may already have unref'd this function.
+                const auto live = s->bus_subs.find(msg.topic);
+                if (live == s->bus_subs.end() ||
+                    std::none_of(live->second.begin(), live->second.end(),
+                                 [&](const BusSubscription& x) { return x.token == sub.token; })) continue;
+                lua_rawgeti(s->L, LUA_REGISTRYINDEX, sub.ref);
+                push_world(s->L, *s, world);
+                lua_pushlstring(s->L, msg.source.data(), msg.source.size());
+                lua_pushlstring(s->L, msg.payload.data(), msg.payload.size());
+                if (!call_lua(*s, 3)) {
+                    bus_stopped = true;
+                    break;
+                }
+            }
+            if (bus_stopped) break;
+        }
+        if (bus_stopped || !s->L || s->paused) continue;
+
         // emf.on_key: every step of any world looks at the keys; a press goes to the world it is meant for
         bool stopped = false;
         // The clock is read under the script's lock, so a press noted by the other world's thread is never "later"
@@ -912,6 +1125,8 @@ void Host::tick_body(EmfWorld* world) {
 
 void Host::check_reload_now() {
     Impl& h = *impl_;
+    // Also stop a mod switched off after startup. It must not retain bus subscriptions.
+    h.recheck();
     for (auto& s : h.scripts) {
         std::map<std::wstring, uint64_t> now;
         scan(s->folder, now);
