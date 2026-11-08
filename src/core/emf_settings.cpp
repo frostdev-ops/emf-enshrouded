@@ -130,6 +130,23 @@ std::vector<SettingDef> emf_setting_defs(const std::vector<std::string>& font_fi
     rows.when_key = "overlay.suggest";
     rows.when_value = "1";
     d.push_back(rows);
+    // [hud_editor]: the HUD editor (src/core/hud_editor); the active layout has no page: the layout bar changes it
+    d.push_back(base("hud_editor.enabled", SettingType::Bool, "HUD editor", "1", kPageHud, true,
+                     "Off: EMF leaves the game's HUD alone."));
+    d.push_back(base("hud_editor.show_outlines", SettingType::Bool, "Outline the HUD parts while this page is open", "1",
+                     kPageHud, true, "The game's own outline; the selected part blinks."));
+    d.push_back(base("hud_editor.allow_with_shroudhud", SettingType::Bool, "Use anyway with another HUD mod", "0", kPageHud,
+                     true,
+                     "With ShroudHud installed the editor stays off so the two do not fight. On: both run, at your own "
+                     "risk."));
+    d.push_back(base("hud_editor.key_page", SettingType::Key, "Key: open this page", "F9", kPageHud, true,
+                     "Press it again to close the console."));
+    d.push_back(base("hud_editor.key_reset", SettingType::Key, "Key: reset the whole HUD", "Pause", kPageHud, true,
+                     "Puts every part back where the game draws it; the layout before is kept as \"Before reset\"."));
+    SettingDef layout = base("hud_editor.active_layout", SettingType::Text, "HUD layout", "Default", "", true,
+                             "The layout bar on the HUD page changes it.");
+    layout.max_length = 40;
+    d.push_back(layout);
     // [console], [backup]: read at start
     d.push_back(base("console.window", SettingType::Bool, "A Windows console window with EMF's log", "0", kPageStart,
                      false));

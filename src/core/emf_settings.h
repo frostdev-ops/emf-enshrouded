@@ -14,6 +14,7 @@ namespace emf::core {
 // The Settings tab's pages, in order (SettingDef::group).
 constexpr const char* kPageText = "Text on screen";
 constexpr const char* kPageConsole = "Console";
+constexpr const char* kPageHud = "HUD";
 constexpr const char* kPageStart = "Start-up";
 
 // Every setting of the Settings tab, in the order the tab shows them; `font_files` (from emf_font_files) become

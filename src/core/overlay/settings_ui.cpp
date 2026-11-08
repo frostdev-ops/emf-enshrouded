@@ -7,8 +7,9 @@
 
 namespace emf::core {
 
-void draw_settings_tab(SettingsStore* s, ModsUiState& ui, SettingsUiState& st, const std::function<void()>& preview) {
-    static const char* const kPages[] = {kPageText, kPageConsole, kPageStart};
+void draw_settings_tab(SettingsStore* s, ModsUiState& ui, SettingsUiState& st, const std::function<void()>& preview,
+                       const std::function<void()>& hud_page) {
+    static const char* const kPages[] = {kPageText, kPageConsole, kPageHud, kPageStart};
     if (std::find(std::begin(kPages), std::end(kPages), st.page) == std::end(kPages)) st.page = kPageText;
     if (!s) {
         ImGui::TextDisabled("EMF's settings are not available.");
@@ -29,6 +30,13 @@ void draw_settings_tab(SettingsStore* s, ModsUiState& ui, SettingsUiState& st, c
     const std::vector<SettingDef> defs = s->defs(kEmfSettingsId);
     if (st.page == kPageText && preview) {
         preview();
+        ImGui::Spacing();
+    }
+    if (st.page == kPageHud) {
+        if (hud_page)
+            hud_page();
+        else
+            ImGui::TextDisabled("The HUD editor is not available here.");
         ImGui::Spacing();
     }
     for (const SettingDef& d : defs)

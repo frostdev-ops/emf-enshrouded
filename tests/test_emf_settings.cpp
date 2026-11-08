@@ -36,6 +36,8 @@ TEST_CASE("emf settings: every key of the spec, on its page, live or next start"
                       "overlay.tabs_font", "overlay.text_size", "overlay.height", "overlay.opacity",
                       "overlay.background", "overlay.accent", "overlay.colour_command", "overlay.colour_reply",
                       "overlay.colour_error", "overlay.colour_success", "overlay.suggest", "overlay.suggest_rows",
+                      "hud_editor.enabled", "hud_editor.show_outlines", "hud_editor.allow_with_shroudhud",
+                      "hud_editor.key_page", "hud_editor.key_reset", "hud_editor.active_layout",
                       "console.window", "backup.on_start", "backup.keep", "backup.min_minutes"});
     const std::vector<std::string> next_start = {"overlay.key",    "overlay.chat", "console.window",
                                                  "backup.on_start", "backup.keep", "backup.min_minutes"};
@@ -43,7 +45,9 @@ TEST_CASE("emf settings: every key of the spec, on its page, live or next start"
         CAPTURE(d.key);
         const bool next = std::find(next_start.begin(), next_start.end(), d.key) != next_start.end();
         CHECK(d.live == !next);
-        const std::string page = d.key.rfind("hud.", 0) == 0       ? kPageText
+        const std::string page = d.key == "hud_editor.active_layout"       ? ""
+                                 : d.key.rfind("hud_editor.", 0) == 0 ? kPageHud
+                                 : d.key.rfind("hud.", 0) == 0       ? kPageText
                                  : d.key.rfind("overlay.", 0) == 0 ? kPageConsole
                                                                    : kPageStart;
         CHECK(d.group == page);
@@ -195,4 +199,17 @@ TEST_CASE("overlay_config_with_store: the console starts with the values the Set
     CHECK(c.suggest_rows == 5u);
     SettingsStore empty(&ini);  // no defs (a core without them): the ini's config as it was
     CHECK(overlay_config_with_store(from_ini, empty).look == from_ini.look);
+}
+
+TEST_CASE("emf settings: the HUD editor's keys default to F9 and Pause, and a store keeps them") {
+    MapIni ini;
+    SettingsStore s(&ini);
+    for (SettingDef d : emf_setting_defs({}))
+        REQUIRE(s.declare(kEmfSettingsId, std::move(d), nullptr, SettingsStore::Declare::Keep));
+    CHECK(s.get(kEmfSettingsId, "hud_editor.key_page") == "F9");
+    CHECK(s.get(kEmfSettingsId, "hud_editor.key_reset") == "Pause");
+    CHECK(s.get(kEmfSettingsId, "hud_editor.enabled") == "1");
+    CHECK(s.get(kEmfSettingsId, "hud_editor.allow_with_shroudhud") == "0");
+    CHECK(s.get(kEmfSettingsId, "hud_editor.active_layout") == "Default");
+    CHECK(s.set(kEmfSettingsId, "hud_editor.active_layout", std::string(41, 'a')) == SettingsStore::SetResult::Invalid);
 }

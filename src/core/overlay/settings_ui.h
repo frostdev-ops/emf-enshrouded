@@ -14,8 +14,10 @@ struct SettingsUiState {
     std::string page = kPageText;  // the page shown (a page that does not exist falls back to the first)
 };
 
-// Draws the tab into the current window. `preview` (optional) draws the text page's preview of the on-screen look.
+// Draws the tab into the current window. `preview` (optional) draws the text page's preview of the on-screen look; `hud_page` (optional) draws the HUD editor's
+// part of the HUD page, above that page's settings.
 void draw_settings_tab(SettingsStore* s, ModsUiState& ui, SettingsUiState& st,
-                       const std::function<void()>& preview = std::function<void()>());
+                       const std::function<void()>& preview = std::function<void()>(),
+                       const std::function<void()>& hud_page = std::function<void()>());
 
 }  // namespace emf::core

@@ -62,7 +62,8 @@ struct Rig {
     SettingsStore store{&ini};
     ModsUiState ui;
     SettingsUiState st;
-    int previews = 0;
+    int previews = 0, hud_calls = 0;
+    std::function<void()> hud_page;
     Rig() {
         for (SettingDef d : emf_setting_defs({"Mine.ttf"}))
             REQUIRE(store.declare(kEmfSettingsId, std::move(d), nullptr, SettingsStore::Declare::Keep));
@@ -76,7 +77,7 @@ struct Rig {
             ImGui::NewFrame();
             ImGui::SetNextWindowSize(ImVec2(1600, 700));
             ImGui::Begin("settings test");
-            draw_settings_tab(&r->store, r->ui, r->st, [r] { ++r->previews; });
+            draw_settings_tab(&r->store, r->ui, r->st, [r] { ++r->previews; }, r->hud_page);
             ImGui::End();
             ImGui::Render();
         }, &c);
@@ -88,7 +89,7 @@ struct Rig {
 TEST_CASE("settings tab: every page draws every kind of setting without ImGui errors; the preview on the text page") {
     Headless h;
     Rig r;
-    for (const char* page : {kPageText, kPageConsole, kPageStart}) {
+    for (const char* page : {kPageText, kPageConsole, kPageHud, kPageStart}) {
         r.st.page = page;
         for (int i = 0; i < 3; ++i) r.frame();
     }
@@ -134,4 +135,27 @@ TEST_CASE("settings tab: the console key's capture runs through the Mods tab's k
     ui.scan.frame = 10;
     CHECK_FALSE(capture_key_event(ui, KeyEvent{0x29, 0, true, false}, 30));  // the tab closed meanwhile: dropped
     CHECK(ui.scan.step == ScanCapture::Step::Idle);
+}
+
+TEST_CASE("settings tab: the HUD page calls its editor first, then draws its settings; other pages never call it") {
+    Headless h;
+    Rig r;
+    r.hud_page = [&r] { ++r.hud_calls; };
+    r.st.page = kPageText;
+    r.frame();
+    r.st.page = kPageConsole;
+    r.frame();
+    r.st.page = kPageStart;
+    r.frame();
+    CHECK(r.hud_calls == 0);
+    r.st.page = kPageHud;
+    r.frame();
+    r.frame();
+    CHECK(r.hud_calls == 2);
+    CHECK(r.st.page == kPageHud);
+    // without an editor the page still draws (a grey line and the settings)
+    r.hud_page = nullptr;
+    r.frame();
+    CHECK(r.hud_calls == 2);
+    CHECK(std::string(emf_imgui_last_assert()).empty());
 }
