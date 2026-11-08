@@ -52,6 +52,7 @@ local FIRST_S = { 5, 12 }    -- s: the first stroll
 local STROLL_S = { 15, 30 }  -- s: a stroll
 local REST_S = { 40, 90 }    -- s: a rest
 local JITTER = 20            -- degrees: a beast faces out of the open side give or take this
+local FACE_TRIES = 3         -- a turn to face out that the game did not carry out is asked this often in all
 local RESPAWN_S = 60
 local RETRY_S = 300
 local BUILD_M, GRACE_S = 20, 5
@@ -171,11 +172,15 @@ local function guard(world, id, h)
 	if h.entity then emf.emit("server", "StartGuardingEvent", { guardingEntityId = id, guardedEntityId = h.entity }) end
 end
 
--- Turns entry `e`'s beast where it stands to face out of stable `h`'s open side: true when the game took it.
+-- Turns entry `e`'s beast where it stands to face out of stable `h`'s open side: true when the game took it. One the
+-- game took but did not carry out (its answer: failed) counts as not faced: the upkeep asks again, FACE_TRIES in all.
 local function face(world, e, h)
 	local x, y, z = world:position(e.id)
 	if not (x and emf.teleport) then return false end
-	return emf.teleport(world, e.id, x, y, z, { yaw = yaw_out(h) }) == true
+	e.tries = (e.tries or 0) + 1
+	return emf.teleport(world, e.id, x, y, z, { yaw = yaw_out(h) }, function(moved)
+		if not moved then e.faced = false end
+	end) == true
 end
 
 -- Puts entry `e`'s beast back on its spot of stable `h`, facing out.
@@ -378,7 +383,7 @@ function H:upkeep(world, e, h, now)
 		end
 	end
 	if max and cur < max then emf.attribute_add(world, e.id, "health", max - cur) end
-	if not e.faced then e.faced = face(world, e, h) end
+	if not e.faced and (e.tries or 0) < FACE_TRIES then e.faced = face(world, e, h) end
 	local x, _, z = world:position(e.id)
 	if dist(h, x, h.y, z) >= ROAM_M then
 		e.far = e.far or now

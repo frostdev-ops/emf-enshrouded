@@ -218,13 +218,16 @@ local function wake(world, id, sc)
 end
 M.wake = wake
 
--- Turns beast `id` where it stands to face the point (tx, tz): true when the game took the teleport.
-local function turn(world, id, tx, tz)
+-- Turns beast `id` where it stands to face the point (tx, tz): true when the game took the teleport. A turn the game
+-- took but did not carry out (its answer: failed) is asked once more while `still()` holds (the scene is the same).
+local function turn(world, id, tx, tz, still, again)
 	local x, y, z = world:position(id)
 	if not x then return false end
 	local dx, dz = tx - x, tz - z
 	if dx * dx + dz * dz < 0.01 or not emf.teleport then return false end
-	return emf.teleport(world, id, x, y, z, { yaw = math.deg(math.atan(dx, dz)) }) == true
+	return emf.teleport(world, id, x, y, z, { yaw = math.deg(math.atan(dx, dz)) }, function(moved, _, _, _, _, w)
+		if not moved and not again and (not still or still()) then turn(w, id, tx, tz, still, true) end
+	end) == true
 end
 
 -- Wakes `id` when it is a player-side creature in the Sleep state with the bit on; true when it was one.
@@ -358,7 +361,9 @@ function I:pick(world, id, account, owner, group, now)
 	local same = sc.scene == scene and sc.key == key
 	sc.scene, sc.key = scene, key
 	sc.until_s = now + math.random(SCENE_MIN_S, SCENE_MAX_S)
-	if not same then sc.turned = fx ~= nil and turn(world, id, fx, fz) end
+	if not same then
+		sc.turned = fx ~= nil and turn(world, id, fx, fz, function() return self.scenes[id] == sc and sc.key == key end)
+	end
 	sc.hold = stays and scene ~= "sniff"
 	if sc.hold then
 		self:lie(world, id, sc, now)

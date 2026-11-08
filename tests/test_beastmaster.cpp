@@ -5159,3 +5159,49 @@ TEST_CASE("home: a monster's hit on a player at a Large Stable sends its beasts 
     b.seconds(1);
     for (uint32_t id : {1234u, 1235u, 1236u}) CHECK(destroyed(b, id));
 }
+
+namespace {
+// The game's last answer to teleport `t` (its callback): moved, or failed (given up after it was taken).
+void answer(const EmfTeleport& t, bool moved) {
+    EmfTeleportResult r{};
+    r.size = sizeof r;
+    r.entity = t.entity;
+    r.status = moved ? EMF_TELEPORT_MOVED : EMF_TELEPORT_FAILED;
+    r.flags = EMF_TELEPORT_LAST;
+    r.reason = moved ? "" : "given up";
+    if (t.cb) t.cb(kServer, &r, t.user);
+}
+}  // namespace
+
+TEST_CASE("idle: a turn the game took but did not carry out (its teleport failed) is asked again, once") {
+    RollRig b({{"call_cooldown_s", "0"}});
+    b.roll(0.6);  // by the fire
+    b.reply("beastmaster.give boar");
+    fire_at(b, 900, 4, 4);
+    roaming(b, "Boar", 1234, 0, 4);
+    b.seconds(11);
+    auto turns = turns_of(b, 1234);
+    REQUIRE(turns.size() == 1u);
+    answer(turns[0], false);
+    one_step(b);
+    turns = turns_of(b, 1234);
+    REQUIRE(turns.size() == 2u);
+    CHECK(turns[1].yaw_deg == doctest::Approx(90.0));
+    answer(turns[1], false);  // failed again: not a third time
+    b.seconds(2);
+    CHECK(turns_of(b, 1234).size() == 2u);
+}
+
+TEST_CASE("home: a beast's turn to face out that the game did not carry out is asked again, at most 3 times") {
+    RollRig b;
+    b.roll(0.6);  // the longest first stroll (12 s): no turn of a rest meanwhile
+    home_three(b);
+    size_t answered = 0;
+    for (int i = 0; i < 6; ++i) {
+        const auto turns = turns_of(b, 1234);
+        if (turns.size() > answered) answer(turns.back(), false);  // each turn answered once (the answer is its last)
+        answered = turns.size();
+        b.seconds(1);
+    }
+    CHECK(turns_of(b, 1234).size() == 3u);
+}
