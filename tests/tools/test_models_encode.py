@@ -124,6 +124,57 @@ class MakeModTests(unittest.TestCase):
             make_mod.remove_stale(d, {"kept"})
             self.assertEqual(sorted(os.listdir(d)), ["kept_blob.lua", "kept_data.lua", "notes.txt"])
 
+    def test_content_scripts_are_copied_with_the_helper_and_stale_ones_go(self):
+        """A pack's "content_scripts" (Beastmaster's Stable) run with EMF's content helper next to them."""
+        lib = os.path.join(HERE, "..", "..", "content", "lib", "emf_content.lua")
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as packs:
+            script = os.path.join(packs, "beastmaster_stable.lua")
+            with open(script, "w", encoding="utf-8") as f:
+                f.write("print('stable')\n")
+            for n in ("content_old.lua", "beast_bear_data.lua"):
+                open(os.path.join(d, n), "w").close()
+            names = make_mod.copy_content(d, ["beastmaster_stable.lua"], packs)
+            self.assertEqual(names, ["content_beastmaster_stable"])
+            self.assertEqual(sorted(os.listdir(d)), ["beast_bear_data.lua", "content_beastmaster_stable.lua",
+                                                     "emf_content.lua"])
+            with open(os.path.join(d, "emf_content.lua"), "rb") as a, open(lib, "rb") as b:
+                self.assertEqual(a.read(), b.read())
+            with open(os.path.join(d, "content_beastmaster_stable.lua"), encoding="utf-8") as f:
+                self.assertEqual(f.read(), "print('stable')\n")
+            self.assertEqual(make_mod.copy_content(d, [], packs), [])  # none left: the helper goes too
+            self.assertEqual(os.listdir(d), ["beast_bear_data.lua"])
+
+    def test_a_content_script_name_is_lowercase_letters_digits_and_underscores(self):
+        with tempfile.TemporaryDirectory() as d, tempfile.TemporaryDirectory() as packs:
+            for bad in ("Stable.lua", "my-stable.lua", "stable.txt"):
+                open(os.path.join(packs, bad), "w").close()
+                with self.assertRaises(SystemExit, msg=bad):
+                    make_mod.copy_content(d, [bad], packs)
+            with self.assertRaises(SystemExit):
+                make_mod.copy_content(d, ["missing.lua"], packs)
+
+    @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
+    def test_the_generated_mod_runs_its_content_scripts_after_the_creatures(self):
+        """A content script that fails is logged and leaves the creatures and the other scripts in place."""
+        with tempfile.TemporaryDirectory() as d:
+            make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(dict(BEAR))],
+                                   ["content_bad", "content_good"])
+            with open(os.path.join(d, "beast_bear_data.lua"), "w", encoding="utf-8") as f:
+                f.write(STUB_DATA)
+            with open(os.path.join(d, "beast_bear_blob.lua"), "w", encoding="utf-8") as f:
+                f.write('return "blob"\n')
+            with open(os.path.join(d, "content_bad.lua"), "w", encoding="utf-8") as f:
+                f.write("error('no such item')\n")
+            with open(os.path.join(d, "content_good.lua"), "w", encoding="utf-8") as f:
+                f.write("print('good content ran')\n")
+            mock = os.path.join(HERE, "..", "..", "tools", "models", "mock_eml.lua")
+            out = subprocess.run(["lua", mock, d], capture_output=True, text=True, timeout=60)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("content_bad: not added:", out.stdout)
+            self.assertIn("no such item", out.stdout)
+            self.assertIn("good content ran", out.stdout)
+            self.assertLess(out.stdout.index("added beast_bear"), out.stdout.index("good content ran"))
+
     def test_skeleton_and_clip_files_go_when_a_creature_has_no_skeleton_of_its_own(self):
         with tempfile.TemporaryDirectory() as d:
             for n in ("own_skeleton.lua", "own_clips.lua", "plain_skeleton.lua", "plain_clips.lua", "plain_data.lua"):
