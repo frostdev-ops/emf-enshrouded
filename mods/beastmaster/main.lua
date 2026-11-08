@@ -466,7 +466,9 @@ local CHAT_CONFIRM_S = 10   -- release: the same command again within this
 -- Why `player` cannot act at a stable now (none within CHAT_STABLE_M), or nil; `bed`: the text says what a stable is.
 local function away_from_stable(world, player, bed)
 	if player and stables:near(world, player, CHAT_STABLE_M) then return nil end
-	if bed then return string.format("Go to a stable %s within %d m to do that.", stable_mod.what_it_is(), CHAT_STABLE_M) end
+	if bed then
+		return string.format("Go to a stable %s within %d m to do that.", stable_mod.what_it_is(), CHAT_STABLE_M)
+	end
 	return string.format("Go to a stable (within %d m) to do that.", CHAT_STABLE_M)
 end
 

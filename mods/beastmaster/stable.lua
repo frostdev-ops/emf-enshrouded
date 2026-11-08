@@ -461,7 +461,8 @@ end
 -- had a stable. The reply.
 function S:list_text(world, player, had)
 	if #self.stables == 0 then
-		local how = "build " .. M.what_to_build() .. " in your base, or mark a prop with beastmaster.stable mark."
+		local how = "build " .. M.what_to_build() .. " in your base, or mark a prop with " ..
+			"beastmaster.stable mark."
 		if had then return "No stable in this world now (there was one: only active beasts can be called): " .. how end
 		return "No stable in this world yet: " .. how
 	end
