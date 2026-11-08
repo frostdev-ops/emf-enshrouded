@@ -1,0 +1,9 @@
+{
+  "notes": "The Stable on the game's own materials (blender/game_materials.py). Slot 0: the thatch of the game's straw roof (Material_buildings_roof_straw_01_parts, 98275745-f4e6-4d24-a5f1-3b5c511b2d5e), its large straw patch (pixels 40..600 x 30..315 of 1024) at the roof pieces' density (5.08 m per texture: 2.78 x 1.41 m). Slot 1: the shed planks (Material_buildings_set_Nation01_shed_Wall_beans, f4469c8e-ce61-4672-badb-a03d84133987), its large weathered board (pixels 430..990 x 60..730) at the shed beams' density (4.18 m per texture: 2.29 x 2.73 m). The Meshy model's straw is bright and saturated, its wood dark and dull.",
+  "rules": [{"material": 0, "min_saturation": 0.55, "min_value": 0.45}],
+  "default": 1,
+  "materials": {
+    "0": {"repeat": [2.78, 1.41], "region": [0.0391, 0.0293, 0.5859, 0.3076]},
+    "1": {"repeat": [2.29, 2.73], "region": [0.4199, 0.0586, 0.9668, 0.7129]}
+  }
+}

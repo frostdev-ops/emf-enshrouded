@@ -206,6 +206,35 @@ class MakeModTests(unittest.TestCase):
             self.assertIn("skinningMap = {}", data)
             self.assertIn("materialIndex = 2", data)
 
+    def test_a_prop_names_the_game_material_of_each_slot(self):
+        prop = {"name": "stable_prop", "glb": "stable.glb", "source_model_guid": "src-model",
+                "source_model_json": "bed.json", "model_guid": "p-1", "materials": {"1": "game-wood", "0": "game-straw"}}
+        self.assertEqual(make_mod.prop_entry(dict(prop))["materials"],
+                         [{"slot": 0, "material": "game-straw"}, {"slot": 1, "material": "game-wood"}])
+        with self.assertRaises(SystemExit):
+            make_mod.prop_entry(dict(prop, materials={"x": "game-wood"}))
+        with self.assertRaises(SystemExit):
+            make_mod.prop_entry(dict(prop, materials={"0": "game-straw"}, texture={"albedo_dir": "t", "slot": 0}))
+
+    @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
+    def test_the_generated_mod_points_a_props_slots_at_the_game_materials(self):
+        with tempfile.TemporaryDirectory() as d:
+            prop = {"name": "stable_prop", "source_model_guid": BEAR["source_model_guid"], "model_guid": "p-1",
+                    "materials": [{"slot": 0, "material": "game-straw"}, {"slot": 1, "material": "game-wood"}]}
+            make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(dict(BEAR))],
+                                   props=[prop])
+            for name in ("beast_bear", "stable_prop"):
+                with open(os.path.join(d, name + "_data.lua"), "w", encoding="utf-8") as f:
+                    f.write(STUB_DATA.replace("beast_bear", name))
+                with open(os.path.join(d, name + "_blob.lua"), "w", encoding="utf-8") as f:
+                    f.write('return "blob"\n')
+            mock = os.path.join(HERE, "..", "..", "tools", "models", "mock_eml.lua")
+            out = subprocess.run(["lua", mock, d], capture_output=True, text=True, timeout=60)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("stable_prop: slot 0 wears the game material game-straw", out.stdout)
+            self.assertIn("stable_prop: slot 1 wears the game material game-wood", out.stdout)
+            self.assertIn("added prop stable_prop: model p-1", out.stdout)
+
     @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
     def test_the_generated_mod_makes_the_props_models_before_its_content_scripts(self):
         """A prop is a model of its own with no template (a content script's object uses it)."""

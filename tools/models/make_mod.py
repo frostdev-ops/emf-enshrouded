@@ -57,7 +57,8 @@ pack.json:
         "source_model_guid": "...", "source_model_json": "<dump>.json",  # a game model whose record and materials
         "model_guid": "...",                          # FIXED forever once shared   are kept
         "width": 4.0, "yaw": 0, "material": 2,        # fitted to this width (metres), turned, every mesh in one slot
-        "texture": {"albedo_dir": "tex/stable", "slot": 2}  # optional, as a creature's
+        "texture": {"albedo_dir": "tex/stable", "slot": 2},  # optional, as a creature's, or instead:
+        "materials": {"0": "<game material GUID>"}    # each slot wears a game material (blender/game_materials.py)
       }
     ],
     "content_scripts": ["beastmaster_stable.lua"]     # optional: Lua files run after the creatures with EMF's helper
@@ -293,6 +294,11 @@ local function make_model(c)
 		m.skinningData = data.skinningData
 		m.blendShapeData = data.blendShapeData
 		m.renderData.hash = game.assets.create_content(buffer.wrap(require(c.name .. "_blob")))
+		-- a prop on the game's own materials: each slot names one (the game's art stays the game's)
+		for _, s in ipairs(c.materials or {}) do
+			m.materials[s.slot + 1].material = s.material
+			log(string.format("%%s: slot %%d wears the game material %%s", c.name, s.slot, s.material))
+		end
 		if c.texture then
 			local ok, result = pcall(make_material, c, m)
 			log(c.name .. (ok and (": material " .. c.texture.material_guid .. ": " .. result)
@@ -861,7 +867,17 @@ def prop_entry(p):
             raise SystemExit("prop %s: \"%s\" is missing" % (p.get("name", "?"), k))
     if not NAME.match(p["name"]):
         raise SystemExit("prop name '%s': use lowercase letters, digits and _" % p["name"])
-    return {"name": p["name"], "source_model_guid": p["source_model_guid"], "model_guid": p["model_guid"]}
+    entry = {"name": p["name"], "source_model_guid": p["source_model_guid"], "model_guid": p["model_guid"]}
+    if p.get("materials"):
+        if p.get("texture"):
+            raise SystemExit("prop %s: \"materials\" (the game's own) or \"texture\" (ours), not both" % p["name"])
+        slots = []
+        for k, guid in p["materials"].items():
+            if not str(k).isdigit():
+                raise SystemExit("prop %s: material slots are numbers, not '%s'" % (p["name"], k))
+            slots.append({"slot": int(k), "material": guid})
+        entry["materials"] = sorted(slots, key=lambda s: s["slot"])
+    return entry
 
 
 def write_scripts(src, pack, listing, content_modules=(), props=()):
