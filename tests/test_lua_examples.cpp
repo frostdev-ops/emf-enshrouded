@@ -1209,8 +1209,8 @@ std::vector<std::string> lua_examples() {
 }
 // The examples that have their own tests in this file. A new folder fails the first test until it is added here (with
 // tests of its own).
-const std::set<std::string> kTestedExamples = {"chat_command", "hotkey_wheel", "hud_widget",
-                                               "loot_ticker",  "pet_follow",   "settings_tour"};
+const std::set<std::string> kTestedExamples = {"bus_client",  "bus_service", "chat_command", "hotkey_wheel",
+                                               "hud_widget",  "loot_ticker", "pet_follow",   "settings_tour"};
 
 EmfCommandSender sender_of(uint32_t entity, uint64_t account, bool chat, bool admin) {
     EmfCommandSender s{};
@@ -1356,9 +1356,10 @@ TEST_CASE("lua examples: every folder in examples/lua loads, has its own tests h
         CHECK(x.host->status(id) == "running");
         // the rule (docs/modding/README.md, "Examples"): "emf" is the API version of the Lua host it depends on
         const std::string json = read_all(EMF_SOURCE_DIR "/examples/lua/" + id + "/mod.json");
+        const bool needs_18 = json.find(R"("lua": ">=1.18")") != std::string::npos;
         const bool needs_14 = json.find(R"("lua": ">=1.4")") != std::string::npos;
-        CHECK((needs_14 || json.find(R"("lua": ">=1.3")") != std::string::npos));
-        CHECK(json.find(needs_14 ? R"("emf": 17)" : R"("emf": 14)") != std::string::npos);
+        CHECK((needs_18 || needs_14 || json.find(R"("lua": ">=1.3")") != std::string::npos));
+        CHECK(json.find(needs_18 ? R"("emf": 20)" : needs_14 ? R"("emf": 17)" : R"("emf": 14)") != std::string::npos);
     }
 }
 
@@ -1918,4 +1919,74 @@ TEST_CASE("lua example loot_ticker: a black line fades to black, never to the us
     }
     CHECK_FALSE(zero);
     CHECK(x.hud("01").empty());
+}
+
+// bus_service + bus_client: the services pattern of docs/modding/services.md, end to end through the Lua host.
+namespace {
+void add_bus_example(Rig& r, const char* id) {
+    add_script(r.dir, id, read_all(std::string(EMF_SOURCE_DIR "/examples/lua/") + id + "/main.lua"));
+}
+}  // namespace
+
+TEST_CASE("lua example bus_service + bus_client: set, get, list and a missing note round trip over the bus") {
+    Rig r(L"bus_example_pair");
+    add_bus_example(r, "bus_client");
+    add_bus_example(r, "bus_service");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    REQUIRE(host.status("bus_client") == "running");
+    REQUIRE(host.status("bus_service") == "running");
+    host.tick(kServer);
+    CHECK(logged("service notes is here (from bus_service)"));  // the hello of the service's start reached the client
+    auto ask = [&](const std::string& command) {
+        r.fake.notes.clear();
+        r.run_command(command);
+        host.tick(kServer);  // the service gets the request and answers
+        host.tick(kServer);  // the client gets the answer
+        return r.fake.notes.empty() ? std::string() : r.fake.notes.back();
+    };
+    CHECK(ask("bus_client.set apple red") == "set apple: true");
+    CHECK(ask("bus_client.set pear green") == "set pear: true");
+    CHECK(ask("bus_client.get apple") == "get apple: red");
+    CHECK(ask("bus_client.get plum") == "get plum: (nothing)");
+    CHECK(ask("bus_client.list") == "notes: [apple, pear]");
+    CHECK(ask("bus_client.set") == "");  // usage line goes to the reply, not to the bus
+}
+
+TEST_CASE("lua example bus_client: with no service the call ends in a timeout after 3 seconds, once") {
+    Rig r(L"bus_example_timeout");
+    add_bus_example(r, "bus_client");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    REQUIRE(host.status("bus_client") == "running");
+    r.run_command("bus_client.get apple");
+    for (int i = 0; i < 170; ++i) host.tick(kServer);
+    CHECK(r.fake.notes.empty());  // still waiting
+    for (int i = 0; i < 20; ++i) host.tick(kServer);
+    REQUIRE(r.fake.notes.size() == 1);
+    CHECK(r.fake.notes[0].find("get apple failed: timeout: no answer from the notes service") == 0);
+    for (int i = 0; i < 400; ++i) host.tick(kServer);
+    CHECK(r.fake.notes.size() == 1);  // the callback ran exactly once
+}
+
+TEST_CASE("lua example bus_service: bad requests get an error reply, a crashing op does not stop the service") {
+    Rig r(L"bus_example_errors");
+    add_bus_example(r, "bus_service");
+    add_script(r.dir, "probe",
+               "emf.bus.subscribe('notes.reply', function(w, from, p) emf.log('REPLY', p) end)\n"
+               "local function ask(t) emf.bus.publish('notes.request', emf.json.encode(t)) end\n"
+               "ask({v = 1, id = 'a', op = 'nope', from = 'probe'})\n"
+               "ask({v = 2, id = 'b', op = 'list', from = 'probe'})\n"
+               "ask({v = 1, id = 'c', op = 'set', args = {key = 7}, from = 'probe'})\n"
+               "emf.bus.publish('notes.request', 'not json')\n"
+               "ask({v = 1, op = 'list', from = 'probe'})\n"
+               "ask({v = 1, id = 'd', op = 'list', from = 'probe'})\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    host.tick(kServer);
+    host.tick(kServer);
+    CHECK(logged(R"("error":"unknown op nope","id":"a")"));
+    CHECK(logged(R"("error":"unsupported version 2","id":"b")"));
+    CHECK(logged(R"("error":"args.key must be a non-empty text","id":"c")"));
+    CHECK(logged(R"("id":"d","ok":true,"result":{})"));  // an empty list: the empty table is {}
 }
