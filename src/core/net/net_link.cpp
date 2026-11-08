@@ -96,6 +96,19 @@ std::optional<HelloInfo> parse_hello_text(std::string_view text) {
 // ---------------------------------------------------------------------------------------------------------------------
 // ServerLink
 
+namespace {
+std::string acct_hex(uint64_t account) {
+    char h[24];
+    std::snprintf(h, sizeof h, "0x%016llx", static_cast<unsigned long long>(account));
+    return h;
+}
+std::string handle_hex(uint32_t handle) {
+    char h[16];
+    std::snprintf(h, sizeof h, "0x%x", handle);
+    return h;
+}
+}  // namespace
+
 void ServerLink::note(uint64_t account, const std::string& what) {
     // called with m_ held: the log function must not call back in
     const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
@@ -147,6 +160,7 @@ bool ServerLink::on_line(uint32_t handle, uint64_t account, std::string_view tex
     std::vector<Connection> replaced;
     bool joined = false;
     std::string reply;  // an error line for the player
+    std::string greeting;  // the log line of a hello answered with a welcome
     {
         const std::lock_guard<std::mutex> g(m_);
         if (!allowed(account, text.size())) return true;
@@ -229,10 +243,15 @@ bool ServerLink::on_line(uint32_t handle, uint64_t account, std::string_view tex
                 for (const auto& l : encoded(lines))
                     if (d_.send) d_.send(handle, account, l);  // the outbox is not locked by us
                 joined = true;
+                greeting = "mod messages: hello from account " + acct_hex(account) + " on connection " +
+                           handle_hex(handle) + " (EMF " + clean_version(hello->emf_version) + ", API " +
+                           std::to_string(hello->api) + ", " + std::to_string(hello->channels.size()) +
+                           " channel(s)); welcome sent";
                 msg.reset();
             }
         }
     }
+    if (!greeting.empty() && d_.log) d_.log(greeting);
     if (!reply.empty() && d_.send) d_.send(handle, account, reply);
     for (const auto& r : replaced)
         if (d_.on_peer) d_.on_peer(r.handle, r.account, false);
@@ -273,8 +292,12 @@ void ServerLink::tick(const std::vector<Connection>& connected) {
                                          nullptr);
         return lines.empty() ? std::string() : encode_line(lines.front());
     }();
-    for (const auto& c : fresh)
-        if (d_.send && !beacon.empty()) d_.send(c.handle, c.account, beacon);
+    for (const auto& c : fresh) {
+        const bool sent = d_.send && !beacon.empty() && d_.send(c.handle, c.account, beacon);
+        if (d_.log)
+            d_.log("mod messages: the beacon to the player on connection " + handle_hex(c.handle) + " (account " +
+                   acct_hex(c.account) + ")" + (sent ? "" : ": it could not be queued"));
+    }
     for (const auto& c : left)
         if (d_.on_peer) d_.on_peer(c.handle, c.account, false);
 }
@@ -347,13 +370,22 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
     if (d_.enabled && !d_.enabled()) return true;  // hosted or offline: hidden, never answered
     std::optional<Reassembly::Message> msg;
     bool up = false, down = false;
+    std::string told;  // a log line, written after the lock
+    bool foreign = false;
     {
         const std::lock_guard<std::mutex> g(m_);
         std::optional<uint64_t> self = d_.self_account ? d_.self_account() : std::nullopt;
         if (!self && !learned_self_ && line->type == 'S') learned_self_ = speaker;  // until the game says who "self" is
         if (!self) self = learned_self_;
-        if (!self || speaker != *self) return true;  // spoken by someone else: a forged line (never shown)
-        switch (line->type) {
+        if (!self || speaker != *self) {  // spoken by someone else: a forged line (never shown)
+            foreign = true;
+            if (!told_foreign_) {
+                told_foreign_ = true;
+                told = "mod messages: a marked chat line not spoken as this player was dropped (speaker " +
+                       acct_hex(speaker) + ", this player " + (self ? acct_hex(*self) : std::string("not known")) +
+                       "; logged once)";
+            }
+        } else switch (line->type) {
             case 'S': {
                 const bool was = state_ == State::Welcomed;
                 state_ = State::Idle;
@@ -367,12 +399,17 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
                 mine.api = d_.api;
                 mine.build = d_.build;
                 if (d_.channels) mine.channels = d_.channels();
-                if (mine.channels.empty()) break;  // no mod of this game talks to a server
+                if (mine.channels.empty()) {  // no mod of this game talks to a server
+                    told = "mod messages: the server's beacon (hidden); no mod of this game has a channel: no hello";
+                    break;
+                }
                 const auto lines =
                     split_message('H', out_seq_, kControl, kControlVersion, hello_text(mine), nullptr);
                 out_seq_ += static_cast<uint32_t>(lines.size());
                 for (const auto& l : encoded(lines)) out_.push_back(l);
                 state_ = State::HelloSent;
+                told = "mod messages: the server's beacon (hidden); hello queued with " +
+                       std::to_string(mine.channels.size()) + " channel(s)";
                 break;
             }
             case 'W': {
@@ -389,6 +426,8 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
                 const bool was = state_ == State::Welcomed;
                 state_ = State::Welcomed;
                 up = !was;
+                told = "mod messages: the server welcomed this game (EMF " + clean_version(hello->emf_version) +
+                       ", " + std::to_string(server_channels_.size()) + " channel(s))";
                 break;
             }
             case 'M': {
@@ -411,6 +450,8 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
                 break;  // an 'H' is the player's, not the server's
         }
     }
+    if (!told.empty() && d_.log) d_.log(told);
+    if (foreign) return true;
     if (up && d_.on_server) d_.on_server(true);
     if (down && d_.on_server) d_.on_server(false);
     if (msg && d_.on_message) d_.on_message(msg->channel, msg->version, msg->data);

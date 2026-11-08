@@ -174,6 +174,7 @@ private:
     std::mutex m_;
     enum class State { Idle, HelloSent, Welcomed } state_ = State::Idle;
     std::optional<uint64_t> learned_self_;
+    bool told_foreign_ = false;  // a line not spoken as this player was logged
     std::map<std::string, uint32_t> server_channels_;
     Reassembly in_;
     uint32_t out_seq_ = 0;

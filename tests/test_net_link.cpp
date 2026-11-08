@@ -180,6 +180,27 @@ TEST_CASE("net link: beacon, hello, welcome; each side then knows the other's ch
     CHECK(r.client.server_version("bm/other") == 0);
 }
 
+TEST_CASE("net link: each step of the greeting is one log line on its side (beacon, hello, welcome)") {
+    Rig r;
+    const auto has = [&r](const char* part) {
+        size_t n = 0;
+        for (const auto& l : r.logs) n += l.find(part) != std::string::npos;
+        return n;
+    };
+    r.join();
+    CHECK(has("the beacon to the player on connection 0x40") == 1);
+    CHECK(has("the server's beacon") == 1);       // the client: hidden, answered
+    CHECK(has("hello from account") == 1);         // the server: who, with how many channels; welcome sent
+    CHECK(has("the server welcomed this game") == 1);
+    r.server.tick({{kHandle, kAcct}});  // nothing new: no more lines
+    CHECK(has("the beacon to the player") == 1);
+    // a marked line not spoken as this player: one line, not one per line
+    const auto beacon = encode_line(split_message('S', 0, "emf/net", 1, "fake", nullptr)[0]);
+    r.client.on_chat_line(beacon, kAcct + 1);
+    r.client.on_chat_line(beacon, kAcct + 1);
+    CHECK(has("not spoken as this player") == 1);
+}
+
 TEST_CASE("net link: a client with no channels sends no hello") {
     Rig r;
     r.client_channels.clear();

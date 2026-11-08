@@ -311,10 +311,21 @@ void __fastcall hk_receive(uint8_t* server) {
 
 // The client's own chat got a line: true when it is a mod message line EMF takes (never added).
 bool client_takes(uint8_t* sys, uint8_t kind, const ChatText* text, uint64_t speaker) {
-    if (!g_client_on || kind != kChatKindTyped || !g_client.line || !sys || sys != g_client_sys.load()) return false;
+    if (!g_client_on || kind != kChatKindTyped || !g_client.line || !sys) return false;
     char buf[kChatMaxBytes];
     size_t n = 0;
     if (!copy_text(text, buf, sizeof buf, &n) || !net::is_marked(std::string_view(buf, n))) return false;
+    if (sys != g_client_sys.load()) {  // not the chat the client's outbox belongs to: left to the game
+        static std::atomic<bool> told{false};
+        if (!told.exchange(true) && g_client.log) {
+            char t[96];
+            std::snprintf(t, sizeof t, "%p (the client's: %p)", static_cast<void*>(sys),
+                          static_cast<void*>(g_client_sys.load()));
+            g_client.log(std::string("mod messages: a marked chat line reached a chat system that is not the client's ") +
+                         t + "; left to the game (logged once)");
+        }
+        return false;
+    }
     return g_client.line(std::string_view(buf, n), speaker);
 }
 
