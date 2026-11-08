@@ -175,6 +175,64 @@ class MakeModTests(unittest.TestCase):
             self.assertIn("good content ran", out.stdout)
             self.assertLess(out.stdout.index("added beast_bear"), out.stdout.index("good content ran"))
 
+    def test_a_prop_entry_needs_its_name_source_and_model(self):
+        prop = {"name": "stable_prop", "glb": "stable.glb", "source_model_guid": "src-model",
+                "source_model_json": "bed.json", "model_guid": "p-1"}
+        self.assertEqual(make_mod.prop_entry(dict(prop)),
+                         {"name": "stable_prop", "source_model_guid": "src-model", "model_guid": "p-1"})
+        for key in ("glb", "source_model_guid", "source_model_json", "model_guid"):
+            with self.assertRaises(SystemExit, msg=key):
+                make_mod.prop_entry({k: v for k, v in prop.items() if k != key})
+        with self.assertRaises(SystemExit):
+            make_mod.prop_entry(dict(prop, name="Stable-Prop"))
+
+    def test_a_prop_is_built_from_its_still_glb(self):
+        import test_gltf_static
+        with tempfile.TemporaryDirectory() as d:
+            src = os.path.join(d, "src")
+            os.makedirs(src)
+            test_gltf_static.prop_glb(os.path.join(d, "stable.glb"))
+            with open(os.path.join(d, "bed.json"), "w", encoding="utf-8") as f:
+                json.dump({"debugName": "bed", "materials": [{"material": "a"}, {"material": "b"}, {"material": "c"}]}, f)
+            prop = {"name": "stable_prop", "glb": "stable.glb", "source_model_guid": "src-model",
+                    "source_model_json": "bed.json", "model_guid": "p-1", "width": 4.0, "material": 2}
+            entry, changed = make_mod.build_prop(prop, src, lambda p: os.path.join(d, p))
+            self.assertEqual(entry, {"name": "stable_prop", "source_model_guid": "src-model", "model_guid": "p-1"})
+            self.assertFalse(changed)
+            self.assertEqual(sorted(os.listdir(src)), ["stable_prop_blob.lua", "stable_prop_data.lua"])
+            with open(os.path.join(src, "stable_prop_data.lua"), encoding="utf-8") as f:
+                data = f.read()
+            self.assertIn("jointCount = 0", data)
+            self.assertIn("skinningMap = {}", data)
+            self.assertIn("materialIndex = 2", data)
+
+    @unittest.skipUnless(shutil.which("lua"), "needs lua 5.4 on PATH")
+    def test_the_generated_mod_makes_the_props_models_before_its_content_scripts(self):
+        """A prop is a model of its own with no template (a content script's object uses it)."""
+        with tempfile.TemporaryDirectory() as d:
+            prop = {"name": "stable_prop", "source_model_guid": BEAR["source_model_guid"], "model_guid": "p-1"}
+            make_mod.write_scripts(d, {"id": "test_pack", "title": "Test"}, [make_mod.listing_entry(dict(BEAR))],
+                                   ["content_good"], props=[prop])
+            for name in ("beast_bear", "stable_prop"):
+                with open(os.path.join(d, name + "_data.lua"), "w", encoding="utf-8") as f:
+                    f.write(STUB_DATA.replace("beast_bear", name))
+                with open(os.path.join(d, name + "_blob.lua"), "w", encoding="utf-8") as f:
+                    f.write('return "blob"\n')
+            with open(os.path.join(d, "content_good.lua"), "w", encoding="utf-8") as f:
+                f.write("print('good content ran')\n")
+            mock = os.path.join(HERE, "..", "..", "tools", "models", "mock_eml.lua")
+            out = subprocess.run(["lua", mock, d], capture_output=True, text=True, timeout=60)
+            self.assertEqual(out.returncode, 0, out.stderr)
+            self.assertIn("added prop stable_prop: model p-1", out.stdout)
+            self.assertIn("model p-1 cloth none", out.stdout)
+            self.assertIn("added beast_bear", out.stdout)  # the creatures as before
+            self.assertLess(out.stdout.index("added prop stable_prop"), out.stdout.index("good content ran"))
+            server = subprocess.run(["lua", mock, d], capture_output=True, text=True, timeout=60,
+                                    env=dict(os.environ, MOCK_SERVER="1"))
+            self.assertEqual(server.returncode, 0, server.stderr)
+            self.assertIn("stable_prop: no render data here", server.stdout)
+            self.assertNotIn("stable_prop: not added", server.stdout)
+
     def test_skeleton_and_clip_files_go_when_a_creature_has_no_skeleton_of_its_own(self):
         with tempfile.TemporaryDirectory() as d:
             for n in ("own_skeleton.lua", "own_clips.lua", "plain_skeleton.lua", "plain_clips.lua", "plain_data.lua"):
