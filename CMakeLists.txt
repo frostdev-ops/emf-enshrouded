@@ -59,7 +59,7 @@ target_include_directories(lua54 PUBLIC third_party/lua)
 if(MSVC)
   target_compile_options(lua54 PRIVATE /W0 /TP /EHsc)
 endif()
-add_library(emf_lua_lib STATIC src/lua_host/fields.cpp src/lua_host/host.cpp src/lua_host/bindings.cpp
+add_library(emf_lua_lib STATIC src/lua_host/fields.cpp src/lua_host/host.cpp src/lua_host/bindings.cpp src/lua_host/lua_json.cpp
   src/core/json.cpp src/core/manifest.cpp)
 target_include_directories(emf_lua_lib PUBLIC src sdk/include)
 target_link_libraries(emf_lua_lib PUBLIC lua54)
@@ -518,6 +518,7 @@ add_executable(emf_tests
   tests/test_loot_scale.cpp
   tests/test_lua_fields.cpp
   tests/test_lua_host.cpp
+  tests/test_lua_json.cpp
   tests/test_lua_bindings.cpp
   tests/test_lua_template.cpp
   tests/test_lua_wheel_group.cpp

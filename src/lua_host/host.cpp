@@ -8,6 +8,7 @@
 #include <sstream>
 
 #include "emf/keys.hpp"
+#include "lua_host/lua_json.h"
 
 namespace emf::lua {
 
@@ -851,6 +852,8 @@ bool Host::Impl::load(Script& s) {
                                        {nullptr, nullptr}};
     luaL_newlib(L, bus_fns);
     lua_setfield(L, -2, "bus");
+    push_json_table(L);
+    lua_setfield(L, -2, "json");
     lua_pushstring(L, s.id.c_str());
     lua_setfield(L, -2, "id");
     lua_pushstring(L, folder.c_str());
