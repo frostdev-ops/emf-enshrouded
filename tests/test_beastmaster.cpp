@@ -4545,3 +4545,24 @@ TEST_CASE("idle: an error drops the search under way; the next waits 30 s") {
     b.seconds(30);
     CHECK(awake(b, 6100));  // the next one, 30 s after the error
 }
+
+// edit_main's reload check compares modification times, so two edits in a row must never get the same one: the system
+// clock moves in steps of about 15 ms, and on a fast machine (CI) an edit made right after another fell in the same step,
+// was not seen as a change, and the test ran on the old script.
+TEST_CASE("rig: write_later gives every write a newer modification time, however fast they follow each other") {
+    BeastRig b;
+    const std::wstring path = b.folder + L"\scratch.lua";
+    auto stamp = [&] {
+        WIN32_FILE_ATTRIBUTE_DATA d{};
+        REQUIRE(GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &d));
+        return (static_cast<uint64_t>(d.ftLastWriteTime.dwHighDateTime) << 32) | d.ftLastWriteTime.dwLowDateTime;
+    };
+    write_later(path, "0", 1);
+    uint64_t last = stamp();
+    for (int i = 1; i < 300; ++i) {
+        write_later(path, std::to_string(i), 1);
+        const uint64_t now = stamp();
+        REQUIRE(now > last);
+        last = now;
+    }
+}
