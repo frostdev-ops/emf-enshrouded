@@ -4640,7 +4640,7 @@ TEST_CASE("idle: an error drops the search under way; the next waits 30 s") {
 // was not seen as a change, and the test ran on the old script.
 TEST_CASE("rig: write_later gives every write a newer modification time, however fast they follow each other") {
     BeastRig b;
-    const std::wstring path = b.folder + L"\scratch.lua";
+    const std::wstring path = b.folder + L"\\scratch.lua";
     auto stamp = [&] {
         WIN32_FILE_ATTRIBUTE_DATA d{};
         REQUIRE(GetFileAttributesExW(path.c_str(), GetFileExInfoStandard, &d));
