@@ -33,27 +33,39 @@ if #game.assets.get_resources_by_type("keen::RenderModel") > 0 then
 	m.debugName = "beastmaster_stable"
 end
 
-content.add_placeable{
-	guid = ITEM_GUID, template_guid = TEMPLATE_GUID, name_guid = NAME_GUID, debug_name = DEBUG_NAME, name = "Stable",
-	description_guid = DESC_GUID,
-	description = "A bed for your tamed beasts. Press E at it to open the Beasts window, where you choose which beasts "
-		.. "go with you (Beastmaster).",
-	clone_of = BED_ITEM,
-	strip = {"keen::ecs::AnimalTarget", "keen::ecs::ActiveNpcTarget"},  -- farm animals and villagers leave it alone
-	edit_template = function(tpl)
-		for _, c in ipairs(tpl.components) do
-			if c.type == "keen::ecs::ModelResource" then c.value.model = MODEL_GUID end
-		end
-	end,
-}
+local function recipe(like)
+	return {
+		guid = RECIPE_GUID, debug_name = "Craft_" .. DEBUG_NAME,
+		output = {ITEM_GUID, 1},
+		inputs = {{WOOD_LOGS, 6}, {PLANT_FIBRE, 8}, {ANIMAL_FUR, 2}},
+		like = like,
+	}
+end
 
-content.add_recipe{
-	guid = RECIPE_GUID, debug_name = "Craft_" .. DEBUG_NAME,
-	output = {ITEM_GUID, 1},
-	inputs = {{WOOD_LOGS, 6}, {PLANT_FIBRE, 8}, {ANIMAL_FUR, 2}},
-	like = "Prop_Decoration_Comfort1_T0_Chair",  -- the Workbench, known with the first furniture; listed after the chair
-}
-
-content.finish()
+local ok, err = pcall(function()
+	content.add_placeable{
+		guid = ITEM_GUID, template_guid = TEMPLATE_GUID, name_guid = NAME_GUID, debug_name = DEBUG_NAME,
+		name = "Stable", description_guid = DESC_GUID,
+		description = "A bed for your tamed beasts. Press E at it to open the Beasts window, where you choose which "
+			.. "beasts go with you (needs the Beastmaster mod).",
+		clone_of = BED_ITEM,
+		strip = {"keen::ecs::AnimalTarget", "keen::ecs::ActiveNpcTarget"},  -- farm animals and villagers leave it alone
+		edit_template = function(tpl)
+			for _, c in ipairs(tpl.components) do
+				if c.type == "keen::ecs::ModelResource" then c.value.model = MODEL_GUID end
+			end
+		end,
+	}
+	-- the Workbench, known with the first furniture, listed after the crude chair; a game without that recipe gets the
+	-- Stable in the own crafting menu (the helper's default), so it can still be crafted
+	local done, why = pcall(content.add_recipe, recipe("Prop_Decoration_Comfort1_T0_Chair"))
+	if not done then
+		print("beastmaster stable: the Workbench recipe could not be copied (" .. tostring(why) .. "): the Stable is "
+			.. "crafted in the own crafting menu instead")
+		content.add_recipe(recipe(nil))
+	end
+end)
+content.finish()  -- the names of what was added, also when a later step failed
+if not ok then error(err, 0) end
 print("beastmaster stable: added " .. DEBUG_NAME .. " (template " .. TEMPLATE_GUID .. ", model " .. MODEL_GUID .. ")"
 	.. (loader.is_server and " on the dedicated server (no model, icon, name or menu entry there)" or ""))

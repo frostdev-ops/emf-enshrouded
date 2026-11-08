@@ -32,8 +32,18 @@ local function run(opts)
 	opts = opts or {}
 	local calls = { placeables = {}, recipes = {}, finish = 0, created = {} }
 	local helper = {
-		add_placeable = function(def) calls.placeables[#calls.placeables + 1] = def; return 1 end,
-		add_recipe = function(def) calls.recipes[#calls.recipes + 1] = def; return 2 end,
+		add_placeable = function(def)
+			if opts.no_bed_item then error("add_placeable: no item " .. def.clone_of .. " to copy (the game changed?)") end
+			calls.placeables[#calls.placeables + 1] = def
+			return 1
+		end,
+		add_recipe = function(def)
+			if opts.no_chair and def.like == "Prop_Decoration_Comfort1_T0_Chair" then
+				error("add_recipe: no recipe Prop_Decoration_Comfort1_T0_Chair to copy (the game changed?)")
+			end
+			calls.recipes[#calls.recipes + 1] = def
+			return 2
+		end,
 		finish = function() calls.finish = calls.finish + 1 end,
 	}
 	local bed_model = { guid = BED_MODEL, data = { debugName = "animalprops_farm_animal_sleep_large_01", renderData = { hash = "h" } } }
@@ -137,6 +147,25 @@ test("its recipe: at the Workbench like the crude chair, 6 wood logs, 8 plant fi
 	eq(r.inputs[2][2], 8, "fibre count")
 	eq(r.inputs[3][1], ANIMAL_FUR, "fur")
 	eq(r.inputs[3][2], 2, "fur count")
+	eq(c.finish, 1, "finish")
+end)
+
+test("without the crude chair's recipe (a game update) the Stable is crafted in the own crafting menu, named", function()
+	local c = run({ no_chair = true })
+	assert(c.ok, c.err)
+	eq(#c.placeables, 1, "placeables")
+	eq(#c.recipes, 1, "recipes")
+	eq(c.recipes[1].like, nil, "like: the helper's default (the own crafting menu, next to the campfire)")
+	eq(c.recipes[1].output[1], STABLE_ITEM, "output")
+	eq(#c.recipes[1].inputs, 3, "inputs")
+	eq(c.finish, 1, "finish")
+end)
+
+test("an item that cannot be added still writes the names given so far, then stops with the error", function()
+	local c = run({ no_bed_item = true })
+	assert(not c.ok, "an error")
+	assert(tostring(c.err):find(BED_ITEM, 1, true), "names the item: " .. tostring(c.err))
+	eq(#c.recipes, 0, "recipes")
 	eq(c.finish, 1, "finish")
 end)
 
