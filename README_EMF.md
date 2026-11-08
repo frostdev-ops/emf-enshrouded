@@ -140,7 +140,7 @@ under it (green when it worked, red when it did not).
   as you typed it (take a suggestion with Tab or Right first).
 
 While it is open the game gets no keyboard or mouse input (only key releases, so nothing stays held) and mods' hotkeys
-are paused. On the main menu, `help`, `mods`, `settings`, `set`, `profile`, `saves.backup`, `saves.list`, `hooks` and `pattern` answer at once; the other
+are paused. On the main menu, `help`, `mods`, `settings`, `set`, `profile`, `hud.*`, `saves.backup`, `saves.list`, `hooks` and `pattern` answer at once; the other
 commands answer `not run: load a world you host first`, and in someone else's game `not run: commands need a world you
 host`.
 
@@ -161,9 +161,9 @@ start and shows what it did; **Save as** saves the switches (and, with "with set
 a new name, and asks before it replaces one. The console's `profile` command does the same.
 
 ### The Settings tab
-EMF's own settings, on three pages: **Text on screen** (the look of HUD lines, notes and wheels, with a preview),
-**Console** (its key, mouse speed, fonts, size, colours and suggestions) and **Start-up** (the log window and the
-save backups). They apply at once, apart from those marked "(next start)". The console key takes two presses of the
+EMF's own settings, on four pages: **Text on screen** (the look of HUD lines, notes and wheels, with a preview),
+**Console** (its key, mouse speed, fonts, size, colours and suggestions), **HUD** (the HUD editor, below) and
+**Start-up** (the log window and the save backups). They apply at once, apart from those marked "(next start)". The console key takes two presses of the
 new key (Esc cancels), so a key you cannot press again is never saved. The same from the command line: `settings emf`
 lists them, `set emf <section>.<key> <value>` changes one (`set emf hud.size 140`). They are the keys of
 `<game>\emf\emf_core.ini` below: a change writes only its own line, and a value you typed by hand that is out of range
@@ -198,6 +198,14 @@ colour=#fffff4 ; notes, and lines whose mod chose no colour of its own
 shadow=1       ; 0: no shadow (style=game)
 notes_place=top_centre  ; top_centre (under the compass), top_left or right
 notes_seconds=6  ; how long a note stays, 2 to 20 seconds
+
+[hud_editor]
+enabled=1                ; 0: EMF leaves the game's HUD alone
+show_outlines=1          ; the game's outline around the HUD parts while the HUD page is open
+allow_with_shroudhud=0   ; 1: run next to ShroudHud anyway
+key_page=F9              ; opens the HUD page; empty: no key
+key_reset=Pause          ; puts the whole HUD back; empty: no key
+active_layout=Default    ; the layout in use (the HUD page changes it)
 ```
 **The look.** EMF's on-screen text (the clock, Life Skills, Flame Blessings and the other mods' lines, notes such as
 Sleep Through the Day's, and the wheels) uses a book serif in warm white with a soft shadow, like the game's own text
@@ -229,6 +237,31 @@ to RivaTuner/RTSS, the Steam overlay and the Discord overlay.
 and the key under Esc). EMF's console opens on that key with or without Shift, so the two can clash: give
 Discord's overlay lock another key in Discord's settings (Game Overlay), or give the console another key with `key=`
 above (a scan code, from the next game start).
+
+### The HUD editor
+The **HUD** page of the Settings tab moves, scales and hides 13 parts of the game's HUD while you play. The parts, by the
+names the commands use: `vitals` (health and stamina), `buffs` (buffs and food), `hotbar`, `compass`, `shroud` (the shroud
+timer and meters), `quests`, `oxygen` (oxygen and glider), `loot` (loot log), `boss` (boss bar), `crosshair`, `chat`,
+`notifications` and `multitool`. A part that sits inside another moves and scales with it: `vitals` carries `buffs`,
+`compass` carries `shroud`, and the `hotbar` carries its item hints and the item name above it. A part's own change adds
+on top. A part the game has not drawn yet is marked "not seen yet" (a boss bar shows only in a boss fight).
+
+- **Offsets** are percent of the screen, from where the game draws the part, so a layout fits other screen sizes. The page
+  shows the pixels at your resolution next to each value. Tab picks the next part, the arrow keys move it by 0.5 % (Shift:
+  5 %), `+` and `-` scale it, H hides it and R resets it.
+- **Keys:** F9 opens the page (press it again to close the console) and Pause puts the whole HUD back. Both are
+  settings on the page and take one key each.
+- **Layouts** are saved under a name in `<game>\emf\hud\<name>.json`, one file each, and are the same for every character.
+  The layout bar saves, loads and deletes them, and `hud.layout` does the same from the console. A reset of the whole HUD
+  first saves what was there as "Before reset", so `hud.layout load "Before reset"` brings it back.
+- **Outlines:** while the page is open, the game's own outline is drawn around each part and the selected one blinks.
+- **Scale** goes from 0.5 to 2, around the screen edge the part is nearest. If the game's drawing does not match what EMF
+  expects, scale stops for that session and says so (see `emf_core.log`); move and hide go on, and your scale values stay in
+  the layout.
+- **When it is off:** on a game build EMF does not know the editor leaves the HUD alone and the page says so; the same
+  with ShroudHud installed (switch on "Use anyway with another HUD mod" at your own risk), after an error in the game's UI
+  code (until the game restarts), and with the "HUD editor" setting off. `hud.reset` and the reset key always work, and the
+  dedicated server has no HUD editor at all.
 
 ### Keys
 EMF's keys by default:
@@ -294,6 +327,12 @@ end the game; use `commands.txt` then.)
 | `profile` | the mod profiles in `emf\profiles` (the on/off state of every mod under a name, as EMF.exe's Mods tab keeps them), the current one and whether the mods changed since (works on the main menu too) |
 | `profile save <name> [--settings] [--replace]` | saves the switches of every mod (EMF, EML, the DLLs in `dinput8-chain.ini`; others as read-only) as a profile; `--settings` also saves the EMF mods' settings; another profile with that name is replaced only with `--replace` (e.g. `profile save "Big Base" --settings`) |
 | `profile load <name>` | switches every mod the profile lists to its state (through the same switches as EMF.exe) and reports what it did, what failed, what is missing (with Nexus ids) and what is not in the profile, and says what will still differ; restart the game to apply. A profile's settings apply at once in the Mods tab. The answer comes a moment later: the work runs on a thread of its own |
+| `hud.list` | the HUD editor's state, every HUD part with its offset, scale and whether it is hidden, and the layouts (works on the main menu too) |
+| `hud.move <part> <x> <y>` | moves a HUD part, in percent of the screen from where the game draws it (e.g. `hud.move vitals 5 -2.5`) |
+| `hud.scale <part> <0.5-2>` | a HUD part's size, around the screen edge it is nearest (e.g. `hud.scale hotbar 0.75`) |
+| `hud.hide <part>` / `hud.show <part>` | hides a HUD part / brings it back |
+| `hud.reset [part]` | puts one HUD part, or every part, back where the game draws it; a reset of every part keeps the layout before as "Before reset" |
+| `hud.layout [save\|load\|delete <name>]` | the HUD layouts in `emf\hud`: without words the list, else save the current one under a name, switch to one, or delete one |
 | `saves.backup [label]` | backs up every save file now, Steam Cloud and Local, into `%LOCALAPPDATA%\EMF\save-backups` ([docs/saves.md](docs/saves.md)); only at the main menu: while a world runs it says why not (the game writes its saves every 30 seconds) |
 | `saves.list` | the save backups, newest first, with what each holds and where they are; restoring needs the game closed (EMF.exe's Saves tab, or by hand: [docs/saves.md](docs/saves.md)) |
 | `items [words]` | the game's items with their debug names, id and stack size, best match first (e.g. `items wood log`) |
