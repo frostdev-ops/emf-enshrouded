@@ -274,7 +274,9 @@ void draw_console(ConsoleModel& model, ConsoleUiState& ui, const CompletionSourc
     if (mods_tab || settings_tab) {
         ImGuiIO& tio = ImGui::GetIO();
         if (tio.KeyCtrl && ImGui::IsKeyPressed(ImGuiKey_Tab, false)) ui.switch_tab = true;
-        const int want = ui.switch_tab ? next_tab(ui.tab, bool(mods_tab), bool(settings_tab)) : -1;
+        const int want = ui.open_tab >= 0 ? ui.open_tab
+                                          : (ui.switch_tab ? next_tab(ui.tab, bool(mods_tab), bool(settings_tab)) : -1);
+        ui.open_tab = -1;
         ui.switch_tab = false;
         if (ui.tabs_font) ImGui::PushFont(ui.tabs_font);  // the tab bar and the Mods tab ([overlay] tabs_font)
         if (ImGui::BeginTabBar("##emf_tabs")) {

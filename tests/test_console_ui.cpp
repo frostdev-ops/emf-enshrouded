@@ -633,3 +633,25 @@ TEST_CASE("console UI: after a click on the scrollback, typing still goes to the
     r.type("help");
     CHECK(r.ui.input == "help");
 }
+
+TEST_CASE("console UI: open_tab selects a tab on the next frame, once") {
+    Headless h;
+    Rig r;
+    int mods = 0, settings = 0;
+    auto frame = [&] {
+        ImGui::NewFrame();
+        draw_console(r.model, r.ui, r.src, r.display, [](const std::string&) {}, [&] { ++mods; }, [&] { ++settings; });
+        ImGui::Render();
+    };
+    frame();
+    frame();
+    CHECK(r.ui.tab == 0);
+    r.ui.open_tab = 2;
+    frame();
+    frame();
+    CHECK(r.ui.tab == 2);
+    CHECK(r.ui.open_tab == -1);
+    CHECK(settings > 0);
+    frame();
+    CHECK(r.ui.tab == 2);  // stays there
+}

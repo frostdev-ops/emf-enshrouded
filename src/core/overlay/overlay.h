@@ -21,6 +21,10 @@
 
 namespace emf::core {
 
+namespace hud {
+class HudEditor;
+}
+
 struct OverlayConfig {
     bool enabled = true;
     uint16_t toggle_scan = 0x29;  // the key under Esc
@@ -64,9 +68,14 @@ struct OverlayDeps {
     const HudModel* hud = nullptr;  // the mods' on-screen lines (API v12); drawn while the console is closed
     const ModRegistry* mods = nullptr;  // the Mods tab (null: no tab)
     SettingsStore* settings = nullptr;  // mods' settings, changed in the Mods tab
+    hud::HudEditor* hud_editor = nullptr;  // the HUD page of the Settings tab (null: the page says it is not available)
 };
 
 bool start_overlay(const OverlayConfig& config, OverlayDeps deps);
+// Opens (or closes) the console on a Settings page, as the HUD page key does: closed gives open on that page; open on it
+// gives closed; open elsewhere gives that page. Any thread; false when the overlay cannot draw or a mod's wheel or
+// window holds the input.
+bool overlay_toggle_settings_page(const char* page);
 ConsoleModel* overlay_console();  // null until started
 // Shows the replies that follow (a command typed into the game's chat) for `ms` (0: [hud] notes_seconds) where notes
 // show.

@@ -26,6 +26,7 @@ struct ConsoleUiState {
     size_t completion_index = 0;
     int tab = 0;               // 0 = Console, 1 = Mods, 2 = Settings
     bool switch_tab = false;   // Ctrl+Tab asked for the other tab (applied on the next frame)
+    int open_tab = -1;         // set: that tab (0 Console, 1 Mods, 2 Settings) is selected on the next frame, once
     std::string status;        // shown at the right end of the tab bar ("debug bridge on"); "" = none
     // Suggestions as you type ([overlay] suggest; off: Tab cycles through the matches as before).
     bool suggest = true;

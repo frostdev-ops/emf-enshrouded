@@ -181,6 +181,7 @@ add_library(emf_core_lib STATIC
   src/core/overlay/cursor_model.cpp
   src/core/overlay/mods_ui.cpp
   src/core/overlay/settings_ui.cpp
+  src/core/overlay/hud_page.cpp
   src/core/overlay/wheel_gate.cpp
   src/core/overlay/window_gate.cpp
   src/core/overlay/wheel_ui.cpp
@@ -770,3 +771,4 @@ target_sources(emf_tests PRIVATE tests/test_hud_hook.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_keys.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_editor.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_commands.cpp)
+target_sources(emf_tests PRIVATE tests/test_hud_page.cpp)

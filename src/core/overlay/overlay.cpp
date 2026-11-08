@@ -21,6 +21,7 @@
 #include "input_hook.h"
 #include "mods_ui.h"
 #include "settings_ui.h"
+#include "hud_page.h"
 #include "submit.h"
 #include "vk_overlay.h"
 #include "wheel_gate.h"
@@ -58,6 +59,9 @@ std::string g_status;   // overlay_set_status: the tab bar's status text
 CursorModel g_cursor;   // render thread: the console's mouse cursor
 ModsUiState g_mods_ui;  // render thread
 SettingsUiState g_settings_ui;  // render thread: the Settings tab
+HudPageState g_hud_page;        // render thread: the HUD page
+std::string g_pending_page;     // under g_queue_lock: a Settings page to show (overlay_toggle_settings_page)
+std::atomic<bool> g_page_showing{false};  // the HUD page is on screen (the render thread writes)
 float g_mouse_speed = 1.0f;
 // Mods' radial wheel: requested from any thread, opened and driven on the render thread.
 WheelModel g_wheel;  // render thread
@@ -189,6 +193,14 @@ void follow_settings() {
 void before_frame(ImGuiIO& io) {
     follow_settings();
     take_wheel_request();
+    std::string page;
+    AcquireSRWLockExclusive(&g_queue_lock);
+    page.swap(g_pending_page);
+    ReleaseSRWLockExclusive(&g_queue_lock);
+    if (!page.empty()) {
+        g_ui.open_tab = 2;
+        g_settings_ui.page = page;
+    }
     if (g_wheel_gate.take_cancel() && g_wheel.is_open()) {  // alt-tab while it was open: its keys' releases are gone
         g_wheel.cancel();
         finish_wheel(-1);
@@ -393,7 +405,11 @@ void build(ImVec2 display) {
     if (g_deps.settings)
         settings_tab = [] {
             draw_settings_tab(g_deps.settings, g_mods_ui, g_settings_ui,
-                              [] { draw_look_preview(text_look(), ImGui::GetContentRegionAvail().x); });
+                              [] { draw_look_preview(text_look(), ImGui::GetContentRegionAvail().x); },
+                              g_deps.hud_editor ? std::function<void()>([] {
+                                  draw_hud_page(*g_deps.hud_editor, g_hud_page, ImGui::GetIO().DisplaySize);
+                              })
+                                                : std::function<void()>());
         };
     AcquireSRWLockShared(&g_status_lock);
     g_ui.status = g_status;
@@ -403,6 +419,7 @@ void build(ImVec2 display) {
         g_model->save_history(g_history_path);
     }, mods_tab, settings_tab);
     // Esc hides the suggestions first, and cancels a key bind or console key that waits for a key
+    g_page_showing = g_router->open() && g_ui.tab == 2 && g_settings_ui.page == kPageHud;
     g_router->set_esc_to_console(g_router->open() && (g_ui.wants_escape || capturing_key(g_mods_ui)));
     const TextLook look = text_look();
     if (g_ui.open_fraction <= 0.0f) {
@@ -628,6 +645,30 @@ bool overlay_open_wheel(const WheelRequest& request) {
                                        "a mod's window is open"};
     log_line((std::string("wheel refused: ") + kWhy[static_cast<int>(why)]).c_str());
     return false;
+}
+
+bool overlay_toggle_settings_page(const char* page) {
+    if (!g_model || !g_router || !page) return false;
+    const PageToggle t = page_toggle(g_router->open(), g_page_showing.load(), g_wheel_gate.busy() || g_window_gate.busy());
+    if (t == PageToggle::Refuse) return false;
+    if (t == PageToggle::Close) {
+        g_router->set_open(false);
+        InputEvent e{InputEvent::Toggle};
+        e.open = false;
+        push(e);
+        return true;
+    }
+    if (!vulkan_overlay_ready()) return false;  // it could not be seen: keep the game's input with the game
+    AcquireSRWLockExclusive(&g_queue_lock);
+    g_pending_page = page;
+    ReleaseSRWLockExclusive(&g_queue_lock);
+    if (t == PageToggle::Open) {
+        g_router->set_open(true);
+        InputEvent e{InputEvent::Toggle};
+        e.open = true;
+        push(e);
+    }
+    return true;
 }
 
 void overlay_notify(const std::string& text) {
