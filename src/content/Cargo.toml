@@ -27,6 +27,9 @@ tracing-subscriber = { version = "0.3.20", default-features = false, features = 
 [dev-dependencies]
 # tests/eml_writer.rs drives EML's container writer directly
 kfc-base = { path = "../../third_party/eml/crates/kfc-base" }
+# tests/zip_mods.rs: a zipped mod as EML's registry opens it (zip writes the test's archive)
+mod-loader-base = { path = "../../third_party/eml/crates/mod-loader-base" }
+zip = { version = "9.4.2", default-features = false, features = ["deflate"] }
 
 [workspace]
 

@@ -42,6 +42,12 @@ Each patch is its own commit, and each changes as little as it can.
    padding to a power of two), it removes a file already at that name. `File::create` would truncate and write
    through a hard link, and EMF's shadow folder links the game's own `.dat` files. Cost: none.
 
+5. **P5** `crates/mod-loader-base/Cargo.toml` and `src/registry/fs.rs`: `zip` 9.4.2 instead of 4.2.0 (the same
+   features), for the security advisories against zip before 9.0.5 (a parser difference between the two headers of
+   an entry, symlink targets and an AES check during extraction). zip 9 decodes a file name and can fail, so a zipped
+   mod's names are results now: a name that does not decode is an I/O error for that mod. Cost: none (EML reads a
+   zipped mod in memory and never extracts it). `src/content/tests/zip_mods.rs` reads a zipped mod.
+
 ## How to update
 
 1. Clone upstream into an empty folder outside the repository and check out the new commit.
