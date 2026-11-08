@@ -146,8 +146,8 @@ private:
 // ---- the client's end ----
 struct ClientLinkDeps {
     std::function<std::map<std::string, uint32_t>()> channels;  // this game's channels
-    // the local player's account as the server stamps it on a line it speaks as that player; nullopt: not known (the
-    // speaker of the first beacon is taken for it)
+    // the local player's account as the server stamps it on a line it speaks as that player; nullopt: not known yet
+    // (marked lines are then hidden and never answered)
     std::function<std::optional<uint64_t>()> self_account;
     // a whole message from the server (a channel the server said it has)
     std::function<void(const std::string& channel, uint32_t server_version, const std::string& data)> on_message;
@@ -183,8 +183,8 @@ private:
     ClientLinkDeps d_;
     std::mutex m_;
     enum class State { Idle, HelloSent, Welcomed } state_ = State::Idle;
-    std::optional<uint64_t> learned_self_;
     bool told_foreign_ = false;  // a line not spoken as this player was logged
+    bool told_no_self_ = false;  // a line before the game knew its own account was logged
     std::map<std::string, uint32_t> server_channels_;
     Reassembly in_;
     uint32_t out_seq_ = 0;

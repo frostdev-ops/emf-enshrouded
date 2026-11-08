@@ -388,16 +388,22 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
     bool foreign = false;
     {
         const std::lock_guard<std::mutex> g(m_);
-        std::optional<uint64_t> self = d_.self_account ? d_.self_account() : std::nullopt;
-        if (!self && !learned_self_ && line->type == 'S') learned_self_ = speaker;  // until the game says who "self" is
-        if (!self) self = learned_self_;
-        if (!self || speaker != *self) {  // spoken by someone else: a forged line (never shown)
+        // only lines the server speaks as this very player count: until the game says who that is, none does (a
+        // beacon another player typed would otherwise make this game talk to a server without EMF)
+        const std::optional<uint64_t> self = d_.self_account ? d_.self_account() : std::nullopt;
+        if (!self) {
+            foreign = true;
+            if (!told_no_self_) {
+                told_no_self_ = true;
+                told = "mod messages: this game does not know its own account yet: a marked chat line (speaker " +
+                       acct_hex(speaker) + ") is hidden and not answered (logged once)";
+            }
+        } else if (speaker != *self) {  // spoken by someone else: a forged line (never shown)
             foreign = true;
             if (!told_foreign_) {
                 told_foreign_ = true;
                 told = "mod messages: a marked chat line not spoken as this player was dropped (speaker " +
-                       acct_hex(speaker) + ", this player " + (self ? acct_hex(*self) : std::string("not known")) +
-                       "; logged once)";
+                       acct_hex(speaker) + ", this player " + acct_hex(*self) + "; logged once)";
             }
         } else switch (line->type) {
             case 'S': {
@@ -533,6 +539,8 @@ void ClientLink::reset() {
         in_ = Reassembly();
         out_.clear();
         out_seq_ = 0;
+        told_foreign_ = false;
+        told_no_self_ = false;
     }
     if (down && d_.on_server) d_.on_server(false);
 }

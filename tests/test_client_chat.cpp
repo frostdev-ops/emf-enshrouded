@@ -3,6 +3,7 @@
 // functions faked.
 #include <doctest.h>
 
+#include <algorithm>
 #include <cstring>
 #include <functional>
 #include <string>
@@ -64,7 +65,7 @@ uint8_t* __fastcall fake_add(uint8_t* out, uint8_t*, uint8_t, const ChatText* t,
 
 struct Rig {
     FakeClient fc;
-    Rig() {
+    explicit Rig(bool session_started = true) {
         g_fc = &fc;
         g_waiting.clear();
         g_sent.clear();
@@ -88,7 +89,12 @@ struct Rig {
         };
         d.put_back = [](std::vector<std::string> lines) { g_waiting.insert(g_waiting.begin(), lines.begin(), lines.end()); };
         d.log = [](const std::string& t) { g_log.push_back(t); };
+        d.reset = [] { g_events.push_back("reset"); g_waiting.clear(); };
         g_cd = client_chat_for_test(fake_flush, fake_send, fake_add, std::move(d));
+        if (session_started) {
+            flush();  // the session's game client is there before any mod queues a line (its first flush resets)
+            g_events.clear();
+        }
     }
     ~Rig() {
         g_fc = nullptr;
@@ -124,6 +130,23 @@ TEST_CASE("client chat: lines are sent with chatClientSend, kind 0, on the clien
     CHECK(g_send_kind == 0);
     CHECK(g_events == std::vector<std::string>{"send", "send", "flush"});
     CHECK(g_waiting.empty());
+}
+
+TEST_CASE("client chat: another game client (a new session) resets the net service before anything is sent") {
+    Rig r;  // its first flush (the session's client) reset once
+    g_waiting = {"#!emf1 M 1 a/b@1 0/1 t y"};
+    r.flush();  // the same client: no reset, the line goes
+    CHECK(g_sent.size() == 1u);
+    CHECK(std::find(g_events.begin(), g_events.end(), "reset") == g_events.end());
+    // a new session's game client: whatever waited for the old server is dropped, nothing goes to the new one
+    FakeClient other;
+    g_waiting = {"#!emf1 M 2 a/b@1 0/1 t z"};
+    g_sent.clear();
+    g_events.clear();
+    g_cd.flush(other.game_client.data());
+    REQUIRE_FALSE(g_events.empty());
+    CHECK(g_events.front() == "reset");
+    CHECK(g_sent.empty());
 }
 
 TEST_CASE("client chat: at most four lines a frame; the rest wait for the next") {
@@ -179,7 +202,7 @@ TEST_CASE("client chat: a marked line the client's own chat gets is taken, never
 }
 
 TEST_CASE("client chat: ordinary lines, other chat systems and lines before the system is known go to the game") {
-    Rig r;
+    Rig r(false);
     // before the first flush: the system is not known, so nothing is taken
     CHECK_FALSE(r.receive("#!emf1 S 0 emf/net@1 0/1 t early", 1));
     r.flush();

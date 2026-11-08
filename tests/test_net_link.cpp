@@ -355,16 +355,30 @@ TEST_CASE("net link: a forged line (another speaker) is taken and does nothing; 
     CHECK(r.client.on_chat_line("#!emf1 M zz", kAcct));
 }
 
-TEST_CASE("net link: without a known self the first beacon's speaker is taken for it") {
+TEST_CASE("net link: while this game does not know its own account, marked lines are hidden and never answered") {
     Rig r;
-    r.self.reset();
+    r.self.reset();  // the game has not told it yet
     const uint64_t me = 0x1234;
     r.server.tick({{kHandle, me}});
+    REQUIRE(r.to_players.size() == 1);
+    CHECK(r.client.on_chat_line(r.to_players[0].second, me));  // taken (never shown) ...
+    CHECK(r.client.waiting() == 0);                             // ... but not answered: a forged beacon could be it
+    size_t told = 0;
+    for (const auto& l : r.logs) told += l.find("does not know its own account") != std::string::npos;
+    CHECK(told == 1);
+    // the next beacon, once the game knows: the hello goes
+    r.self = me;
     CHECK(r.client.on_chat_line(r.to_players[0].second, me));
     CHECK(r.client.waiting() == 1);
-    // a later beacon from someone else changes nothing
-    const auto beacon = encode_line(split_message('S', 0, "emf/net", 1, "fake", nullptr)[0]);
-    r.client.on_chat_line(beacon, me + 5);
+}
+
+TEST_CASE("net link: a beacon typed by another player is never taken for the server's, whatever comes first") {
+    Rig r;
+    const auto forged = encode_line(split_message('S', 0, "emf/net", 1, "fake", nullptr)[0]);
+    CHECK(r.client.on_chat_line(forged, kAcct + 7));  // hidden
+    CHECK(r.client.waiting() == 0);                    // no hello to anyone
+    r.server.tick({{kHandle, kAcct}});
+    r.deliver_to_client();                             // the real one, spoken as this player
     CHECK(r.client.waiting() == 1);
 }
 

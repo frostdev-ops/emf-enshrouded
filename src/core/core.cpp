@@ -209,6 +209,26 @@ uint64_t net_account_of(uint32_t entity) {
     return info ? info->account : 0;
 }
 
+// This game's own account as the server stamps it on a line it speaks as this player: the local player's entry in the
+// client world's BasicPlayerInfos. Nothing until both exist; the transport answers no marked line before that.
+std::optional<uint64_t> net_self_account() {
+    const EmfApi* api = emf::core::api_table();
+    EmfWorld* w = api->client_world();
+    const uint32_t local = api->local_player();
+    const auto* infos = static_cast<const uint8_t*>(w ? api->singleton(w, "BasicPlayerInfos") : nullptr);
+    if (!infos || local == 0 || local > emf::core::kPlayerInfoCount) return std::nullopt;
+    uint8_t entry[emf::core::kPlayerInfoSize];
+    if (!emf::seh_read(infos + static_cast<size_t>(local - 1) * emf::core::kPlayerInfoSize, entry, sizeof entry))
+        return std::nullopt;
+    const auto info = emf::core::read_player_info(entry, local);
+    if (!info || info->account == 0) return std::nullopt;
+    static std::atomic<uint64_t> told{0};
+    if (told.exchange(info->account) != info->account)
+        emf::logf("mod messages: this game's own account (the client world's player %u): 0x%016llx", local,
+                  static_cast<unsigned long long>(info->account));
+    return info->account;
+}
+
 // A player's connection (handle, account) from the server's own records, or nothing.
 std::optional<std::pair<uint32_t, uint64_t>> net_connection_of(uint32_t entity) {
     const uint64_t account = net_account_of(entity);
@@ -264,7 +284,8 @@ void start_net_transport(bool known, const std::wstring& ini) {
                   "game build); in process and as a server they work");
         return;
     }
-    emf::core::net::ClientEnv cenv;  // self: not known yet, the first beacon's speaker stands for it
+    emf::core::net::ClientEnv cenv;
+    cenv.self_account = net_self_account;
     cenv.emf_version = EMF_VERSION;
     cenv.api = EMF_API_VERSION;
     cenv.build = g_state->exe.build_number;
@@ -274,6 +295,7 @@ void start_net_transport(bool known, const std::wstring& ini) {
     cd.take = [](size_t max) { return g_state->net->client_take(max); };
     cd.put_back = [](std::vector<std::string> lines) { g_state->net->client_put_back(std::move(lines)); };
     cd.log = [](const std::string& t) { emf::logf("%s", t.c_str()); };
+    cd.reset = [] { g_state->net->client_reset(); };  // a new session's GameClient: the old server is forgotten
     const bool ok = emf::core::install_client_chat(flush.addr, send.addr, std::move(cd));
     emf::logf("mod messages: %s", ok ? "on (server and client ends)" : "server end only (the client's chat hook failed)");
 }
@@ -560,6 +582,8 @@ void hk_register_all_programs(void* world) {
             g_state->damage_queue.clear();                // hits for the old session never land
             ++g_state->server_session;                    // mods notice the new session (API v9)
         }
+        // a new client world (a new session): the server the last one talked to is forgotten (its welcome, its lines)
+        if (kind == EMF_WORLD_CLIENT && g_state->net) g_state->net->client_reset();
         g_state->relay.forget_world(world);                  // nothing an earlier world left at this address
         if (g_register_program_addr && !g_state->relay.closed()) {
             const size_t relays = emf::core::add_relay_programs(

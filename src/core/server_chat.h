@@ -318,6 +318,9 @@ struct ClientChatDeps {
     std::function<std::vector<std::string>(size_t max)> take;           // the lines to send now (at most `max`)
     std::function<void(std::vector<std::string> lines)> put_back;       // lines the game would not take, to the front
     std::function<void(const std::string& text)> log;
+    // another GameClient than the last one (a new session): the net service forgets the old server (its welcome, the
+    // lines that waited for it) before this one sends anything
+    std::function<void()> reset;
 };
 using ClientFlushFn = void(__fastcall*)(uint8_t* game_client);
 // chatClientSend: Result* (out, ChatSystem* sys, u8 kind, const StringView* text, u32 tag1, u32 tag2); out[0]: 0 ok,

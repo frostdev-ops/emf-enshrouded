@@ -25,6 +25,7 @@ ChatLogAddFn o_log_add = nullptr;
 ClientFlushFn o_flush = nullptr;
 ChatClientSendFn o_client_send = nullptr;
 ClientChatDeps g_client;
+std::atomic<uint8_t*> g_last_game_client{nullptr};  // the GameClient of the last flush (a new one: a new session)
 std::atomic<uint8_t*> g_client_sys{nullptr};  // the client's ChatSystem (from the flush hook's GameClient)
 std::atomic<bool> g_client_on{false};
 ServerChatDeps g_deps;
@@ -342,6 +343,7 @@ bool guarded_client_send(uint8_t* sys, const ChatText* text, uint8_t* result) {
 void client_pump(uint8_t* game_client) {
     uint8_t* sys = nullptr;
     if (!game_client || !seh_read(game_client + kGameClientChat, &sys, sizeof sys) || !sys) return;
+    if (game_client != g_last_game_client.exchange(game_client) && g_client.reset) g_client.reset();
     g_client_sys = sys;
     if (!g_client.take || !o_client_send) return;
     auto lines = g_client.take(kClientLinesPerFrame);
@@ -438,6 +440,7 @@ ClientChatDetours client_chat_for_test(ClientFlushFn game_flush, ChatClientSendF
     o_log_add = game_log_add;
     g_client = std::move(deps);
     g_client_sys = nullptr;
+    g_last_game_client = nullptr;
     g_client_on = true;
     g_deps = ServerChatDeps{};
     g_server = nullptr;
