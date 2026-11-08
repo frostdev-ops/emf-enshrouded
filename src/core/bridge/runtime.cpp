@@ -326,6 +326,7 @@ Refusal load_world_source(const LoadWorldParams& p, std::function<void(const Loa
     r.timeout_ms = p.timeout_ms;
     r.test_refuse = p.test_refuse;
     r.join = p.join;
+    r.password = p.password;
     LoadWorldResult refused;
     const bool ok = menu->request(r, [done](const LoadWorldResult& res) {
         LoadWorldReply reply;

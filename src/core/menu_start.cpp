@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <cstdio>
 #include <cstring>
 #include <memory>
@@ -303,7 +304,7 @@ std::optional<MenuStart::Pending> MenuStart::frame_b_locked(void* ui, uint64_t n
             waiting_for_ = "a session to join (the game's 'About to join' prompt for +connect's server)";
             return std::nullopt;
         }
-        if (!deps_.join_pending(ui)) return std::nullopt;  // tried again next frame
+        if (!deps_.join_pending(ui, req_.password)) return std::nullopt;  // tried again next frame
         start_posted_ = true;
         start_posted_ms_ = now;
         deps_.log("join: the game's 'Join Session' posted");
@@ -427,6 +428,12 @@ void MenuStart::note_command(uint8_t state, const void* cmd) const {
     if (!cmd) return;
     uint8_t b[24] = {};
     if (!deps_.read(reinterpret_cast<uintptr_t>(cmd), b, sizeof b)) return;
+    if (b[0] == 0x25 || b[0] == 0x2a) {  // a password from +2 on (set password, join the pending session)
+        char head[8];
+        std::snprintf(head, sizeof head, "%02x %02x", b[0], b[1]);
+        deps_.log("menu command: state " + std::to_string(state) + ", " + head + " (the password is not logged)");
+        return;
+    }
     std::string hex;
     char two[4];
     for (size_t i = 0; i < sizeof b; ++i) {
@@ -511,10 +518,11 @@ bool post_character(PostCharacterFn fn, void* ui, uint16_t slot) { return guarde
 bool post_slot(PostSlotFn fn, void* ui, uint16_t slot) { return guarded_post(fn, ui, slot); }
 bool post_area(PostAreaFn fn, void* ui, uint8_t area) { return guarded_post(fn, ui, area); }
 bool post_start(PostStartFn fn, void* ui) { return guarded_post(fn, ui); }
-// an empty password, as the prompt's button passes it when +password gave one
-bool post_join(PostJoinFn fn, void* ui) {
-    static const uint64_t kNoPassword[2] = {0, 0};  // {const char* data; u64 length}
-    return guarded_post(fn, ui, static_cast<const void*>(kNoPassword));
+// the server's password as a StringView {const char* data; u64 length}; the poster copies it into the command (at most
+// 1024 bytes)
+bool post_join(PostJoinFn fn, void* ui, const std::string& password) {
+    const uint64_t view[2] = {reinterpret_cast<uint64_t>(password.data()), std::min<uint64_t>(password.size(), 0x400)};
+    return guarded_post(fn, ui, static_cast<const void*>(view));
 }
 }  // namespace
 
@@ -595,7 +603,9 @@ bool install_menu_start(const std::array<Resolved, kSigCount>& sigs, bool known_
         int32_t q = 0;
         if (emf::seh_read(reinterpret_cast<const void*>(p_join + 0x1F), &q, 4) &&
             static_cast<uint32_t>(q) == app->ui_command_queue)
-            deps.join_pending = [p_join](void* ui) { return post_join(reinterpret_cast<PostJoinFn>(p_join), ui); };
+            deps.join_pending = [p_join](void* ui, const std::string& password) {
+                return post_join(reinterpret_cast<PostJoinFn>(p_join), ui, password);
+            };
     }
     const uint32_t queue_at = app->ui_command_queue;
     deps.queued_commands = [queue_at](void* ui) -> size_t {

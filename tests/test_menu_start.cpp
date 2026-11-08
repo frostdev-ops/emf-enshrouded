@@ -25,6 +25,7 @@ struct FakeGame {
         uint16_t value;
         std::thread::id thread;
         void* ui;
+        std::string text;  // join: the password
     };
     std::vector<Post> posts;
     size_t applied = 0;
@@ -127,7 +128,11 @@ struct FakeGame {
         d.select_world = [this](void* ui, uint16_t slot) { return post(0x16, slot, ui); };
         d.session_area = [this](void* ui, uint8_t area) { return post(0x27, area, ui); };
         d.start = [this](void* ui) { return post(0x28, 0, ui); };
-        d.join_pending = [this](void* ui) { return join_posted_ok && post(0x2a, 0, ui); };
+        d.join_pending = [this](void* ui, const std::string& password) {
+            if (!join_posted_ok || queue_full) return false;
+            posts.push_back({0x2a, 0, std::this_thread::get_id(), ui, password});
+            return true;
+        };
         d.client_ready = [this] { return client_running && player; };
         d.world_ready = [this] { return server_running && player; };
         d.any_world_running = [this] { return any_running || server_running || client_running; };
@@ -507,6 +512,7 @@ TEST_CASE_TEMPLATE("local_only: the guard refuses every start with a Steam chara
 LoadWorldRequest join_req(uint32_t character = 1, const char* name = "") {
     LoadWorldRequest r = req(1, character, name);
     r.join = true;
+    r.password = "pw-1234";
     return r;
 }
 
@@ -529,6 +535,8 @@ TEST_CASE_TEMPLATE("join: frame A selects the LOCAL character only, frame B post
     m.on_ui_frame(kUi);  // frame B: only the join, no offline and no start
     REQUIRE(g.posts.size() == 2);
     CHECK(g.posts[1].cmd == 0x2a);
+    CHECK(g.posts[1].text == "pw-1234");  // the server's password, as the prompt's button passes it
+    for (const auto& line : g.log) CHECK(line.find("pw-1234") == std::string::npos);
     g.dispatch();  // the game runs Start Play as a client: the guard lets the LOCAL character through
     CHECK(g.started);
     CHECK(g.refused_starts == 0);
@@ -634,6 +642,18 @@ TEST_CASE_TEMPLATE("menu commands: each command a pregame state gets is logged w
     const size_t n = g.log.size();
     m.note_command(2, nullptr);  // no command: nothing
     CHECK(g.log.size() == n);
+}
+
+TEST_CASE("menu commands: the password commands (0x25, 0x2a) are logged without their password") {
+    FakeGame g;
+    MenuStart m(g.deps());
+    uint8_t join[24] = {0x2a, 0, 's', 'e', 'c', 'r', 'e', 't'};
+    m.note_command(2, join);
+    REQUIRE_FALSE(g.log.empty());
+    CHECK(g.log.back() == "menu command: state 2, 2a 00 (the password is not logged)");
+    uint8_t pw[24] = {0x25, 0, 'x', 'y'};
+    m.note_command(2, pw);
+    CHECK(g.log.back() == "menu command: state 2, 25 00 (the password is not logged)");
 }
 
 TEST_CASE_TEMPLATE("local_only without a name: LOCAL storage is enough", Build, On1273043, On1283531) {

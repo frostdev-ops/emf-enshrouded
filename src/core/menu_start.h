@@ -81,6 +81,7 @@ struct LoadWorldRequest {
     // join the session the game was asked to join (enshrouded.exe +connect <address> +password <password>, the menu's
     // "About to join" prompt) as its "Join Session" button does, instead of starting a LOCAL world: world is not used
     bool join = false;
+    std::string password;  // join: the server's password, as the prompt's button passes it (+password's); never logged
 };
 
 // The character the game has selected (save2+0x1192BE, the slot id the menu's character screen and load_world set, and
@@ -112,7 +113,7 @@ public:
         std::function<bool(void* ui, uint8_t area)> session_area;
         std::function<bool(void* ui)> start;
         // the "About to join" prompt's "Join Session" (0x2a: join the pending session); null when not found
-        std::function<bool(void* ui)> join_pending;
+        std::function<bool(void* ui, const std::string& password)> join_pending;
         // the started world is ready: a world this game hosts steps and the local player is in it (the server world
         // steps about a second after the start, long before the save has loaded and the player exists)
         std::function<bool()> world_ready;

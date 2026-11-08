@@ -806,9 +806,10 @@ TEST_CASE("bridge service: join hands a join of the pending session with the LOC
     Fake f;
     Service s(f.sources(), f.output());
     s.on_connect(1);
-    s.on_line(1, R"({"id":1,"cmd":"join","character":1,"expect_name":"Character 2","timeout_ms":60000})");
+    s.on_line(1, R"({"id":1,"cmd":"join","character":1,"expect_name":"Character 2","timeout_ms":60000,"password":"pw-1234"})");
     REQUIRE(f.loads == 1);
     CHECK(f.load_params.join);
+    CHECK(f.load_params.password == "pw-1234");
     CHECK(f.load_params.character == 1u);
     CHECK(f.load_params.expect_name == "Character 2");
     CHECK(f.load_params.timeout_ms == 60000u);

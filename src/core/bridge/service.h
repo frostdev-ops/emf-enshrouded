@@ -65,6 +65,7 @@ struct LoadWorldParams {
     uint32_t timeout_ms = 180000;
     bool test_refuse = false;  // dev check: the guard refuses even the LOCAL pair (the game stays in the menu)
     bool join = false;  // join: the pending session (+connect) with the LOCAL character; slot is not used
+    std::string password;  // join: the server's password (+password's), passed on as the prompt's button does
 };
 struct LoadWorldReply {
     bool ok = false;

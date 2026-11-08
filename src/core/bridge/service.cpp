@@ -341,6 +341,11 @@ struct Service::Impl : std::enable_shared_from_this<Impl> {
                                    "{\"cmd\":\"load_world\",\"slot\":1,\"character\":1}";
         if ((!join && !r.body.get("slot")) || !r.body.get("character")) return bad(c, r.id, usage);
         lp.join = join;
+        if (join) {
+            std::optional<std::string> pw;
+            if (!read_text(r.body, "password", &pw, &err)) return bad(c, r.id, err);
+            if (pw) lp.password = *pw;
+        }
         if (join) lp.slot = 1;
         else if (!read_ms(r.body, "slot", 0, 1, 255, &lp.slot, &err)) return bad(c, r.id, err);
         if (!read_ms(r.body, "character", 0, 1, 255, &lp.character, &err)) return bad(c, r.id, err);

@@ -11,7 +11,8 @@
 #   emf_bridge.ps1 key <name> [-Down | -Up] [-HoldMs 150]
 #   emf_bridge.ps1 quit                                   (the game saves and closes)
 #   emf_bridge.ps1 load_world 1 1 ["<character name>"] [-TimeoutMs 180000]   (from the main menu: LOCAL world slot 1, LOCAL character 1, offline)
-#   emf_bridge.ps1 join 1 ["<character name>"] [-TimeoutMs 180000]   (the main menu's "About to join" prompt of +connect: Join Session with LOCAL character 1)
+#   emf_bridge.ps1 join 1 ["<character name>"] [-TimeoutMs 180000]   (the main menu's "About to join" prompt of +connect: Join Session with LOCAL character 1;
+#                  the server's password from EMF_JOIN_PASSWORD, so it is on no command line)
 #   emf_bridge.ps1 raw '{"cmd":"hello"}'
 # -Json prints the game's reply as it came. It finds the game through -GamePid, -Game <folder>, its own place (installed
 # as <game>\emf\tools\), a running enshrouded.exe / enshrouded_server.exe, or Steam; only a pipe the game named in
@@ -393,6 +394,7 @@ switch ($Command) {
     "join" {
         if (-not $Arg1) { Fail "usage: emf_bridge.ps1 join <LOCAL character slot> [<expected character name>] [-TimeoutMs n]" 2 }
         $req = @{ cmd = "join"; character = [int]$Arg1 }
+        if ($env:EMF_JOIN_PASSWORD) { $req["password"] = $env:EMF_JOIN_PASSWORD }
         if ($Arg2) { $req["expect_name"] = $Arg2 }
         if ($TimeoutMs -gt 0) { $req["timeout_ms"] = $TimeoutMs }
         $r = Invoke-Bridge $req
