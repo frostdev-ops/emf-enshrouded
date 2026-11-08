@@ -615,7 +615,7 @@ local function wheel_items(world)
 	add("Attack", { action = "attack" })
 	if account then add("Mode: " .. beasts:mode(account):gsub("^%l", string.upper), { action = "mode" }) end
 	if stables:count() == 0 then
-		add(stable_mod.craftable() and "Stable: Workbench" or "Stable: animal bed", { action = "stable_hint" })
+		add(stable_mod.craftable(now(world)) and "Stable: Workbench" or "Stable: animal bed", { action = "stable_hint" })
 	end
 	if account and pack:aside_by_command(account) then add("Come back", { action = "come_back" }) end
 	local list = account and beasts:list(account) or {}

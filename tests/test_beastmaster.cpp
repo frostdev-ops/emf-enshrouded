@@ -1535,6 +1535,15 @@ TEST_CASE("stable: with the beasts pack's Stable item the hints name the Stable 
           "Tusk is in the stable: make it active at a stable (a Stable or an animal bed in your base).");
 }
 
+TEST_CASE("stable: without the beasts pack the Stable's item is looked up at most once a minute (the wheel is built every "
+          "second while the world has no stable)") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.seconds(130);
+    CHECK(b.r.fake.item_lookups["Prop_Beastmaster_Stable"] >= 1);
+    CHECK(b.r.fake.item_lookups["Prop_Beastmaster_Stable"] <= 4);
+}
+
 TEST_CASE("stable: a player whose level cannot be read yet keeps their beasts out (no slot trimming on a level of 0)") {
     BeastRig b;
     set_level(b, 1, 25);  // three slots

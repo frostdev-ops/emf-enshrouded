@@ -29,22 +29,26 @@ M.MODELS = {
 }
 M.STABLE_ITEM = "Prop_Beastmaster_Stable"  -- the beasts pack's Stable: its item's debug name
 
+local ASK_AGAIN_S = 60  -- s: craftable(t) asks again this long after an item lookup that found nothing
 local craftable = false  -- the Stable's item was found (it stays: the game's items do not change while it runs)
+local ask_after = nil    -- craftable(t): no lookup before this time
 
--- Whether the game has the beasts pack's Stable to craft. Inside callbacks only (emf.item needs a world); asked again
--- until found (the hints that use it are rare).
-function M.craftable()
-	if not craftable then
-		local ok, id = pcall(function() return emf.item and emf.item(M.STABLE_ITEM) end)
-		craftable = ok and id ~= nil and id ~= false
-	end
+-- Whether the game has the beasts pack's Stable to craft. Inside callbacks only (emf.item needs a world; a lookup reads
+-- the game's whole item list). Without `t` it looks the item up until found (the commands and hints that ask are rare);
+-- with the world's time `t` (the wheel, built every second) at most once every ASK_AGAIN_S.
+function M.craftable(t)
+	if craftable then return true end
+	if t and ask_after and t < ask_after then return false end
+	local ok, id = pcall(function() return emf.item and emf.item(M.STABLE_ITEM) end)
+	craftable = ok and id ~= nil and id ~= false
+	if t then ask_after = t + ASK_AGAIN_S end
 	return craftable
 end
 
--- What players build as a stable, for the hints: `short` without the animal bed's description.
-function M.what_to_build(short)
+-- What players build as a stable, for the hints.
+function M.what_to_build()
 	if M.craftable() then return "a Stable (crafted at the Workbench) or an animal bed" end
-	return short and "an animal bed" or "an animal bed (the straw bed for farm animals)"
+	return "an animal bed (the straw bed for farm animals)"
 end
 
 -- What a stable is, in brackets after "a stable": "(an animal bed in your base)".

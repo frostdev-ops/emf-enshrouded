@@ -88,6 +88,7 @@ struct Fake {
     std::vector<uint8_t> player_infos;
     std::map<std::string, std::vector<uint8_t>> singletons;  // other singletons by name (e.g. g38_daytime::Daytime)
     std::map<uint32_t, std::string> item_names;  // more items for item_info (0x11 "Wood" is always known)
+    std::map<std::string, int> item_lookups;     // find_item calls by name (the game reads its whole item map each)
     // v18 attributes: (entity, attribute id) -> value; what attribute_add and damage were asked to do
     std::map<std::pair<uint32_t, uint32_t>, int32_t> attrs;
     std::vector<std::tuple<uint32_t, uint32_t, int32_t>> attr_adds;  // entity, id, delta
@@ -185,6 +186,7 @@ void f_for_each(EmfWorld*, EmfEntityCallback cb, void* user) {
     for (uint32_t e : g->entities) cb(e, user);
 }
 uint32_t f_find_item(EmfWorld*, const char* name) {
+    ++g->item_lookups[name];
     if (std::strcmp(name, "Wood") == 0) return 0x11u;
     for (const auto& [id, n] : g->item_names)
         if (n == name) return id;
