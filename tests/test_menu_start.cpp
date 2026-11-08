@@ -446,6 +446,54 @@ TEST_CASE_TEMPLATE("load_world guard: it does nothing outside an EMF load, even 
     CHECK(result[0] == 0);  // untouched: the game decides
 }
 
+TEST_CASE_TEMPLATE("local_only: the guard refuses every start with a Steam character or world, or another name, without a load_world", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
+    standard_saves(g);
+    MenuStart m(g.deps());
+    m.set_local_only("Character 2");  // [debug] local_only=1 (a boot join through +connect never posts a load_world)
+    CHECK(m.armed());
+    m.on_menu_state(g.pg(), 0);
+    g.set16(g.save2, L::kSelectedCharacter, 0x0001);
+    uint8_t ok[16] = {};
+    CHECK_FALSE(m.guard(ok, g.s2()));  // LOCAL slot 1, 'Character 2': left alone
+    CHECK(ok[0] == 0);
+    g.set16(g.save2, L::kSelectedCharacter, 0x0101);  // the Steam character
+    uint8_t r1[16] = {};
+    CHECK(m.guard(r1, g.s2()));
+    CHECK(r1[0] == L::kNoCharacterSelected);
+    g.set16(g.save2, L::kSelectedCharacter, 0x0001);
+    g.set16(g.app, g.lay.play_slot, 0x0101);  // a Steam world
+    uint8_t r2[16] = {};
+    CHECK(m.guard(r2, g.s2()));
+    g.set16(g.app, g.lay.play_slot, 0x0000);
+    g.character(0, 0, L::kRecordExists, "Somebody Else");
+    uint8_t r3[16] = {};
+    CHECK(m.guard(r3, g.s2()));
+    CHECK(r3[0] == L::kNoCharacterSelected);
+    // it stays on: back in the main menu after a refused start
+    m.on_menu_state(g.pg(), 2);
+    m.on_menu_state(g.pg(), 0);
+    m.on_ui_frame(kUi);
+    CHECK(m.armed());
+    uint8_t r4[16] = {};
+    CHECK(m.guard(r4, g.s2()));
+}
+
+TEST_CASE_TEMPLATE("local_only without a name: LOCAL storage is enough", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
+    standard_saves(g);
+    MenuStart m(g.deps());
+    m.set_local_only("");
+    m.on_other_state(g.pg(), 3, 0);  // Start Play (the app is noted before its character check)
+    g.set16(g.save2, L::kSelectedCharacter, 0x0001);
+    g.character(0, 0, L::kRecordExists, "Somebody Else");
+    uint8_t ok[16] = {};
+    CHECK_FALSE(m.guard(ok, g.s2()));
+    g.set16(g.save2, L::kSelectedCharacter, 0x0101);
+    uint8_t r[16] = {};
+    CHECK(m.guard(r, g.s2()));
+}
+
 TEST_CASE_TEMPLATE("load_world guard: during an EMF load a Steam character or world (or another name) becomes 'No Character selected'", Build, On1273043, On1283531) {
     FakeGame g(Build::app);
     standard_saves(g);

@@ -340,6 +340,12 @@ world runs and the local player is in it:
   `load_world`), the scenario
   runner's `load_world` step and the MCP server's `emf_load_world` ([ai_agents.md](ai_agents.md)). Each checks
   afterwards, in the state, that the LOCAL slot it asked for runs.
+- **`local_only=1`** in the same `[debug]` section keeps the guard on for every start the game makes while it runs,
+  not only for a `load_world`, and `local_only_name=<character name>` adds the name check. It is for tests that join a
+  server when the game starts (`enshrouded.exe +connect <address> +password <password>`), which post no `load_world`:
+  a Steam character, or another LOCAL character than the named one, gets "No Character selected" instead of joining.
+  `emf_core.log` says `local_only: on` at start and names each refusal. Your own play with a Steam character does not
+  start while it is set.
 
 ## A test with the bridge
 

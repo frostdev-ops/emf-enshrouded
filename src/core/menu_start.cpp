@@ -352,7 +352,8 @@ void MenuStart::poll() {
 }
 
 bool MenuStart::guard(uint8_t* result, uintptr_t save2) {
-    if (!armed_.load() || !result || !save2) return false;  // outside an EMF load: never anything
+    const bool by_load = armed_.load();
+    if ((!by_load && !local_only_.load()) || !result || !save2) return false;  // outside an EMF load: never anything
     std::string why;
     uint8_t char_storage = 0, world_storage = 0;
     if (!read_u8(save2 + L::kSelectedCharacter + 1, &char_storage) || char_storage != 0)
@@ -364,8 +365,8 @@ bool MenuStart::guard(uint8_t* result, uintptr_t save2) {
     bool test_refuse = false;
     {
         const std::lock_guard<std::mutex> l(lock_);
-        expect = guard_name_;
-        test_refuse = test_refuse_;
+        expect = by_load ? guard_name_ : local_only_name_;
+        test_refuse = by_load && test_refuse_;
     }
     if (why.empty() && test_refuse) why = "test_refuse: the request asked for a refusal (dev check)";
     if (why.empty()) {
@@ -380,9 +381,17 @@ bool MenuStart::guard(uint8_t* result, uintptr_t save2) {
     }
     if (why.empty()) return false;
     result[0] = L::kNoCharacterSelected;
-    guard_fired_ = true;
-    deps_.log("load_world: the guard stopped the start: " + why);
+    if (by_load) guard_fired_ = true;
+    deps_.log(std::string(by_load ? "load_world" : "local_only") + ": the guard stopped the start: " + why);
     return true;
+}
+
+void MenuStart::set_local_only(const std::string& expect_name) {
+    {
+        const std::lock_guard<std::mutex> l(lock_);
+        local_only_name_ = expect_name;
+    }
+    local_only_ = true;
 }
 
 // ---- the process's instance and its hooks ----

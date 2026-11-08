@@ -137,8 +137,12 @@ public:
     // The "character selected?" check's post-hook: while an EMF load runs (and only then) a Steam character or world,
     // or a character with another name than expected, becomes the error 0x1F. True when it forced the error.
     bool guard(uint8_t* result, uintptr_t save2);
+    // [debug] local_only=1 (tests that join a server at boot with +connect, which posts no load_world): the guard is on
+    // for the life of the process, for every start; a name ("" = any) is checked like load_world's. Call before the
+    // game can start a session.
+    void set_local_only(const std::string& expect_name);
 
-    bool armed() const { return armed_.load(); }
+    bool armed() const { return armed_.load() || local_only_.load(); }
     void log_line(const std::string& s) const { deps_.log(s); }
     bool busy() const;
     bool menu_active() const { return menu_active_.load(); }
@@ -196,6 +200,8 @@ private:
     std::atomic<bool> armed_{false};
     std::atomic<bool> guard_fired_{false};
     std::string guard_name_;  // the expected name while armed (under lock_)
+    std::atomic<bool> local_only_{false};
+    std::string local_only_name_;  // set once before the game can start a session (under lock_)
     mutable std::mutex character_lock_;
     CharacterSelection character_;  // the last note_character (under character_lock_)
 };

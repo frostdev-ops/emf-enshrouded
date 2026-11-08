@@ -843,10 +843,23 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         };
         menu.now_ms = [] { return GetTickCount64(); };
         menu.log = [](const std::string& s) { emf::logf("%s", s.c_str()); };
-        if (emf::core::install_menu_start(g_state->sigs, known, build, std::move(menu), &g_load_world_off))
+        if (emf::core::install_menu_start(g_state->sigs, known, build, std::move(menu), &g_load_world_off)) {
             emf::logf("load_world: on (main-menu hooks installed; the guard acts only during a load_world)");
-        else
+            // [debug] local_only=1: tests that join a server at boot (+connect) post no load_world, so the guard is on for
+            // every start of this process; [debug] local_only_name: the LOCAL character must have this name too
+            const std::wstring ini = dir + L"\\emf\\emf_core.ini";
+            if (GetPrivateProfileIntW(L"debug", L"local_only", 0, ini.c_str()) == 1) {
+                wchar_t name[256] = {};
+                GetPrivateProfileStringW(L"debug", L"local_only_name", L"", name, 256, ini.c_str());
+                const std::string expect = utf8(name);
+                emf::core::menu_start()->set_local_only(expect);
+                const std::string other = expect.empty() ? "" : ", or another character than '" + expect + "'";
+                emf::logf("local_only: on (every session start with a Steam character or world%s is refused)",
+                          other.c_str());
+            }
+        } else {
             emf::logf("load_world: off (%s)", g_load_world_off.c_str());
+        }
     }
     // save-info.json: the slot names and levels the main menu shows, for the save backups' list. The game
     // exe only; the hook runs before the game's pregame enters the main menu.
