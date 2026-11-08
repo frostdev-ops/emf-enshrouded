@@ -64,6 +64,7 @@ struct Rig {
         d.api = 27;
         d.build = 1287369;
         d.greet = greet;
+        d.beacon_delay_ms = 0;  // the tests below see the beacon on the first tick; the delay has its own test
         return d;
     }
     ClientLinkDeps client_deps() {
@@ -142,7 +143,7 @@ TEST_CASE("net link: the beacon goes once to each new remote connection, only wh
     CHECK(line->channel == "emf/net");
     CHECK(line->payload.find("EMF") != std::string::npos);
     r.server.tick({{0x40, 1}, {0x41, 2}});
-    CHECK(r.to_players.size() == 1);  // not again
+    CHECK(r.to_players.size() == 1);  // not again before the retry time
     r.server.tick({{0x40, 1}, {0x41, 2}, {0x42, 3}});
     CHECK(r.to_players.size() == 2);
     r.server.tick({{0x42, 3}});  // 0x40 left ...
@@ -156,6 +157,48 @@ TEST_CASE("net link: the beacon goes once to each new remote connection, only wh
     Rig quiet(false);
     quiet.server.tick({{0x40, 1}});
     CHECK(quiet.to_players.empty());
+}
+
+TEST_CASE("net link: the first beacon waits a few seconds after the connection; it comes again until the game says hello, a few times at most") {
+    Rig r;
+    ServerLinkDeps d = r.server_deps();
+    d.beacon_delay_ms = 5000;
+    d.beacon_retry_ms = 15000;
+    d.beacon_tries = 4;
+    ServerLink server(d);
+    server.tick({{kHandle, kAcct}});
+    CHECK(r.to_players.empty());  // the game is still loading: a line now can be lost
+    r.now += 4000;
+    server.tick({{kHandle, kAcct}});
+    CHECK(r.to_players.empty());
+    r.now += 1000;
+    server.tick({{kHandle, kAcct}});
+    CHECK(r.to_players.size() == 1);  // 5 s after the connection
+    r.now += 14000;
+    server.tick({{kHandle, kAcct}});
+    CHECK(r.to_players.size() == 1);
+    r.now += 1000;
+    server.tick({{kHandle, kAcct}});
+    CHECK(r.to_players.size() == 2);  // no hello: again after 15 s
+    for (int i = 0; i < 10; ++i) {
+        r.now += 15000;
+        server.tick({{kHandle, kAcct}});
+    }
+    CHECK(r.to_players.size() == 4);  // at most 4 (a game without EMF shows the text each time)
+    // a game that says hello gets no more beacons
+    Rig r2;
+    ServerLinkDeps d2 = r2.server_deps();
+    d2.beacon_retry_ms = 15000;
+    ServerLink s2(d2);
+    s2.tick({{kHandle, kAcct}});
+    REQUIRE(r2.to_players.size() == 1);
+    r2.client.on_chat_line(r2.to_players[0].second, kAcct);
+    r2.to_players.clear();
+    for (const auto& line : r2.client.take_lines(100)) s2.on_line(kHandle, kAcct, line);  // its hello
+    r2.to_players.clear();                                                                 // the welcome
+    r2.now += 60000;
+    s2.tick({{kHandle, kAcct}});
+    CHECK(r2.to_players.empty());
 }
 
 TEST_CASE("net link: beacon, hello, welcome; each side then knows the other's channels") {

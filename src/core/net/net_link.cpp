@@ -266,18 +266,28 @@ void ServerLink::tick(const std::vector<Connection>& connected) {
     for (const auto& c : connected)
         if (!(d_.is_local && d_.is_local(c.handle, c.account))) now.insert(c);
     std::vector<Connection> left, fresh;
+    std::vector<uint32_t> tries;  // which beacon each fresh one gets (1 = the first)
+    const uint64_t ms = d_.now_ms ? d_.now_ms() : 0;
     {
         const std::lock_guard<std::mutex> g(m_);
         for (auto it = greeted_.begin(); it != greeted_.end();)
-            it = now.count(*it) ? std::next(it) : greeted_.erase(it);
+            it = now.count(it->first) ? std::next(it) : greeted_.erase(it);
         for (auto it = joining_.begin(); it != joining_.end();)
             it = now.count(it->first) ? std::next(it) : joining_.erase(it);
         for (Peer* p : peers_.all())
             if (!now.count({p->handle, p->account})) left.push_back({p->handle, p->account});
         for (const auto& c : left) peers_.bye(c.handle);
         if (d_.greet && d_.channels && !d_.channels().empty())
-            for (const auto& c : now)
-                if (greeted_.insert(c).second) fresh.push_back(c);
+            for (const auto& c : now) {
+                Beaconing& b = greeted_.try_emplace(c, Beaconing{ms, 0, 0}).first->second;
+                if (b.sent >= d_.beacon_tries || peers_.find(c.handle, c.account)) continue;  // done, or said hello
+                const bool due = b.sent == 0 ? ms >= b.seen + d_.beacon_delay_ms : ms >= b.last + d_.beacon_retry_ms;
+                if (!due) continue;
+                b.last = ms;
+                ++b.sent;
+                fresh.push_back(c);
+                tries.push_back(b.sent);
+            }
         // an account with no connection any more starts over with a full budget
         for (auto it = budgets_.begin(); it != budgets_.end();) {
             bool seen = false;
@@ -292,11 +302,15 @@ void ServerLink::tick(const std::vector<Connection>& connected) {
                                          nullptr);
         return lines.empty() ? std::string() : encode_line(lines.front());
     }();
-    for (const auto& c : fresh) {
+    for (size_t i = 0; i < fresh.size(); ++i) {
+        const Connection& c = fresh[i];
         const bool sent = d_.send && !beacon.empty() && d_.send(c.handle, c.account, beacon);
         if (d_.log)
             d_.log("mod messages: the beacon to the player on connection " + handle_hex(c.handle) + " (account " +
-                   acct_hex(c.account) + ")" + (sent ? "" : ": it could not be queued"));
+                   acct_hex(c.account) + ")" +
+                   (tries[i] > 1 ? ", again (" + std::to_string(tries[i]) + " of " + std::to_string(d_.beacon_tries) + "): no hello yet"
+                                 : std::string()) +
+                   (sent ? "" : ": it could not be queued"));
     }
     for (const auto& c : left)
         if (d_.on_peer) d_.on_peer(c.handle, c.account, false);

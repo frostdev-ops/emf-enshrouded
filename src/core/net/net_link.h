@@ -72,6 +72,11 @@ struct ServerLinkDeps {
     uint32_t api = 0;
     uint32_t build = 0;
     bool greet = true;  // [net] greet: send the beacon (a server without it never gets a hello)
+    // The first beacon this long after a connection appears (a line sent while the game still loads is lost), then
+    // again this often until the game says hello, at most this many times (a game without EMF shows each one).
+    uint64_t beacon_delay_ms = 5000;
+    uint64_t beacon_retry_ms = 15000;
+    uint32_t beacon_tries = 4;
 };
 
 // A player on a connection, as the server's records name it.
@@ -120,7 +125,12 @@ private:
     std::mutex m_;
     PeerTable peers_;
     std::map<Connection, Joining> joining_;
-    std::set<Connection> greeted_;
+    struct Beaconing {
+        uint64_t seen = 0;  // when the connection appeared
+        uint64_t last = 0;  // the last beacon
+        uint32_t sent = 0;
+    };
+    std::map<Connection, Beaconing> greeted_;  // the connections there are, and their beacons
     struct Budget {
         RateLimit lines{kLinesPerSecond, kLineBurst};
         RateLimit bytes{kBytesPerSecond, kBytesBurst};

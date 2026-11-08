@@ -66,6 +66,7 @@ struct ServerEnv {
     std::string emf_version;
     uint32_t api = 0, build = 0;
     bool greet = true;
+    uint64_t beacon_delay_ms = 5000;  // ServerLinkDeps: the first beacon after a connection appears
 };
 struct ClientEnv {
     std::function<std::optional<uint64_t>()> self_account;  // empty or nullopt: the first beacon's speaker

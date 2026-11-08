@@ -86,6 +86,7 @@ struct Pair {
         REQUIRE(client.s.add_channel("bm", def("bm/pick", client_pick_version, kToServer, &at_server, nullptr), &why));
         REQUIRE(client.s.add_channel("bm", def("bm/show", 1, kToPlayers, nullptr, &at_client), &why));
         ServerEnv senv;
+        senv.beacon_delay_ms = 0;  // the beacon on the first tick (net_link's tests cover the delay)
         senv.send = [this](uint32_t h, uint64_t a, const std::string& line) {
             chat_to_player.push_back({{h, a}, line});
             return true;
