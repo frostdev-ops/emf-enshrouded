@@ -2,10 +2,11 @@
 -- Beasts window with E at it (mods/beastmaster/stable.lua knows it by its render model). A content script of the beasts
 -- pack (make_mod.py "content_scripts"), run with EMF's helper emf_content.lua (docs/modding/content.md).
 --
--- It is a copy of the large animal bed's object without the parts farm animals and villagers use, with a render model
--- record of its own: a copy of the bed's under the Stable's GUID (the same mesh data), so that Beastmaster tells a
--- Stable from a vanilla bed. A dedicated server has no render data: there the template names the model all the same,
--- as the game's own templates do.
+-- It is a copy of the large animal bed's object without the parts farm animals and villagers use, with the pack's prop
+-- model beastmaster_stable (a stable with a thatched roof; make_mod "props") under the Stable's own model GUID, which
+-- Beastmaster knows it by, and boxes of its own to stand on and bump into. When that model was not made, the Stable
+-- takes a copy of the bed's record under the same GUID (the bed's look). A dedicated server has no render data: there
+-- the template names the model all the same, as the game's own templates do.
 --
 -- The GUIDs below are FIXED FOREVER: saves keep the item by its GUID and placed Stables by their template's GUID, and
 -- Beastmaster knows the model by its GUID.
@@ -25,12 +26,47 @@ local WOOD_LOGS   = "3f4093ae-75ed-4e5d-bd0b-784ba83b88f5" -- Material_T1_Wood_L
 local PLANT_FIBRE = "ff00a9f6-fd7e-4933-9c6b-33c36223cd2b" -- Material_T1_Plant_Fibre
 local ANIMAL_FUR  = "66ce7d4c-ce66-4ad4-800a-ab37f7e604a2" -- Material_T1_Animal_Fur
 
+-- The Stable's solid parts, in metres from its middle on the ground (the prop at 4 m wide, its open side +z): centre
+-- and half size of each box. The first is the hay platform (its top 0.5 m up, walkable); then the back wall, the left
+-- wall (the right side is open between its posts) and the roof (from 2 m up).
+local BOXES = {
+	{ at = { -0.09, 0.25, -0.15 }, half = { 1.48, 0.25, 1.35 } },
+	{ at = { -0.05, 1.05, -1.40 }, half = { 1.55, 1.05, 0.12 } },
+	{ at = { -1.45, 1.05, -0.20 }, half = { 0.12, 1.05, 1.40 } },
+	{ at = { 0.0, 2.65, 0.0 }, half = { 2.0, 0.65, 2.0 } },
+}
+
+-- The bed's collider (one box) becomes the Stable's boxes: the box copied (EML copies a value put into a game array)
+-- and each placed, all in the collider's one solid. A collider that is not one box is kept as it is.
+local function fit_collider(tpl)
+	for _, c in ipairs(tpl.components) do
+		if c.type == "keen::ecs::ColliderResourceComponent" then
+			local col = c.value.colliders[1]
+			local data = col and col.dataArray
+			if not (data and #data == 1 and tostring(data[1].type) == "keen::ecs::BoxColliderData") then
+				print("beastmaster stable: the bed's collider is not one box: kept as it is")
+				return
+			end
+			for _ = 2, #BOXES do table.insert(data, data[1]) end
+			for i, b in ipairs(BOXES) do
+				local v = data[i].value
+				v.offset.x, v.offset.y, v.offset.z = b.at[1], b.at[2], b.at[3]
+				v.shape.halfSize.x, v.shape.halfSize.y, v.shape.halfSize.z = b.half[1], b.half[2], b.half[3]
+			end
+			local list = col.joltObjects[1].shapeIndexList
+			for i = #list + 1, #BOXES do table.insert(list, i - 1) end
+		end
+	end
+end
+
 -- the render model: only where the game has render data (not on a dedicated server)
-if #game.assets.get_resources_by_type("keen::RenderModel") > 0 then
+if #game.assets.get_resources_by_type("keen::RenderModel") > 0
+	and not game.assets.get_resource(MODEL_GUID, "keen::RenderModel") then
 	local bed = game.assets.get_resource(BED_MODEL, "keen::RenderModel")
 	if not bed then error("the large animal bed's model " .. BED_MODEL .. " is not in the game (the game changed?)") end
 	local m = game.assets.create_resource(bed.data, "keen::RenderModel", MODEL_GUID, 0).data
 	m.debugName = "beastmaster_stable"
+	print("beastmaster stable: the pack's Stable model was not made: the Stable has the large animal bed's look")
 end
 
 local function recipe(like)
@@ -54,6 +90,7 @@ local ok, err = pcall(function()
 			for _, c in ipairs(tpl.components) do
 				if c.type == "keen::ecs::ModelResource" then c.value.model = MODEL_GUID end
 			end
+			fit_collider(tpl)
 		end,
 	}
 	-- the Workbench, known with the first furniture, listed after the crude chair; a game without that recipe gets the

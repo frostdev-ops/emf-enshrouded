@@ -27,7 +27,21 @@ local function eq(a, b, what)
 	if a ~= b then error(string.format("%s: %s ~= %s", what, tostring(a), tostring(b)), 2) end
 end
 
--- One run of the script: `server` (no render data), `no_bed_model` (a client whose data lacks the bed's model).
+-- EML clones a value inserted into a game array: the stand-in does the same, or a copied box would share its table
+local function deepcopy(v)
+	if type(v) ~= "table" then return v end
+	local t = {}
+	for k, x in pairs(v) do t[k] = deepcopy(x) end
+	return t
+end
+local raw_insert = table.insert
+table.insert = function(t, a, b)
+	if b == nil then return raw_insert(t, deepcopy(a)) end
+	return raw_insert(t, a, deepcopy(b))
+end
+
+-- One run of the script: `server` (no render data), `no_bed_model` (a client whose data lacks the bed's model),
+-- `no_prop_model` (the pack's prop model of the Stable was not made).
 local function run(opts)
 	opts = opts or {}
 	local calls = { placeables = {}, recipes = {}, finish = 0, created = {} }
@@ -47,12 +61,13 @@ local function run(opts)
 		finish = function() calls.finish = calls.finish + 1 end,
 	}
 	local bed_model = { guid = BED_MODEL, data = { debugName = "animalprops_farm_animal_sleep_large_01", renderData = { hash = "h" } } }
+	local prop_model = { guid = STABLE_MODEL, data = { debugName = "beastmaster_stable", renderData = { hash = "p" } } }
 	_G.loader = { features = { patch = true }, is_server = opts.server or false }
 	_G.game = { assets = {
 		get_resource = function(guid, type)
-			if type == "keen::RenderModel" and guid == BED_MODEL and not opts.server and not opts.no_bed_model then
-				return bed_model
-			end
+			if type ~= "keen::RenderModel" or opts.server then return nil end
+			if guid == BED_MODEL and not opts.no_bed_model then return bed_model end
+			if guid == STABLE_MODEL and not opts.no_prop_model then return prop_model end
 			return nil
 		end,
 		get_resources_by_type = function(type)
@@ -103,14 +118,65 @@ test("its template names the Stable's own render model", function()
 	eq(tpl.components[2].value.model, STABLE_MODEL, "model")
 end)
 
-test("the Stable's render model is a copy of the bed's record under its own GUID (the same mesh data)", function()
+test("the Stable's render model is the one the pack built under its GUID (its prop): nothing is copied", function()
 	local c = run()
+	assert(c.ok, c.err)
+	eq(#c.created, 0, "resources created")
+end)
+
+test("without the pack's model (its prop failed) the Stable takes a copy of the bed's record under its GUID", function()
+	local c = run({ no_prop_model = true })
+	assert(c.ok, c.err)
 	eq(#c.created, 1, "resources created")
 	local m = c.created[1]
 	eq(m.type, "keen::RenderModel", "type")
 	eq(m.guid, STABLE_MODEL, "guid")
 	eq(m.flags, 0, "flags")
-	eq(m.data.renderData.hash, "h", "mesh data")
+	eq(m.data.renderData.hash, "h", "the bed's mesh data")
+	eq(#c.placeables, 1, "placeables")
+end)
+
+-- The bed's collider as the game has it: one box in a ColliderResourceComponent
+local function bed_template()
+	return { components = {
+		{ type = "keen::ecs::ModelResource", value = { model = BED_MODEL } },
+		{ type = "keen::ecs::ColliderResourceComponent", value = { colliders = { {
+			dataArray = { { type = "keen::ecs::BoxColliderData", value = {
+				offset = { x = 0, y = 0.165, z = 0 }, orientation = { x = 0, y = 0, z = 0, w = 1 },
+				shape = { halfSize = { x = 1.45, y = 0.19, z = 1.45 } } } } },
+			joltObjects = { { shapeIndexList = { 0 } } },
+		} } } },
+	} }
+end
+
+test("its collider: the hay platform, the back and left walls and the roof as boxes, all in one solid", function()
+	local c = run()
+	local tpl = bed_template()
+	c.placeables[1].edit_template(tpl)
+	local col = tpl.components[2].value.colliders[1]
+	eq(#col.dataArray, 4, "boxes")
+	local platform = col.dataArray[1].value
+	assert(math.abs(platform.offset.y + platform.shape.halfSize.y - 0.5) < 1e-6, "the platform's top is 0.5 m high")
+	for i, d in ipairs(col.dataArray) do
+		eq(tostring(d.type), "keen::ecs::BoxColliderData", "box " .. i)
+		assert(d.value.shape.halfSize.x > 0 and d.value.shape.halfSize.y > 0 and d.value.shape.halfSize.z > 0, "size " .. i)
+	end
+	local roof = col.dataArray[4].value
+	assert(roof.offset.y - roof.shape.halfSize.y >= 2.0 - 1e-6, "the roof starts 2 m up")
+	assert(col.dataArray[2].value ~= col.dataArray[3].value, "each box its own")
+	local list = col.joltObjects[1].shapeIndexList
+	eq(#list, 4, "shape indices")
+	for i = 1, 4 do eq(list[i], i - 1, "shape index " .. i) end
+end)
+
+test("a collider that is not the bed's one box is kept as it is", function()
+	local c = run()
+	local tpl = bed_template()
+	local col = tpl.components[2].value.colliders[1]
+	col.dataArray[1].type = "keen::ecs::CapsuleColliderData"
+	c.placeables[1].edit_template(tpl)
+	eq(#col.dataArray, 1, "boxes")
+	eq(col.dataArray[1].value.shape.halfSize.x, 1.45, "unchanged")
 end)
 
 test("on a dedicated server (no render data) no model is made and the template still names it", function()
@@ -124,8 +190,8 @@ test("on a dedicated server (no render data) no model is made and the template s
 	eq(#c.recipes, 1, "recipes")
 end)
 
-test("a client without the bed's model adds nothing (the game changed): the error says what is missing", function()
-	local c = run({ no_bed_model = true })
+test("a client with neither the pack's model nor the bed's adds nothing (the game changed): the error says what is missing", function()
+	local c = run({ no_bed_model = true, no_prop_model = true })
 	assert(not c.ok, "an error")
 	assert(tostring(c.err):find(BED_MODEL, 1, true), "names the model: " .. tostring(c.err))
 	eq(#c.placeables, 0, "placeables")
