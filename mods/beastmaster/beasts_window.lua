@@ -17,7 +17,7 @@ local threat = require("threat")
 local M = {}
 M.ID = "stable"
 local CONFIRM_S = 5
-local PORTRAIT_LINES = 8  -- the picture's height in text lines
+local PORTRAIT_LINES = 6  -- the picture's height in text lines: the last row (the buttons) still fits on a 1080p screen
 local PORTRAIT_FPS = 8    -- its 24 frames (mod.json "portraits"): one turn in 3 s
 
 local W = {}

@@ -3096,7 +3096,9 @@ TEST_CASE("beast tab: the selected beast's portrait turns under its name (EMF's 
         CHECK(w.texts[static_cast<size_t>(pic - 1)] == "Fang");  // right under its name
         CHECK(w.widgets[static_cast<size_t>(pic)].icon == 50u);
         CHECK(w.widgets[static_cast<size_t>(pic)].fps == 8u);
-        CHECK(w.widgets[static_cast<size_t>(pic)].height == doctest::Approx(8.0));
+        // 6 lines: with the picture the tab's last row (Make active, Store, Release) still fits a window of 85 % of a
+        // 995 px high game window, as the tab with every talent is
+        CHECK(w.widgets[static_cast<size_t>(pic)].height == doctest::Approx(6.0));
     }
     CHECK(b.r.fake.images_loaded == std::vector<std::string>{"portrait:beastmaster.wolf"});
     click(b, "tab.stable");
