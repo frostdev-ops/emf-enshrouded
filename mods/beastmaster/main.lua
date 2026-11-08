@@ -95,6 +95,7 @@ home = home_mod.new({
 	homes = function() return stables:homes() end,
 	present = function() return pack.present end,
 	log = emf.log,
+	on_spawn = spawned,
 })
 
 -- rare wild bears, aurochs and snakes (with their content packs)
@@ -716,6 +717,7 @@ end
 
 emf.on_event("HitEvent", function(world, e)
 	pack:on_hit(world, e.rootSourceId, e.targetId, e.healthChange)
+	home:on_hit(world, e.rootSourceId, e.targetId)
 	rare:on_hit(world, e.rootSourceId, e.targetId)
 	if e.rootSourceId ~= 0 and e.rootSourceId ~= e.targetId and world:get("PlayerState", e.targetId) then
 		last_hit[e.targetId] = { id = e.rootSourceId, at = now(world) }

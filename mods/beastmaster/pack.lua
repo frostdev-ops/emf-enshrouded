@@ -264,12 +264,18 @@ function P:set_speed(world, id, beast)
 	if factor == 1 then self.speeds[id] = nil end
 end
 
+-- A tamed beast's health against a wild one of its kind at the same level: its role, loyalty and talents.
+function M.health_mul(beast, pace)
+	local role_health = species.role(species.by_id(beast.species))
+	return role_health * loyalty.factor(loyalty.level(beast.points, pace)) * talents.health(beast)
+end
+
 -- A beast out as strong as its role, loyalty and talents: its health through the health watch (on_spawn with the
 -- multiplier), its DamageMod multiplier against its template's, kept from the first time, and its speed. (Its size is
 -- given at the spawn.)
 function P:strengthen(world, id, beast)
 	local sp = species.by_id(beast.species)
-	local role_health, role_damage = species.role(sp)
+	local _, role_damage = species.role(sp)
 	local lvl = loyalty.level(beast.points, self.env.setting("loyalty_pace"))
 	local f = loyalty.factor(lvl)
 	local base = self.base[id]
@@ -278,7 +284,7 @@ function P:strengthen(world, id, beast)
 		base = { damage = dm and dm.dataStorage and dm.dataStorage[3] or nil }
 		self.base[id] = base
 	end
-	if self.env.on_spawn then self.env.on_spawn(world, id, sp, role_health * f * talents.health(beast)) end
+	if self.env.on_spawn then self.env.on_spawn(world, id, sp, M.health_mul(beast, self.env.setting("loyalty_pace"))) end
 	local dm = base.damage and world:get("DamageMod", id)
 	if dm and dm.dataStorage then
 		base.wrote = base.damage * role_damage * f * talents.damage(beast)

@@ -5115,3 +5115,47 @@ TEST_CASE("home: beastmaster.home says where your beasts at home are and what th
     CHECK(text.find("Fang: in the Large Stable at 10, 10, 0, strolling") != std::string::npos);
     CHECK(text.find("Rex: in the Large Stable at 10, 10, 0") != std::string::npos);
 }
+
+TEST_CASE("home: a beast at home has the health it has when called (its role, loyalty and talents)") {
+    BeastRig b;
+    three_beasts(b);
+    large_stable(b, 950, 10, 0);
+    homes_ready(b, 3);
+    for (uint32_t id : {1234u, 1235u, 1236u}) component<ecs::Health>(b.r.fake, id).dataStorage[2] = 100;
+    b.seconds(33);
+    REQUIRE(b.r.fake.spawns.size() == 3);
+    CHECK(now_of<ecs::Health>(b, 1234).dataStorage[3] == 20);  // the wolf's role: 1.2x
+    CHECK(now_of<ecs::Health>(b, 1235).dataStorage[3] == 70);  // the boar's: 1.7x
+}
+
+TEST_CASE("home: a monster's hit on a beast at home sends that stable's beasts inside (out of the world); they come "
+          "back 30 s after the last hit") {
+    BeastRig b;
+    home_three(b);
+    creature(b, 70, 14, 4, kSkeletonFoe);
+    deliver(b.r.fake, "HitEvent", hit_event(70, 1235));
+    b.seconds(1);
+    for (uint32_t id : {1234u, 1235u, 1236u}) CHECK(destroyed(b, id));
+    homes_ready(b, 3);
+    b.seconds(20);
+    deliver(b.r.fake, "HitEvent", hit_event(70, 1));  // the monster hits the player at the stable: still inside
+    b.seconds(25);
+    CHECK(b.r.fake.spawns.size() == 3);
+    b.seconds(7);
+    CHECK(b.r.fake.spawns.size() == 6);
+}
+
+TEST_CASE("home: a monster's hit on a player at a Large Stable sends its beasts inside; a hit on a player far from it, "
+          "or a fall, does not") {
+    BeastRig b;
+    home_three(b);
+    creature(b, 70, 40, 40, kSkeletonFoe);
+    place(b.r.fake, 2, 60, 10, 60);  // player 2, 78 m from the stable
+    deliver(b.r.fake, "HitEvent", hit_event(70, 2));
+    deliver(b.r.fake, "HitEvent", hit_event(0, 1));  // a fall: no source
+    b.seconds(2);
+    CHECK(b.r.fake.destroyed.empty());
+    deliver(b.r.fake, "HitEvent", hit_event(70, 1));  // player 1, 10 m from the stable
+    b.seconds(1);
+    for (uint32_t id : {1234u, 1235u, 1236u}) CHECK(destroyed(b, id));
+}

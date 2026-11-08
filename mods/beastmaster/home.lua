@@ -10,8 +10,11 @@
 --   facing out. A stroll that ends off the floor puts the beast back on its spot before it rests; a beast ROAM_M or more
 --   from the stable's middle for AWAY_S is put back at once (the game's teleport, with a ground search).
 --   A beast the Sleep state cannot hold (no enemy AI state) strolls on.
---   It never fights (its aggro and chosen targets are cleared every step) and is healed to full every second; one that
---   dies anyway is removed and shows up again after RESPAWN_S. Its owner loses nothing: the collection is not touched.
+--   It never fights (its aggro and chosen targets are cleared every step). A hit on one of them, or a creature's hit on
+--   a player within BUILD_M of their stable, sends that stable's beasts inside (out of the world) until SHELTER_S after
+--   the last such hit. It has the health it has when called (its role, loyalty and talents: env.on_spawn) and is healed
+--   to full every second; one that dies anyway is removed and shows up again after RESPAWN_S. Its owner loses nothing:
+--   the collection is not touched.
 --   They leave the world when they are called (leave, before the call's spawn), sent away or released, their owner is
 --   away or left, the setting home_beasts is off, the stable is gone, or (with the setting make_room) a player builds
 --   within BUILD_M of it (the game blocks building next to creatures); back GRACE_S after the building stops.
@@ -25,7 +28,8 @@
 --   Large Stable's middle that are none of ours and guard no player (a beast out guards its owner) are the beasts the
 --   script had there before: taken out of the world at the first check that has a Large Stable.
 -- M.new(env) where env has: now(world), setting(key), beasts() (the roster), homes() (the Large Stables: stable.lua
--- S:homes()), present() (account -> player entity, nil before the first check), log(text).
+-- S:homes()), present() (account -> player entity, nil before the first check), log(text), on_spawn(world, id, sp,
+-- health_mul) (optional: the health watch).
 local species = require("species")
 local loyalty = require("loyalty")
 local idle_mod = require("idle")
@@ -51,6 +55,7 @@ local JITTER = 20            -- degrees: a beast faces out of the open side give
 local RESPAWN_S = 60
 local RETRY_S = 300
 local BUILD_M, GRACE_S = 20, 5
+local SHELTER_S = 30  -- s after the last hit at a stable its beasts stay inside
 local LEASE_S, RENEW_S = 120, 5  -- the Sleep lease: the game's time plus LEASE_S, renewed every RENEW_S
 local CHECK_AHEAD_NS = 1000000000000000000
 local NS = 1000000000
@@ -207,6 +212,28 @@ function H:has(id)
 	return self.ids[id] ~= nil
 end
 
+-- A HitEvent: a hit on a beast at home (from anything but itself), or a creature's hit on a player within BUILD_M of a
+-- Large Stable, sends that stable's beasts inside until SHELTER_S after it (a fall has no source: nothing).
+function H:on_hit(world, source, target)
+	if not source or source == 0 or source == target then return end
+	local now = self.env.now(world)
+	local e = self.ids[target]
+	if e then
+		self.busy[e.key] = now + SHELTER_S
+		self.next_check = 0
+		return
+	end
+	if not get(world, "PlayerState", target) or get(world, "PlayerState", source) then return end
+	local px, py, pz = world:position(target)
+	if not px then return end
+	for _, h in ipairs(self.env.homes()) do
+		if dist(h, px, py, pz) <= BUILD_M then
+			self.busy[key_of(h)] = now + SHELTER_S
+			self.next_check = 0
+		end
+	end
+end
+
 -- A home beast died (the game's event): its body goes, the beast shows up again after RESPAWN_S.
 function H:on_died(world, id)
 	local e = self.ids[id]
@@ -242,6 +269,7 @@ function H:show(world, b, account, owner, h, spot, now)
 	if lvl and lvl.dataStorage and mine and mine.dataStorage then lvl.dataStorage[1] = mine.dataStorage[1] end
 	local scaling = get(world, "DynamicEnemyScaling", id)
 	if scaling then scaling.nextUpdateTime = 0 end
+	if self.env.on_spawn then self.env.on_spawn(world, id, sp, pack_mod.health_mul(b, self.env.setting("loyalty_pace"))) end
 	guard(world, id, h)
 	return e
 end
