@@ -1119,6 +1119,7 @@ struct HeldServerStep {
     HANDLE held = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
     std::thread server;
+    bool ok = false;  // the server step is held (tests REQUIRE it: never inside this constructor)
     HeldServerStep(Rig& rig, Host& h) : r(rig), host(h) {
         r.fake.log_hook = [this](const std::string& line) {
             if (line.find("hold") == std::string::npos) return;
@@ -1126,7 +1127,7 @@ struct HeldServerStep {
             WaitForSingleObject(release, 10000);  // a broken host waits here: the test then fails after 10 s
         };
         server = std::thread([this] { host.tick(kServer); });
-        REQUIRE(WaitForSingleObject(held, 10000) == WAIT_OBJECT_0);
+        ok = WaitForSingleObject(held, 10000) == WAIT_OBJECT_0;
     }
     void let_go() {
         SetEvent(release);
@@ -1156,6 +1157,7 @@ TEST_CASE("lua host: a client step does not wait for a script busy in the server
     REQUIRE(r.fake.hud["slowpoke.n"] == "1");
     {
         HeldServerStep hold(r, host);
+        REQUIRE(hold.ok);
         for (int i = 0; i < 5; ++i) host.tick(kClient);  // returns at once: the script is busy in the server step
         CHECK(r.fake.hud["slowpoke.n"] == "1");
         hold.let_go();
@@ -1172,6 +1174,7 @@ TEST_CASE("lua host: after 30 client steps in a row without it, a client step wa
     host.set_clock([] { return uint64_t{1000}; });
     host.load_all();
     HeldServerStep hold(r, host);
+    REQUIRE(hold.ok);
     for (int i = 0; i < 30; ++i) host.tick(kClient);  // 30 skipped
     std::atomic<bool> done{false};
     std::thread client([&] {
@@ -1184,4 +1187,22 @@ TEST_CASE("lua host: after 30 client steps in a row without it, a client step wa
     client.join();
     CHECK(done.load());
     CHECK(r.fake.hud["slowpoke.n"] == "1");  // the waiting step ran once the server step was done
+}
+
+TEST_CASE("lua host: a client step with bus messages waits only for the scripts that listen on the client world") {
+    Rig r(L"busy_bus");
+    add_script(r.dir, "listener",
+               "got = 0\nemf.bus.subscribe('t', function(w, src, p) got = got + 1; emf.hud('got', tostring(got)) end, 'client')\n");
+    add_script(r.dir, "pub", "emf.on_tick(function(w) if w:is_server() then emf.bus.publish('t', 'x', 'client') end end)\n");
+    add_script(r.dir, "slowpoke", kSlowpoke);
+    Host host(&r.api, r.dir);
+    host.set_clock([] { return uint64_t{1000}; });
+    host.load_all();
+    HeldServerStep hold(r, host);  // pub published in this server step, before slowpoke was held
+    REQUIRE(hold.ok);
+    const uint64_t start = GetTickCount64();
+    host.tick(kClient);
+    CHECK(GetTickCount64() - start < 5000);  // slowpoke has no client bus callback: not waited for (the hold lasts 10 s)
+    CHECK(r.fake.hud["listener.got"] == "1");
+    hold.let_go();
 }

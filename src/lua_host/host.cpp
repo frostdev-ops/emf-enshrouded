@@ -102,8 +102,16 @@ struct ScriptStepTimer {
     ScriptStepTimer(const ScriptStepTimer&) = delete;
     ScriptStepTimer& operator=(const ScriptStepTimer&) = delete;
     ~ScriptStepTimer() {
+        try {
+            report();
+        } catch (...) {  // out of memory: no timing this step (a destructor must not throw)
+        }
+    }
+    void report() {
         const double ms = perf_now(h) - start;
-        h.perf.add(s.id + " (" + world_name(kind) + ")", ms);
+        std::string& name = const_cast<Script&>(s).perf_names[kind >= 0 && kind < 3 ? kind : 0];
+        if (name.empty()) name = s.id + " (" + world_name(kind) + ")";
+        h.perf.add(name, ms);
         if (ms <= 25.0) return;
         const uint64_t now = clock_ms(s);
         bool say = false;
@@ -382,6 +390,7 @@ int l_bus_subscribe(lua_State* L) {
     lua_pushvalue(L, 2);
     sub.ref = luaL_ref(L, LUA_REGISTRYINDEX);
     s->bus_subs[topic].push_back(sub);
+    if (sub.kind >= 0 && sub.kind < 3) ++s->bus_kind_subs[sub.kind];
     lua_pushboolean(L, true);
     return 1;
 }
@@ -395,7 +404,10 @@ int l_bus_unsubscribe(lua_State* L) {
     auto it = s->bus_subs.find(topic);
     const bool found = it != s->bus_subs.end();
     if (found) {
-        for (const auto& sub : it->second) luaL_unref(L, LUA_REGISTRYINDEX, sub.ref);
+        for (const auto& sub : it->second) {
+            luaL_unref(L, LUA_REGISTRYINDEX, sub.ref);
+            if (sub.kind >= 0 && sub.kind < 3) --s->bus_kind_subs[sub.kind];
+        }
         s->bus_subs.erase(it);
     }
     lua_pushboolean(L, found);
@@ -819,6 +831,7 @@ void Host::Impl::pause(Script& s, const std::string& why) {
         for (const auto& sub : subs)
             if (s.L) luaL_unref(s.L, LUA_REGISTRYINDEX, sub.ref);
     s.bus_subs.clear();
+    for (auto& n : s.bus_kind_subs) n = 0;
     drop_sections(s.id);  // a paused mod's wheel section is not shown (its state stays: the refs go with it later)
     s.paused = true;
     s.error = why;
@@ -950,8 +963,10 @@ void Host::Impl::unload(Script& s) {
     s.chat_cbs.clear();
     s.ws_cbs.clear();
     s.bus_subs.clear();
+    for (auto& n : s.bus_kind_subs) n = 0;
     s.commands.clear();  // the command names stay registered; they answer "not loaded" until registered again
     s.events.clear();
+    for (auto& n : s.event_kind_subs) n = 0;
     ++s.generation;
 }
 
@@ -1060,7 +1075,8 @@ void Host::tick_body(EmfWorld* world) {
     const bool server = kind == EMF_WORLD_SERVER;
     if (server) h.server_seen = now;
     const uint64_t server_at = h.server_seen.load();
-    const bool hosting_now = server_at != 0 && now >= server_at && now - server_at < 1000;  // a server step this second
+    // a server step this second (one stored after this step read its clock counts too)
+    const bool hosting_now = server_at != 0 && (now < server_at || now - server_at < 1000);
     uint64_t last = h.last_check.load();
     // The worlds tick on their own threads: only the one that moves the clock on checks. The check takes every
     // script's lock, so while this process hosts a server world only that world checks: a client step (the game's
@@ -1096,10 +1112,12 @@ void Host::tick_body(EmfWorld* world) {
         // A client (or prediction) step does not wait for a script busy in the server world's step on another thread:
         // the game's frame waits for the client world, and a server step's Lua work (a search through every entity)
         // would become a hitch. The script is left out of this step (its keys stay for the next one), at most
-        // kMaxBusySkips steps in a row; a step that delivers bus messages always waits (they are this step's).
+        // kMaxBusySkips steps in a row; a step that delivers bus messages waits for the scripts that listen on this
+        // world (the messages are this step's; a callback added while the script was busy would not get them anyway).
         uint32_t& skips = s->busy_skips[lock_kind];
-        if (server || !bus.empty() || !l.try_lock()) {
-            if (!server && bus.empty() && ++skips <= kMaxBusySkips) {
+        const bool bus_for_it = !bus.empty() && s->bus_kind_subs[lock_kind].load() != 0;
+        if (server || bus_for_it || !l.try_lock()) {
+            if (!server && !bus_for_it && ++skips <= kMaxBusySkips) {
                 static const std::string kLeftOut[3] = {"", "a script busy in another world, left out (prediction)",
                                                         "a script busy in another world, left out (client)"};
                 h.perf.add(kLeftOut[lock_kind], 0.0);

@@ -7,6 +7,7 @@
 // every way of starting (Play without any mods too), so starts can be compared. It changes nothing in the game.
 #include <windows.h>
 
+#include <atomic>
 #include <cstdio>
 #include <cstring>
 #include <string>
@@ -31,6 +32,7 @@ SRWLOCK g_rec_lock = SRWLOCK_INIT;
 std::vector<Frame> g_pending;  // filled by present calls, emptied by the writer once a second
 LARGE_INTEGER g_freq{}, g_first{}, g_last{};
 INIT_ONCE g_writer_once = INIT_ONCE_STATIC_INIT;
+std::atomic<bool> g_recording{true};  // off when the files cannot be written: presents stop filling g_pending
 
 double ms_between(const LARGE_INTEGER& a, const LARGE_INTEGER& b) {
     return static_cast<double>(b.QuadPart - a.QuadPart) * 1000.0 / static_cast<double>(g_freq.QuadPart);
@@ -60,12 +62,21 @@ DWORD WINAPI writer(void*) {
     CreateDirectoryW(dir.c_str(), nullptr);
     FILE* csv = _wfsopen((dir + L"\\frame_times_" + stamp + L".csv").c_str(), L"wb", _SH_DENYWR);
     FILE* log = _wfsopen((dir + L"\\frame_times_" + stamp + L".log").c_str(), L"wb", _SH_DENYWR);
-    if (!csv || !log) return 0;
+    if (!csv || !log) {
+        g_recording = false;
+        if (csv) std::fclose(csv);
+        if (log) std::fclose(log);
+        AcquireSRWLockExclusive(&g_rec_lock);
+        std::vector<Frame>().swap(g_pending);
+        ReleaseSRWLockExclusive(&g_rec_lock);
+        return 0;
+    }
     wchar_t mode[64] = L"";
     GetEnvironmentVariableW(L"EMF_FRAME_TIMES_START", mode, 64);
     std::fprintf(log, "%s EMF frame times; this start: %ls\r\n", clock_text().c_str(), mode[0] ? mode : L"(unknown)");
     std::fprintf(csv, "t_s,frame_ms,present_ms\r\n");
-    std::vector<float> window, run;
+    std::vector<float> window;
+    emf::frametime::RunTotals run;  // the whole run without keeping every frame
     std::vector<Frame> got;
     for (int second = 1;; ++second) {
         Sleep(1000);
@@ -75,7 +86,7 @@ DWORD WINAPI writer(void*) {
         for (const Frame& f : got) {
             std::fprintf(csv, "%.4f,%.2f,%.2f\r\n", f.t_s, f.frame_ms, f.present_ms);
             window.push_back(f.frame_ms);
-            run.push_back(f.frame_ms);
+            run.add(f.frame_ms);
             if (f.frame_ms > 100.0f)
                 std::fprintf(log, "%s hitch %.0f ms at t=%.1f s (present call %.1f ms)\r\n", clock_text().c_str(),
                              f.frame_ms, f.t_s, f.present_ms);
@@ -86,7 +97,7 @@ DWORD WINAPI writer(void*) {
             using emf::frametime::summarize;
             using emf::frametime::summary_line;
             std::fprintf(log, "%s last 10 s: %s | run: %s\r\n", clock_text().c_str(),
-                         summary_line(summarize(window)).c_str(), summary_line(summarize(run)).c_str());
+                         summary_line(summarize(window)).c_str(), emf::frametime::run_line(run).c_str());
             window.clear();
         }
         std::fflush(log);
@@ -94,6 +105,11 @@ DWORD WINAPI writer(void*) {
 }
 
 BOOL CALLBACK start_writer(INIT_ONCE*, void*, void**) {
+    // The Vulkan loader frees a layer's DLL when the game destroys its instance (at exit, or a renderer restart):
+    // pinned, the writer thread never runs in an unloaded DLL (and a new instance finds the one writer still there).
+    HMODULE self = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS | GET_MODULE_HANDLE_EX_FLAG_PIN,
+                       reinterpret_cast<LPCWSTR>(&writer), &self);
     QueryPerformanceFrequency(&g_freq);
     if (HANDLE h = CreateThread(nullptr, 0, writer, nullptr, 0, nullptr)) CloseHandle(h);
     return TRUE;
@@ -205,6 +221,7 @@ VkResult VKAPI_CALL ft_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* in
     QueryPerformanceCounter(&before);
     const VkResult r = rec.present(queue, info);
     QueryPerformanceCounter(&after);
+    if (!g_recording.load(std::memory_order_relaxed)) return r;
     AcquireSRWLockExclusive(&g_rec_lock);
     if (g_first.QuadPart == 0) {
         g_first = before;

@@ -93,6 +93,11 @@ struct Script {
     // Steps in a row of each world kind that left this script out because it was busy in another world's step (only
     // that kind's step, under its world_step_m, uses its slot): tick_body waits after kMaxBusySkips.
     uint32_t busy_skips[3] = {0, 0, 0};
+    // Read without m by a step or an event that finds the script busy in another world: its bus callbacks and event
+    // functions per world kind (only a script that has some for this world is waited for). Changed only under m.
+    std::atomic<uint32_t> bus_kind_subs[3]{};
+    std::atomic<uint32_t> event_kind_subs[3]{};
+    std::string perf_names[3];  // "<id> (server)" etc., made once (under m) for perf_report
     uint64_t loads = 0;                                // +1 per load: answers meant for an older load are dropped
     // data per world: <game>\emf\config\<id>\<slot>.txt (lives as long as the script; attached once)
     std::unique_ptr<emf::WorldFile> file;

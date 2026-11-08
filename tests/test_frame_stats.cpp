@@ -6,6 +6,8 @@
 
 using emf::frametime::summarize;
 using emf::frametime::summary_line;
+using emf::frametime::RunTotals;
+using emf::frametime::run_line;
 
 TEST_CASE("frame times: no frames gives an empty summary") {
     const auto s = summarize({});
@@ -36,4 +38,13 @@ TEST_CASE("frame times: a frame exactly at a hitch limit is not a hitch") {
     CHECK(s.over_25 == 3u);
     CHECK(s.over_50 == 1u);
     CHECK(s.over_100 == 0u);
+}
+
+TEST_CASE("frame times: the whole run's totals are kept without keeping every frame") {
+    RunTotals run;
+    CHECK(run_line(run) == "frames=0");
+    for (int i = 0; i < 98; ++i) run.add(10.0f);
+    run.add(60.0f);
+    run.add(120.0f);
+    CHECK(run_line(run) == "frames=100 fps=86.2 avg=11.6 max=120.0 >25ms=2 >50ms=2 >100ms=1");
 }

@@ -1,8 +1,10 @@
 #pragma once
 #include <windows.h>
 
+#include <deque>
 #include <functional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 #include "common/perf_book.h"
@@ -35,11 +37,16 @@ private:
         void* user;
         uint8_t kind;
         bool enabled;
-        std::string module;  // the callback's DLL ("lua.dll"), for timing and fault reports
+        const std::string* module;  // the callback's DLL ("lua.dll") in names_, for timing (null: not timed)
     };
     mutable SRWLOCK lock_ = SRWLOCK_INIT;
     std::vector<Item> queue_;
     std::vector<Item> subscribers_;
+    // Module names, each kept once (a deque never moves them): items point at them, so a step copies no strings, and
+    // a callback's module is looked up once (GetModuleFileNameW takes the loader lock) on the thread that posts it.
+    std::deque<std::string> names_;
+    std::unordered_map<const void*, const std::string*> name_of_cb_;
+    const std::string* module_of(EmfWorldCallback cb);  // takes lock_ itself
     PerfBook* perf_ = nullptr;
     std::function<void(const std::string&, double)> slow_;
     double (*clock_ms_)() = nullptr;

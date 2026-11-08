@@ -39,4 +39,22 @@ std::string summary_line(const Summary& s) {
     return buf;
 }
 
+void RunTotals::add(float ms) {
+    ++frames;
+    total_ms += ms;
+    max_ms = (std::max)(max_ms, static_cast<double>(ms));
+    over_25 += ms > 25.0f;
+    over_50 += ms > 50.0f;
+    over_100 += ms > 100.0f;
+}
+
+std::string run_line(const RunTotals& r) {
+    if (!r.frames) return "frames=0";
+    char buf[200];
+    std::snprintf(buf, sizeof buf, "frames=%zu fps=%.1f avg=%.1f max=%.1f >25ms=%zu >50ms=%zu >100ms=%zu", r.frames,
+                  r.total_ms > 0 ? static_cast<double>(r.frames) * 1000.0 / r.total_ms : 0.0,
+                  r.total_ms / static_cast<double>(r.frames), r.max_ms, r.over_25, r.over_50, r.over_100);
+    return buf;
+}
+
 }  // namespace emf::frametime

@@ -1492,6 +1492,7 @@ int l_on_event(lua_State* L) {
     }
     lua_pushvalue(L, 2);
     s->events[key].push_back(luaL_ref(L, LUA_REGISTRYINDEX));
+    if (kind < 3) ++s->event_kind_subs[kind];
     return 0;
 }
 
@@ -1510,8 +1511,12 @@ void event_cb_body(EmfWorld* w, const void* event, uint32_t size, void* user) {
                                  slot->type->short_name, size, slot->type->size);
         return;
     }
+    const int kind = slot->host->api->world_kind ? slot->host->api->world_kind(w) : EMF_WORLD_SERVER;
     for (auto& sp : slot->host->scripts) {
         Script& s = *sp;
+        // A script that listens to no event of this world is not waited for: on the client world it may be busy in
+        // the server world's step, and the game's frame waits for the client world.
+        if (kind >= 0 && kind < 3 && s.event_kind_subs[kind].load() == 0) continue;
         std::lock_guard<std::recursive_mutex> l(s.m);
         if (!s.L || s.paused) continue;
         auto it = s.events.find(slot->key);
