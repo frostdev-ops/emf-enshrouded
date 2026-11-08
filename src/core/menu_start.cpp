@@ -394,6 +394,19 @@ void MenuStart::set_local_only(const std::string& expect_name) {
     local_only_ = true;
 }
 
+void MenuStart::note_command(uint8_t state, const void* cmd) const {
+    if (!cmd) return;
+    uint8_t b[24] = {};
+    if (!deps_.read(reinterpret_cast<uintptr_t>(cmd), b, sizeof b)) return;
+    std::string hex;
+    char two[4];
+    for (size_t i = 0; i < sizeof b; ++i) {
+        std::snprintf(two, sizeof two, i ? " %02x" : "%02x", b[i]);
+        hex += two;
+    }
+    deps_.log("menu command: state " + std::to_string(state) + ", " + hex);
+}
+
 // ---- the process's instance and its hooks ----
 namespace {
 std::unique_ptr<MenuStart> g_menu;
@@ -440,6 +453,7 @@ uint64_t hk_pregame_state(void* pregame, uint64_t state, uint64_t phase, void* c
             // the selected character, on the thread that changes it, while the pregame is surely alive (Start Play
             // can free it inside the game's handler): the last note before a world is the character Start Play took
             g_menu->note_character(pregame);
+            if (p == 1) g_menu->note_command(s, cmd);  // which command a menu button posted (rare: user actions)
         }
     } catch (...) {
     }

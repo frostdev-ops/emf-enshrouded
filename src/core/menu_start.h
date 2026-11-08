@@ -141,6 +141,9 @@ public:
     // for the life of the process, for every start; a name ("" = any) is checked like load_world's. Call before the
     // game can start a session.
     void set_local_only(const std::string& expect_name);
+    // The pregame state handler's command (phase 1): logs the state and the command's first 24 bytes (fault-guarded),
+    // so the command a menu button posts can be read off the log. Nothing for a null command.
+    void note_command(uint8_t state, const void* cmd) const;
 
     bool armed() const { return armed_.load() || local_only_.load(); }
     void log_line(const std::string& s) const { deps_.log(s); }

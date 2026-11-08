@@ -479,6 +479,18 @@ TEST_CASE_TEMPLATE("local_only: the guard refuses every start with a Steam chara
     CHECK(m.guard(r4, g.s2()));
 }
 
+TEST_CASE_TEMPLATE("menu commands: each command a pregame state gets is logged with its first bytes", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
+    MenuStart m(g.deps());
+    const uint8_t cmd[24] = {0x2b, 0, 0, 0, 0x11, 0x22, 0x33, 0x44};
+    m.note_command(2, cmd);
+    REQUIRE_FALSE(g.log.empty());
+    CHECK(g.log.back() == "menu command: state 2, 2b 00 00 00 11 22 33 44 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00");
+    const size_t n = g.log.size();
+    m.note_command(2, nullptr);  // no command: nothing
+    CHECK(g.log.size() == n);
+}
+
 TEST_CASE_TEMPLATE("local_only without a name: LOCAL storage is enough", Build, On1273043, On1283531) {
     FakeGame g(Build::app);
     standard_saves(g);
