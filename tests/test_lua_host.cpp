@@ -51,15 +51,33 @@ TEST_CASE("lua host: sandbox: no os.exit, require only finds the mod's own files
     write(r.dir + L"\\safe\\util.lua", "return { word = 'hello' }\n");
     add_script(r.dir, "looper", "while true do end\n");
     Host host(&r.api, r.dir);
-    const uint64_t t0 = GetTickCount64();
     host.load_all();
-    const uint64_t took = GetTickCount64() - t0;
     CHECK(logged("exit is nil"));
     CHECK(logged("util says hello"));
     CHECK(logged("loadlib is nil"));
     CHECK(host.status("looper").find("paused") == 0);
     CHECK(logged("longer than 250 ms"));
-    CHECK(took < 3000);
+}
+
+TEST_CASE("lua host: the 250 ms limit follows the host's clock only: a clock that jumps stops a finite script, a still one never does") {
+    Rig r(L"clocklimit");
+    add_script(r.dir, "busy", "local n = 0\nfor i = 1, 3000000 do n = n + i end\nemf.log(\'busy done\', n)\n");
+    uint64_t now = 0;
+    Host host(&r.api, r.dir);
+    host.set_clock([&now] { return now; });  // never moves by itself: the machine's speed does not matter
+    host.load_all();
+    CHECK(host.status("busy") == "running");
+    CHECK(logged("busy done"));
+
+    Rig r2(L"clockjump");
+    add_script(r2.dir, "busy", "local n = 0\nfor i = 1, 3000000 do n = n + i end\nemf.log(\'busy done\', n)\n");
+    uint64_t t = 0;
+    Host jumping(&r2.api, r2.dir);
+    jumping.set_clock([&t] { return t += 100; });  // every read is 100 ms later: the third read is past the limit
+    jumping.load_all();
+    CHECK(jumping.status("busy").find("paused") == 0);
+    CHECK_FALSE(logged("busy done"));
+    CHECK(logged("longer than 250 ms"));
 }
 
 TEST_CASE("lua host: on_tick callbacks run on tick; a callback error pauses the mod") {
@@ -240,14 +258,11 @@ TEST_CASE("lua host: the time limit holds against pcall and the debug library; n
                "emf.log('require outside', tostring(ok))\n");
     write(r.dir + L"\\outside.lua", "return 1\n");  // next to the mod folders, not inside one
     Host host(&r.api, r.dir);
-    const uint64_t t0 = GetTickCount64();
     host.load_all();
-    const uint64_t took = GetTickCount64() - t0;
     CHECK(host.status("spinner").find("paused") == 0);
     CHECK(host.status("xspinner").find("paused") == 0);
     CHECK(host.status("cospinner").find("paused") == 0);
     CHECK(logged("spinner/main.lua:1: the script ran longer than 250 ms"));  // where it looped
-    CHECK(took < 5000);
     CHECK(logged("sethook is nil getregistry is nil"));
     CHECK(logged("traceback is function"));
     CHECK(logged("execute is nil popen is nil"));
