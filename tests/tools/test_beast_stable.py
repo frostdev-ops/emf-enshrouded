@@ -20,6 +20,21 @@ class BeastStableTests(unittest.TestCase):
         pack = json.loads((REPO / "tools" / "models" / "packs" / "beastmaster_beasts.json").read_text(encoding="utf-8"))
         self.assertIn("beastmaster_stable.lua", pack.get("content_scripts", []))
 
+    def test_the_pack_builds_a_prop_for_each_stable_model_the_script_names(self):
+        import json
+        import re
+        pack = json.loads((REPO / "tools" / "models" / "packs" / "beastmaster_beasts.json").read_text(encoding="utf-8"))
+        text = (REPO / "tools" / "models" / "packs" / "beastmaster_stable.lua").read_text(encoding="utf-8")
+        named = set(re.findall(r'model = "([0-9a-f-]{36})"', text))
+        props = {p["model_guid"]: p for p in pack["props"]}
+        self.assertEqual(named, {"1a49170a-b3d2-498d-9062-8946f6469613", "5879f304-0050-4ecb-96f4-5cc0e66155d9"})
+        self.assertEqual(set(props), named)
+        small = props["1a49170a-b3d2-498d-9062-8946f6469613"]
+        large = props["5879f304-0050-4ecb-96f4-5cc0e66155d9"]
+        self.assertEqual(large["name"], "beastmaster_large_stable")
+        self.assertAlmostEqual(large["width"], small["width"] * 1.6)  # the script's colliders are 1.6x the Stable's
+        self.assertEqual(large["materials"], small["materials"])
+
     def test_the_script_never_touches_package(self):
         # EML's Lua has require but no global package table (it stopped every creature with clips once)
         text = (REPO / "tools" / "models" / "packs" / "beastmaster_stable.lua").read_text(encoding="utf-8")

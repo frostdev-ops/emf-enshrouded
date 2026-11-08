@@ -1,0 +1,39 @@
+{
+  "notes": "The Large Stable (1.6x the Stable: make_mod's prop width 7.2 m) on the game's own materials: the Stable's look (beastmaster_stable_look.json, the same Meshy model and the same atlas regions) with every repeat divided by 1.6, so the thatch and the planks are as big on it as on the Stable.",
+  "rules": [
+    {
+      "material": 0,
+      "min_saturation": 0.45,
+      "min_value": 0.5,
+      "min_height": 0.55
+    }
+  ],
+  "default": 1,
+  "materials": {
+    "0": {
+      "repeat": [
+        0.8687,
+        0.4406
+      ],
+      "region": [
+        0.0391,
+        0.0293,
+        0.5859,
+        0.3076
+      ]
+    },
+    "1": {
+      "repeat": [
+        0.7187,
+        0.8563
+      ],
+      "region": [
+        0.4199,
+        0.0586,
+        0.9668,
+        0.7129
+      ]
+    }
+  },
+  "smooth_angle": 40
+}

@@ -1,4 +1,4 @@
--- Unit tests for tools/models/packs/beastmaster_stable.lua (the beasts pack's craftable Stable), run by
+-- Unit tests for tools/models/packs/beastmaster_stable.lua (the beasts pack's craftable Stable and Large Stable), run by
 -- test_beast_stable.py with a Lua 5.4 interpreter: lua beast_stable_spec.lua <path of beastmaster_stable.lua>.
 -- A stand-in for EMF's content helper records what the script asks of it; a stand-in for EML's game API holds the
 -- large animal bed's render model.
@@ -10,6 +10,13 @@ local STABLE_ITEM = "a84e96fa-f27a-48b8-9815-89093bd142b4"
 local STABLE_TEMPLATE = "96a057d5-a1d9-4fc1-b313-9b923e9302fe"
 local STABLE_MODEL = "1a49170a-b3d2-498d-9062-8946f6469613"
 local STABLE_RECIPE = "0410f9da-8a00-4b5e-a537-33b52d43ccd9"
+local LARGE_ITEM = "439e5967-5b96-4c28-afd2-13db09d7e605"
+local LARGE_TEMPLATE = "c110e001-4b38-462f-a317-3a6b0d627511"
+local LARGE_NAME = "4782e479-fad2-448d-b34f-f77ffa5858af"
+local LARGE_DESC = "b9fa7b45-d5ed-47e1-98ab-51e2a7463a18"
+local LARGE_RECIPE = "9a2fcde6-2dfc-48f6-92ca-0ad394df23da"
+local LARGE_MODEL = "5879f304-0050-4ecb-96f4-5cc0e66155d9"
+local LARGE_SCALE = 1.6
 local WOOD_LOGS = "3f4093ae-75ed-4e5d-bd0b-784ba83b88f5"
 local PLANT_FIBRE = "ff00a9f6-fd7e-4933-9c6b-33c36223cd2b"
 local ANIMAL_FUR = "66ce7d4c-ce66-4ad4-800a-ab37f7e604a2"
@@ -41,13 +48,15 @@ table.insert = function(t, a, b)
 end
 
 -- One run of the script: `server` (no render data), `no_bed_model` (a client whose data lacks the bed's model),
--- `no_prop_model` (the pack's prop model of the Stable was not made).
+-- `no_prop_model` / `no_large_model` (the pack's prop model of the Stable / the Large Stable was not made), `fail_item`
+-- (adding the placeable with this item GUID fails).
 local function run(opts)
 	opts = opts or {}
 	local calls = { placeables = {}, recipes = {}, finish = 0, created = {} }
 	local helper = {
 		add_placeable = function(def)
 			if opts.no_bed_item then error("add_placeable: no item " .. def.clone_of .. " to copy (the game changed?)") end
+			if opts.fail_item == def.guid then error("add_placeable: " .. def.guid .. " failed") end
 			calls.placeables[#calls.placeables + 1] = def
 			return 1
 		end,
@@ -62,12 +71,14 @@ local function run(opts)
 	}
 	local bed_model = { guid = BED_MODEL, data = { debugName = "animalprops_farm_animal_sleep_large_01", renderData = { hash = "h" } } }
 	local prop_model = { guid = STABLE_MODEL, data = { debugName = "beastmaster_stable", renderData = { hash = "p" } } }
+	local large_model = { guid = LARGE_MODEL, data = { debugName = "beastmaster_large_stable", renderData = { hash = "l" } } }
 	_G.loader = { features = { patch = true }, is_server = opts.server or false }
 	_G.game = { assets = {
 		get_resource = function(guid, type)
 			if type ~= "keen::RenderModel" or opts.server then return nil end
 			if guid == BED_MODEL and not opts.no_bed_model then return bed_model end
 			if guid == STABLE_MODEL and not opts.no_prop_model then return prop_model end
+			if guid == LARGE_MODEL and not opts.no_large_model then return large_model end
 			return nil
 		end,
 		get_resources_by_type = function(type)
@@ -87,6 +98,20 @@ local function run(opts)
 	return calls
 end
 
+-- The placeable / recipe of a run with this item / recipe GUID, or nil.
+local function placeable(c, guid)
+	for _, p in ipairs(c.placeables) do
+		if p.guid == guid then return p end
+	end
+	return nil
+end
+local function recipe(c, guid)
+	for _, r in ipairs(c.recipes) do
+		if r.guid == guid then return r end
+	end
+	return nil
+end
+
 local function has(list, value)
 	for _, v in ipairs(list) do
 		if v == value then return true end
@@ -97,8 +122,8 @@ end
 test("the Stable is a copy of the large animal bed's object, without the parts farm animals and villagers use", function()
 	local c = run()
 	assert(c.ok, c.err)
-	eq(#c.placeables, 1, "placeables")
-	local p = c.placeables[1]
+	eq(#c.placeables, 2, "placeables: the Stable and the Large Stable")
+	local p = placeable(c, STABLE_ITEM)
 	eq(p.clone_of, BED_ITEM, "clone_of")
 	eq(p.guid, STABLE_ITEM, "item")
 	eq(p.template_guid, STABLE_TEMPLATE, "template")
@@ -114,7 +139,7 @@ test("its template names the Stable's own render model", function()
 		{ type = "keen::ecs::StaticCollider", value = {} },
 		{ type = "keen::ecs::ModelResource", value = { model = BED_MODEL } },
 	} }
-	c.placeables[1].edit_template(tpl)
+	placeable(c, STABLE_ITEM).edit_template(tpl)
 	eq(tpl.components[2].value.model, STABLE_MODEL, "model")
 end)
 
@@ -133,7 +158,7 @@ test("without the pack's model (its prop failed) the Stable takes a copy of the 
 	eq(m.guid, STABLE_MODEL, "guid")
 	eq(m.flags, 0, "flags")
 	eq(m.data.renderData.hash, "h", "the bed's mesh data")
-	eq(#c.placeables, 1, "placeables")
+	eq(#c.placeables, 2, "placeables")
 end)
 
 -- The bed's collider as the game has it: one box in a ColliderResourceComponent
@@ -152,7 +177,7 @@ end
 test("its collider: the plank floor, the back and left walls, the low rail on the right and the roof, one solid", function()
 	local c = run()
 	local tpl = bed_template()
-	c.placeables[1].edit_template(tpl)
+	placeable(c, STABLE_ITEM).edit_template(tpl)
 	local col = tpl.components[2].value.colliders[1]
 	eq(#col.dataArray, 5, "boxes")
 	local floor = col.dataArray[1].value
@@ -176,7 +201,7 @@ test("a collider that is not the bed's one box is kept as it is", function()
 	local tpl = bed_template()
 	local col = tpl.components[2].value.colliders[1]
 	col.dataArray[1].type = "keen::ecs::CapsuleColliderData"
-	c.placeables[1].edit_template(tpl)
+	placeable(c, STABLE_ITEM).edit_template(tpl)
 	eq(#col.dataArray, 1, "boxes")
 	eq(col.dataArray[1].value.shape.halfSize.x, 1.45, "unchanged")
 end)
@@ -185,26 +210,35 @@ test("on a dedicated server (no render data) no model is made and the template s
 	local c = run({ server = true })
 	assert(c.ok, c.err)
 	eq(#c.created, 0, "resources created")
-	eq(#c.placeables, 1, "placeables")
+	eq(#c.placeables, 2, "placeables")
 	local tpl = { components = { { type = "keen::ecs::ModelResource", value = { model = BED_MODEL } } } }
-	c.placeables[1].edit_template(tpl)
+	placeable(c, STABLE_ITEM).edit_template(tpl)
 	eq(tpl.components[1].value.model, STABLE_MODEL, "model")
-	eq(#c.recipes, 1, "recipes")
+	local big = { components = { { type = "keen::ecs::ModelResource", value = { model = BED_MODEL } } } }
+	placeable(c, LARGE_ITEM).edit_template(big)
+	eq(big.components[1].value.model, LARGE_MODEL, "the Large Stable's model")
+	eq(#c.recipes, 2, "recipes")
 end)
 
-test("a client with neither the pack's model nor the bed's adds nothing (the game changed): the error says what is missing", function()
-	local c = run({ no_bed_model = true, no_prop_model = true })
+test("a client with neither the pack's models nor the bed's adds nothing (the game changed): the error says what is missing", function()
+	local c = run({ no_bed_model = true, no_prop_model = true, no_large_model = true })
 	assert(not c.ok, "an error")
 	assert(tostring(c.err):find(BED_MODEL, 1, true), "names the model: " .. tostring(c.err))
 	eq(#c.placeables, 0, "placeables")
 	eq(#c.recipes, 0, "recipes")
 end)
 
+test("a client without the Stable's model and the bed's still adds the Large Stable (its own model), then errs", function()
+	local c = run({ no_bed_model = true, no_prop_model = true })
+	assert(not c.ok, "an error")
+	eq(#c.placeables, 1, "placeables")
+	assert(placeable(c, LARGE_ITEM), "the Large Stable")
+end)
+
 test("its recipe: at the Workbench like the crude chair, 6 wood logs, 8 plant fibre, 2 animal fur; names written once", function()
 	local c = run()
-	eq(#c.recipes, 1, "recipes")
-	local r = c.recipes[1]
-	eq(r.guid, STABLE_RECIPE, "recipe")
+	eq(#c.recipes, 2, "recipes")
+	local r = recipe(c, STABLE_RECIPE)
 	eq(r.like, "Prop_Decoration_Comfort1_T0_Chair", "like")
 	eq(r.output[1], STABLE_ITEM, "output")
 	eq(r.output[2], 1, "output count")
@@ -218,14 +252,92 @@ test("its recipe: at the Workbench like the crude chair, 6 wood logs, 8 plant fi
 	eq(c.finish, 1, "finish")
 end)
 
-test("without the crude chair's recipe (a game update) the Stable is crafted in the own crafting menu, named", function()
+test("without the crude chair's recipe (a game update) both stables are crafted in the own crafting menu, named", function()
 	local c = run({ no_chair = true })
 	assert(c.ok, c.err)
-	eq(#c.placeables, 1, "placeables")
-	eq(#c.recipes, 1, "recipes")
-	eq(c.recipes[1].like, nil, "like: the helper's default (the own crafting menu, next to the campfire)")
-	eq(c.recipes[1].output[1], STABLE_ITEM, "output")
-	eq(#c.recipes[1].inputs, 3, "inputs")
+	eq(#c.placeables, 2, "placeables")
+	eq(#c.recipes, 2, "recipes")
+	for _, guid in ipairs({ STABLE_RECIPE, LARGE_RECIPE }) do
+		local r = recipe(c, guid)
+		eq(r.like, nil, "like: the helper's default (the own crafting menu, next to the campfire)")
+		eq(#r.inputs, 3, "inputs")
+	end
+	eq(recipe(c, STABLE_RECIPE).output[1], STABLE_ITEM, "output")
+	eq(recipe(c, LARGE_RECIPE).output[1], LARGE_ITEM, "output")
+	eq(c.finish, 1, "finish")
+end)
+
+test("the Large Stable is a second copy of the large animal bed's object, with its own GUIDs, name and description", function()
+	local c = run()
+	assert(c.ok, c.err)
+	local p = placeable(c, LARGE_ITEM)
+	assert(p, "the Large Stable is added")
+	eq(p.clone_of, BED_ITEM, "clone_of")
+	eq(p.template_guid, LARGE_TEMPLATE, "template")
+	eq(p.name_guid, LARGE_NAME, "name GUID")
+	eq(p.description_guid, LARGE_DESC, "description GUID")
+	eq(p.name, "Large Stable", "name")
+	assert(p.description:find("at home", 1, true), "the description says the beasts at home live in it: " .. p.description)
+	assert(p.debug_name ~= placeable(c, STABLE_ITEM).debug_name, "a debug name of its own")
+	assert(has(p.strip, "keen::ecs::AnimalTarget"), "AnimalTarget stripped")
+	assert(has(p.strip, "keen::ecs::ActiveNpcTarget"), "ActiveNpcTarget stripped")
+end)
+
+test("the Large Stable's template names its own render model; the pack built it, so nothing is copied", function()
+	local c = run()
+	local tpl = bed_template()
+	placeable(c, LARGE_ITEM).edit_template(tpl)
+	eq(tpl.components[1].value.model, LARGE_MODEL, "model")
+	eq(#c.created, 0, "resources created")
+end)
+
+test("without the pack's Large Stable model the Large Stable takes a copy of the bed's record under its GUID", function()
+	local c = run({ no_large_model = true })
+	assert(c.ok, c.err)
+	eq(#c.created, 1, "resources created")
+	eq(c.created[1].guid, LARGE_MODEL, "guid")
+	eq(c.created[1].data.renderData.hash, "h", "the bed's mesh data")
+end)
+
+test("the Large Stable's collider is the Stable's boxes 1.6 times as big, from the same middle", function()
+	local c = run()
+	local small, big = bed_template(), bed_template()
+	placeable(c, STABLE_ITEM).edit_template(small)
+	placeable(c, LARGE_ITEM).edit_template(big)
+	local a = small.components[2].value.colliders[1]
+	local b = big.components[2].value.colliders[1]
+	eq(#b.dataArray, #a.dataArray, "boxes")
+	for i = 1, #a.dataArray do
+		local s, l = a.dataArray[i].value, b.dataArray[i].value
+		for _, k in ipairs({ "x", "y", "z" }) do
+			assert(math.abs(l.offset[k] - s.offset[k] * LARGE_SCALE) < 1e-6, "box " .. i .. " offset " .. k)
+			assert(math.abs(l.shape.halfSize[k] - s.shape.halfSize[k] * LARGE_SCALE) < 1e-6, "box " .. i .. " size " .. k)
+		end
+	end
+	eq(#b.joltObjects[1].shapeIndexList, #a.dataArray, "shape indices")
+end)
+
+test("the Large Stable's recipe: at the Workbench like the crude chair, 12 wood logs, 16 plant fibre, 4 animal fur", function()
+	local c = run()
+	local r = recipe(c, LARGE_RECIPE)
+	assert(r, "the Large Stable's recipe")
+	eq(r.like, "Prop_Decoration_Comfort1_T0_Chair", "like")
+	eq(r.output[1], LARGE_ITEM, "output")
+	eq(r.output[2], 1, "output count")
+	eq(r.inputs[1][1], WOOD_LOGS, "wood")
+	eq(r.inputs[1][2], 12, "wood count")
+	eq(r.inputs[2][1], PLANT_FIBRE, "fibre")
+	eq(r.inputs[2][2], 16, "fibre count")
+	eq(r.inputs[3][1], ANIMAL_FUR, "fur")
+	eq(r.inputs[3][2], 4, "fur count")
+end)
+
+test("a Large Stable that cannot be added leaves the Stable added, crafted and named; the error comes after", function()
+	local c = run({ fail_item = LARGE_ITEM })
+	assert(not c.ok, "an error")
+	assert(tostring(c.err):find(LARGE_ITEM, 1, true), "names the item: " .. tostring(c.err))
+	assert(placeable(c, STABLE_ITEM), "the Stable")
+	assert(recipe(c, STABLE_RECIPE), "the Stable's recipe")
 	eq(c.finish, 1, "finish")
 end)
 

@@ -1,9 +1,9 @@
 {
   "id": "emf_beastmaster_beasts",
   "title": "Beastmaster: new beasts",
-  "version": "2.1.0",
+  "version": "2.2.0",
   "out": "../../../analysis/models/mods/emf_beastmaster_beasts",
-  "description": "New beasts for the Beastmaster mod: the Aurochs (a huge horned wild bull on the game boar's skeleton, it charges) and the Snake (a 5 m snake from a 3D scan of a pit viper, on a spine of its own: it slithers, rears up and strikes). Wild ones appear now and then when Beastmaster is installed; tame one and call it. Now and then a wild snake is a rare one: crimson, golden king or albino, bigger and tougher. And the Stable: a bed for your tamed beasts that you craft at the Workbench and place in your base; press E at it to open Beastmaster's Beasts window.",
+  "description": "New beasts for the Beastmaster mod: the Aurochs (a huge horned wild bull on the game boar's skeleton, it charges) and the Snake (a 5 m snake from a 3D scan of a pit viper, on a spine of its own: it slithers, rears up and strikes). Wild ones appear now and then when Beastmaster is installed; tame one and call it. Now and then a wild snake is a rare one: crimson, golden king or albino, bigger and tougher. And the Stable and the Large Stable: beds for your tamed beasts that you craft at the Workbench and place in your base; press E at one to open Beastmaster's Beasts window. In the Large Stable the beasts you left at home walk about and lie down.",
   "authors": [
     "EMF contributors"
   ],
@@ -18,7 +18,8 @@
     "2.1: the Stable (content script beastmaster_stable.lua, run with EMF's content helper): a copy of the large animal bed's object (Animal_Farm_Housing_Sleeping_Bed_YAK_Sanddigger) without AnimalTarget and ActiveNpcTarget, with a render model record of its own (a copy of the bed's, same mesh data) so Beastmaster tells it from a vanilla bed; crafted at the Workbench like the crude chair (6 wood logs, 8 plant fibre, 2 animal fur). The look was picked from six game props drawn by EMF's picture renderer (analysis/models/stable/candidates).",
     "2.1 (the Stable's look): a Meshy model, preview 01a1bb76-1ad1-7135-b977-856ed5f92010 (prompt: a small open-front wooden animal stable, thatched straw roof, plank walls back and sides, hay bed, feeding trough; polycount 15000) and refine 01a1bb7e-33a2-724e-b2d3-018d5bd4fa40 (weathered timber, golden straw), 30 credits; the owner liked it (2026-11-08). A prop (make_mod \"props\"): fitted 4 m wide (3.3 m high), its own texture (1024) on the large bed's third material (the feeding station's, opaque); the content script's collider boxes follow its shape at that size. The owner's later wish: stored beasts visible inside, walking and lying down (a bigger stable).",
     "2.1 (the Stable in the game's style): the owner found the Meshy texture cartoony; the Stable now wears the game's own materials: the thatch of its straw roofs (slot 0) and the planks of its sheds (slot 1), through texture coordinates into their atlases (blender/game_materials.py with beastmaster_stable_look.json on the refined Meshy glb and its albedo, which only sorts straw from wood). No texture of ours ships for it.",
-    "2.1 (the second Meshy model, the owner's ask for more detail): preview 01a1bba9-2ae0-72f9-b145-318da8528f86 at 45000 polygons (3x the first; prompt: squared posts and beams, log walls back and left, the right open between posts, an evenly thatched roof with a neat edge, a raised plank floor, hay bed, feeding trough, clean solid geometry, no loose straw, no base plate) and refine 01a1bbad-e998-76f9-ac0d-5a303fe2dc15, 30 credits. Fitted 4.5 m wide (2.95 m deep, 3.4 m high: room for a beast); the content script's boxes follow it (plank floor, back and left walls, the low right rail, the roof)."
+    "2.1 (the second Meshy model, the owner's ask for more detail): preview 01a1bba9-2ae0-72f9-b145-318da8528f86 at 45000 polygons (3x the first; prompt: squared posts and beams, log walls back and left, the right open between posts, an evenly thatched roof with a neat edge, a raised plank floor, hay bed, feeding trough, clean solid geometry, no loose straw, no base plate) and refine 01a1bbad-e998-76f9-ac0d-5a303fe2dc15, 30 credits. Fitted 4.5 m wide (2.95 m deep, 3.4 m high: room for a beast); the content script's boxes follow it (plank floor, back and left walls, the low right rail, the roof).",
+    "2.2 (the Large Stable, the owner's ask for a second, bigger stable where the beasts at home show up, the Stable staying as it is): the same refined Meshy glb on the same game materials, built 7.2 m wide (1.6x: 4.7 m deep, 5.5 m high), with every texture repeat divided by 1.6 (beastmaster_large_stable_look.json) so the thatch and planks are as big as on the Stable; the content script adds it as a second placeable with the Stable's boxes times 1.6."
   ],
   "creatures": [
     {
@@ -1685,6 +1686,19 @@
       "source_model_json": "../../../analysis/models/stable/game/animalprops_farm_animal_sleep_large_01.json",
       "model_guid": "1a49170a-b3d2-498d-9062-8946f6469613",
       "width": 4.5,
+      "yaw": 0,
+      "materials": {
+        "0": "98275745-f4e6-4d24-a5f1-3b5c511b2d5e",
+        "1": "f4469c8e-ce61-4672-badb-a03d84133987"
+      }
+    },
+    {
+      "name": "beastmaster_large_stable",
+      "glb": "../../../analysis/models/stable/stable2_large_game_materials.glb",
+      "source_model_guid": "7dd9139a-fba7-4e60-8b5a-fa853c250ef7",
+      "source_model_json": "../../../analysis/models/stable/game/animalprops_farm_animal_sleep_large_01.json",
+      "model_guid": "5879f304-0050-4ecb-96f4-5cc0e66155d9",
+      "width": 7.2,
       "yaw": 0,
       "materials": {
         "0": "98275745-f4e6-4d24-a5f1-3b5c511b2d5e",
