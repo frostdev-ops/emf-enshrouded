@@ -164,7 +164,7 @@ struct Encoder {
         // Classify: an array has the keys 1..n and nothing else; an object has only string keys.
         size_t count = 0;
         lua_Integer max_key = 0;
-        bool all_int = true, all_str = true;
+        bool all_int = true, all_str = true, has_int = false, has_str = false;
         std::string bad;
         lua_pushnil(L);
         while (lua_next(L, t) != 0) {
@@ -173,11 +173,13 @@ struct Encoder {
             const int kt = lua_type(L, -1);
             if (kt == LUA_TNUMBER && lua_isinteger(L, -1)) {
                 all_str = false;
+                has_int = true;
                 const lua_Integer k = lua_tointeger(L, -1);
                 if (k < 1) all_int = false;
                 else max_key = std::max(max_key, k);
             } else if (kt == LUA_TSTRING) {
                 all_int = false;
+                has_str = true;
             } else {
                 all_int = all_str = false;
                 if (bad.empty()) bad = std::string("a ") + luaL_typename(L, -1) + " key";
@@ -188,6 +190,7 @@ struct Encoder {
             out += "{}";
             return true;
         }
+        if (all_int && count > kMaxText / 2) return fail("the JSON text would be longer than 1 MiB");
         if (all_int && static_cast<lua_Integer>(count) == max_key) {  // keys are distinct, so 1..count are all present
             out += '[';
             for (lua_Integer i = 1; i <= max_key; ++i) {
@@ -201,10 +204,14 @@ struct Encoder {
             return room(0);
         }
         if (!all_str) {
+            if (bad.empty() && has_int && has_str)
+                return fail("a table with both integer and string keys cannot be written as JSON "
+                            "(an array has only the keys 1..n, an object only string keys)");
             if (bad.empty()) bad = "an integer key that is not part of 1..n";
             return fail("a table with " + bad +
                         " cannot be written as JSON (an array has the keys 1..n, an object only string keys)");
         }
+        if (count > kMaxText / 5) return fail("the JSON text would be longer than 1 MiB");
         std::vector<std::string> keys;
         keys.reserve(count);
         lua_pushnil(L);
@@ -384,6 +391,14 @@ struct Decoder {
         }
         double d = 0;
         const auto r = std::from_chars(b, e, d);
+        if (r.ec == std::errc::result_out_of_range) {  // MSVC also reports underflow (1e-400) this way: that is 0.0
+            const std::string_view num(b, static_cast<size_t>(e - b));
+            const size_t ex = num.find_first_of("eE");
+            if (ex != std::string_view::npos && ex + 1 < num.size() && num[ex + 1] == '-') {
+                lua_pushnumber(L, num[0] == '-' ? -0.0 : 0.0);
+                return true;
+            }
+        }
         if (r.ec != std::errc() || r.ptr != e || d - d != 0) {
             i = start;
             return fail("the number is out of range");

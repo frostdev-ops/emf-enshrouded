@@ -24,7 +24,7 @@ end
 
 emf.bus.subscribe(SERVICE .. ".reply", function(world, source, payload)
   local reply = emf.json.decode(payload)
-  if type(reply) ~= "table" or reply.to ~= emf.id then return end  -- not an answer to us
+  if type(reply) ~= "table" or reply.to ~= emf.id or type(reply.id) ~= "string" then return end  -- not an answer to us
   local p = pending[reply.id]
   if not p then return end  -- a late answer to a request that already timed out
   pending[reply.id] = nil
@@ -41,11 +41,15 @@ end)
 emf.on_tick(function(world)
   if not world:is_server() then return end
   steps = steps + 1
+  -- Collect first, call after: done() may call call() again, and adding a key while pairs() walks the table breaks it.
+  local expired = {}
   for id, p in pairs(pending) do
-    if steps >= p.deadline then
-      pending[id] = nil
-      p.done(false, "timeout: no answer from the " .. SERVICE .. " service (is bus_service installed?)")
-    end
+    if steps >= p.deadline then expired[#expired + 1] = id end
+  end
+  for _, id in ipairs(expired) do
+    local p = pending[id]
+    pending[id] = nil
+    p.done(false, "timeout: no answer from the " .. SERVICE .. " service (is bus_service installed?)")
   end
 end)
 
@@ -55,11 +59,23 @@ local function say(text)
   emf.notify(text)
 end
 
+-- A read is safe to repeat: after a timeout, ask once more (a service that is reloading is back within seconds).
+local function call_retry(op, args, done)
+  call(op, args, function(ok, value)
+    if ok or not tostring(value):find("^timeout") then return done(ok, value) end
+    call(op, args, done)
+  end)
+end
+
 local function show(what)
   return function(ok, value)
     if not ok then return say(what .. " failed: " .. tostring(value)) end
     if value == emf.json.null then return say(what .. ": (nothing)") end
-    if type(value) == "table" then value = "[" .. table.concat(value, ", ") .. "]" end
+    if type(value) == "table" then  -- never trust the shape: the items may be anything
+      local items = {}
+      for i, v in ipairs(value) do items[i] = tostring(v) end
+      value = "[" .. table.concat(items, ", ") .. "]"
+    end
     say(what .. ": " .. tostring(value))
   end
 end
@@ -71,11 +87,11 @@ end)
 
 emf.command("get", "<key>: read a note from the notes service", function(world, args)
   if not args[1] then return emf.reply("usage: get <key>") end
-  call("get", {key = args[1]}, show("get " .. args[1]))
+  call_retry("get", {key = args[1]}, show("get " .. args[1]))
 end)
 
 emf.command("list", ": the keys of all notes", function(world, args)
-  call("list", {}, show("notes"))
+  call_retry("list", {}, show("notes"))
 end)
 
 emf.command("ping", ": ask the notes service to announce itself (see the log)", function(world, args)

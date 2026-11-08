@@ -178,3 +178,20 @@ TEST_CASE("lua host: a mod sends a JSON table over emf.bus and gets it back equa
     CHECK_FALSE(logged("ECHO_BAD"));
     CHECK(logged("CALLER_GOT 7 true echo caf\xC3\xA9 3 integer 2.5 true"));
 }
+
+TEST_CASE("lua host: emf.json edge cases: underflow is zero, mixed keys have their own message, null is truthy, big tables fail early") {
+    json_run(L"json_edges_118", R"LUA(
+local z = J.decode('1e-400'); eq(z, 0.0, 'underflow'); eq(math.type(z), 'float', 'underflow is a float')
+local nz = J.decode('-1e-400'); eq(1 / nz, -math.huge, 'negative underflow is -0.0')
+eq(J.decode('0.0000e-5'), 0.0, 'zero with exponent')
+badd('1e999', 'range', 'overflow stays an error'); badd('-1e999', 'range', 'negative overflow stays an error')
+bad({1, 2, x = 3}, 'both integer and string keys', 'mixed keys message')
+bad({[1] = 'a', [3] = 'c'}, 'key', 'sparse array')
+eq(not J.null, false, 'null is truthy')
+eq(J.encode(setmetatable({}, {__index = function() error('no') end, __pairs = function() error('no') end})), '{}', 'metatables are ignored')
+badd('\xEF\xBB\xBF1', 'unexpected', 'a BOM is rejected')
+eq(math.type(J.decode('-0')), 'integer', '-0 is an integer'); eq(J.decode('-0'), 0, '-0 is 0')
+local big = {}; for i = 1, 530000 do big[i] = 1 end; bad(big, '1 MiB', 'huge array')
+local obj = {}; for i = 1, 210000 do obj['k' .. i] = 1 end; bad(obj, '1 MiB', 'huge object')
+)LUA");
+}

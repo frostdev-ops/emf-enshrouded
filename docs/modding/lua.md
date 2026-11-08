@@ -224,6 +224,11 @@ a missing or wrong-typed argument is still a usage error, as for other `emf` fun
 - **Strings** are UTF-8 and are checked: a string with invalid UTF-8 is an error in both directions. Quotes,
   backslashes and control characters are escaped; `\uXXXX` escapes, including surrogate pairs, are decoded; a lone
   surrogate is an error. Other text (`/`, accents, emoji) is written as it is.
+- **Also**: `emf.json.null` is truthy (`if value then` is true for null: compare with `== emf.json.null`). Metatables
+  are ignored (`__index`, `__pairs` have no effect; only the table's own entries are written). A repeated key in
+  the text keeps its last value. A UTF-8 byte order mark at the start of the text is an error. `-0` decodes as the
+  integer `0`. `decode` accepts a number as its argument (Lua converts it to text: `decode(5)` is `5`); other
+  non-text arguments are a usage error.
 - **Booleans** as usual. Functions, threads, userdata (except `emf.json.null`) and `nil` are errors.
 - **Limits**: 64 levels of nesting (this also stops a table that contains itself), 1 MiB of input text, 1 MiB of
   output text. The bus carries at most 64 KiB, so encode first and check that `emf.bus.publish` returned true.
