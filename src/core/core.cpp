@@ -26,6 +26,11 @@
 #include "fault_report.h"
 #include "builtin_commands.h"
 #include "profile_commands.h"
+#include "hud_commands.h"
+#include "hud_editor/editor.h"
+#include "hud_editor/gate.h"
+#include "hud_editor/hook.h"
+#include "emf/keys.hpp"
 #include "save_commands.h"
 #include "save_slots.h"
 #include "saves/backup.h"
@@ -89,6 +94,7 @@ constexpr auto kModsReadyTimeout = std::chrono::seconds(30);
 emf::core::BuiltinContext g_builtin;                     // the core's own commands
 emf::core::ProfileCommandContext g_profiles;             // "profile": mod profiles
 emf::core::SaveCommandContext g_save_commands;           // "saves.backup", "saves.list"
+std::unique_ptr<emf::core::hud::HudEditor> g_hud_editor;  // the HUD editor (game client only)
 std::unique_ptr<emf::core::CommandFile> g_command_file;  // emf/commands.txt
 emf::core::ConsoleWindow g_console;                      // optional ([console] window=1 in emf/emf_core.ini)
 emf::core::ManifestWatch g_manifest_watch;  // mods' settings follow their mod.json while the game runs
@@ -1165,6 +1171,35 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_profiles.emf_version = EMF_VERSION;
     g_profiles.run = emf::core::profile_worker_runner();  // never on the render thread or a world's thread
     if (!emf::core::add_profile_commands(g_state->commands, g_profiles)) emf::logf("commands: \"profile\" could not be added");
+    // The HUD editor: the game client only. On the dedicated server nothing is created, hooked or registered. Its hooks are
+    // installed by the editor itself, once, when its gate first says on (known build, signatures usable, setting on, no
+    // other HUD mod): until then the game's UI code is untouched.
+    if (!g_state->exe.server) {
+        using namespace emf::core::hud;
+        HudEditorDeps hd;
+        hd.settings = g_state->settings.get();
+        hd.dir = dir + L"\\emf\\hud";
+        hd.build_number = g_state->exe.build_number;
+        hd.gate = GateInput{false, hud_signatures_ready(g_state->sigs, known, build), build_label(g_state->exe.build_number, sha)};
+        hd.install_hooks = [known, build](std::string* why) {
+            return install_hud_hooks(g_state->sigs, known, build, &g_hud_editor->snapshots(), why);
+        };
+        hd.other_hud_mod = loaded_other_hud_mod;
+        hd.fault_code = hud_fault_code;
+        hd.live = hud_live;
+        hd.scale_state = hud_scale_state;
+        hd.key_down = [](uint32_t vk) { return emf::keys::down(vk); };
+        hd.toggle_page = [] { emf::core::overlay_toggle_settings_page(emf::core::kPageHud); };
+        hd.run = emf::core::profile_worker_runner();
+        hd.now_ms = [] { return GetTickCount64(); };
+        hd.log = [](const std::string& s) { emf::logf("%s", s.c_str()); };
+        g_hud_editor = std::make_unique<HudEditor>(std::move(hd));
+        g_hud_editor->start();
+        if (!emf::core::add_hud_commands(g_state->commands, *g_hud_editor)) emf::logf("commands: \"hud.*\" could not be added");
+        g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
+            if (g_hud_editor && emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_CLIENT) g_hud_editor->tick();
+        }, nullptr);
+    }
     // Save backups from the console: for players without EMF.exe; the copying runs on the profile worker.
     // Not in the dedicated server: its world is in its own savegame folder.
     if (!g_state->exe.server) {
@@ -1241,6 +1276,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             deps.hud = &g_state->hud;
             deps.mods = &g_state->mods;
             deps.settings = g_state->settings.get();
+            deps.hud_editor = g_hud_editor.get();
             if (emf::core::start_overlay(cfg, std::move(deps))) {
                 g_state->open_wheel = [](const emf::core::WheelRequest& r) {
                     const bool ok = emf::core::overlay_open_wheel(r);
