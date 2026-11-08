@@ -759,7 +759,7 @@ target_sources(emf_tests PRIVATE tests/test_app_content_panel.cpp tests/test_app
 target_sources(emf_core_lib PRIVATE src/core/hud_editor/elements.cpp src/core/hud_editor/layout.cpp
   src/core/hud_editor/layout_store.cpp
   src/core/hud_editor/gate.cpp src/core/hud_editor/scale.cpp
-  src/core/hud_editor/hook.cpp src/core/hud_editor/keys.cpp src/core/hud_editor/editor.cpp)
+  src/core/hud_editor/hook.cpp src/core/hud_editor/keys.cpp src/core/hud_editor/editor.cpp src/core/hud_commands.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_elements.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_layout.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_layout_store.cpp)
@@ -769,3 +769,4 @@ target_sources(emf_tests PRIVATE tests/test_hud_scale.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_hook.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_keys.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_editor.cpp)
+target_sources(emf_tests PRIVATE tests/test_hud_commands.cpp)
