@@ -1,9 +1,9 @@
 {
   "id": "emf_beastmaster_beasts",
   "title": "Beastmaster: new beasts",
-  "version": "2.0.0",
+  "version": "2.1.0",
   "out": "../../../analysis/models/mods/emf_beastmaster_beasts",
-  "description": "New beasts for the Beastmaster mod: the Aurochs (a huge horned wild bull on the game boar's skeleton, it charges) and the Snake (a 5 m snake from a 3D scan of a pit viper, on a spine of its own: it slithers, rears up and strikes). Wild ones appear now and then when Beastmaster is installed; tame one and call it. Now and then a wild snake is a rare one: crimson, golden king or albino, bigger and tougher.",
+  "description": "New beasts for the Beastmaster mod: the Aurochs (a huge horned wild bull on the game boar's skeleton, it charges) and the Snake (a 5 m snake from a 3D scan of a pit viper, on a spine of its own: it slithers, rears up and strikes). Wild ones appear now and then when Beastmaster is installed; tame one and call it. Now and then a wild snake is a rare one: crimson, golden king or albino, bigger and tougher. And the Stable: a bed for your tamed beasts that you craft at the Workbench and place in your base; press E at it to open Beastmaster's Beasts window.",
   "authors": [
     "EMF contributors"
   ],
@@ -14,7 +14,8 @@
     "The aurochs keeps detail bones only where it has that detail (fit_to_game_skeleton.py, clean_detail_weights: its rump is off the boar's tail bones), and its tail follows the hips (--tail hips): the boar's short tail's animation does not drive it.",
     "Snake: the CC0 Quaternius snake (Easy Enemy pack, https://poly.pizza/m/x9x0viZs8V) gives the skeleton (16 joints) and the slither, strike and lunge; its hit and death are made from key turns (made_clips.py); its look is a Meshy model made from renders of that rig's rest pose (multi-image task 01a198b9-5ebb-76ae-88e2-931a4f9e3158, retexture 01a198bb-2f02-77b9-981f-5659f7298a05) rebound on the rig with its weights (blender/rebind_to_rig.py). It plays a copy of the game wolf's graph (every one of its 35 clips mapped to ours); scale 0.8 (about 2.4 m reared); a ScaleComponent of 1 so Beastmaster's wild rotation knows its own wild one; 1.3x the wolf's damage, 2x its health (species.lua). Snake model and animations by Quaternius (CC0).",
     "2.0: the snake and the rare snakes rebuilt on 'CC0 Japanese Pit Viper' by ffish.asia / floraZia.com (CC0: no credit required; a courtesy credit in the Nexus text), a 3D scan on a 53-joint spine scaled 13x (5.1 m), turned to face forward (yaw 90); 1.0's snake (the Quaternius cartoon snake) looked out of place. Its own clips are made by snake_clips.py from a body curve: slither waves matched to the template's speeds (walk 1.6, run 4.5 m/s), a rearing threat, two strikes, flinches, a death that rolls onto its back. The rare snakes: the scan's skin recoloured (crimson, golden king, albino; textures 1024: a 2048 scan skin made the pack too big for EML), ScaleComponent 1.15, 1.25, 1.35, DamageMod x1.6, x1.8, x2.0 (health x3, x4, x5 from Beastmaster at runtime). Movement for all: walk and patrol x0.7, run and sprint x0.75, the rest x0.85 of the wolf's. GUIDs unchanged: d4c87337-8c53-41df-8488-8079046e15N1..N5 (N 0 the snake, 1 crimson, 2 golden king, 3 albino).",
-    "Size (EML, 2026-11-01): the built mod is 69 MB of Lua, its biggest file beastmaster_snake_albedo.lua 8.5 MB; applied together with the bear pack (81 MB, 94 patches) without trouble. With 2048 textures it was 148 MB with 22-31 MB albedo files, and emm.exe failed (0xC0000409) applying both packs (171 MB)."
+    "Size (EML, 2026-11-01): the built mod is 69 MB of Lua, its biggest file beastmaster_snake_albedo.lua 8.5 MB; applied together with the bear pack (81 MB, 94 patches) without trouble. With 2048 textures it was 148 MB with 22-31 MB albedo files, and emm.exe failed (0xC0000409) applying both packs (171 MB).",
+    "2.1: the Stable (content script beastmaster_stable.lua, run with EMF's content helper): a copy of the large animal bed's object (Animal_Farm_Housing_Sleeping_Bed_YAK_Sanddigger) without AnimalTarget and ActiveNpcTarget, with a render model record of its own (a copy of the bed's, same mesh data) so Beastmaster tells it from a vanilla bed; crafted at the Workbench like the crude chair (6 wood logs, 8 plant fibre, 2 animal fur). The look was picked from six game props drawn by EMF's picture renderer (analysis/models/stable/candidates)."
   ],
   "creatures": [
     {
@@ -1672,5 +1673,8 @@
         "graph_guid": "d4c87337-8c53-41df-8488-8079046e1535"
       }
     }
+  ],
+  "content_scripts": [
+    "beastmaster_stable.lua"
   ]
 }
