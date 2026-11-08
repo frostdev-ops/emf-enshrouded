@@ -124,18 +124,29 @@ inline PortraitStamps portraits_stamps(const std::wstring& game, const std::stri
     game_text += detail::fact_line("resources", fact_of(cio::join(game, name + L".kfc_resources"), file_name + ".kfc_resources"));
     game_text += "dats\t" + std::to_string(count_game_dats(game, file_name)) + "\n";
     const std::string dll_text = "emf portraits dll stamp 1\n" + detail::fact_line("dll", fact_of(dll, "emf_content.dll"));
-    std::string mods_text = "emf portraits mods stamp 1\n";
+    // sorted as the content fingerprint sorts them (mods by id, files by name), so the order they come in is no change
+    std::vector<ModFiles> sorted;
     for (const auto& m : mods) {
-        const auto files = mod_files(cio::join(cio::join(game, L"mods"), m.folder));
-        mods_text += "mod\t" + m.id + "\t" + m.version + "\t" + std::to_string(files.size()) + "\n";
-        for (const auto& f : files) {
+        ModFiles mf;
+        mf.id = m.id;
+        mf.version = m.version;
+        for (const auto& f : mod_files(cio::join(cio::join(game, L"mods"), m.folder))) {
             FileFact x;
             x.name = cio::to_utf8(f.rel);
             x.size = f.size;
             x.written = f.written;
             x.exists = true;
-            mods_text += detail::fact_line("file", x);
+            mf.files.push_back(std::move(x));
         }
+        std::sort(mf.files.begin(), mf.files.end(),
+                  [](const FileFact& a, const FileFact& b) { return detail::name_less(a.name, b.name); });
+        sorted.push_back(std::move(mf));
+    }
+    std::sort(sorted.begin(), sorted.end(), [](const ModFiles& a, const ModFiles& b) { return a.id < b.id; });
+    std::string mods_text = "emf portraits mods stamp 1\n";
+    for (const auto& m : sorted) {
+        mods_text += "mod\t" + m.id + "\t" + m.version + "\t" + std::to_string(m.files.size()) + "\n";
+        for (const auto& f : m.files) mods_text += detail::fact_line("file", f);
     }
     const auto hex = [](const std::string& t) {
         emf::Sha256 h;

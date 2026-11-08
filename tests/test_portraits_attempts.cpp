@@ -108,6 +108,17 @@ TEST_CASE("portraits memory: the mods stamp changes with an EML content mod's fi
     CHECK(two != one);
     pack.version = "1.1";
     CHECK(stamp({pack}) != two);
+    // the order the mods come in does not matter (the content fingerprint sorts them by id too)
+    std::filesystem::create_directories(root + L"\\mods\\other");
+    {
+        std::ofstream f(std::filesystem::path(root + L"\\mods\\other\\b.bin"), std::ios::binary);
+        f << "two";
+    }
+    emf::loader::EmlMod other;
+    other.folder = L"other";
+    other.id = "other";
+    other.version = "2.0";
+    CHECK(stamp({pack, other}) == stamp({other, pack}));
     std::error_code ec;
     std::filesystem::remove_all(root, ec);
 }
