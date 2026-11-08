@@ -344,6 +344,7 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
         if (d_.log) d_.log("mod messages: a marked chat line dropped: " + why);
         return true;
     }
+    if (d_.enabled && !d_.enabled()) return true;  // hosted or offline: hidden, never answered
     std::optional<Reassembly::Message> msg;
     bool up = false, down = false;
     {

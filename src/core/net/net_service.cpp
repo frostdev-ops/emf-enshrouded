@@ -200,6 +200,10 @@ void NetService::enable_client(ClientEnv env) {
     ClientLinkDeps l;
     l.channels = [this] { return channel_versions(); };
     l.self_account = std::move(env.self_account);
+    l.enabled = [this] {  // a joined game only: a game that hosts its server delivers in process
+        uint32_t id = 0;
+        return !d_.hosted(&id);
+    };
     l.log = d_.log;
     l.emf_version = env.emf_version;
     l.api = env.api;

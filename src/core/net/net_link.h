@@ -143,6 +143,8 @@ struct ClientLinkDeps {
     std::function<void(const std::string& channel, uint32_t server_version, const std::string& data)> on_message;
     std::function<void(bool up)> on_server;  // the server welcomed this game / is gone
     std::function<void(const std::string&)> log;
+    // false: this game hosts its server (or is offline): marked lines are hidden but not answered (the loopback delivers)
+    std::function<bool()> enabled;
     std::string emf_version;
     uint32_t api = 0;
     uint32_t build = 0;

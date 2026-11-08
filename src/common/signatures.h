@@ -34,6 +34,8 @@ enum class Sig : size_t {
     XpRequired, MaxPlayerLevel,
     // the game's UI scopes and the UI layer's transform stack, client only (the HUD editor; docs/engine_parts/re_ui_scopes.md)
     UiScopeOpen, UiScopeClose, UiPushTransform, UiPopTransform,
+    // mod messages (API v27): the client's chat send and the outbox flush that sends the lines on
+    ChatClientSend, ClientOutboxFlush,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

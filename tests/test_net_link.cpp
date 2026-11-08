@@ -29,6 +29,7 @@ struct Rig {
     uint64_t now = 1000;
     size_t room = 1000;
     bool greet = true;
+    bool client_enabled = true;
     std::map<std::string, uint32_t> server_channels{{"bm/pick", 2}, {"bm/show", 1}};
     std::map<std::string, uint32_t> client_channels{{"bm/pick", 2}, {"bm/show", 1}};
     std::optional<uint64_t> self = kAcct;
@@ -73,6 +74,7 @@ struct Rig {
             at_client.push_back({0, 0, c, v, data});
         };
         d.on_server = [this](bool up) { server_events.push_back(up); };
+        d.enabled = [this] { return client_enabled; };
         d.log = [this](const std::string& l) { logs.push_back(l); };
         d.emf_version = "0.5.1";
         d.api = 27;
@@ -482,4 +484,14 @@ TEST_CASE("net link: a second beacon starts the conversation again") {
     r.deliver_to_client();
     CHECK(r.client.welcomed());
     CHECK(r.server_events == (std::vector<bool>{false, true}));
+}
+
+TEST_CASE("net link: a game that hosts its server hides marked lines but does not answer the beacon") {
+    Rig r;
+    r.client_enabled = false;
+    r.server.tick({{kHandle, kAcct}});
+    REQUIRE(r.to_players.size() == 1);
+    CHECK(r.client.on_chat_line(r.to_players[0].second, kAcct));  // taken: never shown
+    CHECK(r.client.waiting() == 0);
+    CHECK_FALSE(r.client.welcomed());
 }

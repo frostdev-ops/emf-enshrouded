@@ -163,6 +163,13 @@ constexpr SigDef kSignatures[] = {
     {Sig::UiScopeClose, "UiScopeClose", "48 89 5C 24 18 48 89 74 24 20 57 48 83 EC 60 80 79 20 00 48 8B D9 74 6A 48 8B 49 08 0F 29 74 24 50 66 0F 6F 35 ?? ?? ?? ?? C7 44 24 70 FF 00 FF FF C7 44 24 74 00 00 80 3F", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xa40080u, 0u}, false},
     {Sig::UiPushTransform, "UiPushTransform", "48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 30 83 79 08 04 48 8B EA F2 0F 10 02 48 8B F9 0F B7 35 ?? ?? ?? ?? 8B 42 08 F2 0F 11 44 24 20 66 89 74 24 2C 89 44 24 28 0F 85 ?? ?? ?? ?? 48 8B CA E8 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? ?? ?? 48 8B B7 E0 6C 00 00 48 8D 9E E8 04 03 00", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x11c4aa0u, 0u}, false},
     {Sig::UiPopTransform, "UiPopTransform", "48 83 EC 28 48 8B 81 10 42 00 00 4C 8B C1 48 FF C8 48 89 81 10 42 00 00 83 79 08 04 75 41 48 85 C0 74 3C 48 8B D0 48 8B 81 08 42 00 00 0F B7 4C 50 FE 49 8B 80 E0 21 00 00 48 03 C9 0F B7 44 C8 0C 49 8B 88 E0 6C 00 00 66 39 81 2C 52 03 00 74 0E 66 89 81 2C 52 03 00 C6 81 D2 52 03 00 00 49 8B C8 E8 ?? ?? ?? ?? 49 FF 88 E8 21 00 00 48 83 C4 28 C3", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x11c2850u, 0u}, false},
+    // chatClientSend(out, ChatSystem* sys, u8 kind, const StringView* text, u32 tag1, u32 tag2): queues a line in the
+    // client's chat outbox, skipping the UI's text-chat gate (docs/engine_parts/re_chat.md "B"; the dedicated server has
+    // an unused copy). Checked on 1273043 (both exes), 1285601 (client) and 1287369 (both exes) with tools/re/sig.py.
+    {Sig::ChatClientSend, "ChatClientSend", "48 89 6C 24 20 56 41 54 41 57 48 83 EC 20 49 8B 41 08 4D 8B F9 45 0F B6 E0 48 8B EA 48 8B F1 48 3D 00 04 00 00 76 ?? 33 D2 C6 01 12", {kRvaUnchecked, 0xe99f70u, 0x94e320u, kRvaUnchecked, kRvaUnchecked, 0xeb1140u, kRvaUnchecked, 0xeb1220u, 0x958570u}, false},
+    // void clientOutboxFlush(GameClient*): sends the client's queued chat lines as ChatMessageClientMessages; called from
+    // the GameClient update every frame. Client only. 12 bytes, one match on 1273043, 1285601 and 1287369.
+    {Sig::ClientOutboxFlush, "ClientOutboxFlush", "40 55 53 56 48 8D AC 24 10 FC FF FF", {kRvaUnchecked, 0x867710u, 0u, kRvaUnchecked, 0u, 0x871e10u, 0u, 0x871ef0u, 0u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

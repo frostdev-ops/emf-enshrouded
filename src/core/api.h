@@ -146,6 +146,11 @@ struct CoreState {
     std::function<bool(uint32_t handle_hint, uint64_t account, const std::string& line)> chat_tell_line;
     std::function<bool(const std::string& line)> chat_everyone_line;
     std::function<uint32_t(uint64_t account)> entity_by_account;  // on_chat's entity, on the server world's thread
+    // API v27 mod messages (the chat transport; set when it starts): a player entity's connection, an account's entity
+    // (the server world's thread) and whether an account is an admin
+    std::function<std::optional<std::pair<uint32_t, uint64_t>>(uint32_t entity)> net_connection_of;
+    std::function<uint32_t(uint64_t account)> net_entity_of;
+    std::function<bool(uint64_t account)> net_is_admin;
     // player_name: a copy of the server's connection records (empty: read from chat_server(); false: none to read)
     std::function<bool(std::vector<uint8_t>* records)> read_connections;
     using RequestSaveFn = void (*)(void* game_server_instance);

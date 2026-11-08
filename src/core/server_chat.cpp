@@ -87,7 +87,7 @@ ChatRateLimit::Verdict ChatRateLimit::check(uint64_t account, uint64_t now_ms) {
     return w.count == max_ + 1 ? Verdict::Warn : Verdict::Drop;
 }
 
-bool ChatOutbox::add(uint32_t handle, uint64_t account, std::string text, bool raw) {
+bool ChatOutbox::add(uint32_t handle, uint64_t account, std::string text, bool raw, bool net) {
     std::lock_guard<std::mutex> l(m_);
     if (items_.size() >= kMaxChatOutbox) return false;
     ChatReply r;
@@ -95,6 +95,7 @@ bool ChatOutbox::add(uint32_t handle, uint64_t account, std::string text, bool r
     r.account = account;
     r.text = std::move(text);
     r.raw = raw;
+    r.net = net;
     items_.push_back(std::move(r));
     return true;
 }

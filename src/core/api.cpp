@@ -2284,6 +2284,11 @@ net::NetDeps net_deps(CoreState* s) {
     };
     d.now_ms = [s] { return s->now_ms ? s->now_ms() : GetTickCount64(); };
     d.log = [](const std::string& line) { core_log(line); };
+    d.connection_of = [s](uint32_t entity) -> std::optional<std::pair<uint32_t, uint64_t>> {
+        return s->net_connection_of ? s->net_connection_of(entity) : std::nullopt;
+    };
+    d.entity_of = [s](uint64_t account) { return s->net_entity_of ? s->net_entity_of(account) : 0u; };
+    d.is_admin = [s](uint64_t account) { return s->net_is_admin && s->net_is_admin(account); };
     return d;
 }
 

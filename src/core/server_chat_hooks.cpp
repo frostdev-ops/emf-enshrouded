@@ -12,6 +12,7 @@
 #include "api.h"
 #include "chat_commands.h"
 #include "common/seh.h"
+#include "net/net_line.h"
 #include "server_chat.h"
 
 namespace emf::core {
@@ -21,6 +22,11 @@ constexpr size_t kServerChatSystem = 0x60;  // Server: its ChatSystem* (both exe
 
 ChatReceiveFn o_receive = nullptr;
 ChatLogAddFn o_log_add = nullptr;
+ClientFlushFn o_flush = nullptr;
+ChatClientSendFn o_client_send = nullptr;
+ClientChatDeps g_client;
+std::atomic<uint8_t*> g_client_sys{nullptr};  // the client's ChatSystem (from the flush hook's GameClient)
+std::atomic<bool> g_client_on{false};
 ServerChatDeps g_deps;
 ChatOutbox g_outbox;
 ChatRateLimit g_limit;  // players who are no admins: 5 command lines per 10 s
@@ -110,6 +116,12 @@ std::string hex(uint32_t v) {
 
 // True if EMF took the line (a command, run or refused): the game must not add it.
 bool take_line(const ChatText* text, uint8_t kind, uint32_t handle, uint64_t account) {
+    if (g_deps.net_line && kind == kChatKindTyped) {  // API v27 mod messages: before commands and on_chat
+        char nbuf[kChatMaxBytes];
+        size_t nn = 0;
+        if (copy_text(text, nbuf, sizeof nbuf, &nn) && net::is_marked(std::string_view(nbuf, nn)))
+            return g_deps.net_line(handle, account, std::string_view(nbuf, nn));
+    }
     if (kind != kChatKindTyped || ((!g_deps.run || !g_deps.is_command) && !g_deps.on_line)) return false;
     char buf[kChatMaxBytes];
     size_t n = 0;
@@ -203,9 +215,24 @@ bool send_line(uint8_t* sys, const std::string& text, uint32_t handle, uint64_t 
     return true;
 }
 
+// The bytes the chat reader `reader` still has to send (-1 when unreadable).
+int32_t reader_pending(const uint8_t* sys, uint32_t reader) {
+    int32_t pending = 0;
+    if (reader >= static_cast<uint32_t>(chat_layout::kReaderCount) ||
+        !seh_read(sys + chat_layout::kReaders + chat_layout::kReaderStride * reader + chat_layout::kReaderPending, &pending,
+                  sizeof pending))
+        return -1;
+    return pending;
+}
+
 void flush_replies(uint8_t* server) {
     auto items = g_outbox.take();
     if (items.empty()) return;
+    std::vector<ChatReply> deferred;  // mod message lines for players whose reader is behind: next run
+    struct Defer {
+        std::vector<ChatReply>* d;
+        ~Defer() { g_outbox.put_back(std::move(*d)); }
+    } defer{&deferred};
     uint8_t* sys = nullptr;
     if (!seh_read(server + kServerChatSystem, &sys, sizeof sys) || !sys) return;
     std::vector<uint8_t> records;  // read once, when a mod's line needs them
@@ -257,6 +284,11 @@ void flush_replies(uint8_t* server) {
                            " (the player left?); reply dropped: " + printable(reply.text));
             continue;
         }
+        if (reply.net && reader_pending(sys, *reader) > kMaxNetPendingBytes) {  // a lagging player: later, not now
+            deferred.push_back(reply);
+            --sent;
+            continue;
+        }
         if (!send_line(sys, reply.raw ? reply.text : "[EMF] " + reply.text, handle, reply.account, *reader)) return;
     }
 }
@@ -268,13 +300,78 @@ void __fastcall hk_receive(uint8_t* server) {
     o_receive(server);
     t_server = previous;
     try {
+        if (g_deps.net_tick) {
+            std::vector<uint8_t> records;
+            if (read_connections(server, &records)) g_deps.net_tick(connected_players(records.data()));
+        }
         flush_replies(server);
     } catch (...) {  // nothing may unwind into the game
     }
 }
 
+// The client's own chat got a line: true when it is a mod message line EMF takes (never added).
+bool client_takes(uint8_t* sys, uint8_t kind, const ChatText* text, uint64_t speaker) {
+    if (!g_client_on || kind != kChatKindTyped || !g_client.line || !sys || sys != g_client_sys.load()) return false;
+    char buf[kChatMaxBytes];
+    size_t n = 0;
+    if (!copy_text(text, buf, sizeof buf, &n) || !net::is_marked(std::string_view(buf, n))) return false;
+    return g_client.line(std::string_view(buf, n), speaker);
+}
+
+bool guarded_client_send(uint8_t* sys, const ChatText* text, uint8_t* result) {
+    __try {
+        o_client_send(result, sys, kChatKindTyped, text, 0, 0);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+// Before the game flushes the client's outbox: this frame's mod message lines go in (the GameClient's own thread).
+void client_pump(uint8_t* game_client) {
+    uint8_t* sys = nullptr;
+    if (!game_client || !seh_read(game_client + kGameClientChat, &sys, sizeof sys) || !sys) return;
+    g_client_sys = sys;
+    if (!g_client.take || !o_client_send) return;
+    auto lines = g_client.take(kClientLinesPerFrame);
+    for (size_t i = 0; i < lines.size(); ++i) {
+        const ChatText view{lines[i].data(), lines[i].size()};
+        uint8_t result[16] = {};
+        if (!guarded_client_send(sys, &view, result)) {
+            if (g_client.log) g_client.log("mod messages: sending a chat line faulted; the lines of this frame are dropped");
+            return;
+        }
+        if (result[0] == 0) continue;
+        if (result[0] == 2 && g_client.put_back) {  // the chat pool is full: this line and the rest, next frame
+            g_client.put_back(std::vector<std::string>(lines.begin() + static_cast<std::ptrdiff_t>(i), lines.end()));
+            return;
+        }
+        if (g_client.log) g_client.log("mod messages: the game refused a chat line (code " + std::to_string(result[0]) + ")");
+    }
+}
+
+void __fastcall hk_flush(uint8_t* game_client) {
+    try {
+        client_pump(game_client);
+    } catch (...) {  // nothing may unwind into the game
+    }
+    o_flush(game_client);
+}
+
 uint8_t* __fastcall hk_log_add(uint8_t* out, uint8_t* sys, uint8_t kind, const ChatText* text, uint32_t tag1,
                                uint32_t tag2, uint32_t handle, uint64_t account, const void* time) {
+    if (!t_server && out && g_client_on) {  // the client's own chat: a mod message line is taken, never shown
+        bool taken = false;
+        try {
+            taken = client_takes(sys, kind, text, account);
+        } catch (...) {
+        }
+        if (taken) {
+            out[0] = 0;
+            std::memset(out + 4, 0, 4);
+            return out;
+        }
+    }
     if (t_server && out) {
         bool taken = false;
         try {
@@ -312,6 +409,30 @@ bool install_server_chat(uintptr_t receive, uintptr_t chat_log_add, ServerChatDe
     return ok;
 }
 
+bool install_client_chat(uintptr_t flush, uintptr_t client_send, ClientChatDeps deps) {
+    if (!flush || !client_send || !o_log_add || o_flush) return false;
+    g_client = std::move(deps);
+    o_client_send = reinterpret_cast<ChatClientSendFn>(client_send);
+    if (!install_emf_hook("client chat outbox flush (mod messages)", flush, reinterpret_cast<void*>(&hk_flush),
+                          reinterpret_cast<void**>(&o_flush)))
+        return false;
+    g_client_on = true;
+    return true;
+}
+
+ClientChatDetours client_chat_for_test(ClientFlushFn game_flush, ChatClientSendFn game_send, ChatLogAddFn game_log_add,
+                                       ClientChatDeps deps) {
+    o_flush = game_flush;
+    o_client_send = game_send;
+    o_log_add = game_log_add;
+    g_client = std::move(deps);
+    g_client_sys = nullptr;
+    g_client_on = true;
+    g_deps = ServerChatDeps{};
+    g_server = nullptr;
+    return {&hk_flush, &hk_log_add};
+}
+
 ServerChatDetours server_chat_for_test(ChatReceiveFn game_receive, ChatLogAddFn game_log_add, ServerChatDeps deps) {
     g_limit.reset();
     o_receive = game_receive;
@@ -320,6 +441,10 @@ ServerChatDetours server_chat_for_test(ChatReceiveFn game_receive, ChatLogAddFn 
     g_outbox.take();
     g_server = nullptr;
     g_on = true;
+    g_client_on = false;
+    g_client_sys = nullptr;
+    o_flush = nullptr;
+    o_client_send = nullptr;
     return {&hk_receive, &hk_log_add};
 }
 
@@ -330,6 +455,15 @@ bool queue_chat_tell(uint32_t handle_hint, uint64_t account, std::string line) {
 }
 
 bool queue_chat_everyone(std::string line) { return g_on.load() && g_outbox.add_everyone(std::move(line)); }
+
+bool queue_net_line(uint32_t handle, uint64_t account, std::string line) {
+    return g_on.load() && g_outbox.add(handle, account, std::move(line), true, true);
+}
+
+size_t chat_outbox_room() {
+    const size_t n = g_outbox.size();
+    return n >= kMaxChatOutbox ? 0 : kMaxChatOutbox - n;
+}
 
 uint8_t* chat_server() { return g_server.load(); }
 

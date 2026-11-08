@@ -76,6 +76,7 @@ struct ChatReply {
     std::string text;
     bool raw = false;
     bool everyone = false;
+    bool net = false;  // a mod message line (API v27): waits while the player's chat reader has too much pending
 };
 // Lines waiting for the receive loop's thread (commands and mods run on the server world's thread). Any thread. At most
 // kMaxChatOutbox lines wait: add refuses more (false).
@@ -85,7 +86,7 @@ constexpr size_t kMaxChatOutbox = 1024;
 constexpr int kMaxChatLinesPerRun = 32;
 class ChatOutbox {
 public:
-    bool add(uint32_t handle, uint64_t account, std::string text, bool raw = false);
+    bool add(uint32_t handle, uint64_t account, std::string text, bool raw = false, bool net = false);
     bool add_everyone(std::string text);
     std::vector<ChatReply> take();
     // Puts lines that were taken but not sent yet back in front of the others (their order kept).
@@ -269,7 +270,14 @@ struct ServerChatDeps {
     std::function<void(uint8_t* server, uint32_t handle, uint64_t account)> debug;
     // API v19 on_chat: each line a player sent that is no EMF command (on the receive thread; empty: none)
     std::function<void(ChatLine line)> on_line;
+    // API v27 mod messages: a marked line (#!emf1 ...) a player sent, on the receive thread, before commands and on_line;
+    // true = taken (it is never added to the chat, so no one sees it)
+    std::function<bool(uint32_t handle, uint64_t account, std::string_view text)> net_line;
+    // after each run of the receive loop (before the lines of the outbox go out): the connected players
+    std::function<void(const std::vector<ChatConnection>& connected)> net_tick;
 };
+// Chat bytes a player's reader may have waiting before more mod message lines go to it (the rest wait for a later run).
+constexpr int32_t kMaxNetPendingBytes = 16384;
 // Hooks the server's receive loop and chatLogAdd (both found by signature; 0 = not found). True if both are in place.
 bool install_server_chat(uintptr_t receive, uintptr_t chat_log_add, ServerChatDeps deps);
 
@@ -280,6 +288,10 @@ bool server_chat_on();  // the hooks are in place (install_server_chat, or serve
 bool queue_chat_tell(uint32_t handle_hint, uint64_t account, std::string line);
 // A mod's line for every connected player. False as queue_chat_tell.
 bool queue_chat_everyone(std::string line);
+// A mod message line (API v27) for one player: as queue_chat_tell, but it waits while that player's reader is behind.
+bool queue_net_line(uint32_t handle, uint64_t account, std::string line);
+// How many more lines the outbox takes.
+size_t chat_outbox_room();
 // The server object the receive loop last ran for (its connection records), or nullptr before the first run.
 uint8_t* chat_server();
 
@@ -292,5 +304,35 @@ struct ServerChatDetours {
     ChatLogAddFn log_add;
 };
 ServerChatDetours server_chat_for_test(ChatReceiveFn game_receive, ChatLogAddFn game_log_add, ServerChatDeps deps);
+
+// ---- API v27, a player's game: mod messages through the client's chat ----
+// The client's chat: the outbox flush runs every frame of the game's update with the GameClient (rcx); before the game
+// flushes, EMF queues up to kClientLinesPerFrame of the lines a mod's messages became with chatClientSend (which skips the
+// UI's text-chat gate: it works with text chat off), on the GameClient's thread that owns the outbox. A marked line the
+// server speaks as this player reaches the chatLogAdd detour (the same hook as the server's) for the client's own chat
+// system, *(GameClient+0xF8): it is taken there and never added, so no one sees it.
+constexpr size_t kGameClientChat = 0xF8;  // GameClient: its ChatSystem* (build 1273043, from static analysis)
+constexpr size_t kClientLinesPerFrame = 4;
+struct ClientChatDeps {
+    std::function<bool(std::string_view text, uint64_t speaker)> line;  // a marked line the client's chat got: true = taken
+    std::function<std::vector<std::string>(size_t max)> take;           // the lines to send now (at most `max`)
+    std::function<void(std::vector<std::string> lines)> put_back;       // lines the game would not take, to the front
+    std::function<void(const std::string& text)> log;
+};
+using ClientFlushFn = void(__fastcall*)(uint8_t* game_client);
+// chatClientSend: Result* (out, ChatSystem* sys, u8 kind, const StringView* text, u32 tag1, u32 tag2); out[0]: 0 ok,
+// 2 the chat pool is full, 0x12 too long
+using ChatClientSendFn = uint8_t*(__fastcall*)(uint8_t* out, uint8_t* sys, uint8_t kind, const ChatText* text,
+                                               uint32_t tag1, uint32_t tag2);
+// Hooks the outbox flush and keeps chatClientSend to call. Needs chatLogAdd hooked already (install_server_chat: both
+// ends share that one detour). True if in place.
+bool install_client_chat(uintptr_t flush, uintptr_t client_send, ClientChatDeps deps);
+struct ClientChatDetours {
+    ClientFlushFn flush;
+    ChatLogAddFn log_add;
+};
+// Tests: the flush and chatLogAdd detours over stand-ins (the server side is off).
+ClientChatDetours client_chat_for_test(ClientFlushFn game_flush, ChatClientSendFn game_send, ChatLogAddFn game_log_add,
+                                       ClientChatDeps deps);
 
 }  // namespace emf::core

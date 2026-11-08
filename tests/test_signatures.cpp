@@ -101,10 +101,12 @@ TEST_CASE("signature table: build 1283531's RVAs, game and dedicated server, as 
         CHECK(d->rva[static_cast<size_t>(client)] == w.client);
         CHECK(d->rva[static_cast<size_t>(server)] == w.server);
     }
-    // every signature was checked on both exes of 1283531 (none is kRvaUnchecked there)
-    // (except the HUD editor's UI signatures, checked on 1287369 alone)
+    // every signature was checked on both exes of 1283531 (none is kRvaUnchecked there), except the HUD editor's UI
+    // signatures (checked on 1287369 alone) and the two of the chat transport (API v27), added when only the exes of
+    // 1273043 (their RVAs from the notes), 1285601 (client) and 1287369 were at hand
     for (const auto& d : all_signatures()) {
         if (d.id >= Sig::UiScopeOpen && d.id <= Sig::UiPopTransform) continue;
+        if (d.id == Sig::ChatClientSend || d.id == Sig::ClientOutboxFlush) continue;
         CHECK(d.rva[static_cast<size_t>(client)] != kRvaUnchecked);
         CHECK(d.rva[static_cast<size_t>(server)] != kRvaUnchecked);
     }
@@ -181,6 +183,7 @@ TEST_CASE("signature table: one entry per Sig, in order, unique names, valid pat
         for (size_t b = 0; b < kKnownBuildCount; ++b) {
             CAPTURE(all[i].name);
             const bool client_only = all[i].id == Sig::ClientWorldSetup || all[i].id == Sig::QueueChatMessage ||
+                                     all[i].id == Sig::ClientOutboxFlush ||
                                      (all[i].id >= Sig::UiFrame && all[i].id <= Sig::CharacterSelected) ||
                                      (all[i].id >= Sig::UiScopeOpen && all[i].id <= Sig::UiPopTransform);
             CHECK((all[i].rva[b] == 0) == (known_builds()[b].server && client_only));
@@ -257,7 +260,7 @@ TEST_CASE("signature table has the inventory transaction and readOther, optional
         CHECK(d->rva[1] == w.rva_1273043);
         CHECK_FALSE(d->required);
     }
-    CHECK(kSigCount == 57);
+    CHECK(kSigCount == 59);
 }
 
 TEST_CASE("signature table has XpRequired and MaxPlayerLevel (API v22 levels), optional, on both exes of 1283531") {
@@ -271,6 +274,30 @@ TEST_CASE("signature table has XpRequired and MaxPlayerLevel (API v22 levels), o
     CHECK(cap->rva[3] == 0xe99270u);
     CHECK(cap->rva[4] == 0x9404f0u);
     CHECK_FALSE(cap->required);
+}
+
+TEST_CASE("signature table has ChatClientSend and ClientOutboxFlush (API v27 mod messages), optional") {
+    const SigDef* send = find_signature("ChatClientSend");
+    REQUIRE(send != nullptr);
+    CHECK(send->id == Sig::ChatClientSend);
+    CHECK_FALSE(send->required);
+    CHECK(send->rva[1] == 0xe99f70u);  // 1273043 client
+    CHECK(send->rva[2] == 0x94e320u);  // its dedicated server (the unused copy)
+    CHECK(send->rva[5] == 0xeb1140u);  // 1285601 client
+    CHECK(send->rva[7] == 0xeb1220u);  // 1287369 client
+    CHECK(send->rva[8] == 0x958570u);  // 1287369 dedicated server
+    CHECK_FALSE(rva_checked(*send, 0));  // 1269579, 1283531, 1285601 server: not checked
+    CHECK_FALSE(rva_checked(*send, 3));
+    CHECK(rva_checked(*send, 7));
+    const SigDef* flush = find_signature("ClientOutboxFlush");
+    REQUIRE(flush != nullptr);
+    CHECK(flush->id == Sig::ClientOutboxFlush);
+    CHECK_FALSE(flush->required);
+    CHECK(flush->rva[1] == 0x867710u);
+    CHECK(flush->rva[5] == 0x871e10u);
+    CHECK(flush->rva[7] == 0x871ef0u);
+    for (const size_t server : {2u, 4u, 6u, 8u}) CHECK(absent_on(*flush, static_cast<int>(server)));  // client-only code
+    CHECK_FALSE(absent_on(*flush, 7));
 }
 
 TEST_CASE("signature table has sendServerInfo (API v21 world settings: the game's resync), on both exes of 1273043") {

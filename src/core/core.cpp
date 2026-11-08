@@ -195,6 +195,89 @@ uint32_t chat_sender_entity(uint64_t account) {
     });
 }
 
+// ---- API v27 mod messages: what the chat transport asks of the server world ----
+// A player entity's account (its BasicPlayerInfos entry's), or 0.
+uint64_t net_account_of(uint32_t entity) {
+    const EmfApi* api = emf::core::api_table();
+    EmfWorld* w = api->server_world();
+    const auto* infos = static_cast<const uint8_t*>(w ? api->singleton(w, "BasicPlayerInfos") : nullptr);
+    if (!infos || entity == 0 || entity > emf::core::kPlayerInfoCount) return 0;
+    uint8_t entry[emf::core::kPlayerInfoSize];
+    if (!emf::seh_read(infos + static_cast<size_t>(entity - 1) * emf::core::kPlayerInfoSize, entry, sizeof entry))
+        return 0;
+    const auto info = emf::core::read_player_info(entry, entity);
+    return info ? info->account : 0;
+}
+
+// A player's connection (handle, account) from the server's own records, or nothing.
+std::optional<std::pair<uint32_t, uint64_t>> net_connection_of(uint32_t entity) {
+    const uint64_t account = net_account_of(entity);
+    uint8_t* const server = emf::core::chat_server();
+    if (!account || !server) return std::nullopt;
+    std::vector<uint8_t> records(
+        static_cast<size_t>(emf::core::server_layout::kConnectionSize) * emf::core::server_layout::kConnectionCount, 0);
+    if (!emf::seh_read(server + emf::core::server_layout::kConnections, records.data(), records.size()))
+        return std::nullopt;
+    const auto c = emf::core::connection_of(records.data(), account);
+    if (!c) return std::nullopt;
+    return std::make_pair(c->handle, c->account);
+}
+
+// True for the connection of this process's own player (a game it hosts): its messages go in process, not by chat.
+bool net_is_local(uint32_t, uint64_t account) {
+    const EmfApi* api = emf::core::api_table();
+    if (g_state->exe.server || !api->server_world()) return false;  // a joined game or the dedicated server hosts no player
+    const uint32_t local = api->local_player();
+    return local != 0 && account != 0 && net_account_of(local) == account;
+}
+
+emf::core::ChatPolicy g_net_policy;  // [chat] admins / everyone: who is an admin for a message's sender
+
+// Switches the chat transport on (the chat hooks are in place): the server end everywhere (a game that hosts, the
+// dedicated server), the client end on a game exe, with the client's outbox flush and chatClientSend when the build has
+// them. Mod messages to and from a joined game or the server need that; in process they never did.
+void start_net_transport(bool known, const std::wstring& ini) {
+    (void)ini;
+    auto* net = g_state->net;
+    emf::core::net::ServerEnv senv;
+    senv.send = [](uint32_t handle, uint64_t account, const std::string& line) {
+        return emf::core::queue_net_line(handle, account, line);
+    };
+    senv.room = [] { return emf::core::chat_outbox_room(); };
+    senv.is_local = net_is_local;
+    senv.emf_version = EMF_VERSION;
+    senv.api = EMF_API_VERSION;
+    senv.build = g_state->exe.build_number;
+    senv.greet = GetPrivateProfileIntW(L"net", L"greet", 1, ini.c_str()) != 0;
+    net->enable_server(std::move(senv));
+    g_state->net_connection_of = net_connection_of;
+    g_state->net_is_admin = [](uint64_t account) { return g_net_policy.allows(account); };
+    g_state->net_entity_of = chat_sender_entity;
+    if (g_state->exe.server) {
+        emf::logf("mod messages: on the server end ([net] greet=%d)", senv.greet ? 1 : 0);
+        return;
+    }
+    const auto& send = g_state->sigs[static_cast<size_t>(emf::Sig::ChatClientSend)];
+    const auto& flush = g_state->sigs[static_cast<size_t>(emf::Sig::ClientOutboxFlush)];
+    if (!emf::is_usable(send, known) || !emf::is_usable(flush, known)) {
+        emf::logf("mod messages: this game cannot send them to a server (the client chat functions were not found on this "
+                  "game build); in process and as a server they work");
+        return;
+    }
+    emf::core::net::ClientEnv cenv;  // self: not known yet, the first beacon's speaker stands for it
+    cenv.emf_version = EMF_VERSION;
+    cenv.api = EMF_API_VERSION;
+    cenv.build = g_state->exe.build_number;
+    net->enable_client(std::move(cenv));
+    emf::core::ClientChatDeps cd;
+    cd.line = [](std::string_view text, uint64_t speaker) { return g_state->net->client_line(text, speaker); };
+    cd.take = [](size_t max) { return g_state->net->client_take(max); };
+    cd.put_back = [](std::vector<std::string> lines) { g_state->net->client_put_back(std::move(lines)); };
+    cd.log = [](const std::string& t) { emf::logf("%s", t.c_str()); };
+    const bool ok = emf::core::install_client_chat(flush.addr, send.addr, std::move(cd));
+    emf::logf("mod messages: %s", ok ? "on (server and client ends)" : "server end only (the client's chat hook failed)");
+}
+
 // chat.players (admin): the players of the server world with their account hashes (what [chat] admins takes), the
 // connection handle their BasicPlayerInfos entry holds and whether the server's connection record for it matches (their
 // chat reader), and their name. (No raw dump: connection records hold players' network data, and logs go into bug
@@ -1343,7 +1426,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     {
         const std::wstring ini = dir + L"\\emf\\emf_core.ini";
         const bool players = g_state->exe.server || GetPrivateProfileIntW(L"chat", L"players", 0, ini.c_str()) != 0;
-        if (players) {
+        // API v27 mod messages ride on the same two hooks, so they are installed for them too ([net] enabled=0: off)
+        const bool net_on = g_state->net && GetPrivateProfileIntW(L"net", L"enabled", 1, ini.c_str()) != 0;
+        if (players || net_on) {
             wchar_t admins[2048] = {};
             GetPrivateProfileStringW(L"chat", L"admins", L"", admins, 2048, ini.c_str());
             const bool everyone = GetPrivateProfileIntW(L"chat", L"everyone", 0, ini.c_str()) != 0;
@@ -1361,19 +1446,32 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             std::vector<std::string> skipped_admins;
             sc.policy = emf::core::parse_chat_policy(utf8(admins), everyone, &skipped_admins);
             for (const auto& entry : skipped_admins) emf::logf("%s", emf::core::skipped_admin_warning(entry).c_str());
-            sc.is_command = [](std::string_view word) {
-                for (const auto& [name, help] : g_state->commands.list())
-                    if (name == word) return true;
-                return false;
-            };
-            // commands a mod marked for every player (API v17 EMF_COMMAND_PLAYERS); the admins may run all of them
-            sc.for_players = [](std::string_view word) { return g_state->commands.for_players(word); };
-            sc.run = [](const std::string& line, const emf::core::CommandSender& sender, emf::core::ReplyFn reply) {
-                g_state->commands.enqueue(line, GetTickCount64(), sender, std::move(reply));
-            };
+            g_net_policy = sc.policy;
+            if (players) {  // [chat] players=1 (always on the dedicated server): players' /commands and on_chat
+                sc.is_command = [](std::string_view word) {
+                    for (const auto& [name, help] : g_state->commands.list())
+                        if (name == word) return true;
+                    return false;
+                };
+                // commands a mod marked for every player (API v17 EMF_COMMAND_PLAYERS); the admins may run all of them
+                sc.for_players = [](std::string_view word) { return g_state->commands.for_players(word); };
+                sc.run = [](const std::string& line, const emf::core::CommandSender& sender, emf::core::ReplyFn reply) {
+                    g_state->commands.enqueue(line, GetTickCount64(), sender, std::move(reply));
+                };
+                if (GetPrivateProfileIntW(L"chat", L"debug", 0, ini.c_str()) != 0) sc.debug = chat_debug_dump;
+                sc.on_line = [](emf::core::ChatLine line) { emf::core::note_chat_line(std::move(line)); };  // v19 on_chat
+            }
             sc.log = [](const std::string& t) { emf::logf("%s", t.c_str()); };
-            if (GetPrivateProfileIntW(L"chat", L"debug", 0, ini.c_str()) != 0) sc.debug = chat_debug_dump;
-            sc.on_line = [](emf::core::ChatLine line) { emf::core::note_chat_line(std::move(line)); };  // v19 on_chat
+            if (net_on) {
+                sc.net_line = [](uint32_t handle, uint64_t account, std::string_view text) {
+                    return g_state->net->server_line(handle, account, text);
+                };
+                sc.net_tick = [](const std::vector<emf::core::ChatConnection>& connected) {
+                    std::vector<emf::core::net::Connection> v;
+                    for (const auto& c : connected) v.push_back({c.handle, c.account});
+                    g_state->net->server_tick(v);
+                };
+            }
             g_state->entity_by_account = chat_sender_entity;
             // the sender's entity: the player info entry that holds their account hash (players are the first ids)
             // the sender's entity, looked up when the command runs (the server world's thread): the player info
@@ -1386,14 +1484,18 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             const auto& add = g_state->sigs[static_cast<size_t>(emf::Sig::ChatLogAdd)];
             const bool ok = emf::is_usable(rcv, known) && emf::is_usable(add, known) &&
                             emf::core::install_server_chat(rcv.addr, add.addr, std::move(sc));
-            if (!ok)
+            if (!ok) {
                 emf::logf("players' chat commands: off (the server's chat functions were not found on this game build)");
-            else if (everyone)
-                emf::logf("players' chat commands: on, for every player ([chat] everyone=1)");
-            else
-                emf::logf("players' chat commands: on, for %zu admin account(s) ([chat] admins in emf\\emf_core.ini; a "
-                          "refused player's account is logged)",
-                          admin_count);
+            } else if (players) {
+                if (everyone)
+                    emf::logf("players' chat commands: on, for every player ([chat] everyone=1)");
+                else
+                    emf::logf("players' chat commands: on, for %zu admin account(s) ([chat] admins in emf\emf_core.ini; "
+                              "a refused player's account is logged)",
+                              admin_count);
+            }
+            if (ok && net_on) start_net_transport(known, ini);
+            else if (net_on) emf::logf("mod messages: in process only (the chat functions were not found on this game build)");
         }
     }
     if (!g_state->commands.add("chat.players",

@@ -608,10 +608,10 @@ slot.type = EMF_UI_SLOT;  slot.icon = wolf;  slot.text = "Wolf";  slot.key = "ac
 
 ## v27: mod messages
 
-Your mod on a player's game and the same mod on the server send each other messages on named channels. **For now only
-in process**: the host's own game and an offline game (the server world and the player's game in one process). Joined
-players and the dedicated server come with the chat transport in a later version; until then `net_to_server` from a
-joined game is false and `net_to_players` reaches only the host.
+Your mod on a player's game and the same mod on the server send each other messages on named channels. In the host's
+own game and in an offline game (the server world and the player's game in one process) they are delivered in process.
+Joined players and the dedicated server use the game's chat as the transport (below). The chat transport is built and
+tested without the game; it has not been run in a live game yet, so treat it as unproven until it has.
 
 ```c
 EmfNetChannel c = {sizeof c};
@@ -630,6 +630,36 @@ api->net_to_player(w, from->player, "mymod/show", "ok", 2);  // the server -> th
   server's own records, never from the message), `local` in process, `admin` for the host's own game.
 - Refusals (a bad channel, too large, over the rate, the wrong direction) are false and logged once per reason; a
   player whose game has no such channel is false without a log.
+
+- A message to or from a peer is sent only when the other side has the same channel at the same version (`net_peer`
+  says which version a player's game has, 0 for none); nothing is delivered across versions.
+- Order and delivery: in order per peer and direction, at most once, very likely delivered while both stay
+  connected. A message lost under heavy load or on a disconnect is not resent: a mod that needs certainty sends an
+  acknowledgement, or sends its state again when a player's game says hello (`net_peer` turns non-zero).
+
+### The chat transport (joined players, the dedicated server)
+
+- **Lines.** A message becomes up to 24 marked chat lines (`#!emf1 <type> <seq> <channel>@<ver> <frag>/<count> <enc>
+  <payload>`, at most 1024 bytes each, text or base64url). The server's end takes a player's marked line in the receive
+  loop before the game adds it (so no one sees it, and it never reaches commands, `on_chat` or the log); the player's
+  end takes the server's marked lines before the chat shows them. The sender of a message is the server's own
+  connection record (handle and account), never the message.
+- **Discovery.** Nothing is sent to a game that did not prove it runs EMF. A server that has at least one channel sends
+  each new connection one beacon line (spoken as that player, kind 0); an EMF game hides it and answers with a hello (its
+  EMF version, API, game build and channels); the server answers with a welcome (its channels). A game without EMF
+  shows the beacon text once ("This server uses EMF mods ..."); `[net] greet=0` in `emf\emf_core.ini` turns the beacon
+  off (and with it the whole transport for that server). A server without EMF sends no beacon, so an EMF game sends
+  nothing to it; a marked line another player types is dropped (the line must be spoken as the player itself).
+- **Limits.** A player's game: 20 lines a second (burst 40) and 16 KiB a second; a flood of ten times that gets the
+  account ignored for a minute. Per channel and sender: `per_10s`. The server holds a player's mod lines back while
+  that player's chat reader has more than 16 KiB waiting, and adds at most 32 lines per receive-loop run (shared with
+  command replies). A game sends at most 4 lines a frame (up to 64 wait).
+- **Settings** (`emf\emf_core.ini`): `[net] enabled=0` leaves the chat hooks out (messages stay in process),
+  `greet=0` as above. On a game that hosts, the hooks are installed even without `[chat] players=1` (only the
+  command policy stays behind that switch).
+- Works with text chat turned off in the server's settings (the game's own send call is used, which skips the UI's
+  gate). Needs two engine functions (`ChatClientSend`, `ClientOutboxFlush`) that `emf_sigcheck` finds on the known
+  builds; where they are missing a joined game cannot send, the server end and the loopback still work.
 
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
 

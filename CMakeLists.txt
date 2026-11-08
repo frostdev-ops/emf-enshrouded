@@ -600,6 +600,7 @@ add_executable(emf_tests
   tests/test_vk_layer.cpp
   tests/test_layer_env.cpp
   tests/test_chat_commands.cpp
+  tests/test_client_chat.cpp
   tests/test_server_chat.cpp
   tests/test_server_chat_hooks.cpp
   tests/test_line_queue.cpp

@@ -3,6 +3,7 @@
 #include <doctest.h>
 
 #include <cstring>
+#include <functional>
 #include <string>
 #include <vector>
 
@@ -121,7 +122,7 @@ void __fastcall fake_receive(uint8_t* server) {
 
 struct Rig {
     FakeServer fs;
-    Rig() {
+    explicit Rig(const std::function<void(ServerChatDeps&)>& tweak = {}) {
         g_fs = &fs;
         g_added.clear();
         g_speakers.clear();
@@ -140,6 +141,7 @@ struct Rig {
         deps.now_ms = [] { return g_chat_now; };
         deps.on_line = [](ChatLine l) { g_heard.push_back(std::move(l)); };
         g_chat_now += 60000;  // every test starts with a fresh rate window
+        if (tweak) tweak(deps);
         g_d = server_chat_for_test(fake_receive, fake_add, std::move(deps));
     }
     ~Rig() { g_fs = nullptr; }
@@ -400,4 +402,114 @@ TEST_CASE("server chat hooks: at most 32 lines are added per receive loop run (t
     CHECK(g_added.size() == 40 + 31);
     r.receive();
     CHECK(g_added.size() == 40 + 31 + 2);
+}
+
+// ---- API v27 mod messages ----
+
+namespace {
+struct NetSeen {
+    uint32_t handle;
+    uint64_t account;
+    std::string text;
+};
+std::vector<NetSeen> g_net_lines;
+std::vector<std::vector<ChatConnection>> g_net_ticks;
+bool g_net_take = true;
+
+void with_net(ServerChatDeps& d) {
+    g_net_lines.clear();
+    g_net_ticks.clear();
+    g_net_take = true;
+    d.net_line = [](uint32_t h, uint64_t a, std::string_view t) {
+        g_net_lines.push_back({h, a, std::string(t)});
+        return g_net_take;
+    };
+    d.net_tick = [](const std::vector<ChatConnection>& c) { g_net_ticks.push_back(c); };
+}
+}  // namespace
+
+TEST_CASE("server chat hooks v27: a marked line goes to the net service before commands and on_chat, and is never added") {
+    Rig r(with_net);
+    g_incoming = {{kPlayerHandle, kPlayer, "#!emf1 M 0 bm/pick@1 0/1 t 3"},
+                  {kPlayerHandle, kPlayer, "hello all"},
+                  {kAdminHandle, kAdmin, "/give Wood 5"}};
+    r.receive();
+    REQUIRE(g_net_lines.size() == 1);
+    CHECK(g_net_lines[0].handle == kPlayerHandle);
+    CHECK(g_net_lines[0].account == kPlayer);
+    CHECK(g_net_lines[0].text == "#!emf1 M 0 bm/pick@1 0/1 t 3");
+    REQUIRE(g_added.size() == 1);  // only the plain line
+    CHECK(g_added[0] == "hello all");
+    CHECK(g_heard.size() == 1);    // on_chat heard it too, but not the marked line
+    REQUIRE(g_ran.size() == 1);
+    CHECK(g_ran[0].line == "give Wood 5");
+}
+
+TEST_CASE("server chat hooks v27: a marked line the net service does not take goes on as chat") {
+    Rig r(with_net);
+    g_net_take = false;  // the service says no: the line then goes on as chat (a server without the end switched on)
+    g_incoming = {{kPlayerHandle, kPlayer, "#!emf1 M 0 bm/pick@1 0/1 t 3"}};
+    r.receive();
+    CHECK(g_net_lines.size() == 1);
+    CHECK(g_added.size() == 1);
+}
+
+TEST_CASE("server chat hooks v27: without a net service marked lines are ordinary chat") {
+    Rig r;
+    g_incoming = {{kPlayerHandle, kPlayer, "#!emf1 M 0 bm/pick@1 0/1 t 3"}};
+    r.receive();
+    CHECK(g_added.size() == 1);
+}
+
+TEST_CASE("server chat hooks v27: after each receive loop the net service is told who is connected") {
+    Rig r(with_net);
+    r.receive();
+    REQUIRE(g_net_ticks.size() == 1);
+    std::vector<uint32_t> handles;
+    for (const auto& c : g_net_ticks[0]) handles.push_back(c.handle);
+    CHECK(handles.size() == 2);
+    CHECK(((handles[0] == kAdminHandle && handles[1] == kPlayerHandle) ||
+           (handles[1] == kAdminHandle && handles[0] == kPlayerHandle)));
+    r.receive();
+    CHECK(g_net_ticks.size() == 2);
+}
+
+TEST_CASE("server chat hooks v27: a mod message line reaches only its player; it waits while that reader is behind") {
+    Rig r(with_net);
+    REQUIRE(queue_net_line(kPlayerHandle, kPlayer, "#!emf1 W 0 emf/net@1 0/1 t p1;x;1;1;"));
+    r.receive();
+    REQUIRE(g_added.size() == 1);
+    CHECK(g_speakers[0] == std::make_pair(kPlayerHandle, kPlayer));
+    CHECK((r.fs.tail_mask() & (1u << 5)) != 0);  // not the admin
+    CHECK((r.fs.tail_mask() & (1u << 1)) == 0);  // the player
+
+    // the player's reader has too much waiting: its mod line waits, other lines (and other players) go on
+    const int32_t behind = kMaxNetPendingBytes + 1;
+    std::memcpy(r.fs.sys.data() + 0x0C + 12 * 1 + 8, &behind, 4);
+    g_added.clear();
+    g_speakers.clear();
+    REQUIRE(queue_net_line(kPlayerHandle, kPlayer, "#!emf1 M 0 bm/show@1 0/1 t one"));
+    REQUIRE(queue_chat_tell(kPlayerHandle, kPlayer, "a normal tell"));
+    REQUIRE(queue_net_line(kAdminHandle, kAdmin, "#!emf1 M 0 bm/show@1 0/1 t admin"));
+    r.receive();
+    REQUIRE(g_added.size() == 2);
+    CHECK(g_added[0] == "a normal tell");
+    CHECK(g_added[1] == "#!emf1 M 0 bm/show@1 0/1 t admin");
+    // it goes when the reader has caught up
+    const int32_t caught_up = 0;
+    std::memcpy(r.fs.sys.data() + 0x0C + 12 * 1 + 8, &caught_up, 4);
+    g_added.clear();
+    r.receive();
+    REQUIRE(g_added.size() == 1);
+    CHECK(g_added[0] == "#!emf1 M 0 bm/show@1 0/1 t one");
+}
+
+TEST_CASE("server chat hooks v27: the outbox room shrinks with waiting lines") {
+    Rig r(with_net);
+    const size_t room = chat_outbox_room();
+    CHECK(room == kMaxChatOutbox);
+    REQUIRE(queue_net_line(kPlayerHandle, kPlayer, "x"));
+    CHECK(chat_outbox_room() == room - 1);
+    r.receive();
+    CHECK(chat_outbox_room() == room);
 }
