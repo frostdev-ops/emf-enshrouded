@@ -630,7 +630,8 @@ Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod
 `help`, `mods` (every mod, its version and status), `hooks` (every inline hook and its owner), `pattern <bytes> [.section]` (test a pattern live), `settings <mod>`, `set <mod> <key> <value>` (`enabled` = the switch,
 from the next start), `profile [save <name> [--settings] [--replace] | load <name>]` (mod profiles: the switches of
 every mod under a name, as in EMF.exe; a load applies at the next start), `items [part]`, `give <item> [n]`, `put <item> [n] [entity] [level] [rarity]`,
-`take <item> [n] [entity]`, `spawn <guid> [n]`, `time <hours>`, `pos`, `goto [#k] <x> <y> <z> [ground]` / `goto [#k] <entity> [ground]`
+`take <item> [n] [entity]`, `spawn <guid> [n]`, `time <hours>`, `pos`, `perf` (how long each world step took since the last `perf`: the game's own steps, EMF's wait
+for the server world's jobs and each mod), `goto [#k] <x> <y> <z> [ground]` / `goto [#k] <entity> [ground]`
 (v20: teleports you, or the k-th player, there or beside that entity; the result follows a few steps later), `entities`, `near [radius]`, `inv <entity>`,
 `inspect <entity>`, `tpl <entity> <component> [bytes] [offset]`, `tplset <entity> <component> <offset> <type> <value>`,
 `stack <item> <max>`, `destroy <entity>`, `chat.players` (v19: the players of the world you host or of the

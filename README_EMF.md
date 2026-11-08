@@ -320,6 +320,29 @@ Example reply (from a test run):
 [cmd] time of day is now 12.00 h (was 15.35 h)
 ```
 
+## If the game stutters
+
+EMF can measure where the time goes, so a report can say what is slow:
+
+1. **Frame times.** Put this in `<game>\emf\emf_core.ini`:
+
+   ```
+   [debug]
+   frame_times=1
+   ```
+
+   From the next start, each frame's time goes to `emf\logs\frame_times_<date>_<time>.csv`, and a summary every 10 s
+   to the `.log` next to it (frames per second, the slowest frames, and each frame over 100 ms with the time of day).
+   It works in every way of starting, "Play without any mods" in EMF.exe too, so you can compare. `frame_times=0`
+   (or no line) turns it off; it changes nothing in the game.
+2. **Each mod's time.** In the console, `perf` shows how long the game's own world steps, EMF's wait for the server
+   world's jobs and each mod took per step since the last `perf`; `lua.perf` the same for each Lua mod. Play a few
+   minutes, then run them.
+3. **Slow moments.** A mod's step over 25 ms (the game's own over 100 ms) is written to `emf\emf_core.log` as a
+   `slow:` line, at most once a minute each.
+
+When you report stutter, send the frame-time `.log`, `emf_core.log` and what `perf` and `lua.perf` showed.
+
 ## The sample mod
 - Every 5 s (client world): the local player's position, and how often the hooked `client_player_state` program ran.
 - Every 10 s (server world, host only): how often its own ECS program `sample_mod_server_tick` ran, and the villagers

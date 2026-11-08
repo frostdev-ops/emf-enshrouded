@@ -286,8 +286,34 @@ void cmd_chat_players(EmfWorld* w, int argc, const char* const* argv, void*) {
     if (!count) api->command_reply("no players in this world's player list");
 }
 
+// A step over the limit (a hitch the player may feel): logged at most once a minute per name, so a player's own
+// session leaves a trace in emf_core.log (`perf` in the console has the numbers).
+void note_slow(const std::string& who, double ms, double limit) {
+    if (ms <= limit) return;
+    static SRWLOCK lock = SRWLOCK_INIT;
+    static std::vector<std::pair<std::string, uint64_t>> last;
+    const uint64_t now = GetTickCount64();
+    bool say = false;
+    AcquireSRWLockExclusive(&lock);
+    auto it = std::find_if(last.begin(), last.end(), [&](const auto& l) { return l.first == who; });
+    if (it == last.end()) {
+        last.emplace_back(who, now);
+        say = true;
+    } else if (now - it->second >= 60000) {
+        it->second = now;
+        say = true;
+    }
+    ReleaseSRWLockExclusive(&lock);
+    if (say)
+        emf::logf("slow: %s took %.0f ms in one world step (said at most once a minute; perf in the console has "
+                  "the numbers)",
+                  who.c_str(), ms);
+}
+
 void hk_sim_step(void* storage, char ticked) {
+    const double game_start = emf::perf_clock_ms();
     o_sim_step(storage, ticked);
+    const double game_ms = emf::perf_clock_ms() - game_start;
     try {
         emf::WorldView view = emf::WorldView::from_storage(storage);
         if (view.state() != 2) {  // world not running yet
@@ -297,10 +323,20 @@ void hk_sim_step(void* storage, char ticked) {
         const uint8_t kind = view.kind();
         if (kind > 2) return;
         auto* world = reinterpret_cast<EmfWorld*>(view.raw());
+        static const std::string kGameStep[3] = {"the game's server world step", "the game's prediction world step",
+                                                 "the game's client world step"};
+        g_state->perf.add(kGameStep[kind], game_ms);
+        note_slow(kGameStep[kind], game_ms, 100.0);
         // The server world's SimStep has returned with its grid update and range queries still running on the game's
         // workers; the game waits for them later in this frame. Wait now, so mods' on_tick and commands (spawn,
         // destroy, give) never change the grid under them. Other worlds: nothing to wait for.
-        g_world_jobs.before_tick_work(world, kind);
+        const double wait_start = emf::perf_clock_ms();
+        if (g_world_jobs.before_tick_work(world, kind)) {
+            const double wait_ms = emf::perf_clock_ms() - wait_start;
+            static const std::string kWait = "EMF: waiting for the server world's jobs";
+            g_state->perf.add(kWait, wait_ms);
+            note_slow(kWait, wait_ms, emf::core::Dispatcher::kSlowCallMs);
+        }
         g_state->tracker.on_tick(world, kind, GetTickCount64());
         g_state->dispatcher.run(world, kind, [](const std::string& e) { emf::logf("dispatch: %s", e.c_str()); });
         emf::core::pump_setting_changes(world);  // v13 on_setting_changed
@@ -650,6 +686,10 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     });
     g_state->log_line = [](const std::string& s) { emf::logf("%s", s.c_str()); };
     emf::core::set_fault_reporter([](const std::string& s) { emf::logf("%s", s.c_str()); });
+    g_state->perf_since_ms = GetTickCount64();
+    g_state->dispatcher.set_perf(&g_state->perf, [](const std::string& module, double ms) {
+        note_slow(module, ms, emf::core::Dispatcher::kSlowCallMs);
+    });
     g_state->now_ms = [] { return GetTickCount64(); };
     auto defs = emf::all_signatures();
     int usable = 0;

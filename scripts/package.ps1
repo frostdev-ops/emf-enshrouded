@@ -39,7 +39,7 @@ foreach ($pack in @($ExtraContent | ForEach-Object { $_ -split "," })) {  # powe
 
 # The bundled fonts (third_party\fonts\README.md, SIL OFL 1.1): the build copies them to dist\emf\fonts\
 $fonts = @("Alegreya-Regular.ttf", "Alegreya-Bold.ttf", "CascadiaMono-Regular.ttf")
-$needed = @("dinput8.dll", "emf\emf_core.dll", "emf\vk\VkLayer_EMF_console.json", "emf\known_tools.txt") + ($fonts | ForEach-Object { "emf\fonts\$_" }) + ($playerMods | ForEach-Object { "emf\mods\$_\$_.dll", "emf\mods\$_\mod.json" })
+$needed = @("dinput8.dll", "emf\emf_core.dll", "emf\vk\VkLayer_EMF_console.json", "emf\emf_frametime.dll", "emf\vk\VkLayer_EMF_frametime.json", "emf\known_tools.txt") + ($fonts | ForEach-Object { "emf\fonts\$_" }) + ($playerMods | ForEach-Object { "emf\mods\$_\$_.dll", "emf\mods\$_\mod.json" })
 foreach ($f in $needed) { if (-not (Test-Path -LiteralPath (Join-Path $dist $f))) { throw "missing build output $dist\$f (run scripts\test.sh first)" } }
 if (-not (Test-Path -LiteralPath (Join-Path $Build "emf_sigcheck.exe"))) { throw "missing build output $Build\emf_sigcheck.exe (run scripts\test.sh first)" }
 # emf_content.dll (src/content, built from EML: GPL-3.0-or-later, THIRD_PARTY_NOTICES.md) builds the content of EML mods
@@ -90,6 +90,9 @@ Copy-Into (Join-Path $dist "dinput8.dll") (Join-Path $game "dinput8.dll")
 Copy-Into (Join-Path $dist "emf\emf_core.dll") (Join-Path $game "emf\emf_core.dll")
 Copy-Into $contentDll (Join-Path $game "emf\emf_content.dll")  # the loader loads it only at a start that builds EML content
 Copy-Into (Join-Path $dist "emf\vk\VkLayer_EMF_console.json") (Join-Path $game "emf\vk\VkLayer_EMF_console.json")
+# the frame-time recorder (diagnostics, off until [debug] frame_times=1 in emf_core.ini: README "If the game stutters")
+Copy-Into (Join-Path $dist "emf\emf_frametime.dll") (Join-Path $game "emf\emf_frametime.dll")
+Copy-Into (Join-Path $dist "emf\vk\VkLayer_EMF_frametime.json") (Join-Path $game "emf\vk\VkLayer_EMF_frametime.json")
 Copy-Into (Join-Path $dist "emf\known_tools.txt") (Join-Path $game "emf\known_tools.txt")  # loaders EMF recognises
 foreach ($f in $fonts) { Copy-Into (Join-Path $dist "emf\fonts\$f") (Join-Path $game "emf\fonts\$f") }  # the overlay's text
 # EMF.exe goes in emf\, never next to enshrouded.exe (where mods put proxy DLLs); it finds the game as its parent folder

@@ -53,6 +53,8 @@ struct CoreState {
     GetComponentFn get_component = nullptr;
     GetTemplateComponentFn get_template_component = nullptr;  // optional signature
     Dispatcher dispatcher;
+    PerfBook perf;                           // time per world step: the game's, EMF's wait, each mod's (`perf`)
+    std::atomic<uint64_t> perf_since_ms{0};  // when `perf` last took the book (GetTickCount64)
     WorldTracker tracker;
     std::function<void(const std::string&)> log_line;  // receives finished lines
     std::function<uint64_t()> now_ms;                  // wall clock in ms (injectable for tests)

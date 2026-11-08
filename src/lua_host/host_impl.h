@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "common/perf_book.h"
 #include "core/manifest.h"
 #include "emf/emf_api.h"
 #include "emf/storage.hpp"
@@ -89,6 +90,14 @@ struct Script {
     std::string timeout;                               // the time limit's message with file:line, while it unwinds
     std::string not_run;                               // the core did not keep it as a script mod: never runs again
     uint64_t generation = 1;                         // worlds and proxies made in an older generation are stale
+    // Steps in a row of each world kind that left this script out because it was busy in another world's step (only
+    // that kind's step, under its world_step_m, uses its slot): tick_body waits after kMaxBusySkips.
+    uint32_t busy_skips[3] = {0, 0, 0};
+    // Read without m by a step or an event that finds the script busy in another world: its bus callbacks and event
+    // functions per world kind (only a script that has some for this world is waited for). Changed only under m.
+    std::atomic<uint32_t> bus_kind_subs[3]{};
+    std::atomic<uint32_t> event_kind_subs[3]{};
+    std::string perf_names[3];  // "<id> (server)" etc., made once (under m) for perf_report
     uint64_t loads = 0;                                // +1 per load: answers meant for an older load are dropped
     // data per world: <game>\emf\config\<id>\<slot>.txt (lives as long as the script; attached once)
     std::unique_ptr<emf::WorldFile> file;
@@ -135,6 +144,11 @@ struct Host::Impl {
     std::wstring mods_dir;
     std::vector<std::unique_ptr<Script>> scripts;
     std::atomic<uint64_t> last_check{0};  // GetTickCount64 of the last reload check (tick runs on several world threads)
+    emf::PerfBook perf;                   // each script's time per world step, and the reload check's (perf_report)
+    std::atomic<uint64_t> perf_since{0};  // GetTickCount64 of the last perf_report
+    double (*perf_clock)() = nullptr;     // that timing's clock (nullptr: QueryPerformanceCounter)
+    std::mutex slow_m;                    // slow_said
+    std::map<std::string, uint64_t> slow_said;  // script id -> when its last "slow" line was logged
     size_t memory_limit = kMemoryLimit;   // per script, for states made from now on
     std::mutex m;  // the maps below
     std::mutex world_step_m[3];  // serialize steps of the same world kind; preserves bus delivery order

@@ -3,12 +3,14 @@
 
 #include <doctest.h>
 
+#include <atomic>
 #include <cstdarg>
 #include <cstdio>
 #include <fstream>
 #include <iterator>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "lua_host/host.h"
@@ -1072,4 +1074,135 @@ TEST_CASE("lua host: bus drops drained publications after their sender pauses in
     host.tick(kServer);  // outbox was drained, then sender's on_tick throws before receiver runs
     CHECK(host.status("sender").find("paused:") == 0);
     CHECK_FALSE(logged("STALE_FROM_PAUSED_SENDER"));
+}
+
+namespace {
+double g_perf_now = 0;
+double perf_fake_clock() { return g_perf_now += 30.0; }  // each read is 30 ms later: every timed step lasts 30 ms
+size_t logged_count(const char* needle) {
+    size_t n = 0;
+    for (const auto& l : g->log) n += l.find(needle) != std::string::npos;
+    return n;
+}
+}  // namespace
+
+TEST_CASE("lua host: perf_report gives each script's time per world step, then counts again; a step over 25 ms is "
+          "logged at most once a minute per script") {
+    Rig r(L"perf");
+    add_script(r.dir, "busy", "emf.on_tick(function(w) end)\n");
+    Host host(&r.api, r.dir);
+    host.set_perf_clock(perf_fake_clock);
+    host.load_all();
+    host.tick(kServer);
+    host.tick(kServer);
+    host.tick(kClient);
+    double seconds = -1;
+    const auto lines = host.perf_report(&seconds);
+    CHECK(seconds >= 0.0);
+    const auto has_line = [&](const std::string& start) {
+        for (const auto& l : lines)
+            if (l.rfind(start, 0) == 0) return true;
+        return false;
+    };
+    CHECK(has_line("busy (server): 30.00 ms a step (2 steps), worst 30.0 ms"));
+    CHECK(has_line("busy (client): 30.00 ms a step (1 steps), worst 30.0 ms"));
+    CHECK(logged_count("slow: busy took 30 ms in one world step") == 1u);  // three slow steps, one line
+    CHECK(host.perf_report().empty());                                     // counted again from the last report
+}
+
+namespace {
+// A script whose server step stays inside emf.log('hold') until the test lets it go (on another thread), and whose
+// client steps count themselves in a HUD line.
+struct HeldServerStep {
+    Rig& r;
+    Host& host;
+    HANDLE held = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    std::thread server;
+    bool ok = false;  // the server step is held (tests REQUIRE it: never inside this constructor)
+    HeldServerStep(Rig& rig, Host& h) : r(rig), host(h) {
+        r.fake.log_hook = [this](const std::string& line) {
+            if (line.find("hold") == std::string::npos) return;
+            SetEvent(held);
+            WaitForSingleObject(release, 10000);  // a broken host waits here: the test then fails after 10 s
+        };
+        server = std::thread([this] { host.tick(kServer); });
+        ok = WaitForSingleObject(held, 10000) == WAIT_OBJECT_0;
+    }
+    void let_go() {
+        SetEvent(release);
+        if (server.joinable()) server.join();
+        r.fake.log_hook = nullptr;
+    }
+    ~HeldServerStep() {
+        let_go();
+        CloseHandle(held);
+        CloseHandle(release);
+    }
+};
+const char* kSlowpoke =
+    "n = 0\n"
+    "emf.on_tick(function(w)\n"
+    "  if w:is_server() then emf.log('hold') else n = n + 1; emf.hud('n', tostring(n)) end\n"
+    "end)\n";
+}  // namespace
+
+TEST_CASE("lua host: a client step does not wait for a script busy in the server world's step; it runs again after") {
+    Rig r(L"busy_elsewhere");
+    add_script(r.dir, "slowpoke", kSlowpoke);
+    Host host(&r.api, r.dir);
+    host.set_clock([] { return uint64_t{1000}; });  // the held call must not count against the 250 ms limit
+    host.load_all();
+    host.tick(kClient);
+    REQUIRE(r.fake.hud["slowpoke.n"] == "1");
+    {
+        HeldServerStep hold(r, host);
+        REQUIRE(hold.ok);
+        for (int i = 0; i < 5; ++i) host.tick(kClient);  // returns at once: the script is busy in the server step
+        CHECK(r.fake.hud["slowpoke.n"] == "1");
+        hold.let_go();
+    }
+    host.tick(kClient);
+    CHECK(r.fake.hud["slowpoke.n"] == "2");
+    CHECK(host.status("slowpoke") == "running");
+}
+
+TEST_CASE("lua host: after 30 client steps in a row without it, a client step waits for the busy script") {
+    Rig r(L"busy_elsewhere_long");
+    add_script(r.dir, "slowpoke", kSlowpoke);
+    Host host(&r.api, r.dir);
+    host.set_clock([] { return uint64_t{1000}; });
+    host.load_all();
+    HeldServerStep hold(r, host);
+    REQUIRE(hold.ok);
+    for (int i = 0; i < 30; ++i) host.tick(kClient);  // 30 skipped
+    std::atomic<bool> done{false};
+    std::thread client([&] {
+        host.tick(kClient);  // the 31st waits for the server step
+        done = true;
+    });
+    Sleep(200);
+    CHECK_FALSE(done.load());  // still waiting
+    hold.let_go();
+    client.join();
+    CHECK(done.load());
+    CHECK(r.fake.hud["slowpoke.n"] == "1");  // the waiting step ran once the server step was done
+}
+
+TEST_CASE("lua host: a client step with bus messages waits only for the scripts that listen on the client world") {
+    Rig r(L"busy_bus");
+    add_script(r.dir, "listener",
+               "got = 0\nemf.bus.subscribe('t', function(w, src, p) got = got + 1; emf.hud('got', tostring(got)) end, 'client')\n");
+    add_script(r.dir, "pub", "emf.on_tick(function(w) if w:is_server() then emf.bus.publish('t', 'x', 'client') end end)\n");
+    add_script(r.dir, "slowpoke", kSlowpoke);
+    Host host(&r.api, r.dir);
+    host.set_clock([] { return uint64_t{1000}; });
+    host.load_all();
+    HeldServerStep hold(r, host);  // pub published in this server step, before slowpoke was held
+    REQUIRE(hold.ok);
+    const uint64_t start = GetTickCount64();
+    host.tick(kClient);
+    CHECK(GetTickCount64() - start < 5000);  // slowpoke has no client bus callback: not waited for (the hold lasts 10 s)
+    CHECK(r.fake.hud["listener.got"] == "1");
+    hold.let_go();
 }

@@ -12,6 +12,8 @@
 #include <tuple>
 #include <vector>
 
+#include <functional>
+
 #include "emf/emf_api.h"
 #include "test_scratch.h"
 
@@ -19,6 +21,7 @@ namespace {
 
 struct Fake {
     std::vector<std::string> log, notes, replies;
+    std::function<void(const std::string&)> log_hook;  // called with each log line before it is kept (tests that hold a script)
     std::map<std::string, std::string> hud;  // id -> text
     std::map<std::string, std::pair<uint32_t, uint32_t>> hud_style;  // id -> (place, rgba) of its last hud_set
     struct Cmd {
@@ -272,6 +275,7 @@ void f_log(const char* mod, const char* fmt, ...) {
     va_start(ap, fmt);
     std::vsnprintf(b, sizeof b, fmt, ap);
     va_end(ap);
+    if (g->log_hook) g->log_hook(b);
     g->log.push_back(std::string("[") + mod + "] " + b);
 }
 void f_notify(const char* fmt, ...) {

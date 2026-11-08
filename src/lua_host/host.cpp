@@ -15,6 +15,9 @@ namespace emf::lua {
 namespace {
 
 constexpr uint64_t kCallLimitMs = 250;
+// A client or prediction step leaves out a script busy in another world's step at most this many steps in a row (half a
+// second at 60 steps a second), then waits for it.
+constexpr uint32_t kMaxBusySkips = 30;
 constexpr uint64_t kSaveCreditMs = 1000;  // world-data writes left out of the time limit, per call
 constexpr size_t kBusMaxTopic = 96;
 constexpr size_t kBusMaxPayload = 64 * 1024;
@@ -80,6 +83,49 @@ void* capped_alloc(void* ud, void* ptr, size_t osize, size_t nsize) {
 
 // The clock of the time limit: the host's (tests replace it).
 uint64_t clock_ms(const Script& s) { return s.host && s.host->now_ms ? s.host->now_ms() : GetTickCount64(); }
+
+double perf_now(const Host::Impl& h) { return h.perf_clock ? h.perf_clock() : emf::perf_clock_ms(); }
+
+const char* world_name(int kind) {
+    return kind == EMF_WORLD_SERVER ? "server" : kind == EMF_WORLD_CLIENT ? "client" : "prediction";
+}
+
+// One script's work in one world step, for perf_report; a step over 25 ms is logged at most once a minute per script
+// (by the scripts' clock), so a player's own session leaves a trace in the log.
+struct ScriptStepTimer {
+    Host::Impl& h;
+    const Script& s;
+    int kind;
+    double start;
+    ScriptStepTimer(Host::Impl& host, const Script& script, int k)
+        : h(host), s(script), kind(k), start(perf_now(host)) {}
+    ScriptStepTimer(const ScriptStepTimer&) = delete;
+    ScriptStepTimer& operator=(const ScriptStepTimer&) = delete;
+    ~ScriptStepTimer() {
+        try {
+            report();
+        } catch (...) {  // out of memory: no timing this step (a destructor must not throw)
+        }
+    }
+    void report() {
+        const double ms = perf_now(h) - start;
+        std::string& name = const_cast<Script&>(s).perf_names[kind >= 0 && kind < 3 ? kind : 0];
+        if (name.empty()) name = s.id + " (" + world_name(kind) + ")";
+        h.perf.add(name, ms);
+        if (ms <= 25.0) return;
+        const uint64_t now = clock_ms(s);
+        bool say = false;
+        {
+            std::lock_guard<std::mutex> l(h.slow_m);
+            auto it = h.slow_said.find(s.id);
+            say = it == h.slow_said.end() || now - it->second >= 60000;
+            if (say) h.slow_said[s.id] = now;
+        }
+        if (say && h.api && h.api->log)
+            h.api->log("lua", "slow: %s took %.0f ms in one world step (said at most once a minute; lua.perf in the "
+                              "console has the numbers)", s.id.c_str(), ms);
+    }
+};
 
 bool over_time(const Script* s) { return s && s->call_start && clock_ms(*s) - s->call_start > kCallLimitMs; }
 
@@ -344,6 +390,7 @@ int l_bus_subscribe(lua_State* L) {
     lua_pushvalue(L, 2);
     sub.ref = luaL_ref(L, LUA_REGISTRYINDEX);
     s->bus_subs[topic].push_back(sub);
+    if (sub.kind >= 0 && sub.kind < 3) ++s->bus_kind_subs[sub.kind];
     lua_pushboolean(L, true);
     return 1;
 }
@@ -357,7 +404,10 @@ int l_bus_unsubscribe(lua_State* L) {
     auto it = s->bus_subs.find(topic);
     const bool found = it != s->bus_subs.end();
     if (found) {
-        for (const auto& sub : it->second) luaL_unref(L, LUA_REGISTRYINDEX, sub.ref);
+        for (const auto& sub : it->second) {
+            luaL_unref(L, LUA_REGISTRYINDEX, sub.ref);
+            if (sub.kind >= 0 && sub.kind < 3) --s->bus_kind_subs[sub.kind];
+        }
         s->bus_subs.erase(it);
     }
     lua_pushboolean(L, found);
@@ -781,6 +831,7 @@ void Host::Impl::pause(Script& s, const std::string& why) {
         for (const auto& sub : subs)
             if (s.L) luaL_unref(s.L, LUA_REGISTRYINDEX, sub.ref);
     s.bus_subs.clear();
+    for (auto& n : s.bus_kind_subs) n = 0;
     drop_sections(s.id);  // a paused mod's wheel section is not shown (its state stays: the refs go with it later)
     s.paused = true;
     s.error = why;
@@ -912,8 +963,10 @@ void Host::Impl::unload(Script& s) {
     s.chat_cbs.clear();
     s.ws_cbs.clear();
     s.bus_subs.clear();
+    for (auto& n : s.bus_kind_subs) n = 0;
     s.commands.clear();  // the command names stay registered; they answer "not loaded" until registered again
     s.events.clear();
+    for (auto& n : s.event_kind_subs) n = 0;
     ++s.generation;
 }
 
@@ -922,7 +975,17 @@ Host::Host(const EmfApi* api, std::wstring mods_dir) : impl_(std::make_unique<Im
     impl_->mods_dir = std::move(mods_dir);
     impl_->key_down = [](uint32_t vk) { return emf::keys::down(vk); };
     impl_->now_ms = [] { return GetTickCount64(); };
+    impl_->perf_since = GetTickCount64();
 }
+
+std::vector<std::string> Host::perf_report(double* seconds) {
+    const uint64_t now = GetTickCount64();
+    const double covered = static_cast<double>(now - impl_->perf_since.exchange(now)) / 1000.0;
+    if (seconds) *seconds = covered;
+    return emf::perf_lines(impl_->perf.take(), covered);
+}
+
+void Host::set_perf_clock(double (*clock_ms)()) { impl_->perf_clock = clock_ms; }
 
 Host::~Host() {
     for (auto& s : impl_->scripts) {
@@ -1009,11 +1072,22 @@ void Host::tick_body(EmfWorld* world) {
     }
     if (!h.rechecked.exchange(true)) h.recheck();
     const uint64_t now = GetTickCount64();
-    uint64_t last = h.last_check.load();
-    // the server and client worlds tick on their own threads: only the one that moves the clock on checks
-    if (now > last && now - last >= 1000 && h.last_check.compare_exchange_strong(last, now)) check_reload_now();
     const bool server = kind == EMF_WORLD_SERVER;
     if (server) h.server_seen = now;
+    const uint64_t server_at = h.server_seen.load();
+    // a server step this second (one stored after this step read its clock counts too)
+    const bool hosting_now = server_at != 0 && (now < server_at || now - server_at < 1000);
+    uint64_t last = h.last_check.load();
+    // The worlds tick on their own threads: only the one that moves the clock on checks. The check takes every
+    // script's lock, so while this process hosts a server world only that world checks: a client step (the game's
+    // frame waits for it) must not wait for a script busy in the server world's step.
+    if ((server || !hosting_now) && now > last && now - last >= 1000 &&
+        h.last_check.compare_exchange_strong(last, now)) {
+        const double start = perf_now(h);
+        check_reload_now();
+        static const std::string kReload = "reload check (once a second)";
+        h.perf.add(kReload, perf_now(h) - start);
+    }
     // Drain this world's FIFO once. A callback's publication stays queued until its next step.
     // Sequence watermarks invalidate pre-reload and pre-subscribe messages without stealing
     // the same publication from other mods that are still subscribed.
@@ -1032,9 +1106,30 @@ void Host::tick_body(EmfWorld* world) {
             }
         }
     }
+    double lock_wait = 0;  // time this step waited for scripts busy in another world's step (perf_report)
     for (auto& s : h.scripts) {
-        std::lock_guard<std::recursive_mutex> l(s->m);
+        std::unique_lock<std::recursive_mutex> l(s->m, std::defer_lock);
+        // A client (or prediction) step does not wait for a script busy in the server world's step on another thread:
+        // the game's frame waits for the client world, and a server step's Lua work (a search through every entity)
+        // would become a hitch. The script is left out of this step (its keys stay for the next one), at most
+        // kMaxBusySkips steps in a row; a step that delivers bus messages waits for the scripts that listen on this
+        // world (the messages are this step's; a callback added while the script was busy would not get them anyway).
+        uint32_t& skips = s->busy_skips[lock_kind];
+        const bool bus_for_it = !bus.empty() && s->bus_kind_subs[lock_kind].load() != 0;
+        if (server || bus_for_it || !l.try_lock()) {
+            if (!server && !bus_for_it && ++skips <= kMaxBusySkips) {
+                static const std::string kLeftOut[3] = {"", "a script busy in another world, left out (prediction)",
+                                                        "a script busy in another world, left out (client)"};
+                h.perf.add(kLeftOut[lock_kind], 0.0);
+                continue;
+            }
+            const double wait_start = perf_now(h);
+            l.lock();
+            lock_wait += perf_now(h) - wait_start;
+        }
+        skips = 0;
         if (!s->L || s->paused) continue;
+        const ScriptStepTimer step_timer(h, *s, kind);
         if (server && s->file) {  // the world's data: once per session after its save loaded, again after a reload
             std::string text;
             bool hand = s->file->poll([&](const std::string& t) { text = t; });
@@ -1120,6 +1215,7 @@ void Host::tick_body(EmfWorld* world) {
         ++s->generation;
     }
     // after the scripts' ticks: a reloaded script that offered again kept its entities; the rest come off
+    if (lock_wait > 0.01) h.perf.add(std::string("waiting for scripts busy in another world (") + world_name(kind) + ")", lock_wait);
     if (server) run_offer_drops(h, world);
 }
 

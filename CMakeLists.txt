@@ -246,6 +246,13 @@ set_target_properties(emf_core PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINAR
 # The Vulkan layer manifest (emf_core.dll is the layer library; the loader enables it for the game process).
 configure_file(src/core/overlay/VkLayer_EMF_console.json ${CMAKE_BINARY_DIR}/dist/emf/vk/VkLayer_EMF_console.json
   COPYONLY)
+# EMF's frame-time recorder (diagnostics): a Vulkan layer the loader enables for the game client with [debug]
+# frame_times=1 in emf_core.ini, in every way of starting; it writes emf\logs\frame_times_*.csv and .log.
+add_library(emf_frametime SHARED src/frametime/frametime_layer.cpp src/frametime/frame_stats.cpp)
+target_include_directories(emf_frametime PRIVATE src third_party/vulkan-headers/include)
+set_target_properties(emf_frametime PROPERTIES RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/dist/emf)
+configure_file(src/frametime/VkLayer_EMF_frametime.json ${CMAKE_BINARY_DIR}/dist/emf/vk/VkLayer_EMF_frametime.json
+  COPYONLY)
 # The loaders and DLL mods EMF recognises next to the game (read by the core at start-up and by the installer).
 configure_file(src/core/known_tools.txt ${CMAKE_BINARY_DIR}/dist/emf/known_tools.txt COPYONLY)
 
@@ -615,6 +622,9 @@ add_executable(emf_tests
   tests/test_app_server_process.cpp
   tests/test_app_server_bridge.cpp
   tests/test_app_updates.cpp
+  tests/test_frame_stats.cpp
+  tests/test_perf.cpp
+  src/frametime/frame_stats.cpp
   src/probe/report.cpp)
 target_include_directories(emf_tests PRIVATE tests sdk/include)
 target_compile_definitions(emf_tests PRIVATE EMF_SOURCE_DIR="${CMAKE_SOURCE_DIR}" EMF_BINARY_DIR="${CMAKE_BINARY_DIR}")

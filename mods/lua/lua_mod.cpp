@@ -1,6 +1,7 @@
 // lua: the EMF mod that runs Lua mods (emf/mods/<id>/mod.json with "main": "main.lua"). Built only on the public API:
 // everything it does goes through src/lua_host (one Lua state per script mod, protected calls, live reload).
-// Console: lua.status (every script mod and its state), lua.reload (check the files now).
+// Console: lua.status (every script mod and its state), lua.reload (check the files now), lua.perf (each script mod's
+// time per world step since the last lua.perf).
 #include <windows.h>
 
 #include <string>
@@ -33,6 +34,14 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
         for (const auto& id : g_host->ids()) EMF_REPLY("%s: %s", id.c_str(), g_host->status(id).c_str());
         EMF_REPLY("%zu Lua mod(s)", g_host->script_count());
     });
+    emf::add_command("lua.perf", ": how long each Lua mod took per world step since the last lua.perf",
+                     [](emf::World, const std::vector<std::string>&) {
+                         double seconds = 0;
+                         const auto lines = g_host->perf_report(&seconds);
+                         EMF_REPLY("lua.perf: the last %.1f s, per world step (counted again from now):", seconds);
+                         if (lines.empty()) EMF_REPLY("  no Lua mod ran in a world step meanwhile");
+                         for (const auto& l : lines) EMF_REPLY("  %s", l.c_str());
+                     });
     emf::add_command("lua.reload", ": reload the Lua mods whose files changed (this also happens every second)",
                      [](emf::World, const std::vector<std::string>&) {
                          g_host->check_reload_now();

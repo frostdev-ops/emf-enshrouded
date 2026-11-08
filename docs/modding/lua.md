@@ -101,7 +101,7 @@ right away.
 | `emf.log(...)` / `print(...)` | a line in `emf\emf_core.log` (and the console), prefixed `[id]` |
 | `emf.notify(text)` | a note at the top of the screen for a few seconds |
 | `emf.hud(id, text [, place [, rgba]])` | a line kept on screen; `""` removes it; place `"top_right"` (below the quest tracker), `"bottom_right"` or `"bottom_left"` (or 0, 1, 2), so a `select` setting's value fits; `rgba` a `color` setting's `"#rrggbb"`, `"#rrggbbaa"` (with alpha: a line can fade), a number like `0xFFD070FF` or the text `"0xFFD070FF"`; 0 (or none) means the usual colour |
-| `emf.on_tick(fn)` | `fn(world)` after every world step (server, client) |
+| `emf.on_tick(fn)` | `fn(world)` after every world step (server, client). In a game you host, a client step leaves your mod out while it is still busy in the server step (at most 30 steps in a row), so the game's frame seldom waits for your server work (it still does when your mod has a client bus callback with messages due, a client `on_event`, or after 30 steps); keep heavy work in the server world |
 | `emf.bus.subscribe(topic, fn [, world])` | (1.17) listen for a topic in `"server"` (default) or `"client"` world; `fn(world, source_mod_id, payload)` runs on that world's next step when a publication arrives; true when registered |
 | `emf.bus.publish(topic, payload [, world])` | (1.17) queue a copy of a text/binary payload for `"server"` (default) or `"client"`; true when queued, false if the topic, payload or queue limit is invalid (logged once per rejection streak) |
 | `emf.bus.unsubscribe(topic)` | (1.17) remove all this mod's callbacks for a topic in both worlds; true if any were removed, false if none existed |
