@@ -13,6 +13,7 @@ local talents = require("talents")
 local fight_mod = require("fight")
 local threat_mod = require("threat")
 local idle_mod = require("idle")
+local stable_mod = require("stable")
 
 local M = {}
 local P = {}
@@ -322,7 +323,7 @@ function P:call(world, owner, account, beast)
 	local busy, busy_why = self.aside:building(world, account, owner, self.env.now(world), self:spots(account))
 	if busy then return waits(busy_why, "call again") end
 	if self.env.stabled() and not beast.active then
-		return beast.name .. " is in the stable: make it active at a stable (an animal bed in your base)."
+		return beast.name .. " is in the stable: make it active at a stable " .. stable_mod.what_it_is() .. "."
 	end
 	if beast.rest > 0 then return string.format("%s rests for %s.", beast.name, mmss(beast.rest)) end
 	local n, max = self:out_count(account), self.env.slots(world, owner) or 1

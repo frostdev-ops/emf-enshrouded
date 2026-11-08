@@ -66,8 +66,10 @@ at 30 (settings; 0 turns a slot off). `/beastmaster slots` tells you yours and w
 **Before your world has a stable**, you tame and call as before: any beast of your collection, as many out as your slots
 (dismiss one on the wheel and call another to swap). A beast you tame while your slots are full goes home.
 
-**The stable** is a prop Beastmaster knows: the game's **animal bed** (the straw bed for farm animals, large or small)
-built in your base, within 80 m of a flame altar (on the host a new one counts within seconds), or any prop the host
+**The stable** is a prop Beastmaster knows: the **Stable** of the beasts pack (crafted at the Workbench from 6 wood
+logs, 8 plant fibre and 2 animal fur, listed after the crude chair; a straw bed), or the game's **animal bed** (the straw
+bed for farm animals, large or small), built in your base, within 80 m of a flame altar (on the host a new one counts
+within seconds), or any prop the host
 marks with `beastmaster.stable mark` while looking at it (on a dedicated server an admin types `/beastmaster.stable
 mark` in the chat). An animal bed your farm animals already use counts too; it keeps working for them. Once your world has a stable (it
 stays so, kept with the world):
@@ -147,7 +149,7 @@ resting and active or in the stable, then "Talents: 3 points (1 left)", a row pe
 +8 % damage") and a **+** (off when the talent is full or no point is left; Second Wind says "ready" or when it works
 again while the beast is out), **Reset talents**, and Make active, Store and Release.
 
-**The wheel (hold F3):** Tame, Feed, Attack, **Mode** (steps passive, defending, aggressive), **Stable: animal bed** while your world has no stable (it says what to build), **Come back** while your beasts stepped aside by `/beastmaster aside`,
+**The wheel (hold F3):** Tame, Feed, Attack, **Mode** (steps passive, defending, aggressive), **Stable: animal bed** (with the beasts pack: **Stable: Workbench**) while your world has no stable (it says what to build), **Come back** while your beasts stepped aside by `/beastmaster aside`,
 **Dismiss <name>** for each beast that is out (and **Dismiss all** with two or more out), then **Call <name>** for up
 to 6 beasts that are at home or resting (once your world has a stable: the active ones); a resting one shows its time
 left. The labels are short so they fit the
@@ -325,6 +327,10 @@ An EML data patch with new beasts:
   `d4c87337-8c53-41df-8488-8079046e1512`, `...1522`, `...1532`): the snake with the scan's skin recoloured, each
   its own copy of the skeleton and graph; sizes 1.15, 1.25 and 1.35, damage x1.6, x1.8 and x2.0; the health (x3, x4,
   x5) comes from Beastmaster. With an older beasts pack that lacks them, a wild snake is always a plain one.
+- the Stable, `Prop_Beastmaster_Stable` (template `96a057d5-a1d9-4fc1-b313-9b923e9302fe`, pack 2.1.0): a copy of the
+  game's large animal bed without the parts farm animals and villagers use, with a render model of its own (the bed's
+  mesh; Beastmaster knows the Stable by it), crafted at the Workbench. Like every placed object it is saved only inside
+  a base, and removing the pack removes placed Stables from the world when it next loads (pick them up first).
 
 Installed and rebuilt like the bear pack (`tools/models/packs/beastmaster_beasts.json`). Without the pack (or when its
 content was not built), an aurochs or snake in your collection stays at home: calling it says that it comes with the

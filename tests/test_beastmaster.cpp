@@ -1500,6 +1500,41 @@ TEST_CASE("stable: before the world has a stable the wheel says what to build; a
           "Tusk is in the stable: make it active at a stable (an animal bed in your base).");
 }
 
+// The beasts pack's Stable (tools/models/packs/beastmaster_stable.lua): its render model of its own and its item.
+constexpr const char* kOwnStableModel = "1a49170a-b3d2-498d-9062-8946f6469613";
+constexpr uint32_t kStableItem = 0x5AB1E0u;
+
+TEST_CASE("stable: the beasts pack's Stable (its own model) in a base is a stable named Stable") {
+    BeastRig b;
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 950, 5, 10, 0, kOwnStableModel);
+    b.seconds(32);  // the next search of the world
+    CHECK(b.reply("beastmaster.stable list").find("1. Stable at 5, 10, 0 (5 m from you)") != std::string::npos);
+}
+
+TEST_CASE("stable: with the beasts pack's Stable item the hints name the Stable crafted at the Workbench, besides the "
+          "animal bed") {
+    BeastRig b;
+    b.r.fake.item_names[kStableItem] = "Prop_Beastmaster_Stable";
+    CHECK(b.reply("beastmaster.stable list") == "No stable in this world yet: build a Stable (crafted at the Workbench) "
+                                                 "or an animal bed in your base, or mark a prop with beastmaster.stable "
+                                                 "mark.");
+    b.reply("beastmaster.give wolf");
+    press(b, VK_F3);
+    REQUIRE(b.r.fake.wheels.size() == 1);
+    CHECK(index_of(b.r.fake.wheels[0].items, "Stable: animal bed") < 0);
+    const int hint = index_of(b.r.fake.wheels[0].items, "Stable: Workbench");
+    REQUIRE(hint >= 0);
+    b.r.fake.wheels[0].cb(kClient, hint, b.r.fake.wheels[0].user);
+    b.seconds(1);
+    CHECK(noted(b, "Build a Stable (crafted at the Workbench) or an animal bed in your base"));
+    three_beasts(b);  // Tusk is stored
+    at_stable(b);
+    b.seconds(1);
+    CHECK(b.reply("beastmaster.call Tusk") ==
+          "Tusk is in the stable: make it active at a stable (a Stable or an animal bed in your base).");
+}
+
 TEST_CASE("stable: a player whose level cannot be read yet keeps their beasts out (no slot trimming on a level of 0)") {
     BeastRig b;
     set_level(b, 1, 25);  // three slots

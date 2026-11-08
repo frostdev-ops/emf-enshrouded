@@ -339,12 +339,13 @@ end
 
 -- The wheel's stable item (while the world has no stable): what to build.
 function actions.stable_hint(world, player, account)
+	local what = stable_mod.what_to_build()
 	if beasts:stabled() then
-		return "Your world's stables are gone: build an animal bed (the straw bed for farm animals) in your base, and " ..
-			"press E at it to choose your active beasts."
+		return "Your world's stables are gone: build " .. what .. " in your base, and press E at it to choose your " ..
+			"active beasts."
 	end
-	return "Build an animal bed (the straw bed for farm animals) in your base: press E at it to choose your active " ..
-		"beasts. Until your world has one, you can call any beast, as many at once as your active slots."
+	return "Build " .. what .. " in your base: press E at it to choose your active beasts. Until your world has one, " ..
+		"you can call any beast, as many at once as your active slots."
 end
 
 function actions.attack(world, player, account)
@@ -465,7 +466,7 @@ local CHAT_CONFIRM_S = 10   -- release: the same command again within this
 -- Why `player` cannot act at a stable now (none within CHAT_STABLE_M), or nil; `bed`: the text says what a stable is.
 local function away_from_stable(world, player, bed)
 	if player and stables:near(world, player, CHAT_STABLE_M) then return nil end
-	if bed then return string.format("Go to a stable (an animal bed in your base) within %d m to do that.", CHAT_STABLE_M) end
+	if bed then return string.format("Go to a stable %s within %d m to do that.", stable_mod.what_it_is(), CHAT_STABLE_M) end
 	return string.format("Go to a stable (within %d m) to do that.", CHAT_STABLE_M)
 end
 
@@ -611,7 +612,9 @@ local function wheel_items(world)
 	add("Feed (bait)", { action = "feed" })
 	add("Attack", { action = "attack" })
 	if account then add("Mode: " .. beasts:mode(account):gsub("^%l", string.upper), { action = "mode" }) end
-	if stables:count() == 0 then add("Stable: animal bed", { action = "stable_hint" }) end
+	if stables:count() == 0 then
+		add(stable_mod.craftable() and "Stable: Workbench" or "Stable: animal bed", { action = "stable_hint" })
+	end
 	if account and pack:aside_by_command(account) then add("Come back", { action = "come_back" }) end
 	local list = account and beasts:list(account) or {}
 	local out = 0

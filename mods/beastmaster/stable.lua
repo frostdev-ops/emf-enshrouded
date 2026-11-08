@@ -21,11 +21,36 @@ local M = {}
 
 -- The render models of the props players build as a stable, and the names the list shows: the game's animal beds (the
 -- straw beds for farm animals; items Animal_Farm_Housing_Sleeping_Bed and ..._YAK_Sanddigger), which have no E use of
--- their own.
+-- their own, and the beasts pack's Stable (crafted at the Workbench; a model record of its own, the large bed's mesh).
 M.MODELS = {
 	["daeb81bb-8398-4128-9107-c75b2e3e7d5b"] = "Animal bed",        -- animalprops_farm_animal_sleep_01
 	["7dd9139a-fba7-4e60-8b5a-fa853c250ef7"] = "Large animal bed",  -- animalprops_farm_animal_sleep_large_01
+	["1a49170a-b3d2-498d-9062-8946f6469613"] = "Stable",            -- beastmaster_stable (the beasts pack)
 }
+M.STABLE_ITEM = "Prop_Beastmaster_Stable"  -- the beasts pack's Stable: its item's debug name
+
+local craftable = false  -- the Stable's item was found (it stays: the game's items do not change while it runs)
+
+-- Whether the game has the beasts pack's Stable to craft. Inside callbacks only (emf.item needs a world); asked again
+-- until found (the hints that use it are rare).
+function M.craftable()
+	if not craftable then
+		local ok, id = pcall(function() return emf.item and emf.item(M.STABLE_ITEM) end)
+		craftable = ok and id ~= nil and id ~= false
+	end
+	return craftable
+end
+
+-- What players build as a stable, for the hints: `short` without the animal bed's description.
+function M.what_to_build(short)
+	if M.craftable() then return "a Stable (crafted at the Workbench) or an animal bed" end
+	return short and "an animal bed" or "an animal bed (the straw bed for farm animals)"
+end
+
+-- What a stable is, in brackets after "a stable": "(an animal bed in your base)".
+function M.what_it_is()
+	return "(" .. (M.craftable() and "a Stable or an animal bed" or "an animal bed") .. " in your base)"
+end
 
 local SCAN_PER_STEP = 250  -- entities looked at per step while a world is searched
 local RESCAN_S = 30        -- s between two searches of the server world (flame altars)
@@ -436,8 +461,7 @@ end
 -- had a stable. The reply.
 function S:list_text(world, player, had)
 	if #self.stables == 0 then
-		local how = "build an animal bed (the straw bed for farm animals) in your base, or mark a prop with " ..
-			"beastmaster.stable mark."
+		local how = "build " .. M.what_to_build() .. " in your base, or mark a prop with beastmaster.stable mark."
 		if had then return "No stable in this world now (there was one: only active beasts can be called): " .. how end
 		return "No stable in this world yet: " .. how
 	end
