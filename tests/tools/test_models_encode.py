@@ -196,6 +196,7 @@ class MakeModTests(unittest.TestCase):
                 json.dump({"debugName": "bed", "materials": [{"material": "a"}, {"material": "b"}, {"material": "c"}]}, f)
             prop = {"name": "stable_prop", "glb": "stable.glb", "source_model_guid": "src-model",
                     "source_model_json": "bed.json", "model_guid": "p-1", "width": 4.0, "material": 2}
+            open(os.path.join(src, "stable_prop_albedo.lua"), "w").close()  # an earlier build's texture of ours
             entry, changed = make_mod.build_prop(prop, src, lambda p: os.path.join(d, p))
             self.assertEqual(entry, {"name": "stable_prop", "source_model_guid": "src-model", "model_guid": "p-1"})
             self.assertFalse(changed)

@@ -990,6 +990,8 @@ def build_prop(p, src, path):
         write_albedo(src, p["name"], path(t["albedo_dir"]))
         entry["texture"] = {"slot": int(t.get("slot", 1)), "material_guid": t["material_guid"],
                             "flat_size": int(t.get("flat_size", 128))}
+    elif os.path.exists(os.path.join(src, p["name"] + "_albedo.lua")):  # an earlier build's texture of ours
+        os.remove(os.path.join(src, p["name"] + "_albedo.lua"))
     print("%s: prop, %d meshes, %d bytes, %.2f x %.2f x %.2f m, model %s" % (
         p["name"], len(fields["meshes"]), len(blob), report["size"][0], report["size"][1], report["size"][2],
         p["model_guid"]))
