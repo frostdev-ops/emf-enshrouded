@@ -10,6 +10,11 @@
 --   facing out. A stroll that ends off the floor puts the beast back on its spot before it rests; a beast ROAM_M or more
 --   from the stable's middle for AWAY_S is put back at once (the game's teleport, with a ground search).
 --   A beast the Sleep state cannot hold (no enemy AI state) strolls on.
+--   At night (NIGHT_FROM to DAWN by the game's clock) they rest the whole night: a stroll ends at once, a rest goes on;
+--   in the morning each rest ends when it was due, so they get up one by one.
+--   Each carries the game's "E Pet" prompt (emf.offer; offered again every OFFER_EVERY_S while EMF no longer holds it).
+--   A pet turns the beast to the player and settles it for PET_S (a rest); its owner's pet earns it a loyalty point
+--   (env.gain) once a game day (the days are counted at each dawn the game's clock passes, while the world runs).
 --   It never fights (its aggro and chosen targets are cleared every step). A hit on one of them, or a creature's hit on
 --   a player within BUILD_M of their stable, sends that stable's beasts inside (out of the world) until SHELTER_S after
 --   the last such hit. It has the health it has when called (its role, loyalty and talents: env.on_spawn) and is healed
@@ -29,7 +34,8 @@
 --   script had there before: taken out of the world at the first check that has a Large Stable.
 -- M.new(env) where env has: now(world), setting(key), beasts() (the roster), homes() (the Large Stables: stable.lua
 -- S:homes()), present() (account -> player entity, nil before the first check), log(text), on_spawn(world, id, sp,
--- health_mul) (optional: the health watch).
+-- health_mul) (optional: the health watch), tell(world, player, text) and gain(world, account, beast) (a loyalty
+-- point; both optional: a pet then only settles the beast).
 local species = require("species")
 local loyalty = require("loyalty")
 local idle_mod = require("idle")
@@ -57,6 +63,10 @@ local RESPAWN_S = 60
 local RETRY_S = 300
 local BUILD_M, GRACE_S = 20, 5
 local SHELTER_S = 30  -- s after the last hit at a stable its beasts stay inside
+local NIGHT_FROM, DAWN = 18, 6  -- the game's night: its clock's night start and day start (hours)
+local PET_S = 20         -- s a pet settles a beast
+local OFFER_EVERY_S = 10 -- s between two looks at a beast's Pet prompt (offered again when EMF no longer holds it)
+local PET = { verb = "Pet" }
 local LEASE_S, RENEW_S = 120, 5  -- the Sleep lease: the game's time plus LEASE_S, renewed every RENEW_S
 local CHECK_AHEAD_NS = 1000000000000000000
 local NS = 1000000000
@@ -80,6 +90,9 @@ function H:reset()
 	self.clock = nil     -- the game's time (ns) minus env.now (s) x 10^9, once known
 	self.next_check = 0
 	self.swept = false
+	self.day = 0         -- game days begun while the world runs (a dawn passed)
+	self.last_hour = nil -- the game's clock at the last check
+	self.night = false
 end
 
 local function key_of(h)
@@ -239,6 +252,38 @@ function H:on_hit(world, source, target)
 	end
 end
 
+-- `player` pressed E at the Pet prompt on `entity`: the beast turns to them and settles for PET_S; its owner's first pet
+-- of the game day earns it a loyalty point.
+function H:pet(world, player, entity)
+	local e = self.ids[entity]
+	if not (e and still(world, e)) then return end
+	local now = self.env.now(world)
+	local b = e.beast
+	local px, _, pz = world:position(player)
+	local x, y, z = world:position(e.id)
+	if px and x and emf.teleport and (px - x) ^ 2 + (pz - z) ^ 2 > 0.01 then
+		emf.teleport(world, e.id, x, y, z, { yaw = math.deg(math.atan(px - x, pz - z)) })
+	end
+	e.faced = true
+	e.sc.turned = true
+	local was_rest = e.scene == "rest"
+	if idle_mod.hold(world, e.id, e.sc, now, self:game_now(world, LEASE_S * NS), self:game_now(world, CHECK_AHEAD_NS)) then
+		e.until_s = was_rest and math.max(e.until_s, now + PET_S) or now + PET_S
+		e.scene = "rest"
+	end
+	local tell = self.env.tell or function() end
+	if world:account(player) ~= e.account then
+		tell(world, player, string.format("%s enjoys it.", b.name))
+	elseif b.petted ~= self.day and self.env.gain then
+		b.petted = self.day
+		self.env.gain(world, e.account, b)
+		tell(world, player, string.format("%s enjoys it: a loyalty point.", b.name))
+	else
+		tell(world, player, string.format("%s enjoys it (a pet earns a loyalty point once a game day: again tomorrow).",
+			b.name))
+	end
+end
+
 -- A home beast died (the game's event): its body goes, the beast shows up again after RESPAWN_S.
 function H:on_died(world, id)
 	local e = self.ids[id]
@@ -384,6 +429,13 @@ function H:upkeep(world, e, h, now)
 	end
 	if max and cur < max then emf.attribute_add(world, e.id, "health", max - cur) end
 	if not e.faced and (e.tries or 0) < FACE_TRIES then e.faced = face(world, e, h) end
+	if emf.offer and now >= (e.offer_at or 0) then
+		e.offer_at = now + OFFER_EVERY_S
+		local held = e.offered and (not emf.offered or emf.offered(world, e.id))
+		if not held then
+			e.offered = emf.offer(world, e.id, PET, function(w, player, entity) self:pet(w, player, entity) end) == true
+		end
+	end
 	local x, _, z = world:position(e.id)
 	if dist(h, x, h.y, z) >= ROAM_M then
 		e.far = e.far or now
@@ -391,6 +443,7 @@ function H:upkeep(world, e, h, now)
 	else
 		e.far = nil
 	end
+	if self.night and e.scene == "stroll" and not e.no_hold then e.until_s = math.min(e.until_s, now) end
 	if now < e.until_s then return end
 	if e.scene == "stroll" then
 		e.sc.turned = true
@@ -400,8 +453,11 @@ function H:upkeep(world, e, h, now)
 		if idle_mod.hold(world, e.id, e.sc, now, lease, check) then
 			e.scene, e.until_s = "rest", now + between(REST_S)
 		else
+			e.no_hold = true
 			e.until_s = now + between(STROLL_S)  -- the Sleep state cannot hold it: it strolls on
 		end
+	elseif self.night then
+		e.until_s = now + between(REST_S)  -- it sleeps on until the morning
 	else
 		idle_mod.wake(world, e.id, e.sc)
 		guard(world, e.id, h)
@@ -409,8 +465,23 @@ function H:upkeep(world, e, h, now)
 	end
 end
 
+-- The game's clock: a dawn passed (from before DAWN to after it, or a jump over midnight to after it: a night slept
+-- through) begins a game day; night or not.
+function H:clock_step(world)
+	local h = emf.time_of_day and emf.time_of_day(world)
+	if not h then
+		self.night = false
+		return
+	end
+	local last = self.last_hour
+	if last and h >= DAWN and (last < DAWN or h < last) then self.day = self.day + 1 end
+	self.last_hour = h
+	self.night = h >= NIGHT_FROM or h < DAWN
+end
+
 -- Every second: the stables being built at, who is shown where, then each one's upkeep.
 function H:check(world, now)
+	self:clock_step(world)
 	for id, due in pairs(self.bodies) do
 		if now >= due then
 			self.bodies[id] = nil
@@ -487,7 +558,8 @@ function H:text(world, account)
 			local bx, by, bz = world:position(e.id)
 			local far = bx and string.format(", %.1f m from its middle", dist({ x = x, y = y, z = z }, bx, by, bz)) or ""
 			lines[#lines + 1] = string.format("%s: in the Large Stable at %d, %d, %d, %s%s", b.name,
-				math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5), e.scene == "rest" and "resting" or "strolling",
+				math.floor(x + 0.5), math.floor(y + 0.5), math.floor(z + 0.5),
+				e.scene == "rest" and (self.night and "sleeping" or "resting") or "strolling",
 				far)
 		end
 	end

@@ -5205,3 +5205,108 @@ TEST_CASE("home: a beast's turn to face out that the game did not carry out is a
     }
     CHECK(turns_of(b, 1234).size() == 3u);
 }
+
+// ---- home: petting the beasts at home, and their night in the Large Stable ----
+namespace {
+// The last E Pet prompt EMF was asked to put on entity `id` (nullptr when none).
+const Fake::Off* pet_prompt(BeastRig& b, uint32_t id) {
+    const Fake::Off* last = nullptr;
+    for (const auto& o : b.r.fake.offers)
+        if (o.entity == id && o.o.verb == EMF_VERB_PET) last = &o;
+    return last;
+}
+// `player` presses E at beast `id`'s Pet prompt.
+void pet(BeastRig& b, uint32_t player, uint32_t id) {
+    const Fake::Off* o = pet_prompt(b, id);
+    REQUIRE(o != nullptr);
+    o->cb(kServer, player, id, o->user);
+}
+size_t pet_prompts(BeastRig& b) {
+    size_t n = 0;
+    for (const auto& o : b.r.fake.offers) n += o.o.verb == EMF_VERB_PET;
+    return n;
+}
+}  // namespace
+
+TEST_CASE("home: each beast at home carries the game's E Pet prompt; one EMF no longer holds is offered again") {
+    BeastRig b;
+    with_offers(b.r.api);
+    home_three(b);
+    b.seconds(2);
+    for (uint32_t id : {1234u, 1235u, 1236u}) CHECK(pet_prompt(b, id) != nullptr);
+    const size_t before = pet_prompts(b);
+    b.seconds(5);
+    CHECK(pet_prompts(b) == before);  // held: not asked again
+    b.r.fake.offer_active = false;    // EMF dropped them (the beasts streamed out and back)
+    b.seconds(11);
+    CHECK(pet_prompts(b) >= before + 3);
+}
+
+TEST_CASE("home: its owner pets a beast at home: it turns to them, settles for 20 s and earns a loyalty point, once a "
+          "game day") {
+    BeastRig b;
+    with_offers(b.r.api);
+    home_three(b);
+    b.seconds(2);
+    pet(b, 1, 1234);
+    CHECK(asleep(b, 1234));
+    const auto& s = b.r.fake.spawns[0];
+    const double toward = std::atan2(0.0 - s.x, 0.0 - s.z) * 180.0 / kPi;  // player 1 stands at (0, 10, 0)
+    REQUIRE_FALSE(std::isnan(last_yaw(b, 1234)));
+    CHECK(std::abs(last_yaw(b, 1234) - toward) < 1.0);
+    CHECK(noted(b, "Fang enjoys it"));
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Fang") != std::string::npos);
+    pet(b, 1, 1234);  // again today: a note, no point
+    CHECK(noted(b, "again tomorrow"));
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Fang") != std::string::npos);
+    b.seconds(21);
+    CHECK(awake(b, 1234));  // the 20 s are over: it strolls again
+}
+
+TEST_CASE("home: a new game day (the dawn) lets a beast earn a point from a pet again") {
+    BeastRig b;
+    with_offers(b.r.api);
+    set_daytime(b.r.fake, 20.0);
+    home_three(b);
+    b.seconds(2);
+    pet(b, 1, 1235);
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Tusk") != std::string::npos);
+    set_daytime(b.r.fake, 2.0);  // past midnight: the same game day until the dawn
+    b.seconds(2);
+    pet(b, 1, 1235);
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Tusk") != std::string::npos);
+    set_daytime(b.r.fake, 7.0);  // the dawn
+    b.seconds(2);
+    pet(b, 1, 1235);
+    CHECK(b.saved().find("y 0x00000000000000aa 2 Tusk") != std::string::npos);
+}
+
+TEST_CASE("home: another player's pet: the beast turns to them and settles, but earns no point") {
+    BeastRig b;
+    with_offers(b.r.api);
+    home_three(b);
+    b.seconds(2);
+    pet(b, 2, 1236);
+    CHECK(asleep(b, 1236));
+    CHECK(b.saved().find("Rex") != std::string::npos);
+    CHECK(b.saved().find("y 0x00000000000000aa 1 Rex") == std::string::npos);
+    bool told = false;
+    for (const auto& [player, text] : b.r.fake.tells) told = told || (player == 2 && text.find("Rex enjoys it") != std::string::npos);
+    CHECK(told);
+}
+
+TEST_CASE("home: at night the beasts at home rest the whole night, without strolls; in the morning they stroll again") {
+    RollRig b;
+    b.roll(0.0);  // the shortest scenes
+    set_daytime(b.r.fake, 22.0);
+    home_three(b);
+    b.seconds(2);
+    for (int i = 0; i < 6; ++i) {  // two minutes of night
+        for (uint32_t id : {1234u, 1235u, 1236u}) CHECK(asleep(b, id));
+        b.seconds(20);
+    }
+    CHECK(b.reply("beastmaster.home").find("Fang: in the Large Stable at 10, 10, 0, sleeping") != std::string::npos);
+    set_daytime(b.r.fake, 8.0);
+    b.seconds(41);  // the rest under way ends (40 s at the most with these rolls): a stroll
+    CHECK(awake(b, 1234));
+}

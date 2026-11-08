@@ -85,7 +85,10 @@ stays so, kept with the world):
 **Beasts at home in the Large Stable.** While you are within 50 m of a Large Stable, the beasts of your collection that
 are not out with you (active or in the stable) show up in it: each on a spot of its own on its floor, facing out of its
 open side. They stroll about near it for a while, then rest: wolves, hounds and bears lie down, the others stand still.
-One that wanders off is put back on its spot. They never fight: when a monster hits one of them, or a player at the
+One that wanders off is put back on its spot. At night they sleep the whole night (no strolls) and get up one by one in
+the morning. Each has the game's **E Pet** prompt: a pet turns it to you and settles it for 20 s, and your own beast
+earns a loyalty point from your first pet of each game day (a day starts at each dawn while the world runs; the next
+pet that day only makes it happy). They never fight: when a monster hits one of them, or a player at the
 stable, they go inside out of sight and come back 30 s after the last hit. They have the health they have when you call
 them and are healed every second; one that dies anyway comes back a minute later, and you lose nothing. A Large Stable has room for 4 beasts, all players
 together (the beasts shown stay; then by player and list order); more beasts need another Large Stable. They leave when

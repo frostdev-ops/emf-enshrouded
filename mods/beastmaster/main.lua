@@ -96,6 +96,8 @@ home = home_mod.new({
 	present = function() return pack.present end,
 	log = emf.log,
 	on_spawn = spawned,
+	tell = tell,
+	gain = function(world, account, b) pack:gain(world, { account = account, beast = b }) end,
 })
 
 -- rare wild bears, aurochs and snakes (with their content packs)
