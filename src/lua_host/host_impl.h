@@ -14,6 +14,7 @@
 #include <string>
 #include <vector>
 
+#include "common/perf_book.h"
 #include "core/manifest.h"
 #include "emf/emf_api.h"
 #include "emf/storage.hpp"
@@ -135,6 +136,11 @@ struct Host::Impl {
     std::wstring mods_dir;
     std::vector<std::unique_ptr<Script>> scripts;
     std::atomic<uint64_t> last_check{0};  // GetTickCount64 of the last reload check (tick runs on several world threads)
+    emf::PerfBook perf;                   // each script's time per world step, and the reload check's (perf_report)
+    std::atomic<uint64_t> perf_since{0};  // GetTickCount64 of the last perf_report
+    double (*perf_clock)() = nullptr;     // that timing's clock (nullptr: QueryPerformanceCounter)
+    std::mutex slow_m;                    // slow_said
+    std::map<std::string, uint64_t> slow_said;  // script id -> when its last "slow" line was logged
     size_t memory_limit = kMemoryLimit;   // per script, for states made from now on
     std::mutex m;  // the maps below
     std::mutex world_step_m[3];  // serialize steps of the same world kind; preserves bus delivery order

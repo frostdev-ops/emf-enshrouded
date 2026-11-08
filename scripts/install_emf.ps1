@@ -31,6 +31,10 @@ Copy-Item (Join-Path $Dist "emf\known_tools.txt") (Join-Path $Game "emf\known_to
 # The in-game console's Vulkan layer manifest (names ..\emf_core.dll; only EMF's loader enables it, for the game only)
 New-Item -ItemType Directory -Force (Join-Path $Game "emf\vk") | Out-Null
 Copy-Item (Join-Path $Dist "emf\vk\*.json") (Join-Path $Game "emf\vk") -Force
+# the frame-time recorder's layer (diagnostics: off until [debug] frame_times=1)
+if (Test-Path (Join-Path $Dist "emf\emf_frametime.dll")) {
+    Copy-Item (Join-Path $Dist "emf\emf_frametime.dll") (Join-Path $Game "emf\emf_frametime.dll") -Force
+}
 # The overlay's bundled fonts (third_party\fonts)
 if (Test-Path (Join-Path $Dist "emf\fonts")) {
     New-Item -ItemType Directory -Force (Join-Path $Game "emf\fonts") | Out-Null

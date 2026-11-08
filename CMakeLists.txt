@@ -620,6 +620,7 @@ add_executable(emf_tests
   tests/test_app_server_bridge.cpp
   tests/test_app_updates.cpp
   tests/test_frame_stats.cpp
+  tests/test_perf.cpp
   src/frametime/frame_stats.cpp
   src/probe/report.cpp)
 target_include_directories(emf_tests PRIVATE tests sdk/include)

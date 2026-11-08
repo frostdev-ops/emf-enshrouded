@@ -1073,3 +1073,37 @@ TEST_CASE("lua host: bus drops drained publications after their sender pauses in
     CHECK(host.status("sender").find("paused:") == 0);
     CHECK_FALSE(logged("STALE_FROM_PAUSED_SENDER"));
 }
+
+namespace {
+double g_perf_now = 0;
+double perf_fake_clock() { return g_perf_now += 30.0; }  // each read is 30 ms later: every timed step lasts 30 ms
+size_t logged_count(const char* needle) {
+    size_t n = 0;
+    for (const auto& l : g->log) n += l.find(needle) != std::string::npos;
+    return n;
+}
+}  // namespace
+
+TEST_CASE("lua host: perf_report gives each script's time per world step, then counts again; a step over 25 ms is "
+          "logged at most once a minute per script") {
+    Rig r(L"perf");
+    add_script(r.dir, "busy", "emf.on_tick(function(w) end)\n");
+    Host host(&r.api, r.dir);
+    host.set_perf_clock(perf_fake_clock);
+    host.load_all();
+    host.tick(kServer);
+    host.tick(kServer);
+    host.tick(kClient);
+    double seconds = -1;
+    const auto lines = host.perf_report(&seconds);
+    CHECK(seconds >= 0.0);
+    const auto has_line = [&](const std::string& start) {
+        for (const auto& l : lines)
+            if (l.rfind(start, 0) == 0) return true;
+        return false;
+    };
+    CHECK(has_line("busy (server): 30.00 ms a step (2 steps), worst 30.0 ms"));
+    CHECK(has_line("busy (client): 30.00 ms a step (1 steps), worst 30.0 ms"));
+    CHECK(logged_count("slow: busy took 30 ms in one world step") == 1u);  // three slow steps, one line
+    CHECK(host.perf_report().empty());                                     // counted again from the last report
+}

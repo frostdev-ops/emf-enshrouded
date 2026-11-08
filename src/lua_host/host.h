@@ -45,6 +45,13 @@ public:
     // The clock (ms) the scripts' world-data files tell by that the server world still steps (save_world_data works
     // only within 2 s of its last step; default GetTickCount64; tests that step a fake world pass its time).
     void set_file_clock(uint64_t (*now_ms)());
+    // Each script mod's time per world step (its world data, bus messages, keys and on_tick callbacks) and the
+    // reload check's, since the last call (perf_lines: "<id> (server): 0.42 ms a step (600 steps), worst ..."),
+    // largest first; then counted again. `seconds` gets the time they cover. A script step over 25 ms is logged
+    // ("slow: ...") at most once a minute per script.
+    std::vector<std::string> perf_report(double* seconds = nullptr);
+    // The clock (ms) of that timing (default QueryPerformanceCounter; tests use a fake).
+    void set_perf_clock(double (*clock_ms)());
 
     struct Impl;
 

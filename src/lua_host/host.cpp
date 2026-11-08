@@ -81,6 +81,41 @@ void* capped_alloc(void* ud, void* ptr, size_t osize, size_t nsize) {
 // The clock of the time limit: the host's (tests replace it).
 uint64_t clock_ms(const Script& s) { return s.host && s.host->now_ms ? s.host->now_ms() : GetTickCount64(); }
 
+double perf_now(const Host::Impl& h) { return h.perf_clock ? h.perf_clock() : emf::perf_clock_ms(); }
+
+const char* world_name(int kind) {
+    return kind == EMF_WORLD_SERVER ? "server" : kind == EMF_WORLD_CLIENT ? "client" : "prediction";
+}
+
+// One script's work in one world step, for perf_report; a step over 25 ms is logged at most once a minute per script
+// (by the scripts' clock), so a player's own session leaves a trace in the log.
+struct ScriptStepTimer {
+    Host::Impl& h;
+    const Script& s;
+    int kind;
+    double start;
+    ScriptStepTimer(Host::Impl& host, const Script& script, int k)
+        : h(host), s(script), kind(k), start(perf_now(host)) {}
+    ScriptStepTimer(const ScriptStepTimer&) = delete;
+    ScriptStepTimer& operator=(const ScriptStepTimer&) = delete;
+    ~ScriptStepTimer() {
+        const double ms = perf_now(h) - start;
+        h.perf.add(s.id + " (" + world_name(kind) + ")", ms);
+        if (ms <= 25.0) return;
+        const uint64_t now = clock_ms(s);
+        bool say = false;
+        {
+            std::lock_guard<std::mutex> l(h.slow_m);
+            auto it = h.slow_said.find(s.id);
+            say = it == h.slow_said.end() || now - it->second >= 60000;
+            if (say) h.slow_said[s.id] = now;
+        }
+        if (say && h.api && h.api->log)
+            h.api->log("lua", "slow: %s took %.0f ms in one world step (said at most once a minute; lua.perf in the "
+                              "console has the numbers)", s.id.c_str(), ms);
+    }
+};
+
 bool over_time(const Script* s) { return s && s->call_start && clock_ms(*s) - s->call_start > kCallLimitMs; }
 
 // Every 10000 instructions: past the limit, raise an error naming where the script was running.
@@ -922,7 +957,17 @@ Host::Host(const EmfApi* api, std::wstring mods_dir) : impl_(std::make_unique<Im
     impl_->mods_dir = std::move(mods_dir);
     impl_->key_down = [](uint32_t vk) { return emf::keys::down(vk); };
     impl_->now_ms = [] { return GetTickCount64(); };
+    impl_->perf_since = GetTickCount64();
 }
+
+std::vector<std::string> Host::perf_report(double* seconds) {
+    const uint64_t now = GetTickCount64();
+    const double covered = static_cast<double>(now - impl_->perf_since.exchange(now)) / 1000.0;
+    if (seconds) *seconds = covered;
+    return emf::perf_lines(impl_->perf.take(), covered);
+}
+
+void Host::set_perf_clock(double (*clock_ms)()) { impl_->perf_clock = clock_ms; }
 
 Host::~Host() {
     for (auto& s : impl_->scripts) {
@@ -1011,7 +1056,12 @@ void Host::tick_body(EmfWorld* world) {
     const uint64_t now = GetTickCount64();
     uint64_t last = h.last_check.load();
     // the server and client worlds tick on their own threads: only the one that moves the clock on checks
-    if (now > last && now - last >= 1000 && h.last_check.compare_exchange_strong(last, now)) check_reload_now();
+    if (now > last && now - last >= 1000 && h.last_check.compare_exchange_strong(last, now)) {
+        const double start = perf_now(h);
+        check_reload_now();
+        static const std::string kReload = "reload check (once a second)";
+        h.perf.add(kReload, perf_now(h) - start);
+    }
     const bool server = kind == EMF_WORLD_SERVER;
     if (server) h.server_seen = now;
     // Drain this world's FIFO once. A callback's publication stays queued until its next step.
@@ -1035,6 +1085,7 @@ void Host::tick_body(EmfWorld* world) {
     for (auto& s : h.scripts) {
         std::lock_guard<std::recursive_mutex> l(s->m);
         if (!s->L || s->paused) continue;
+        const ScriptStepTimer step_timer(h, *s, kind);
         if (server && s->file) {  // the world's data: once per session after its save loaded, again after a reload
             std::string text;
             bool hand = s->file->poll([&](const std::string& t) { text = t; });

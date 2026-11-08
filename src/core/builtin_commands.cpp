@@ -667,6 +667,25 @@ void cmd_time(EmfWorld* w, int argc, const char* const* argv, void* u) {
                            known ? "" : "; weather not reset (a game build EMF does not know)"));
 }
 
+// perf: how long each world step took since the last perf (or the start): the game's own steps, EMF's wait for the
+// server world's jobs and each mod (its tick callbacks and posted work), per step on average, the worst step and the
+// share of the time. Then the numbers start again.
+void cmd_perf(EmfWorld*, int, const char* const*, void*) {
+    CoreState* state = core_state();
+    if (!state) return;
+    const uint64_t now = GetTickCount64();
+    const double seconds = static_cast<double>(now - state->perf_since_ms.exchange(now)) / 1000.0;
+    const auto rows = state->perf.take();
+    char head[160];
+    std::snprintf(head, sizeof head, "perf: the last %.1f s, per world step (counted again from now):", seconds);
+    command_reply_line(head);
+    if (rows.empty()) {
+        command_reply_line("  no world step ran meanwhile");
+        return;
+    }
+    for (const auto& line : emf::perf_lines(rows, seconds)) command_reply_line("  " + line);
+}
+
 void cmd_pos(EmfWorld* w, int, const char* const*, void* u) {
     auto& c = ctx_of(u);
     const uint32_t player = c.player ? c.player() : 0;
@@ -1045,6 +1064,8 @@ bool add_builtin_commands(BuiltinContext& ctx) {
          cmd_spawn},
         {"time", "<hours 0-24>: set the time of day (host)", cmd_time},
         {"pos", ": your position", cmd_pos},
+        {"perf", ": how long the game's world steps, EMF's wait and each mod took per step since the last perf",
+         cmd_perf},
         {"goto", "[#k] <x> <y> <z> | <entity> [ground] (host)",
          cmd_goto},
         {"near", "[radius 1-200]: the entities around you, nearest first, and what they are (host)", cmd_near},
