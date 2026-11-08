@@ -269,6 +269,7 @@ void before_frame(ImGuiIO& io) {
                     io.AddMouseButtonEvent(0, false);
                     io.AddMouseButtonEvent(1, false);
                     io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
+                    if (g_deps.hud_editor) g_deps.hud_editor->flush();  // the HUD page's last edit is saved now
                 }
                 break;
             case InputEvent::Key:

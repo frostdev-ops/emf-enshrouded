@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -97,6 +98,7 @@ private:
     LayoutResult reset_all_locked();
     void use_default_locked();
     void set_active_setting_locked(const std::string& name);
+    bool could_turn_on_locked() const;
 
     HudEditorDeps deps_;
     mutable std::mutex mu_;
@@ -111,6 +113,7 @@ private:
     // layouts, by slug
     std::map<std::string, HudLayout> layouts_;
     std::string active_slug_;
+    std::set<std::string> refused_;  // slugs of files that could not be read: kept as .bad before a write over them
 
     // gate and hooks
     Gate gate_;
@@ -120,6 +123,7 @@ private:
     std::string hook_error_, other_mod_;
     uint32_t fault_ = 0;
     uint64_t last_conflict_check_ = 0;
+    bool other_checked_ = false;
     bool scale_off_logged_ = false;
 
     // keys and the page

@@ -128,4 +128,18 @@ bool delete_layout_file(const std::wstring& dir, const std::string& slug, std::s
     return false;
 }
 
+bool set_aside_layout_file(const std::wstring& dir, const std::string& slug, std::string* new_name) {
+    const std::wstring base = loader::cio::join(dir, std::wstring(slug.begin(), slug.end()) + L".json");
+    if (GetFileAttributesW(base.c_str()) == INVALID_FILE_ATTRIBUTES) return true;  // nothing there
+    for (int n = 1; n < 1000; ++n) {
+        const std::string suffix = n == 1 ? ".bad" : ".bad" + std::to_string(n);
+        const std::wstring target = base + std::wstring(suffix.begin(), suffix.end());
+        if (GetFileAttributesW(target.c_str()) != INVALID_FILE_ATTRIBUTES) continue;
+        if (!MoveFileExW(base.c_str(), target.c_str(), 0)) return false;
+        if (new_name) *new_name = slug + ".json" + suffix;
+        return true;
+    }
+    return false;
+}
+
 }  // namespace emf::core::hud

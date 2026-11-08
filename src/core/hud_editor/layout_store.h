@@ -27,4 +27,9 @@ bool write_layout_file(const std::wstring& dir, const HudLayout& l, uint32_t bui
 // Removes <dir>\<slug>.json; a file that is already gone counts as success. A slug that is not a file name of ours is refused.
 bool delete_layout_file(const std::wstring& dir, const std::string& slug, std::string* error);
 
+// Renames <dir>\<slug>.json to <slug>.json.bad (.bad2, .bad3, ... when that exists) so a file EMF could not read is kept
+// before a layout of the same name is written over it. A file that is not there counts as success; *new_name (optional)
+// gets the new file name.
+bool set_aside_layout_file(const std::wstring& dir, const std::string& slug, std::string* new_name);
+
 }  // namespace emf::core::hud

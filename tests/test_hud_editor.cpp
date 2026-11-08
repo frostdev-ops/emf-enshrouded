@@ -5,6 +5,7 @@
 
 #include <fstream>
 
+#include "core/hud_editor/layout_store.h"
 #include "core/profiles.h"
 #include "hud_editor_rig.h"
 
@@ -326,7 +327,7 @@ TEST_CASE("editor: save_as, load and remove") {
     bool has_file = false;
     for (const auto& f : r.files()) has_file = has_file || f.slug == "building-2";
     CHECK(has_file);
-    CHECK(r.store.get(kEmfSettingsId, "hud_editor.active_layout") == "Building 2");
+    CHECK(r.store.get(kEmfSettingsId, "hud_editor.active_layout") == "building-2");
     CHECK(e.view().layout_name == "Building 2");
     CHECK(e.view().layouts == std::vector<std::string>{"Building 2", "Default"});
     res = e.load("default");
@@ -336,7 +337,7 @@ TEST_CASE("editor: save_as, load and remove") {
     CHECK(e.view().elements[3].x == 7.0f);  // the Default layout got the first edit
     res = e.load("BUILDING-2");
     CHECK(e.view().layout_name == "Building 2");
-    CHECK(r.store.get(kEmfSettingsId, "hud_editor.active_layout") == "Building 2");
+    CHECK(r.store.get(kEmfSettingsId, "hud_editor.active_layout") == "building-2");
     res = e.load("nope");
     CHECK_FALSE(res.ok);
     CHECK(res.message == "no layout \"nope\"; layouts: Building 2, Default");
@@ -344,7 +345,7 @@ TEST_CASE("editor: save_as, load and remove") {
     CHECK(res.ok);
     CHECK(res.message == "layout \"Building 2\" deleted; \"Default\" is in use");
     CHECK(e.view().layout_name == "Default");
-    CHECK(r.store.get(kEmfSettingsId, "hud_editor.active_layout") == "Default");
+    CHECK(r.store.get(kEmfSettingsId, "hud_editor.active_layout") == "default");
     for (const auto& f : r.files()) CHECK(f.slug != "building-2");
     res = e.remove("nope");
     CHECK_FALSE(res.ok);
@@ -455,4 +456,146 @@ TEST_CASE("editor: page_frame writes a due Later save (the main menu has no tick
     r.now += 600;
     e.page_frame(0);
     CHECK(r.writes == 1);
+}
+
+// ---- the final review's fixes ----
+
+TEST_CASE("editor: the other-HUD-mod check is not made while the editor could not turn on") {
+    {
+        HudRig r;
+        r.set("enabled", "0");
+        HudEditor& e = r.make();
+        r.now += 20000;
+        e.tick();
+        e.tick();
+        CHECK(r.other_calls == 0);
+        CHECK(e.view().gate.state == GateState::Disabled);
+        r.set("enabled", "1");  // now it could: asked at the next tick
+        e.tick();
+        CHECK(r.other_calls == 1);
+        CHECK(e.view().gate.state == GateState::On);
+    }
+    {
+        HudRig r;
+        r.gate.build_known = false;
+        HudEditor& e = r.make();
+        r.now += 20000;
+        e.tick();
+        CHECK(r.other_calls == 0);
+        CHECK(e.view().gate.state == GateState::UnknownBuild);
+    }
+    {
+        HudRig r;
+        HudEditor& e = r.make();
+        CHECK(r.other_calls == 1);
+        r.fault = 0xC0000005;
+        e.tick();
+        r.now += 20000;
+        e.tick();
+        CHECK(r.other_calls == 1);  // faulted: off until the game restarts, no need to ask
+    }
+}
+
+TEST_CASE("editor: a layout file that was refused is kept as .bad before the first write over it") {
+    HudRig r;
+    std::filesystem::create_directories(r.dir);
+    const std::string original = "{\"format\":2,\"name\":\"Default\"}";  // a newer EMF's file
+    std::ofstream(std::filesystem::path(r.dir) / L"default.json", std::ios::binary) << original;
+    HudEditor& e = r.make();
+    e.nudge(0, 1, 1, Save::Now);
+    e.nudge(0, 1, 1, Save::Now);
+    std::ifstream bad(std::filesystem::path(r.dir) / L"default.json.bad", std::ios::binary);
+    REQUIRE(bad.good());
+    const std::string kept((std::istreambuf_iterator<char>(bad)), std::istreambuf_iterator<char>());
+    CHECK(kept == original);
+    bool ok = false;
+    for (const auto& f : r.files())
+        if (f.slug == "default") ok = f.layout.has_value() && f.layout->elements[0].x == 2.0f;
+    CHECK(ok);
+    CHECK(r.count_logged("default.json.bad") == 1);
+}
+
+TEST_CASE("editor: save_as and reset-all onto refused files keep them too") {
+    HudRig r;
+    std::filesystem::create_directories(r.dir);
+    std::ofstream(std::filesystem::path(r.dir) / L"before-reset.json", std::ios::binary) << "{";
+    std::ofstream(std::filesystem::path(r.dir) / L"mine.json", std::ios::binary) << "not json";
+    HudEditor& e = r.make();
+    e.set_offset(0, 5, 5, Save::Now);
+    e.reset_all();
+    CHECK(std::filesystem::exists(std::filesystem::path(r.dir) / L"before-reset.json.bad"));
+    CHECK(e.save_as("Mine").ok);
+    CHECK(std::filesystem::exists(std::filesystem::path(r.dir) / L"mine.json.bad"));
+}
+
+TEST_CASE("set_aside_layout_file: numbered when .bad exists; a missing file is fine") {
+    HudRig r;
+    std::filesystem::create_directories(r.dir);
+    std::string name;
+    CHECK(set_aside_layout_file(r.dir, "none", &name));
+    std::ofstream(std::filesystem::path(r.dir) / L"a.json") << "1";
+    std::ofstream(std::filesystem::path(r.dir) / L"a.json.bad") << "0";
+    CHECK(set_aside_layout_file(r.dir, "a", &name));
+    CHECK(name == "a.json.bad2");
+    CHECK(std::filesystem::exists(std::filesystem::path(r.dir) / L"a.json.bad2"));
+    CHECK_FALSE(std::filesystem::exists(std::filesystem::path(r.dir) / L"a.json"));
+}
+
+TEST_CASE("editor: the active layout survives a restart through the ini, whatever its name") {
+    for (const char* name : {"PvP; big", "100%", "\xF0\x9F\x99\x82 HUD", "plain"}) {
+        CAPTURE(name);
+        HudRig r;
+        const std::wstring ini = r.root + L"\\emf_core.ini";
+        {
+            CoreIniBackend backend(ini);
+            SettingsStore real(&backend);
+            for (SettingDef d : emf_setting_defs({}))
+                REQUIRE(real.declare(kEmfSettingsId, std::move(d), nullptr, SettingsStore::Declare::Start));
+            HudEditorDeps d = r.deps();
+            d.settings = &real;
+            HudEditor e(d);
+            e.start();
+            REQUIRE(e.save_as(name).ok);
+        }
+        CoreIniBackend backend(ini);
+        SettingsStore real(&backend);
+        for (SettingDef d : emf_setting_defs({}))
+            REQUIRE(real.declare(kEmfSettingsId, std::move(d), nullptr, SettingsStore::Declare::Start));
+        HudEditorDeps d = r.deps();
+        d.settings = &real;
+        HudEditor e(d);
+        e.start();
+        CHECK(e.view().layout_name == name);
+    }
+}
+
+TEST_CASE("editor: a pending edit is saved to its own layout when settings switch the layout") {
+    HudRig r;
+    write_layout(r, "Building", 3, 12.5f);
+    HudEditor& e = r.make();
+    e.set_offset(0, 7, 7, Save::Later);
+    r.set("active_layout", "building");
+    e.tick();
+    CHECK(e.view().layout_name == "Building");
+    bool ok = false;
+    for (const auto& f : r.files())
+        if (f.slug == "default") ok = f.layout.has_value() && f.layout->elements[0].x == 7.0f;
+    CHECK(ok);
+    for (const auto& f : r.files())
+        if (f.slug == "building") CHECK(f.layout->elements[0].x == 0.0f);  // the new layout got nothing
+    r.now += 1000;
+    e.tick();
+    for (const auto& f : r.files())
+        if (f.slug == "building") CHECK(f.layout->elements[0].x == 0.0f);
+}
+
+TEST_CASE("editor: a pending edit is saved to the old layout before save_as") {
+    HudRig r;
+    HudEditor& e = r.make();
+    e.set_offset(0, 7, 7, Save::Later);
+    REQUIRE(e.save_as("Other").ok);
+    bool ok = false;
+    for (const auto& f : r.files())
+        if (f.slug == "default") ok = f.layout.has_value() && f.layout->elements[0].x == 7.0f;
+    CHECK(ok);
 }

@@ -43,7 +43,7 @@ struct HudRig {
     std::string other_mod;
     uint32_t fault = 0;
     std::set<uint32_t> down;
-    int toggles = 0, writes = 0;
+    int toggles = 0, writes = 0, other_calls = 0;
     std::vector<std::string> logs;
     std::array<emf::core::hud::LiveInfo, emf::core::hud::kHudElementCount> live{};
     emf::core::hud::ScaleState scale{true, false};
@@ -77,7 +77,10 @@ struct HudRig {
             if (!install_ok && why) *why = install_why;
             return install_ok;
         };
-        d.other_hud_mod = [this] { return other_mod; };
+        d.other_hud_mod = [this] {
+            ++other_calls;
+            return other_mod;
+        };
         d.fault_code = [this] { return fault; };
         d.live = [this](size_t i) { return live[i]; };
         d.scale_state = [this] { return scale; };

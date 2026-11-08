@@ -94,21 +94,18 @@ std::string other_hud_mod_in(const std::vector<std::wstring>& module_names,
 }
 
 std::string loaded_other_hud_mod() {
+    // By the DLL's name (one lookup), then by an export of any loaded module: no module names are read, which is slow
+    // with hundreds of modules and this runs on the game's thread.
+    for (const KnownHudMod& m : kKnownHudMods)
+        if (GetModuleHandleW(m.dll)) return m.name;
     HMODULE mods[1024];
     DWORD needed = 0;
     if (!K32EnumProcessModules(GetCurrentProcess(), mods, sizeof mods, &needed)) return "";
     const size_t n = (needed < sizeof mods ? needed : sizeof mods) / sizeof(HMODULE);
-    std::vector<std::wstring> names;
-    for (size_t i = 0; i < n; ++i) {
-        wchar_t buf[MAX_PATH];
-        const DWORD len = K32GetModuleBaseNameW(GetCurrentProcess(), mods[i], buf, MAX_PATH);
-        names.emplace_back(buf, len);
-    }
-    return other_hud_mod_in(names, [&](const char* export_name) {
+    for (const KnownHudMod& m : kKnownHudMods)
         for (size_t i = 0; i < n; ++i)
-            if (GetProcAddress(mods[i], export_name)) return true;
-        return false;
-    });
+            if (GetProcAddress(mods[i], m.export_name)) return m.name;
+    return "";
 }
 
 }  // namespace emf::core::hud

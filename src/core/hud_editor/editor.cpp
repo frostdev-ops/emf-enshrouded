@@ -68,6 +68,7 @@ void HudEditor::select_layout_locked(const std::string& wanted, bool /*first*/) 
             if (lower(i->second.name) == w) it = i;
     }
     if (it != layouts_.end() && !wanted.empty()) {
+        if (dirty_ && active_slug_ != it->first && layouts_.count(active_slug_)) write_active_locked();  // its own file
         active_slug_ = it->first;
         return;
     }
@@ -76,6 +77,7 @@ void HudEditor::select_layout_locked(const std::string& wanted, bool /*first*/) 
         d.name = kDefaultLayoutName;
         layouts_["default"] = d;
     }
+    if (dirty_ && active_slug_ != "default" && layouts_.count(active_slug_)) write_active_locked();
     active_slug_ = "default";
     if (!wanted.empty() && slug != "default" && warned_layout_ != wanted) {
         warned_layout_ = wanted;
@@ -143,7 +145,17 @@ void HudEditor::write_layout_locked(const HudLayout& l) {
     const std::wstring dir = deps_.dir;
     const uint32_t build = deps_.build_number;
     auto log = deps_.log;
-    auto job = [dir, copy, build, log] {
+    const std::string slug = profile_slug(copy.name);
+    const bool set_aside = refused_.erase(slug) > 0;  // a file EMF could not read: kept before the first write over it
+    auto job = [dir, copy, build, log, slug, set_aside] {
+        if (set_aside) {
+            std::string kept;
+            if (set_aside_layout_file(dir, slug, &kept)) {
+                if (!kept.empty() && log) log("HUD editor: emf\\hud\\" + slug + ".json could not be read; kept as " + kept);
+            } else if (log) {
+                log("HUD editor: could not keep emf\\hud\\" + slug + ".json before writing a new one");
+            }
+        }
         std::string err;
         if (!write_layout_file(dir, copy, build, &err) && log)
             log("HUD editor: could not write emf\\hud\\" + profile_slug(copy.name) + ".json (" + err + ")");
@@ -164,22 +176,35 @@ void HudEditor::mark_changed_locked(Save save) {
     }
 }
 
+bool HudEditor::could_turn_on_locked() const {
+    return enabled_ && deps_.gate.build_known && !deps_.gate.server_exe && fault_ == 0;
+}
+
 void HudEditor::start() {
-    std::lock_guard<std::mutex> lock(mu_);
+    std::unique_lock<std::mutex> lock(mu_);
     read_settings_locked();
     layouts_.clear();
     for (LayoutFile& f : read_layout_dir(deps_.dir)) {
         if (!f.error.empty()) log_locked("HUD editor: emf\\hud\\" + f.slug + ".json: " + f.error);
         for (const std::string& n : f.notes) log_locked("HUD editor: emf\\hud\\" + f.slug + ".json: " + n);
-        if (f.layout) layouts_[f.slug] = std::move(*f.layout);
+        if (f.layout)
+            layouts_[f.slug] = std::move(*f.layout);
+        else
+            refused_.insert(f.slug);
     }
     const std::string wanted = deps_.settings ? deps_.settings->get(kEmfSettingsId, std::string(kPrefix) + "active_layout")
                                               : std::string();
     select_layout_locked(wanted, true);
     hotkeys_.poll(deps_.key_down);  // a key held now does not fire later
-    other_mod_ = deps_.other_hud_mod ? deps_.other_hud_mod() : std::string();
-    last_conflict_check_ = now_locked();
     fault_ = deps_.fault_code ? deps_.fault_code() : 0;
+    if (could_turn_on_locked() && deps_.other_hud_mod) {  // only while it could turn on; outside the lock (it can be slow)
+        lock.unlock();
+        const std::string mod = deps_.other_hud_mod();
+        lock.lock();
+        other_mod_ = mod;
+        other_checked_ = true;
+        last_conflict_check_ = now_locked();
+    }
     update_gate_locked(false);
     if (gate_.state == GateState::On)
         log_locked("HUD editor: on (layout \"" + active_locked().name + "\", " + std::to_string(kHudElementCount) + " parts)");
@@ -191,11 +216,16 @@ void HudEditor::tick() {
     std::unique_lock<std::mutex> lock(mu_);
     refresh_settings_locked();
     const uint64_t now = now_locked();
-    if (now - last_conflict_check_ >= kConflictCheckMs) {
-        other_mod_ = deps_.other_hud_mod ? deps_.other_hud_mod() : std::string();
+    fault_ = deps_.fault_code ? deps_.fault_code() : 0;
+    if (could_turn_on_locked() && deps_.other_hud_mod &&
+        (!other_checked_ || now - last_conflict_check_ >= kConflictCheckMs)) {
+        lock.unlock();  // the process check can be slow: never under the editor's lock
+        const std::string mod = deps_.other_hud_mod();
+        lock.lock();
+        other_mod_ = mod;
+        other_checked_ = true;
         last_conflict_check_ = now;
     }
-    fault_ = deps_.fault_code ? deps_.fault_code() : 0;
     update_gate_locked(true);
     if (dirty_ && now - last_change_ >= kSaveDelayMs) write_active_locked();
     if (deps_.scale_state && !scale_off_logged_ && deps_.scale_state().off) {
@@ -318,7 +348,9 @@ LayoutResult HudEditor::not_found_locked(const std::string& name) const {
 
 void HudEditor::set_active_setting_locked(const std::string& name) {
     if (!deps_.settings) return;
-    deps_.settings->set(kEmfSettingsId, std::string(kPrefix) + "active_layout", name);
+    // The slug, not the name: the ini cannot hold every name (a ';' cuts a value, a trailing '%' is dropped, the file is
+    // in the code page). select_layout_locked resolves slugs.
+    deps_.settings->set(kEmfSettingsId, std::string(kPrefix) + "active_layout", profile_slug(name));
     // our own write: the next tick must not re-resolve it as a change from elsewhere
     settings_version_ = deps_.settings->version();
 }
@@ -364,6 +396,7 @@ LayoutResult HudEditor::save_as(const std::string& name) {
     if (!problem.empty()) return {false, problem};
     const std::string slug = profile_slug(trimmed);
     const bool existed = layouts_.count(slug) > 0;
+    if (dirty_) write_active_locked();  // a pending edit belongs to the layout being left
     HudLayout copy = active_locked();
     copy.name = trimmed;
     layouts_[slug] = copy;
