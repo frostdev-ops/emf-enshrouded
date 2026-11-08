@@ -100,6 +100,7 @@ struct LoadWorldResult {
     uint32_t world = 0, character = 0;
     std::string world_name, character_name;
     uint64_t ms = 0;    // from the request until the world ran
+    bool join = false;  // a join (no world slot of this PC)
 };
 
 class MenuStart {
@@ -153,8 +154,8 @@ public:
     // for the life of the process, for every start; a name ("" = any) is checked like load_world's. Call before the
     // game can start a session.
     void set_local_only(const std::string& expect_name);
-    // The pregame state handler's command (phase 1): logs the state and the command's first 24 bytes (fault-guarded),
-    // so the command a menu button posts can be read off the log. Nothing for a null command.
+    // The pregame state handler's command (phase 1): logs the state and the command's number (never its bytes: they can
+    // hold the server's password), so the command a menu button posts can be read off the log. Nothing for a null command.
     void note_command(uint8_t state, const void* cmd) const;
 
     bool armed() const { return armed_.load() || local_only_.load(); }

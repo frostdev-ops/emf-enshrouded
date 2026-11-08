@@ -697,6 +697,12 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     emf::log_open(dir + L"\\emf\\emf_core.log");
     // [debug] bridge=1: the debug bridge (started below); its log ring keeps lines from here on
     const bool debug_bridge = emf::core::bridge::bridge_switch_on(dir + L"\\emf\\emf_core.ini");
+    // [debug] local_only=1 asked for, but not in place: say so, a test that relies on it must not go on unguarded
+    const bool local_only_wanted =
+        GetPrivateProfileIntW(L"debug", L"local_only", 0, (dir + L"\\emf\\emf_core.ini").c_str()) == 1;
+    const auto local_only_not_on = [local_only_wanted](const char* why) {
+        if (local_only_wanted) emf::logf("local_only: NOT on (%s): session starts are not guarded", why);
+    };
     if (debug_bridge) emf::log_ring_enable(5000);
     emf::logf("%s starting (game dir %s)", kVersion, utf8(dir).c_str());
     {
@@ -795,6 +801,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     else emf::logf("signatures: %d of %zu usable", usable, emf::kSigCount);
     if (!emf::required_signatures_ok(g_state->sigs, known)) {
         emf::logf("a required signature is missing: EMF stays idle, no mods loaded");
+        local_only_not_on("EMF stays idle");
         return;
     }
     // Struct offsets read from instructions in the located functions (common/code_offsets.h), before any hook: the
@@ -805,6 +812,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     emf::logf("%s", world_plan.line.c_str());
     if (!world_plan.ok) {
         emf::logf("the world's offsets are not known on this game build: EMF stays idle, no mods loaded");
+        local_only_not_on("EMF stays idle");
         return;
     }
     emf::set_world_offsets(world_plan.offsets);
@@ -864,7 +872,10 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             }
         } else {
             emf::logf("load_world: off (%s)", g_load_world_off.c_str());
+            local_only_not_on("the main-menu hooks are off on this build");
         }
+    } else if (!g_state->exe.server) {
+        local_only_not_on("it needs [debug] bridge=1");
     }
     // save-info.json: the slot names and levels the main menu shows, for the save backups' list. The game
     // exe only; the hook runs before the game's pregame enters the main menu.

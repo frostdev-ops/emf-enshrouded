@@ -345,8 +345,12 @@ world runs and the local player is in it:
   not only for a `load_world`, and `local_only_name=<character name>` adds the name check. It is for tests that join a
   server when the game starts (`enshrouded.exe +connect <address> +password <password>`), which post no `load_world`:
   a Steam character, or another LOCAL character than the named one, gets "No Character selected" instead of joining.
-  `emf_core.log` says `local_only: on` at start and names each refusal. Your own play with a Steam character does not
-  start while it is set.
+  The name also counts for a `load_world` or `join` that names none. `emf_core.log` says `local_only: on` at start and
+  names each refusal, or `local_only: NOT on (<why>)` when it cannot be (no `bridge=1`, the main-menu hooks are off on
+  this build, EMF idle): then nothing is guarded. Your own play with a Steam character does not start while it is set.
+- While a `load_world` or `join` runs, the guard also refuses any other LOCAL slot than the requested one (a click on
+  another character in between). The log notes the number of each command the menu gets (`menu command: state 2,
+  0x2a`), never its bytes, which can hold a server password.
 
 ### join
 
@@ -356,19 +360,22 @@ tests with a dedicated server on the same PC. Start the game with the server's a
 `enshrouded.exe +connect <address>:<queryPort> +password <password>`. The game asks the server for its details, then
 shows "About to join: <server>" with Join Session and Cancel in the main menu. `join` presses Join Session the way the
 button does, and answers once the server's world runs here with the local player in it:
-`{"ok":true,"character":1,"character_name":"<character name>","ms":9000}`.
+`{"ok":true,"character":1,"character_name":"<character name>","ms":9000}` (no slot or world: none of this PC is loaded).
 
 - How: like `load_world`. In one UI frame EMF selects the LOCAL character (the command the character screen posts);
   in a later frame it checks the selection, Lobby mode, no world and an empty command queue, waits until the game
   has the session to join (its prompt is up), then posts the prompt's own command (0x2a, "join the pending
   session") with `password`, as the button passes the one `+password` gave (without it a server with a password
   answers "wrong password"; `emf_bridge.ps1 join` takes it from `EMF_JOIN_PASSWORD`, so it is on no command line, and
-  EMF never writes it to its log). The guard is on from the first post, as for `load_world`: a Steam character, or another name than
+  EMF never writes it to its log; the game itself writes its command line, `+password` included, into
+  `enshrouded.log` and the copies in the game folder's `backup`). The guard is on from the first post, as for
+  `load_world`, and it skips the world check (a join loads no world of this PC): a Steam character, another slot, or another name than
   `expect_name`, gets "No Character selected" and nothing is joined. Keep `local_only=1` on as well.
 - Give the server time: a dedicated server answers the game's query only about 10 s after it starts, and on the
   PC's network address, not on 127.0.0.1. When the game asked too early its log says "Server failed to respond" and
   no prompt comes (`join` then times out, naming the session it waited for).
-- Only on the game exe of build 1287369 (the command's poster, `PostJoinPending`, is checked there); `emf_core.log`
+- Only on the game exe of build 1287369 (the command's poster, `PostJoinPending`, and the pending-session flag are
+  checked there; on another build join stays off even when the pattern is found); `emf_core.log`
   says `join: on` or off next to `load_world: on`.
 
 ## A test with the bridge

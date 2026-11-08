@@ -74,6 +74,7 @@ struct LoadWorldReply {
     uint32_t slot = 0, character = 0;
     std::string world, character_name;
     uint64_t ms = 0;
+    bool join = false;  // a join's reply: no slot, no world
 };
 
 struct KeyResult {

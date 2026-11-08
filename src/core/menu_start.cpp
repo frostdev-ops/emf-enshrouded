@@ -100,7 +100,7 @@ bool MenuStart::request(const LoadWorldRequest& r, Done done, LoadWorldResult* r
     if (r.character < 1 || r.character > L::kCharacterSlots)
         return no("bad_request", "character must be a LOCAL character slot from 1 to " + std::to_string(L::kCharacterSlots));
     const std::lock_guard<std::mutex> l(lock_);
-    if (step_ != Step::Idle) return no("busy", "a load_world is already in progress");
+    if (step_ != Step::Idle) return no("busy", "a load_world or join is already in progress");
     lingering_ = false;  // the new request owns the guard from here
     req_ = r;
     done_ = std::move(done);
@@ -132,6 +132,7 @@ MenuStart::Pending MenuStart::finish_locked(bool ok, const char* code, const std
     }
     p.result.world = req_.world;
     p.result.character = req_.character;
+    p.result.join = req_.join;
     p.result.world_name = world_name_;
     p.result.character_name = character_name_;
     const uint64_t now = deps_.now_ms();
@@ -165,11 +166,13 @@ void MenuStart::linger_check_locked(uint64_t now) {
 }
 
 void MenuStart::deliver(Pending p) {
-    if (p.result.ok)
+    if (p.result.ok && p.result.join)
+        deps_.log("join: joined with '" + p.result.character_name + "' (" + std::to_string(p.result.ms) + " ms)");
+    else if (p.result.ok)
         deps_.log("load_world: '" + p.result.world_name + "' runs with '" + p.result.character_name + "' (" +
                   std::to_string(p.result.ms) + " ms)");
     else
-        deps_.log("load_world: " + p.result.code + ": " + p.result.error);
+        deps_.log(std::string(p.result.join ? "join: " : "load_world: ") + p.result.code + ": " + p.result.error);
     if (p.done) p.done(p.result);
 }
 
@@ -245,6 +248,10 @@ std::optional<MenuStart::Pending> MenuStart::frame_a_locked(void* ui, uint64_t n
         return finish_locked(false, "refused",
                              "LOCAL character slot " + std::to_string(req_.character) + " is '" + character_name_ +
                                  "', not '" + req_.expect_name + "'");
+    if (local_only_.load() && !local_only_name_.empty() && character_name_ != local_only_name_)
+        return finish_locked(false, "refused",
+                             "LOCAL character slot " + std::to_string(req_.character) + " is '" + character_name_ +
+                                 "', not '" + local_only_name_ + "' ([debug] local_only_name)");
     armed_ = true;  // from the first post on, a Steam slot can never start
     if (!deps_.select_character(ui, local_slot_id(req_.character)) ||
         (!req_.join && !deps_.select_world(ui, local_slot_id(req_.world)))) {
@@ -305,6 +312,8 @@ std::optional<MenuStart::Pending> MenuStart::frame_b_locked(void* ui, uint64_t n
             return std::nullopt;
         }
         if (!deps_.join_pending(ui, req_.password)) return std::nullopt;  // tried again next frame
+        std::fill(req_.password.begin(), req_.password.end(), char{0});  // the command has its copy
+        req_.password.clear();
         start_posted_ = true;
         start_posted_ms_ = now;
         deps_.log("join: the game's 'Join Session' posted");
@@ -384,35 +393,46 @@ void MenuStart::poll() {
 bool MenuStart::guard(uint8_t* result, uintptr_t save2) {
     const bool by_load = armed_.load();
     if ((!by_load && !local_only_.load()) || !result || !save2) return false;  // outside an EMF load: never anything
-    std::string why;
-    uint8_t char_storage = 0, world_storage = 0;
-    if (!read_u8(save2 + L::kSelectedCharacter + 1, &char_storage) || char_storage != 0)
-        why = "the selected character is not LOCAL storage";
-    const uintptr_t app = game_app();
-    if (why.empty() && (!app || !read_u8(app + deps_.app.play_slot + 1, &world_storage) || world_storage != 0))
-        why = "the world to load is not LOCAL storage";
-    std::string expect;
-    bool test_refuse = false;
+    std::string expect_request, expect_local;
+    bool test_refuse = false, join = false;
+    uint32_t want_slot = 0;
     {
         const std::lock_guard<std::mutex> l(lock_);
-        expect = by_load ? guard_name_ : local_only_name_;
-        test_refuse = by_load && test_refuse_;
-    }
-    if (why.empty() && test_refuse) why = "test_refuse: the request asked for a refusal (dev check)";
-    if (why.empty()) {
-        if (!expect.empty()) {
-            uint16_t sel = 0;
-            std::optional<std::string> name;
-            if (read_u16(save2 + L::kSelectedCharacter, &sel) && (sel & 0xFF) >= 1 && (sel & 0xFF) <= L::kCharacterSlots)
-                name = read_name(save2 + L::kCharacterRecords + ((sel & 0xFF) - 1) * L::kCharacterRecordSize +
-                                 L::kCharacterRecordName);
-            if (!name || *name != expect) why = "the selected character is not '" + expect + "'";
+        if (by_load) {
+            expect_request = guard_name_;
+            test_refuse = test_refuse_;
+            join = req_.join;
+            want_slot = req_.character;
         }
+        if (local_only_.load()) expect_local = local_only_name_;
+    }
+    std::string why;
+    uint8_t char_storage = 0, world_storage = 0;
+    uint16_t sel = 0;
+    if (!read_u8(save2 + L::kSelectedCharacter + 1, &char_storage) || char_storage != 0)
+        why = "the selected character is not LOCAL storage";
+    // a join loads no world of this PC: the world to load does not matter then
+    const uintptr_t app = game_app();
+    if (why.empty() && !join &&
+        (!app || !read_u8(app + deps_.app.play_slot + 1, &world_storage) || world_storage != 0))
+        why = "the world to load is not LOCAL storage";
+    if (why.empty() && test_refuse) why = "test_refuse: the request asked for a refusal (dev check)";
+    if (why.empty() && !read_u16(save2 + L::kSelectedCharacter, &sel)) why = "the selected character cannot be read";
+    if (why.empty() && want_slot && (sel & 0xFF) != want_slot)
+        why = "the selected character is not LOCAL slot " + std::to_string(want_slot);
+    if (why.empty() && (!expect_request.empty() || !expect_local.empty())) {
+        std::optional<std::string> name;
+        if ((sel & 0xFF) >= 1 && (sel & 0xFF) <= L::kCharacterSlots)
+            name = read_name(save2 + L::kCharacterRecords + ((sel & 0xFF) - 1) * L::kCharacterRecordSize +
+                             L::kCharacterRecordName);
+        for (const std::string* expect : {&expect_request, &expect_local})
+            if (why.empty() && !expect->empty() && (!name || *name != *expect))
+                why = "the selected character is not '" + *expect + "'";
     }
     if (why.empty()) return false;
     result[0] = L::kNoCharacterSelected;
     if (by_load) guard_fired_ = true;
-    deps_.log(std::string(by_load ? "load_world" : "local_only") + ": the guard stopped the start: " + why);
+    deps_.log(std::string(by_load ? (join ? "join" : "load_world") : "local_only") + ": the guard stopped the start: " + why);
     return true;
 }
 
@@ -425,22 +445,13 @@ void MenuStart::set_local_only(const std::string& expect_name) {
 }
 
 void MenuStart::note_command(uint8_t state, const void* cmd) const {
+    // the command's number only: its bytes can hold the server's password (0x25, 0x26, 0x29, 0x2a)
     if (!cmd) return;
-    uint8_t b[24] = {};
-    if (!deps_.read(reinterpret_cast<uintptr_t>(cmd), b, sizeof b)) return;
-    if (b[0] == 0x25 || b[0] == 0x2a) {  // a password from +2 on (set password, join the pending session)
-        char head[8];
-        std::snprintf(head, sizeof head, "%02x %02x", b[0], b[1]);
-        deps_.log("menu command: state " + std::to_string(state) + ", " + head + " (the password is not logged)");
-        return;
-    }
-    std::string hex;
-    char two[4];
-    for (size_t i = 0; i < sizeof b; ++i) {
-        std::snprintf(two, sizeof two, i ? " %02x" : "%02x", b[i]);
-        hex += two;
-    }
-    deps_.log("menu command: state " + std::to_string(state) + ", " + hex);
+    uint8_t id = 0;
+    if (!deps_.read(reinterpret_cast<uintptr_t>(cmd), &id, 1)) return;
+    char t[8];
+    std::snprintf(t, sizeof t, "0x%02x", id);
+    deps_.log("menu command: state " + std::to_string(state) + ", " + t);
 }
 
 // ---- the process's instance and its hooks ----
@@ -599,7 +610,9 @@ bool install_menu_start(const std::array<Resolved, kSigCount>& sigs, bool known_
     deps.start = [p_start](void* ui) { return post_start(reinterpret_cast<PostStartFn>(p_start), ui); };
     // join (optional): postJoinPending must read the command queue where postStart does (`mov rsi, [rax+disp32]` at
     // +0x1C, which its signature leaves open)
-    if (const uintptr_t p_join = addr(Sig::PostJoinPending)) {
+    const auto& join_def = all_signatures()[static_cast<size_t>(Sig::PostJoinPending)];
+    if (const uintptr_t p_join = addr(Sig::PostJoinPending);
+        p_join && known_build && rva_checked(join_def, build_index) && app->pending_join != 0) {
         int32_t q = 0;
         if (emf::seh_read(reinterpret_cast<const void*>(p_join + 0x1F), &q, 4) &&
             static_cast<uint32_t>(q) == app->ui_command_queue)

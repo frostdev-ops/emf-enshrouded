@@ -818,10 +818,13 @@ TEST_CASE("bridge service: join hands a join of the pending session with the LOC
     r.character = 1;
     r.character_name = "Character 2";
     r.ms = 9000;
+    r.join = true;
     f.load_done(r);
     const auto v = last(f);
     CHECK(ok(v));
     CHECK(str(v, "character_name") == "Character 2");
+    CHECK(v.get("slot") == nullptr);   // a join has no world slot of this PC
+    CHECK(v.get("world") == nullptr);
     s.on_line(1, R"({"id":2,"cmd":"join"})");  // the character is needed
     CHECK(str(last(f), "code") == "bad_request");
     s.on_line(1, R"({"id":3,"cmd":"load_world","slot":1,"character":1})");

@@ -338,6 +338,7 @@ Refusal load_world_source(const LoadWorldParams& p, std::function<void(const Loa
         reply.world = res.world_name;
         reply.character_name = res.character_name;
         reply.ms = res.ms;
+        reply.join = res.join;
         done(reply);
     }, &refused);
     if (!ok) return Refusal{refused.code.empty() ? code::kRefused : refused.code, refused.error};

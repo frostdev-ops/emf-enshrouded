@@ -632,28 +632,94 @@ TEST_CASE_TEMPLATE("join: refused at once without the game's join command; a wro
     CHECK(c.last.code == "refused");
 }
 
-TEST_CASE_TEMPLATE("menu commands: each command a pregame state gets is logged with its first bytes", Build, On1273043, On1283531) {
+TEST_CASE_TEMPLATE("menu commands: each command a pregame state gets is logged by its number only, never its bytes", Build, On1273043, On1283531) {
     FakeGame g(Build::app);
     MenuStart m(g.deps());
     const uint8_t cmd[24] = {0x2b, 0, 0, 0, 0x11, 0x22, 0x33, 0x44};
     m.note_command(2, cmd);
     REQUIRE_FALSE(g.log.empty());
-    CHECK(g.log.back() == "menu command: state 2, 2b 00 00 00 11 22 33 44 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00");
+    CHECK(g.log.back() == "menu command: state 2, 0x2b");
     const size_t n = g.log.size();
     m.note_command(2, nullptr);  // no command: nothing
     CHECK(g.log.size() == n);
 }
 
-TEST_CASE("menu commands: the password commands (0x25, 0x2a) are logged without their password") {
+TEST_CASE("menu commands: a command that carries the server's password (Start Play's 0x29, 0x25, 0x2a, a session 0x26) logs no byte of it") {
     FakeGame g;
     MenuStart m(g.deps());
-    uint8_t join[24] = {0x2a, 0, 's', 'e', 'c', 'r', 'e', 't'};
-    m.note_command(2, join);
-    REQUIRE_FALSE(g.log.empty());
-    CHECK(g.log.back() == "menu command: state 2, 2a 00 (the password is not logged)");
-    uint8_t pw[24] = {0x25, 0, 'x', 'y'};
-    m.note_command(2, pw);
-    CHECK(g.log.back() == "menu command: state 2, 25 00 (the password is not logged)");
+    const char* secret = "Sekret-pw-123";
+    for (const uint8_t id : {uint8_t{0x29}, uint8_t{0x25}, uint8_t{0x2a}, uint8_t{0x26}}) {
+        uint8_t c[24] = {id, 0};
+        std::memcpy(c + 2, secret, std::strlen(secret));
+        m.note_command(3, c);
+    }
+    REQUIRE(g.log.size() == 4u);
+    CHECK(g.log[0] == "menu command: state 3, 0x29");
+    for (const auto& l : g.log) {
+        CHECK(l.find("Sekret") == std::string::npos);
+        CHECK(l.find("53 65 6b") == std::string::npos);  // nor as hex
+    }
+}
+
+TEST_CASE_TEMPLATE("local_only's name counts for a request too: a request without a name for another LOCAL character is refused before anything is posted", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
+    standard_saves(g);
+    g.character(0, 1, L::kRecordExists, "Other Hero");  // LOCAL slot 2
+    MenuStart m(g.deps());
+    m.set_local_only("Character 2");
+    m.on_menu_state(g.pg(), 0);
+    Capture c;
+    LoadWorldResult no;
+    REQUIRE(m.request(req(1, 2, ""), c.done(), &no));  // no name of its own
+    m.on_ui_frame(kUi);
+    CHECK(g.posts.empty());
+    REQUIRE(c.calls == 1);
+    CHECK(c.last.code == "refused");
+    // and the guard checks both names: armed by a request named "Character 2", local_only's name also applies
+    MenuStart m2(g.deps());
+    m2.set_local_only("Character 2");
+    g.set16(g.save2, L::kSelectedCharacter, 0x0002);  // LOCAL slot 2, "Other Hero"
+    uint8_t r[16] = {};
+    CHECK(m2.guard(r, g.s2()));
+}
+
+TEST_CASE_TEMPLATE("guard: while a request runs only its LOCAL slot may start, even without a name", Build, On1273043, On1283531) {
+    FakeGame g(Build::app);
+    standard_saves(g);
+    g.character(0, 1, L::kRecordExists, "Other Hero");
+    MenuStart m(g.deps());
+    g.menu = &m;
+    m.on_menu_state(g.pg(), 0);
+    Capture c;
+    LoadWorldResult no;
+    REQUIRE(m.request(req(1, 1, ""), c.done(), &no));
+    m.on_ui_frame(kUi);
+    g.dispatch();
+    m.on_ui_frame(kUi);  // offline + start posted
+    REQUIRE(g.posts.size() == 4);
+    g.set16(g.save2, L::kSelectedCharacter, 0x0002);  // a click on another LOCAL character slipped in
+    g.dispatch();
+    CHECK(g.refused_starts == 1);
+    CHECK_FALSE(g.started);
+}
+
+TEST_CASE("guard: a join loads no local world, so a Steam world left selected does not stop it; a load_world it still stops") {
+    FakeGame g(L::kApp1283531);
+    standard_saves(g);
+    MenuStart m(g.deps());
+    g.menu = &m;
+    m.on_menu_state(g.pg(), 0);
+    g.set16(g.app, g.lay.play_slot, 0x0101);  // the world list left a Steam world as the one to load
+    g.app[g.lay.pending_join] = 1;
+    Capture c;
+    LoadWorldResult no;
+    REQUIRE(m.request(join_req(1, "Character 2"), c.done(), &no));
+    m.on_ui_frame(kUi);
+    g.dispatch();
+    m.on_ui_frame(kUi);
+    g.dispatch();
+    CHECK(g.refused_starts == 0);
+    CHECK(g.started);
 }
 
 TEST_CASE_TEMPLATE("local_only without a name: LOCAL storage is enough", Build, On1273043, On1283531) {

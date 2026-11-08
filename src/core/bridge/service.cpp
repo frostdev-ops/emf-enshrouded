@@ -327,7 +327,9 @@ struct Service::Impl : std::enable_shared_from_this<Impl> {
             return reply_error(p->client, p->id, r.code.empty() ? code::kUnavailable : r.code,
                                r.error.empty() ? "the world did not start" : r.error);
         JsonObj o;
-        o.num("slot", r.slot).num("character", r.character).str("world", r.world);
+        if (!r.join) o.num("slot", r.slot);
+        o.num("character", r.character);
+        if (!r.join) o.str("world", r.world);
         o.str("character_name", r.character_name).num("ms", static_cast<double>(r.ms));
         reply_ok(p->client, p->id, o.members());
     }
