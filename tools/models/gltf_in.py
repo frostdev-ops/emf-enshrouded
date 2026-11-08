@@ -4,6 +4,7 @@ Bones are matched to the game skeleton by name: every bone must be called 'jNNN'
 gamegltf.py exports), NNN being the game joint index. Vertices are taken in the file's bind space and moved into the
 game skeleton's bind space with each joint's matrices (identity when the artist kept the game's rest pose).
 Materials map by name 'game_material_N' -> N, otherwise in order of first use.
+load_static_groups reads a glb without a skeleton (a prop) instead: fitted to a width, standing at the origin.
 """
 import json
 import math
@@ -237,3 +238,119 @@ def load_groups(path, hier, material_count=None, warn=print):
     if report["unmapped_bones"]:
         warn("bones without a game joint (named jNNN...) were ignored: %s" % ", ".join(sorted(set(report["unmapped_bones"]))[:10]))
     return groups, report
+
+
+def node_matrix(node):
+    """A glTF node's local matrix (rows) from its matrix or its translation, rotation and scale."""
+    if "matrix" in node:
+        return mat_from_colmajor(node["matrix"])
+    t = node.get("translation", [0.0, 0.0, 0.0])
+    x, y, z, w = node.get("rotation", [0.0, 0.0, 0.0, 1.0])
+    s = node.get("scale", [1.0, 1.0, 1.0])
+    rot = [[1 - 2 * (y * y + z * z), 2 * (x * y - z * w), 2 * (x * z + y * w)],
+           [2 * (x * y + z * w), 1 - 2 * (x * x + z * z), 2 * (y * z - x * w)],
+           [2 * (x * z - y * w), 2 * (y * z + x * w), 1 - 2 * (x * x + y * y)]]
+    return [[rot[r][c] * s[c] for c in range(3)] + [t[r]] for r in range(3)] + [[0.0, 0.0, 0.0, 1.0]]
+
+
+def world_matrices(gltf):
+    """Every node's world matrix (rows), its parents' applied."""
+    nodes = gltf.get("nodes", [])
+    parent = {c: i for i, n in enumerate(nodes) for c in n.get("children", [])}
+    cache = {}
+
+    def world(i):
+        if i not in cache:
+            m = node_matrix(nodes[i])
+            cache[i] = mat_mul(world(parent[i]), m) if i in parent else m
+        return cache[i]
+    return [world(i) for i in range(len(nodes))]
+
+
+def load_static_groups(path, width=None, yaw=0.0, material=None, material_count=None, warn=print):
+    """Return (groups, report) for a glb without a skeleton (a prop): every mesh in the file's world space, turned by
+    `yaw` degrees about the vertical, scaled so its wider horizontal side is `width` metres (None: as it is), centred
+    on the origin and standing on the ground (lowest point y 0), in game space (the file mirrored in x). Groups have no
+    skin. `material`: every primitive goes to that material slot; otherwise materials map by name 'game_material_N' ->
+    N, else in order of first use. report: {"meshes", "size": (x, y, z) metres}."""
+    gltf, binc = read_glb(path)
+    nodes = gltf.get("nodes", [])
+    worlds = world_matrices(gltf)
+    c, s = math.cos(math.radians(yaw)), math.sin(math.radians(yaw))
+
+    def turn(v):  # about +y
+        return (v[0] * c + v[2] * s, v[1], -v[0] * s + v[2] * c)
+
+    prims, material_ids = [], {}
+    for ni, node in enumerate(nodes):
+        if "mesh" not in node:
+            continue
+        m = worlds[ni]
+        inv = mat_inv_affine(m)
+        normal_m = [[inv[k][r] for k in range(3)] + [0.0] for r in range(3)] + [[0.0, 0.0, 0.0, 1.0]]
+        for prim in gltf["meshes"][node["mesh"]]["primitives"]:
+            if prim.get("mode", 4) != 4:
+                warn("skipping a primitive that is not a triangle list")
+                continue
+            a = prim["attributes"]
+            pos = accessor(gltf, binc, a["POSITION"])
+            n = len(pos)
+            nrm = accessor(gltf, binc, a["NORMAL"]) if "NORMAL" in a else [(0.0, 1.0, 0.0)] * n
+            uv = accessor(gltf, binc, a["TEXCOORD_0"]) if "TEXCOORD_0" in a else [(0.0, 0.0)] * n
+            tan = accessor(gltf, binc, a["TANGENT"]) if "TANGENT" in a else None
+            col = None
+            if "COLOR_0" in a:
+                cs = accessor(gltf, binc, a["COLOR_0"])
+                col = [tuple(int(round(max(0.0, min(1.0, v[k] if k < len(v) else 1.0)) * 255)) for k in range(4))
+                       for v in cs]
+            idx = accessor(gltf, binc, prim["indices"]) if "indices" in prim else list(range(n))
+            tris = [tuple(idx[i:i + 3]) for i in range(0, len(idx) - 2, 3)]
+            if material is not None:
+                mid = material
+            else:
+                key = prim.get("material", -1)
+                if key not in material_ids:
+                    name = gltf["materials"][key].get("name", "") if key >= 0 else ""
+                    mm = re.match(r"^game_material_(\d+)", name)
+                    material_ids[key] = int(mm.group(1)) if mm else len(material_ids)
+                mid = material_ids[key]
+            if material_count is not None and mid >= material_count:
+                raise ValueError("material %d does not exist on the source model (it has %d)" % (mid, material_count))
+            prims.append({
+                "material": mid,
+                "pos": [turn(xform_point(m, p)) for p in pos],
+                "nrm": [turn(xform_dir(normal_m, v)) for v in nrm],
+                "tan": [turn(xform_dir(m, t[:3])) + (t[3],) for t in tan] if tan is not None else None,
+                "uv": [tuple(float(x) for x in t) for t in uv], "col": col, "tris": tris})
+    if not prims:
+        raise ValueError("no meshes in %s" % path)
+    allp = [p for pr in prims for p in pr["pos"]]
+    lo = [min(p[k] for p in allp) for k in range(3)]
+    hi = [max(p[k] for p in allp) for k in range(3)]
+    wide = max(hi[0] - lo[0], hi[2] - lo[2])
+    scale = width / wide if width and wide > 0 else 1.0
+    cx, cz = (lo[0] + hi[0]) / 2, (lo[2] + hi[2]) / 2
+    by_material = {}
+    for pr in prims:
+        rh_pos = [((p[0] - cx) * scale, (p[1] - lo[1]) * scale, (p[2] - cz) * scale) for p in pr["pos"]]
+        if pr["tan"] is None:
+            rh_tan = tangents_from_uv(rh_pos, pr["nrm"], pr["uv"], pr["tris"])
+        else:
+            rh_tan = pr["tan"]
+        g = by_material.setdefault(pr["material"], {"material": pr["material"], "pos": [], "nrm": [], "tan": [],
+                                                    "col": [] if pr["col"] else None, "uv": [], "skin": None,
+                                                    "lods": [[]]})
+        base = len(g["pos"])
+        g["pos"] += [gamegltf.mirror_vec(p) for p in rh_pos]
+        g["nrm"] += [gamegltf.mirror_vec(v) for v in pr["nrm"]]
+        g["tan"] += [(-t[0], t[1], t[2], -t[3]) for t in rh_tan]
+        g["uv"] += pr["uv"]
+        if g["col"] is not None:
+            g["col"] += pr["col"] or [(255, 255, 255, 255)] * len(rh_pos)
+        g["lods"][0] += [(a_ + base, b_ + base, c_ + base) for a_, b_, c_ in pr["tris"]]
+    groups = [by_material[k] for k in sorted(by_material)]
+    for g in groups:
+        if g["col"] is None:
+            g.pop("col")
+    size = tuple(round((hi[k] - lo[k]) * scale, 6) for k in range(3))
+    return groups, {"meshes": len(prims), "size": size}
