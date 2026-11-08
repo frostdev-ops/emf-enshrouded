@@ -1,14 +1,26 @@
 {
   "id": "beastmaster",
   "name": "Beastmaster",
-  "version": "1.10.0",
-  "description": "A Beastmaster class: tame wild wolves, boars, sabretooths and hounds (beat them down or feed them bait), and bears, aurochs and snakes with the EMF creature packs (a wild snake is now and then a rare crimson, golden king or albino one, with a bonus for whoever slays it), keep up to 8 in your collection, call as many to fight beside you as your active slots (1 at the start, up to 4 with your level), and choose them at a stable (the game's animal bed in your base: press E at it). Loyal beasts earn talent points (Strength, Toughness, Swiftness, Second Wind, Ambush, Guard, Menace, Taunt), spent on each beast's tab of the Beasts window. Monsters split between you and your beasts: a tank draws half of them. They follow you, come back when far away, pass the time while you stand still (lie down, sit by a fire, watch a villager, keep watch at night), and are kept with the world. Hold F3 for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
+  "version": "1.11.0",
+  "description": "A Beastmaster class: tame wild wolves, boars, sabretooths and hounds (beat them down or feed them bait), and bears, aurochs and snakes with the EMF creature packs (a wild snake is now and then a rare crimson, golden king or albino one, with a bonus for whoever slays it), keep up to 8 in your collection, call as many to fight beside you as your active slots (1 at the start, up to 4 with your level), and choose them at a stable (the game's animal bed in your base: press E at it). Loyal beasts earn talent points (Strength, Toughness, Swiftness, Second Wind, Ambush, Guard, Menace, Taunt), spent on each beast's tab of the Beasts window (it shows the beast slowly turning, drawn from your own game). Monsters split between you and your beasts: a tank draws half of them. They follow you, come back when far away, pass the time while you stand still (lie down, sit by a fire, watch a villager, keep watch at night), and are kept with the world. Hold F3 for the beast wheel; /beastmaster in the chat for players who join. Host or dedicated server. Installed switched off.",
   "authors": ["EMF contributors"],
   "enabled": false,
   "emf": 14,
   "side": "server",
   "main": "main.lua",
   "depends": {"lua": ">=1.14"},
+  "portraits": [
+    {"key": "beastmaster.wolf", "template": "478381c5-585f-4264-b373-dbb1ea596eca", "frames": 24, "size": 192},
+    {"key": "beastmaster.boar", "template": "255fd8d9-4447-445d-8ffc-4d9dc0afdd16", "frames": 24, "size": 192},
+    {"key": "beastmaster.sabretooth", "template": "50b96064-3ffc-47a2-8c7d-1d592a3c459c", "frames": 24, "size": 192},
+    {"key": "beastmaster.hound", "template": "87575915-bc75-4611-ab71-0cd4e79535b1", "frames": 24, "size": 192},
+    {"key": "beastmaster.bear", "template": "b3a7c2e1-5f4d-4c8b-9e21-7a0d4b6e2f02", "frames": 24, "size": 192},
+    {"key": "beastmaster.aurochs", "template": "d5f2b8e3-7c4a-4e9f-8b21-6a3c8d4e0f02", "frames": 24, "size": 192},
+    {"key": "beastmaster.snake", "template": "d4c87337-8c53-41df-8488-8079046e1502", "frames": 24, "size": 192},
+    {"key": "beastmaster.crimson_snake", "template": "d4c87337-8c53-41df-8488-8079046e1512", "frames": 24, "size": 192},
+    {"key": "beastmaster.golden_snake", "template": "d4c87337-8c53-41df-8488-8079046e1522", "frames": 24, "size": 192},
+    {"key": "beastmaster.albino_snake", "template": "d4c87337-8c53-41df-8488-8079046e1532", "frames": 24, "size": 192}
+  ],
   "settings": [
     {"key": "wheel_key", "type": "keybind", "default": "F3", "label": "Beast wheel (hold)", "live": true, "group": "Controls"},
     {"key": "stable_key", "type": "keybind", "default": "E", "label": "Beasts window (at a stable without the E prompt)", "live": true, "group": "Controls"},

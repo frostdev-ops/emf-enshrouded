@@ -2,6 +2,10 @@
 // components and commands (tests/lua_mod_rig.h).
 #include "lua_mod_rig.h"
 
+#include <regex>
+
+#include "loader/portraits_plan.h"
+
 namespace {
 // The animation graph the game wolf (and the scavengers' hound, and the bear pack's bear) runs: its template data on the
 // server world, where render models are not (seen in game: a spawned wolf has no ModelResource there).
@@ -3065,7 +3069,90 @@ void fang_window(BeastRig& b) {
 }
 bool lit(const Fake::Win& w, const std::string& key) { return (flags_at(w, key) & EMF_UI_SELECTED) != 0u; }
 bool off(const Fake::Win& w, const std::string& key) { return (flags_at(w, key) & EMF_UI_DISABLED) != 0u; }
+// The window's picture row, or -1.
+int image_row(const Fake::Win& w) {
+    for (size_t i = 0; i < w.widgets.size(); ++i)
+        if (w.widgets[i].type == EMF_UI_IMAGE) return static_cast<int>(i);
+    return -1;
+}
+// The icon of the window's picture row as last drawn (0: none).
+uint32_t picture(BeastRig& b) {
+    const int i = image_row(shown(b));
+    return i < 0 ? 0u : shown(b).widgets[static_cast<size_t>(i)].icon;
+}
 }  // namespace
+
+TEST_CASE("beast tab: the selected beast's portrait turns under its name (EMF's picture of its kind, loaded once)") {
+    BeastRig b;
+    with_images(b.r.api);  // a v26 core
+    fang_window(b);
+    CHECK(image_row(shown(b)) == -1);  // the Stable tab has none
+    CHECK(b.r.fake.images_loaded.empty());
+    click(b, "beast.Fang");
+    {
+        const Fake::Win& w = shown(b);
+        const int pic = image_row(w);
+        REQUIRE(pic > 0);
+        CHECK(w.texts[static_cast<size_t>(pic - 1)] == "Fang");  // right under its name
+        CHECK(w.widgets[static_cast<size_t>(pic)].icon == 50u);
+        CHECK(w.widgets[static_cast<size_t>(pic)].fps == 8u);
+        CHECK(w.widgets[static_cast<size_t>(pic)].height == doctest::Approx(8.0));
+    }
+    CHECK(b.r.fake.images_loaded == std::vector<std::string>{"portrait:beastmaster.wolf"});
+    click(b, "tab.stable");
+    CHECK(picture(b) == 0u);
+    click(b, "tab.beast");
+    CHECK(picture(b) == 50u);
+    click(b, "beast.Tusk");  // the boar
+    CHECK(picture(b) == 51u);
+    click(b, "beast.Fang");
+    CHECK(picture(b) == 50u);
+    CHECK(b.r.fake.images_loaded == std::vector<std::string>{"portrait:beastmaster.wolf", "portrait:beastmaster.boar"});
+}
+
+TEST_CASE("beast tab: without its picture (not drawn, or a core before v26) the tab has no picture row and no gap") {
+    for (bool v26 : {true, false}) {
+        CAPTURE(v26);
+        BeastRig b;
+        if (v26) {
+            with_images(b.r.api);
+            b.r.fake.image_ok = false;  // the cache has no picture of it
+        }
+        fang_window(b);
+        click(b, "beast.Fang");
+        CHECK(image_row(shown(b)) == -1);
+        CHECK(shows(shown(b), "Wolf, level 10"));
+        CHECK(b.host->status(b.id) == "running");
+        click(b, "tab.stable");
+        click(b, "tab.beast");
+        CHECK(b.r.fake.images_loaded.size() == (v26 ? 1u : 0u));  // a refused picture is not asked for again
+    }
+}
+
+TEST_CASE("beastmaster: mod.json asks EMF for a portrait of every built-in kind (key beastmaster.<id>, its template)") {
+    const std::string dir = std::string(EMF_SOURCE_DIR) + "/mods/beastmaster/";
+    const std::string species = slurp(std::filesystem::path(dir + "species.lua").wstring());
+    std::map<std::string, std::string> kinds;  // id -> template, from species.lua's list
+    const std::regex entry(R"re(\{ id = "([a-z_]+)",[^\n]*template = "([0-9a-f-]{36})")re");
+    for (auto it = std::sregex_iterator(species.begin(), species.end(), entry); it != std::sregex_iterator(); ++it)
+        kinds[(*it)[1]] = (*it)[2];
+    REQUIRE(kinds.size() == 10u);  // wolf, boar, sabretooth, hound, bear, aurochs and four snakes
+    std::vector<std::string> problems;
+    const auto items = emf::loader::read_portrait_lists(
+        {{"beastmaster", slurp(std::filesystem::path(dir + "mod.json").wstring())}}, &problems);
+    CHECK(problems.empty());
+    CHECK(items.size() == kinds.size());
+    for (const auto& [id, tpl] : kinds) {
+        CAPTURE(id);
+        const auto it = std::find_if(items.begin(), items.end(),
+                                     [&](const emf::loader::PortraitItem& p) { return p.key == "beastmaster." + id; });
+        REQUIRE(it != items.end());
+        CHECK(it->template_guid == tpl);
+        CHECK(it->model_guid.empty());
+        CHECK(it->frames == 24);
+        CHECK(it->size == 192);
+    }
+}
 
 TEST_CASE("talent: selecting a beast opens its tab with its stats and talents; Stable goes back") {
     BeastRig b;  // level 10

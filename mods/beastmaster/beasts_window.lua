@@ -17,12 +17,15 @@ local threat = require("threat")
 local M = {}
 M.ID = "stable"
 local CONFIRM_S = 5
+local PORTRAIT_LINES = 8  -- the picture's height in text lines
+local PORTRAIT_FPS = 8    -- its 24 frames (mod.json "portraits"): one turn in 3 s
 
 local W = {}
 W.__index = W
 
 function M.new(env)
-	local w = setmetatable({ env = env, opening = 0 }, W)  -- opening: counts the windows opened (kept over resets)
+	-- opening: counts the windows opened; portraits: species id -> picture handle (0: none); both kept over resets
+	local w = setmetatable({ env = env, opening = 0, portraits = {} }, W)
 	w:reset()
 	return w
 end
@@ -79,8 +82,21 @@ local function mmss(s)
 	return string.format("%d:%02d", math.floor(s / 60), math.floor(s % 60))
 end
 
--- The selected beast's tab: its stats (kind, level, loyalty, what its role, loyalty and talents make of its health,
--- damage and speed, where it is), its talents with a + each and Reset talents, and its actions.
+-- The picture of the kind `sp` that EMF drew from the player's game at the start (mod.json "portraits", key
+-- beastmaster.<id>), or nil: not drawn, or no emf.image (Lua before 1.15, whose windows refuse a picture row). Asked
+-- once per kind: the cache only changes at a start.
+function W:portrait(sp)
+	if not (sp and emf.image) then return nil end
+	local h = self.portraits[sp.id]
+	if h == nil then
+		h = emf.image("portrait:beastmaster." .. sp.id) or 0
+		self.portraits[sp.id] = h
+	end
+	return h ~= 0 and h or nil
+end
+
+-- The selected beast's tab: its picture (turning), its stats (kind, level, loyalty, what its role, loyalty and talents
+-- make of its health, damage and speed, where it is), its talents with a + each and Reset talents, and its actions.
 function W:beast_rows(world, rows, b)
 	local env = self.env
 	local pace = env.setting("loyalty_pace")
@@ -89,6 +105,8 @@ function W:beast_rows(world, rows, b)
 	local lvl = self:loyalty_of(b)
 	local f = loyalty.factor(lvl)
 	rows[#rows + 1] = { heading = b.name }
+	local pic = self:portrait(sp)
+	if pic then rows[#rows + 1] = { image = pic, height = PORTRAIT_LINES, fps = PORTRAIT_FPS } end
 	local level = env.level(world, self.player)
 	local kind = sp and sp.name or tostring(b.species)
 	rows[#rows + 1] = { text = level > 0 and string.format("%s, level %d", kind, level) or kind }

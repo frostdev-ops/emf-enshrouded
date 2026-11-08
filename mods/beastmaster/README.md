@@ -140,7 +140,8 @@ lower, or the Loyalty grows setting turned down), it keeps them, but no new poin
 many: reset to choose again"). A release forgets a beast's talents; a rename keeps them. The numbers are in one table at
 the top of `talents.lua`.
 
-**The beast's tab** shows its kind and level (yours), its loyalty and the kills to the next, what its role, loyalty and
+**The beast's tab** shows the beast under its name, slowly turning (a picture EMF draws from your own game, see Good to
+know), then its kind and level (yours), its loyalty and the kills to the next, what its role, loyalty and
 talents make of its health, damage and speed ("Health x1.32, damage x1.27, speed x1.08"), whether it is out, at home or
 resting and active or in the stable, then "Talents: 3 points (1 left)", a row per talent with its points ("Strength 2/5:
 +8 % damage") and a **+** (off when the talent is full or no point is left; Second Wind says "ready" or when it works
@@ -349,7 +350,8 @@ return {
 
 Each entry needs `id`, `name`, `template` and `graph`. An entry without them, or with an id that is taken, is
 skipped. EMF's log lists the skipped entries and the beasts added, and says when the file does not load. Beastmaster
-does not ship this file.
+does not ship this file. A beast added here has no picture on its tab (the pictures are listed in Beastmaster's
+`mod.json`).
 
 ## Good to know
 
@@ -363,6 +365,11 @@ does not ship this file.
   every search of the world (every 30 s), so one the game dropped (the bed streamed out of view) comes back. With
   EMF's Lua 1.15 it also sees when EMF dropped it (`emf.offered`): the E key opens the window there meanwhile.
 - Your collection is kept with the world, per player (by Steam account).
+- The picture on a beast's tab: EMF draws one of each kind from your own game files when the game starts (the
+  `portraits` list in `mod.json`; EMF 0.5.2 or newer). The first start after installing shows a short splash while it
+  draws. Nothing of the game's art ships with the mod. A pack beast's picture is drawn when its pack is installed at
+  that start; with a pack added later it comes after the next game or EMF update (EMF does not try a failed picture
+  again before then). Until a picture is there, or with an older EMF, the tab shows the rest as before.
 - A beast that is out is taken out of the world while its owner is away, and comes back when they return.
 - Beasts are ordinary game creatures with the enemy AI: they guard you as the game's companions do, and sometimes take
   their own path to a foe.
