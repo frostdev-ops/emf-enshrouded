@@ -149,24 +149,26 @@ local function bed_template()
 	} }
 end
 
-test("its collider: the hay platform, the back and left walls and the roof as boxes, all in one solid", function()
+test("its collider: the plank floor, the back and left walls, the low rail on the right and the roof, one solid", function()
 	local c = run()
 	local tpl = bed_template()
 	c.placeables[1].edit_template(tpl)
 	local col = tpl.components[2].value.colliders[1]
-	eq(#col.dataArray, 4, "boxes")
-	local platform = col.dataArray[1].value
-	assert(math.abs(platform.offset.y + platform.shape.halfSize.y - 0.5) < 1e-6, "the platform's top is 0.5 m high")
+	eq(#col.dataArray, 5, "boxes")
+	local floor = col.dataArray[1].value
+	assert(math.abs(floor.offset.y + floor.shape.halfSize.y - 0.19) < 0.01, "the floor's top is 0.19 m high")
 	for i, d in ipairs(col.dataArray) do
 		eq(tostring(d.type), "keen::ecs::BoxColliderData", "box " .. i)
 		assert(d.value.shape.halfSize.x > 0 and d.value.shape.halfSize.y > 0 and d.value.shape.halfSize.z > 0, "size " .. i)
 	end
-	local roof = col.dataArray[4].value
-	assert(roof.offset.y - roof.shape.halfSize.y >= 2.0 - 1e-6, "the roof starts 2 m up")
+	local rail = col.dataArray[4].value
+	assert(rail.offset.y + rail.shape.halfSize.y < 1.0, "the rail is low (under 1 m)")
+	local roof = col.dataArray[5].value
+	assert(roof.offset.y - roof.shape.halfSize.y >= 2.2, "the roof starts above head height")
 	assert(col.dataArray[2].value ~= col.dataArray[3].value, "each box its own")
 	local list = col.joltObjects[1].shapeIndexList
-	eq(#list, 4, "shape indices")
-	for i = 1, 4 do eq(list[i], i - 1, "shape index " .. i) end
+	eq(#list, 5, "shape indices")
+	for i = 1, 5 do eq(list[i], i - 1, "shape index " .. i) end
 end)
 
 test("a collider that is not the bed's one box is kept as it is", function()

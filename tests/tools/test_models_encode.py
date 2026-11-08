@@ -27,6 +27,26 @@ def tiny_group():
 
 
 class EncodeTests(unittest.TestCase):
+    def test_a_group_over_the_vertex_limit_is_split_by_triangles(self):
+        """A mesh holds at most 65535 vertices (u16 indices): the second Stable's thatch had 84079."""
+        tris, pos = [], []
+        for t in range(5):  # five triangles that share no vertex
+            base = len(pos)
+            pos += [(t, 0.0, 0.0), (t, 1.0, 0.0), (t, 0.0, 1.0)]
+            tris.append((base, base + 1, base + 2))
+        g = {"material": 2, "pos": pos, "nrm": [(0.0, 1.0, 0.0)] * 15, "tan": [(1.0, 0.0, 0.0, 1.0)] * 15,
+             "uv": [(0.1 * i, 0.0) for i in range(15)], "skin": None, "lods": [tris]}
+        parts = encode.split_groups([g], max_verts=7)
+        self.assertGreater(len(parts), 1)
+        self.assertTrue(all(len(p["pos"]) <= 7 and p["material"] == 2 and p["skin"] is None for p in parts))
+        got = sorted(tuple(p["pos"][i] for i in t) for p in parts for t in p["lods"][0])
+        self.assertEqual(got, sorted(tuple(pos[i] for i in t) for t in tris))  # every triangle once, as it was
+        for p in parts:
+            self.assertEqual(len(p["uv"]), len(p["pos"]))
+            self.assertTrue(all(0 <= i < len(p["pos"]) for t in p["lods"][0] for i in t))
+        small = encode.split_groups([g], max_verts=100)
+        self.assertEqual(small, [g])
+
     def test_weights_sum_to_255(self):
         for ws in ([1.0], [0.5, 0.5], [0.6, 0.3, 0.1], [0.34, 0.33, 0.33], [0.25] * 4):
             self.assertEqual(sum(encode.pack_weights(ws)), 255)

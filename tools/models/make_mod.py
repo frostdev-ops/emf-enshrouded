@@ -969,6 +969,7 @@ def build_prop(p, src, path):
     source = rm.load_record(path(p["source_model_json"]))
     groups, report = gltf_in.load_static_groups(path(p["glb"]), width=p.get("width"), yaw=float(p.get("yaw", 0)),
                                                 material=p.get("material"), material_count=len(source["materials"]))
+    groups = encode.split_groups(groups)  # a dense prop (the second Stable's thatch) is more than one mesh
     blob, fields = encode.build(groups)
     ctr = fields["boundingSphere"]["center"]
     radius = max(((q[0] - ctr["x"]) ** 2 + (q[1] - ctr["y"]) ** 2 + (q[2] - ctr["z"]) ** 2) ** 0.5

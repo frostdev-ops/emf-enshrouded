@@ -23,6 +23,14 @@ class AtlasUvTests(unittest.TestCase):
         self.assertEqual(atlas_uv.classify((0.9, 0.9, 0.9), RULES, 1), 1)     # bright but grey
         self.assertEqual(atlas_uv.classify((0.3, 0.2, 0.02), RULES, 1), 1)    # saturated but dark
 
+    def test_a_rule_can_ask_for_a_height(self):
+        # the second Stable's floor planks are as bright as its thatch: straw only on the roof (above half the height)
+        rules = [{"material": 0, "min_saturation": 0.45, "min_value": 0.5, "min_height": 0.5}]
+        straw_coloured = (0.79, 0.56, 0.14)
+        self.assertEqual(atlas_uv.classify(straw_coloured, rules, 1, height=0.8), 0)
+        self.assertEqual(atlas_uv.classify(straw_coloured, rules, 1, height=0.1), 1)
+        self.assertEqual(atlas_uv.classify(straw_coloured, RULES, 1, height=0.1), 0)  # no min_height: any height
+
     def test_a_small_face_maps_inside_the_region(self):
         wall = [(1.0, 0.3, 2.0), (1.0, 0.3, 2.2), (1.0, 0.5, 2.2)]  # facing +x
         uvs = atlas_uv.face_uvs(wall, (1, 0, 0), 1.5, REGION)

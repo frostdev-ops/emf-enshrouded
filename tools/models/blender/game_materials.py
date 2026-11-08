@@ -7,7 +7,7 @@ each slot: nothing of the game's art is copied.
   blender --background --factory-startup --python tools/models/blender/game_materials.py -- \\
       <in.glb> <its albedo.png> <look.json> <out.glb>
 
-look.json: {"rules": [{"material": 0, "min_saturation": 0.55, "min_value": 0.45}], "default": 1,
+look.json: {"rules": [{"material": 0, "min_saturation": 0.55, "min_value": 0.45, "min_height": 0.5}], "default": 1,
             "materials": {"0": {"repeat": [2.8, 1.4], "region": [u0, v0, u1, v1]}, "1": {...}},
             "smooth_angle": 40,   (optional: smooth shading, sharp edges only where faces meet at more than 40 degrees)
             "drop_low": [{"material": 0, "below": 0.05}, {"below": 0.025}]}   (optional: faces of that slot (no
@@ -64,7 +64,9 @@ def main():
             u = sum(x[0] for x in uvs) / len(uvs)
             v = sum(x[1] for x in uvs) / len(uvs)
             r, g, b, _ = px[min(h - 1, max(0, int(v * h))), min(w - 1, max(0, int(u * w)))]
-            slot = atlas_uv.classify((float(r), float(g), float(b)), look.get("rules", []), look["default"])
+            centre = sum((mw @ l.vert.co).z for l in f.loops) / len(f.loops)
+            slot = atlas_uv.classify((float(r), float(g), float(b)), look.get("rules", []), look["default"],
+                                     height=(centre - z0) / height)
             top = max((mw @ l.vert.co).z for l in f.loops)
             if any(d.get("material", slot) == slot and top < z0 + d["below"] * height for d in drops):
                 doomed.append(f)

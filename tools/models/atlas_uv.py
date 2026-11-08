@@ -10,12 +10,14 @@ import colorsys
 import math
 
 
-def classify(rgb, rules, default):
-    """The material of a face whose texture colour is `rgb` (0..1 each): the first rule it meets, else `default`.
-    rules: [{"material": n, "min_saturation": s, "min_value": v}] (HSV saturation and value)."""
+def classify(rgb, rules, default, height=None):
+    """The material of a face whose texture colour is `rgb` (0..1 each), its centre at `height` (a fraction of the
+    model's height): the first rule it meets, else `default`. rules: [{"material": n, "min_saturation": s,
+    "min_value": v, "min_height": h}] (HSV saturation and value; min_height optional)."""
     _, s, v = colorsys.rgb_to_hsv(*rgb)
     for r in rules:
-        if s >= r.get("min_saturation", 0.0) and v >= r.get("min_value", 0.0):
+        if s >= r.get("min_saturation", 0.0) and v >= r.get("min_value", 0.0) and (
+                height is None or height >= r.get("min_height", 0.0)):
             return r["material"]
     return default
 

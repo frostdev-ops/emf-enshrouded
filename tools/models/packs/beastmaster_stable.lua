@@ -26,14 +26,15 @@ local WOOD_LOGS   = "3f4093ae-75ed-4e5d-bd0b-784ba83b88f5" -- Material_T1_Wood_L
 local PLANT_FIBRE = "ff00a9f6-fd7e-4933-9c6b-33c36223cd2b" -- Material_T1_Plant_Fibre
 local ANIMAL_FUR  = "66ce7d4c-ce66-4ad4-800a-ab37f7e604a2" -- Material_T1_Animal_Fur
 
--- The Stable's solid parts, in metres from its middle on the ground (the prop 3.9 x 3.5 x 4 m, its open side +z):
--- centre and half size of each box. The first is the hay platform (its top 0.5 m up, walkable); then the back wall,
--- the left wall (the right side is open between its posts) and the roof (from 2.1 m up).
+-- The Stable's solid parts, in metres from its middle on the ground (the prop 4.5 x 3.4 x 2.95 m, its open side +z):
+-- centre and half size of each box. The first is the plank floor (its top 0.19 m up, walkable); then the back wall,
+-- the left wall, the low rail on the right (0.95 m high; the front is open) and the roof (from 2.25 m up).
 local BOXES = {
-	{ at = { -0.08, 0.25, -0.15 }, half = { 1.55, 0.25, 1.35 } },
-	{ at = { -0.05, 1.1, -1.32 }, half = { 1.6, 1.1, 0.18 } },
-	{ at = { -1.5, 1.1, -0.15 }, half = { 0.18, 1.1, 1.4 } },
-	{ at = { 0.0, 2.8, 0.0 }, half = { 2.0, 0.68, 2.0 } },
+	{ at = { -0.01, 0.096, -0.017 }, half = { 2.01, 0.096, 1.434 } },
+	{ at = { -0.06, 1.23, -1.125 }, half = { 1.86, 1.035, 0.225 } },
+	{ at = { -1.69, 1.23, -0.11 }, half = { 0.225, 1.035, 1.24 } },
+	{ at = { 1.69, 0.57, 0.0 }, half = { 0.135, 0.38, 1.125 } },
+	{ at = { 0.0, 2.84, 0.0 }, half = { 2.25, 0.59, 1.6 } },
 }
 
 -- The bed's collider (one box) becomes the Stable's boxes: the box copied (EML copies a value put into a game array)

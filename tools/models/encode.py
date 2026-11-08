@@ -73,6 +73,35 @@ def sphere(points):
     return c, r
 
 
+def split_groups(groups, max_verts=MAX_VERTS):
+    """Groups over `max_verts` vertices (a mesh's u16 indices) split into several groups of the same material, by
+    triangles in their order (LOD 0; a split group keeps only that level); smaller groups are returned as they are."""
+    out = []
+    for g in groups:
+        if len(g["pos"]) <= max_verts:
+            out.append(g)
+            continue
+        keys = [k for k in ("pos", "nrm", "tan", "col", "uv", "skin") if g.get(k) is not None]
+        part, remap = None, None
+        for t in g["lods"][0]:
+            fresh = {i for i in t if remap is None or i not in remap}
+            if part is None or len(part["pos"]) + len(fresh) > max_verts:
+                part = dict({k: [] for k in keys}, material=g["material"], lods=[[]])
+                if "skin" not in keys:
+                    part["skin"] = None
+                remap = {}
+                out.append(part)
+            tri = []
+            for i in t:
+                if i not in remap:
+                    remap[i] = len(part["pos"])
+                    for k in keys:
+                        part[k].append(g[k][i])
+                tri.append(remap[i])
+            part["lods"][0].append(tuple(tri))
+    return out
+
+
 def build(groups, palette=None, box=None):
     for g in groups:
         if len(g["pos"]) > MAX_VERTS:
