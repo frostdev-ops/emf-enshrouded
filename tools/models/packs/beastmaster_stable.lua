@@ -3,7 +3,8 @@
 -- and shows the beasts a player left at home inside the Large Stable (mods/beastmaster/home.lua). A content script of
 -- the beasts pack (make_mod.py "content_scripts"), run with EMF's helper emf_content.lua (docs/modding/content.md).
 --
--- Each is a copy of the large animal bed's object without the parts farm animals and villagers use, with a prop model of
+-- Each is a copy of the large animal bed's object without the parts farm animals and villagers use, nor the ones that
+-- let monsters target and break it (furniture such as the crafting stations has none of them), with a prop model of
 -- the pack (beastmaster_stable, beastmaster_large_stable: a stable with a thatched roof; make_mod "props") under its own
 -- model GUID, which Beastmaster knows it by, and boxes of its own to stand on and bump into. When its model was not made,
 -- it takes a copy of the bed's record under the same GUID (the bed's look). A dedicated server has no render data: there
@@ -111,7 +112,9 @@ local function add(s)
 		guid = s.item, template_guid = s.template, name_guid = s.name_guid, debug_name = s.debug_name,
 		name = s.name, description_guid = s.desc_guid, description = s.description,
 		clone_of = BED_ITEM,
-		strip = { "keen::ecs::AnimalTarget", "keen::ecs::ActiveNpcTarget" },  -- farm animals and villagers leave it alone
+		-- farm animals and villagers leave it alone; monsters neither target nor break it (a broken one fell to an item)
+		strip = { "keen::ecs::AnimalTarget", "keen::ecs::ActiveNpcTarget", "keen::ecs::ServerTarget",
+			"keen::ecs::Destructible", "keen::ecs::OnDestroy" },
 		edit_template = function(tpl)
 			for _, c in ipairs(tpl.components) do
 				if c.type == "keen::ecs::ModelResource" then c.value.model = s.model end

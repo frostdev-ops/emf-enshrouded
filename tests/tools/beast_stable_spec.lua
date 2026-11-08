@@ -267,6 +267,16 @@ test("without the crude chair's recipe (a game update) both stables are crafted 
 	eq(c.finish, 1, "finish")
 end)
 
+test("monsters can neither target nor break a stable: the bed's Destructible, OnDestroy and ServerTarget go, as on furniture", function()
+	local c = run()
+	for _, guid in ipairs({ STABLE_ITEM, LARGE_ITEM }) do
+		local p = placeable(c, guid)
+		for _, part in ipairs({ "keen::ecs::Destructible", "keen::ecs::OnDestroy", "keen::ecs::ServerTarget" }) do
+			assert(has(p.strip, part), guid .. ": " .. part .. " stripped")
+		end
+	end
+end)
+
 test("the Large Stable is a second copy of the large animal bed's object, with its own GUIDs, name and description", function()
 	local c = run()
 	assert(c.ok, c.err)
