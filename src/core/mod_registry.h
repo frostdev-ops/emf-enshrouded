@@ -30,6 +30,7 @@ struct ModRecord {
     bool has_manifest = false;
     bool enabled_default = true;  // the manifest's "enabled" (the switch's value while the ini has none)
     std::string main;             // script entry for a Script mod ("main.lua")
+    std::string side;             // the manifest's "side" in lower case ("" without it)
 };
 
 class ModRegistry {

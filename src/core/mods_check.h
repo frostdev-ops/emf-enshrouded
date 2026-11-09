@@ -15,6 +15,8 @@
 #include <utility>
 #include <vector>
 
+#include "core/mod_registry.h"
+
 namespace emf::core {
 
 constexpr size_t kMaxModEntries = 512;
@@ -111,6 +113,23 @@ inline ModDiff compare_mods(const std::vector<ModEntry>& server, const std::vect
     for (const auto& p : player)
         if (mod_kind_compared(p.kind) && !find(server, p.id)) d.extra.push_back(p);
     return d;
+}
+
+// This game's list: the EML content mods its data was built with (id, version), then every running mod (loaded or a
+// script) by its mod.json side. Entries whose id or version cannot go in the list are left out.
+inline std::vector<ModEntry> this_games_mods(const std::vector<ModRecord>& mods,
+                                             const std::vector<std::pair<std::string, std::string>>& content) {
+    std::vector<ModEntry> out;
+    std::set<std::string> seen;
+    for (const auto& [id, version] : content)
+        if (valid_list_id(id) && valid_list_version(version) && seen.insert(id).second) out.push_back({'c', id, version});
+    for (const auto& r : mods) {
+        if (r.status != ModStatus::Loaded && r.status != ModStatus::Script) continue;
+        if (!valid_list_id(r.id) || !valid_list_version(r.version) || !seen.insert(r.id).second) continue;
+        const char kind = r.side == "both" ? 'b' : r.side == "server" ? 's' : r.side == "client" ? 'l' : 'u';
+        out.push_back({kind, r.id, r.version});
+    }
+    return out;
 }
 
 // What the player's game shows (once per session); "" when nothing is missing.

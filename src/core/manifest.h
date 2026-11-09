@@ -101,6 +101,7 @@ struct Manifest {
     std::vector<Dependency> depends;
     bool enabled_default = true;  // the switch's value while the mod's ini has no "enabled" key
     std::vector<SettingDef> settings;
+    std::string side;  // "side" in lower case: "server", "client", "both" or another word; "" without it
 };
 
 // mod.json is refused above this size (the loader reads no more than this plus one byte).

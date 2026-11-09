@@ -1155,6 +1155,9 @@ ManifestResult parse_manifest(std::string_view json_text) {
         m.emf = static_cast<uint32_t>(x->n);
     }
     if (const Value* x = root.get("enabled"); x && x->is(VT::Bool)) m.enabled_default = x->b;
+    if (const Value* x = root.get("side"); x && x->is(VT::String)) {
+        for (char c : x->s) m.side += static_cast<char>(c >= 'A' && c <= 'Z' ? c - 'A' + 'a' : c);
+    }
     const Value* dll = root.get("dll");
     const Value* main = root.get("main");
     if (dll && main) {

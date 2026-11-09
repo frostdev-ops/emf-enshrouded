@@ -363,3 +363,12 @@ TEST_CASE("manifest: ShroudForge's \"dependencies\" is read as \"depends\"; both
     CHECK_FALSE(r.manifest);
     CHECK(r.error.find("\"dependencies\": \"a\"") == 0);  // errors name the field as the mod wrote it
 }
+
+TEST_CASE("manifest: side is kept in lower case (the mod check on join reads it); without it, empty") {
+    auto r = parse_manifest(R"({"id": "emberbrand", "version": "1.2.0", "side": "Both"})");
+    REQUIRE_MESSAGE(r.manifest, r.error);
+    CHECK(r.manifest->side == "both");
+    r = parse_manifest(R"({"id": "tiny", "version": "2"})");
+    REQUIRE_MESSAGE(r.manifest, r.error);
+    CHECK(r.manifest->side.empty());
+}

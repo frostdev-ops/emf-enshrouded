@@ -134,6 +134,7 @@ std::vector<Found> discover(const std::wstring& dir) {
         x.rec.description = m.description;
         for (size_t i = 0; i < m.authors.size(); ++i) x.rec.authors += (i ? ", " : "") + m.authors[i];
         x.rec.enabled_default = m.enabled_default;
+        x.rec.side = m.side;
         x.rec.main = m.main;
         if (m.main.empty()) {
             std::string rel = m.dll;

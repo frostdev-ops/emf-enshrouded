@@ -86,3 +86,25 @@ TEST_CASE("mods check: a long list in the note is cut after 8 with how many more
     CHECK(note.find("pack8") == std::string::npos);
     CHECK(note.find("and 4 more") != std::string::npos);
 }
+
+TEST_CASE("mods check: this game's list is its content mods, then the running mods by their side") {
+    using emf::core::ModRecord;
+    using emf::core::ModStatus;
+    auto rec = [](const char* id, const char* version, const char* side, ModStatus st) {
+        ModRecord r;
+        r.id = id;
+        r.version = version;
+        r.side = side;
+        r.status = st;
+        return r;
+    };
+    const std::vector<ModRecord> mods = {rec("beastmaster", "1.15.1", "server", ModStatus::Script),
+                                         rec("emberbrand", "1.2.0", "both", ModStatus::Loaded),
+                                         rec("clock", "1.0.0", "client", ModStatus::Loaded),
+                                         rec("off", "1.0", "both", ModStatus::Disabled),
+                                         rec("broken", "1.0", "both", ModStatus::Failed),
+                                         rec("lua", "1.20.0", "", ModStatus::Loaded),
+                                         rec("odd", "1 0", "both", ModStatus::Loaded)};  // a version with a space: left out
+    const auto list = emf::core::this_games_mods(mods, {{"beasts_pack", "2.2.0"}});
+    CHECK(encode_mods(list) == "c beasts_pack 2.2.0\ns beastmaster 1.15.1\nb emberbrand 1.2.0\nl clock 1.0.0\nu lua 1.20.0\n");
+}
