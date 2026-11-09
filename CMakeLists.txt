@@ -138,6 +138,7 @@ add_library(emf_core_lib STATIC
   src/core/world_settings_file.cpp
   src/core/world_settings_glue.cpp
   src/core/world_settings_service.cpp
+  src/core/player_events.cpp
   src/core/world_commands.cpp
   src/core/hook_table.cpp
   src/core/api.cpp
@@ -526,6 +527,7 @@ add_executable(emf_tests
   tests/test_net_line.cpp
   tests/test_net_link.cpp
   tests/test_player_roster.cpp
+  tests/test_player_events.cpp
   tests/test_net_peers.cpp
   tests/test_net_remote.cpp
   tests/test_net_service.cpp

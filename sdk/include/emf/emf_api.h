@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 27 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 28 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 27
+#define EMF_API_VERSION 28
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -978,6 +978,12 @@ typedef struct EmfApi {
     /* The channel version a player's game has (server: world, player), or the server's (a player's game: NULL, 0); 0 =
      * none. */
     uint32_t (*net_peer)(EmfWorld* world, uint32_t player, const char* channel);
+
+    /* ---- v28: player events (EmfPlayerEvent above; reference.md "v28") ---- */
+    /* `cb` for each player who joins, leaves or dies on the server world (the host's game or a dedicated server; its
+     * thread, after its step). False for a null cb. "Died" needs the call before the first world starts (the game's
+     * events are wired then, as on_event's); later only joined and left come (logged). Any thread. */
+    bool (*on_player)(EmfPlayerCallback cb, void* user);
 } EmfApi;
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);

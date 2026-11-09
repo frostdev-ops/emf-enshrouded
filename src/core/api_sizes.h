@@ -42,6 +42,7 @@ constexpr uint32_t kApiV24Size = EMF_FIELD_END(EmfApi, window_close);
 constexpr uint32_t kApiV25Size = EMF_FIELD_END(EmfApi, offer_remove);
 constexpr uint32_t kApiV26Size = EMF_FIELD_END(EmfApi, offer_active);
 constexpr uint32_t kApiV27Size = EMF_FIELD_END(EmfApi, net_peer);
+constexpr uint32_t kApiV28Size = EMF_FIELD_END(EmfApi, on_player);
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
@@ -102,8 +103,14 @@ static_assert(kApiV25Size == 672, "EmfApi size (v25)");
 static_assert(offsetof(EmfApi, image_load) == kApiV25Size && offsetof(EmfApi, offer_active) == kApiV25Size + 8 &&
                   kApiV26Size == 688,
               "EmfApi layout (v26 appends image_load and offer_active after offer_remove)");
-static_assert(offsetof(EmfApi, net_channel) == kApiV26Size && kApiV27Size == 728 && sizeof(EmfApi) == kApiV27Size,
+static_assert(offsetof(EmfApi, net_channel) == kApiV26Size && kApiV27Size == 728,
               "EmfApi layout (v27 appends net_channel, net_to_server, net_to_player, net_to_players, net_peer)");
+static_assert(offsetof(EmfApi, on_player) == kApiV27Size && kApiV28Size == 736 && sizeof(EmfApi) == kApiV28Size,
+              "EmfApi layout (v28 appends on_player)");
+static_assert(sizeof(EmfPlayerEvent) == 96 && offsetof(EmfPlayerEvent, account) == 8 &&
+                  offsetof(EmfPlayerEvent, player) == 16 && offsetof(EmfPlayerEvent, host) == 24 &&
+                  offsetof(EmfPlayerEvent, name) == 32,
+              "EmfPlayerEvent layout (v28)");
 static_assert(sizeof(EmfNetFrom) == 24 && offsetof(EmfNetFrom, account) == 8 && offsetof(EmfNetFrom, admin) == 20,
               "EmfNetFrom layout (v27)");
 static_assert(sizeof(EmfNetChannel) == 56 && offsetof(EmfNetChannel, name) == 8 &&

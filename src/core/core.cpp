@@ -545,6 +545,7 @@ uint8_t* hk_load_savegame_step(uint8_t* out, uint8_t* inst) {
         emf::core::loaded_world_slot(inst, g_inst_slot_flag_offset, &slot)) {
         const int faults = g_state->load_events.fire(slot);
         emf::logf("world loaded (slot 0x%04x)%s", slot, faults ? ", a load callback faulted" : "");
+        if (g_state->players) g_state->players->world_loaded();  // v28: everyone joins 1 s later
         if (auto* info = emf::core::save_info_recorder()) info->on_world_loaded(slot);  // save-info.json
         // EML content could not be applied at this start: said once on screen, when the first world is there
         if (!g_content_lines.notice.empty() && !g_content_notice_said.exchange(true) && g_state->notify)
@@ -1301,6 +1302,14 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     static std::unique_ptr<emf::core::net::NetService> net;      // v27 mod messages (in process for now)
     net = std::make_unique<emf::core::net::NetService>(emf::core::net_deps(g_state.get()));
     g_state->net = net.get();
+    static std::unique_ptr<emf::core::PlayerEvents> players;     // v28 on_player
+    players = std::make_unique<emf::core::PlayerEvents>(emf::core::player_events_deps());
+    g_state->players = players.get();
+    // after the chat lines: who joined, left or died (the event relay delivered this step's deaths before)
+    g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
+        if (g_state->players && emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER)
+            g_state->players->server_step(w, g_state->server_session.load());
+    }, nullptr);
     g_state->core_settings_backend = std::make_unique<emf::core::CoreIniBackend>(dir + L"\\emf\\emf_core.ini");
     g_state->settings_route = std::make_unique<emf::core::RoutingIniBackend>(g_state->core_settings_backend.get(),
                                                                               g_state->settings_backend.get());

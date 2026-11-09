@@ -17,6 +17,7 @@
 #include "commands.h"
 #include "dispatcher.h"
 #include "event_relay.h"
+#include "player_events.h"
 #include "hook_table.h"
 #include "mod_registry.h"
 #include "program_registry.h"
@@ -35,6 +36,7 @@ class InventoryService;
 class TeleportService;
 class ComponentService;
 class OfferService;
+class PlayerEvents;
 namespace net {
 class NetService;
 struct NetDeps;
@@ -76,6 +78,7 @@ struct CoreState {
     std::string components_off;                         // why change_component is off
     OfferService* offers = nullptr;                     // v25 E prompts (null when change_component is off)
     net::NetService* net = nullptr;                     // v27 mod messages
+    PlayerEvents* players = nullptr;                    // v28 on_player
     std::atomic<uint32_t> server_session{0};            // +1 per server world set up (API v9 server_session)
     std::atomic<uint32_t> client_session{0};            // +1 per client world set up (mod messages: a new session)
     std::function<bool(const WheelRequest&)> open_wheel;   // the overlay's wheel (null: no overlay)
@@ -173,6 +176,8 @@ void post_wheel_choice(const WheelRequest& request, int choice);
 void post_window_event(const WindowRequest& request, uint32_t kind, const std::string& key, uint32_t reason);
 // The net service's ties to the game (v27 mod messages): the host check, the dispatcher, the clock, the log.
 net::NetDeps net_deps(CoreState* state);
+// v28 on_player: the core's player list reader, the clock, the log and the guarded call for PlayerEvents.
+PlayerEvents::Deps player_events_deps();
 // Tells the on_setting_changed callbacks about the settings changed since the last call (the sim step calls it
 // after each world's step, on that world's thread).
 void pump_setting_changes(EmfWorld* world);

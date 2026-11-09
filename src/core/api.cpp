@@ -31,6 +31,7 @@
 #include "component_service.h"
 #include "offers.h"
 #include "net/net_service.h"
+#include "player_events.h"
 #include "overlay/window_model.h"
 #include "world_settings_service.h"
 #include "emf/generated/components.hpp"
@@ -588,6 +589,46 @@ void api_notify(const char* fmt, ...) {
         g_state->notify(buf);
     else
         core_log(buf);
+}
+
+// v28 on_player. The first call also asks the event relay for EntityDiedEvent and HitEvent on the server world
+// ("died" and its killer) while it is still open (before the first world starts); later, joined and left only.
+void player_died_event(EmfWorld*, const void* event, uint32_t size, void*) {
+    if (!g_state || !g_state->players || size < sizeof(gen::ecs::EntityDiedEvent)) return;
+    gen::ecs::EntityDiedEvent e{};
+    std::memcpy(&e, event, sizeof e);
+    g_state->players->died(e.deadEntityId.id);
+}
+void player_hit_event(EmfWorld*, const void* event, uint32_t size, void*) {
+    if (!g_state || !g_state->players || size < sizeof(gen::ecs::HitEvent)) return;
+    gen::ecs::HitEvent e{};
+    std::memcpy(&e, event, sizeof e);
+    g_state->players->hit(e.targetId.id, e.rootSourceId.id);
+}
+
+bool api_on_player(EmfPlayerCallback cb, void* user) {
+    if (!g_state || !g_state->players || !cb) return false;
+    static std::atomic<bool> asked{false};
+    if (!asked.exchange(true)) {
+        std::string why;
+        const bool died = g_state->relay.subscribe(EMF_WORLD_SERVER, "EntityDiedEvent", sizeof(gen::ecs::EntityDiedEvent),
+                                                   player_died_event, nullptr, &why) &&
+                          g_state->relay.subscribe(EMF_WORLD_SERVER, "HitEvent", sizeof(gen::ecs::HitEvent),
+                                                   player_hit_event, nullptr, &why);
+        if (!died)
+            core_log("on_player (" + module_name_of(reinterpret_cast<const void*>(cb)) +
+                     "): no \"died\" events (" + why + "); joined and left come");
+    }
+    return g_state->players->watch(cb, user);
+}
+
+bool guarded_player_call(EmfPlayerCallback cb, EmfWorld* w, const EmfPlayerEvent* e, void* user) {
+    __try {
+        cb(w, e, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
 }
 
 bool api_on_event(uint8_t kind, const char* name, uint32_t expected_size, EmfWorldEventCallback cb, void* user) {
@@ -2096,6 +2137,7 @@ const EmfApi kApi = {
     api_net_to_player,
     api_net_to_players,
     api_net_peer,
+    api_on_player,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {
@@ -2270,6 +2312,15 @@ void post_wheel_choice(const WheelRequest& request, int choice) {
         delete j;  // before the call: a faulting callback must not leak it
         copy.cb(w, copy.choice, copy.user);
     }, job);
+}
+
+PlayerEvents::Deps player_events_deps() {
+    return PlayerEvents::Deps{
+        [](EmfWorld* w) { return read_players(api_table(), w); },
+        [] { return static_cast<uint64_t>(GetTickCount64()); },
+        [](const std::string& s) { core_log(s); },
+        [](EmfPlayerCallback cb, EmfWorld* w, const EmfPlayerEvent* e, void* u) { return guarded_player_call(cb, w, e, u); },
+        [](const void* addr) { return module_name_of(addr); }};
 }
 
 net::NetDeps net_deps(CoreState* s) {

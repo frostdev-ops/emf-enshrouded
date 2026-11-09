@@ -891,6 +891,33 @@ bool on_chat(const char* mod, F f) {
     if (!ok) delete p;
     return ok;
 }
+// ---- v28: player events ----
+inline bool has_v28() { return api() && api()->size >= offsetof(EmfApi, on_player) + sizeof(api()->on_player); }
+// f(World, const EmfPlayerEvent&) for each player who joins, leaves or dies on the server world (EMF_PLAYER_JOINED,
+// _LEFT, _DIED; its thread, after its step). Call it in emf_mod_load for "died" too. The functor lives for the whole
+// process; a C++ exception it throws is logged under `mod`. False on an older core.
+template <class F>
+bool on_player(const char* mod, F f) {
+    if (!has_v28() || !api()->on_player) return false;
+    struct Holder {
+        F f;
+        std::string mod;
+    };
+    auto* p = new Holder{std::move(f), mod ? mod : "emf::on_player"};
+    const bool ok = api()->on_player([](EmfWorld* w, const EmfPlayerEvent* e, void* u) {
+        auto* h = static_cast<Holder*>(u);
+        try {
+            h->f(World(w), *e);
+        } catch (const std::exception& ex) {
+            EMF_LOG(h->mod.c_str(), "the on_player callback threw: %s", ex.what());
+        } catch (...) {
+            EMF_LOG(h->mod.c_str(), "the on_player callback threw an unknown C++ exception");
+        }
+    }, p);
+    if (!ok) delete p;
+    return ok;
+}
+
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
 inline bool request_save() { return has_v19() && api()->request_save && api()->request_save(); }
 
