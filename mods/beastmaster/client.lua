@@ -10,6 +10,7 @@ local beast_line = require("beast_line")
 
 local OPEN_NEAR_M = 6  -- m: the stable key asks the server for the window with a stable this close (the server checks)
 local WHEEL_WAIT_S = 2  -- s: the wheel's items from the server open the wheel this long after the key was pressed
+local JUMP_M = 100      -- m: moved this far between two searches (fast travel): the world streams in again, wait again
 local NO_SERVER_WHEEL = "The server's Beastmaster does not answer (it needs 1.15 or newer): type /beastmaster in the chat."
 local LINE_STATES = { out = true, aside = true, rest = true }
 
@@ -58,7 +59,9 @@ function C:step(world)
 		self.since = self.since or t
 	else
 		self.since, self.sent = nil, nil
-		self.line = nil  -- another server, or none: its line goes
+		self.line = nil          -- another server, or none: its line goes
+		self.reporter:reset()    -- and a search of the next one's world at once (its clock may be behind)
+		self.searched_at = nil
 	end
 	-- the beast line, its rests counted down by this game's clock (drawn when its text changes)
 	local text = self.line and beast_line.text(self.line.head, self.line.parts, t - self.line.at) or ""
@@ -66,7 +69,15 @@ function C:step(world)
 		emf.hud("out", text, "bottom_left")
 		self.drawn = text
 	end
-	local list = self.reporter:step(world, t, emf.local_player())
+	local me = emf.local_player()
+	local list = self.reporter:step(world, t, me)
+	if list and up then  -- a jump (fast travel): the stables there may still be streaming in
+		local x, y, z
+		if me and me ~= 0 then x, y, z = world:position(me) end
+		local at = self.searched_at
+		if x and at and math.sqrt((x - at.x) ^ 2 + (y - at.y) ^ 2 + (z - at.z) ^ 2) >= JUMP_M then self.since = t end
+		self.searched_at = x and { x = x, y = y, z = z } or nil
+	end
 	if list and up and t - self.since >= stable_mod.SETTLE_S and not (self.sent and stable_mod.same_list(list, self.sent)) then
 		if wire.send({ t = "stables", list = list }) then
 			self.sent = list

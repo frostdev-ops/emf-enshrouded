@@ -5671,9 +5671,11 @@ TEST_CASE("beastmaster net: a reported stable is gone only when a game within 40
     from_player(b, 2, 0xBB, report_of(kStableModel, 10, 10, 0));  // player 2 at (30, 10, 0): 20 m from it
     REQUIRE(listed(b, "seen by a player's game"));
     place(b.r.fake, 2, 300, 10, 0);
+    b.seconds(3);  // (a player's reports count at most one every 2 s)
     from_player(b, 2, 0xBB, R"({"t":"stables","list":{}})");
     CHECK(listed(b, "seen by a player's game"));  // too far to see it
     place(b.r.fake, 2, 30, 10, 0);
+    b.seconds(3);
     from_player(b, 2, 0xBB, R"({"t":"stables","list":[]})");
     CHECK(b.reply("beastmaster.stable list").rfind("No stable in this world now", 0) == 0);
     b.seconds(1);
@@ -5908,4 +5910,136 @@ TEST_CASE("beastmaster net: beastmaster.as #k open opens a joined player's Beast
     CHECK(has_part(sent_to(b, 2), "\"open\":true", "Talents: "));
     b.r.fake.net_peer_version = 0;
     CHECK(b.reply("beastmaster.as #2 open").rfind("That player's game has no Beastmaster window", 0) == 0);
+}
+
+// ---- after the final review ----
+namespace {
+// The reported stables kept with the world ("r" lines in the saved data).
+size_t r_lines(const std::string& saved) {
+    size_t n = saved.rfind("r ", 0) == 0 ? 1 : 0;
+    for (size_t at = saved.find("\nr "); at != std::string::npos; at = saved.find("\nr ", at + 1)) ++n;
+    return n;
+}
+size_t log_count(BeastRig& b, const std::string& part) {
+    size_t n = 0;
+    for (const auto& l : b.r.fake.log) n += l.find(part) != std::string::npos;
+    return n;
+}
+// A stables report of the beds at `points` (x, z; y 10).
+std::string report_points(const std::vector<std::pair<double, double>>& points) {
+    std::string list;
+    for (const auto& [x, z] : points) {
+        char e[160];
+        std::snprintf(e, sizeof e, R"({"m":"%s","x":%.2f,"y":10.0,"z":%.2f})", kStableModel, x, z);
+        list += (list.empty() ? "" : ",") + std::string(e);
+    }
+    return R"({"t":"stables","list":[)" + list + "]}";
+}
+}  // namespace
+
+TEST_CASE("beastmaster net: a player's game cannot grow the reported stables without end: at most 64 are kept") {
+    BeastRig b({}, true);
+    flame_altar(b, 900, 100, 0);  // a base 70 m from player 2 (at 30, 10, 0): nothing there is within their 40 m
+    b.seconds(31);
+    for (int r = 0; r < 10; ++r) {  // 10 reports of 32 new beds each
+        std::vector<std::pair<double, double>> points;
+        for (int i = 0; i < 32; ++i) points.push_back({90.0 + 2.0 * (i % 8), -40.0 + 2.0 * (r * 4 + i / 8)});
+        from_player(b, 2, 0xBB, report_points(points));
+        b.seconds(3);
+    }
+    CHECK(r_lines(b.saved()) == 64u);
+    CHECK(log_count(b, "64") >= 1u);
+}
+
+TEST_CASE("beastmaster net: a stable reported far from the player whose game reports it is not taken") {
+    BeastRig b({}, true);
+    flame_altar(b, 900, 200, 0);
+    b.seconds(31);
+    from_player(b, 2, 0xBB, report_of(kStableModel, 210, 10, 0));  // 180 m from player 2 at (30, 10, 0)
+    b.seconds(1);
+    CHECK(r_lines(b.saved()) == 0u);
+    place(b.r.fake, 2, 200, 10, 0);
+    b.seconds(3);
+    from_player(b, 2, 0xBB, report_of(kStableModel, 210, 10, 0));
+    b.seconds(1);
+    CHECK(r_lines(b.saved()) == 1u);
+}
+
+TEST_CASE("beastmaster net: a player's stables reports count at most one every 2 s") {
+    BeastRig b({}, true);
+    flame_altar(b, 900, 0, 0);
+    b.seconds(31);
+    from_player(b, 2, 0xBB, report_of(kStableModel, 10, 10, 0));
+    from_player(b, 2, 0xBB, report_points({{10, 0}, {14, 0}}));  // at once: not taken
+    b.seconds(1);
+    CHECK(r_lines(b.saved()) == 1u);
+    b.seconds(2);
+    from_player(b, 2, 0xBB, report_points({{10, 0}, {14, 0}}));
+    b.seconds(1);
+    CHECK(r_lines(b.saved()) == 2u);
+}
+
+TEST_CASE("beastmaster net: a full report (its 32 nearest) removes no stable beyond the farthest one it lists") {
+    BeastRig b({}, true);
+    flame_altar(b, 900, 5, 4);
+    b.seconds(31);
+    std::vector<std::pair<double, double>> beds;  // 40 beds, 2 m apart
+    for (int i = 0; i < 40; ++i) beds.push_back({2.0 * (i % 8), 2.0 * (i / 8)});
+    auto nearest = [&](double px, double pz) {
+        auto v = beds;
+        std::sort(v.begin(), v.end(), [&](const auto& a, const auto& c) {
+            return std::hypot(a.first - px, a.second - pz) < std::hypot(c.first - px, c.second - pz);
+        });
+        v.resize(32);
+        return v;
+    };
+    place(b.r.fake, 2, -10, 10, 4);
+    from_player(b, 2, 0xBB, report_points(nearest(-10, 4)));
+    b.seconds(3);
+    place(b.r.fake, 2, 24, 10, 4);
+    from_player(b, 2, 0xBB, report_points(nearest(24, 4)));
+    b.seconds(3);
+    REQUIRE(r_lines(b.saved()) == 40u);
+    place(b.r.fake, 2, -10, 10, 4);
+    from_player(b, 2, 0xBB, report_points(nearest(-10, 4)));  // the same 32 again: the other 8 are farther
+    b.seconds(1);
+    CHECK(r_lines(b.saved()) == 40u);
+}
+
+TEST_CASE("beastmaster net: unknown kinds of messages write one log line however many come") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    for (int i = 0; i < 50; ++i) from_player(b, 2, 0xBB, "{\"t\":\"kind" + std::to_string(i) + "\"}");
+    CHECK(log_count(b, "an unknown kind") == 1u);
+}
+
+TEST_CASE("beastmaster net: after a session ends and the clock goes back (a restarted server), the game searches and reports again") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    stable_prop(b, 950, 10, 10, 0);
+    client_steps(b, 181 + 35 * 60);
+    REQUIRE(sent_up(b).size() == 1u);
+    b.r.fake.net_peer_version = 0;  // the session ends ...
+    client_steps(b, 60);
+    b.r.fake.tick -= 2000;          // ... and the next server's clock is behind
+    b.r.fake.net_peer_version = 1;
+    client_steps(b, 36 * 60);
+    CHECK(sent_up(b).size() == 2u);
+}
+
+TEST_CASE("beastmaster net: after a jump of 100 m or more (fast travel) the game waits 30 s again before it reports") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    place(b.r.fake, 1, 500, 10, 3);
+    stable_prop(b, 950, 500, 10, 0);  // a bed in another base
+    client_steps(b, 181 + 35 * 60);
+    REQUIRE(sent_up(b).size() == 1u);
+    place(b.r.fake, 1, 0, 10, 0);     // fast travel home: that base streamed out, home not streamed in yet
+    remove_entity(b.r.fake, 950);
+    client_steps(b, 15 * 60);
+    CHECK(sent_up(b).size() == 1u);   // no report of "nothing here" while home streams in
+    stable_prop(b, 951, 10, 10, 0);   // home's bed shows up
+    client_steps(b, 25 * 60);
+    REQUIRE(sent_up(b).size() == 2u);
+    CHECK(sent_up(b)[1].find("\"x\":10.0") != std::string::npos);
 }

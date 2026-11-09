@@ -78,6 +78,9 @@ local CLIENT_STEPS = 180   -- the client world stepping this often without a ser
 local CLIENT_SEE_M = 40    -- m: a bed this close to the host that the client world does not show is gone
 local OFFER = { verb = "Open" }  -- the prompt: "E Open" (the game's word; a text of our own shows no word)
 local WAIT_S = 300         -- s: a reported stable no flame altar is known near yet is tried again after searches this long
+local REPORT_NEAR_M = 150  -- m: a reported stable farther than this from the player whose game reports it is not taken
+local REPORTED_MAX = 64    -- reported stables a world keeps (a game that reports more: they are not taken, logged once)
+local WAITING_MAX = 32     -- reported stables waiting for a flame altar
 M.CLIENT_STEPS = CLIENT_STEPS
 M.REPORT_MAX = 32          -- stables a report holds (the nearest to its player first); more are not looked at
 M.SETTLE_S = 30            -- s: a game's first this long in a world (still streaming in) removes no reported stable
@@ -141,7 +144,14 @@ local RP = {}
 RP.__index = RP
 
 function M.new_reporter()
-	return setmetatable({ walk = nil, after = 0, last = nil }, RP)  -- last: the last finished search's list
+	local rp = setmetatable({}, RP)
+	rp:reset()
+	return rp
+end
+
+-- A new session (another server, or the same one again): search at once, nothing seen yet.
+function RP:reset()
+	self.walk, self.after, self.last = nil, 0, nil  -- last: the last finished search's list
 end
 
 -- A step of the client world (`t` its time, `me` this game's player): searched every CLIENT_RESCAN_S, SCAN_PER_STEP
@@ -149,6 +159,7 @@ end
 -- M.REPORT_MAX; nil while it searches.
 function RP:step(world, t, me)
 	if not self.walk then
+		if t + CLIENT_RESCAN_S < self.after then self.after = t end  -- the clock went back (another server's)
 		if t < self.after then return nil end
 		self.walk = { ids = world:entities(), i = 1, models = {} }
 	end
@@ -218,6 +229,7 @@ function S:reset()
 	self.offered = {}        -- server entity -> true: a stable's prompt the game took
 	self.waiting = {}        -- reported stables no flame altar was known near: key -> {x, y, z, model, q, until_t}
 	self.client_since = nil  -- the server world's time at the host's client world's first step
+	self.told = {}           -- what was logged once (a full list of reported stables)
 	self.host_view = nil     -- the host's last client search after its first SETTLE_S: {x, y, z, models}
 end
 
@@ -466,7 +478,7 @@ function S:refound(world)
 			self.waiting[key] = nil
 		elseif self:in_base(wt) then
 			self.waiting[key] = nil
-			if not has_entry(self.reported, wt) then
+			if not has_entry(self.reported, wt) and self:room(wt) then
 				self.reported[#self.reported + 1] = { x = wt.x, y = wt.y, z = wt.z, model = wt.model, q = wt.q }
 				accepted = true
 			end
@@ -496,43 +508,69 @@ local function valid_entry(e)
 	return { x = e.x, y = e.y, z = e.z, model = e.m, q = q }
 end
 
--- The reported stables within CLIENT_SEE_M of (x, y, z) that `seen` (entries {x, y, z, model}) does not have are gone
--- (and those waiting there). How many went.
-function S:prune(x, y, z, seen)
+-- Whether a reported stable may be taken: the world keeps at most REPORTED_MAX (more are logged once).
+function S:room(e)
+	if #self.reported < REPORTED_MAX then return true end
+	if not self.told.full then
+		self.told.full = true
+		self.env.log(string.format("the reported stables are full (%d): more are not taken until some are gone",
+			REPORTED_MAX))
+	end
+	return false
+end
+
+-- The reported stables within CLIENT_SEE_M of (x, y, z) (and closer than `limit` when given) that `seen` (entries
+-- {x, y, z, model}) does not have are gone (and those waiting there). How many went.
+function S:prune(x, y, z, seen, limit)
+	local function near(p)
+		local d = dist(p, x, y, z)
+		return d <= CLIENT_SEE_M and (not limit or d < limit)
+	end
 	local gone = 0
 	for i = #self.reported, 1, -1 do
 		local r = self.reported[i]
-		if dist(r, x, y, z) <= CLIENT_SEE_M and not has_entry(seen, r) then
+		if near(r) and not has_entry(seen, r) then
 			table.remove(self.reported, i)
 			gone = gone + 1
 		end
 	end
 	for key, wt in pairs(self.waiting) do
-		if dist(wt, x, y, z) <= CLIENT_SEE_M and not has_entry(seen, wt) then self.waiting[key] = nil end
+		if near(wt) and not has_entry(seen, wt) then self.waiting[key] = nil end
 	end
 	return gone
 end
 
 -- A joined player's game at (px, py, pz) (the server world's place of that player) reports the stables its client world
--- shows (`list`: entries {m, x, y, z, q}; at most M.REPORT_MAX looked at, bad ones skipped). New ones count when a
--- flame altar of the last search is near (else they wait for one); reported ones near the player that the list does
--- not have are gone. Answers changed, seen, added, gone.
+-- shows (`list`: entries {m, x, y, z, q}, the nearest first; at most M.REPORT_MAX looked at, bad ones and ones farther
+-- than REPORT_NEAR_M from the player skipped). New ones count when a flame altar of the last search is near (else they
+-- wait for one) and the world keeps fewer than REPORTED_MAX; reported ones near the player that the list does not have
+-- are gone (a full list holds only its nearest: then only those closer than its farthest). Answers changed, seen,
+-- added, gone.
 function S:report(world, px, py, pz, list)
 	if type(list) ~= "table" then return false, 0, 0, 0 end
 	local seen = {}
+	local farthest = 0
 	for i = 1, math.min(#list, M.REPORT_MAX) do
 		local e = valid_entry(list[i])
-		if e then seen[#seen + 1] = e end
+		if e and dist(e, px, py, pz) <= REPORT_NEAR_M then
+			seen[#seen + 1] = e
+			farthest = math.max(farthest, dist(e, px, py, pz))
+		end
 	end
-	local gone = self:prune(px, py, pz, seen)
+	local gone = self:prune(px, py, pz, seen, #list >= M.REPORT_MAX and farthest or nil)
 	local added = 0
+	local waiting = 0
+	for _ in pairs(self.waiting) do waiting = waiting + 1 end
 	for _, e in ipairs(seen) do
 		if not has_entry(self.reported, e) then
 			if self:in_base(e) then
-				self.reported[#self.reported + 1] = e
-				added = added + 1
-			else
+				if self:room(e) then
+					self.reported[#self.reported + 1] = e
+					added = added + 1
+				end
+			elseif waiting < WAITING_MAX then
 				local key = string.format("%s %.0f %.0f %.0f", e.model, e.x, e.y, e.z)
+				if not self.waiting[key] then waiting = waiting + 1 end
 				self.waiting[key] = { x = e.x, y = e.y, z = e.z, model = e.model, q = e.q, until_t = self.t + WAIT_S }
 			end
 		end

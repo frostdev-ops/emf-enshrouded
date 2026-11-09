@@ -19,6 +19,8 @@ R.__index = R
 -- What each kind of message from a player's game does: fn(self, world, player, account, msg).
 local on = {}
 
+local REPORT_EVERY_S = 2  -- s: a player's stables reports are taken at most this often (a game sends one on a change)
+
 function M.new(env)
 	-- n, seq: the last window's and wheel's numbers (they count up, kept over resets)
 	local r = setmetatable({ env = env, n = 0, seq = 0 }, R)
@@ -31,6 +33,7 @@ function R:reset()
 	self.windows = {}  -- account -> {w (the window), n (its number), player}
 	self.wheels = {}   -- account -> {seq, labels, entries, player}: the wheel sent last, until a pick from it
 	self.lines = {}    -- account -> the beast line sent last (beast_line.snapshot)
+	self.reported_at = {}  -- account -> when their last stables report was taken (one every REPORT_EVERY_S)
 end
 
 -- Whether `player` gets Beastmaster's screens on their own game: a player who joined (not this game's own) whose game
@@ -154,7 +157,11 @@ end
 
 -- The stables the player's game shows (the server has no render models).
 function on.stables(self, world, player, account, msg)
-	if type(msg.list) == "table" then self.env.report(world, player, msg.list) end
+	if type(msg.list) ~= "table" then return end
+	local t, last = self.env.now(world), self.reported_at[account]
+	if last and t >= last and t - last < REPORT_EVERY_S then return end
+	self.reported_at[account] = t
+	self.env.report(world, player, msg.list)
 end
 
 -- A message from a player's game (the core's handler, on the server world).
@@ -162,17 +169,19 @@ function R:on_message(world, from, data)
 	local account = from and from.account or "?"
 	local msg, why = wire.decode(data)
 	if not msg then
-		wire.log_once(string.format("a message from %s was dropped: %s", account, why))
+		wire.log_once("dropped: " .. why, string.format("a message from %s was dropped: %s", account, why))
 		return
 	end
 	local player = from.player
 	if not player or player == 0 or world:account(player) ~= account then
-		wire.log_once(string.format("a message from %s was dropped: that player is not in the world", account))
+		wire.log_once("dropped: not in the world",
+			string.format("a message from %s was dropped: that player is not in the world", account))
 		return
 	end
 	local fn = on[msg.t]
 	if not fn then
-		wire.log_once(string.format("a message from %s was dropped: an unknown kind (%s)", account, msg.t))
+		wire.log_once("dropped: an unknown kind", string.format("a message from %s was dropped: an unknown kind (%s)",
+			account, msg.t:sub(1, 16):gsub("[^%w_]", "?")))
 		return
 	end
 	fn(self, world, player, account, msg)

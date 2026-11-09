@@ -8,13 +8,15 @@ M.CHANNEL = "ui"
 M.VERSION = 1
 M.MAX = 16384  -- bytes: a whole Beasts window (16 beasts, a beast's talents) fits
 
-local told = {}
+local told, told_count = {}, 0
+local TOLD_MAX = 64  -- kinds of lines logged once (more: not logged)
 
--- A line in the log, once per `why` (a flood of bad messages writes one line).
-function M.log_once(why)
-	if told[why] then return end
-	told[why] = true
-	emf.log("beastmaster/ui: " .. why)
+-- A line in the log, once per `key` (default: the text itself): a flood of bad messages writes one line.
+function M.log_once(key, text)
+	if told[key] or told_count >= TOLD_MAX then return end
+	told[key] = true
+	told_count = told_count + 1
+	emf.log("beastmaster/ui: " .. (text or key))
 end
 
 -- `msg` as the channel's text, or nil (logged once): not writable as JSON, or over M.MAX.
