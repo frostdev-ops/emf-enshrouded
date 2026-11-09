@@ -7,6 +7,7 @@
 #include "core/mods_check.h"
 #include "core/mods_check_content.h"
 #include "core/mods_check_service.h"
+#include "core/mods_policy.h"
 
 using emf::core::compare_mods;
 using emf::core::decode_mods;
@@ -259,4 +260,43 @@ TEST_CASE("mods check: players.mods shows a player's list only while that very c
     CHECK_FALSE(m.current(0xBB, 2));
     peers[5] = true;
     CHECK_FALSE(m.current(0xBB, 5));  // another entity than the list came from
+}
+
+TEST_CASE("mods policy: warn by default, refuse when asked, anything else warns and says so") {
+    using emf::core::parse_mods_policy;
+    std::vector<std::string> problems;
+    CHECK_FALSE(parse_mods_policy("", "", "", &problems).refuse);
+    CHECK_FALSE(parse_mods_policy("warn", "", "", &problems).refuse);
+    CHECK(parse_mods_policy(" Refuse ", "", "", &problems).refuse);
+    CHECK(problems.empty());
+    CHECK_FALSE(parse_mods_policy("kick", "", "", &problems).refuse);
+    REQUIRE(problems.size() == 1);
+    CHECK(problems[0].find("\"kick\"") != std::string::npos);
+    CHECK(problems[0].find("warn") != std::string::npos);
+}
+
+TEST_CASE("mods policy: required ids are split by commas and spaces, lower-cased, each once; bad ones named and dropped") {
+    using emf::core::parse_mods_policy;
+    std::vector<std::string> problems;
+    const auto p = parse_mods_policy("refuse", "beastmaster, Emberbrand  beastmaster;x,,beastmaster", "", &problems);
+    CHECK(p.required == std::vector<std::string>{"beastmaster", "emberbrand"});
+    REQUIRE(problems.size() == 1);
+    CHECK(problems[0].find("\"beastmaster;x\"") != std::string::npos);
+    std::string many;
+    for (int i = 0; i < 70; ++i) many += "m" + std::to_string(i) + ",";
+    problems.clear();
+    CHECK(parse_mods_policy("refuse", many, "", &problems).required.size() == emf::core::kMaxRequiredMods);
+    REQUIRE(problems.size() == 1);
+    CHECK(problems[0].find("64") != std::string::npos);
+    CHECK(emf::core::valid_list_id("beasts_pack-2.x"));
+    CHECK_FALSE(emf::core::valid_list_id("Beasts"));
+}
+
+TEST_CASE("mods policy: the info text is trimmed, control characters become spaces, cut at 200 bytes on a UTF-8 boundary") {
+    using emf::core::parse_mods_policy;
+    CHECK(parse_mods_policy("refuse", "", "  nexusmods.com/enshrouded	or discord  ", nullptr).info ==
+          "nexusmods.com/enshrouded or discord");
+    const std::string text = std::string(199, 'a') + "Ã©";  // the 2-byte character would end at byte 201
+    CHECK(parse_mods_policy("", "", text, nullptr).info == std::string(199, 'a'));
+    CHECK(parse_mods_policy("", "", std::string(300, 'b'), nullptr).info.size() == emf::core::kMaxModsInfoBytes);
 }

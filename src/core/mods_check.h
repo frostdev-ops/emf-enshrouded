@@ -16,6 +16,7 @@
 #include <vector>
 
 #include "core/mod_registry.h"
+#include "core/mods_policy.h"  // valid_list_id
 
 namespace emf::core {
 
@@ -35,13 +36,6 @@ struct ModDiff {
 };
 
 inline bool mod_kind_compared(char k) { return k == 'c' || k == 'b'; }
-
-inline bool valid_list_id(std::string_view id) {
-    if (id.empty() || id.size() > 48) return false;
-    for (char c : id)
-        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' || c == '-')) return false;
-    return true;
-}
 
 inline bool valid_list_version(std::string_view v) {
     if (v.empty() || v.size() > kMaxModVersionBytes) return false;
