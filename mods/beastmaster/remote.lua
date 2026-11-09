@@ -4,7 +4,8 @@
 -- message from it is checked here as the chat commands are checked.
 -- M.new(env) where env has: now(world), log(text), present() (account -> player entity, the players in the world;
 -- nil before the first check), loaded() (the world's data is here), make_window(screen) (a beasts_window drawn on
--- `screen`).
+-- `screen`), stable_key(world, player) (a stable without the game's prompt is under that player's crosshair: their
+-- stable key opens the window there), report(world, player, list) (the stables their game shows).
 local wire = require("wire")
 
 local M = {}
@@ -102,6 +103,17 @@ function on.closed(self, world, player, account, msg)
 	if not (s and s.n == msg.n) then return end
 	s.w:on_event(world, { kind = "closed" })
 	self.windows[account] = nil
+end
+
+-- The stable key on the player's game near a stable it shows: the window, when the server sees them at one without
+-- the game's prompt (with the prompt, the prompt opens it).
+function on.open(self, world, player, account, msg)
+	if self.env.stable_key(world, player) then self:open_window(world, player) end
+end
+
+-- The stables the player's game shows (the server has no render models).
+function on.stables(self, world, player, account, msg)
+	if type(msg.list) == "table" then self.env.report(world, player, msg.list) end
 end
 
 -- A message from a player's game (the core's handler, on the server world).

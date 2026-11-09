@@ -1,9 +1,13 @@
 -- Beastmaster on the game of a player who joined, the player's side of the beastmaster/ui channel (wire.lua): it shows
 -- what the server's Beastmaster sends (notes, the Beasts window) and decides nothing itself: a click goes back to the
--- server, which acts and sends the window again.
+-- server, which acts and sends the window again. It also tells the server which stables its client world shows (the
+-- server has no render models), and asks for the window when the stable key is pressed near one.
 -- M.new(env) where env has: now(world), log(text).
 local wire = require("wire")
 local window_mod = require("beasts_window")
+local stable_mod = require("stable")
+
+local OPEN_NEAR_M = 6  -- m: the stable key asks the server for the window with a stable this close (the server checks)
 
 local M = {}
 
@@ -14,7 +18,8 @@ C.__index = C
 local on = {}
 
 function M.new(env)
-	local c = setmetatable({ env = env, portraits = {} }, C)  -- portraits: species id -> picture handle (0: none)
+	-- portraits: species id -> picture handle (0: none); reporter: the client world's stables (stable.lua)
+	local c = setmetatable({ env = env, portraits = {}, reporter = stable_mod.new_reporter() }, C)
 	c:reset()
 	return c
 end
@@ -22,6 +27,44 @@ end
 function C:reset()
 	self.win_open = false  -- the server's Beasts window is open here
 	self.win_n = nil       -- its number (the server's)
+	self.since = nil       -- this game's time when the server's Beastmaster first answered in this session
+	self.sent = nil        -- the stables last reported to the server in this session
+end
+
+-- Every step of the client world while this game is in someone else's world: the stables its client world shows go to
+-- the server when they changed (the first list in a session in any case), once the server's Beastmaster answers and
+-- this game has been in the world SETTLE_S (one still streaming in would report stables gone).
+function C:step(world)
+	local t = self.env.now(world)
+	local up = wire.server_peer()
+	if up then
+		self.since = self.since or t
+	else
+		self.since, self.sent = nil, nil
+	end
+	local list = self.reporter:step(world, t, emf.local_player())
+	if list and up and t - self.since >= stable_mod.SETTLE_S and not (self.sent and stable_mod.same_list(list, self.sent)) then
+		if wire.send({ t = "stables", list = list }) then
+			self.sent = list
+			self.env.log(string.format("stables reported to the server: %d", #list))
+		end
+	end
+end
+
+-- The stable key (on the client world): the server is asked for the Beasts window when this game shows a stable within
+-- OPEN_NEAR_M (the server checks the crosshair and that the stable has no prompt of its own).
+function C:on_stable_key(world)
+	if not wire.server_peer() then return end
+	local me = emf.local_player()
+	local px, py, pz
+	if me and me ~= 0 then px, py, pz = world:position(me) end
+	if not px then return end
+	for _, e in ipairs(self.reporter.last or {}) do
+		if math.sqrt((e.x - px) ^ 2 + (e.y - py) ^ 2 + (e.z - pz) ^ 2) <= OPEN_NEAR_M then
+			wire.send({ t = "open" })
+			return
+		end
+	end
 end
 
 -- This game's picture of species `id` (EMF drew it from this game at the start), or nil.

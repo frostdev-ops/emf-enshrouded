@@ -5589,3 +5589,171 @@ TEST_CASE("beastmaster net: when the window cannot be sent, the joined player ge
     b.seconds(2);
     CHECK(sent_to(b, 2).empty());  // no window is held for them
 }
+
+namespace {
+// A stables report from a player's game: one entry of `model` at (x, y, z), not turned.
+std::string report_of(const char* model, double x, double y, double z) {
+    char buf[320];
+    std::snprintf(buf, sizeof buf,
+                  R"({"t":"stables","list":[{"m":"%s","x":%.2f,"y":%.2f,"z":%.2f,"q":{"x":0.0,"y":0.0,"z":0.0,"w":1.0}}]})",
+                  model, x, y, z);
+    return buf;
+}
+bool listed(BeastRig& b, const std::string& part) { return b.reply("beastmaster.stable list").find(part) != std::string::npos; }
+}  // namespace
+
+TEST_CASE("beastmaster net: a joined player's game reports the stables it sees after its first 30 s, and again only when they change") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    stable_prop(b, 950, 10, 10, 0);  // the client world shows the bed's model
+    client_steps(b, 181 + 25 * 60);
+    CHECK(sent_up(b).empty());  // still settling
+    client_steps(b, 10 * 60);
+    REQUIRE(sent_up(b).size() == 1u);
+    CHECK(sent_up(b)[0].find("\"t\":\"stables\"") != std::string::npos);
+    CHECK(sent_up(b)[0].find("\"m\":\"daeb81bb-8398-4128-9107-c75b2e3e7d5b\"") != std::string::npos);
+    client_steps(b, 20 * 60);
+    CHECK(sent_up(b).size() == 1u);  // nothing changed
+    remove_entity(b.r.fake, 950);
+    client_steps(b, 10 * 60);
+    REQUIRE(sent_up(b).size() == 2u);  // the bed is gone: an empty list
+    CHECK(sent_up(b)[1].find("daeb81bb") == std::string::npos);
+}
+
+TEST_CASE("beastmaster net: a stable a joined player reports near a flame altar counts, gets its prompt, is kept with the world, and makes the world one with stables") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    with_offers(b.r.api);
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 960, 10, 10, 0, nullptr);  // a dedicated server: the entity, no render model
+    b.seconds(31);                             // a search found the altar
+    from_player(b, 2, 0xBB, report_of(kStableModel, 10, 10, 0));
+    CHECK(listed(b, "1. Animal bed at 10, 10, 0, seen by a player's game"));
+    b.seconds(31);
+    CHECK(offers_on(b, 960) >= 1u);
+    CHECK(b.saved().find("r 10.00 10.00 0.00 daeb81bb-8398-4128-9107-c75b2e3e7d5b") != std::string::npos);
+    CHECK(b.saved().find("s 1") != std::string::npos);
+    CHECK(logged("stables reported by 0x00000000000000bb: 1 seen, 1 added, 0 gone"));
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    CHECK(listed(b, "1. Animal bed at 10, 10, 0, seen by a player's game"));
+}
+
+TEST_CASE("beastmaster net: a Large Stable a joined player's game reports is a home: their beasts at home show up in it") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    joined_beasts(b);
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 960, 35, 10, 0, nullptr);
+    homes_ready(b, 3);
+    b.seconds(31);
+    from_player(b, 2, 0xBB, report_of(kLargeOwnStableModel, 35, 10, 0));
+    b.seconds(5);
+    CHECK(b.reply("beastmaster.home", 2, 0xBB).find("Tusk: in the Large Stable at 35, 10, 0") != std::string::npos);
+}
+
+TEST_CASE("beastmaster net: a reported stable far from every flame altar waits until a search finds one") {
+    BeastRig b({}, true);
+    stable_prop(b, 960, 10, 10, 0, nullptr);
+    from_player(b, 2, 0xBB, report_of(kStableModel, 10, 10, 0));
+    CHECK(b.reply("beastmaster.stable list").rfind("No stable in this world yet", 0) == 0);
+    flame_altar(b, 900, 0, 0);
+    b.seconds(31);
+    CHECK(listed(b, "1. Animal bed at 10, 10, 0, seen by a player's game"));
+}
+
+TEST_CASE("beastmaster net: a reported stable is gone only when a game within 40 m of it no longer reports it") {
+    BeastRig b({}, true);
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 960, 10, 10, 0, nullptr);
+    b.seconds(31);
+    from_player(b, 2, 0xBB, report_of(kStableModel, 10, 10, 0));  // player 2 at (30, 10, 0): 20 m from it
+    REQUIRE(listed(b, "seen by a player's game"));
+    place(b.r.fake, 2, 300, 10, 0);
+    from_player(b, 2, 0xBB, R"({"t":"stables","list":{}})");
+    CHECK(listed(b, "seen by a player's game"));  // too far to see it
+    place(b.r.fake, 2, 30, 10, 0);
+    from_player(b, 2, 0xBB, R"({"t":"stables","list":[]})");
+    CHECK(b.reply("beastmaster.stable list").rfind("No stable in this world now", 0) == 0);
+    b.seconds(1);
+    CHECK(b.saved().find("r 10.00") == std::string::npos);
+}
+
+TEST_CASE("beastmaster net: of a report, at most 32 entries are looked at and unknown models or bad numbers are skipped") {
+    BeastRig b({}, true);
+    flame_altar(b, 900, 0, 0);
+    b.seconds(31);
+    std::string list;
+    for (int i = 0; i < 40; ++i) {
+        const bool bad_model = i == 1 || i == 3 || i == 5 || i == 7 || i == 9;
+        char e[200];
+        if (i == 11)
+            std::snprintf(e, sizeof e, R"({"m":"%s","x":"ten","y":10.0,"z":0.0})", kStableModel);
+        else
+            std::snprintf(e, sizeof e, R"({"m":"%s","x":%d.0,"y":10.0,"z":0.0})", bad_model ? "not-a-model" : kStableModel, 2 * i);
+        list += (list.empty() ? "" : ",") + std::string(e);
+    }
+    from_player(b, 2, 0xBB, R"({"t":"stables","list":[)" + list + "]}");
+    b.seconds(1);
+    const std::string saved = b.saved();  // (the list command's reply holds at most 1023 bytes: count the saved ones)
+    size_t kept = 0;
+    for (size_t at = saved.find("r "); at != std::string::npos; at = saved.find("\nr ", at + 1)) ++kept;
+    CHECK(kept == 26u);
+    CHECK(saved.find("not-a-model") == std::string::npos);
+    CHECK(saved.find("r 64.00 ") == std::string::npos);  // entry 32: not looked at
+}
+
+TEST_CASE("beastmaster net: on the host, a reported stable the host's own game no longer shows within 40 m is gone, but not in its first 30 s") {
+    BeastRig b({}, true);
+    flame_altar(b, 900, 0, 0);
+    b.seconds(31);
+    from_player(b, 2, 0xBB, report_of(kStableModel, 10, 10, 0));
+    REQUIRE(listed(b, "seen by a player's game"));
+    auto step_both = [&](int secs) {  // the host's client world shows no bed there
+        for (int i = 0; i < secs * 60; ++i) {
+            b.host->tick(kClient);
+            b.r.fake.tick += 1;
+            b.host->tick(kServer);
+        }
+    };
+    step_both(20);
+    CHECK(listed(b, "seen by a player's game"));
+    step_both(20);
+    CHECK(b.reply("beastmaster.stable list").rfind("No stable in this world now", 0) == 0);
+}
+
+TEST_CASE("beastmaster net: the E key on a joined player's game asks the server only near a stable it sees; the server opens the window only at one without the prompt") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    stable_prop(b, 950, 0, 10, 3);  // the client world shows a bed 3 m from this game's player (1, at the origin)
+    client_steps(b, 181 + 6 * 60);
+    press_client(b, kE);
+    CHECK(has_part(sent_up(b), "\"t\":\"open\""));
+    take_sent(b, 0);
+    place(b.r.fake, 950, 0, 10, 30);
+    client_steps(b, 6 * 60);
+    press_client(b, kE);
+    CHECK_FALSE(has_part(sent_up(b), "\"t\":\"open\""));
+
+    BeastRig c({}, true);  // the server: player 2 looks at a marked prop 3 m in front of them
+    c.r.fake.net_peer_version = 1;
+    joined_beasts(c);
+    stable_prop(c, 960, 30, 10, 3, nullptr);
+    c.look(2, 30, 11.5, 0, 0);
+    REQUIRE(c.reply("beastmaster.stable mark", 2, 0xBB).rfind("Marked: ", 0) == 0);
+    from_player(c, 2, 0xBB, R"({"t":"open"})");
+    REQUIRE(sent_to(c, 2).size() == 1u);
+    CHECK(sent_to(c, 2)[0].find("\"open\":true") != std::string::npos);
+
+    BeastRig d({}, true);  // the game's prompt is there: the prompt opens it, the E key does nothing
+    d.r.fake.net_peer_version = 1;
+    with_offers(d.r.api);
+    joined_beasts(d);
+    stable_prop(d, 960, 30, 10, 3, nullptr);
+    d.look(2, 30, 11.5, 0, 0);
+    REQUIRE(d.reply("beastmaster.stable mark", 2, 0xBB).rfind("Marked: ", 0) == 0);
+    component<ecs::InteractionOfferRuntime>(d.r.fake, 960);
+    from_player(d, 2, 0xBB, R"({"t":"open"})");
+    CHECK(sent_to(d, 2).empty());
+}

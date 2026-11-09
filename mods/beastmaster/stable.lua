@@ -2,7 +2,13 @@
 --   - a built prop whose render model is in M.MODELS, within BASE_M (horizontally) of a flame altar that is not
 --     abandoned (players build only in a base; villages and ruins may have the same model);
 --   - a prop the host marked (beastmaster.stable mark): kept with the world by its place and model, as lines
---     "k <x> <y> <z> <model or ->" in the world's data, until the host takes the mark off.
+--     "k <x> <y> <z> <model or ->" in the world's data, until the host takes the mark off;
+--   - a stable a joined player's game saw in its client world and reported (S:report; Beastmaster on their game, the
+--     beastmaster/ui channel): counted when a flame altar of the last search is within BASE_M, kept with the world as
+--     lines "r <x> <y> <z> <model> <qx> <qy> <qz> <qw>" (or "-" for no turn) until a game within CLIENT_SEE_M of it
+--     (a joined player's, or the host's own) no longer shows it there, after that game's first SETTLE_S. Any EMF
+--     player's game reports; a player could make any prop count (accepted: a stable opens the window and holds the
+--     beasts at home, nothing more). A joined player's game searches its client world with M.new_reporter().
 -- The server world is searched a slice at a time (SCAN_PER_STEP entities per step, a new search every RESCAN_S
 -- seconds) for flame altars and props with a stable's model. Render models are client-side: on the host the client
 -- world is searched for the models too, every CLIENT_RESCAN_S (a bed just built counts within seconds), and its beds
@@ -71,9 +77,14 @@ local KEY_RAY_M = 1        -- under_crosshair: the crosshair passes within this 
 local CLIENT_STEPS = 180   -- the client world stepping this often without a server step: someone else's game
 local CLIENT_SEE_M = 40    -- m: a bed this close to the host that the client world does not show is gone
 local OFFER = { verb = "Open" }  -- the prompt: "E Open" (the game's word; a text of our own shows no word)
+local WAIT_S = 300         -- s: a reported stable no flame altar is known near yet is tried again after searches this long
+M.CLIENT_STEPS = CLIENT_STEPS
+M.REPORT_MAX = 32          -- stables a report holds (the nearest to its player first); more are not looked at
+M.SETTLE_S = 30            -- s: a game's first this long in a world (still streaming in) removes no reported stable
 
 local function dist(a, x, y, z) return math.sqrt((a.x - x) ^ 2 + (a.y - y) ^ 2 + (a.z - z) ^ 2) end
 local function round(v) return math.floor(v + 0.5) end
+local function round2(v) return math.floor(v * 100 + 0.5) / 100 end
 
 local function has(world, component, id)
 	local ok, value = pcall(world.get, world, component, id)
@@ -101,13 +112,92 @@ local function camera(world, player)
 	return aim.ray(world, player)
 end
 
+-- One slice of a search of a client world for the stables' render models: entities w.i .. of w.ids into w.models
+-- (entity -> {model, x, y, z, q}). True when the search is done.
+local function scan_slice(world, w)
+	local last = math.min(#w.ids, w.i + SCAN_PER_STEP - 1)
+	for k = w.i, last do
+		local id = w.ids[k]
+		local ok, t = pcall(world.template, world, "ModelResource", id)
+		if ok and t and M.MODELS[t.model] then
+			local x, y, z = world:position(id)
+			if x then w.models[id] = { model = t.model, x = x, y = y, z = z, q = turn_of(world, id) } end
+		end
+	end
+	w.i = last + 1
+	return w.i > #w.ids
+end
+
+-- Whether `list` (entries {x, y, z, model}) has one with `e`'s model within SAME_M of it.
+local function has_entry(list, e)
+	for _, f in ipairs(list) do
+		if f.model == e.model and dist(f, e.x, e.y, e.z) <= SAME_M then return true end
+	end
+	return false
+end
+
+-- ---- a joined player's game: the stables its client world shows, for the server (client.lua) ----
+local RP = {}
+RP.__index = RP
+
+function M.new_reporter()
+	return setmetatable({ walk = nil, after = 0, last = nil }, RP)  -- last: the last finished search's list
+end
+
+-- A step of the client world (`t` its time, `me` this game's player): searched every CLIENT_RESCAN_S, SCAN_PER_STEP
+-- entities a step. A finished search answers its list {m (model), x, y, z, q}, the nearest to `me` first, at most
+-- M.REPORT_MAX; nil while it searches.
+function RP:step(world, t, me)
+	if not self.walk then
+		if t < self.after then return nil end
+		self.walk = { ids = world:entities(), i = 1, models = {} }
+	end
+	if not scan_slice(world, self.walk) then return nil end
+	local models = self.walk.models
+	self.walk, self.after = nil, t + CLIENT_RESCAN_S
+	local px, py, pz
+	if me and me ~= 0 then px, py, pz = world:position(me) end
+	local list = {}
+	for _, c in pairs(models) do
+		local q = c.q and { x = c.q.x, y = c.q.y, z = c.q.z, w = c.q.w } or nil
+		list[#list + 1] = { m = c.model, x = round2(c.x), y = round2(c.y), z = round2(c.z), q = q,
+			d = px and dist(c, px, py, pz) or 0 }
+	end
+	table.sort(list, function(a, b)
+		if a.d ~= b.d then return a.d < b.d end
+		if a.x ~= b.x then return a.x < b.x end
+		return a.z < b.z
+	end)
+	while #list > M.REPORT_MAX do list[#list] = nil end
+	for _, e in ipairs(list) do e.d = nil end
+	self.last = list
+	return list
+end
+
+-- Whether two reported lists hold the same stables (each of `a` has one of the same model within SAME_M in `b`).
+function M.same_list(a, b)
+	if not a or not b or #a ~= #b then return false end
+	for _, e in ipairs(a) do
+		local found = false
+		for _, f in ipairs(b) do
+			if f.m == e.m and dist(f, e.x, e.y, e.z) <= SAME_M then
+				found = true
+				break
+			end
+		end
+		if not found then return false end
+	end
+	return true
+end
+
 local S = {}
 S.__index = S
 
 -- env: now(world) -> seconds; log(text); on_found(world) (optional): called after a search or a mark when the world
--- has a stable; on_open(world, player, entity) (optional): a player pressed E at a stable's prompt.
+-- has a stable; on_open(world, player, entity) (optional): a player pressed E at a stable's prompt; on_change(world)
+-- (optional): the reported stables changed (to be saved).
 function M.new(env)
-	local s = setmetatable({ env = env, marks = {} }, S)
+	local s = setmetatable({ env = env, marks = {}, reported = {} }, S)
 	s:reset()
 	return s
 end
@@ -126,15 +216,28 @@ function S:reset()
 	self.stables = {}
 	self.client_server = {}  -- a client world bed's id -> the server world's entity at its place (for its prompt)
 	self.offered = {}        -- server entity -> true: a stable's prompt the game took
+	self.waiting = {}        -- reported stables no flame altar was known near: key -> {x, y, z, model, q, until_t}
+	self.client_since = nil  -- the server world's time at the host's client world's first step
+	self.host_view = nil     -- the host's last client search after its first SETTLE_S: {x, y, z, models}
 end
 
--- The marks from the world's data.
+-- The marks and the reported stables from the world's data.
 function S:load(text)
-	self.marks = {}
+	self.marks, self.reported = {}, {}
 	for line in (text or ""):gmatch("[^\r\n]+") do
 		local x, y, z, model = line:match("^k (%S+) (%S+) (%S+) (%S+)$")
 		if x and tonumber(x) and tonumber(y) and tonumber(z) then
 			self.marks[#self.marks + 1] = { x = tonumber(x), y = tonumber(y), z = tonumber(z), model = model }
+		end
+		local rx, ry, rz, rmodel, rest = line:match("^r (%S+) (%S+) (%S+) (%S+)%s*(.*)$")
+		if rx and tonumber(rx) and tonumber(ry) and tonumber(rz) and M.MODELS[rmodel] then
+			local qx, qy, qz, qw = rest:match("^(%S+) (%S+) (%S+) (%S+)$")
+			local q
+			if qx and tonumber(qx) and tonumber(qy) and tonumber(qz) and tonumber(qw) then
+				q = { x = tonumber(qx), y = tonumber(qy), z = tonumber(qz), w = tonumber(qw) }
+			end
+			self.reported[#self.reported + 1] = { x = tonumber(rx), y = tonumber(ry), z = tonumber(rz), model = rmodel,
+				q = q }
 		end
 	end
 	self:reset()
@@ -144,6 +247,10 @@ end
 function S:serialize()
 	local lines = {}
 	for _, m in ipairs(self.marks) do lines[#lines + 1] = string.format("k %.2f %.2f %.2f %s", m.x, m.y, m.z, m.model) end
+	for _, r in ipairs(self.reported) do
+		local q = r.q and string.format("%.4f %.4f %.4f %.4f", r.q.x, r.q.y, r.q.z, r.q.w) or "-"
+		lines[#lines + 1] = string.format("r %.2f %.2f %.2f %s %s", r.x, r.y, r.z, r.model, q)
+	end
 	return table.concat(lines, "\n")
 end
 
@@ -160,12 +267,22 @@ function S:model_of(world, id)
 	return nil
 end
 
--- The stables: the built ones found, then the marks (a mark on a built one counts once).
+-- The stables: the built ones found, the reported ones, then the marks (one place counts once).
 function S:rebuild(world)
 	local list = {}
 	for _, f in ipairs(self.found) do
 		list[#list + 1] = { id = f.id, x = f.x, y = f.y, z = f.z, kind = "built", name = f.name, entity = f.entity,
 			model = f.model, q = f.q }
+	end
+	for _, r in ipairs(self.reported) do
+		local twice = false
+		for _, b in ipairs(list) do
+			if dist(b, r.x, r.y, r.z) <= SAME_M then twice = true end
+		end
+		if not twice then
+			list[#list + 1] = { x = r.x, y = r.y, z = r.z, kind = "built", reported = true, name = M.MODELS[r.model],
+				model = r.model, q = r.q, entity = r.entity }
+		end
 	end
 	for _, m in ipairs(self.marks) do
 		local twice = false
@@ -253,13 +370,14 @@ function S:walk_step(world)
 	if not self.walk then
 		local beds = {}  -- the client world's beds when this search began: which have an entity at their place here
 		for id in pairs(self.client_models) do beds[id] = false end
-		self.walk = { ids = world:entities(), i = 1, found = {}, altars = {}, beds = beds, bed_at = {}, mark_at = {} }
+		self.walk = { ids = world:entities(), i = 1, found = {}, altars = {}, beds = beds, bed_at = {}, mark_at = {},
+			rep_at = {} }
 	end
 	local w = self.walk
 	local last = math.min(#w.ids, w.i + SCAN_PER_STEP - 1)
 	for k = w.i, last do
 		local id = w.ids[k]
-		if next(w.beds) or #self.marks > 0 then
+		if next(w.beds) or #self.marks > 0 or #self.reported > 0 then
 			local x, y, z = world:position(id)
 			if x then
 				for bed in pairs(w.beds) do
@@ -273,6 +391,10 @@ function S:walk_step(world)
 				for _, m in ipairs(self.marks) do
 					local d = dist(m, x, y, z)
 					if d <= SAME_M then w.mark_at[m] = nearer(world, w.mark_at[m], id, d) end
+				end
+				for _, r in ipairs(self.reported) do
+					local d = dist(r, x, y, z)
+					if d <= SAME_M then w.rep_at[r] = nearer(world, w.rep_at[r], id, d) end
 				end
 			end
 		end
@@ -303,6 +425,10 @@ function S:walk_step(world)
 		local at = w.mark_at[m]
 		m.entity = at and at.id or nil
 	end
+	for _, r in ipairs(self.reported) do
+		local at = w.rep_at[r]
+		r.entity = at and at.id or nil
+	end
 	self.walk = nil
 	self.walk_after = self.t + RESCAN_S
 	self:refound(world)
@@ -331,20 +457,108 @@ function S:refound(world)
 	end
 	self.found = {}
 	for _, f in ipairs(all) do
-		for _, a in ipairs(self.altars) do
-			if (a.x - f.x) ^ 2 + (a.z - f.z) ^ 2 <= BASE_M * BASE_M then
-				self.found[#self.found + 1] = f
-				break
+		if self:in_base(f) then self.found[#self.found + 1] = f end
+	end
+	-- the reported stables that waited for a flame altar
+	local accepted = false
+	for key, wt in pairs(self.waiting) do
+		if self.t > wt.until_t then
+			self.waiting[key] = nil
+		elseif self:in_base(wt) then
+			self.waiting[key] = nil
+			if not has_entry(self.reported, wt) then
+				self.reported[#self.reported + 1] = { x = wt.x, y = wt.y, z = wt.z, model = wt.model, q = wt.q }
+				accepted = true
 			end
 		end
 	end
 	self:rebuild(world)
+	if accepted and self.env.on_change then self.env.on_change(world) end
+end
+
+-- Whether a flame altar of the last search is within BASE_M (horizontally) of `p`.
+function S:in_base(p)
+	for _, a in ipairs(self.altars) do
+		if (a.x - p.x) ^ 2 + (a.z - p.z) ^ 2 <= BASE_M * BASE_M then return true end
+	end
+	return false
+end
+
+-- A reported entry checked: {x, y, z, model, q} or nil (not a table, not a stable's model, a bad number).
+local function num(v) return type(v) == "number" and v == v and math.abs(v) < 1e6 end
+local function valid_entry(e)
+	if type(e) ~= "table" or type(e.m) ~= "string" or not M.MODELS[e.m] then return nil end
+	if not (num(e.x) and num(e.y) and num(e.z)) then return nil end
+	local q
+	if type(e.q) == "table" and num(e.q.x) and num(e.q.y) and num(e.q.z) and num(e.q.w) then
+		q = { x = e.q.x, y = e.q.y, z = e.q.z, w = e.q.w }
+	end
+	return { x = e.x, y = e.y, z = e.z, model = e.m, q = q }
+end
+
+-- The reported stables within CLIENT_SEE_M of (x, y, z) that `seen` (entries {x, y, z, model}) does not have are gone
+-- (and those waiting there). How many went.
+function S:prune(x, y, z, seen)
+	local gone = 0
+	for i = #self.reported, 1, -1 do
+		local r = self.reported[i]
+		if dist(r, x, y, z) <= CLIENT_SEE_M and not has_entry(seen, r) then
+			table.remove(self.reported, i)
+			gone = gone + 1
+		end
+	end
+	for key, wt in pairs(self.waiting) do
+		if dist(wt, x, y, z) <= CLIENT_SEE_M and not has_entry(seen, wt) then self.waiting[key] = nil end
+	end
+	return gone
+end
+
+-- A joined player's game at (px, py, pz) (the server world's place of that player) reports the stables its client world
+-- shows (`list`: entries {m, x, y, z, q}; at most M.REPORT_MAX looked at, bad ones skipped). New ones count when a
+-- flame altar of the last search is near (else they wait for one); reported ones near the player that the list does
+-- not have are gone. Answers changed, seen, added, gone.
+function S:report(world, px, py, pz, list)
+	if type(list) ~= "table" then return false, 0, 0, 0 end
+	local seen = {}
+	for i = 1, math.min(#list, M.REPORT_MAX) do
+		local e = valid_entry(list[i])
+		if e then seen[#seen + 1] = e end
+	end
+	local gone = self:prune(px, py, pz, seen)
+	local added = 0
+	for _, e in ipairs(seen) do
+		if not has_entry(self.reported, e) then
+			if self:in_base(e) then
+				self.reported[#self.reported + 1] = e
+				added = added + 1
+			else
+				local key = string.format("%s %.0f %.0f %.0f", e.model, e.x, e.y, e.z)
+				self.waiting[key] = { x = e.x, y = e.y, z = e.z, model = e.model, q = e.q, until_t = self.t + WAIT_S }
+			end
+		end
+	end
+	local changed = added > 0 or gone > 0
+	if changed then
+		self:rebuild(world)
+		if self.env.on_change then self.env.on_change(world) end
+	end
+	return changed, #seen, added, gone
 end
 
 -- Every step of the server world.
 function S:step(world)
 	self.t = self.env.now(world)
 	self.client_steps = 0
+	local v = self.host_view
+	if v then  -- the host's own game is one that sees the reported stables near it
+		self.host_view = nil
+		local seen = {}
+		for _, c in pairs(v.models) do seen[#seen + 1] = { x = c.x, y = c.y, z = c.z, model = c.model } end
+		if self:prune(v.x, v.y, v.z, seen) > 0 then
+			self:rebuild(world)
+			if self.env.on_change then self.env.on_change(world) end
+		end
+	end
 	if self.walk or self.t >= self.walk_after then self:walk_step(world) end
 end
 
@@ -352,22 +566,13 @@ end
 function S:client_step(world)
 	self.client_steps = self.client_steps + 1
 	if self.client_steps > CLIENT_STEPS then return end
+	if not self.client_since then self.client_since = self.t end
 	if not self.cwalk then
 		if self.t < self.cwalk_after then return end
 		self.cwalk = { ids = world:entities(), i = 1, models = {} }
 	end
 	local w = self.cwalk
-	local last = math.min(#w.ids, w.i + SCAN_PER_STEP - 1)
-	for k = w.i, last do
-		local id = w.ids[k]
-		local ok, t = pcall(world.template, world, "ModelResource", id)
-		if ok and t and M.MODELS[t.model] then
-			local x, y, z = world:position(id)
-			if x then w.models[id] = { model = t.model, x = x, y = y, z = z, q = turn_of(world, id) } end
-		end
-	end
-	w.i = last + 1
-	if w.i > #w.ids then
+	if scan_slice(world, w) then
 		-- a bed built, taken down (not shown with the host near it) or moved: the server world is searched now (its end
 		-- decides the stables again, with this list)
 		local changed = false
@@ -388,6 +593,9 @@ function S:client_step(world)
 			end
 		end
 		self.client_models = w.models
+		if hx and self.t - self.client_since >= M.SETTLE_S then
+			self.host_view = { x = hx, y = hy, z = hz, models = w.models }
+		end
 		if changed and not self.walk then self.walk_after = 0 end
 		self.cwalk = nil
 		self.cwalk_after = self.t + CLIENT_RESCAN_S
@@ -501,8 +709,9 @@ function S:list_text(world, player, had)
 	if player and player ~= 0 then x, y, z = world:position(player) end
 	local lines = {}
 	for i, b in ipairs(self.stables) do
-		lines[#lines + 1] = string.format("%d. %s at %d, %d, %d%s", i, b.kind == "built" and b.name or "marked prop",
-			round(b.x), round(b.y), round(b.z), x and string.format(" (%d m from you)", round(dist(b, x, y, z))) or "")
+		lines[#lines + 1] = string.format("%d. %s at %d, %d, %d%s%s", i, b.kind == "built" and b.name or "marked prop",
+			round(b.x), round(b.y), round(b.z), b.reported and ", seen by a player's game" or "",
+			x and string.format(" (%d m from you)", round(dist(b, x, y, z))) or "")
 	end
 	return table.concat(lines, "\n")
 end

@@ -26,6 +26,7 @@ local last_hit = {}           -- player entity -> {id, at}: what hit them last (
 local taming                  -- the taming channels (made below; reset with each world)
 local window                  -- the Beasts window (made below)
 local on_first_stable         -- the world's first stable was found or marked (made below)
+local on_stables_changed      -- the reported stables changed (made below: saved)
 local at_stable_open          -- a player pressed E at a stable's prompt (made below)
 local release_asked = {}      -- account -> {name, at}: a release by chat asked once (reset with each world)
 local next_hud = 0            -- when the HUD line is written next (reset with each world: the clock may restart)
@@ -52,7 +53,8 @@ end
 
 -- the stables in the world (built ones and the host's marks; the marks are kept with the world)
 local stables = stable_mod.new({ now = now, log = emf.log, on_found = function(world) on_first_stable(world) end,
-	on_open = function(world, player, entity) at_stable_open(world, player, entity) end })
+	on_open = function(world, player, entity) at_stable_open(world, player, entity) end,
+	on_change = function(world) on_stables_changed(world) end })
 
 -- The level of a player's character.
 local function level_of(world, player)
@@ -74,6 +76,7 @@ local function save()
 	if marks ~= "" then text = text ~= "" and (text .. "\n" .. marks) or marks end
 	emf.save_world_data(text)
 end
+on_stables_changed = function() save() end
 
 -- tougher beasts, watched from their spawn: a wild one by its species' health_mul (the wild bear: 2.5x health), a
 -- tamed one by its role and loyalty (`mul`)
@@ -236,6 +239,20 @@ remote = remote_mod.new({
 	present = function() return pack.present end,
 	loaded = function() return loaded end,
 	make_window = function(screen) return window_mod.new(window_env, screen) end,
+	stable_key = function(world, player)
+		if not loaded then return false end
+		local b = stables:under_crosshair(world, player, STABLE_REACH_M)
+		return b ~= nil and not stables:prompted(world, b)
+	end,
+	report = function(world, player, list)
+		local x, y, z = world:position(player)
+		if not x then return end
+		local changed, seen, added, gone = stables:report(world, x, y, z, list)
+		if changed then
+			emf.log(string.format("stables reported by %s: %d seen, %d added, %d gone", world:account(player) or "?", seen,
+				added, gone))
+		end
+	end,
 })
 client = client_mod.new({ now = now, log = emf.log })
 if emf.net and emf.net.channel then
@@ -270,7 +287,11 @@ end
 -- The E key (stable_key): the Beasts window at a stable under the host's crosshair that has no prompt (the game refused
 -- it there, or it has no entity for one); at a stable with the prompt the prompt opens it.
 emf.on_key("stable_key", function(world)
-	if not world:is_server() or not loaded then return end
+	if not world:is_server() then  -- someone else's game: the server is asked
+		client:on_stable_key(world)
+		return
+	end
+	if not loaded then return end
 	local player = emf.local_player()
 	if not player or player == 0 then return end
 	local b = stables:under_crosshair(world, player, STABLE_REACH_M)
@@ -766,11 +787,20 @@ emf.on_event("EntityDiedEvent", function(world, e)
 	rare:on_died(world, e.deadEntityId)
 end)
 
+local client_steps = 0  -- client world steps since the server world's last (more than stable_mod.CLIENT_STEPS: joined)
 emf.on_tick(function(world)
 	if not world:is_server() then
-		if world:is_client() then stables:client_step(world) end
+		if world:is_client() then
+			client_steps = client_steps + 1
+			if client_steps > stable_mod.CLIENT_STEPS then
+				client:step(world)  -- someone else's game
+			else
+				stables:client_step(world)
+			end
+		end
 		return
 	end
+	client_steps = 0
 	stables:step(world)
 	taming:step(world)
 	pack:step(world)
