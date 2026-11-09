@@ -5757,3 +5757,96 @@ TEST_CASE("beastmaster net: the E key on a joined player's game asks the server 
     from_player(d, 2, 0xBB, R"({"t":"open"})");
     CHECK(sent_to(d, 2).empty());
 }
+
+namespace {
+// The 1-based place of `label` in a wheel message's "labels" list, or -1.
+int label_index(const std::string& msg, const std::string& label) {
+    const size_t start = msg.find("\"labels\":[");
+    if (start == std::string::npos) return -1;
+    const size_t end = msg.find(']', start);
+    const std::string list = msg.substr(start + 10, end - start - 10);
+    int i = 0;
+    for (size_t at = 0; at < list.size();) {
+        const size_t q1 = list.find('"', at);
+        if (q1 == std::string::npos) break;
+        const size_t q2 = list.find('"', q1 + 1);
+        ++i;
+        if (list.substr(q1 + 1, q2 - q1 - 1) == label) return i;
+        at = q2 + 1;
+    }
+    return -1;
+}
+std::string pick_json(int seq, int i, const std::string& label) {
+    return "{\"t\":\"pick\",\"seq\":" + std::to_string(seq) + ",\"i\":" + std::to_string(i) + ",\"label\":\"" + label + "\"}";
+}
+}  // namespace
+
+TEST_CASE("beastmaster net: the wheel key on a joined player's game asks the server for the items and opens the wheel with them; a pick runs on the server for that player") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    joined_beasts(b);
+    b.spawnable(1);
+    press_client(b, VK_F3, /*keep=*/true);
+    REQUIRE(sent_up(b).size() == 1u);
+    CHECK(sent_up(b)[0].find("\"t\":\"wheel\"") != std::string::npos);
+    relay_up(b, 2, 0xBB);
+    relay_down(b, 2);
+    REQUIRE(b.r.fake.wheels.size() == 1u);
+    const auto w = b.r.fake.wheels[0];
+    CHECK(w.hold == VK_F3);
+    const int grey = index_of(w.items, "Call Grey");
+    REQUIRE(grey >= 0);
+    CHECK(index_of(w.items, "Call Fang") < 0);  // the host's beast is not on player 2's wheel
+    CHECK(index_of(w.items, "Call Tusk") < 0);  // stored: not on the wheel
+    w.cb(kClient, grey, w.user);
+    g_held[VK_F3] = false;
+    relay_up(b, 2, 0xBB);
+    REQUIRE(b.r.fake.spawns.size() == 1u);
+    CHECK(has_part(sent_to(b, 2), "\"t\":\"note\"", "Grey the wolf comes"));
+}
+
+TEST_CASE("beastmaster net: wheel items that arrive after the key was let go, or a second time, open no wheel") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    joined_beasts(b);
+    press_client(b, VK_F3);  // let go at once
+    relay_up(b, 2, 0xBB);
+    relay_down(b, 2);
+    CHECK(b.r.fake.wheels.empty());
+    press_client(b, VK_F3, /*keep=*/true);
+    relay_up(b, 2, 0xBB);
+    const auto items = take_sent(b, 2);
+    REQUIRE(items.size() == 1u);
+    from_server(b, items[0]);
+    from_server(b, items[0]);  // the same answer again
+    CHECK(b.r.fake.wheels.size() == 1u);
+    g_held[VK_F3] = false;
+}
+
+TEST_CASE("beastmaster net: a pick for a wheel the server did not send, or with another label, does nothing") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    joined_beasts(b);
+    b.spawnable(1);
+    from_player(b, 2, 0xBB, R"({"t":"wheel"})");
+    const auto items = take_sent(b, 2);
+    REQUIRE(items.size() == 1u);
+    const int grey = label_index(items[0], "Call Grey (wolf)");
+    REQUIRE(grey > 1);
+    from_player(b, 2, 0xBB, pick_json(99, grey, "Call Grey (wolf)"));  // another wheel
+    from_player(b, 2, 0xBB, pick_json(1, 1, "Call Grey (wolf)"));      // the label is not the one shown there
+    from_player(b, 1, 0xAA, pick_json(1, grey, "Call Grey (wolf)"));   // another player
+    CHECK(b.r.fake.spawns.empty());
+    from_player(b, 2, 0xBB, pick_json(1, grey, "Call Grey (wolf)"));
+    CHECK(b.r.fake.spawns.size() == 1u);
+    from_player(b, 2, 0xBB, pick_json(1, grey, "Call Grey (wolf)"));  // used up
+    CHECK(b.r.fake.spawns.size() == 1u);
+}
+
+TEST_CASE("beastmaster net: without Beastmaster on the server the wheel key says to use the chat and sends nothing") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 0;
+    press_client(b, VK_F3);
+    CHECK(b.noted("type /beastmaster in the chat"));
+    CHECK(sent_up(b).empty());
+}

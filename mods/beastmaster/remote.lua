@@ -5,7 +5,9 @@
 -- M.new(env) where env has: now(world), log(text), present() (account -> player entity, the players in the world;
 -- nil before the first check), loaded() (the world's data is here), make_window(screen) (a beasts_window drawn on
 -- `screen`), stable_key(world, player) (a stable without the game's prompt is under that player's crosshair: their
--- stable key opens the window there), report(world, player, list) (the stables their game shows).
+-- stable key opens the window there), report(world, player, list) (the stables their game shows), wheel_items(world,
+-- player) -> labels, entries (that player's wheel), run(world, player, account, entry) -> text (a wheel pick done),
+-- tell(world, player, text).
 local wire = require("wire")
 
 local M = {}
@@ -17,7 +19,8 @@ R.__index = R
 local on = {}
 
 function M.new(env)
-	local r = setmetatable({ env = env, n = 0 }, R)  -- n: the last window's number (counts up, kept over resets)
+	-- n, seq: the last window's and wheel's numbers (they count up, kept over resets)
+	local r = setmetatable({ env = env, n = 0, seq = 0 }, R)
 	r:reset()
 	return r
 end
@@ -25,6 +28,7 @@ end
 -- A new world: no player's screen.
 function R:reset()
 	self.windows = {}  -- account -> {w (the window), n (its number), player}
+	self.wheels = {}   -- account -> {seq, labels, entries, player}: the wheel sent last, until a pick from it
 end
 
 -- Whether `player` gets Beastmaster's screens on their own game: a player who joined (not this game's own) whose game
@@ -88,6 +92,9 @@ function R:step(world)
 			s.w:refresh(world)
 		end
 	end
+	for account, s in pairs(self.wheels) do
+		if present[account] ~= s.player then self.wheels[account] = nil end
+	end
 end
 
 -- A click in window `n` (only the window open now, on that player's own game, counts).
@@ -109,6 +116,25 @@ end
 -- the game's prompt (with the prompt, the prompt opens it).
 function on.open(self, world, player, account, msg)
 	if self.env.stable_key(world, player) then self:open_window(world, player) end
+end
+
+-- The wheel key on the player's game: their wheel's items (as the host's are made, for their account).
+function on.wheel(self, world, player, account, msg)
+	local labels, entries = self.env.wheel_items(world, player)
+	self.seq = self.seq + 1
+	self.wheels[account] = { seq = self.seq, labels = labels, entries = entries, player = player }
+	wire.send_to(world, player, { t = "wheel", seq = self.seq, labels = labels })
+end
+
+-- A pick on that wheel: item i, as it was shown (the label must be the one sent there); done once.
+function on.pick(self, world, player, account, msg)
+	local s = self.wheels[account]
+	if not (s and s.player == player and msg.seq == s.seq) then return end
+	local i = msg.i
+	if type(i) ~= "number" or i ~= math.floor(i) or s.labels[i] == nil or s.labels[i] ~= msg.label then return end
+	self.wheels[account] = nil
+	local text = self.env.run(world, player, account, s.entries[i])
+	if text then self.env.tell(world, player, text) end
 end
 
 -- The stables the player's game shows (the server has no render models).

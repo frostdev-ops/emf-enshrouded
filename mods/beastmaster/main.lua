@@ -232,39 +232,6 @@ local window_env = {
 }
 window = window_mod.new(window_env)
 
--- ---- players who joined: Beastmaster's screens on their own game (mod messages, Lua 1.19) ----
-remote = remote_mod.new({
-	now = now,
-	log = emf.log,
-	present = function() return pack.present end,
-	loaded = function() return loaded end,
-	make_window = function(screen) return window_mod.new(window_env, screen) end,
-	stable_key = function(world, player)
-		if not loaded then return false end
-		local b = stables:under_crosshair(world, player, STABLE_REACH_M)
-		return b ~= nil and not stables:prompted(world, b)
-	end,
-	report = function(world, player, list)
-		local x, y, z = world:position(player)
-		if not x then return end
-		local changed, seen, added, gone = stables:report(world, x, y, z, list)
-		if changed then
-			emf.log(string.format("stables reported by %s: %d seen, %d added, %d gone", world:account(player) or "?", seen,
-				added, gone))
-		end
-	end,
-})
-client = client_mod.new({ now = now, log = emf.log })
-if emf.net and emf.net.channel then
-	emf.net.channel(wire.CHANNEL, {
-		version = wire.VERSION,
-		to = "both",
-		max = wire.MAX,
-		on_server = function(world, from, data) remote:on_message(world, from, data) end,
-		on_player = function(world, from, data) client:on_message(world, from, data) end,
-	})
-end
-
 -- What a player who joined (no window) can do at a stable, by chat.
 local AT_STABLE_CHAT = "At a stable: /beastmaster active <name or number> (it can be called), /beastmaster store " ..
 	"<name or number>, /beastmaster release <name or number> (twice), /beastmaster talents <name or number> [reset], " ..
@@ -671,9 +638,10 @@ local function picked_own(world, choice)
 	pending = choice and own_entries[choice] or nil
 end
 
--- The wheel's items for the host's account: labels and what each does.
-local function wheel_items(world)
-	local account = world:account(emf.local_player())
+-- The wheel's items for `player`'s account (the host's, or a joined player's on their own game): labels and what each
+-- does.
+local function wheel_items(world, player)
+	local account = player and world:account(player)
 	local labels, entries = {}, {}
 	local function add(label, entry)
 		labels[#labels + 1] = label
@@ -720,7 +688,7 @@ end
 -- mod's key opens (Necromancer's too); off, it keeps its own wheel and is not on the shared one.
 local GROUP = "summons"
 local function publish(world)
-	local labels, entries = wheel_items(world)
+	local labels, entries = wheel_items(world, emf.local_player())
 	wheel_entries = entries
 	local t = now(world)
 	for i, l in ipairs(labels) do recent[l] = { entry = entries[i], at = t } end
@@ -736,8 +704,8 @@ local function publish(world)
 end
 
 emf.on_key("wheel_key", function(world)
-	if not world:is_server() then
-		emf.notify("The beast wheel works in a world you host; in someone else's game type /beastmaster in the chat.")
+	if not world:is_server() then  -- someone else's game: the server sends the items
+		client:on_wheel_key(world)
 		return
 	end
 	local labels = publish(world)
@@ -748,6 +716,42 @@ emf.on_key("wheel_key", function(world)
 		emf.wheel("Beasts", labels, emf.setting("wheel_key"), picked_own)
 	end
 end)
+
+-- ---- players who joined: Beastmaster's screens on their own game (mod messages, Lua 1.19) ----
+remote = remote_mod.new({
+	now = now,
+	log = emf.log,
+	present = function() return pack.present end,
+	loaded = function() return loaded end,
+	make_window = function(screen) return window_mod.new(window_env, screen) end,
+	stable_key = function(world, player)
+		if not loaded then return false end
+		local b = stables:under_crosshair(world, player, STABLE_REACH_M)
+		return b ~= nil and not stables:prompted(world, b)
+	end,
+	wheel_items = wheel_items,
+	run = function(world, player, account, entry) return actions[entry.action](world, player, account, entry.key) end,
+	tell = function(world, player, text) tell(world, player, text) end,
+	report = function(world, player, list)
+		local x, y, z = world:position(player)
+		if not x then return end
+		local changed, seen, added, gone = stables:report(world, x, y, z, list)
+		if changed then
+			emf.log(string.format("stables reported by %s: %d seen, %d added, %d gone", world:account(player) or "?", seen,
+				added, gone))
+		end
+	end,
+})
+client = client_mod.new({ now = now, log = emf.log })
+if emf.net and emf.net.channel then
+	emf.net.channel(wire.CHANNEL, {
+		version = wire.VERSION,
+		to = "both",
+		max = wire.MAX,
+		on_server = function(world, from, data) remote:on_message(world, from, data) end,
+		on_player = function(world, from, data) client:on_message(world, from, data) end,
+	})
+end
 
 -- The host's own beasts on screen: "Beasts: Wolf (out), Boar (rests 1:20)".
 local function update_hud(world)

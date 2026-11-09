@@ -8,6 +8,9 @@ local window_mod = require("beasts_window")
 local stable_mod = require("stable")
 
 local OPEN_NEAR_M = 6  -- m: the stable key asks the server for the window with a stable this close (the server checks)
+local WHEEL_WAIT_S = 2  -- s: the wheel's items from the server open the wheel this long after the key was pressed
+local NO_SERVER_WHEEL = "The server's Beastmaster does not answer (it needs 1.15 or newer): type /beastmaster in the chat."
+
 
 local M = {}
 
@@ -29,6 +32,16 @@ function C:reset()
 	self.win_n = nil       -- its number (the server's)
 	self.since = nil       -- this game's time when the server's Beastmaster first answered in this session
 	self.sent = nil        -- the stables last reported to the server in this session
+	self.asked = nil       -- this game's time when the wheel key asked the server for the items
+end
+
+-- The wheel key (on the client world): the server is asked for this player's items.
+function C:on_wheel_key(world)
+	if not wire.server_peer() then
+		emf.notify(NO_SERVER_WHEEL)
+		return
+	end
+	if wire.send({ t = "wheel" }) then self.asked = self.env.now(world) end
 end
 
 -- Every step of the client world while this game is in someone else's world: the stables its client world shows go to
@@ -141,6 +154,25 @@ function on.win(self, world, msg)
 		if not ok then wire.log_once("the server's window could not be drawn: " .. tostring(opened)) end
 		wire.send({ t = "closed", n = msg.n })
 	end
+end
+
+-- The wheel's items: the wheel opens while the key that asked for them is still held (a late answer, or one that
+-- came twice, opens none); a pick goes to the server with the label shown.
+function on.wheel(self, world, msg)
+	local asked = self.asked
+	self.asked = nil
+	if not asked or self.env.now(world) - asked > WHEEL_WAIT_S or type(msg.labels) ~= "table" then return end
+	if not emf.key_down("wheel_key") then return end
+	local labels = {}
+	for i = 1, math.min(#msg.labels, 64) do
+		if type(msg.labels[i]) ~= "string" then return end
+		labels[i] = msg.labels[i]
+	end
+	if #labels == 0 then return end
+	local seq = msg.seq
+	emf.wheel("Beasts", labels, emf.setting("wheel_key"), function(w, choice)
+		if choice and labels[choice] then wire.send({ t = "pick", seq = seq, i = choice, label = labels[choice] }) end
+	end)
 end
 
 function on.close(self, world, msg)
