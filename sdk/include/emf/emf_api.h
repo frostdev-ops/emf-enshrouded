@@ -422,6 +422,24 @@ typedef struct EmfNetChannel {
     void* user;
 } EmfNetChannel;
 
+/* v28 on_player: who joined, left or died on the server world (the host's game or a dedicated server) */
+#define EMF_PLAYER_JOINED 1u /* in the world and ready to play (the host's own player at once), once per arrival; 1 s
+                                after a world's load event everyone there (the host first, then by entity id) */
+#define EMF_PLAYER_LEFT   2u /* gone from the world; back as another entity: left, then joined. None when the world
+                                itself ends */
+#define EMF_PLAYER_DIED   3u /* a joined player died */
+typedef struct EmfPlayerEvent {
+    uint32_t size;     /* sizeof(EmfPlayerEvent) of the core */
+    uint32_t kind;     /* EMF_PLAYER_* */
+    uint64_t account;  /* the player's account (as player_account and the command sender give it) */
+    uint32_t player;   /* their entity in the server world (left: the one they had) */
+    uint32_t killer;   /* died: the root source of the last hit on them within 10 s (not themselves), else 0 */
+    uint8_t host;      /* 1 = the host's own player */
+    uint8_t pad[7];
+    char name[64];     /* their chat name (UTF-8), "" where players' chat is off or it is not known */
+} EmfPlayerEvent;
+typedef void (*EmfPlayerCallback)(EmfWorld* world, const EmfPlayerEvent* e, void* user);
+
 /* v13 mod_info: what the loader found */
 #define EMF_MOD_LOADED 0u
 #define EMF_MOD_FAILED 1u   /* its DLL did not load, or emf_mod_load returned false or faulted */

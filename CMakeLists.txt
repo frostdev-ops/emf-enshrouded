@@ -525,6 +525,7 @@ add_executable(emf_tests
   tests/test_image_store.cpp
   tests/test_net_line.cpp
   tests/test_net_link.cpp
+  tests/test_player_roster.cpp
   tests/test_net_peers.cpp
   tests/test_net_remote.cpp
   tests/test_net_service.cpp
