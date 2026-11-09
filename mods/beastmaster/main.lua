@@ -212,7 +212,7 @@ end
 
 -- the Beasts window (the host, at a stable)
 local STABLE_REACH_M = 4  -- E opens the window with a stable under the crosshair this close
-window = window_mod.new({
+local window_env = {
 	setting = setting,
 	now = now,
 	beasts = function() return beasts end,
@@ -225,7 +225,8 @@ window = window_mod.new({
 	release = stable_do.release,
 	spend = stable_do.spend,
 	reset_talents = stable_do.reset_talents,
-})
+}
+window = window_mod.new(window_env)
 
 -- ---- players who joined: Beastmaster's screens on their own game (mod messages, Lua 1.19) ----
 remote = remote_mod.new({ now = now, log = emf.log })

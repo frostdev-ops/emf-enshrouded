@@ -8,6 +8,9 @@
 -- Wind works again), and the stable's
 -- actions, each returning what it did: make_active(world, account, player, beast), store(world, account, beast),
 -- release(world, account, beast), spend(world, account, beast, talent), reset_talents(world, account, beast).
+-- M.new(env, screen): where the window is drawn (nil: M.host_screen(), EMF's overlay in this game); a screen has
+-- open(world, def, on_event) -> bool, update(world, def) -> bool (false: it is closed) and picture(sp) -> the fields a
+-- picture row of kind `sp` gets, or nil (none). def = {title, width, place, rows}.
 local species = require("species")
 local loyalty = require("loyalty")
 local slots = require("slots")
@@ -23,11 +26,40 @@ local PORTRAIT_FPS = 8    -- its 24 frames (mod.json "portraits"): one turn in 3
 local W = {}
 W.__index = W
 
-function M.new(env)
-	-- opening: counts the windows opened; portraits: species id -> picture handle (0: none); both kept over resets
-	local w = setmetatable({ env = env, opening = 0, portraits = {} }, W)
+function M.new(env, screen)
+	-- opening: counts the windows opened (kept over resets)
+	local w = setmetatable({ env = env, opening = 0, screen = screen or M.host_screen() }, W)
 	w:reset()
 	return w
+end
+
+-- The host's screen: EMF's overlay in this game (emf.window, its events on the server world), the pictures EMF drew
+-- from this game at the start (mod.json "portraits", key beastmaster.<id>), asked once per kind (the cache only changes
+-- at a start; no emf.image (Lua before 1.15, whose windows refuse a picture row): none).
+function M.host_screen()
+	local portraits = {}  -- species id -> picture handle (0: none)
+	local s = {}
+	local function full(def)
+		def.close_key = emf.setting("stable_key") or ""
+		def.world = "server"
+		return def
+	end
+	function s.open(world, def, on_event)
+		return emf.window(M.ID, full(def), on_event)
+	end
+	function s.update(world, def)
+		return emf.window_update(M.ID, full(def))
+	end
+	function s.picture(sp)
+		if not (sp and emf.image) then return nil end
+		local h = portraits[sp.id]
+		if h == nil then
+			h = emf.image("portrait:beastmaster." .. sp.id) or 0
+			portraits[sp.id] = h
+		end
+		return h ~= 0 and { image = h } or nil
+	end
+	return s
 end
 
 -- A new world: no window.
@@ -82,19 +114,6 @@ local function mmss(s)
 	return string.format("%d:%02d", math.floor(s / 60), math.floor(s % 60))
 end
 
--- The picture of the kind `sp` that EMF drew from the player's game at the start (mod.json "portraits", key
--- beastmaster.<id>), or nil: not drawn, or no emf.image (Lua before 1.15, whose windows refuse a picture row). Asked
--- once per kind: the cache only changes at a start.
-function W:portrait(sp)
-	if not (sp and emf.image) then return nil end
-	local h = self.portraits[sp.id]
-	if h == nil then
-		h = emf.image("portrait:beastmaster." .. sp.id) or 0
-		self.portraits[sp.id] = h
-	end
-	return h ~= 0 and h or nil
-end
-
 -- The selected beast's tab: its picture (turning), its stats (kind, level, loyalty, what its role, loyalty and talents
 -- make of its health, damage and speed, where it is), its talents with a + each and Reset talents, and its actions.
 function W:beast_rows(world, rows, b)
@@ -105,8 +124,12 @@ function W:beast_rows(world, rows, b)
 	local lvl = self:loyalty_of(b)
 	local f = loyalty.factor(lvl)
 	rows[#rows + 1] = { heading = b.name }
-	local pic = self:portrait(sp)
-	if pic then rows[#rows + 1] = { image = pic, height = PORTRAIT_LINES, fps = PORTRAIT_FPS } end
+	local pic = self.screen.picture(sp)
+	if pic then
+		local row = { height = PORTRAIT_LINES, fps = PORTRAIT_FPS }
+		for k, v in pairs(pic) do row[k] = v end
+		rows[#rows + 1] = row
+	end
 	local level = env.level(world, self.player)
 	local kind = sp and sp.name or tostring(b.species)
 	rows[#rows + 1] = { text = level > 0 and string.format("%s, level %d", kind, level) or kind }
@@ -202,13 +225,8 @@ function W:rows(world)
 	return rows
 end
 
-local function key_text(key)
-	return emf.setting(key) or ""
-end
-
 function W:def(world)
-	return { title = "Beasts", width = 30, place = "centre", close_key = key_text("stable_key"), world = "server",
-		rows = self:rows(world) }
+	return { title = "Beasts", width = 30, place = "centre", rows = self:rows(world) }
 end
 
 -- The rows as one text: the window is drawn again only when this changed.
@@ -224,7 +242,7 @@ local function signature(rows)
 	return table.concat(parts, ";")
 end
 
--- Opens the window for `player` (the host); not while it is open (one E press can reach both the stable's prompt and
+-- Opens the window for `player` (the screen's player); not while it is open (one E press can reach both the stable's prompt and
 -- the E key). Each opening answers only its own events: a window from before (a world loaded again under it) that
 -- closes late leaves the one opened since alone. True when it opened.
 function W:show(world, player)
@@ -236,7 +254,7 @@ function W:show(world, player)
 	local def = self:def(world)
 	self.opening = self.opening + 1
 	local opening = self.opening
-	if not emf.window(M.ID, def, function(w, ev)
+	if not self.screen.open(world, def, function(w, ev)
 		if opening == self.opening then self:on_event(w, ev) end
 	end) then
 		self:reset()
@@ -253,7 +271,7 @@ function W:refresh(world, force)
 	local def = self:def(world)
 	local sig = signature(def.rows)
 	if not force and sig == self.drawn then return end
-	if emf.window_update(M.ID, def) then
+	if self.screen.update(world, def) then
 		self.drawn = sig
 	else
 		self.open = false  -- the player closed it meanwhile
