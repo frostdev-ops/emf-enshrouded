@@ -15,11 +15,18 @@
 //   ... when it changed:  g_file.save(my_state_as_text());  // cheap when unchanged
 //
 // poll and save run on the server world's thread (from on_tick, a command, a put/take result...).
+//
+// A text per player (by account) in the same world goes beside it, in <slot>.players.txt, read by the same poll and
+// saved under the same rules (save_player; at most 16 KiB per player and 2 MiB per file):
+//   ... when a player's data changed:  g_file.save_player(account, text);   // "" removes the player
+//   ... to read it:                    if (auto t = g_file.player(account)) { /* *t: "" when none */ }
 #include <windows.h>
 
 #include <atomic>
 #include <cstdint>
 #include <cstdio>
+#include <map>
+#include <optional>
 #include <string>
 
 #include "emf/emf.hpp"
@@ -66,6 +73,7 @@ public:
         file_session_ = session;
         read_loads_ = loads;
         written_ = text;
+        players_bad_ = !parse_players(read(players_path()), players_);
         on_loaded(text);
         return true;
     }
@@ -90,9 +98,62 @@ public:
     bool save(const std::string& text) {
         if (!ready()) return false;
         if (text == written_) return true;
+        if (!write_whole(path(), text)) return false;
+        written_ = text;
+        return true;
+    }
+
+    // ---- a text per player in the same world ----
+    static constexpr size_t kMaxPlayerText = 16384;     // bytes per player
+    static constexpr size_t kMaxPlayersFile = 2097152;  // bytes of the whole file
+    std::wstring players_path() const {
+        if (!file_slot_) return {};
+        wchar_t name[24];
+        swprintf(name, 24, L"\\%04x.players.txt", static_cast<unsigned>(file_slot_));
+        return dir_ + name;
+    }
+    // `account`'s text in the running world ("" when none); nothing while not ready() (no world's data yet, another
+    // world, someone else's game).
+    std::optional<std::string> player(uint64_t account) const {
+        if (!ready()) return std::nullopt;
+        const auto it = players_.find(account);
+        return it == players_.end() ? std::string() : it->second;
+    }
+    // Saves `account`'s text ("" removes the player); the whole file is written, only when something changed. False
+    // when not ready(), for account 0, over kMaxPlayerText or kMaxPlayersFile, into a file that did not parse (it is
+    // never overwritten), or on a write error (each logged once).
+    bool save_player(uint64_t account, const std::string& text) {
+        if (!ready() || !account) return false;
+        if (players_bad_) {
+            say_once(bad_said_, "%ls could not be read (not EMF's format): player data is not saved until it is fixed or removed",
+                     players_path().c_str());
+            return false;
+        }
+        if (text.size() > kMaxPlayerText) {
+            say_once(big_said_, "a player's data over %u bytes was not saved", static_cast<unsigned>(kMaxPlayerText));
+            return false;
+        }
+        std::map<uint64_t, std::string> next = players_;
+        if (text.empty()) next.erase(account);
+        else next[account] = text;
+        if (next == players_) return true;
+        const std::string all = players_text(next);
+        if (all.size() > kMaxPlayersFile) {
+            say_once(full_said_, "player data was not saved: %ls would pass %u bytes", players_path().c_str(),
+                     static_cast<unsigned>(kMaxPlayersFile));
+            return false;
+        }
+        if (!write_whole(players_path(), all)) return false;
+        players_ = std::move(next);
+        return true;
+    }
+
+private:
+    // `text` into `file` whole: a temporary file renamed over it (a crash leaves the old file or the new one).
+    bool write_whole(const std::wstring& file, const std::string& text) {
         CreateDirectoryW(parent(dir_).c_str(), nullptr);
         CreateDirectoryW(dir_.c_str(), nullptr);
-        const std::wstring file = path(), tmp = file + L".tmp";
+        const std::wstring tmp = file + L".tmp";
         FILE* f = nullptr;
         bool ok = _wfopen_s(&f, tmp.c_str(), L"wb") == 0 && f;
         if (ok) {
@@ -109,12 +170,58 @@ public:
             }
             return false;
         }
-        failed_path_.clear();
-        written_ = text;
+        if (failed_path_ == file) failed_path_.clear();
+        return true;
+    }
+    template <class... A>
+    void say_once(bool& said, const char* fmt, A... a) {
+        if (said) return;
+        said = true;
+        if (api_->log) api_->log(mod_.c_str(), fmt, a...);
+    }
+    // "emf players 1\n", then per player "0x<16 hex> <bytes>\n<text>\n" (any bytes fit).
+    static std::string players_text(const std::map<uint64_t, std::string>& m) {
+        std::string s = "emf players 1\n";
+        for (const auto& [account, text] : m) {
+            char head[48];
+            std::snprintf(head, sizeof head, "0x%016llx %zu\n", static_cast<unsigned long long>(account), text.size());
+            s += head;
+            s += text;
+            s += '\n';
+        }
+        return s;
+    }
+    // False (and `out` empty) when `t` is not that format; an empty or missing file is no players.
+    static bool parse_players(const std::string& t, std::map<uint64_t, std::string>& out) {
+        out.clear();
+        if (t.empty()) return true;
+        const std::string head = "emf players 1\n";
+        if (t.compare(0, head.size(), head) != 0) return false;
+        size_t i = head.size();
+        while (i < t.size()) {
+            const size_t nl = t.find('\n', i);
+            if (nl == std::string::npos || nl - i < 20 || nl - i > 28 || t[i] != '0' || t[i + 1] != 'x' || t[i + 18] != ' ')
+                return out.clear(), false;
+            uint64_t account = 0;
+            for (size_t k = i + 2; k < i + 18; ++k) {
+                const char c = t[k];
+                const int v = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+                if (v < 0) return out.clear(), false;
+                account = account * 16 + static_cast<uint64_t>(v);
+            }
+            size_t len = 0;
+            for (size_t k = i + 19; k < nl; ++k) {
+                if (t[k] < '0' || t[k] > '9') return out.clear(), false;
+                len = len * 10 + static_cast<size_t>(t[k] - '0');
+            }
+            if (i + 19 == nl || len > kMaxPlayerText || nl + 1 + len >= t.size() || t[nl + 1 + len] != '\n')
+                return out.clear(), false;
+            out[account] = t.substr(nl + 1, len);
+            i = nl + 1 + len + 1;
+        }
         return true;
     }
 
-private:
     std::wstring default_dir() const {
         wchar_t exe[MAX_PATH];
         GetModuleFileNameW(nullptr, exe, MAX_PATH);
@@ -146,6 +253,9 @@ private:
     uint32_t file_session_ = 0, read_loads_ = 0;
     std::string written_;
     std::wstring failed_path_;  // the file whose write failure was logged
+    std::map<uint64_t, std::string> players_;  // the running world's player texts (read by poll)
+    bool players_bad_ = false;                 // its file did not parse: never overwritten
+    bool bad_said_ = false, big_said_ = false, full_said_ = false;
 };
 
 }  // namespace emf

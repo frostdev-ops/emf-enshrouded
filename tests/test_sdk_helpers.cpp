@@ -333,6 +333,155 @@ TEST_CASE("storage: a WorldFile saves only while its server world runs (poll cal
     RemoveDirectoryW(dir.c_str());
 }
 
+// ---- a text per player in the same world (<slot>.players.txt beside <slot>.txt) ----
+namespace {
+std::string slurp(const std::wstring& path) {
+    std::string out;
+    FILE* f = nullptr;
+    if (_wfopen_s(&f, path.c_str(), L"rb") != 0 || !f) return out;
+    char buf[65536];
+    size_t n;
+    while ((n = fread(buf, 1, sizeof buf, f)) > 0) out.append(buf, n);
+    fclose(f);
+    return out;
+}
+void spill(const std::wstring& path, const std::string& text) {
+    FILE* f = nullptr;
+    REQUIRE(_wfopen_s(&f, path.c_str(), L"wb") == 0);
+    fwrite(text.data(), 1, text.size(), f);
+    fclose(f);
+}
+}  // namespace
+
+TEST_CASE("storage: a text per player is read with the world's data and saved beside it") {
+    reset();
+    static EmfApi api = fake_api();
+    REQUIRE(emf::init(&api));
+    const std::wstring dir = temp_dir(L"emf_players_test");
+    const std::wstring players = dir + L"\\0003.players.txt";
+    DeleteFileW(players.c_str());
+    emf::WorldFile file("mymod");
+    file.set_dir(dir);
+    REQUIRE(file.attach());
+    CHECK_FALSE(file.player(0xAA).has_value());  // before the world's data
+    CHECK_FALSE(file.save_player(0xAA, "x"));
+    g_load_cb(3, g_load_user);
+    REQUIRE(file.poll([](const std::string&) {}));
+    REQUIRE(file.player(0xAA).has_value());
+    CHECK(file.player(0xAA)->empty());  // none yet
+    REQUIRE(file.save_player(0xBB, "kills=1"));
+    REQUIRE(file.save_player(0xAA, "kills=3"));
+    CHECK(*file.player(0xAA) == "kills=3");
+    CHECK(file.players_path() == players);
+    CHECK(slurp(players) == "emf players 1\n0x00000000000000aa 7\nkills=3\n0x00000000000000bb 7\nkills=1\n");
+    CHECK(GetFileAttributesW((players + L".tmp").c_str()) == INVALID_FILE_ATTRIBUTES);
+    g_session = 2;  // the next session reads it back
+    g_load_cb(3, g_load_user);
+    CHECK_FALSE(file.player(0xBB).has_value());  // not before its poll
+    REQUIRE(file.poll([](const std::string&) {}));
+    CHECK(*file.player(0xBB) == "kills=1");
+    DeleteFileW(players.c_str());
+    RemoveDirectoryW(dir.c_str());
+}
+
+TEST_CASE("storage: player texts round-trip any bytes; an empty text removes the player") {
+    reset();
+    static EmfApi api = fake_api();
+    REQUIRE(emf::init(&api));
+    const std::wstring dir = temp_dir(L"emf_players_bytes");
+    const std::wstring players = dir + L"\\0003.players.txt";
+    DeleteFileW(players.c_str());
+    emf::WorldFile file("mymod");
+    file.set_dir(dir);
+    REQUIRE(file.attach());
+    g_load_cb(3, g_load_user);
+    REQUIRE(file.poll([](const std::string&) {}));
+    static const char raw[] = "a\nemf players 1\n0x0000000000000001 3\n\0z\n";
+    const std::string odd(raw, sizeof raw - 1);
+    REQUIRE(file.save_player(0xAA, odd));
+    g_session = 2;
+    g_load_cb(3, g_load_user);
+    REQUIRE(file.poll([](const std::string&) {}));
+    CHECK(*file.player(0xAA) == odd);
+    REQUIRE(file.save_player(0xAA, ""));
+    CHECK(file.player(0xAA)->empty());
+    CHECK(slurp(players) == "emf players 1\n");
+    CHECK(file.save_player(0xCC, ""));  // removing one that is not there: nothing to do
+    DeleteFileW(players.c_str());
+    RemoveDirectoryW(dir.c_str());
+}
+
+TEST_CASE("storage: player saves are refused over 16 KiB or 2 MiB, for account 0, and into a file that does not parse") {
+    reset();
+    static EmfApi api = fake_api();
+    REQUIRE(emf::init(&api));
+    const std::wstring dir = temp_dir(L"emf_players_limits");
+    const std::wstring players = dir + L"\\0003.players.txt";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    std::string big = "emf players 1\n";  // 127 players of 16 KiB: just under 2 MiB
+    for (uint64_t a = 1; a <= 127; ++a) {
+        char head[40];
+        std::snprintf(head, sizeof head, "0x%016llx 16384\n", static_cast<unsigned long long>(a));
+        big += head + std::string(16384, 'p') + "\n";
+    }
+    REQUIRE(big.size() <= emf::WorldFile::kMaxPlayersFile);
+    spill(players, big);
+    emf::WorldFile file("mymod");
+    file.set_dir(dir);
+    REQUIRE(file.attach());
+    g_load_cb(3, g_load_user);
+    REQUIRE(file.poll([](const std::string&) {}));
+    CHECK(file.player(127)->size() == 16384);
+    g_logged.clear();
+    CHECK_FALSE(file.save_player(0xAA, std::string(16385, 'a')));  // one byte over 16 KiB
+    CHECK(g_logged.size() == 1);
+    CHECK_FALSE(file.save_player(0xAA, std::string(16384, 'a')));  // the file would pass 2 MiB
+    CHECK(g_logged.size() == 2);
+    CHECK(slurp(players) == big);  // untouched
+    CHECK(file.save_player(1, std::string(16384, 'q')));  // the same size: fits
+    CHECK(file.save_player(2, ""));
+    CHECK(file.save_player(0xAA, std::string(16384, 'a')));  // room again
+    CHECK_FALSE(file.save_player(0, "x"));
+    // a file that does not parse is never overwritten
+    spill(players, "emf players 1\n0xnothex 3\nabc\n");
+    g_session = 2;
+    g_load_cb(3, g_load_user);
+    REQUIRE(file.poll([](const std::string&) {}));
+    CHECK(file.player(0xAA)->empty());
+    g_logged.clear();
+    CHECK_FALSE(file.save_player(0xAA, "x"));
+    CHECK_FALSE(file.save_player(0xAA, "y"));
+    CHECK(g_logged.size() == 1);
+    CHECK(slurp(players) == "emf players 1\n0xnothex 3\nabc\n");
+    DeleteFileW(players.c_str());
+    RemoveDirectoryW(dir.c_str());
+}
+
+TEST_CASE("storage: another world never sees the last world's players") {
+    reset();
+    static EmfApi api = fake_api();
+    REQUIRE(emf::init(&api));
+    const std::wstring dir = temp_dir(L"emf_players_worlds");
+    DeleteFileW((dir + L"\\0003.players.txt").c_str());
+    DeleteFileW((dir + L"\\0005.players.txt").c_str());
+    emf::WorldFile file("mymod");
+    file.set_dir(dir);
+    REQUIRE(file.attach());
+    g_load_cb(3, g_load_user);
+    REQUIRE(file.poll([](const std::string&) {}));
+    REQUIRE(file.save_player(0xAA, "three"));
+    g_load_cb(5, g_load_user);  // another world, same session
+    CHECK_FALSE(file.player(0xAA).has_value());
+    CHECK_FALSE(file.save_player(0xAA, "not into three"));
+    REQUIRE(file.poll([](const std::string&) {}));
+    CHECK(file.player(0xAA)->empty());
+    REQUIRE(file.save_player(0xAA, "five"));
+    CHECK(slurp(dir + L"\\0003.players.txt") == "emf players 1\n0x00000000000000aa 5\nthree\n");
+    DeleteFileW((dir + L"\\0003.players.txt").c_str());
+    DeleteFileW((dir + L"\\0005.players.txt").c_str());
+    RemoveDirectoryW(dir.c_str());
+}
+
 // ---- helpers for gameplay mods: time of day, kill, players and their accounts ----
 namespace {
 void health(uint32_t entity, std::initializer_list<int32_t> storage, uint32_t current) {
