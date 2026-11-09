@@ -645,7 +645,8 @@ api->net_to_player(w, from->player, "mymod/show", "ok", 2);  // the server -> th
   loop before the game adds it (so no one sees it, and it never reaches commands, `on_chat` or the log); the player's
   end takes the server's marked lines before the chat shows them. The sender of a message is the server's own
   connection record (handle and account), never the message.
-- **Discovery.** Nothing is sent to a game that did not prove it runs EMF. A server that has at least one channel sends
+- **Discovery.** Nothing is sent to a game that did not prove it runs EMF. A server that has at least one mod channel (or
+  only the core's own `emf/mods`, when it has mods its players must match: server.md "Players' mods") sends
   each new connection a beacon line (spoken as that player, kind 0) 10 s after it appears, and once more 35 s later
   if that game has not said hello (at most 2 times; a line that arrives while the game still loads can be lost); an EMF
   game hides it and answers with a hello (its EMF version, API, game build and channels); the server answers with a

@@ -153,6 +153,26 @@ players who join later get it too. It lasts until the server restarts; `world.se
 world. `world.export` prints a `gameSettings` block to paste into `enshrouded_server.json`; EMF never edits that
 file. The settings, their ranges and the other `world.*` commands: [world_settings.md](world_settings.md).
 
+## Players' mods (the mod check on join)
+
+When a player whose game runs EMF 0.6.3 or newer joins a server or a game someone hosts with EMF 0.6.3 or newer, the
+two compare the mods that must match: every EML content mod (it changes the game's data) and every mod whose
+`mod.json` says `"side": "both"`, by id and version. Mods marked `"server"` or `"client"`, and mods without `side`,
+are not compared.
+
+- The player's game shows a note when it lacks one of those mods or has another version, once per session: "This
+  server uses mods your game does not have or has in another version: beasts_pack (server 2.2.0, you: none). Items
+  from content mods can show as [Invalid Item Stack] and be lost: install the same versions (EMF.exe) before you play
+  here." Its console log has the whole list.
+- The server writes one line per player to `emf\emf_core.log` (`mods check: player 0x... (entity 2, EMF 0.6.3):
+  missing: ...`), and `players.mods` (the server's console, `emf\commands.txt`, or a `[chat] admins` account) lists
+  every player in the world: their EMF and what differs, or "no EMF" (a player without EMF cannot be checked).
+- It only warns. Nothing is refused or turned off.
+- The greeting: a server greets new connections (the line a game without EMF shows, at most twice) when one of its
+  mods talks to players' games, or when it has mods its players must match. A server whose mods players do not need
+  stays silent.
+- It travels as the core's own message channel `emf/mods` (version 1); an older EMF at either end takes no part.
+
 ## Keeping a test server private
 
 The server registers in Steam's public server list when it starts; there is no unlisted mode. For a private server:
