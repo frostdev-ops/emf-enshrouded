@@ -20,10 +20,13 @@ R.__index = R
 local on = {}
 
 local REPORT_EVERY_S = 2  -- s: a player's stables reports are taken at most this often (a game sends one on a change)
+local CLOSE_TRIES = 10    -- a close that does not go is tried again once a second this often
 
 function M.new(env)
-	-- n, seq: the last window's and wheel's numbers (they count up, kept over resets)
-	local r = setmetatable({ env = env, n = 0, seq = 0 }, R)
+	-- n, seq: the last window's and wheel's numbers (they count up, kept over resets); closing: account -> {player, n,
+	-- tries}, a window to close on that player's game (its update did not go); pending: account -> {player, list}, the
+	-- last stables report that came before the world's data (taken once it is here)
+	local r = setmetatable({ env = env, n = 0, seq = 0, closing = {}, pending = {} }, R)
 	r:reset()
 	return r
 end
@@ -64,6 +67,7 @@ local function screen(player, n)
 	function s.picture(sp)
 		return sp and { portrait = sp.id } or nil
 	end
+	s.counts_down = true  -- the player's game counts the rests down (a change of them alone sends nothing)
 	return s
 end
 
@@ -78,18 +82,41 @@ function R:open_window(world, player, name)
 	local w = self.env.make_window(screen(player, n))
 	if not w:show(world, player, name) then return false end
 	self.windows[account] = { w = w, n = n, player = player }
+	self.closing[account] = nil  -- the new one replaces it there
 	return true
 end
 
 -- Once a second on the server world: a window whose player left (or came back as another entity) or that closed is
--- forgotten; the others are drawn again when what they show changed.
+-- forgotten (one whose update did not go is closed on that player's game); the others are drawn again when what they
+-- show changed. A stables report that came before the world's data is taken now.
 function R:step(world)
-	local present = self.env.present() or {}
+	local known = self.env.present()
+	local present = known or {}
 	for account, s in pairs(self.windows) do
-		if present[account] ~= s.player or not s.w.open then
+		if present[account] ~= s.player then
 			self.windows[account] = nil
+		elseif not s.w.open then
+			self.windows[account] = nil
+			self.closing[account] = { player = s.player, n = s.n, tries = 0 }
 		else
 			s.w:refresh(world)
+		end
+	end
+	for account, c in pairs(self.closing) do
+		if present[account] ~= c.player or wire.send_to(world, c.player, { t = "close", n = c.n }) then
+			self.closing[account] = nil
+		else
+			c.tries = c.tries + 1
+			if c.tries >= CLOSE_TRIES then self.closing[account] = nil end
+		end
+	end
+	if known and self.env.loaded() then
+		for account, p in pairs(self.pending) do
+			self.pending[account] = nil
+			if present[account] == p.player then
+				self.reported_at[account] = self.env.now(world)
+				self.env.report(world, p.player, p.list)
+			end
 		end
 	end
 	for account, s in pairs(self.wheels) do
@@ -115,15 +142,18 @@ function R:step(world)
 	end
 end
 
--- A click in window `n` (only the window open now, on that player's own game, counts).
+-- A click in window `n` (only the window open now, on that player's own game, counts). Each handler answers "bad"
+-- when the message's fields are not what its kind has (logged once per kind).
 function on.click(self, world, player, account, msg)
+	if type(msg.n) ~= "number" or type(msg.key) ~= "string" or #msg.key > 80 then return "bad" end
 	local s = self.windows[account]
-	if not (s and s.n == msg.n and s.player == player and type(msg.key) == "string" and #msg.key <= 80) then return end
+	if not (s and s.n == msg.n and s.player == player) then return end
 	s.w:on_event(world, { kind = "click", key = msg.key })
 end
 
 -- Window `n` was closed on the player's game (or could not open there).
 function on.closed(self, world, player, account, msg)
+	if type(msg.n) ~= "number" then return "bad" end
 	local s = self.windows[account]
 	if not (s and s.n == msg.n) then return end
 	s.w:on_event(world, { kind = "closed" })
@@ -146,18 +176,25 @@ end
 
 -- A pick on that wheel: item i, as it was shown (the label must be the one sent there); done once.
 function on.pick(self, world, player, account, msg)
+	local i = msg.i
+	if type(msg.seq) ~= "number" or type(i) ~= "number" or i ~= math.floor(i) or type(msg.label) ~= "string" then
+		return "bad"
+	end
 	local s = self.wheels[account]
 	if not (s and s.player == player and msg.seq == s.seq) then return end
-	local i = msg.i
-	if type(i) ~= "number" or i ~= math.floor(i) or s.labels[i] == nil or s.labels[i] ~= msg.label then return end
+	if s.labels[i] == nil or s.labels[i] ~= msg.label then return end
 	self.wheels[account] = nil
 	local text = self.env.run(world, player, account, s.entries[i])
 	if text then self.env.tell(world, player, text) end
 end
 
--- The stables the player's game shows (the server has no render models).
+-- The stables the player's game shows (the server has no render models). One before the world's data waits for it.
 function on.stables(self, world, player, account, msg)
-	if type(msg.list) ~= "table" then return end
+	if type(msg.list) ~= "table" then return "bad" end
+	if not self.env.loaded() then
+		self.pending[account] = { player = player, list = msg.list }
+		return
+	end
 	local t, last = self.env.now(world), self.reported_at[account]
 	if last and t >= last and t - last < REPORT_EVERY_S then return end
 	self.reported_at[account] = t
@@ -184,7 +221,10 @@ function R:on_message(world, from, data)
 			account, msg.t:sub(1, 16):gsub("[^%w_]", "?")))
 		return
 	end
-	fn(self, world, player, account, msg)
+	if fn(self, world, player, account, msg) == "bad" then
+		wire.log_once("dropped: bad fields in " .. msg.t,
+			string.format("a message from %s was dropped: bad fields in a %s message", account, msg.t))
+	end
 end
 
 return M

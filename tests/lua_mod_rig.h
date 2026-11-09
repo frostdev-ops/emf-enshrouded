@@ -158,10 +158,10 @@ struct ModRig {
     std::string id;
     // `also`: more shipped mods loaded beside it, at their default settings (e.g. two class mods sharing a wheel).
     // `api`: changes to the core's function table made before the mods load (e.g. with_net: a mod registers its message
-    // channels while it loads).
+    // channels while it loads). `load`: false leaves the world's data unloaded (the test fires the load).
     ModRig(const char* mod, const wchar_t* name, const std::map<std::string, std::string>& settings,
            const std::function<void(Fake&)>& world = nullptr, const std::vector<std::string>& also = {},
-           const std::function<void(EmfApi&)>& api = nullptr)
+           const std::function<void(EmfApi&)>& api = nullptr, bool load = true)
         : r(name), id(mod) {
         r.api.local_player = player_one;
         const std::wstring wid(id.begin(), id.end());
@@ -184,6 +184,7 @@ struct ModRig {
         host->set_clock(&rig_file_ms);  // the 250 ms limit per call and the chat limit run on the world's time, not the machine's
         host->load_all();
         REQUIRE_MESSAGE(host->status(id) == "running", host->status(id));
+        if (!load) return;
         fire_load(1);
         seconds(1);
     }

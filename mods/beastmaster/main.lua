@@ -258,6 +258,12 @@ end
 
 -- The E key (stable_key): the Beasts window at a stable under the host's crosshair that has no prompt (the game refused
 -- it there, or it has no entity for one); at a stable with the prompt the prompt opens it.
+-- E on someone else's game: the game's own prompt at a stable may open the Beasts window there (client.lua shows a
+-- window the server opens only after a press of E or the stable key).
+emf.on_key("E", function(world)
+	if not world:is_server() then client:on_open_key(world) end
+end)
+
 emf.on_key("stable_key", function(world)
 	if not world:is_server() then  -- someone else's game: the server is asked
 		client:on_stable_key(world)

@@ -10,6 +10,7 @@ local beast_line = require("beast_line")
 
 local OPEN_NEAR_M = 6  -- m: the stable key asks the server for the window with a stable this close (the server checks)
 local WHEEL_WAIT_S = 2  -- s: the wheel's items from the server open the wheel this long after the key was pressed
+local OPEN_WAIT_S = 5   -- s: a window the server opens shows this long after a press of E or the stable key
 local JUMP_M = 100      -- m: moved this far between two searches (fast travel): the world streams in again, wait again
 local NO_SERVER_WHEEL = "The server's Beastmaster does not answer (it needs 1.15 or newer): type /beastmaster in the chat."
 local LINE_STATES = { out = true, aside = true, rest = true }
@@ -24,8 +25,11 @@ C.__index = C
 local on = {}
 
 function M.new(env)
-	-- portraits: species id -> picture handle (0: none); reporter: the client world's stables (stable.lua)
-	local c = setmetatable({ env = env, portraits = {}, reporter = stable_mod.new_reporter() }, C)
+	-- portraits: species id -> picture handle (0: none); reporter: the client world's stables (stable.lua); opening:
+	-- counts the windows opened here (a late event of an earlier one is not the open one's); free_open: the server may
+	-- still open one window without a key press (once per game: beastmaster.as open from the console, for tests)
+	local c = setmetatable({ env = env, portraits = {}, reporter = stable_mod.new_reporter(), opening = 0,
+		free_open = true }, C)
 	c:reset()
 	return c
 end
@@ -38,15 +42,87 @@ function C:reset()
 	self.asked = nil       -- this game's time when the wheel key asked the server for the items
 	self.line = nil        -- the server's beast line: {head, parts, at (this game's time when it came)}
 	self.drawn = nil       -- the line's text on screen now
+	self.pressed_at = nil  -- this game's time of the last press of E or the stable key (one window per press)
+	self.win_def = nil     -- the open window as it came, when it has countdowns (counted down here)
+	self.win_at = nil      -- this game's time when it came
+	self.win_el = nil      -- the whole seconds counted down on screen now
 end
 
--- The wheel key (on the client world): the server is asked for this player's items.
+-- E or the stable key on the client world: the server may open a window here for a moment.
+function C:on_open_key(world)
+	self.pressed_at = self.env.now(world)
+end
+
+-- Whether a window the server opens may show now: within OPEN_WAIT_S after a press, or the one free opening (a server
+-- cannot open it again and again: it takes the mouse and keyboard).
+function C:may_open(world)
+	local at = self.pressed_at
+	if at then
+		local since = self.env.now(world) - at
+		if since >= 0 and since <= OPEN_WAIT_S then return true end
+	end
+	if self.free_open then
+		self.free_open = false
+		return true
+	end
+	return false
+end
+
+-- The window open here goes (closed, or it could not be drawn again): closed on screen, the server hears it.
+function C:drop_window()
+	local n = self.win_n
+	self.win_open, self.win_n, self.win_def = false, nil, nil
+	self.opening = self.opening + 1  -- its late "closed" is no later window's
+	pcall(emf.window_close, window_mod.ID)
+	if n then wire.send({ t = "closed", n = n }) end
+end
+
+-- Keeps window `def` (as drawn) to count its rests down here, when it has any.
+function C:count_from(world, def)
+	self.win_def = nil
+	for _, r in ipairs(def.rows) do
+		if type(r.text) == "string" and window_mod.has_countdown(r.text) then
+			self.win_def, self.win_at, self.win_el = def, self.env.now(world), 0
+			return
+		end
+	end
+end
+
+-- The open window's countdowns, drawn again when a whole second went.
+function C:count_window(world, t)
+	local def = self.win_def
+	if not (self.win_open and def) then return end
+	local el = math.floor(t - self.win_at)
+	if el == self.win_el or el < 0 then return end
+	self.win_el = el
+	local rows = {}
+	for i, r in ipairs(def.rows) do
+		if type(r.text) == "string" and window_mod.has_countdown(r.text) then
+			local row = {}
+			for k, v in pairs(r) do row[k] = v end
+			row.text = window_mod.count_down(r.text, el)
+			rows[i] = row
+		else
+			rows[i] = r
+		end
+	end
+	local shown = {}
+	for k, v in pairs(def) do shown[k] = v end
+	shown.rows = rows
+	local ok, drawn = pcall(emf.window_update, window_mod.ID, shown)
+	if not (ok and drawn) then self:drop_window() end
+end
+
+-- The wheel key (on the client world): the server is asked for this player's items (not again while its answer is on
+-- the way: a pick must be from the wheel it answers last).
 function C:on_wheel_key(world)
 	if not wire.server_peer() then
 		emf.notify(NO_SERVER_WHEEL)
 		return
 	end
-	if wire.send({ t = "wheel" }) then self.asked = self.env.now(world) end
+	local t = self.env.now(world)
+	if self.asked and t - self.asked >= 0 and t - self.asked <= WHEEL_WAIT_S then return end
+	if wire.send({ t = "wheel" }) then self.asked = t end
 end
 
 -- Every step of the client world while this game is in someone else's world: the stables its client world shows go to
@@ -69,8 +145,9 @@ function C:step(world)
 		emf.hud("out", text, "bottom_left")
 		self.drawn = text
 	end
+	self:count_window(world, t)
 	local me = emf.local_player()
-	local list = self.reporter:step(world, t, me)
+	local list = up and self.reporter:step(world, t, me) or nil  -- no search while the server's Beastmaster is silent
 	if list and up then  -- a jump (fast travel): the stables there may still be streaming in
 		local x, y, z
 		if me and me ~= 0 then x, y, z = world:position(me) end
@@ -89,6 +166,7 @@ end
 -- The stable key (on the client world): the server is asked for the Beasts window when this game shows a stable within
 -- OPEN_NEAR_M (the server checks the crosshair and that the stable has no prompt of its own).
 function C:on_stable_key(world)
+	self:on_open_key(world)
 	if not wire.server_peer() then return end
 	local me = emf.local_player()
 	local px, py, pz
@@ -139,19 +217,23 @@ function C:on_window(world, ev)
 	if ev.kind == "click" then
 		if self.win_open then wire.send({ t = "click", n = self.win_n, key = ev.key }) end
 	elseif ev.kind == "closed" then
-		self.win_open = false
-		if self.win_n then wire.send({ t = "closed", n = self.win_n }) end
+		local n = self.win_n
+		self.win_open, self.win_n, self.win_def = false, nil, nil
+		if n then wire.send({ t = "closed", n = n }) end
 	end
 end
 
+-- Each handler answers "bad" when the message's fields are not what its kind has (logged once per kind).
 function on.note(self, world, msg)
-	if type(msg.text) == "string" then emf.notify(msg.text) end
+	if type(msg.text) ~= "string" then return "bad" end
+	emf.notify(msg.text)
 end
 
--- Window n from the server: drawn again when it is open here, opened when the server opens it (`open`); one that
--- cannot open here (another window or the wheel is open) is reported closed.
+-- Window n from the server: drawn again when it is open here (one that cannot be drawn again goes), opened when the
+-- server opens it (`open`) and this game asked for it (may_open); one that cannot open here (another window or the
+-- wheel is open) or was not asked for is reported closed.
 function on.win(self, world, msg)
-	if type(msg.n) ~= "number" or type(msg.rows) ~= "table" then return end
+	if type(msg.n) ~= "number" or type(msg.rows) ~= "table" then return "bad" end
 	local def = {
 		title = type(msg.title) == "string" and msg.title or "Beasts",
 		width = type(msg.width) == "number" and msg.width or nil,
@@ -164,14 +246,26 @@ function on.win(self, world, msg)
 		local ok, drawn = pcall(emf.window_update, window_mod.ID, def)
 		if ok and drawn then
 			self.win_n = msg.n
+			self:count_from(world, def)
 			return
 		end
-		self.win_open = false
+		self:drop_window()
 	end
 	if msg.open ~= true then return end
-	local ok, opened = pcall(emf.window, window_mod.ID, def, function(w, ev) self:on_window(w, ev) end)
+	if not self:may_open(world) then
+		wire.log_once("unasked window", "a window the server opened without a key press here was not shown")
+		wire.send({ t = "closed", n = msg.n })
+		return
+	end
+	self.pressed_at = nil  -- one press, one window
+	self.opening = self.opening + 1
+	local opening = self.opening
+	local ok, opened = pcall(emf.window, window_mod.ID, def, function(w, ev)
+		if opening == self.opening then self:on_window(w, ev) end
+	end)
 	if ok and opened then
 		self.win_open, self.win_n = true, msg.n
+		self:count_from(world, def)
 	else
 		if not ok then wire.log_once("the server's window could not be drawn: " .. tostring(opened)) end
 		wire.send({ t = "closed", n = msg.n })
@@ -181,15 +275,16 @@ end
 -- The wheel's items: the wheel opens while the key that asked for them is still held (a late answer, or one that
 -- came twice, opens none); a pick goes to the server with the label shown.
 function on.wheel(self, world, msg)
-	local asked = self.asked
-	self.asked = nil
-	if not asked or self.env.now(world) - asked > WHEEL_WAIT_S or type(msg.labels) ~= "table" then return end
-	if not emf.key_down("wheel_key") then return end
+	if type(msg.labels) ~= "table" then return "bad" end
 	local labels = {}
 	for i = 1, math.min(#msg.labels, 64) do
-		if type(msg.labels[i]) ~= "string" then return end
+		if type(msg.labels[i]) ~= "string" then return "bad" end
 		labels[i] = msg.labels[i]
 	end
+	local asked = self.asked
+	self.asked = nil
+	if not asked or self.env.now(world) - asked > WHEEL_WAIT_S then return end
+	if not emf.key_down("wheel_key") then return end
 	if #labels == 0 then return end
 	local seq = msg.seq
 	emf.wheel("Beasts", labels, emf.setting("wheel_key"), function(w, choice)
@@ -199,14 +294,14 @@ end
 
 -- The beast line (checked: a head, at most 16 parts of a name and a state, a rest of 0..3600 s).
 function on.line(self, world, msg)
-	if type(msg.head) ~= "string" or #msg.head > 64 or type(msg.parts) ~= "table" then return end
+	if type(msg.head) ~= "string" or #msg.head > 64 or type(msg.parts) ~= "table" then return "bad" end
 	local parts = {}
 	for i = 1, math.min(#msg.parts, 16) do
 		local p = msg.parts[i]
-		if type(p) ~= "table" or type(p.name) ~= "string" or #p.name > 40 or not LINE_STATES[p.state] then return end
+		if type(p) ~= "table" or type(p.name) ~= "string" or #p.name > 40 or not LINE_STATES[p.state] then return "bad" end
 		local rest
 		if p.state == "rest" then
-			if type(p.rest) ~= "number" or p.rest ~= p.rest or p.rest < 0 or p.rest > 3600 then return end
+			if type(p.rest) ~= "number" or p.rest ~= p.rest or p.rest < 0 or p.rest > 3600 then return "bad" end
 			rest = p.rest
 		end
 		parts[i] = { name = p.name, state = p.state, rest = rest }
@@ -214,16 +309,27 @@ function on.line(self, world, msg)
 	self.line = { head = msg.head, parts = parts, at = self.env.now(world) }
 end
 
+-- The server closes window n (its update did not go there).
 function on.close(self, world, msg)
-	if self.win_open and msg.n == self.win_n then emf.window_close(window_mod.ID) end
+	if type(msg.n) ~= "number" then return "bad" end
+	if not (self.win_open and msg.n == self.win_n) then return end
+	self.win_open, self.win_n, self.win_def = false, nil, nil
+	self.opening = self.opening + 1  -- its late "closed" is no later window's
+	pcall(emf.window_close, window_mod.ID)
 end
 
 -- A message from the server (the core's handler, on the client world).
 function C:on_message(world, from, data)
-	local msg = wire.decode(data)
-	if not msg then return end
+	local msg, why = wire.decode(data)
+	if not msg then
+		wire.log_once("dropped (server): " .. why, "a message from the server was dropped: " .. why)
+		return
+	end
 	local fn = on[msg.t]
-	if fn then fn(self, world, msg) end
+	if fn and fn(self, world, msg) == "bad" then
+		wire.log_once("dropped (server): bad fields in " .. msg.t,
+			string.format("a message from the server was dropped: bad fields in a %s message", msg.t))
+	end
 end
 
 return M

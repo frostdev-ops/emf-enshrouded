@@ -10,7 +10,8 @@
 -- release(world, account, beast), spend(world, account, beast, talent), reset_talents(world, account, beast).
 -- M.new(env, screen): where the window is drawn (nil: M.host_screen(), EMF's overlay in this game); a screen has
 -- open(world, def, on_event) -> bool, update(world, def) -> bool (false: it is closed) and picture(sp) -> the fields a
--- picture row of kind `sp` gets, or nil (none). def = {title, width, place, rows}.
+-- picture row of kind `sp` gets, or nil (none). def = {title, width, place, rows}. A screen with counts_down = true
+-- counts the rows' countdowns down itself: a change of them alone does not draw the window again.
 local species = require("species")
 local loyalty = require("loyalty")
 local slots = require("slots")
@@ -20,6 +21,35 @@ local threat = require("threat")
 local M = {}
 M.ID = "stable"
 local CONFIRM_S = 5
+
+-- The countdowns a row's text can hold ("rests 1:20", "again in 0:45", "rests for 1:20"): a joined player's game counts
+-- them down itself, so a window drawn there is sent again only when something else changed.
+local COUNTDOWNS = { "(rests )(%d+):(%d%d)", "(again in )(%d+):(%d%d)", "(rests for )(%d+):(%d%d)" }
+
+-- Whether `text` holds a countdown.
+function M.has_countdown(text)
+	for _, p in ipairs(COUNTDOWNS) do
+		if text:find(p) then return true end
+	end
+	return false
+end
+
+-- `text` with its countdowns `elapsed` seconds further on (not below 0:00).
+function M.count_down(text, elapsed)
+	for _, p in ipairs(COUNTDOWNS) do
+		text = text:gsub(p, function(lead, m, s)
+			local left = math.max(0, tonumber(m) * 60 + tonumber(s) - elapsed)
+			return string.format("%s%d:%02d", lead, math.floor(left / 60), math.floor(left % 60))
+		end)
+	end
+	return text
+end
+
+-- `text` with its countdowns' numbers left out (what a window shows apart from them).
+local function masked(text)
+	for _, p in ipairs(COUNTDOWNS) do text = text:gsub(p, "%1#") end
+	return text
+end
 local PORTRAIT_LINES = 6  -- the picture's height in text lines: the last row (the buttons) still fits on a 1080p screen
 local PORTRAIT_FPS = 8    -- its 24 frames (mod.json "portraits"): one turn in 3 s
 
@@ -229,14 +259,18 @@ function W:def(world)
 	return { title = "Beasts", width = 30, place = "centre", rows = self:rows(world) }
 end
 
--- The rows as one text: the window is drawn again only when this changed.
-local function signature(rows)
+-- The rows as one text: the window is drawn again only when this changed (`counts_down`: apart from the countdowns).
+local function signature(rows, counts_down)
 	local parts = {}
 	for _, r in ipairs(rows) do
 		local keys = {}
 		for k in pairs(r) do keys[#keys + 1] = k end
 		table.sort(keys)
-		for _, k in ipairs(keys) do parts[#parts + 1] = k .. "=" .. tostring(r[k]) end
+		for _, k in ipairs(keys) do
+			local v = r[k]
+			if counts_down and type(v) == "string" then v = masked(v) end
+			parts[#parts + 1] = k .. "=" .. tostring(v)
+		end
 		parts[#parts + 1] = "|"
 	end
 	return table.concat(parts, ";")
@@ -263,7 +297,7 @@ function W:show(world, player, name)
 		return false
 	end
 	self.open = true
-	self.drawn = signature(def.rows)
+	self.drawn = signature(def.rows, self.screen.counts_down)
 	return true
 end
 
@@ -271,7 +305,7 @@ end
 function W:refresh(world, force)
 	if not self.open then return end
 	local def = self:def(world)
-	local sig = signature(def.rows)
+	local sig = signature(def.rows, self.screen.counts_down)
 	if not force and sig == self.drawn then return end
 	if self.screen.update(world, def) then
 		self.drawn = sig

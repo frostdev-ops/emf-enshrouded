@@ -228,7 +228,7 @@ function S:reset()
 	self.client_server = {}  -- a client world bed's id -> the server world's entity at its place (for its prompt)
 	self.offered = {}        -- server entity -> true: a stable's prompt the game took
 	self.waiting = {}        -- reported stables no flame altar was known near: key -> {x, y, z, model, q, until_t}
-	self.client_since = nil  -- the server world's time at the host's client world's first step
+	self.client_since = nil  -- the server world's time at the host's client world's first step with the host in it
 	self.told = {}           -- what was logged once (a full list of reported stables)
 	self.host_view = nil     -- the host's last client search after its first SETTLE_S: {x, y, z, models}
 end
@@ -604,7 +604,10 @@ end
 function S:client_step(world)
 	self.client_steps = self.client_steps + 1
 	if self.client_steps > CLIENT_STEPS then return end
-	if not self.client_since then self.client_since = self.t end
+	if not self.client_since and self.t > 0 then  -- the settle starts with the host in its world (not on the loading screen)
+		local me = emf.local_player()
+		if me and me ~= 0 and world:position(me) then self.client_since = self.t end
+	end
 	if not self.cwalk then
 		if self.t < self.cwalk_after then return end
 		self.cwalk = { ids = world:entities(), i = 1, models = {} }
@@ -631,7 +634,7 @@ function S:client_step(world)
 			end
 		end
 		self.client_models = w.models
-		if hx and self.t - self.client_since >= M.SETTLE_S then
+		if hx and self.client_since and self.t - self.client_since >= M.SETTLE_S then
 			self.host_view = { x = hx, y = hy, z = hz, models = w.models }
 		end
 		if changed and not self.walk then self.walk_after = 0 end

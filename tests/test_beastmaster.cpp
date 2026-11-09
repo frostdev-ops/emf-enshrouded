@@ -21,7 +21,7 @@ std::vector<uint8_t> guid_bytes(const std::string& text) {
 // Player 1 (account 0xAA, the host, level 10) at (0, 10, 0); player 2 (0xBB) at (30, 10, 0).
 // `net`: a v27 core (mod messages) from the start, so Beastmaster's channel is registered.
 struct BeastRig : ModRig {
-    explicit BeastRig(const std::map<std::string, std::string>& settings = {}, bool net = false)
+    explicit BeastRig(const std::map<std::string, std::string>& settings = {}, bool net = false, bool load = true)
         : ModRig("beastmaster", L"beastmaster", settings, [](Fake& f) {
               add_player(f, 1, 0xAA, 0, 10, 0);
               add_player(f, 2, 0xBB, 30, 10, 0);
@@ -31,7 +31,7 @@ struct BeastRig : ModRig {
                   f.attrs[{p, EMF_ATTR_MANA}] = 100;
                   f.attrs[{p, EMF_ATTR_MAX_MANA}] = 100;
               }
-          }, {}, net ? std::function<void(EmfApi&)>([](EmfApi& a) { with_net(a); }) : nullptr) {
+          }, {}, net ? std::function<void(EmfApi&)>([](EmfApi& a) { with_net(a); }) : nullptr, load) {
         with_attributes(r.api);  // a v18+ core: health, mana and damage through the game's attributes
         with_teleport(r.api);    // a v20 core
         with_windows(r.api);     // a v24 core
@@ -6042,4 +6042,221 @@ TEST_CASE("beastmaster net: after a jump of 100 m or more (fast travel) the game
     client_steps(b, 25 * 60);
     REQUIRE(sent_up(b).size() == 2u);
     CHECK(sent_up(b)[1].find("\"x\":10.0") != std::string::npos);
+}
+
+// ---- the 0.6.2 review's smaller findings ----
+namespace {
+// The seconds of the first "rests M:SS" a window shows, or -1.
+int rest_shown(const Fake::Win& w) {
+    for (const auto& t : w.texts) {
+        const size_t at = t.find("rests ");
+        if (at == std::string::npos) continue;
+        int m = 0, s = 0;
+        if (std::sscanf(t.c_str() + at, "rests %d:%d", &m, &s) == 2) return m * 60 + s;
+    }
+    return -1;
+}
+// Only the "win" messages of `messages`.
+std::vector<std::string> wins(const std::vector<std::string>& messages) {
+    std::vector<std::string> out;
+    for (const auto& m : messages)
+        if (m.find("\"t\":\"win\"") != std::string::npos) out.push_back(m);
+    return out;
+}
+// The server sends window `n` to this game, to open it.
+void server_opens(BeastRig& b, int n) {
+    from_server(b, "{\"t\":\"win\",\"n\":" + std::to_string(n) + ",\"open\":true,\"title\":\"Beasts\",\"rows\":[{\"text\":\"x\"}]}");
+}
+}  // namespace
+
+TEST_CASE("beastmaster net: once a window was closed on a joined player's game, the server opens another there only within 5 s after a press of E or the stable key") {
+    BeastRig b({}, true);
+    joined_at_stable(b);
+    relay_down(b, 2);
+    REQUIRE(b.r.fake.windows.size() == 1u);  // the first opens (beastmaster.as open works for a first look)
+    client_click(b, "", EMF_UI_CLOSED);
+    take_sent(b, 0);
+    for (int n = 7; n < 10; ++n) server_opens(b, n);  // again and again, unasked
+    CHECK(b.r.fake.windows.size() == 1u);
+    CHECK(has_part(sent_up(b), "\"t\":\"closed\"", "\"n\":9"));  // the server hears it is closed
+    take_sent(b, 0);
+    press_client(b, kE);
+    server_opens(b, 10);
+    REQUIRE(b.r.fake.windows.size() == 2u);  // asked for: shown
+    client_click(b, "", EMF_UI_CLOSED);
+    server_opens(b, 11);
+    CHECK(b.r.fake.windows.size() == 2u);  // one press, one window
+    press_client(b, kE);
+    b.r.fake.tick += 6 * 60;
+    server_opens(b, 12);
+    CHECK(b.r.fake.windows.size() == 2u);  // too late after the press
+
+    BeastRig c({{"stable_key", "R"}}, true);  // another stable key: E (the game's prompt) still counts, and so does R
+    joined_at_stable(c);
+    relay_down(c, 2);
+    client_click(c, "", EMF_UI_CLOSED);
+    press_client(c, kE);
+    server_opens(c, 7);
+    REQUIRE(c.r.fake.windows.size() == 2u);
+    client_click(c, "", EMF_UI_CLOSED);
+    press_client(c, 'R');
+    server_opens(c, 8);
+    CHECK(c.r.fake.windows.size() == 3u);
+}
+
+TEST_CASE("beastmaster net: a window whose update did not go is closed on the joined player's game") {
+    BeastRig b({}, true);
+    joined_at_stable(b);
+    relay_down(b, 2);
+    b.r.fake.net_ok = false;  // the core takes no message for a while
+    REQUIRE(b.reply("beastmaster.rename Grey Ash", 2, 0xBB).find("now called Ash") != std::string::npos);
+    b.seconds(3);
+    take_sent(b, 2);
+    b.r.fake.net_ok = true;
+    b.seconds(1);
+    REQUIRE(has_part(sent_to(b, 2), "\"t\":\"close\"", "\"n\":1"));
+    relay_down(b, 2);
+    CHECK(b.r.fake.windows_closed == std::vector<std::string>{"beastmaster.stable"});
+    b.seconds(3);
+    CHECK(sent_to(b, 2).empty());  // closed once
+}
+
+TEST_CASE("beastmaster net: a window the joined player's game cannot draw again is closed there and the server hears it") {
+    BeastRig b({}, true);
+    joined_at_stable(b);
+    relay_down(b, 2);
+    take_sent(b, 0);
+    b.r.fake.window_update_ok = false;
+    from_server(b, R"({"t":"win","n":1,"title":"Beasts","rows":[{"text":"x"}]})");
+    CHECK(b.r.fake.windows_closed == std::vector<std::string>{"beastmaster.stable"});
+    CHECK(has_part(sent_up(b), "\"t\":\"closed\"", "\"n\":1"));
+}
+
+TEST_CASE("beastmaster net: a late close of an earlier window leaves the joined player's window open now alone") {
+    BeastRig b({}, true);
+    joined_at_stable(b);
+    relay_down(b, 2);
+    const Fake::Win first = b.r.fake.windows.back();
+    from_server(b, R"({"t":"close","n":1})");
+    press_client(b, kE);
+    server_opens(b, 2);
+    REQUIRE(b.r.fake.windows.size() == 2u);
+    EmfUiEvent e{};  // the core's "closed" for the first window comes only now
+    e.size = sizeof e;
+    e.kind = EMF_UI_CLOSED;
+    e.window = first.id.c_str();
+    e.key = "";
+    e.from_key = "";
+    e.reason = EMF_UI_BY_MOD;
+    take_sent(b, 0);
+    first.cb(kClient, &e, first.user);
+    CHECK_FALSE(has_part(sent_up(b), "\"t\":\"closed\"", "\"n\":2"));
+    client_click(b, "beast.Tusk");
+    CHECK(has_part(sent_up(b), "\"t\":\"click\"", "\"n\":2"));
+}
+
+TEST_CASE("beastmaster net: a joined player's window counts its rests down itself; the server does not send it again for that") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    with_offers(b.r.api);
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\nb 0x00000000000000bb wolf 80 0 Grey\n"
+                  "b 0x00000000000000bb boar 0 0 Tusk\na 0x00000000000000aa Fang\na 0x00000000000000bb Grey\ns 1\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    at_stable(b);
+    Fake::Off o = *last_offer(b, 960);
+    o.cb(kServer, 2, 960, o.user);
+    REQUIRE(wins(sent_to(b, 2)).size() == 1u);
+    relay_down(b, 2);
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    const int first = rest_shown(b.r.fake.windows.back());
+    REQUIRE(first > 60);
+    b.seconds(5);
+    CHECK(wins(sent_to(b, 2)).empty());  // the countdown alone sends nothing
+    client_steps(b, 181 + 60);           // 300 + 241 ticks since it came: 9 s
+    REQUIRE(!b.r.fake.window_updates.empty());
+    CHECK(first - rest_shown(b.r.fake.window_updates.back()) == 9);
+}
+
+TEST_CASE("beastmaster net: a second press of the wheel key while the server's answer is on its way asks once; the pick from that wheel runs") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    joined_beasts(b);
+    b.spawnable(1);
+    press_client(b, VK_F3);                 // a tap ...
+    press_client(b, VK_F3, /*keep=*/true);  // ... and at once again, held
+    REQUIRE(sent_up(b).size() == 1u);
+    relay_up(b, 2, 0xBB);
+    relay_down(b, 2);
+    REQUIRE(b.r.fake.wheels.size() == 1u);
+    const auto w = b.r.fake.wheels[0];
+    const int grey = index_of(w.items, "Call Grey");
+    REQUIRE(grey >= 0);
+    w.cb(kClient, grey, w.user);
+    g_held[VK_F3] = false;
+    relay_up(b, 2, 0xBB);
+    CHECK(b.r.fake.spawns.size() == 1u);
+}
+
+TEST_CASE("beastmaster net: on the host, the first 30 s in which its own game removes no reported stable start when the host is in the world") {
+    BeastRig b({}, true);
+    flame_altar(b, 900, 0, 0);
+    auto step_both = [&](int secs) {
+        for (int i = 0; i < secs * 60; ++i) {
+            b.host->tick(kClient);
+            b.r.fake.tick += 1;
+            b.host->tick(kServer);
+        }
+    };
+    remove_entity(b.r.fake, 1);  // the host's player is not in its world yet: its loading screen
+    step_both(31);
+    from_player(b, 2, 0xBB, report_of(kStableModel, 10, 10, 0));
+    REQUIRE(r_lines(b.saved()) == 1u);
+    step_both(10);
+    add_player(b.r.fake, 1, 0xAA, 0, 10, 0);  // the host is in; its game shows no bed there yet (still streaming in)
+    add_entity(b.r.fake, 1);
+    step_both(5);
+    CHECK(r_lines(b.saved()) == 1u);
+    CHECK(listed(b, "seen by a player's game"));
+}
+
+TEST_CASE("beastmaster net: messages of a known kind with bad fields write one log line per kind") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    joined_beasts(b);
+    for (int i = 0; i < 5; ++i) {
+        from_player(b, 2, 0xBB, R"({"t":"click","n":"one","key":5})");
+        from_player(b, 2, 0xBB, R"({"t":"pick","seq":1,"i":"x"})");
+        from_player(b, 2, 0xBB, R"({"t":"stables","list":7})");
+        from_server(b, R"({"t":"line","head":7})");
+    }
+    CHECK(log_count(b, "bad fields in a click") == 1u);
+    CHECK(log_count(b, "bad fields in a pick") == 1u);
+    CHECK(log_count(b, "bad fields in a stables") == 1u);
+    CHECK(log_count(b, "bad fields in a line") == 1u);
+}
+
+TEST_CASE("beastmaster net: a joined player's game does not search for stables while the server's Beastmaster does not answer") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 0;  // no Beastmaster 1.15 on the server
+    stable_prop(b, 950, 10, 10, 0);
+    client_steps(b, 181);
+    const size_t walks = b.r.fake.for_each_calls;
+    client_steps(b, 40 * 60);
+    CHECK(b.r.fake.for_each_calls == walks);
+    b.r.fake.net_peer_version = 1;  // it answers now: the game searches at once
+    client_steps(b, 60);
+    CHECK(b.r.fake.for_each_calls > walks);
+}
+
+TEST_CASE("beastmaster net: a stables report that comes before the world's data is taken once the data is here") {
+    BeastRig b({}, true, /*load=*/false);
+    b.r.fake.net_peer_version = 1;
+    flame_altar(b, 900, 0, 0);
+    b.seconds(31);
+    from_player(b, 2, 0xBB, report_of(kStableModel, 10, 10, 0));
+    fire_load(1);
+    b.seconds(35);
+    CHECK(listed(b, "seen by a player's game"));
 }

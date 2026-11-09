@@ -39,6 +39,7 @@ struct Fake {
     std::map<std::pair<uint32_t, uint32_t>, std::vector<uint8_t>> components;  // (hash, entity) -> data
     std::map<std::pair<uint32_t, uint32_t>, std::vector<uint8_t>> templates;   // (hash, entity) -> template half
     std::vector<uint32_t> entities;
+    size_t for_each_calls = 0;  // walks of every entity (for_each_entity)
     struct Give {
         uint32_t player, item, count;
     };
@@ -136,6 +137,7 @@ struct Fake {
     bool offer_active = true;     // v26 offer_active's answer
     uint32_t next_offer_spawn = 9000;
     std::vector<std::string> windows_closed;
+    bool window_update_ok = true;  // what window_update answers (false: the window is not open there)
     // v26 pictures: the paths image_load got, its answers
     std::vector<std::string> images_loaded;
     bool image_ok = true;
@@ -196,6 +198,7 @@ void* f_get_template_component(EmfWorld*, uint32_t hash, uint32_t entity, uint64
     return it->second.data();
 }
 void f_for_each(EmfWorld*, EmfEntityCallback cb, void* user) {
+    ++g->for_each_calls;
     for (uint32_t e : g->entities) cb(e, user);
 }
 uint32_t f_find_item(EmfWorld*, const char* name) {
@@ -449,7 +452,7 @@ bool f_window_open(const EmfWindowDef* d) {
 }
 bool f_window_update(const EmfWindowDef* d) {
     g->window_updates.push_back(copy_window(d));
-    return true;
+    return g->window_update_ok;
 }
 bool f_window_close(const char* id) {
     g->windows_closed.emplace_back(id);

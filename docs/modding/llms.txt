@@ -438,13 +438,13 @@ From the mods in the EMF zip (only while that mod runs):
 - handover.log: the last hand-overs [handover]
 - handover.debug_target <entity|off>: (tests) every hand-over goes to this villager or chest [handover]
 - beastmaster.species <animation graph guid> <faction number> [scale]: which beast a creature is (for modders) [beastmaster]
-- beastmaster.stable mark | unmark | list: the prop you look at is a stable; the marked prop nearest you is not;  [beastmaster]
+- beastmaster.stable mark | unmark | list: the prop you look at is a stable; the marked prop nearest you is not; this world's stables (host and admins) [beastmaster]
 - beastmaster.threat: the monsters held on you or your beasts now, and for how long [beastmaster]
 - beastmaster.home: where your beasts at home are (in a Large Stable) and what they do [beastmaster]
 - beastmaster.idle: what your beasts do while you stand still now [beastmaster]
 - beastmaster.loyalty <name or number> <1-10>: set a beast's loyalty (admin) [beastmaster]
 - beastmaster.give <species>: add a beast to your collection (admin) [beastmaster]
-- beastmaster.as <#k or player entity> <word> [...]: run a player's word as that player: give, loyalty, open  [beastmaster]
+- beastmaster.as <#k or player entity> <word> [...]: run a player's word as that player: give, loyalty, open [name], or any /beastmaster word (console only; for tests on a dedicated server) [beastmaster]
 Lua mods add <id>.<name> commands with emf.command.
 
 ## Debug bridge (docs/modding/debug_bridge.md)
