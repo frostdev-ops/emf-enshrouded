@@ -292,7 +292,7 @@ void ServerLink::tick(const std::vector<Connection>& connected) {
         for (Peer* p : peers_.all())
             if (!now.count({p->handle, p->account})) left.push_back({p->handle, p->account});
         for (const auto& c : left) peers_.bye(c.handle);
-        if (d_.greet && d_.channels && !d_.channels().empty())
+        if (d_.greet && (d_.greets ? d_.greets() : d_.channels && !d_.channels().empty()))
             for (const auto& c : now) {
                 Beaconing& b = greeted_.try_emplace(c, Beaconing{ms, 0, 0}).first->second;
                 // done, said hello, or a hello is coming in (another beacon would restart the conversation)

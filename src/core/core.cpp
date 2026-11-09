@@ -64,11 +64,43 @@
 #include "version.h"
 #include "system_programs.h"
 #include "world_jobs.h"
+#include "mods_check_service.h"
+#include "loader/eml_mods.h"
 
 // The Vulkan layer entry point lives in emf_core_lib (a static library): keep it in emf_core.dll's exports.
 #pragma comment(linker, "/include:emf_vk_negotiate")
 
 namespace {
+emf::core::ModsCheck* g_mods_check = nullptr;  // the mod check on join (core channel emf/mods)
+
+// players.mods: each player in the server world, with their EMF and what differs from this server's mods.
+void cmd_players_mods(EmfWorld* world, int, const char* const*, void*) {
+    if (!world || emf::WorldView(reinterpret_cast<uint8_t*>(world)).kind() != EMF_WORLD_SERVER) {
+        emf::core::command_reply_line("players.mods: only where the world runs (a game you host or the dedicated server)");
+        return;
+    }
+    const auto players = emf::core::read_players(emf::core::api_table(), world);
+    if (players.empty()) {
+        emf::core::command_reply_line("players.mods: no player in the world");
+        return;
+    }
+    for (const auto& p : players) {
+        std::string who = (p.name.empty() ? "player " + std::to_string(p.entity) : p.name) + " (entity " +
+                          std::to_string(p.entity) + ")";
+        if (p.host) {
+            emf::core::command_reply_line(who + ": the host (this game)");
+            continue;
+        }
+        const auto seen = g_mods_check && p.account ? g_mods_check->player(p.account) : std::nullopt;
+        if (seen)
+            emf::core::command_reply_line(who + ": EMF " + (seen->emf.empty() ? std::string("?") : seen->emf) + ", " + seen->diff);
+        else
+            emf::core::command_reply_line(who + ": no EMF, or its mod list has not come" +
+                                          std::string(g_mods_check && g_mods_check->server_has_content()
+                                                          ? " (content mods cannot be checked)"
+                                                          : ""));
+    }
+}
 constexpr const char* kVersion = emf::core::version_string();
 
 using SimStepFn = void (*)(void* storage, char ticked);
@@ -1305,6 +1337,60 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     static std::unique_ptr<emf::core::PlayerEvents> players;     // v28 on_player
     players = std::make_unique<emf::core::PlayerEvents>(emf::core::player_events_deps());
     g_state->players = players.get();
+    // the mod check on join (core channel emf/mods): this game's list is its applied EML content mods and its mods
+    static std::vector<std::pair<std::string, std::string>> content_mods;
+    if (auto cs = emf::core::read_content_status(); cs && (cs->kind == "built" || cs->kind == "current"))
+        for (const auto& m : emf::loader::scan_eml_mods(dir + L"\\mods").usable) content_mods.emplace_back(m.id, m.version);
+    static std::unique_ptr<emf::core::ModsCheck> mods_check;
+    mods_check = std::make_unique<emf::core::ModsCheck>(emf::core::ModsCheck::Deps{
+        [] {
+            auto list = emf::core::this_games_mods(g_state->mods.list(), content_mods);
+            list.insert(list.begin(), emf::core::ModEntry{'e', "emf", EMF_VERSION});
+            return list;
+        },
+        [] { return emf::core::api_table()->server_world() == nullptr; },  // no server world here: someone else's
+        [] { return g_state->net ? g_state->net->peer(0, emf::core::kModsChannel) : 0u; },
+        [] { return g_state->client_session.load(); },
+        [](const std::string& d) {
+            std::string why;
+            return g_state->net && g_state->net->to_server("emf", emf::core::kModsChannel, d, &why);
+        },
+        [](uint32_t player, const std::string& d) {
+            std::string why;
+            return g_state->net && g_state->net->to_player("emf", player, emf::core::kModsChannel, d, &why);
+        },
+        [](const std::string& n) {
+            if (g_state->notify) g_state->notify(n);
+        },
+        [](const std::string& s) { emf::logf("%s", s.c_str()); }});
+    g_mods_check = mods_check.get();
+    {
+        emf::core::net::ChannelDef c;
+        c.name = emf::core::kModsChannel;
+        c.version = emf::core::kModsChannelVersion;
+        c.flags = emf::core::net::kToServer | emf::core::net::kToPlayers;
+        c.max_size = emf::core::kMaxModListBytes;
+        c.per_10s = 5;
+        c.on_server = [](EmfWorld*, const emf::core::net::NetFrom& f, const std::string& d) {
+            if (!f.local && g_mods_check) g_mods_check->on_server_message(f.player, f.account, d);
+        };
+        c.on_player = [](EmfWorld*, const emf::core::net::NetFrom& f, const std::string& d) {
+            if (!f.local && g_mods_check) g_mods_check->on_player_message(d);
+        };
+        std::string why;
+        if (!net->add_channel("emf", c, &why)) emf::logf("mods check: off (%s)", why.c_str());
+        // the core's channel alone greets players only when this server has mods they must match
+        net->set_core_greets([] { return g_mods_check && g_mods_check->has_shared_mods(); });
+    }
+    // a joined game: once a second, its list goes to an EMF server that has emf/mods (once per session)
+    g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
+        static ULONGLONG last = 0;
+        if (!g_mods_check || emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() != EMF_WORLD_CLIENT) return;
+        const ULONGLONG now = GetTickCount64();
+        if (now - last < 1000) return;
+        last = now;
+        g_mods_check->client_tick();
+    }, nullptr);
     // after the chat lines: who joined, left or died (the event relay delivered this step's deaths before)
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
         if (g_state->players && emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER)
@@ -1320,6 +1406,11 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_builtin.registry = &g_state->mods;
     g_builtin.settings = g_state->settings.get();
     if (!emf::core::add_builtin_commands(g_builtin)) emf::logf("commands: a built-in command could not be added");
+    if (!g_state->commands.add("players.mods",
+                               ": each player in the world: their EMF and the mods that differ from this server's (the mod "
+                               "check on join)",
+                               cmd_players_mods, nullptr, nullptr))
+        emf::logf("commands: \"players.mods\" could not be added");
     if (g_ws && g_builtin.center && !emf::core::add_world_commands(*g_builtin.center, *g_ws->service))
         emf::logf("commands: a world settings command could not be added");
     // Mod profiles: the same files and rules as EMF.exe's Mods tab; settings go through the live store

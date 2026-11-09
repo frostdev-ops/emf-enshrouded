@@ -76,6 +76,14 @@ struct ClientEnv {
     uint32_t api = 0, build = 0;
 };
 
+// Whether a server with these channels greets new connections: a mod's channel, yes; only the core's own (emf/...),
+// when `core_needs` (the mod check: the server has mods its players must match).
+inline bool greets_for(const std::map<std::string, uint32_t>& channels, bool core_needs) {
+    for (const auto& [name, version] : channels)
+        if (name.rfind("emf/", 0) != 0) return true;
+    return core_needs && !channels.empty();
+}
+
 class NetService {
 public:
     explicit NetService(NetDeps deps) : d_(std::move(deps)) {}
@@ -109,8 +117,11 @@ public:
     bool client_on() const { return client_ != nullptr; }
     // This game's channels with their versions (what hello and welcome say).
     std::map<std::string, uint32_t> channel_versions();
+    // The core's own channels alone make the server greet only while this says yes (greets_for).
+    void set_core_greets(std::function<bool()> f) { core_greets_ = std::move(f); }
 
 private:
+    std::function<bool()> core_greets_;  // set_core_greets
     struct Channel {
         ChannelDef def;
         std::string owner;

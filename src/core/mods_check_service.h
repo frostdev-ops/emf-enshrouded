@@ -108,6 +108,14 @@ public:
         return it == seen_.end() ? std::nullopt : std::optional<Seen>(it->second);
     }
 
+    // Whether this game has mods its players must match (content or side "both"): only then does the core's channel
+    // alone make the server greet new connections.
+    bool has_shared_mods() const {
+        for (const auto& m : d_.mine ? d_.mine() : std::vector<ModEntry>{})
+            if (mod_kind_compared(m.kind)) return true;
+        return false;
+    }
+
     bool server_has_content() const {
         for (const auto& m : d_.mine ? d_.mine() : std::vector<ModEntry>{})
             if (m.kind == 'c') return true;

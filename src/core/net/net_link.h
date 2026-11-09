@@ -62,6 +62,8 @@ inline constexpr const char* kBeaconText =
 struct ServerLinkDeps {
     // the channels this server has (name -> version); none: no beacon is sent
     std::function<std::map<std::string, uint32_t>()> channels;
+    // whether new connections get a beacon (empty: when `channels` is not empty)
+    std::function<bool()> greets;
     // one marked line for the player on (handle, account); false: it could not be queued
     std::function<bool(uint32_t handle, uint64_t account, const std::string& line)> send;
     // a message's (or welcome's) lines for the player on (handle, account), all or none; when set it is used for them

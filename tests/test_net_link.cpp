@@ -712,3 +712,26 @@ TEST_CASE("net link: a game that hosts its server hides marked lines but does no
     CHECK(r.client.waiting() == 0);
     CHECK_FALSE(r.client.welcomed());
 }
+
+TEST_CASE("net link: a server whose greets says no sends no beacon; one that says yes beacons without a mod channel") {
+    Rig r;
+    auto d = r.server_deps();
+    d.greets = [] { return false; };
+    ServerLink quiet(d);
+    quiet.tick({{0x40, 1}});
+    CHECK(r.to_players.empty());
+    r.server_channels.clear();
+    auto d2 = r.server_deps();
+    d2.greets = [] { return true; };
+    ServerLink loud(d2);
+    loud.tick({{0x40, 1}});
+    CHECK(r.to_players.size() == 1);
+}
+
+TEST_CASE("net link: only the core's emf/ channels greet only when the core says so; a mod's channel always does") {
+    using emf::core::net::greets_for;
+    CHECK_FALSE(greets_for({}, true));  // no channel at all: nothing to talk about
+    CHECK_FALSE(greets_for({{"emf/mods", 1}}, false));
+    CHECK(greets_for({{"emf/mods", 1}}, true));
+    CHECK(greets_for({{"emf/mods", 1}, {"beastmaster/ui", 1}}, false));
+}

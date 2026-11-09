@@ -185,6 +185,7 @@ std::map<std::string, uint32_t> NetService::channel_versions() {
 void NetService::enable_server(ServerEnv env) {
     ServerLinkDeps l;
     l.channels = [this] { return channel_versions(); };
+    l.greets = [this] { return greets_for(channel_versions(), core_greets_ && core_greets_()); };
     l.send = std::move(env.send);
     l.send_lines = std::move(env.send_lines);
     l.room = std::move(env.room);
