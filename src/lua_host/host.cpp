@@ -636,18 +636,65 @@ int l_on_world_data(lua_State* L) {
 // world's data (a reloaded script would otherwise save its fresh defaults over it) or while no hosted world runs.
 // The time the write takes (a busy disk, a virus scanner) does not count toward the script's time limit, up to
 // kSaveCreditMs per call (a loop of saves still ends).
-int l_save_world_data(lua_State* L) {
-    Script* s = script_of(L);
-    size_t n = 0;
-    const char* text = luaL_checklstring(L, 1, &n);
-    const uint64_t before = clock_ms(*s);
-    const bool saved = s->file && s->world_delivered == s->loads && s->file->save(std::string(text, n));
+// The time a write took since `before`, given back to the running call (up to kSaveCreditMs per call).
+void credit_write(Script* s, uint64_t before) {
     const uint64_t after = clock_ms(*s);
     if (s->call_start && after > before && s->call_credit < kSaveCreditMs) {
         const uint64_t add = (std::min)(after - before, kSaveCreditMs - s->call_credit);
         s->call_start += add;
         s->call_credit += add;
     }
+}
+
+int l_save_world_data(lua_State* L) {
+    Script* s = script_of(L);
+    size_t n = 0;
+    const char* text = luaL_checklstring(L, 1, &n);
+    const uint64_t before = clock_ms(*s);
+    const bool saved = s->file && s->world_delivered == s->loads && s->file->save(std::string(text, n));
+    credit_write(s, before);
+    lua_pushboolean(L, saved);
+    return 1;
+}
+
+// An account argument: "0x" and 1-16 hex digits, not 0 (as world:account and on_player_joined give it).
+uint64_t account_arg(lua_State* L, int i) {
+    size_t n = 0;
+    const char* t = luaL_checklstring(L, i, &n);
+    bool ok = n > 2 && n <= 18 && t[0] == '0' && (t[1] == 'x' || t[1] == 'X');
+    uint64_t v = 0;
+    for (size_t k = 2; ok && k < n; ++k) {
+        const char c = t[k];
+        const int d = c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+        ok = d >= 0;
+        v = v * 16 + static_cast<uint64_t>(d < 0 ? 0 : d);
+    }
+    if (!ok || v == 0) luaL_argerror(L, i, "an account: \"0x\" and up to 16 hex digits, as world:account gives it");
+    return v;
+}
+
+// emf.player_data(account) (lua 1.20): the player's text in the world being played ("" when none); nil before the
+// world's data came, or where no hosted world runs.
+int l_player_data(lua_State* L) {
+    Script* s = script_of(L);
+    const uint64_t account = account_arg(L, 1);
+    const auto text = s->file ? s->file->player(account) : std::nullopt;
+    if (text) lua_pushlstring(L, text->data(), text->size());
+    else lua_pushnil(L);
+    return 1;
+}
+
+// emf.save_player_data(account, text) (lua 1.20): as save_world_data, for one player ("" removes them); false also over
+// 16 KiB per player or 2 MiB for the world's file.
+int l_save_player_data(lua_State* L) {
+    Script* s = script_of(L);
+    const uint64_t account = account_arg(L, 1);
+    size_t n = 0;
+    const char* text = luaL_checklstring(L, 2, &n);
+    const uint64_t before = clock_ms(*s);
+    const bool saved =
+        s->file && s->world_delivered == s->loads && s->file->save_player(account, std::string(text, n));
+    credit_write(s, before);
     lua_pushboolean(L, saved);
     return 1;
 }
@@ -890,6 +937,8 @@ bool Host::Impl::load(Script& s) {
                                    {"session_token", l_session_token},
                                    {"on_world_data", l_on_world_data},
                                    {"save_world_data", l_save_world_data},
+                                   {"player_data", l_player_data},
+                                   {"save_player_data", l_save_player_data},
                                    {"setting", l_setting},
                                    {"set_setting", l_set_setting},
                                    {"on_setting_changed", l_on_setting_changed},

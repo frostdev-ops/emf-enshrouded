@@ -410,6 +410,76 @@ TEST_CASE("lua host: world data: a reloaded script gets the saved text again; an
 }
 
 namespace {
+const char* kPlayers =
+    "emf.on_world_data(function(w, text) end)\n"
+    "emf.command('pget', '<account>', function(w, args)\n"
+    "  local t = emf.player_data(args[1])\n"
+    "  emf.reply(t == nil and 'nil' or ('[' .. t .. ']'))\n"
+    "end)\n"
+    "emf.command('pset', '<account> <text>', function(w, args)\n"
+    "  emf.reply(tostring(emf.save_player_data(args[1], args[2] or '')))\n"
+    "end)\n"
+    "emf.command('pbad', '<account>', function(w, args)\n"
+    "  local ok = pcall(emf.save_player_data, args[1], 'x')\n"
+    "  local ok2 = pcall(emf.player_data, args[1])\n"
+    "  emf.reply((ok or ok2) and 'taken' or 'error')\n"
+    "end)\n";
+}  // namespace
+
+TEST_CASE("lua host: player data: nil before the world's data, \"\" for a player with none, the saved text after") {
+    Rig r(L"playerdata");
+    add_script(r.dir, "keeper", kPlayers);
+    const std::wstring file = r.dir + L"\\..\\config\\keeper\\0001.players.txt";
+    DeleteFileW(file.c_str());
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("keeper.pget 0x00000000000000aa");
+    REQUIRE(!r.fake.replies.empty());
+    CHECK(r.fake.replies.back() == "nil");
+    r.run_command("keeper.pset 0x00000000000000aa early");
+    CHECK(r.fake.replies.back() == "false");
+    fire_load(1);
+    host.tick(kServer);
+    r.run_command("keeper.pget 0xaa");
+    CHECK(r.fake.replies.back() == "[]");
+    r.run_command("keeper.pset 0xAA kills=3");
+    CHECK(r.fake.replies.back() == "true");
+    r.run_command("keeper.pget 0x00000000000000aa");
+    CHECK(r.fake.replies.back() == "[kills=3]");
+    CHECK(read_file(file) == "emf players 1\n0x00000000000000aa 7\nkills=3\n");
+    for (const char* bad : {"aa", "0x", "0xzz", "0x00000000000000aaa", "0x0"}) {
+        CAPTURE(bad);
+        r.run_command(std::string("keeper.pbad ") + bad);
+        CHECK(r.fake.replies.back() == "error");  // not an account
+    }
+    DeleteFileW(file.c_str());
+}
+
+TEST_CASE("lua host: player data: a reloaded script cannot save before its world data came again") {
+    Rig r(L"playerdata2");
+    add_script(r.dir, "keeper", kPlayers);
+    const std::wstring file = r.dir + L"\\..\\config\\keeper\\0001.players.txt";
+    DeleteFileW(file.c_str());
+    Host host(&r.api, r.dir);
+    host.load_all();
+    fire_load(1);
+    host.tick(kServer);
+    r.run_command("keeper.pset 0xaa kills=3");
+    REQUIRE(r.fake.replies.back() == "true");
+    Sleep(20);
+    write(r.dir + L"\\keeper\\main.lua", std::string(kPlayers) + "-- changed\n");
+    host.check_reload_now();
+    r.run_command("keeper.pset 0xaa fresh-defaults");
+    CHECK(r.fake.replies.back() == "false");  // its fresh state must not go over the saved one
+    host.tick(kServer);
+    r.run_command("keeper.pget 0xaa");
+    CHECK(r.fake.replies.back() == "[kills=3]");
+    r.run_command("keeper.pset 0xaa kills=4");
+    CHECK(r.fake.replies.back() == "true");
+    DeleteFileW(file.c_str());
+}
+
+namespace {
 uint64_t g_file_ms = 0;
 uint64_t file_ms() { return g_file_ms; }
 }  // namespace
