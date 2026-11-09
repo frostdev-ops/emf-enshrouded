@@ -1330,3 +1330,26 @@ TEST_CASE("lua 1.20: an error in a player function is logged and the other scrip
     CHECK(logged("boom"));
     CHECK(logged("pb heard 3"));
 }
+
+TEST_CASE("lua 1.20: a script reloaded while players are in the world is told about them at the next server step") {
+    Rig r(L"on_player_reload");
+    r.api.on_player = f_on_player;
+    add_script(r.dir, "pr", "emf.on_player_joined(function(w, p) emf.log('pr joined ' .. p.player .. ' ' .. p.name) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    fire_player(kServer, EMF_PLAYER_JOINED, 1, 0xA, true, "Al");
+    fire_player(kServer, EMF_PLAYER_JOINED, 2, 0xB, false, "Bea");
+    fire_player(kServer, EMF_PLAYER_LEFT, 2, 0xB, false, "Bea");
+    CHECK(logged("pr joined 1 Al"));
+    Sleep(20);
+    write(r.dir + L"\\pr\\main.lua",
+          "emf.on_player_joined(function(w, p) emf.log('again ' .. p.player .. ' ' .. p.name .. ' ' .. tostring(p.host)) end)\n");
+    host.check_reload_now();
+    host.tick(kServer);
+    CHECK(logged("again 1 Al true"));
+    CHECK_FALSE(logged("again 2"));  // left before the reload
+    CHECK(r.fake.player_cbs.size() == 1);
+    r.fake.log.clear();
+    host.tick(kServer);
+    CHECK_FALSE(logged("again 1"));  // told once
+}

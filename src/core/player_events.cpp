@@ -49,18 +49,14 @@ bool PlayerEvents::watch(EmfPlayerCallback cb, void* user) {
     return true;
 }
 
-void PlayerEvents::world_loaded() {
-    arm_pending_ = true;
-    arm_at_ = (d_.now_ms ? d_.now_ms() : 0) + kPlayerArmDelayMs;
-}
+void PlayerEvents::world_loaded() { arm_pending_ = true; }
 
 void PlayerEvents::hit(uint32_t target, uint32_t source) {
-    if (watched_) roster_.hit(target, source, d_.now_ms ? d_.now_ms() : 0);
+    if (watched_ && target >= 1 && target <= 1023) roster_.hit(target, source, d_.now_ms ? d_.now_ms() : 0);
 }
 
 void PlayerEvents::died(uint32_t entity) {
-    if (!watched_) return;
-    if (auto e = roster_.died(entity, d_.now_ms ? d_.now_ms() : 0)) died_.push_back(std::move(*e));
+    if (watched_ && entity >= 1 && entity <= 1023) deaths_.push_back(entity);
 }
 
 void PlayerEvents::server_step(EmfWorld* w, uint32_t session) {
@@ -70,24 +66,67 @@ void PlayerEvents::server_step(EmfWorld* w, uint32_t session) {
         session_ = session;
         roster_.reset(UINT64_MAX);
         armed_ = false;
-        died_.clear();
+        deaths_.clear();
     }
-    if (arm_pending_) {
+    if (arm_pending_) {  // 1 s from this first step after the load (the mods' world data first)
         arm_pending_ = false;
+        arm_at_ = now + kPlayerArmDelayMs;
         roster_.reset(arm_at_);
         armed_ = true;
         read_once_ = false;
-        died_.clear();
+        deaths_.clear();
     }
+    introduce(w);
     std::vector<RosterEvent> events;
+    for (uint32_t entity : deaths_)  // after the relay handed this step's hits too
+        if (auto e = roster_.died(entity, now)) events.push_back(std::move(*e));
+    deaths_.clear();
     if (armed_ && now >= arm_at_ && (!read_once_ || now - last_read_ >= kPlayerReadMs || now < last_read_)) {
         last_read_ = now;
         read_once_ = true;
-        events = roster_.update(d_.read ? d_.read(w) : std::vector<RosterSeen>{}, now);
+        auto changes = roster_.update(d_.read ? d_.read(w) : std::vector<RosterSeen>{}, now);
+        events.insert(events.end(), changes.begin(), changes.end());
     }
-    for (auto& e : died_) events.push_back(std::move(e));
-    died_.clear();
     if (!events.empty()) deliver(w, events);
+}
+
+void PlayerEvents::introduce(EmfWorld* w) {
+    std::vector<Watcher> late;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        for (auto& x : watchers_)
+            if (x.intro) {
+                x.intro = false;
+                if (x.on) late.push_back(x);
+            }
+    }
+    if (late.empty() || !armed_ || !read_once_) return;  // nobody announced yet: the arming's joins reach them
+    const auto present = roster_.present();
+    for (const auto& x : late)
+        for (const auto& ev : present)
+            if (!call(w, x, ev)) break;
+}
+
+bool PlayerEvents::call(EmfWorld* w, const Watcher& x, const RosterEvent& ev) {
+    EmfPlayerEvent e{};
+    e.size = sizeof e;
+    e.kind = ev.kind;
+    e.account = ev.account;
+    e.player = ev.entity;
+    e.killer = ev.killer;
+    e.host = ev.host ? 1 : 0;
+    std::snprintf(e.name, sizeof e.name, "%s", ev.name.c_str());
+    if (d_.call && d_.call(x.cb, w, &e, x.user)) return true;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        for (auto& y : watchers_)
+            if (y.cb == x.cb && y.user == x.user) y.on = false;
+    }
+    if (d_.log)
+        d_.log("an on_player callback in " +
+               (d_.module_of ? d_.module_of(reinterpret_cast<const void*>(x.cb)) : std::string("a mod")) +
+               " faulted and was switched off");
+    return false;
 }
 
 void PlayerEvents::deliver(EmfWorld* w, const std::vector<RosterEvent>& events) {
@@ -96,30 +135,9 @@ void PlayerEvents::deliver(EmfWorld* w, const std::vector<RosterEvent>& events) 
         std::lock_guard<std::mutex> l(m_);
         list = watchers_;
     }
-    for (const auto& ev : events) {
-        EmfPlayerEvent e{};
-        e.size = sizeof e;
-        e.kind = ev.kind;
-        e.account = ev.account;
-        e.player = ev.entity;
-        e.killer = ev.killer;
-        e.host = ev.host ? 1 : 0;
-        std::snprintf(e.name, sizeof e.name, "%s", ev.name.c_str());
-        for (size_t i = 0; i < list.size(); ++i) {
-            if (!list[i].on) continue;
-            if (d_.call && d_.call(list[i].cb, w, &e, list[i].user)) continue;
-            list[i].on = false;
-            {
-                std::lock_guard<std::mutex> l(m_);
-                for (auto& x : watchers_)
-                    if (x.cb == list[i].cb && x.user == list[i].user) x.on = false;
-            }
-            if (d_.log)
-                d_.log("an on_player callback in " + (d_.module_of ? d_.module_of(reinterpret_cast<const void*>(list[i].cb))
-                                                                   : std::string("a mod")) +
-                       " faulted and was switched off");
-        }
-    }
+    for (const auto& ev : events)
+        for (auto& x : list)
+            if (x.on && !call(w, x, ev)) x.on = false;
 }
 
 }  // namespace emf::core

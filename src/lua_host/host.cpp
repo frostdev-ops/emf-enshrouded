@@ -962,6 +962,7 @@ void Host::Impl::unload(Script& s) {
     s.keys.clear();
     s.chat_cbs.clear();
     for (auto& v : s.player_cbs) v.clear();
+    s.player_intro.clear();
     s.ws_cbs.clear();
     s.bus_subs.clear();
     for (auto& n : s.bus_kind_subs) n = 0;
@@ -1148,6 +1149,10 @@ void Host::tick_body(EmfWorld* world) {
                     if (!call_lua(*s, 2)) continue;
                 }
             }
+        }
+        if (server && !s->player_intro.empty()) {  // after the world's data: the players already there (lua 1.20)
+            deliver_player_intro(h, *s, world);
+            if (!s->L || s->paused) continue;
         }
         bool bus_stopped = false;
         for (const auto& msg : bus) {

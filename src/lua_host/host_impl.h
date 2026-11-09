@@ -73,6 +73,7 @@ struct Script {
     std::vector<KeyWatch> keys;                        // emf.on_key
     std::vector<int> chat_cbs;                         // emf.on_chat (lua 1.6)
     std::vector<int> player_cbs[3];                    // emf.on_player_joined, _left, _died (lua 1.20)
+    std::vector<int> player_intro;                     // joined functions registered after players came: told next step
     std::vector<int> ws_cbs;                           // emf.on_world_setting_changed (lua 1.10)
     std::map<std::string, std::vector<BusSubscription>> bus_subs;  // cross-mod message callbacks
     uint64_t next_bus_subscription = 0;             // unique callback tokens, even after unsubscribe
@@ -171,6 +172,14 @@ struct Host::Impl {
     std::atomic<uint64_t> server_seen{0};                // GetTickCount64 of the last server world step
     std::atomic<int> chat_hooked{0};                     // the core's on_chat for emf.on_chat: 0 not asked, 1 on, -1 refused
     std::atomic<int> player_hooked{0};                   // the core's on_player (lua 1.20): 0 not asked, 1 on, -1 refused
+    struct PresentPlayer {
+        uint32_t player = 0;
+        std::string name;
+        bool host = false;
+    };
+    std::mutex present_m;                                // present, present_session
+    std::map<uint64_t, PresentPlayer> present;           // the players the core said are in (by account)
+    uint32_t present_session = 0;                        // the server session they are of
     std::atomic<int> ws_hooked{0};                       // the core's on_world_setting_changed: 0 not asked, 1 on, -1 refused
     std::atomic<int> moves{0};                           // emf.move requests in flight (each holds one place in the item queue)
     std::function<uint64_t()> now_ms;                    // the clock of the chat limit and time limit (tests replace it)
@@ -193,6 +202,9 @@ struct Host::Impl {
 Script* script_of(lua_State* L);
 // Calls the function under the arguments on the stack (protected, 250 ms limit). False: the script is paused.
 bool call_lua(Script& s, int nargs);
+// lua 1.20: the players already in the world, as joined, to the functions in s.player_intro (server world, the
+// script's lock held).
+void deliver_player_intro(Host::Impl& h, Script& s, EmfWorld* w);
 // The world userdata passed to callbacks (valid until the callback returns).
 void push_world(lua_State* L, Script& s, EmfWorld* w);
 // Adds the world/component/item/event/wheel functions to the emf table on top of the stack.

@@ -26,6 +26,10 @@ void record(EmfWorld*, const EmfPlayerEvent* e, void*) {
     g_got.push_back({e->kind, e->player, e->killer, e->account, e->host != 0, e->name});
 }
 void faulty(EmfWorld*, const EmfPlayerEvent*, void*) {}
+std::vector<Got> g_got2;
+void record2(EmfWorld*, const EmfPlayerEvent* e, void*) {
+    g_got2.push_back({e->kind, e->player, e->killer, e->account, e->host != 0, e->name});
+}
 
 struct Svc {
     std::vector<RosterSeen> seen;
@@ -47,6 +51,12 @@ struct Svc {
         g_got.clear();
     }
     void step(uint32_t session = 1) { p.server_step(kServer, session); }
+    // A world's save loaded and the next step came: everyone joins 1 s later.
+    void load(uint32_t session = 1) {
+        p.world_loaded();
+        step(session);
+        now += 1000;
+    }
 };
 std::string kinds() {
     std::string s;
@@ -66,10 +76,12 @@ TEST_CASE("player events: a mod gets joined for everyone 1 s after the world loa
     s.step();
     CHECK(g_got.empty());  // no world loaded yet
     s.p.world_loaded();
-    s.now = 999;
+    s.now = 5000;
+    s.step();  // the first step after the load (however late it comes): 1 s from here
+    s.now = 5999;
     s.step();
     CHECK(g_got.empty());  // the mods' world data first
-    s.now = 1000;
+    s.now = 6000;
     s.step();
     CHECK(kinds() == "+1 +2");
     REQUIRE(g_got.size() == 2);
@@ -78,7 +90,7 @@ TEST_CASE("player events: a mod gets joined for everyone 1 s after the world loa
     CHECK(g_got[1].name == "Bea");
     g_got.clear();
     s.seen = {{1, 0xA, true, true, "Host"}};
-    s.now = 2000;
+    s.now = 7000;
     s.step();
     CHECK(kinds() == "-2");
 }
@@ -87,8 +99,7 @@ TEST_CASE("player events: a new session waits for its own world's load") {
     Svc s;
     REQUIRE(s.p.watch(record, nullptr));
     s.seen = {{1, 0xA, true, true, "Host"}};
-    s.p.world_loaded();
-    s.now = 1000;
+    s.load(1);
     s.step(1);
     REQUIRE(kinds() == "+1");
     g_got.clear();
@@ -97,8 +108,7 @@ TEST_CASE("player events: a new session waits for its own world's load") {
     s.now = 9000;
     s.step(2);
     CHECK(g_got.empty());
-    s.p.world_loaded();
-    s.now = 10000;
+    s.load(2);
     s.step(2);
     CHECK(kinds() == "+1");
 }
@@ -108,12 +118,11 @@ TEST_CASE("player events: a callback that faults is switched off and named once;
     REQUIRE(s.p.watch(faulty, nullptr));
     REQUIRE(s.p.watch(record, nullptr));
     s.seen = {{1, 0xA, true, true, ""}};
-    s.p.world_loaded();
-    s.now = 1000;
+    s.load();
     s.step();
     CHECK(kinds() == "+1");
     s.seen = {};
-    s.now = 2000;
+    s.now += 1000;
     s.step();
     CHECK(kinds() == "+1 -1");
     size_t told = 0;
@@ -125,11 +134,10 @@ TEST_CASE("player events: a joined player's death comes with the next step, with
     Svc s;
     REQUIRE(s.p.watch(record, nullptr));
     s.seen = {{1, 0xA, true, true, ""}, {2, 0xB, true, false, ""}};
-    s.p.world_loaded();
-    s.now = 1000;
+    s.load();
     s.step();
     g_got.clear();
-    s.now = 3000;
+    s.now += 2000;
     s.p.hit(2, 812);
     s.p.died(2);
     s.p.died(900);  // not a player: nothing
@@ -196,4 +204,49 @@ TEST_CASE("player events: the core's API table is v28 with on_player at its end"
     CHECK(api->size == emf::core::kApiV28Size);
     REQUIRE(api->on_player != nullptr);
     CHECK_FALSE(api->on_player(nullptr, nullptr));
+}
+
+TEST_CASE("player events: the killing hit that comes after the death in the same step names the killer") {
+    Svc s;
+    REQUIRE(s.p.watch(record, nullptr));
+    s.seen = {{1, 0xA, true, true, ""}, {2, 0xB, true, false, ""}};
+    s.load();
+    s.step();
+    g_got.clear();
+    s.now += 500;
+    s.p.hit(2, 700);  // an earlier hit
+    s.p.died(2);      // the relay hands the step's deaths before its hits
+    s.p.hit(2, 812);  // the killing hit
+    s.step();
+    REQUIRE(g_got.size() == 1);
+    CHECK(g_got[0].killer == 812);
+    g_got.clear();
+    s.now += 3000;
+    s.p.died(2);  // a fall soon after: no hit since
+    s.step();
+    REQUIRE(g_got.size() == 1);
+    CHECK(g_got[0].killer == 0);
+}
+
+TEST_CASE("player events: a mod that starts watching after the players joined is told about them, to it alone") {
+    Svc s;
+    REQUIRE(s.p.watch(record, nullptr));
+    s.seen = {{1, 0xA, true, true, "Host"}, {2, 0xB, true, false, "Bea"}};
+    s.load();
+    s.step();
+    REQUIRE(kinds() == "+1 +2");
+    g_got.clear();
+    g_got2.clear();
+    REQUIRE(s.p.watch(record2, nullptr));
+    s.now += 100;
+    s.step();
+    CHECK(g_got.empty());
+    REQUIRE(g_got2.size() == 2);
+    CHECK(g_got2[0].kind == EMF_PLAYER_JOINED);
+    CHECK(g_got2[0].host);
+    CHECK(g_got2[1].player == 2);
+    CHECK(g_got2[1].name == "Bea");
+    s.now += 1000;
+    s.step();
+    CHECK(g_got2.size() == 2u);  // told once
 }

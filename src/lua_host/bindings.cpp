@@ -1264,15 +1264,44 @@ bool has_v28(const EmfApi* a) {
     return a && a->version >= 28 && a->size >= offsetof(EmfApi, on_player) + sizeof(a->on_player) && a->on_player;
 }
 
+// The info table of a player event: {player, account, name, host [, killer]}.
+void push_player_info(lua_State* L, uint32_t player, uint64_t account, const char* name, bool host, bool died,
+                      uint32_t killer) {
+    char hex[24];
+    std::snprintf(hex, sizeof hex, "0x%016llx", static_cast<unsigned long long>(account));
+    lua_createtable(L, 0, 5);
+    lua_pushinteger(L, player);
+    lua_setfield(L, -2, "player");
+    lua_pushstring(L, hex);
+    lua_setfield(L, -2, "account");
+    lua_pushstring(L, name);
+    lua_setfield(L, -2, "name");
+    lua_pushboolean(L, host);
+    lua_setfield(L, -2, "host");
+    if (died) {
+        lua_pushinteger(L, killer);
+        lua_setfield(L, -2, "killer");
+    }
+}
+
+
 void player_cb_body(EmfWorld* w, const EmfPlayerEvent* e, void* user) {
     auto* h = static_cast<Host::Impl*>(user);
     if (!e || e->kind < EMF_PLAYER_JOINED || e->kind > EMF_PLAYER_DIED) return;
     const size_t k = e->kind - EMF_PLAYER_JOINED;
-    char hex[24];
-    std::snprintf(hex, sizeof hex, "0x%016llx", static_cast<unsigned long long>(e->account));
     char name[sizeof e->name + 1];
     std::memcpy(name, e->name, sizeof e->name);
     name[sizeof e->name] = 0;
+    {  // who is in: told to a function registered later (a reload)
+        std::lock_guard<std::mutex> l(h->present_m);
+        const uint32_t session = session_of(h->api);
+        if (session != h->present_session) {
+            h->present.clear();
+            h->present_session = session;
+        }
+        if (e->kind == EMF_PLAYER_JOINED) h->present[e->account] = {e->player, name, e->host != 0};
+        if (e->kind == EMF_PLAYER_LEFT) h->present.erase(e->account);
+    }
     for (auto& sp : h->scripts) {
         Script& s = *sp;
         std::lock_guard<std::recursive_mutex> l(s.m);
@@ -1281,19 +1310,7 @@ void player_cb_body(EmfWorld* w, const EmfPlayerEvent* e, void* user) {
         for (int ref : refs) {
             lua_rawgeti(s.L, LUA_REGISTRYINDEX, ref);
             push_world(s.L, s, w);
-            lua_createtable(s.L, 0, 5);
-            lua_pushinteger(s.L, e->player);
-            lua_setfield(s.L, -2, "player");
-            lua_pushstring(s.L, hex);
-            lua_setfield(s.L, -2, "account");
-            lua_pushstring(s.L, name);
-            lua_setfield(s.L, -2, "name");
-            lua_pushboolean(s.L, e->host != 0);
-            lua_setfield(s.L, -2, "host");
-            if (e->kind == EMF_PLAYER_DIED) {
-                lua_pushinteger(s.L, e->killer);
-                lua_setfield(s.L, -2, "killer");
-            }
+            push_player_info(s.L, e->player, e->account, name, e->host != 0, e->kind == EMF_PLAYER_DIED, e->killer);
             if (!call_lua(s, 2)) break;
         }
         ++s.generation;
@@ -1315,6 +1332,7 @@ int on_player_kind(lua_State* L, size_t k) {
     luaL_checktype(L, 1, LUA_TFUNCTION);
     Host::Impl* h = s->host;
     int state = h->player_hooked.load();
+    const bool was_on = state == 1;  // the core already told the host who came: a new joined function hears it from it
     if (state == 0) {
         const bool ok = has_v28(h->api) && h->api->on_player(player_cb, h);
         int expected = 0;
@@ -1326,13 +1344,37 @@ int on_player_kind(lua_State* L, size_t k) {
         return 1;
     }
     lua_pushvalue(L, 1);
-    s->player_cbs[k].push_back(luaL_ref(L, LUA_REGISTRYINDEX));
+    const int ref = luaL_ref(L, LUA_REGISTRYINDEX);
+    s->player_cbs[k].push_back(ref);
+    if (k == 0 && was_on) s->player_intro.push_back(ref);
     lua_pushboolean(L, true);
     return 1;
 }
 int l_on_player_joined(lua_State* L) { return on_player_kind(L, 0); }
 int l_on_player_left(lua_State* L) { return on_player_kind(L, 1); }
 int l_on_player_died(lua_State* L) { return on_player_kind(L, 2); }
+
+void player_intro_body(Host::Impl& h, Script& s, EmfWorld* w) {
+    const std::vector<int> refs = std::move(s.player_intro);
+    s.player_intro.clear();
+    std::vector<std::pair<uint64_t, Host::Impl::PresentPlayer>> list;
+    {
+        std::lock_guard<std::mutex> l(h.present_m);
+        if (h.present_session != session_of(h.api)) return;  // another world: its joins come by themselves
+        list.assign(h.present.begin(), h.present.end());
+    }
+    std::sort(list.begin(), list.end(), [](const auto& a, const auto& b) {
+        return a.second.host != b.second.host ? a.second.host : a.second.player < b.second.player;
+    });
+    for (int ref : refs)
+        for (const auto& [account, p] : list) {
+            if (!s.L || s.paused) return;
+            lua_rawgeti(s.L, LUA_REGISTRYINDEX, ref);
+            push_world(s.L, s, w);
+            push_player_info(s.L, p.player, account, p.name.c_str(), p.host, false, 0);
+            if (!call_lua(s, 2)) return;
+        }
+}
 
 // emf.request_save(): asks the game to save the world now; true when asked (or queued).
 int l_request_save(lua_State* L) {
@@ -3082,5 +3124,7 @@ void finish_load(Host::Impl& h) {
             h.api->log("lua", "the program that sends the scripts' events could not be added: emf.emit will not work");
     }
 }
+
+void deliver_player_intro(Host::Impl& h, Script& s, EmfWorld* w) { player_intro_body(h, s, w); }
 
 }  // namespace emf::lua

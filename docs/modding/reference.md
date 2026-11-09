@@ -692,12 +692,14 @@ chat name, "" where players' chat is off).
 
 - **`EMF_PLAYER_JOINED`**: the player is in the world (PlayerState and a position), their account is known and their
   game is ready to play (`PlayerInput.fromClientIsReadyForGameplay`; the host's own player at once). Once per
-  arrival. Nothing comes before a world's save has loaded: 1 s after the load event (the mods' world data first)
-  everyone there joins, the host first, then by entity id; a new world starts over without "left" events.
+  arrival. Nothing comes before a world's save has loaded: 1 s after the first step that follows the load event (the
+  mods' world data first) everyone there joins, the host first, then by entity id; a new world starts over without
+  "left" events. A mod that starts watching later (or a Lua script reloaded) is told about the players already there,
+  as joined, at its first step.
 - **`EMF_PLAYER_LEFT`**: that account's entity is gone. A player back as another entity: left, then joined. None when
   the world itself ends.
 - **`EMF_PLAYER_DIED`**: a joined player died (the game's `EntityDiedEvent`); `killer` is the root source of the last
-  hit on them within 10 s (`HitEvent`; not themselves), else 0. The core asks the event relay for both events at the
+  hit on them within 10 s (`HitEvent`, the step's killing hit included; not themselves), else 0. The core asks the event relay for both events at the
   first `on_player`, which therefore has to come before the first world starts (in `emf_mod_load`, or a Lua script's
   first run); a later first call gets joined and left only (logged).
 - The player list is read at most 4 times a second and only while a mod watches.

@@ -82,6 +82,16 @@ public:
         return out;
     }
 
+    // The players joined now, as joined events (the host first, then by entity id): for a mod that starts watching later.
+    std::vector<RosterEvent> present() const {
+        std::vector<RosterEvent> out;
+        for (const auto& [account, k] : known_) out.push_back({EMF_PLAYER_JOINED, k.entity, account, k.host, k.name, 0});
+        std::sort(out.begin(), out.end(), [](const RosterEvent& a, const RosterEvent& b) {
+            return a.host != b.host ? a.host : a.entity < b.entity;
+        });
+        return out;
+    }
+
     void hit(uint32_t target, uint32_t source, uint64_t now_ms) {
         if (source == 0 || source == target) {
             hits_.erase(target);  // its own (a fall) or no source: the last hitter no longer counts
