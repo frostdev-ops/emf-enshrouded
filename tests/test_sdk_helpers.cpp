@@ -446,13 +446,85 @@ TEST_CASE("storage: player saves are refused over 16 KiB or 2 MiB, for account 0
     spill(players, "emf players 1\n0xnothex 3\nabc\n");
     g_session = 2;
     g_load_cb(3, g_load_user);
-    REQUIRE(file.poll([](const std::string&) {}));
-    CHECK(file.player(0xAA)->empty());
     g_logged.clear();
+    REQUIRE(file.poll([](const std::string&) {}));
+    CHECK(g_logged.size() == 1);                 // said when it is read
+    CHECK_FALSE(file.player(0xAA).has_value());  // nothing, not "": a mod must not take everyone for new
     CHECK_FALSE(file.save_player(0xAA, "x"));
     CHECK_FALSE(file.save_player(0xAA, "y"));
     CHECK(g_logged.size() == 1);
     CHECK(slurp(players) == "emf players 1\n0xnothex 3\nabc\n");
+    DeleteFileW(players.c_str());
+    RemoveDirectoryW(dir.c_str());
+}
+
+TEST_CASE("storage: a players file that is not EMF's format gives nothing and is never overwritten") {
+    reset();
+    static EmfApi api = fake_api();
+    REQUIRE(emf::init(&api));
+    const std::wstring dir = temp_dir(L"emf_players_bad");
+    const std::wstring players = dir + L"\\0003.players.txt";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    const std::string head = "emf players 1\n", aa = "0x00000000000000aa";
+    const std::vector<std::string> bad = {
+        head + aa + " 3\nab",                                     // the last entry cut short
+        head + aa + " 9\nabc\n",                                  // a length past the end
+        head + aa + " 3\nabc",                                    // no newline after the text
+        "emf players 1\r\n" + aa + " 3\r\nabc\r\n",                // CRLF (a hand edit in Notepad)
+        head + aa + " 16385\n" + std::string(16385, 'x') + "\n",  // over 16 KiB
+        head + aa + " 1\na\n0x00000000000000AA 1\nb\n",            // the same account twice
+        head + aa + "  3\nabc\n",                                 // two spaces
+        "emf players 2\n",                                        // a newer format
+    };
+    emf::WorldFile file("mymod");
+    file.set_dir(dir);
+    REQUIRE(file.attach());
+    uint32_t session = 1;
+    for (const auto& text : bad) {
+        CAPTURE(text.substr(0, 40));
+        spill(players, text);
+        g_session = ++session;
+        g_load_cb(3, g_load_user);
+        REQUIRE(file.poll([](const std::string&) {}));
+        CHECK_FALSE(file.player(0xAA).has_value());
+        CHECK_FALSE(file.save_player(0xAA, "new"));
+        CHECK(slurp(players) == text);
+    }
+    spill(players, head + aa + " 3\nabc\n");  // fixed: the next load reads it
+    g_session = ++session;
+    g_load_cb(3, g_load_user);
+    REQUIRE(file.poll([](const std::string&) {}));
+    CHECK(*file.player(0xAA) == "abc");
+    DeleteFileW(players.c_str());
+    RemoveDirectoryW(dir.c_str());
+}
+
+TEST_CASE("storage: a players file another program holds open is read again later, never saved over meanwhile") {
+    reset();
+    static EmfApi api = fake_api();
+    REQUIRE(emf::init(&api));
+    const std::wstring dir = temp_dir(L"emf_players_locked");
+    const std::wstring players = dir + L"\\0003.players.txt";
+    CreateDirectoryW(dir.c_str(), nullptr);
+    const std::string original = "emf players 1\n0x00000000000000aa 3\nabc\n";
+    spill(players, original);
+    emf::WorldFile file("mymod");
+    file.set_dir(dir);
+    REQUIRE(file.attach());
+    HANDLE h = CreateFileW(players.c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, 0, nullptr);  // no sharing
+    REQUIRE(h != INVALID_HANDLE_VALUE);
+    g_load_cb(3, g_load_user);
+    g_logged.clear();
+    REQUIRE(file.poll([](const std::string&) {}));
+    CHECK(g_logged.size() == 1);
+    CHECK_FALSE(file.player(0xAA).has_value());
+    CloseHandle(h);
+    CHECK_FALSE(file.save_player(0xBB, "b"));  // not read yet: a save now would drop 0xAA's text
+    CHECK(slurp(players) == original);
+    CHECK_FALSE(file.poll([](const std::string&) {}));  // the next step reads it again (nothing new for the mod)
+    CHECK(*file.player(0xAA) == "abc");
+    REQUIRE(file.save_player(0xBB, "b"));
+    CHECK(slurp(players) == original + "0x00000000000000bb 1\nb\n");
     DeleteFileW(players.c_str());
     RemoveDirectoryW(dir.c_str());
 }

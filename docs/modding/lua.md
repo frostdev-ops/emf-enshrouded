@@ -405,6 +405,7 @@ emf.save_world_data("kills=" .. kills)
 in `emf.on_player_joined`):
 
 ```lua
+local visits = {}
 emf.on_player_joined(function(world, p)
   local text = emf.player_data(p.account)        -- "" the first time
   visits[p.account] = (tonumber(text) or 0) + 1
@@ -413,10 +414,13 @@ end)
 ```
 
 - `emf.player_data(account)` gives the player's text, "" when none, and nil before the world's data came (the same
-  moment `on_world_data` runs) or where no world of yours runs. `emf.save_player_data(account, text)` saves it
+  moment `on_world_data` runs), where no world of yours runs, and while the world's players file cannot be read (not
+  EMF's format: the log says so; another program had it open: it is read again). `emf.save_player_data(account, text)` saves it
   (`""` removes the player) under the same rules as `save_world_data`; it returns false over 16 KiB for one player or
   2 MiB for the world's file.
-- An account is `"0x"` and up to 16 hex digits, as `world:account` gives it; anything else is an error.
+- An account is `"0x"` and up to 16 hex digits, as `world:account` gives it; anything else is an error. The all-zero
+  account (the console's `emf.sender()`, the host's own `emf.net` messages) gives nil and false: use
+  `world:account(emf.local_player())` for the host.
 - Kept beside the world's data in `emf\config\<your mod id>\<world slot>.players.txt` (C++: `WorldFile::player` and
   `save_player`). Each save writes the whole file, so save when a player's text changed, not every step.
 

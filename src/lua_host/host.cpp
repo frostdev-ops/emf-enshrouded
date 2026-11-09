@@ -632,10 +632,6 @@ int l_on_world_data(lua_State* L) {
     return 0;
 }
 
-// emf.save_world_data(text): true when written (or unchanged); false before this load of the script got the running
-// world's data (a reloaded script would otherwise save its fresh defaults over it) or while no hosted world runs.
-// The time the write takes (a busy disk, a virus scanner) does not count toward the script's time limit, up to
-// kSaveCreditMs per call (a loop of saves still ends).
 // The time a write took since `before`, given back to the running call (up to kSaveCreditMs per call).
 void credit_write(Script* s, uint64_t before) {
     const uint64_t after = clock_ms(*s);
@@ -646,6 +642,10 @@ void credit_write(Script* s, uint64_t before) {
     }
 }
 
+// emf.save_world_data(text): true when written (or unchanged); false before this load of the script got the running
+// world's data (a reloaded script would otherwise save its fresh defaults over it) or while no hosted world runs.
+// The time the write takes (a busy disk, a virus scanner) does not count toward the script's time limit, up to
+// kSaveCreditMs per call (a loop of saves still ends).
 int l_save_world_data(lua_State* L) {
     Script* s = script_of(L);
     size_t n = 0;
@@ -657,7 +657,8 @@ int l_save_world_data(lua_State* L) {
     return 1;
 }
 
-// An account argument: "0x" and 1-16 hex digits, not 0 (as world:account and on_player_joined give it).
+// An account argument: "0x" and 1-16 hex digits (as world:account and on_player_joined give it). The all-zero account
+// (the console's, the host's own emf.net messages') is taken: no player has it, so it reads nil and saves false.
 uint64_t account_arg(lua_State* L, int i) {
     size_t n = 0;
     const char* t = luaL_checklstring(L, i, &n);
@@ -669,16 +670,18 @@ uint64_t account_arg(lua_State* L, int i) {
         ok = d >= 0;
         v = v * 16 + static_cast<uint64_t>(d < 0 ? 0 : d);
     }
-    if (!ok || v == 0) luaL_argerror(L, i, "an account: \"0x\" and up to 16 hex digits, as world:account gives it");
+    if (!ok) luaL_argerror(L, i, "an account: \"0x\" and up to 16 hex digits, as world:account gives it");
     return v;
 }
 
-// emf.player_data(account) (lua 1.20): the player's text in the world being played ("" when none); nil before the
-// world's data came, or where no hosted world runs.
+// emf.player_data(account) (lua 1.20): the player's text in the world being played ("" when none); nil before this load
+// of the script got the world's data (non-nil: a save would be taken), where no hosted world runs, for the all-zero
+// account, and while the world's players file cannot be read.
 int l_player_data(lua_State* L) {
     Script* s = script_of(L);
     const uint64_t account = account_arg(L, 1);
-    const auto text = s->file ? s->file->player(account) : std::nullopt;
+    const auto text =
+        s->file && account && s->world_delivered == s->loads ? s->file->player(account) : std::nullopt;
     if (text) lua_pushlstring(L, text->data(), text->size());
     else lua_pushnil(L);
     return 1;

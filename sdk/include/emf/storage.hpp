@@ -20,9 +20,11 @@
 // saved under the same rules (save_player; at most 16 KiB per player and 2 MiB per file):
 //   ... when a player's data changed:  g_file.save_player(account, text);   // "" removes the player
 //   ... to read it:                    if (auto t = g_file.player(account)) { /* *t: "" when none */ }
+// player and save_player run on the server world's thread too (or under your own lock): poll rebuilds the texts.
 #include <windows.h>
 
 #include <atomic>
+#include <cerrno>
 #include <cstdint>
 #include <cstdio>
 #include <map>
@@ -67,13 +69,15 @@ public:
         last_poll_ms_ = clock_();  // the server world runs
         const uint32_t session = api_->server_session();
         const uint32_t loads = loads_;
+        if (players_state_ == PlayersState::Unreadable && file_session_ == session && read_loads_ == loads && file_slot_)
+            load_players();  // another program had it open: read it again
         if (loaded_session_ != session || (file_session_ == session && read_loads_ == loads) || !slot_) return false;
         file_slot_ = slot_;
         const std::string text = read(path());
         file_session_ = session;
         read_loads_ = loads;
         written_ = text;
-        players_bad_ = !parse_players(read(players_path()), players_);
+        load_players();
         on_loaded(text);
         return true;
     }
@@ -113,9 +117,10 @@ public:
         return dir_ + name;
     }
     // `account`'s text in the running world ("" when none); nothing while not ready() (no world's data yet, another
-    // world, someone else's game).
+    // world, someone else's game) or while the world's players file cannot be read (not EMF's format, or another
+    // program has it open: poll reads it again).
     std::optional<std::string> player(uint64_t account) const {
-        if (!ready()) return std::nullopt;
+        if (!ready() || players_state_ != PlayersState::Ok) return std::nullopt;
         const auto it = players_.find(account);
         return it == players_.end() ? std::string() : it->second;
     }
@@ -124,15 +129,13 @@ public:
     // never overwritten), or on a write error (each logged once).
     bool save_player(uint64_t account, const std::string& text) {
         if (!ready() || !account) return false;
-        if (players_bad_) {
-            say_once(bad_said_, "%ls could not be read (not EMF's format): player data is not saved until it is fixed or removed",
-                     players_path().c_str());
-            return false;
-        }
+        if (players_state_ != PlayersState::Ok) return false;  // logged when it was read
         if (text.size() > kMaxPlayerText) {
             say_once(big_said_, "a player's data over %u bytes was not saved", static_cast<unsigned>(kMaxPlayerText));
             return false;
         }
+        const auto have = players_.find(account);
+        if (text.empty() ? have == players_.end() : have != players_.end() && have->second == text) return true;
         std::map<uint64_t, std::string> next = players_;
         if (text.empty()) next.erase(account);
         else next[account] = text;
@@ -172,6 +175,45 @@ private:
         }
         if (failed_path_ == file) failed_path_.clear();
         return true;
+    }
+    // Reads the world's players file: none is no players; one another program holds is read again by poll; one that is
+    // not EMF's format is never overwritten (until it is fixed or removed and the world loaded again).
+    void load_players() {
+        const std::wstring file = players_path();
+        std::string text;
+        FILE* f = nullptr;
+        const errno_t e = _wfopen_s(&f, file.c_str(), L"rb");
+        bool unreadable = e != 0 || !f;
+        if (unreadable && e == ENOENT) {
+            players_.clear();
+            players_state_ = PlayersState::Ok;
+            return;
+        }
+        if (!unreadable) {
+            char buf[4096];
+            size_t n;
+            while ((n = fread(buf, 1, sizeof(buf), f)) > 0) text.append(buf, n);
+            unreadable = ferror(f) != 0;
+            fclose(f);
+        }
+        if (unreadable) {
+            players_.clear();
+            if (players_state_ != PlayersState::Unreadable && api_->log)
+                api_->log(mod_.c_str(), "could not read %ls (another program has it open?): player data waits until it can",
+                          file.c_str());
+            players_state_ = PlayersState::Unreadable;
+            return;
+        }
+        if (!parse_players(text, players_)) {
+            players_state_ = PlayersState::Bad;
+            if (api_->log)
+                api_->log(mod_.c_str(),
+                          "%ls is not EMF's player data format: it is not read or saved over until it is fixed or removed "
+                          "and the world loaded again",
+                          file.c_str());
+            return;
+        }
+        players_state_ = PlayersState::Ok;
     }
     template <class... A>
     void say_once(bool& said, const char* fmt, A... a) {
@@ -216,7 +258,7 @@ private:
             }
             if (i + 19 == nl || len > kMaxPlayerText || nl + 1 + len >= t.size() || t[nl + 1 + len] != '\n')
                 return out.clear(), false;
-            out[account] = t.substr(nl + 1, len);
+            if (!out.emplace(account, t.substr(nl + 1, len)).second) return out.clear(), false;  // an account twice
             i = nl + 1 + len + 1;
         }
         return true;
@@ -254,8 +296,9 @@ private:
     std::string written_;
     std::wstring failed_path_;  // the file whose write failure was logged
     std::map<uint64_t, std::string> players_;  // the running world's player texts (read by poll)
-    bool players_bad_ = false;                 // its file did not parse: never overwritten
-    bool bad_said_ = false, big_said_ = false, full_said_ = false;
+    enum class PlayersState { Ok, Unreadable, Bad };  // Unreadable: poll reads it again; Bad: never overwritten
+    PlayersState players_state_ = PlayersState::Ok;
+    bool big_said_ = false, full_said_ = false;
 };
 
 }  // namespace emf

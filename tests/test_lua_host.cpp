@@ -447,7 +447,11 @@ TEST_CASE("lua host: player data: nil before the world's data, \"\" for a player
     r.run_command("keeper.pget 0x00000000000000aa");
     CHECK(r.fake.replies.back() == "[kills=3]");
     CHECK(read_file(file) == "emf players 1\n0x00000000000000aa 7\nkills=3\n");
-    for (const char* bad : {"aa", "0x", "0xzz", "0x00000000000000aaa", "0x0"}) {
+    r.run_command("keeper.pget 0x0000000000000000");  // the console's and the host's own messages' account
+    CHECK(r.fake.replies.back() == "nil");             // nothing, and no error
+    r.run_command("keeper.pset 0x0 x");
+    CHECK(r.fake.replies.back() == "false");
+    for (const char* bad : {"aa", "0x", "0xzz", "0x00000000000000aaa"}) {
         CAPTURE(bad);
         r.run_command(std::string("keeper.pbad ") + bad);
         CHECK(r.fake.replies.back() == "error");  // not an account
@@ -471,6 +475,8 @@ TEST_CASE("lua host: player data: a reloaded script cannot save before its world
     host.check_reload_now();
     r.run_command("keeper.pset 0xaa fresh-defaults");
     CHECK(r.fake.replies.back() == "false");  // its fresh state must not go over the saved one
+    r.run_command("keeper.pget 0xaa");
+    CHECK(r.fake.replies.back() == "nil");  // nor read before its world data came again (non-nil: a save works)
     host.tick(kServer);
     r.run_command("keeper.pget 0xaa");
     CHECK(r.fake.replies.back() == "[kills=3]");
