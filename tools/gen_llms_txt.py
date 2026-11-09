@@ -239,10 +239,11 @@ def parse_mod_commands(repo):
             if fn.endswith(".lua"):
                 with open(os.path.join(folder, fn), encoding="utf-8") as f:
                     src = f.read()
-                for m in re.finditer(r'emf\.command\(\s*"([\w.]+)",\s*"((?:[^"\\]|\\.)*)"', src):
+                # the help may be strings joined with .. over several lines
+                for m in re.finditer(r'emf\.command\(\s*"([\w.]+)",\s*((?:"(?:[^"\\]|\\.)*"\s*(?:\.\.\s*)?)+)', src):
                     name = m.group(1)  # Lua 1.6: a command named exactly like the mod stays unprefixed
                     full = name if name == mod_id or name.startswith(mod_id + ".") else mod_id + "." + name
-                    out.append((mod, full, m.group(2)))
+                    out.append((mod, full, _cpp_strings(m.group(2))))
     return out
 
 

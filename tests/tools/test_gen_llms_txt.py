@@ -96,6 +96,11 @@ class OtherSourcesTests(unittest.TestCase):
         self.assertTrue(cmds["profile"].startswith("[save <name>"))
         self.assertIn("- profile [save <name>", g.generate())
 
+    def test_lua_command_help_joined_with_dots(self):
+        helps = {n: h for _, n, h in g.parse_mod_commands(g.REPO)}
+        self.assertIn("[name], or any /beastmaster word", helps["beastmaster.as"])
+        self.assertIn("this world's stables (host and admins)", helps["beastmaster.stable"])
+
     def test_mod_commands(self):
         cmds = [(m, n) for m, n, _ in g.parse_mod_commands(g.REPO)]
         self.assertIn(("lua", "lua.status"), cmds)
