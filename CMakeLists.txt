@@ -528,6 +528,7 @@ add_executable(emf_tests
   tests/test_net_link.cpp
   tests/test_player_roster.cpp
   tests/test_player_events.cpp
+  tests/test_mods_check.cpp
   tests/test_net_peers.cpp
   tests/test_net_remote.cpp
   tests/test_net_service.cpp
