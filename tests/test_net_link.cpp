@@ -449,21 +449,51 @@ TEST_CASE("net link: a forged line (another speaker) is taken and does nothing; 
     CHECK(r.client.on_chat_line("#!emf1 M zz", kAcct));
 }
 
-TEST_CASE("net link: while this game does not know its own account, marked lines are hidden and never answered") {
+TEST_CASE("net link: a beacon that comes before this game knows its own account is answered once it does (spoken as this player)") {
     Rig r;
-    r.self.reset();  // the game has not told it yet
+    r.self.reset();  // the game has not told it yet (its world's player list is not in: still loading)
     const uint64_t me = 0x1234;
     r.server.tick({{kHandle, me}});
     REQUIRE(r.to_players.size() == 1);
     CHECK(r.client.on_chat_line(r.to_players[0].second, me));  // taken (never shown) ...
-    CHECK(r.client.waiting() == 0);                             // ... but not answered: a forged beacon could be it
+    CHECK(r.client.waiting() == 0);                             // ... not answered yet: a forged beacon could be it
     size_t told = 0;
     for (const auto& l : r.logs) told += l.find("does not know its own account") != std::string::npos;
     CHECK(told == 1);
-    // the next beacon, once the game knows: the hello goes
-    r.self = me;
+    r.self = me;  // the game knows now: the beacon it held was spoken as this player, the hello goes
+    CHECK(r.client.waiting() == 1);
+    const auto lines = r.client.take_lines(8);
+    REQUIRE(lines.size() == 1);
+    CHECK(lines[0].find(" H ") != std::string::npos);
+    CHECK(r.client.waiting() == 0);  // answered once
+    // the next beacon, as before: the hello goes again
     CHECK(r.client.on_chat_line(r.to_players[0].second, me));
     CHECK(r.client.waiting() == 1);
+}
+
+TEST_CASE("net link: a beacon held before this game knew its own account and spoken as another player is never answered") {
+    Rig r;
+    r.self.reset();
+    const auto forged = encode_line(split_message('S', 0, "emf/net", 1, "fake", nullptr)[0]);
+    CHECK(r.client.on_chat_line(forged, kAcct + 7));  // hidden
+    r.self = kAcct;
+    CHECK(r.client.waiting() == 0);
+    CHECK(r.client.take_lines(8).empty());
+    size_t told = 0;
+    for (const auto& l : r.logs) told += l.find("not spoken as this player") != std::string::npos;
+    CHECK(told == 1);
+}
+
+TEST_CASE("net link: a beacon held before this game knew its own account is gone with the session") {
+    Rig r;
+    r.self.reset();
+    const uint64_t me = 0x1234;
+    r.server.tick({{kHandle, me}});
+    REQUIRE(r.to_players.size() == 1);
+    CHECK(r.client.on_chat_line(r.to_players[0].second, me));
+    r.client.reset();  // another world or server
+    r.self = me;
+    CHECK(r.client.waiting() == 0);
 }
 
 TEST_CASE("net link: a beacon typed by another player is never taken for the server's, whatever comes first") {

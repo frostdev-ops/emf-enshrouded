@@ -191,11 +191,19 @@ public:
     void reset();
 
 private:
+    // The server's beacon, spoken as this player: a new conversation, this game's hello queued. Under m_; the log line.
+    std::string beacon_locked(bool& down);
+    // A beacon that came before this game knew its own account is answered now that it does (when spoken as this
+    // player). take_lines and waiting call it.
+    void answer_held();
+
     ClientLinkDeps d_;
     std::mutex m_;
     enum class State { Idle, HelloSent, Welcomed } state_ = State::Idle;
     bool told_foreign_ = false;  // a line not spoken as this player was logged
     bool told_no_self_ = false;  // a line before the game knew its own account was logged
+    // the speaker of a beacon that came before the game knew its own account (still loading): answered once it does
+    std::optional<uint64_t> held_beacon_;
     std::map<std::string, uint32_t> server_channels_;
     Reassembly in_;
     uint32_t out_seq_ = 0;

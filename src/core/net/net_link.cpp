@@ -406,10 +406,11 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
         const std::optional<uint64_t> self = d_.self_account ? d_.self_account() : std::nullopt;
         if (!self) {
             foreign = true;
+            if (line->type == 'S') held_beacon_ = speaker;  // answered once the game knows (when it is this player)
             if (!told_no_self_) {
                 told_no_self_ = true;
                 told = "mod messages: this game does not know its own account yet: a marked chat line (speaker " +
-                       acct_hex(speaker) + ") is hidden and not answered (logged once)";
+                       acct_hex(speaker) + ") is hidden; a beacon is answered once it knows (logged once)";
             }
         } else if (speaker != *self) {  // spoken by someone else: a forged line (never shown)
             foreign = true;
@@ -419,32 +420,10 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
                        acct_hex(speaker) + ", this player " + acct_hex(*self) + "; logged once)";
             }
         } else switch (line->type) {
-            case 'S': {
-                const bool was = state_ == State::Welcomed;
-                state_ = State::Idle;
-                server_channels_.clear();
-                in_ = Reassembly();
-                out_.clear();
-                out_seq_ = 0;
-                down = was;
-                HelloInfo mine;
-                mine.emf_version = d_.emf_version;
-                mine.api = d_.api;
-                mine.build = d_.build;
-                if (d_.channels) mine.channels = d_.channels();
-                if (mine.channels.empty()) {  // no mod of this game talks to a server
-                    told = "mod messages: the server's beacon (hidden); no mod of this game has a channel: no hello";
-                    break;
-                }
-                const auto lines =
-                    split_message('H', out_seq_, kControl, kControlVersion, hello_text(mine), nullptr);
-                out_seq_ += static_cast<uint32_t>(lines.size());
-                for (const auto& l : encoded(lines)) out_.push_back(l);
-                state_ = State::HelloSent;
-                told = "mod messages: the server's beacon (hidden); hello queued with " +
-                       std::to_string(mine.channels.size()) + " channel(s)";
+            case 'S':
+                held_beacon_.reset();  // this one answers
+                told = beacon_locked(down);
                 break;
-            }
             case 'W': {
                 if (state_ == State::Idle || line->channel != kControl) break;
                 msg = in_.add(*line, &why);
@@ -491,6 +470,57 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
     return true;
 }
 
+std::string ClientLink::beacon_locked(bool& down) {
+    const bool was = state_ == State::Welcomed;
+    state_ = State::Idle;
+    server_channels_.clear();
+    in_ = Reassembly();
+    out_.clear();
+    out_seq_ = 0;
+    down = was;
+    HelloInfo mine;
+    mine.emf_version = d_.emf_version;
+    mine.api = d_.api;
+    mine.build = d_.build;
+    if (d_.channels) mine.channels = d_.channels();
+    if (mine.channels.empty())  // no mod of this game talks to a server
+        return "mod messages: the server's beacon (hidden); no mod of this game has a channel: no hello";
+    const auto lines = split_message('H', out_seq_, kControl, kControlVersion, hello_text(mine), nullptr);
+    out_seq_ += static_cast<uint32_t>(lines.size());
+    for (const auto& l : encoded(lines)) out_.push_back(l);
+    state_ = State::HelloSent;
+    return "mod messages: the server's beacon (hidden); hello queued with " + std::to_string(mine.channels.size()) +
+           " channel(s)";
+}
+
+void ClientLink::answer_held() {
+    std::string told;
+    bool down = false;
+    {
+        const std::lock_guard<std::mutex> g(m_);
+        if (!held_beacon_) return;
+        if (d_.enabled && !d_.enabled()) {  // hosted or offline now: never answered
+            held_beacon_.reset();
+            return;
+        }
+        const std::optional<uint64_t> self = d_.self_account ? d_.self_account() : std::nullopt;
+        if (!self) return;  // still not known
+        const uint64_t speaker = *held_beacon_;
+        held_beacon_.reset();
+        if (speaker != *self) {  // spoken by someone else: a forged beacon
+            if (!told_foreign_) {
+                told_foreign_ = true;
+                told = "mod messages: a marked chat line not spoken as this player was dropped (speaker " +
+                       acct_hex(speaker) + ", this player " + acct_hex(*self) + "; logged once)";
+            }
+        } else {
+            told = beacon_locked(down) + " (the beacon came before this game knew its own account)";
+        }
+    }
+    if (!told.empty() && d_.log) d_.log(told);
+    if (down && d_.on_server) d_.on_server(false);
+}
+
 bool ClientLink::send(const std::string& channel, uint32_t version, const std::string& data, std::string* why) {
     const auto fail = [&](const std::string& r) {
         if (why) *why = r;
@@ -513,6 +543,7 @@ bool ClientLink::send(const std::string& channel, uint32_t version, const std::s
 }
 
 std::vector<std::string> ClientLink::take_lines(size_t max) {
+    answer_held();
     const std::lock_guard<std::mutex> g(m_);
     const size_t n = std::min(max, out_.size());
     std::vector<std::string> out(out_.begin(), out_.begin() + static_cast<std::ptrdiff_t>(n));
@@ -526,6 +557,7 @@ void ClientLink::put_back(std::vector<std::string> lines) {
 }
 
 size_t ClientLink::waiting() {
+    answer_held();
     const std::lock_guard<std::mutex> g(m_);
     return out_.size();
 }
@@ -554,6 +586,7 @@ void ClientLink::reset() {
         out_seq_ = 0;
         told_foreign_ = false;
         told_no_self_ = false;
+        held_beacon_.reset();
     }
     if (down && d_.on_server) d_.on_server(false);
 }
