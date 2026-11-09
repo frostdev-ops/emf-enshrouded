@@ -203,6 +203,9 @@ constexpr size_t kConnectionPeer = 4;
 constexpr size_t kConnectionAccount = 0x48;  // u64 the player's account hash
 constexpr size_t kConnectionName = 0x20;        // char* the player's name (confirmed in game: their platform name)
 constexpr size_t kConnectionNameLength = 0x28;  // u64 its length in bytes (no NUL needed)
+// u8 the player's permissions, bit 0 CanKickBan (an admin; the host has every bit): the player update copies it from
+// the instance's permission list; handleAccountAction skips a player with bit 0 (research kick_player_2026-11-09.md)
+constexpr size_t kConnectionPerms = 0x10;
 }  // namespace server_layout
 // Where the record of connection `handle` starts in the server; nullopt past the 16 records.
 std::optional<size_t> connection_record_offset(uint32_t handle);

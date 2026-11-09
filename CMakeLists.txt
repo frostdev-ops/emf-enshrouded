@@ -173,6 +173,7 @@ add_library(emf_core_lib STATIC
   src/core/bridge/runtime.cpp
   src/core/chat_commands.cpp
   src/core/server_chat.cpp
+  src/core/game_kick.cpp
   src/core/server_chat_hooks.cpp
   src/core/overlay/console_model.cpp
   src/core/overlay/console_suggest.cpp
@@ -529,6 +530,7 @@ add_executable(emf_tests
   tests/test_player_roster.cpp
   tests/test_player_events.cpp
   tests/test_mods_check.cpp
+  tests/test_game_kick.cpp
   tests/test_net_peers.cpp
   tests/test_net_remote.cpp
   tests/test_net_service.cpp
