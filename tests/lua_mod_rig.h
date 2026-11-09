@@ -157,8 +157,11 @@ struct ModRig {
     std::vector<std::wstring> others_data;  // the world data files of the mods loaded beside it
     std::string id;
     // `also`: more shipped mods loaded beside it, at their default settings (e.g. two class mods sharing a wheel).
+    // `api`: changes to the core's function table made before the mods load (e.g. with_net: a mod registers its message
+    // channels while it loads).
     ModRig(const char* mod, const wchar_t* name, const std::map<std::string, std::string>& settings,
-           const std::function<void(Fake&)>& world = nullptr, const std::vector<std::string>& also = {})
+           const std::function<void(Fake&)>& world = nullptr, const std::vector<std::string>& also = {},
+           const std::function<void(EmfApi&)>& api = nullptr)
         : r(name), id(mod) {
         r.api.local_player = player_one;
         const std::wstring wid(id.begin(), id.end());
@@ -175,6 +178,7 @@ struct ModRig {
             others_data.push_back(r.dir + L"\\..\\config\\" + std::wstring(other.begin(), other.end()) + L"\\0001.txt");
             DeleteFileW(others_data.back().c_str());
         }
+        if (api) api(r.api);
         host = std::make_unique<Host>(&r.api, r.dir);
         host->set_file_clock(&rig_file_ms);
         host->set_clock(&rig_file_ms);  // the 250 ms limit per call and the chat limit run on the world's time, not the machine's

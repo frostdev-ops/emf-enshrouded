@@ -19,8 +19,9 @@ std::vector<uint8_t> guid_bytes(const std::string& text) {
 }
 
 // Player 1 (account 0xAA, the host, level 10) at (0, 10, 0); player 2 (0xBB) at (30, 10, 0).
+// `net`: a v27 core (mod messages) from the start, so Beastmaster's channel is registered.
 struct BeastRig : ModRig {
-    explicit BeastRig(const std::map<std::string, std::string>& settings = {})
+    explicit BeastRig(const std::map<std::string, std::string>& settings = {}, bool net = false)
         : ModRig("beastmaster", L"beastmaster", settings, [](Fake& f) {
               add_player(f, 1, 0xAA, 0, 10, 0);
               add_player(f, 2, 0xBB, 30, 10, 0);
@@ -30,7 +31,7 @@ struct BeastRig : ModRig {
                   f.attrs[{p, EMF_ATTR_MANA}] = 100;
                   f.attrs[{p, EMF_ATTR_MAX_MANA}] = 100;
               }
-          }) {
+          }, {}, net ? std::function<void(EmfApi&)>([](EmfApi& a) { with_net(a); }) : nullptr) {
         with_attributes(r.api);  // a v18+ core: health, mana and damage through the game's attributes
         with_teleport(r.api);    // a v20 core
         with_windows(r.api);     // a v24 core
@@ -5309,4 +5310,144 @@ TEST_CASE("home: at night the beasts at home rest the whole night, without strol
     set_daytime(b.r.fake, 8.0);
     b.seconds(41);  // the rest under way ends (40 s at the most with these rolls): a stroll
     CHECK(awake(b, 1234));
+}
+
+// ---- Beastmaster for players who joined (mod messages, Lua 1.19: the beastmaster/ui channel) ----
+namespace {
+const Fake::NetCh& ui_channel(BeastRig& b) {
+    const Fake::NetCh* found = nullptr;
+    for (const auto& c : b.r.fake.net_channels)
+        if (c.name == "beastmaster/ui") found = &c;
+    REQUIRE(found != nullptr);
+    return *found;
+}
+EmfNetFrom net_from(uint32_t player, uint64_t account) {
+    EmfNetFrom f{};
+    f.size = sizeof f;
+    f.player = player;
+    f.account = account;
+    f.peer_version = 1;
+    return f;
+}
+// A message from player `p`'s game to the server (the core's call, on the server world).
+void from_player(BeastRig& b, uint32_t p, uint64_t account, const std::string& json) {
+    const Fake::NetCh ch = ui_channel(b);
+    const EmfNetFrom f = net_from(p, account);
+    ch.def.on_server(kServer, &f, json.data(), static_cast<uint32_t>(json.size()), ch.def.user);
+}
+// A message from the server to this game (the core's call, on the client world).
+void from_server(BeastRig& b, const std::string& json) {
+    const Fake::NetCh ch = ui_channel(b);
+    const EmfNetFrom f = net_from(0, 0);
+    ch.def.on_player(kClient, &f, json.data(), static_cast<uint32_t>(json.size()), ch.def.user);
+}
+// The data of the messages sent to player `p` (0: to the server).
+std::vector<std::string> sent_to(BeastRig& b, uint32_t p) {
+    std::vector<std::string> out;
+    for (const auto& m : b.r.fake.net_sent)
+        if (m.channel == "beastmaster/ui" && m.player == p) out.push_back(m.data);
+    return out;
+}
+std::vector<std::string> sent_up(BeastRig& b) { return sent_to(b, 0); }
+// Takes the messages to player `p` (0: to the server) out of what was sent.
+std::vector<std::string> take_sent(BeastRig& b, uint32_t p) {
+    std::vector<std::string> out;
+    auto& v = b.r.fake.net_sent;
+    for (auto it = v.begin(); it != v.end();) {
+        if (it->channel == "beastmaster/ui" && it->player == p) {
+            out.push_back(it->data);
+            it = v.erase(it);
+        } else {
+            ++it;
+        }
+    }
+    return out;
+}
+// What the server sent player `p` arrives at this game (the rig is both).
+void relay_down(BeastRig& b, uint32_t p) {
+    for (const auto& m : take_sent(b, p)) from_server(b, m);
+}
+// What this game sent the server arrives there, from player `p`.
+void relay_up(BeastRig& b, uint32_t p, uint64_t account) {
+    for (const auto& m : take_sent(b, 0)) from_player(b, p, account, m);
+}
+// `n` steps of the client world alone (someone else's game: after 180 of them Beastmaster knows it joined one).
+void client_steps(BeastRig& b, int n) {
+    for (int i = 0; i < n; ++i) {
+        b.r.fake.tick += 1;
+        b.host->tick(kClient);
+    }
+}
+// Presses `vk` on the client world: no server world stepped in the last second (the host sees a joined game).
+// `keep`: still held afterwards (the test lets go: g_held[vk] = false).
+void press_client(BeastRig& b, uint32_t vk, bool keep = false) {
+    b.host->set_key_reader([](uint32_t k) { return g_held[k]; });
+    Sleep(1100);
+    g_held[vk] = true;
+    b.r.fake.tick += 1;
+    b.host->tick(kClient);
+    if (keep) return;
+    g_held[vk] = false;
+    b.r.fake.tick += 1;
+    b.host->tick(kClient);
+}
+bool has_part(const std::vector<std::string>& messages, const std::string& a, const std::string& c = "") {
+    for (const auto& m : messages)
+        if (m.find(a) != std::string::npos && m.find(c) != std::string::npos) return true;
+    return false;
+}
+// Player 2 (at 30, 10, 0, looking along +z) tames a beaten wolf 5 m in front of them: "You tamed a wolf: Wolf".
+void tame_for_player2(BeastRig& b) {
+    b.look(2, 30, 10.5, 0, 0);
+    b.beast(50, kWolfGraph, 30, 5, kWildBeast, 20, 100);
+    REQUIRE(b.reply("beastmaster.tame", 2, 0xBB).find("Taming") != std::string::npos);
+    b.seconds(4);
+}
+// Player 2's beasts (0xBB): Grey (wolf, active), Tusk (boar); player 1's Fang (wolf, active); the world has a stable.
+void joined_beasts(BeastRig& b) {
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\nb 0x00000000000000bb wolf 0 0 Grey\n"
+                  "b 0x00000000000000bb boar 0 0 Tusk\na 0x00000000000000aa Fang\na 0x00000000000000bb Grey\ns 1\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+}
+}  // namespace
+
+TEST_CASE("beastmaster net: the ui channel is beastmaster/ui, version 1, both ways, up to 16384 bytes") {
+    BeastRig b({}, true);
+    const auto& ch = ui_channel(b);
+    CHECK(ch.def.version == 1u);
+    CHECK(ch.def.flags == (EMF_NET_TO_SERVER | EMF_NET_TO_PLAYERS));
+    CHECK(ch.def.max_size == 16384u);
+    CHECK(ch.def.on_server != nullptr);
+    CHECK(ch.def.on_player != nullptr);
+}
+
+TEST_CASE("beastmaster net: news for a joined player whose game has the channel goes as a note message, not a chat line; another version gets the chat line") {
+    for (uint32_t version : {1u, 4u}) {
+        CAPTURE(version);
+        BeastRig b({}, true);
+        b.r.fake.net_peer_version = version;
+        tame_for_player2(b);
+        CHECK(has_part(sent_to(b, 2), "\"t\":\"note\"", "You tamed a wolf: Wolf") == (version == 1));
+        CHECK(told(b, 2, "You tamed a wolf") == (version != 1));
+    }
+}
+
+TEST_CASE("beastmaster net: the joined player's game shows the server's note on screen") {
+    BeastRig b({}, true);
+    from_server(b, R"({"t":"note","text":"Grey reached loyalty 3: a talent point to spend at a stable."})");
+    CHECK(b.noted("Grey reached loyalty 3"));
+}
+
+TEST_CASE("beastmaster net: messages from a player's game that are not Beastmaster's are dropped, logged once, and the mod runs on") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    for (const char* bad : {"not json", "[1,2]", R"({"t":5})", R"({"t":"dance"})", R"({"t":"click","n":"x","key":{}})",
+                            R"({"t":"pick","seq":[],"i":"one"})", R"({"t":"stables","list":"none"})"})
+        from_player(b, 2, 0xBB, bad);
+    from_player(b, 2, 0xAA, R"({"t":"wheel"})");  // another account than player 2's: ignored
+    CHECK(b.host->status("beastmaster") == "running");
+    CHECK(logged("beastmaster/ui"));
+    CHECK(sent_to(b, 2).empty());
 }

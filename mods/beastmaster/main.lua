@@ -14,6 +14,9 @@ local stable_mod = require("stable")
 local home_mod = require("home")
 local window_mod = require("beasts_window")
 local talents = require("talents")
+local wire = require("wire")
+local remote_mod = require("remote")
+local client_mod = require("client")
 
 emf.emits({ "StartGuardingEvent", "AddThreatTargetEvent" })
 
@@ -26,14 +29,21 @@ local on_first_stable         -- the world's first stable was found or marked (m
 local at_stable_open          -- a player pressed E at a stable's prompt (made below)
 local release_asked = {}      -- account -> {name, at}: a release by chat asked once (reset with each world)
 local next_hud = 0            -- when the HUD line is written next (reset with each world: the clock may restart)
+local remote                  -- the screens of players who joined, sent to their games (made below)
+local client                  -- on a joined player's game: what the server's Beastmaster sends (made below)
 
 local function setting(key)
 	return emf.setting(key)
 end
 
--- A note for a player: on screen for the host, a chat line for a player who joined.
+-- A note for a player: on screen for the host and for a player who joined with Beastmaster on their game (a message),
+-- else a chat line.
 local function tell(world, player, text)
-	if player == emf.local_player() then emf.notify(text) else emf.tell(world, player, text) end
+	if player == emf.local_player() then
+		emf.notify(text)
+	elseif not (remote and remote:note(world, player, text)) then
+		emf.tell(world, player, text)
+	end
 end
 
 local function now(world)
@@ -216,6 +226,19 @@ window = window_mod.new({
 	spend = stable_do.spend,
 	reset_talents = stable_do.reset_talents,
 })
+
+-- ---- players who joined: Beastmaster's screens on their own game (mod messages, Lua 1.19) ----
+remote = remote_mod.new({ now = now, log = emf.log })
+client = client_mod.new({ now = now, log = emf.log })
+if emf.net and emf.net.channel then
+	emf.net.channel(wire.CHANNEL, {
+		version = wire.VERSION,
+		to = "both",
+		max = wire.MAX,
+		on_server = function(world, from, data) remote:on_message(world, from, data) end,
+		on_player = function(world, from, data) client:on_message(world, from, data) end,
+	})
+end
 
 -- What a player who joined (no window) can do at a stable, by chat.
 local AT_STABLE_CHAT = "At a stable: /beastmaster active <name or number> (it can be called), /beastmaster store " ..

@@ -8,7 +8,7 @@
   "emf": 14,
   "side": "server",
   "main": "main.lua",
-  "depends": {"lua": ">=1.14"},
+  "depends": {"lua": ">=1.19"},
   "portraits": [
     {"key": "beastmaster.wolf", "template": "478381c5-585f-4264-b373-dbb1ea596eca", "frames": 24, "size": 192},
     {"key": "beastmaster.boar", "template": "255fd8d9-4447-445d-8ffc-4d9dc0afdd16", "frames": 24, "size": 192},
