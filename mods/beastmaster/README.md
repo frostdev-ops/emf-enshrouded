@@ -7,7 +7,7 @@ they fall, and are kept with the world. Their kills are yours: XP and loot. Loya
 one your own (stronger, tougher, faster, a second wind, an ambush, a guard, a menace, a taunt). Monsters split between
 you and your beasts: a tank beast draws half of them.
 
-It needs the `lua` mod 1.14 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
+It needs the `lua` mod 1.19 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
 (the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs and the snake come in the **EMF creature packs**
 download (the **bear pack** and the **beasts pack**, below): install them with EMF.exe ("Install a downloaded file")
 and EMF builds them when the game starts (no EML needed; with EML or ShroudForge installed, the card on EMF.exe's EMF
@@ -73,8 +73,8 @@ wide, where your beasts at home live: see below),
 or the game's **animal bed** (the straw
 bed for farm animals, large or small), built in your base, within 80 m of a flame altar (on the host a new one counts
 within seconds), or any prop the host
-marks with `beastmaster.stable mark` while looking at it (on a dedicated server an admin types `/beastmaster.stable
-mark` in the chat). An animal bed your farm animals already use counts too; it keeps working for them. Once your world has a stable (it
+marks with `beastmaster.stable mark` while looking at it (on a dedicated server a stable counts once a player's game
+with Beastmaster sees it, see Playing on a server; an admin can still type `/beastmaster.stable mark` in the chat). An animal bed your farm animals already use counts too; it keeps working for them. Once your world has a stable (it
 stays so, kept with the world):
 - only **active** beasts can be called, and the wheel lists only those; the others wait in the stable. Calling one in
   the stable says to make it active at a stable;
@@ -108,8 +108,9 @@ whether it is out, at home or resting. Click a beast (or a slot) to select it: i
 - **Store**: out of its slot (a beast that is out goes home);
 - **Release**: it leaves your collection for good (a beast that is out leaves the world); click it twice within 5 s.
 
-E or Esc closes the window. **Players who joined** get the stable's commands in the chat when they press E at its
-prompt, and use them within 10 m of a stable: `/beastmaster active <name or
+E or Esc closes the window. **Players who joined** with Beastmaster switched on in their own game get the same window
+(see Playing on a server). The others get the stable's commands in the chat when they press E at its prompt, and use
+them within 10 m of a stable: `/beastmaster active <name or
 number>`, `/beastmaster store <name or number>` and `/beastmaster release <name or number>` (the same command again
 within 10 s lets the beast go). `/beastmaster list` shows which beasts are active.
 
@@ -251,6 +252,30 @@ stillness. Each player's beasts follow only that player's stillness. **Beasts pa
 (`idle`) turns it off; **After you stand still for** (`idle_s`) sets the 10 s. `beastmaster.idle` (console) says what
 each beast does now.
 
+## Playing on a server
+
+Beastmaster runs where the world runs (the host, or a dedicated server). A player who joins:
+
+- **with EMF and Beastmaster switched on in their own game** gets everything the host gets, drawn on their own screen:
+  the Beasts window (E at a stable), the beast wheel (hold F3, their own key), the beast line at the bottom left, and
+  the news as notes at the top of the screen. The beast's turning picture is drawn from their own game. The server
+  decides everything: their game only shows what the server sends and passes clicks back, so nothing can happen that
+  the server did not allow. It needs the same Beastmaster version on both sides (1.15 or newer).
+- **without it** plays as before: the stable's commands and everything else with `/beastmaster` in the chat, the news
+  as chat lines. When they join, EMF's greeting may show in their chat, at most twice: "This server runs EMF mods. Get
+  EMF to see their windows; you can play without it." Only they see it.
+
+**For server owners:** a dedicated server has no models to see a stable by, so the games of players with Beastmaster
+tell it where the stables they see are (a Stable, a Large Stable or an animal bed within 80 m of a flame altar). Those
+stables count for everyone, are kept with the world, and stop counting when a player's game near one no longer sees
+it. Marking stables (`/beastmaster.stable mark`) still works. The Large Stable's beasts at home show up there too. The
+first stable a world gets makes it one where only active beasts can be called (as in a game someone hosts): players
+without EMF then choose their active beasts with the chat commands at a stable. Any player's game can report a stable,
+so a player could make a prop count as one; a stable only opens the window and holds the beasts at home.
+
+`beastmaster.as #2 give wolf`, `beastmaster.as #2 open` and the like (console only) run a word as another player, for
+testing on a dedicated server, where the console has no player of its own.
+
 ## Commands
 
 All of these work from the game's chat for every player (`/beastmaster <word>`), and in the console
@@ -281,6 +306,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `beastmaster.home` | **console:** where your beasts at home are (in a Large Stable) and whether they stroll or rest |
 | `beastmaster.loyalty <name or number> <1-10>` | **host console only:** set a beast's loyalty (tests); the reply says its talent points |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
+| `beastmaster.as <#k or player entity> <word> [...]` | **host or server console only:** run a word as that player (#2: the second player, lowest entity id first): `give`, `loyalty`, `open [name]` (their Beasts window, on that beast's tab), or any `/beastmaster` word; for tests on a dedicated server |
 | `beastmaster.species <graph guid> <faction> [scale]` | for modders: which beast a creature is, by the animation graph its template runs, its faction number and its scale (render models are not on the server world; the bear its own copy of the wolf's graph at 1.4x (the bear pack 1.0's: the wolf's graph at 1.4x), the aurochs the boar's at 1.3x, the snake and each rare snake its own copy of the wolf's graph) |
 
 ## Settings (Mods tab, EMF.exe, or `set beastmaster <key> <value>`)
@@ -390,11 +416,11 @@ does not ship this file. A beast added here has no picture on its tab (the pictu
 ## Good to know
 
 - It runs where the world runs: the host or a dedicated server. Without the packs, players who join need nothing:
-  they see the beasts and use `/beastmaster` in the chat. **With a pack, everyone needs it:** the host (or the
-  server) and every player who joins, because it changes the game's data (an EML patch). The wheel, the Beasts window
-  and the line on screen are the host's.
-- Render models are only on the game's client side: on a dedicated server a built stable is not seen; an admin marks it
-  (`/beastmaster.stable mark`). There every player who presses E at a stable's prompt gets its chat commands.
+  they see the beasts and use `/beastmaster` in the chat (with Beastmaster switched on in their own game, the window,
+  the wheel and the line too: see Playing on a server). **With a pack, everyone needs it:** the host (or the server)
+  and every player who joins, because it changes the game's data (an EML patch).
+- Render models are only on the game's client side: a dedicated server sees a built stable through the games of the
+  players with Beastmaster (they report it), or an admin marks it (`/beastmaster.stable mark`).
 - A stable's prompt is on the stable's entity in the world the host or the server runs; Beastmaster offers it again at
   every search of the world (every 30 s), so one the game dropped (the bed streamed out of view) comes back. With
   EMF's Lua 1.15 it also sees when EMF dropped it (`emf.offered`): the E key opens the window there meanwhile.
