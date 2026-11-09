@@ -167,11 +167,24 @@ are not compared.
 - The server writes one line per player to `emf\emf_core.log` (`mods check: player 0x... (entity 2, EMF 0.6.3):
   missing: ...`), and `players.mods` (the server's console, `emf\commands.txt`, or a `[chat] admins` account) lists
   every player in the world: their EMF and what differs, or "no EMF" (a player without EMF cannot be checked).
-- It only warns. Nothing is refused or turned off.
+- By default it only warns. A server owner can refuse such players instead: `[net] mods_check=refuse` in
+  `emf\emf_core.ini` (or the Players' mods card on EMF.exe's Server tab), read when the server starts. A player whose
+  game lacks a required mod or has another version of one, or has no EMF (no mod list 60 s after they are in the
+  world), is told why in the chat ("This server needs these mods: beasts_pack 2.2.0 (you: none). Get them from ...
+  You will be disconnected in 5 seconds."), and 5 s later the game's own kick disconnects them (the game's "kicked"
+  popup). Nothing is banned: they can come back once they have the mods.
+  - Required: the content and side-both mods above, plus the ids in `[net] mods_required = beastmaster, hudmod`
+    (the server's version when it runs that mod, any version when it does not).
+  - `[net] mods_info` is the "Get them from ..." text (at most 200 bytes); without it an EMF player reads "Install
+    them with EMF.exe."
+  - Never refused: the host's own player, the server's admins (a user group with `canKickBan`) and the accounts in
+    `[chat] admins`. The server logs each refusal and kick; `players.mods` shows who was refused.
+  - Refusing needs the game's kick on this game build and the greeting on; otherwise the log says it is off and
+    players are only warned.
 - The greeting: a server greets new connections (the line a game without EMF shows, at most twice) when one of its
-  mods talks to players' games, or when it has mods its players must match. A server whose mods players do not need
-  stays silent, and then has nothing to compare (`players.mods` shows "no EMF" for everyone there). `[net] greet=0`
-  in `emf\emf_core.ini` switches the greeting, and with it the check, off.
+  mods talks to players' games, when it has mods its players must match, or when it refuses players (above). A
+  server whose mods players do not need stays silent, and then has nothing to compare (`players.mods` shows "no EMF"
+  for everyone there). `[net] greet=0` in `emf\emf_core.ini` switches the greeting, and with it the check, off.
 - It travels as the core's own message channel `emf/mods` (version 1); an older EMF at either end takes no part.
 
 ## Keeping a test server private

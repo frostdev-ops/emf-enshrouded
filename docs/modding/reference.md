@@ -666,7 +666,8 @@ api->net_to_player(w, from->player, "mymod/show", "ok", 2);  // the server -> th
   sends at most 4 lines a frame (up to 64 wait).
 - **Settings** (`emf\emf_core.ini`): `[net] enabled=0` leaves the chat hooks out (messages stay in process),
   `greet=0` as above. On a game that hosts, the hooks are installed even without `[chat] players=1` (only the
-  command policy stays behind that switch).
+  command policy stays behind that switch). `mods_check`, `mods_required` and `mods_info` are the mod check on join's
+  (warn or refuse; [server.md](server.md) "Players' mods").
 - Works with text chat turned off in the server's settings (the game's own send call is used, which skips the UI's
   gate). Needs two engine functions (`ChatClientSend`, `ClientOutboxFlush`) that `emf_sigcheck` finds on the known
   builds; where they are missing a joined game cannot send, the server end and the loopback still work.
