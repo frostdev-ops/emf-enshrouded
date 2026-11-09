@@ -120,6 +120,7 @@ emf.on_world_data(function(world, text)
 	beasts = roster.parse(text)
 	stables:load(text)
 	window:reset()
+	if remote then remote:reset() end
 	release_asked = {}
 	pack:reset()
 	home:reset()
@@ -229,7 +230,13 @@ local window_env = {
 window = window_mod.new(window_env)
 
 -- ---- players who joined: Beastmaster's screens on their own game (mod messages, Lua 1.19) ----
-remote = remote_mod.new({ now = now, log = emf.log })
+remote = remote_mod.new({
+	now = now,
+	log = emf.log,
+	present = function() return pack.present end,
+	loaded = function() return loaded end,
+	make_window = function(screen) return window_mod.new(window_env, screen) end,
+})
 client = client_mod.new({ now = now, log = emf.log })
 if emf.net and emf.net.channel then
 	emf.net.channel(wire.CHANNEL, {
@@ -246,15 +253,16 @@ local AT_STABLE_CHAT = "At a stable: /beastmaster active <name or number> (it ca
 	"<name or number>, /beastmaster release <name or number> (twice), /beastmaster talents <name or number> [reset], " ..
 	"/beastmaster talent <name or number> <talent>. /beastmaster list shows your beasts."
 
--- E at a stable's prompt (on `entity`): the host gets the Beasts window; a player who joined (and everyone on a
--- dedicated server), the stable's chat commands. An entity that is no stable's now (its id given out again) does nothing.
+-- E at a stable's prompt (on `entity`): the host gets the Beasts window, and so does a player who joined with
+-- Beastmaster on their own game (drawn there); anyone else, the stable's chat commands. An entity that is no stable's
+-- now (its id given out again) does nothing.
 at_stable_open = function(world, player, entity)
 	if not world:is_server() or not loaded or not player or player == 0 then return end
 	if not stables:stable_of(world, entity) then return end
 	local host = emf.local_player()
 	if host and host ~= 0 and player == host then
 		window:show(world, player)
-	else
+	elseif not (remote:is_remote(world, player) and remote:open_window(world, player)) then
 		emf.tell(world, player, AT_STABLE_CHAT)
 	end
 end
@@ -738,6 +746,7 @@ local function update_hud(world)
 	local head = account and string.format("Beasts (%s): ", beasts:mode(account)) or "Beasts: "
 	emf.hud("out", #parts > 0 and (head .. table.concat(parts, ", ")) or "", "bottom_left")
 	window:refresh(world)
+	remote:step(world)
 	publish(world)  -- the shared wheel shows what the other class mod's key opens with
 end
 

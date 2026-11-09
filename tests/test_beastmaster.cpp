@@ -5451,3 +5451,141 @@ TEST_CASE("beastmaster net: messages from a player's game that are not Beastmast
     CHECK(logged("beastmaster/ui"));
     CHECK(sent_to(b, 2).empty());
 }
+
+namespace {
+// An event on the window this game opened for the server's Beasts window (its events on the client world).
+void client_click(BeastRig& b, const std::string& key, uint32_t kind = EMF_UI_CLICK) {
+    REQUIRE(!b.r.fake.windows.empty());
+    const Fake::Win w = b.r.fake.windows.back();
+    EmfUiEvent e{};
+    e.size = sizeof e;
+    e.kind = kind;
+    e.window = w.id.c_str();
+    e.key = key.c_str();
+    e.from_key = "";
+    e.reason = EMF_UI_BY_PLAYER;
+    w.cb(kClient, &e, w.user);
+}
+// Player 2 presses E at the marked stable 960 (at_stable): the server's answer is in sent_to(b, 2).
+Fake::Off joined_at_stable(BeastRig& b) {
+    b.r.fake.net_peer_version = 1;
+    with_offers(b.r.api);
+    joined_beasts(b);
+    at_stable(b);
+    Fake::Off o = *last_offer(b, 960);
+    o.cb(kServer, 2, 960, o.user);
+    return o;
+}
+}  // namespace
+
+TEST_CASE("beastmaster net: E at a stable opens the Beasts window on a joined player's game; their clicks act on the server and it is drawn again") {
+    BeastRig b({}, true);
+    joined_at_stable(b);
+    CHECK(b.r.fake.windows.empty());  // not the host's window
+    CHECK_FALSE(told(b, 2, "/beastmaster active"));
+    REQUIRE(sent_to(b, 2).size() == 1u);
+    const std::string win = sent_to(b, 2)[0];
+    CHECK(win.find("\"t\":\"win\"") != std::string::npos);
+    CHECK(win.find("\"open\":true") != std::string::npos);
+    CHECK(win.find("Stable 2/8") != std::string::npos);
+    relay_down(b, 2);
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    const Fake::Win w = b.r.fake.windows.back();
+    CHECK(w.id == "beastmaster.stable");
+    CHECK(w.kind == EMF_WORLD_CLIENT);
+    CHECK(w.close_key == kE);
+    CHECK(shows(w, "Grey (wolf, loyalty 1, at home, active)"));
+    client_click(b, "beast.Tusk");
+    relay_up(b, 2, 0xBB);
+    relay_down(b, 2);
+    REQUIRE(!b.r.fake.window_updates.empty());
+    CHECK(shows(b.r.fake.window_updates.back(), "Tusk"));
+    CHECK(shows(b.r.fake.window_updates.back(), "Talents: "));
+    client_click(b, "make_active");
+    relay_up(b, 2, 0xBB);
+    relay_down(b, 2);
+    CHECK(shows(b.r.fake.window_updates.back(), "Tusk is active."));
+    CHECK(b.reply("beastmaster.list", 2, 0xBB).find("Tusk - boar, loyalty 1, at home, active") != std::string::npos);
+}
+
+TEST_CASE("beastmaster net: the picture on a joined player's beast tab comes from their own game, by name") {
+    BeastRig b({}, true);
+    with_images(b.r.api);
+    joined_at_stable(b);
+    relay_down(b, 2);
+    client_click(b, "beast.Grey");
+    relay_up(b, 2, 0xBB);
+    REQUIRE(sent_to(b, 2).size() == 1u);
+    CHECK(sent_to(b, 2)[0].find("\"portrait\":\"wolf\"") != std::string::npos);
+    CHECK(sent_to(b, 2)[0].find("\"image\"") == std::string::npos);
+    CHECK(b.r.fake.images_loaded.empty());  // the server draws no picture
+    relay_down(b, 2);
+    CHECK(image_row(b.r.fake.window_updates.back()) >= 0);
+    CHECK(b.r.fake.images_loaded == std::vector<std::string>{"portrait:beastmaster.wolf"});
+    from_server(b, R"({"t":"win","n":1,"title":"Beasts","rows":[{"heading":"X"},{"portrait":"../x","height":6,"fps":8}]})");
+    CHECK(image_row(b.r.fake.window_updates.back()) < 0);
+    CHECK(shows(b.r.fake.window_updates.back(), "X"));
+    CHECK(b.r.fake.images_loaded.size() == 1u);
+}
+
+TEST_CASE("beastmaster net: the server draws a joined player's window again only when what it shows changed; a closed one is forgotten") {
+    BeastRig b({}, true);
+    Fake::Off o = joined_at_stable(b);
+    relay_down(b, 2);
+    b.seconds(3);
+    CHECK(sent_to(b, 2).empty());
+    REQUIRE(b.reply("beastmaster.rename Grey Ash", 2, 0xBB).find("now called Ash") != std::string::npos);
+    b.seconds(1);
+    REQUIRE(sent_to(b, 2).size() == 1u);
+    CHECK(sent_to(b, 2)[0].find("Ash (wolf") != std::string::npos);
+    CHECK(sent_to(b, 2)[0].find("\"open\"") == std::string::npos);
+    relay_down(b, 2);
+    client_click(b, "", EMF_UI_CLOSED);
+    REQUIRE(has_part(sent_up(b), "\"t\":\"closed\""));
+    relay_up(b, 2, 0xBB);
+    b.reply("beastmaster.rename Ash Grey", 2, 0xBB);
+    b.seconds(2);
+    CHECK(sent_to(b, 2).empty());  // forgotten: nothing more drawn
+    o.cb(kServer, 2, 960, o.user);
+    REQUIRE(sent_to(b, 2).size() == 1u);
+    CHECK(sent_to(b, 2)[0].find("\"open\":true") != std::string::npos);
+    CHECK(sent_to(b, 2)[0].find("\"n\":2") != std::string::npos);
+}
+
+TEST_CASE("beastmaster net: a click from a window opened before the player left or the world loaded again does nothing") {
+    BeastRig b({}, true);
+    Fake::Off o = joined_at_stable(b);
+    relay_down(b, 2);
+    remove_entity(b.r.fake, 2);  // player 2 leaves ...
+    b.seconds(2);
+    add_player(b.r.fake, 2, 0xBB, 30, 10, 0);  // ... and comes back
+    add_entity(b.r.fake, 2);
+    b.seconds(1);
+    client_click(b, "beast.Tusk");
+    relay_up(b, 2, 0xBB);
+    CHECK(sent_to(b, 2).empty());
+    o.cb(kServer, 2, 960, o.user);  // a window again; Tusk's tab; then the world loads again under it
+    relay_down(b, 2);
+    client_click(b, "beast.Tusk");
+    relay_up(b, 2, 0xBB);
+    relay_down(b, 2);
+    REQUIRE(shows(b.r.fake.window_updates.back(), "Talents: "));
+    b.r.fake.session = 3;
+    fire_load(1);
+    b.seconds(1);
+    client_click(b, "make_active");
+    relay_up(b, 2, 0xBB);
+    CHECK(sent_to(b, 2).empty());
+    CHECK(b.reply("beastmaster.list", 2, 0xBB).find("Tusk - boar, loyalty 1, at home, active") == std::string::npos);
+}
+
+TEST_CASE("beastmaster net: when the window cannot be sent, the joined player gets the stable's chat commands") {
+    BeastRig b({}, true);
+    b.r.fake.net_ok = false;  // the core refuses (too large, over the rate, the game said bye)
+    joined_at_stable(b);
+    CHECK(told(b, 2, "/beastmaster active"));
+    b.r.fake.net_sent.clear();
+    b.r.fake.net_ok = true;
+    b.seconds(2);
+    CHECK(sent_to(b, 2).empty());  // no window is held for them
+}
