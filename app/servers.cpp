@@ -654,6 +654,13 @@ Change save_mods_check_settings(const std::wstring& folder_in, const ModsCheckSe
     if (!there && exists(path)) return {false, "Could not read emf\\emf_core.ini."};
     if (bytes.size() > max) return {false, "emf\\emf_core.ini is too large to edit here (over 1 MB)."};
     IniText ini = decode_ini(bytes);
+    // the core reads the file with GetPrivateProfileStringW: a file without a BOM in the ANSI code page, so a value
+    // that is not ASCII needs the file in UTF-16 (the core's own settings switch it the same way)
+    const bool ascii = std::all_of(s.info.begin(), s.info.end(), [](char c) { return static_cast<unsigned char>(c) < 0x80; });
+    if (!ini.utf16 && !ascii) {
+        ini.text = to_utf8_text(ini.text);
+        ini.utf16 = true;
+    }
     ini.text = set_ini_value(ini.text, "net", "mods_check", s.refuse ? "refuse" : "warn");
     ini.text = set_ini_value(ini.text, "net", "mods_required", admins_value(s.required));
     ini.text = set_ini_value(ini.text, "net", "mods_info", s.info);

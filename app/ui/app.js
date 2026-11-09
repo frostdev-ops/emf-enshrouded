@@ -1537,10 +1537,14 @@ function renderServers() {
     srv.game = s.game;
     srv.dirty = false;
     srv.everyone = null;
+    srv.modsDirty = false;
+    srv.refuse = null;
     srv.stop = null;
     srv.logs = { server: '', core: '', server_path: '', core_path: '' };
     srv.drawn = '';
     if (document.activeElement === adminsBox) adminsBox.blur();
+    if (document.activeElement === modsBox) modsBox.blur();
+    if (document.activeElement === modsInfoBox) modsInfoBox.blur();
   }
   // the folder switcher: Game, Server: <name>, ..., Add a server folder...
   const sel = $('folder-switch');

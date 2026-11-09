@@ -26,6 +26,7 @@ constexpr uint64_t kRefuseNoListMs = 60000;    // ready this long without a list
 constexpr uint64_t kRefuseKickDelayMs = 5000;  // from the chat line to the kick
 constexpr uint64_t kRefuseGoneCheckMs = 10000; // from the kick to "still here"
 constexpr size_t kRefuseMaxNamed = 8;          // the chat line names at most this many, then "and N more"
+constexpr const char* kModsCheckSince = "0.6.3";  // the first EMF whose game sends its mod list
 
 // A mod a player's game must have and does not (or has in another version).
 struct Needed {
@@ -89,8 +90,9 @@ inline std::string refuse_text(const std::vector<Needed>& needs, bool no_emf, co
     }
     if (needs.size() > kRefuseMaxNamed) names += ", and " + std::to_string(needs.size() - kRefuseMaxNamed) + " more";
     std::string t;
-    if (no_emf)
-        t = "[EMF] This server needs EMF" + (needs.empty() ? std::string() : " and these mods: " + names) + ".";
+    if (no_emf)  // no list: no EMF, or one older than the mod check
+        t = std::string("[EMF] This server needs EMF ") + kModsCheckSince + " or newer" +
+            (needs.empty() ? std::string() : " and these mods: " + names) + ".";
     else
         t = "[EMF] This server needs these mods: " + names + ".";
     if (!info.empty()) {
@@ -124,8 +126,20 @@ public:
         for (const auto& p : players)
             if (p.account) present.insert(p.account);
         for (auto it = w_.begin(); it != w_.end();) it = present.count(it->first) ? std::next(it) : w_.erase(it);
+        // one entity per account (an old one can linger beside the new): the one already watched, else the first
+        std::map<uint64_t, const RosterSeen*> pick;
         for (const auto& p : players) {
             if (p.host || !p.account || !p.ready) continue;
+            const auto at = pick.find(p.account);
+            if (at == pick.end()) {
+                pick.emplace(p.account, &p);
+                continue;
+            }
+            const auto w = w_.find(p.account);
+            if (w != w_.end() && w->second.entity == p.entity) at->second = &p;
+        }
+        for (const auto& [account, seen] : pick) {
+            const RosterSeen& p = *seen;
             auto it = w_.find(p.account);
             if (it != w_.end() && it->second.entity != p.entity) {  // back as another entity: starts over
                 w_.erase(it);
@@ -187,7 +201,8 @@ private:
                 w.phase = Phase::Ok;
                 return;
             }
-            std::string what = list ? "lacks " : "no EMF (no mod list within 60 s)";
+            std::string what = list ? "lacks " : std::string("no mod list within 60 s (no EMF, or one older than ") +
+                                                     kModsCheckSince + ")";
             if (list)
                 for (size_t i = 0; i < needs.size(); ++i)
                     what += (i ? ", " : "") + needs[i].id + (needs[i].version.empty() ? "" : " " + needs[i].version) +

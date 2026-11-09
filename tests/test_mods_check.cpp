@@ -388,14 +388,14 @@ TEST_CASE("refuse: needs are the server's content and side-both mods and the req
 TEST_CASE("refuse: the words for a player without EMF and for one with other versions") {
     using emf::core::refuse_text;
     CHECK(refuse_text({{'c', "beasts_pack", "2.2.0", ""}, {'u', "hudmod", "", ""}}, true, "nexusmods.com") ==
-          "[EMF] This server needs EMF and these mods: beasts_pack 2.2.0, hudmod. Get them from nexusmods.com. You will "
-          "be disconnected in 5 seconds.");  // the game shows the player's own name before it: "[EMF]" says who speaks
+          "[EMF] This server needs EMF 0.6.3 or newer and these mods: beasts_pack 2.2.0, hudmod. Get them from "
+          "nexusmods.com. You will be disconnected in 5 seconds.");  // the game shows the player's own name before it: "[EMF]" says who speaks
     CHECK(refuse_text({{'c', "beasts_pack", "2.2.0", ""}, {'b', "emberbrand", "1.2.0", "1.1.0"}}, false, "") ==
           "[EMF] This server needs these mods: beasts_pack 2.2.0 (you: none), emberbrand 1.2.0 (you: 1.1.0). Install them "
           "with EMF.exe. You will be disconnected in 5 seconds.");
-    CHECK(refuse_text({}, true, "") == "[EMF] This server needs EMF. You will be disconnected in 5 seconds.");
+    CHECK(refuse_text({}, true, "") == "[EMF] This server needs EMF 0.6.3 or newer. You will be disconnected in 5 seconds.");
     CHECK(refuse_text({}, true, "discord.gg/x.") ==
-          "[EMF] This server needs EMF. Get it from discord.gg/x. You will be disconnected in 5 seconds.");
+          "[EMF] This server needs EMF 0.6.3 or newer. Get it from discord.gg/x. You will be disconnected in 5 seconds.");
     std::vector<Needed> many;
     for (int i = 0; i < 12; ++i) many.push_back({'c', "p" + std::to_string(i), "1.0", ""});
     const std::string t = refuse_text(many, false, "");
@@ -440,8 +440,10 @@ TEST_CASE("refuse: no list within 60 s of being ready means no EMF; the time sta
     CHECK(g.tells.empty());
     g.r.tick({seen(2, 0xCC)}, 190000);
     REQUIRE(g.tells.size() == 1);
-    CHECK(g.tells[0].second.rfind("[EMF] This server needs EMF and these mods: beasts_pack 2.2.0, emberbrand 1.2.0.", 0) == 0);
-    CHECK(g.logged("no EMF") == 1);
+    CHECK(g.tells[0].second.rfind("[EMF] This server needs EMF 0.6.3 or newer and these mods: beasts_pack 2.2.0, "
+                                  "emberbrand 1.2.0.",
+                                  0) == 0);  // an older EMF has no mod list either
+    CHECK(g.logged("no mod list within 60 s (no EMF, or one older than 0.6.3)") == 1);
     RefuseRig late;
     late.r.tick({seen(2, 0xDD)}, 0);
     late.lists[0xDD] = kFull;  // the list came at 30 s
@@ -523,4 +525,30 @@ TEST_CASE("mods check: a player's list is forgotten when their game says hello a
     server.m.on_server_message(2, 0xBB, "e emf 0.6.3\nb emberbrand 1.2.0\n");  // the new list counts
     REQUIRE(server.m.player(0xBB));
     CHECK(server.m.player(0xBB)->mods.size() == 2);
+}
+
+TEST_CASE("mods check: a joined game sends its list again every 5 s until the server's list comes, at most 6 times") {
+    End game({{'e', "emf", "0.6.3"}});
+    for (int i = 0; i < 5; ++i) game.m.client_tick();
+    CHECK(game.up.size() == 1);
+    game.m.client_tick();  // the 6th second without the server's list
+    CHECK(game.up.size() == 2);
+    game.m.on_player_message("e emf 0.6.3\n");  // the server's list: ours got there
+    for (int i = 0; i < 20; ++i) game.m.client_tick();
+    CHECK(game.up.size() == 2);
+    End lost({{'e', "emf", "0.6.3"}});
+    for (int i = 0; i < 100; ++i) lost.m.client_tick();
+    CHECK(lost.up.size() == 6);  // then it gives up
+    lost.session = 2;
+    lost.m.client_tick();
+    CHECK(lost.up.size() == 7);  // a new session starts over
+}
+
+TEST_CASE("refuse: two entities with the same account count once (the one already watched)") {
+    RefuseRig g;
+    g.lists[0xBB] = kLacking;
+    const std::vector<RosterSeen> both = {seen(3, 0xBB), seen(7, 0xBB)};  // an old entity lingers
+    for (uint64_t t = 0; t <= 6000; t += 1000) g.r.tick(both, t);
+    CHECK(g.tells.size() == 1);
+    CHECK(g.kicks.size() == 1);
 }

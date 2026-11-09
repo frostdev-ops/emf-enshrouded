@@ -21,6 +21,10 @@ namespace emf::core {
 constexpr const char* kModsChannel = "emf/mods";
 constexpr uint32_t kModsChannelVersion = 1;
 constexpr size_t kModsCheckMaxPlayers = 256;  // accounts kept on the server (the oldest goes)
+// A joined game sends its list again this many client ticks (seconds) after the last send while the server's list has
+// not come (a list the server could not place, or dropped on a new hello, is not lost for good), at most this often.
+constexpr uint32_t kModsResendTicks = 5;
+constexpr uint32_t kModsSendTries = 6;
 
 class ModsCheck {
 public:
@@ -49,10 +53,18 @@ public:
         if (!d_.joined || !d_.joined()) return;
         if (!d_.server_version || d_.server_version() == 0) return;
         const uint32_t session = d_.client_session ? d_.client_session() : 0;
-        if (sent_ && sent_session_ == session) return;
+        if (!send_started_ || send_session_ != session) {  // a new session: sends start over
+            send_started_ = true;
+            send_session_ = session;
+            tries_ = 0;
+            wait_ = 0;
+        }
+        if (answered_ && answered_session_ == session) return;
+        if (tries_ >= kModsSendTries) return;
+        if (tries_ > 0 && ++wait_ < kModsResendTicks) return;
         if (d_.to_server && d_.to_server(encode_mods(d_.mine ? d_.mine() : std::vector<ModEntry>{}))) {
-            sent_ = true;
-            sent_session_ = session;
+            ++tries_;
+            wait_ = 0;
         }
     }
 
@@ -94,10 +106,12 @@ public:
             told("the server's mod list was not taken: " + why);
             return;
         }
+        const uint32_t session = d_.client_session ? d_.client_session() : 0;
+        answered_ = true;  // the server has our list: no more sends this session
+        answered_session_ = session;
         const ModDiff d = compare_mods(*server, d_.mine ? d_.mine() : std::vector<ModEntry>{});
         if (d_.log) d_.log("mods check: against the server's mods: " + diff_text(d));
         const std::string note = player_note(d);
-        const uint32_t session = d_.client_session ? d_.client_session() : 0;
         if (note.empty() || (noted_ && noted_session_ == session)) return;
         noted_ = true;
         noted_session_ = session;
@@ -163,8 +177,10 @@ private:
     std::map<uint64_t, Seen> seen_;
     std::vector<uint64_t> order_;
     std::set<std::string> told_;
-    bool sent_ = false, noted_ = false;  // the client world's thread
-    uint32_t sent_session_ = 0, noted_session_ = 0;
+    // the client world's thread
+    bool send_started_ = false, answered_ = false, noted_ = false;
+    uint32_t send_session_ = 0, answered_session_ = 0, noted_session_ = 0;
+    uint32_t tries_ = 0, wait_ = 0;
 };
 
 }  // namespace emf::core

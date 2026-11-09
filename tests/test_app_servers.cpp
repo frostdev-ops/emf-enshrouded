@@ -2,6 +2,7 @@
 // Steam, the server's enshrouded_server.json (passwords never leave the parser except as "set"), EMF's chat settings in
 // emf\emf_core.ini, where a mod runs ("side" in mod.json), log redaction and the EMF package that installs a server.
 #include <doctest.h>
+#include <windows.h>
 
 #include <string>
 #include <vector>
@@ -835,4 +836,28 @@ TEST_CASE("app servers: the install plan names the folder it installs into") {
     p.game = L"C:\\Servers\\Ember";
     p.name = "Mod";
     CHECK(plan_json(p, "p1", "").find("\"game\":\"C:\\\\Servers\\\\Ember\"") != std::string::npos);
+}
+
+TEST_CASE("mods check settings: a non-ASCII text turns the file into UTF-16, so the core reads it back the same") {
+    TempGame srv(L"mods_utf16", false);
+    srv.write(L"enshrouded_server.exe", "fake");
+    srv.write(L"emf\\emf_core.ini", "[chat]\r\nadmins=0x1\r\n");
+    ModsCheckSettings s;
+    s.refuse = true;
+    s.info = "Last ned p\xC3\xA5 Nexus \xE2\x80\x93 EMF";
+    REQUIRE(save_mods_check_settings(srv.dir, s).ok);
+    const std::string after = srv.read(L"emf\\emf_core.ini");
+    REQUIRE(after.size() > 2);
+    CHECK(after.substr(0, 2) == "\xFF\xFE");
+    const std::wstring ini = srv.dir + L"\\emf\\emf_core.ini";
+    wchar_t buf[512] = {};
+    GetPrivateProfileStringW(L"net", L"mods_info", L"", buf, 512, ini.c_str());  // as the core reads it
+    CHECK(std::wstring(buf) == L"Last ned på Nexus – EMF");
+    GetPrivateProfileStringW(L"chat", L"admins", L"", buf, 512, ini.c_str());
+    CHECK(std::wstring(buf) == L"0x1");  // the file's other keys stay
+    CHECK(read_mods_check_settings(srv.dir).info == s.info);
+    srv.write(L"emf\\emf_core.ini", "[net]\r\n");  // plain ASCII leaves an ASCII file as it is
+    s.info = "nexusmods.com";
+    REQUIRE(save_mods_check_settings(srv.dir, s).ok);
+    CHECK(srv.read(L"emf\\emf_core.ini").substr(0, 5) == "[net]");
 }
