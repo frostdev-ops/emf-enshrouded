@@ -2,7 +2,7 @@
 // The mod check on join: what an EMF game and an EMF server tell each other about their mods (the core channel
 // emf/mods), and what is said when they differ. Pure.
 //   The list: one entry per line, "kind id version". kind: c = an EML content mod (it changes the game's data), b = a mod
-//   whose mod.json says "side": "both", s = "server", l = "client", u = no side. At most kMaxModEntries entries and
+//   whose mod.json says "side": "both", s = "server", l = "client", u = no side, e = EMF itself ("e emf 0.6.3"). At most kMaxModEntries entries and
 //   kMaxModListBytes bytes; a line that is not an entry is skipped, the first of a repeated id counts.
 //   Compared: the server's c and b entries by id and version (a player's game without one, or with another version,
 //   "misses" it); the player's own c and b entries the server lacks are "extra" (harmless for the world: no note).
@@ -84,7 +84,7 @@ inline std::optional<std::vector<ModEntry>> decode_mods(std::string_view text, s
         // "k id version": exactly three fields
         if (line.size() < 5 || line[1] != ' ') continue;
         const char kind = line[0];
-        if (kind != 'c' && kind != 'b' && kind != 's' && kind != 'l' && kind != 'u') continue;
+        if (kind != 'c' && kind != 'b' && kind != 's' && kind != 'l' && kind != 'u' && kind != 'e') continue;
         const std::string_view rest = line.substr(2);
         const size_t sp = rest.find(' ');
         if (sp == std::string_view::npos) continue;
