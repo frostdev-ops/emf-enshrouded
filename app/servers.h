@@ -118,6 +118,17 @@ AdminList parse_admin_lines(const std::string& text);
 // Writes admins, everyone (and players when it is on or the file has it) into emf\emf_core.ini, keeping its other keys,
 // its comments and its encoding (UTF-16 stays UTF-16). The file is made when it is missing.
 Change save_chat_settings(const std::wstring& folder, const ChatSettings& s);
+// ---- the mod check on join ([net] mods_check, mods_required, mods_info; src/core/mods_policy.h reads them the same way) ----
+struct ModsCheckSettings {
+    bool refuse = false;                // mods_check = refuse (the default is warn)
+    std::vector<std::string> required;  // mod ids every player must have too, lower case
+    std::string info;                   // where to get them, said to a refused player
+};
+ModsCheckSettings parse_mods_check_settings(const std::string& ini_text);
+ModsCheckSettings read_mods_check_settings(const std::wstring& folder);
+// Writes the three keys into [net] of emf\emf_core.ini (required joined by ", "), keeping the file's other keys, comments
+// and encoding. The file is made when it is missing.
+Change save_mods_check_settings(const std::wstring& folder, const ModsCheckSettings& s);
 // Accounts EMF refused, from emf_core.log: one per line the core wrote, "[<time> t<thread>] chat command refused from
 // account 0x<16 hex digits>: <what was typed> (to allow it, ...)", the words right after the line's prefix, so a player
 // cannot list an account by typing them. Each account once (its newest line), the newest last.

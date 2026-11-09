@@ -300,6 +300,43 @@ TEST_CASE("app server bridge: chat settings are checked and saved; a refused acc
     CHECK_FALSE(flag(*res, "ok"));
 }
 
+TEST_CASE("server_mods_save: bad ids are refused and named; good ones are saved and the server tab shows them") {
+    World w;
+    w.host.dir = w.server.dir;
+    Bridge b(w.host);
+    b.handle(R"({"cmd":"state"})");
+    auto res = last_of(b.handle(R"({"cmd":"server_mods_save","refuse":true,"required":"beastmaster\nBad Id!, ok","info":"x"})"), "result");
+    REQUIRE(res);
+    CHECK_FALSE(flag(*res, "ok"));
+    CHECK(text(*res, "error").find("Not saved") != std::string::npos);
+    CHECK(text(*res, "error").find("Id!") != std::string::npos);
+    CHECK(text(*res, "error").find("a-z") != std::string::npos);
+    CHECK_FALSE(w.server.has(L"emf\\emf_core.ini"));  // nothing saved
+
+    auto out = b.handle(R"({"cmd":"server_mods_save","refuse":true,"required":"Beastmaster\r\nother.mod, third\n","info":"Get them on Nexus"})");
+    res = last_of(out, "result");
+    REQUIRE(res);
+    CHECK(flag(*res, "ok"));
+    CHECK(text(*res, "text").find("next start") != std::string::npos);
+    const ModsCheckSettings saved = read_mods_check_settings(w.server.dir);
+    CHECK(saved.refuse);
+    CHECK(saved.required == std::vector<std::string>{"beastmaster", "other.mod", "third"});
+    CHECK(saved.info == "Get them on Nexus");
+    b.handle(R"({"cmd":"state"})");
+    const auto st = last_of(b.handle(R"({"cmd":"state"})"), "state");
+    REQUIRE(st);
+    const json::Value* mods = st->get("server_tab")->get("mods");
+    REQUIRE(mods);
+    CHECK(flag(*mods, "refuse"));
+    CHECK(mods->get("required")->arr.size() == 3);
+    CHECK(text(*mods, "info") == "Get them on Nexus");
+    // only for a server folder
+    w.host.dir = w.game.dir;
+    b.handle(R"({"cmd":"state"})");
+    res = last_of(b.handle(R"({"cmd":"server_mods_save","refuse":false,"required":"","info":""})"), "result");
+    CHECK_FALSE(flag(*res, "ok"));
+}
+
 TEST_CASE("app server bridge: start, then stop on a worker with progress; a stop that fails offers Stop now") {
     World w;
     w.host.dir = w.server.dir;

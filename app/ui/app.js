@@ -1424,6 +1424,8 @@ const srv = {
   found: null,     // the server folders Steam has (the add sheet)
   everyone: null,  // the switch while it differs from what is saved (null: as saved)
   dirty: false,    // the admins box has changes that are not saved
+  refuse: null,    // the players' mods choice while it differs from what is saved (null: as saved)
+  modsDirty: false, // the mods boxes have changes that are not saved
   drawn: '',
   switchKey: '',
   game: null,      // the folder the tab was drawn for
@@ -1439,6 +1441,22 @@ adminsBox.addEventListener('input', () => {
   const note = $('srv-chat-note');
   if (note) note.textContent = 'Not saved yet.';
 });
+// The players' mods card keeps its two boxes the same way.
+const modsBox = el('textarea', {
+  id: 'srv-mods-required', rows: '3', spellcheck: 'false', autocomplete: 'off', placeholder: 'beastmaster',
+  'aria-label': 'Mods every player must have, one id per line',
+});
+const modsInfoBox = el('input', {
+  id: 'srv-mods-info', type: 'text', maxlength: '200', autocomplete: 'off', spellcheck: 'false',
+  'aria-label': 'Where to get the mods, said to refused players',
+});
+const modsTyped = () => {
+  srv.modsDirty = true;
+  const note = $('srv-mods-note');
+  if (note) note.textContent = 'Not saved yet.';
+};
+modsBox.addEventListener('input', modsTyped);
+modsInfoBox.addEventListener('input', modsTyped);
 const serverLogBox = el('pre', { class: 'log', id: 'srv-log', tabindex: '0' });
 
 function onServerMessage(m) {
@@ -1484,6 +1502,10 @@ function onServerMessage(m) {
     if (m.cmd === 'server_chat_save' && m.ok) {
       srv.dirty = false;
       srv.everyone = null;
+    }
+    if (m.cmd === 'server_mods_save' && m.ok) {
+      srv.modsDirty = false;
+      srv.refuse = null;
     }
     if (m.cmd === 'server_install_emf' && !m.ok && modal && modal.mode === 'busy') closeModal();
     if (m.cmd === 'folder_switch' && !m.ok) {  // the list shows the folder shown again
@@ -1627,7 +1649,10 @@ function renderServerPage() {
   }
   const chat = t.chat || { admins: [] };
   if (!srv.dirty && document.activeElement !== adminsBox) adminsBox.value = (chat.admins || []).join('\n');
-  const drawnNow = JSON.stringify([t, s.emf_installed, s.emf_version, s.game, srv.everyone, srv.logWhich, srv.stop, srv.dirty]);
+  const mods = t.mods || { required: [] };
+  if (!srv.modsDirty && document.activeElement !== modsBox) modsBox.value = (mods.required || []).join('\n');
+  if (!srv.modsDirty && document.activeElement !== modsInfoBox) modsInfoBox.value = mods.info || '';
+  const drawnNow = JSON.stringify([t, s.emf_installed, s.emf_version, s.game, srv.everyone, srv.logWhich, srv.stop, srv.dirty, srv.refuse, srv.modsDirty]);
   if (drawnNow === srv.drawn && page.childElementCount) {
     renderServerLog();
     return;
@@ -1708,6 +1733,23 @@ function renderServerPage() {
       el('span', { class: 'muted small', id: 'srv-chat-note' }, srv.dirty || srv.everyone !== null ? 'Not saved yet.'
         : 'In emf\\emf_core.ini ([chat]); the server reads it when it starts.')));
 
+  // ---- the mod check on join ----
+  const refuse = srv.refuse === null ? !!mods.refuse : srv.refuse;
+  const pickRefuse = (v) => { srv.refuse = v; srv.modsDirty = true; renderServerPage(); };
+  const modsCard = el('div', { class: 'card account', id: 'srv-mods' },
+    el('p', {}, 'EMF compares each joining player’s mods with this server’s. By default it only warns.'),
+    el('fieldset', { class: 'srv-close' }, el('legend', {}, 'When a player’s mods differ'),
+      radio('srv-mods-mode', 'warn', !refuse, 'Warn players whose mods differ (default)', () => pickRefuse(false)),
+      radio('srv-mods-mode', 'refuse', refuse, 'Refuse them: they are told why in the chat, then kicked after 5 seconds (admins never)', () => pickRefuse(true))),
+    el('label', { class: 'srv-label', for: 'srv-mods-required' }, 'Mods every player must have, one id per line (content packs and mods marked for both sides are always checked)'),
+    modsBox,
+    el('label', { class: 'srv-label', for: 'srv-mods-info' }, 'Where to get them (said to refused players)'),
+    modsInfoBox,
+    el('div', { class: 'row' },
+      el('button', { class: 'primary', type: 'button', id: 'srv-mods-save', onclick: () => send({ cmd: 'server_mods_save', refuse, required: modsBox.value, info: modsInfoBox.value }) }, 'Save'),
+      el('span', { class: 'muted small', id: 'srv-mods-note' }, srv.modsDirty ? 'Not saved yet.'
+        : 'In emf\\emf_core.ini ([net]); the server reads it when it starts.')));
+
   // ---- EMF in this server ----
   const pkg = t.package || {};
   const order = compareVersions(pkg.version, s.emf_version);
@@ -1752,6 +1794,7 @@ function renderServerPage() {
     runCard,
     el('h3', { class: 'section-title' }, 'Server (enshrouded_server.json)'), configCard,
     el('h3', { class: 'section-title' }, 'EMF chat commands'), chatCard,
+    el('h3', { class: 'section-title' }, 'Players’ mods'), modsCard,
     el('h3', { class: 'section-title' }, 'EMF in this server'), emfCard,
     logHead, serverLogBox);
   renderServerLog();

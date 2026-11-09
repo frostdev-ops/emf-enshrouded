@@ -556,6 +556,10 @@ stopping it, and its logs.
     words into the chat cannot list another account (what a player types is in the middle of that line, never at its
     start). Add as admin drops the entries the core skips (a Steam64 id) and refuses a line that would be too long.
   - The server reads `[chat]` when it starts; when it runs, the message says to restart it.
+- **Players' mods** (`[net]` `mods_check`, `mods_required`, `mods_info` in `emf\emf_core.ini`): warn players whose mods
+  differ (the default) or refuse them (told why in the chat, kicked after 5 seconds, admins never), the mod ids every
+  player must have too (one per line; a bad id is named and nothing is saved), and where to get them (at most 200
+  bytes). It is read through the core's own `parse_mods_policy`; the file's other keys, comments and encoding stay.
 - **Start and Stop**:
   - **Start** runs `enshrouded_server.exe` with its folder as the working folder, in a console window of its own
     (minimized), inside a job object EMF.exe holds (it only groups the server's processes: nothing is ended when it

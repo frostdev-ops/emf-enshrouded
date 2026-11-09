@@ -4,10 +4,11 @@
 //
 // Page -> host: {cmd: "folder_switch" {path} | "folder_add" {path} | "folder_pick_server" | "folder_forget" {path}
 //                | "server_detect" | "server_chat_save" {everyone, admins, players} | "server_admin_add" {account}
+//                | "server_mods_save" {refuse, required, info}
 //                | "server_start" | "server_stop" {shared_ok} | "server_kill" | "server_on_close" {stop} | "server_logs"
 //                | "server_install_emf"}
 // Host -> page: the state's "folders" [{kind, path, label, current, missing}] and "server_tab" (null for a game folder:
-//               {config, chat, refused [{account, time, command}], process {running, pid, started_here}, stopping,
+//               {config, chat, mods {refuse, required [ids], info}, refused [{account, time, command}], process {running, pid, started_here}, stopping,
 //               stop_failed, stop_text, stop_on_close, can_start, package {ok, version, error, mods}, installing,
 //               emf_here, log_path, core_log_path}),
 //               {type: "server_detect", found: [{path, name, added}]},
@@ -70,6 +71,7 @@ private:
         bool server = false;
         ServerConfig cfg;
         ChatSettings chat;
+        ModsCheckSettings mods;
         std::vector<RefusedAccount> refused;
         std::string log_key;  // emf_core.log's size and time when `refused` was read
         bool exe = false;     // enshrouded_server.exe is there

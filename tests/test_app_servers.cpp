@@ -322,6 +322,55 @@ TEST_CASE("app servers: chat settings are saved into emf\\emf_core.ini keeping i
     CHECK_FALSE(read_chat_settings(srv.dir).everyone);
 }
 
+TEST_CASE("mods check settings: read from [net]; missing keys mean warn with nothing required") {
+    const ModsCheckSettings s = parse_mods_check_settings(
+        "[net]\r\nmods_check = Refuse\r\nmods_required=Beastmaster, my.mod  other-mod\r\nmods_info=Get them at \"example.org\"\r\n");
+    CHECK(s.refuse);
+    CHECK(s.required == std::vector<std::string>{"beastmaster", "my.mod", "other-mod"});
+    CHECK(s.info.find("example.org") != std::string::npos);
+    const ModsCheckSettings none = parse_mods_check_settings("[chat]\nmods_check=refuse\n");  // not in [net]
+    CHECK_FALSE(none.refuse);
+    CHECK(none.required.empty());
+    CHECK(none.info.empty());
+    CHECK_FALSE(parse_mods_check_settings("[net]\nmods_check=maybe\n").refuse);
+    TempGame srv(L"mods_read", false);
+    srv.write(L"emf\\emf_core.ini", "[net]\r\nmods_check=refuse\r\n");
+    CHECK(read_mods_check_settings(srv.dir).refuse);
+    CHECK_FALSE(read_mods_check_settings(L"C:\\no\\such\\folder").refuse);
+}
+
+TEST_CASE("mods check settings: saving keeps the file's other lines and comments") {
+    TempGame srv(L"mods_save", false);
+    srv.write(L"enshrouded_server.exe", "fake");
+    ModsCheckSettings s;
+    s.refuse = true;
+    s.required = {"beastmaster", "other"};
+    s.info = "Nexus: EMF";
+    REQUIRE(save_mods_check_settings(srv.dir, s).ok);  // no ini yet: the file is made
+    CHECK(srv.read(L"emf\\emf_core.ini") == "[net]\r\nmods_check=refuse\r\nmods_required=beastmaster, other\r\nmods_info=Nexus: EMF\r\n");
+    srv.write(L"emf\\emf_core.ini", "[chat]\r\n; who\r\nadmins=0x1\r\n[net]\r\n; net settings\r\nport=1\r\nmods_check=warn\r\n[console]\r\nwindow=0\r\n");
+    REQUIRE(save_mods_check_settings(srv.dir, s).ok);
+    CHECK(srv.read(L"emf\\emf_core.ini") ==
+          "[chat]\r\n; who\r\nadmins=0x1\r\n[net]\r\n; net settings\r\nport=1\r\nmods_check=refuse\r\nmods_required=beastmaster, other\r\n"
+          "mods_info=Nexus: EMF\r\n[console]\r\nwindow=0\r\n");
+    const ModsCheckSettings back = read_mods_check_settings(srv.dir);
+    CHECK(back.refuse);
+    CHECK(back.required.size() == 2);
+    CHECK(back.info == "Nexus: EMF");
+    s.refuse = false;
+    REQUIRE(save_mods_check_settings(srv.dir, s).ok);
+    CHECK(srv.read(L"emf\\emf_core.ini").find("mods_check=warn") != std::string::npos);
+    // a UTF-16 ini stays UTF-16
+    const std::wstring w16 = L"\xFEFF[net]\r\nmods_check=refuse\r\n";
+    srv.write(L"emf\\emf_core.ini", std::string(reinterpret_cast<const char*>(w16.data()), w16.size() * 2));
+    CHECK(read_mods_check_settings(srv.dir).refuse);
+    REQUIRE(save_mods_check_settings(srv.dir, s).ok);
+    const std::string after = srv.read(L"emf\\emf_core.ini");
+    REQUIRE(after.size() > 2);
+    CHECK(after.substr(0, 2) == "\xFF\xFE");
+    CHECK_FALSE(read_mods_check_settings(srv.dir).refuse);
+}
+
 TEST_CASE("app servers: accounts the server refused are listed from emf_core.log, each once, newest last") {
     const std::string log =
         "[11:05:41.520 t1] players' chat commands: on, for 0 admin account(s)\n"

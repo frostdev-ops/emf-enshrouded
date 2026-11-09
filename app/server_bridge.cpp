@@ -6,6 +6,7 @@
 #include <cstdlib>
 
 #include "core/json.h"
+#include "core/mods_policy.h"
 #include "json_out.h"
 #include "locate.h"
 #include "server_process.h"
@@ -153,6 +154,7 @@ ServerDesk::Snapshot ServerDesk::read_snapshot(const std::wstring& folder, bool 
     if (server) {
         s.cfg = read_server_config(folder, secrets);
         s.chat = read_chat_settings(folder);
+        s.mods = read_mods_check_settings(folder);
         const std::wstring core_log = folder + L"\\emf\\emf_core.log";
         s.log_key = file_key(core_log);
         if (before && !before->log_key.empty() && before->log_key == s.log_key && text_same(before->folder, folder))
@@ -246,6 +248,7 @@ std::string ServerDesk::state_fields(const FolderState& folder) {
         Obj o;
         o.raw("config", server_config_json(sn.cfg));
         o.raw("chat", Obj().boolean("players", sn.chat.players).boolean("everyone", sn.chat.everyone).strs("admins", sn.chat.admins).text());
+        o.raw("mods", Obj().boolean("refuse", sn.mods.refuse).strs("required", sn.mods.required).str("info", sn.mods.info).text());
         o.raw("refused", json_list(refused));
         o.raw("process", Obj().boolean("running", pid != 0).num("pid", pid).boolean("started_here", pid && host_.server_started_here(pid)).text());
         o.boolean("stopping", stopping_ && stop_here).boolean("stop_failed", stop_failed_ && stop_here && pid != 0 && pid == stop_pid_);
@@ -383,6 +386,34 @@ ServerDesk::Reply ServerDesk::handle(const std::string& cmd, const core::json::V
         if (!c.ok) return say(false, c.error);
         return say(true, "", std::string(cmd == "server_admin_add" ? "Added. " : "") +
                                  "Saved in emf\\emf_core.ini. The server reads it at its next start" +
+                                 (pid ? ": restart it to use the change." : "."));
+    }
+    if (cmd == "server_mods_save") {
+        std::vector<std::string> problems;
+        const core::ModsPolicy policy = core::parse_mods_policy(bool_of(m, "refuse").value_or(false) ? "refuse" : "warn",
+                                                                text_of(m, "required"), text_of(m, "info"), &problems);
+        std::string bad;
+        size_t bad_count = 0;
+        for (const auto& p : problems) {
+            const size_t a = p.find("mods_required: \"");
+            if (a == std::string::npos) continue;
+            const size_t from = a + 16, to = p.find('"', from);
+            if (to == std::string::npos) continue;
+            if (++bad_count <= 5) bad += (bad_count > 1 ? ", " : "") + p.substr(from, to - from);
+        }
+        if (bad_count)
+            return say(false, "Not saved: " + bad + (bad_count == 1 ? " is" : " are") +
+                                  " not a mod id. A mod id is 1-48 characters of a-z, 0-9, _ . - , like beastmaster (it is the "
+                                  "id in the mod's mod.json and in the Mods tab).");
+        ModsCheckSettings s;
+        s.refuse = policy.refuse;
+        s.required = policy.required;
+        s.info = policy.info;
+        const Change c = save_mods_check_settings(dir, s);
+        r.state = true;
+        snap_.reset();
+        if (!c.ok) return say(false, c.error);
+        return say(true, "", std::string("Saved in emf\\emf_core.ini. The server reads it at its next start") +
                                  (pid ? ": restart it to use the change." : "."));
     }
     if (cmd == "server_start") {

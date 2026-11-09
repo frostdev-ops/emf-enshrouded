@@ -10,6 +10,7 @@
 #include <optional>
 
 #include "core/json.h"
+#include "core/mods_policy.h"
 #include "json_out.h"
 #include "locate.h"
 #include "text.h"
@@ -623,6 +624,39 @@ Change save_chat_settings(const std::wstring& folder_in, const ChatSettings& s) 
     ini.text = set_ini_value(ini.text, "chat", "admins", admins_value(s.admins));
     ini.text = set_ini_value(ini.text, "chat", "everyone", s.everyone ? "1" : "0");
     if (s.players || before.has_players_key) ini.text = set_ini_value(ini.text, "chat", "players", s.players ? "1" : "0");
+    std::error_code ec;
+    std::filesystem::create_directories(std::filesystem::path(folder + L"\\emf"), ec);
+    return write_file_whole(path, encode_ini(ini), "emf\\emf_core.ini");
+}
+
+ModsCheckSettings parse_mods_check_settings(const std::string& ini_text) {
+    const auto get = [&](const char* key) { return ini_value(ini_text, "net", key).value_or(std::string()); };
+    const core::ModsPolicy p = core::parse_mods_policy(get("mods_check"), get("mods_required"), get("mods_info"), nullptr);
+    ModsCheckSettings s;
+    s.refuse = p.refuse;
+    s.required = p.required;
+    s.info = p.info;
+    return s;
+}
+
+ModsCheckSettings read_mods_check_settings(const std::wstring& folder) {
+    std::string bytes;
+    read_file(without_trailing_slashes(folder) + L"\\emf\\emf_core.ini", bytes, 1u << 20);
+    return parse_mods_check_settings(decode_ini(bytes).text);
+}
+
+Change save_mods_check_settings(const std::wstring& folder_in, const ModsCheckSettings& s) {
+    const std::wstring folder = without_trailing_slashes(folder_in);
+    const std::wstring path = folder + L"\\emf\\emf_core.ini";
+    const size_t max = 1u << 20;
+    std::string bytes;
+    const bool there = read_file(path, bytes, max + 1);
+    if (!there && exists(path)) return {false, "Could not read emf\\emf_core.ini."};
+    if (bytes.size() > max) return {false, "emf\\emf_core.ini is too large to edit here (over 1 MB)."};
+    IniText ini = decode_ini(bytes);
+    ini.text = set_ini_value(ini.text, "net", "mods_check", s.refuse ? "refuse" : "warn");
+    ini.text = set_ini_value(ini.text, "net", "mods_required", admins_value(s.required));
+    ini.text = set_ini_value(ini.text, "net", "mods_info", s.info);
     std::error_code ec;
     std::filesystem::create_directories(std::filesystem::path(folder + L"\\emf"), ec);
     return write_file_whole(path, encode_ini(ini), "emf\\emf_core.ini");
