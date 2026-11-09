@@ -111,6 +111,9 @@ public:
         return s;
     }
 
+    // This game's own list (with its "e emf <version>" entry).
+    std::vector<ModEntry> mine() const { return d_.mine ? d_.mine() : std::vector<ModEntry>{}; }
+
     std::optional<Seen> player(uint64_t account) const {
         std::lock_guard<std::mutex> l(m_);
         const auto it = seen_.find(account);

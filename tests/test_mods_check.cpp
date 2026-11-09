@@ -182,6 +182,7 @@ TEST_CASE("mods check: the server keeps a player's list, logs the differences on
     CHECK(seen->emf == "0.6.3");
     CHECK(seen->diff.find("beasts_pack") != std::string::npos);
     CHECK(server.m.server_has_content());
+    CHECK(server.m.mine().size() == 3);
     server.m.on_server_message(5, 0xBB, "e emf 0.6.3\nc beasts_pack 2.2.0\nb emberbrand 1.2.0\n");  // back, updated
     REQUIRE(server.m.player(0xBB));
     CHECK(server.m.player(0xBB)->player == 5);

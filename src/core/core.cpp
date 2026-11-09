@@ -66,12 +66,17 @@
 #include "world_jobs.h"
 #include "mods_check_service.h"
 #include "mods_check_content.h"
+#include "mods_policy.h"
+#include "mods_refuse.h"
+#include "game_kick.h"
 
 // The Vulkan layer entry point lives in emf_core_lib (a static library): keep it in emf_core.dll's exports.
 #pragma comment(linker, "/include:emf_vk_negotiate")
 
 namespace {
 emf::core::ModsCheck* g_mods_check = nullptr;  // the mod check on join (core channel emf/mods)
+emf::core::ModsRefuse* g_mods_refuse = nullptr;  // [net] mods_check=refuse (null: warn only)
+emf::core::HandleAccountActionFn g_kick_fn = nullptr;  // the game's handleAccountAction (refuse only)
 
 // players.mods: each player in the server world, with their EMF and what differs from this server's mods.
 void cmd_players_mods(EmfWorld* world, int, const char* const*, void*) {
@@ -92,13 +97,17 @@ void cmd_players_mods(EmfWorld* world, int, const char* const*, void*) {
             continue;
         }
         const auto seen = g_mods_check && p.account ? g_mods_check->current(p.account, p.entity) : std::nullopt;
+        const std::string refused = g_mods_refuse && p.account ? g_mods_refuse->state_of(p.account) : std::string();
+        const std::string tail = refused.empty() ? std::string() : "; " + refused;
         if (seen)
-            emf::core::command_reply_line(who + ": EMF " + (seen->emf.empty() ? std::string("?") : seen->emf) + ", " + seen->diff);
+            emf::core::command_reply_line(who + ": EMF " + (seen->emf.empty() ? std::string("?") : seen->emf) + ", " +
+                                          seen->diff + tail);
         else
             emf::core::command_reply_line(who + ": no EMF, or its mod list has not come" +
                                           std::string(g_mods_check && g_mods_check->server_has_content()
                                                           ? " (content mods cannot be checked)"
-                                                          : ""));
+                                                          : "") +
+                                          tail);
     }
 }
 constexpr const char* kVersion = emf::core::version_string();
@@ -1387,11 +1396,88 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             static std::atomic<bool> yes{false};
             const uint64_t now = GetTickCount64();
             if (now - at.load() >= 2000) {
-                yes = g_mods_check && g_mods_check->has_shared_mods();
+                yes = g_mods_refuse || (g_mods_check && g_mods_check->has_shared_mods());  // refuse asks every game
                 at = now;
             }
             return yes.load();
         });
+    }
+    // [net] mods_check=refuse (the owner's option; warn is the default): a player whose game lacks a required mod (or has
+    // no EMF) is told why in the chat, then kicked 5 s later with the game's own admin kick (handleAccountAction with a
+    // Kick event; never an admin, never the host). Only with both kick signatures on this build, with the greeting on.
+    {
+        const std::wstring ini = dir + L"\\emf\\emf_core.ini";
+        wchar_t check[64] = {}, required[2048] = {}, info[512] = {};
+        GetPrivateProfileStringW(L"net", L"mods_check", L"", check, 64, ini.c_str());
+        GetPrivateProfileStringW(L"net", L"mods_required", L"", required, 2048, ini.c_str());
+        GetPrivateProfileStringW(L"net", L"mods_info", L"", info, 512, ini.c_str());
+        std::vector<std::string> problems;
+        auto policy = emf::core::parse_mods_policy(utf8(check), utf8(required), utf8(info), &problems);
+        for (const auto& p : problems) emf::logf("mods check: %s", p.c_str());
+        if (policy.refuse) {
+            const auto& handler = g_state->sigs[static_cast<size_t>(emf::Sig::HandleAccountAction)];
+            const auto& call = g_state->sigs[static_cast<size_t>(emf::Sig::SessionRequestKick)];
+            const char* off = nullptr;
+            if (!emf::is_usable(handler, g_state->known_build) || !emf::is_usable(call, g_state->known_build))
+                off = "the game's kick was not found on this game build";
+            else if (GetPrivateProfileIntW(L"net", L"enabled", 1, ini.c_str()) == 0)
+                off = "[net] enabled=0 (no mod lists come)";
+            else if (GetPrivateProfileIntW(L"net", L"greet", 1, ini.c_str()) == 0)
+                off = "[net] greet=0 (no game is asked for its mods)";
+            if (off) {
+                emf::logf("mods check: [net] mods_check=refuse is off: %s; players are only warned", off);
+                policy.refuse = false;
+            }
+        }
+        if (policy.refuse) {
+            g_kick_fn = reinterpret_cast<emf::core::HandleAccountActionFn>(
+                g_state->sigs[static_cast<size_t>(emf::Sig::HandleAccountAction)].addr);
+            std::string req;
+            for (const auto& id : policy.required) req += (req.empty() ? "" : ", ") + id;
+            emf::logf("mods check: refuse (players without EMF or without these mods are told why, then kicked 5 s later; "
+                      "required: the content and side-both mods%s%s; never admins or the host)",
+                      req.empty() ? "" : ", ", req.c_str());
+            static std::unique_ptr<emf::core::ModsRefuse> refuse;
+            refuse = std::make_unique<emf::core::ModsRefuse>(std::move(policy), emf::core::ModsRefuse::Deps{
+                [](uint64_t account, uint32_t entity) -> std::optional<std::vector<emf::core::ModEntry>> {
+                    const auto s = g_mods_check ? g_mods_check->current(account, entity) : std::nullopt;
+                    if (!s) return std::nullopt;
+                    return s->mods;
+                },
+                [] { return g_mods_check ? g_mods_check->mine() : std::vector<emf::core::ModEntry>{}; },
+                [](uint32_t, uint64_t account) {
+                    // the game's CanKickBan (its kick skips them anyway), or an account in [chat] admins
+                    for (uint64_t a : g_net_policy.admins)
+                        if (a == account) return true;
+                    uint8_t* const server = emf::core::chat_server();
+                    std::vector<uint8_t> records(static_cast<size_t>(emf::core::server_layout::kConnectionSize) *
+                                                     emf::core::server_layout::kConnectionCount,
+                                                 0);
+                    if (!server || !emf::seh_read(server + emf::core::server_layout::kConnections, records.data(),
+                                                  records.size()))
+                        return false;
+                    return emf::core::connection_is_admin(records.data(), account).value_or(false);
+                },
+                [](uint32_t entity, uint64_t account, const std::string& text) {
+                    const auto c = net_connection_of(entity);
+                    bool ok = true;
+                    for (const auto& line : emf::core::chat_lines(text, 2))
+                        ok = emf::core::queue_chat_tell(c ? c->first : 0, account, line) && ok;
+                    return ok;
+                },
+                [](uint64_t account) { return emf::core::kick_account(g_kick_fn, emf::core::chat_server(), account); },
+                [](const std::string& s) { emf::logf("%s", s.c_str()); }});
+            g_mods_refuse = refuse.get();
+            // the server world's thread (the game runs its own account actions there too), once a second
+            g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
+                static ULONGLONG last = 0;
+                if (!g_mods_refuse || emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() != EMF_WORLD_SERVER) return;
+                const ULONGLONG now = GetTickCount64();
+                if (now - last < 1000) return;
+                last = now;
+                g_mods_refuse->tick(emf::core::read_players(emf::core::api_table(), w), now);
+            }, nullptr);
+        }
     }
     // a joined game: once a second, its list goes to an EMF server that has emf/mods (once per session)
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
