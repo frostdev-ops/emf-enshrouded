@@ -670,6 +670,38 @@ api->net_to_player(w, from->player, "mymod/show", "ok", 2);  // the server -> th
   gate). Needs two engine functions (`ChatClientSend`, `ClientOutboxFlush`) that `emf_sigcheck` finds on the known
   builds; where they are missing a joined game cannot send, the server end and the loopback still work.
 
+## v28: player events
+
+Who joins, leaves or dies on the server world (the host's game or a dedicated server), once for every mod, instead of
+each mod comparing the player list itself.
+
+```c
+static void on_player(EmfWorld* w, const EmfPlayerEvent* e, void* user) {
+    if (e->kind == EMF_PLAYER_JOINED && !e->host) api->chat_tell(w, e->player, "Welcome!");
+}
+api->on_player(on_player, NULL);  /* in emf_mod_load, for "died" too */
+```
+
+| C++ (`emf.hpp`) | C | What |
+|---|---|---|
+| `emf::on_player(mod, f)` | `on_player(cb, user)` | `cb(world, event, user)` for each event on the server world's thread, after its step. False for a null cb. A callback that faults is switched off and named in `emf_core.log`. |
+
+`EmfPlayerEvent`: `size`, `kind`, `account` (as `player_account` and the command sender give it), `player` (the entity
+in the server world; for left, the one they had), `killer` (died only), `host` (1 = the host's own player), `name` (the
+chat name, "" where players' chat is off).
+
+- **`EMF_PLAYER_JOINED`**: the player is in the world (PlayerState and a position), their account is known and their
+  game is ready to play (`PlayerInput.fromClientIsReadyForGameplay`; the host's own player at once). Once per
+  arrival. Nothing comes before a world's save has loaded: 1 s after the load event (the mods' world data first)
+  everyone there joins, the host first, then by entity id; a new world starts over without "left" events.
+- **`EMF_PLAYER_LEFT`**: that account's entity is gone. A player back as another entity: left, then joined. None when
+  the world itself ends.
+- **`EMF_PLAYER_DIED`**: a joined player died (the game's `EntityDiedEvent`); `killer` is the root source of the last
+  hit on them within 10 s (`HitEvent`; not themselves), else 0. The core asks the event relay for both events at the
+  first `on_player`, which therefore has to come before the first world starts (in `emf_mod_load`, or a Lua script's
+  first run); a later first call gets joined and left only (logged).
+- The player list is read at most 4 times a second and only while a mod watches.
+
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
 
 ## SDK headers (header-only C++, no ABI)

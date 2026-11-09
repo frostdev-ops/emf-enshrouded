@@ -1282,3 +1282,51 @@ TEST_CASE("lua 1.10: without a hosted world or on an older core, world settings 
         CHECK(r.fake.replies[0] == "nil false 0 true false no world is hosted here");
     }
 }
+
+TEST_CASE("lua 1.20: emf.on_player_joined, _left and _died get the world and the player's info; one core listener") {
+    Rig r(L"on_player");
+    r.api.on_player = f_on_player;
+    add_script(r.dir, "pj",
+               "local function show(what, w, p)\n"
+               "  emf.log(what .. ' ' .. p.player .. ' ' .. p.account .. ' [' .. p.name .. '] host ' .. tostring(p.host) ..\n"
+               "          ' killer ' .. tostring(p.killer) .. ' server ' .. tostring(w:is_server()))\n"
+               "end\n"
+               "emf.log('joined ' .. tostring(emf.on_player_joined(function(w, p) show('J', w, p) end)))\n"
+               "emf.on_player_left(function(w, p) show('L', w, p) end)\n"
+               "emf.on_player_died(function(w, p) show('D', w, p) end)\n");
+    add_script(r.dir, "pj2", "emf.on_player_joined(function(w, p) emf.log('second ' .. p.player) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK(logged("joined true"));
+    CHECK(r.fake.player_cbs.size() == 1);  // the host listens once for every script
+    fire_player(kServer, EMF_PLAYER_JOINED, 1, 0xa1b2c3d4e5f60718ull, true, "Al");
+    CHECK(logged("J 1 0xa1b2c3d4e5f60718 [Al] host true killer nil server true"));
+    CHECK(logged("second 1"));
+    fire_player(kServer, EMF_PLAYER_DIED, 2, 0xbbull, false, "", 812);
+    CHECK(logged("D 2 0x00000000000000bb [] host false killer 812 server true"));
+    fire_player(kServer, EMF_PLAYER_LEFT, 2, 0xbbull, false, "Bea");
+    CHECK(logged("L 2 0x00000000000000bb [Bea] host false killer nil server true"));
+}
+
+TEST_CASE("lua 1.20: on a core without on_player the three answer false") {
+    Rig r(L"on_player_old");
+    r.api.on_player = nullptr;
+    add_script(r.dir, "po",
+               "emf.log('player fns ' .. tostring(emf.on_player_joined(function() end)) .. ' ' ..\n"
+               "        tostring(emf.on_player_left(function() end)) .. ' ' .. tostring(emf.on_player_died(function() end)))\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK(logged("player fns false false false"));
+}
+
+TEST_CASE("lua 1.20: an error in a player function is logged and the other scripts still hear the event") {
+    Rig r(L"on_player_err");
+    r.api.on_player = f_on_player;
+    add_script(r.dir, "pa", "emf.on_player_joined(function(w, p) error('boom') end)\n");
+    add_script(r.dir, "pb", "emf.on_player_joined(function(w, p) emf.log('pb heard ' .. p.player) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    fire_player(kServer, EMF_PLAYER_JOINED, 3, 0xccull, false, "");
+    CHECK(logged("boom"));
+    CHECK(logged("pb heard 3"));
+}

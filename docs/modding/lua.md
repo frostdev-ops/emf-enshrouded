@@ -43,7 +43,7 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    E prompts (`emf.offer`, `emf.spawn_offer`, `emf.offer_remove`; EMF API v25): depend on `">=1.14"`. 1.15 adds
    pictures in windows (`emf.image`, the `image`, `icon`, `fps` and `height` row fields; EMF API v26): depend on
    `">=1.15"`. 1.17 adds the inter-mod message bus (`emf.bus.subscribe`, `.publish`, `.unsubscribe`): mods using it
-   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. Ranges are explained in
+   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. Ranges are explained in
    [guide.md](guide.md), "Dependencies and version ranges".)
 
 3. Put `main.lua` next to it:
@@ -146,6 +146,7 @@ right away.
 | `emf.wheel(title, labels, key, fn)` | the radial wheel; `key` is held to choose (`"G"`, `""` for click); `fn(world, choice)`, choice 1..n or nil |
 | `emf.wheel_section(group, title, labels, fn)` | (1.9) your part of a wheel shared by several mods: publishes (replaces) your section of `group`; an empty list or nil removes it. `fn(world, index, label)` gets the index into the labels as they were when the wheel opened, and the label shown: if you published another list since, find the item by `label`. A pick from a wheel opened before your mod reloaded is dropped. Publish again when your labels change |
 | `emf.wheel_group(group, title, key)` | (1.9) opens one wheel with every mod's section of `group` (each label as "Section: label" when more than one mod has a section); a pick runs only its owner's `fn`. True when it opened (false: no labels, or more than 64) |
+| `emf.on_player_joined(fn)`, `emf.on_player_left(fn)`, `emf.on_player_died(fn)` | (1.20) `fn(world, p)` on the server world, `p` = `{player, account, name, host, killer}` (`killer`: died only, the last hitter within 10 s or 0). All join 1 s after the world data; died needs the call in the first run. False on an older core (reference.md "v28") |
 | `emf.net.channel(name, def)` | (1.19) a message channel `"<mod id>/<name>"`: `def` = `{version, to = "server" \| "players" \| "both", max, per_10s, on_server = fn(world, from, data), on_player = fn(world, from, data)}`; `from` = `{player, account, admin, is_local, version}`. A reload binds the new functions; a new version needs a restart. In process, and to joined players and the server over the chat (reference.md "v27") |
 | `emf.net.send(name, data)`, `.send_to(world, player, name, data)`, `.send_all(world, name, data)`, `.peer(world, player, name)` | (1.19) to the server (true: sent) / to one player's game / to all with the channel (count) / that game's channel version (`peer(nil, 0, name)`: the server's; 0 = none) |
 | `emf.offered(world, id)` | (1.15) true while your script's offer on `id` is in EMF's hands (not removed, not dropped by EMF); after a drop, `emf.offer` again takes it back |

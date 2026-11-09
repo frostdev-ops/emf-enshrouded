@@ -961,6 +961,7 @@ void Host::Impl::unload(Script& s) {
     s.setting_cbs.clear();
     s.keys.clear();
     s.chat_cbs.clear();
+    for (auto& v : s.player_cbs) v.clear();
     s.ws_cbs.clear();
     s.bus_subs.clear();
     for (auto& n : s.bus_kind_subs) n = 0;

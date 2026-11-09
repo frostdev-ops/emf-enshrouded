@@ -1259,6 +1259,81 @@ int l_on_chat(lua_State* L) {
     return 1;
 }
 
+// ---- lua 1.20: player events (API v28 on_player) ----
+bool has_v28(const EmfApi* a) {
+    return a && a->version >= 28 && a->size >= offsetof(EmfApi, on_player) + sizeof(a->on_player) && a->on_player;
+}
+
+void player_cb_body(EmfWorld* w, const EmfPlayerEvent* e, void* user) {
+    auto* h = static_cast<Host::Impl*>(user);
+    if (!e || e->kind < EMF_PLAYER_JOINED || e->kind > EMF_PLAYER_DIED) return;
+    const size_t k = e->kind - EMF_PLAYER_JOINED;
+    char hex[24];
+    std::snprintf(hex, sizeof hex, "0x%016llx", static_cast<unsigned long long>(e->account));
+    char name[sizeof e->name + 1];
+    std::memcpy(name, e->name, sizeof e->name);
+    name[sizeof e->name] = 0;
+    for (auto& sp : h->scripts) {
+        Script& s = *sp;
+        std::lock_guard<std::recursive_mutex> l(s.m);
+        if (!s.L || s.paused || s.player_cbs[k].empty()) continue;
+        const std::vector<int> refs = s.player_cbs[k];
+        for (int ref : refs) {
+            lua_rawgeti(s.L, LUA_REGISTRYINDEX, ref);
+            push_world(s.L, s, w);
+            lua_createtable(s.L, 0, 5);
+            lua_pushinteger(s.L, e->player);
+            lua_setfield(s.L, -2, "player");
+            lua_pushstring(s.L, hex);
+            lua_setfield(s.L, -2, "account");
+            lua_pushstring(s.L, name);
+            lua_setfield(s.L, -2, "name");
+            lua_pushboolean(s.L, e->host != 0);
+            lua_setfield(s.L, -2, "host");
+            if (e->kind == EMF_PLAYER_DIED) {
+                lua_pushinteger(s.L, e->killer);
+                lua_setfield(s.L, -2, "killer");
+            }
+            if (!call_lua(s, 2)) break;
+        }
+        ++s.generation;
+    }
+}
+
+// Called by EMF: nothing may escape into the game (a Lua error is a C++ exception).
+void player_cb(EmfWorld* w, const EmfPlayerEvent* e, void* user) {
+    try {
+        player_cb_body(w, e, user);
+    } catch (...) {
+    }
+}
+
+// emf.on_player_joined / _left / _died(fn): fn(world, {player, account, name, host, killer (died)}) on the server world
+// after its step. The first of any script subscribes the host once, for the process. False on an older core.
+int on_player_kind(lua_State* L, size_t k) {
+    Script* s = script_of(L);
+    luaL_checktype(L, 1, LUA_TFUNCTION);
+    Host::Impl* h = s->host;
+    int state = h->player_hooked.load();
+    if (state == 0) {
+        const bool ok = has_v28(h->api) && h->api->on_player(player_cb, h);
+        int expected = 0;
+        h->player_hooked.compare_exchange_strong(expected, ok ? 1 : -1);
+        state = h->player_hooked.load();
+    }
+    if (state != 1) {
+        lua_pushboolean(L, false);
+        return 1;
+    }
+    lua_pushvalue(L, 1);
+    s->player_cbs[k].push_back(luaL_ref(L, LUA_REGISTRYINDEX));
+    lua_pushboolean(L, true);
+    return 1;
+}
+int l_on_player_joined(lua_State* L) { return on_player_kind(L, 0); }
+int l_on_player_left(lua_State* L) { return on_player_kind(L, 1); }
+int l_on_player_died(lua_State* L) { return on_player_kind(L, 2); }
+
 // emf.request_save(): asks the game to save the world now; true when asked (or queued).
 int l_request_save(lua_State* L) {
     Script* s = script_of(L);
@@ -2920,6 +2995,8 @@ void open_bindings(lua_State* L, Script&) {
                                    {"image", l_image}, {"offered", l_offered},
                                    {"offer", l_offer}, {"spawn_offer", l_spawn_offer}, {"offer_remove", l_offer_remove},
                                    {"tell", l_tell},       {"broadcast", l_broadcast}, {"on_chat", l_on_chat},
+                                   {"on_player_joined", l_on_player_joined}, {"on_player_left", l_on_player_left},
+                                   {"on_player_died", l_on_player_died},
                                    {"request_save", l_request_save}, {"teleport", l_teleport},
                                    {"on_world_setting_changed", l_on_world_setting_changed},
                                    {"on_event", l_on_event}, {"emits", l_emits},       {"emit", l_emit},

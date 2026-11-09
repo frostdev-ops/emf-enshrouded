@@ -100,6 +100,7 @@ struct Fake {
     std::vector<std::string> broadcasts;
     std::map<uint32_t, std::string> names;  // player entity -> name (absent: player_name answers false)
     std::vector<std::pair<EmfChatCallback, void*>> chat_cbs;
+    std::vector<std::pair<EmfPlayerCallback, void*>> player_cbs;  // v28 on_player listeners
     int saves = 0;
     bool chat_ok = true;  // what chat_tell / chat_broadcast / on_chat / request_save answer
     // v20 teleport: the requests made (answer them with their cb/user as the core would)
@@ -608,6 +609,25 @@ bool f_request_save() {
 void fire_chat(EmfWorld* world, uint64_t account, uint32_t entity, const char* text) {
     const auto cbs = g->chat_cbs;
     for (auto& [cb, user] : cbs) cb(world, account, entity, text, user);
+}
+bool f_on_player(EmfPlayerCallback cb, void* user) {
+    if (!cb) return false;
+    g->player_cbs.emplace_back(cb, user);
+    return true;
+}
+// A player event on the server world (every on_player listener hears it).
+void fire_player(EmfWorld* world, uint32_t kind, uint32_t player, uint64_t account, bool host, const char* name,
+                 uint32_t killer = 0) {
+    EmfPlayerEvent e{};
+    e.size = sizeof e;
+    e.kind = kind;
+    e.player = player;
+    e.account = account;
+    e.host = host ? 1 : 0;
+    e.killer = killer;
+    std::snprintf(e.name, sizeof e.name, "%s", name);
+    const auto cbs = g->player_cbs;
+    for (auto& [cb, user] : cbs) cb(world, &e, user);
 }
 // The host loaded world save `slot` (every on_load listener hears it).
 void fire_load(uint16_t slot) {
