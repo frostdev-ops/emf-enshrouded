@@ -719,7 +719,7 @@ Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod
 | `emf/keys.hpp` | `emf::keys::parse_key(L"G", &name)` (ini key text: a letter, a digit, a name like `F2`, `Space`, `PageUp`, `Numpad7`, `Shift`, or `0x71`; 0 for mouse buttons; `name` optional), `down(vk)` (only while the game window is in front), `Edge` (press detection) |
 | `emf/query.hpp` | `emf::position(w, id)`, `emf::entities_near(w, center, radius, pred)`, `emf::players(w)`, `emf::player_account(w, id)` |
 | `emf/inventory.hpp` | `emf::inventory_stacks(w, entity)`, `emf::inventory_contents(w, entity, plain_only)`, `emf::slot_id(inv, slot)` |
-| `emf/storage.hpp` | `emf::WorldFile`: a per-world text file for your mod (loads once per session, saves atomically, never into another world's file) |
+| `emf/storage.hpp` | `emf::WorldFile`: a per-world text file for your mod (loads once per session, saves atomically, never into another world's file), and a text per player in it (`player(account)`, `save_player(account, text)`: at most 16 KiB each, 2 MiB in all) |
 | `emf/teleport.hpp` | v20: `emf::teleport(w, id, pos, opts, f)`, `emf::teleport_to_spawn_point(w, id, spawn_point, f)`, `emf::player_spawn_point(w, player)`, `emf::spawn_points_near(w, pos, radius)` (see v20 above) |
 
 ## Console commands (built in)

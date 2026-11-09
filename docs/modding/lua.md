@@ -113,7 +113,7 @@ right away.
 | `emf.local_player()` | your player's entity id |
 | `emf.sender()` | inside a command: who typed it, `{chat, entity, account, admin}` (`chat` true: another player in the game's chat, `entity` 0 if unknown, `account` a text "0x" + 16 hex digits, `admin` (1.4) true when they may run every command: the console, the host, `[chat] admins`); the host's own chat and the console give `chat` false; nil outside commands |
 | `emf.session()` | a number that changes when a world loads (entity ids from an older session mean nothing) |
-| `emf.on_world_data(fn)` / `emf.save_world_data(text)` | your data for the world being played: `fn(world, text)` once after the world loaded / save text for it (see "Saving data") |
+| `emf.on_world_data(fn)` / `emf.save_world_data(text)` / `emf.player_data(a)` / `emf.save_player_data(a, text)` | your data for the world being played: `fn(world, text)` once after the world loaded / save text for it; (1.20) a text per player (see "Saving data") |
 | `emf.setting(key)` | one of your settings from `mod.json`: a `bool` as true/false, `int` and whole `slider` as an integer, `float` and decimal `slider` as a number, `choice` as its index, `select` as the option's value (text), `color` as `"#rrggbb"`, `keybind` as the key's name (`""`: none), `text` as text; players change them in the Mods tab and EMF.exe |
 | `emf.set_setting(key, value)` / `emf.on_setting_changed(fn)` | change one / `fn(key)` after each change |
 | `emf.item(name)` / `emf.item_info(id)` | an item's id by its debug name (`items wood` in the console lists names) / `{id, name, max_stack, guid}`; inside callbacks only (they need a world), so look ids up in your first `on_tick` or command |
@@ -400,6 +400,25 @@ emf.save_world_data("kills=" .. kills)
   wrong world's file or over its data. It writes only when the text changed.
 - The data is text; choose your own format. It is kept in `emf\config\<your mod id>\<world slot>.txt`, as for C++
   mods (`emf/storage.hpp`).
+
+**Per player in a world** (`lua` 1.20): a text for each player, by their account (`world:account(id)`, or `p.account`
+in `emf.on_player_joined`):
+
+```lua
+emf.on_player_joined(function(world, p)
+  local text = emf.player_data(p.account)        -- "" the first time
+  visits[p.account] = (tonumber(text) or 0) + 1
+  emf.save_player_data(p.account, tostring(visits[p.account]))
+end)
+```
+
+- `emf.player_data(account)` gives the player's text, "" when none, and nil before the world's data came (the same
+  moment `on_world_data` runs) or where no world of yours runs. `emf.save_player_data(account, text)` saves it
+  (`""` removes the player) under the same rules as `save_world_data`; it returns false over 16 KiB for one player or
+  2 MiB for the world's file.
+- An account is `"0x"` and up to 16 hex digits, as `world:account` gives it; anything else is an error.
+- Kept beside the world's data in `emf\config\<your mod id>\<world slot>.players.txt` (C++: `WorldFile::player` and
+  `save_player`). Each save writes the whole file, so save when a player's text changed, not every step.
 
 **Your own files:** write them into your own folder:
 
