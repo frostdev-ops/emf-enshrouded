@@ -484,16 +484,31 @@ TEST_CASE("net link: a beacon held before this game knew its own account and spo
     CHECK(told == 1);
 }
 
-TEST_CASE("net link: a beacon held before this game knew its own account is gone with the session") {
+TEST_CASE("net link: a beacon held before this game knew its own account is gone with a new connection, and says so") {
     Rig r;
     r.self.reset();
     const uint64_t me = 0x1234;
     r.server.tick({{kHandle, me}});
     REQUIRE(r.to_players.size() == 1);
     CHECK(r.client.on_chat_line(r.to_players[0].second, me));
-    r.client.reset();  // another world or server
+    r.client.reset();  // a new connection (another server, or the same again)
     r.self = me;
     CHECK(r.client.waiting() == 0);
+    size_t told = 0;
+    for (const auto& l : r.logs) told += l.find("held beacon was dropped") != std::string::npos;
+    CHECK(told == 1);
+}
+
+TEST_CASE("net link: a beacon held before this game knew its own account outlives a new client world on the same connection") {
+    Rig r;
+    r.self.reset();
+    const uint64_t me = 0x1234;
+    r.server.tick({{kHandle, me}});
+    REQUIRE(r.to_players.size() == 1);
+    CHECK(r.client.on_chat_line(r.to_players[0].second, me));
+    r.client.reset(/*keep_held_beacon=*/true);  // the client world is made while the game still loads
+    r.self = me;
+    CHECK(r.client.waiting() == 1);
 }
 
 TEST_CASE("net link: a beacon typed by another player is never taken for the server's, whatever comes first") {

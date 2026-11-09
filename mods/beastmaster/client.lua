@@ -11,6 +11,10 @@ local beast_line = require("beast_line")
 local OPEN_NEAR_M = 6  -- m: the stable key asks the server for the window with a stable this close (the server checks)
 local WHEEL_WAIT_S = 2  -- s: the wheel's items from the server open the wheel this long after the key was pressed
 local OPEN_WAIT_S = 5   -- s: a window the server opens shows this long after a press of E or the stable key
+local OPEN_AT_STABLE_M = 10  -- m: or while this game's player is this close to a stable it shows (the game's prompt,
+                             -- by any key or a controller) ...
+local REOPEN_S = 3           -- s: ... but not this soon after a window closed here
+local NOT_SHOWN = "The server's Beasts window was not shown here: open it at a stable (E, or your stable key)."
 local JUMP_M = 100      -- m: moved this far between two searches (fast travel): the world streams in again, wait again
 local NO_SERVER_WHEEL = "The server's Beastmaster does not answer (it needs 1.15 or newer): type /beastmaster in the chat."
 local LINE_STATES = { out = true, aside = true, rest = true }
@@ -43,6 +47,7 @@ function C:reset()
 	self.line = nil        -- the server's beast line: {head, parts, at (this game's time when it came)}
 	self.drawn = nil       -- the line's text on screen now
 	self.pressed_at = nil  -- this game's time of the last press of E or the stable key (one window per press)
+	self.closed_at = nil   -- this game's time when a window closed here last
 	self.win_def = nil     -- the open window as it came, when it has countdowns (counted down here)
 	self.win_at = nil      -- this game's time when it came
 	self.win_el = nil      -- the whole seconds counted down on screen now
@@ -53,14 +58,28 @@ function C:on_open_key(world)
 	self.pressed_at = self.env.now(world)
 end
 
--- Whether a window the server opens may show now: within OPEN_WAIT_S after a press, or the one free opening (a server
--- cannot open it again and again: it takes the mouse and keyboard).
-function C:may_open(world)
-	local at = self.pressed_at
-	if at then
-		local since = self.env.now(world) - at
-		if since >= 0 and since <= OPEN_WAIT_S then return true end
+-- Whether this game's player is within `range` m of a stable this game's last search found.
+function C:near_stable(world, range)
+	local me = emf.local_player()
+	local px, py, pz
+	if me and me ~= 0 then px, py, pz = world:position(me) end
+	if not px then return false end
+	for _, e in ipairs(self.reporter.last or {}) do
+		if math.sqrt((e.x - px) ^ 2 + (e.y - py) ^ 2 + (e.z - pz) ^ 2) <= range then return true end
 	end
+	return false
+end
+
+-- Whether a window the server opens may show now: within OPEN_WAIT_S after a press of E or the stable key; at a stable
+-- this game shows (the game's prompt, whatever key or controller opened it), not within REOPEN_S of a close here; or
+-- the one free opening. A server cannot open it again and again (it takes the mouse and keyboard).
+function C:may_open(world)
+	local t = self.env.now(world)
+	local at = self.pressed_at
+	if at and t - at >= 0 and t - at <= OPEN_WAIT_S then return true end
+	local closed = self.closed_at
+	local just_closed = closed and t - closed >= 0 and t - closed < REOPEN_S
+	if not just_closed and self:near_stable(world, OPEN_AT_STABLE_M) then return true end
 	if self.free_open then
 		self.free_open = false
 		return true
@@ -69,9 +88,10 @@ function C:may_open(world)
 end
 
 -- The window open here goes (closed, or it could not be drawn again): closed on screen, the server hears it.
-function C:drop_window()
+function C:drop_window(world)
 	local n = self.win_n
 	self.win_open, self.win_n, self.win_def = false, nil, nil
+	self.closed_at = self.env.now(world)
 	self.opening = self.opening + 1  -- its late "closed" is no later window's
 	pcall(emf.window_close, window_mod.ID)
 	if n then wire.send({ t = "closed", n = n }) end
@@ -110,7 +130,7 @@ function C:count_window(world, t)
 	for k, v in pairs(def) do shown[k] = v end
 	shown.rows = rows
 	local ok, drawn = pcall(emf.window_update, window_mod.ID, shown)
-	if not (ok and drawn) then self:drop_window() end
+	if not (ok and drawn) then self:drop_window(world) end
 end
 
 -- The wheel key (on the client world): the server is asked for this player's items (not again while its answer is on
@@ -168,16 +188,7 @@ end
 function C:on_stable_key(world)
 	self:on_open_key(world)
 	if not wire.server_peer() then return end
-	local me = emf.local_player()
-	local px, py, pz
-	if me and me ~= 0 then px, py, pz = world:position(me) end
-	if not px then return end
-	for _, e in ipairs(self.reporter.last or {}) do
-		if math.sqrt((e.x - px) ^ 2 + (e.y - py) ^ 2 + (e.z - pz) ^ 2) <= OPEN_NEAR_M then
-			wire.send({ t = "open" })
-			return
-		end
-	end
+	if self:near_stable(world, OPEN_NEAR_M) then wire.send({ t = "open" }) end
 end
 
 -- This game's picture of species `id` (EMF drew it from this game at the start), or nil.
@@ -219,6 +230,7 @@ function C:on_window(world, ev)
 	elseif ev.kind == "closed" then
 		local n = self.win_n
 		self.win_open, self.win_n, self.win_def = false, nil, nil
+		self.closed_at = self.env.now(world)
 		if n then wire.send({ t = "closed", n = n }) end
 	end
 end
@@ -249,11 +261,15 @@ function on.win(self, world, msg)
 			self:count_from(world, def)
 			return
 		end
-		self:drop_window()
+		self:drop_window(world)
 	end
 	if msg.open ~= true then return end
 	if not self:may_open(world) then
 		wire.log_once("unasked window", "a window the server opened without a key press here was not shown")
+		if not self.told_not_shown then
+			self.told_not_shown = true
+			emf.notify(NOT_SHOWN)
+		end
 		wire.send({ t = "closed", n = msg.n })
 		return
 	end
@@ -314,6 +330,7 @@ function on.close(self, world, msg)
 	if type(msg.n) ~= "number" then return "bad" end
 	if not (self.win_open and msg.n == self.win_n) then return end
 	self.win_open, self.win_n, self.win_def = false, nil, nil
+	self.closed_at = self.env.now(world)
 	self.opening = self.opening + 1  -- its late "closed" is no later window's
 	pcall(emf.window_close, window_mod.ID)
 end

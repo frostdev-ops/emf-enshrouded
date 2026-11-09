@@ -315,8 +315,8 @@ void NetService::client_put_back(std::vector<std::string> lines) {
     if (client_) client_.load()->put_back(std::move(lines));
 }
 
-void NetService::client_reset() {
-    if (client_) client_.load()->reset();
+void NetService::client_reset(bool keep_held_beacon) {
+    if (client_) client_.load()->reset(keep_held_beacon);
 }
 
 }  // namespace emf::core::net

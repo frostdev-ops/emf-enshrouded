@@ -574,8 +574,9 @@ uint32_t ClientLink::server_version(const std::string& channel) {
     return it == server_channels_.end() ? 0 : it->second;
 }
 
-void ClientLink::reset() {
+void ClientLink::reset(bool keep_held_beacon) {
     bool down = false;
+    bool dropped = false;
     {
         const std::lock_guard<std::mutex> g(m_);
         down = state_ == State::Welcomed;
@@ -586,8 +587,12 @@ void ClientLink::reset() {
         out_seq_ = 0;
         told_foreign_ = false;
         told_no_self_ = false;
-        held_beacon_.reset();
+        if (!keep_held_beacon) {
+            dropped = held_beacon_.has_value();
+            held_beacon_.reset();
+        }
     }
+    if (dropped && d_.log) d_.log("mod messages: a held beacon was dropped (a new connection before this game knew its own account)");
     if (down && d_.on_server) d_.on_server(false);
 }
 

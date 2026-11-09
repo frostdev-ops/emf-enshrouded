@@ -6046,13 +6046,13 @@ TEST_CASE("beastmaster net: after a jump of 100 m or more (fast travel) the game
 
 // ---- the 0.6.2 review's smaller findings ----
 namespace {
-// The seconds of the first "rests M:SS" a window shows, or -1.
+// The seconds of the first "rests M:SS" (or a beast tab's "Rests M:SS") a window shows, or -1.
 int rest_shown(const Fake::Win& w) {
     for (const auto& t : w.texts) {
-        const size_t at = t.find("rests ");
+        const size_t at = t.find("ests ");
         if (at == std::string::npos) continue;
         int m = 0, s = 0;
-        if (std::sscanf(t.c_str() + at, "rests %d:%d", &m, &s) == 2) return m * 60 + s;
+        if (std::sscanf(t.c_str() + at, "ests %d:%d", &m, &s) == 2) return m * 60 + s;
     }
     return -1;
 }
@@ -6062,6 +6062,19 @@ std::vector<std::string> wins(const std::vector<std::string>& messages) {
     for (const auto& m : messages)
         if (m.find("\"t\":\"win\"") != std::string::npos) out.push_back(m);
     return out;
+}
+// Player 2 (0xBB) with Grey resting 80 s presses E at the stable: the window's message is in sent_to(b, 2).
+void joined_resting_at_stable(BeastRig& b) {
+    b.r.fake.net_peer_version = 1;
+    with_offers(b.r.api);
+    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\nb 0x00000000000000bb wolf 80 0 Grey\n"
+                  "b 0x00000000000000bb boar 0 0 Tusk\na 0x00000000000000aa Fang\na 0x00000000000000bb Grey\ns 1\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    at_stable(b);
+    Fake::Off o = *last_offer(b, 960);
+    o.cb(kServer, 2, 960, o.user);
 }
 // The server sends window `n` to this game, to open it.
 void server_opens(BeastRig& b, int n) {
@@ -6157,16 +6170,7 @@ TEST_CASE("beastmaster net: a late close of an earlier window leaves the joined 
 
 TEST_CASE("beastmaster net: a joined player's window counts its rests down itself; the server does not send it again for that") {
     BeastRig b({}, true);
-    b.r.fake.net_peer_version = 1;
-    with_offers(b.r.api);
-    write(b.data, "b 0x00000000000000aa wolf 0 0 Fang\nb 0x00000000000000bb wolf 80 0 Grey\n"
-                  "b 0x00000000000000bb boar 0 0 Tusk\na 0x00000000000000aa Fang\na 0x00000000000000bb Grey\ns 1\n");
-    b.r.fake.session = 2;
-    fire_load(1);
-    b.seconds(1);
-    at_stable(b);
-    Fake::Off o = *last_offer(b, 960);
-    o.cb(kServer, 2, 960, o.user);
+    joined_resting_at_stable(b);
     REQUIRE(wins(sent_to(b, 2)).size() == 1u);
     relay_down(b, 2);
     REQUIRE(b.r.fake.windows.size() == 1u);
@@ -6177,6 +6181,61 @@ TEST_CASE("beastmaster net: a joined player's window counts its rests down itsel
     client_steps(b, 181 + 60);           // 300 + 241 ticks since it came: 9 s
     REQUIRE(!b.r.fake.window_updates.empty());
     CHECK(first - rest_shown(b.r.fake.window_updates.back()) == 9);
+    b.seconds(11);  // a game that does not count them (Beastmaster 1.15.0) gets them every 15 s
+    CHECK(wins(sent_to(b, 2)).size() == 1u);
+}
+
+TEST_CASE("beastmaster net: on a resting beast's own tab the joined player's game counts the rest down too") {
+    BeastRig b({}, true);
+    joined_resting_at_stable(b);
+    relay_down(b, 2);
+    client_click(b, "beast.Grey");
+    relay_up(b, 2, 0xBB);
+    REQUIRE(wins(sent_to(b, 2)).size() == 1u);
+    relay_down(b, 2);
+    const int first = rest_shown(b.r.fake.window_updates.back());
+    REQUIRE(first > 60);
+    b.seconds(5);
+    CHECK(wins(sent_to(b, 2)).empty());
+    client_steps(b, 181 + 60);
+    CHECK(first - rest_shown(b.r.fake.window_updates.back()) == 9);
+}
+
+TEST_CASE("beastmaster net: a countdown with absurd numbers from the server is left as it is") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    joined_beasts(b);
+    from_server(b, R"({"t":"win","n":1,"open":true,"title":"Beasts","rows":[{"text":"Grey rests 99999999999999999999:00"}]})");
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    client_steps(b, 181 + 120);
+    CHECK(b.host->status("beastmaster") == "running");
+}
+
+TEST_CASE("beastmaster net: at a stable this game shows, a window the server opens shows without a key press (a controller, another interact key), but not within 3 s of a close") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    stable_prop(b, 950, 0, 10, 40);  // 40 m from this game's player (1, at the origin)
+    client_steps(b, 181 + 6 * 60);   // this game has searched
+    server_opens(b, 1);              // the free one
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    client_click(b, "", EMF_UI_CLOSED);
+    CHECK_FALSE(b.noted("open it at a stable"));
+    server_opens(b, 2);  // far from the stable, no key: not
+    server_opens(b, 3);
+    CHECK(b.r.fake.windows.size() == 1u);
+    size_t notes = 0;
+    for (const auto& n : b.r.fake.notes) notes += n.find("open it at a stable") != std::string::npos;
+    CHECK(notes == 1u);  // said once
+    place(b.r.fake, 950, 0, 10, 3);  // the player walks up to it: 3 m
+    client_steps(b, 10 * 60);
+    server_opens(b, 4);
+    REQUIRE(b.r.fake.windows.size() == 2u);  // at the stable: shown
+    client_click(b, "", EMF_UI_CLOSED);
+    server_opens(b, 5);  // at once after the close: not
+    CHECK(b.r.fake.windows.size() == 2u);
+    client_steps(b, 4 * 60);
+    server_opens(b, 6);
+    CHECK(b.r.fake.windows.size() == 3u);
 }
 
 TEST_CASE("beastmaster net: a second press of the wheel key while the server's answer is on its way asks once; the pick from that wheel runs") {

@@ -24,7 +24,9 @@ local CONFIRM_S = 5
 
 -- The countdowns a row's text can hold ("rests 1:20", "again in 0:45", "rests for 1:20"): a joined player's game counts
 -- them down itself, so a window drawn there is sent again only when something else changed.
-local COUNTDOWNS = { "(rests )(%d+):(%d%d)", "(again in )(%d+):(%d%d)", "(rests for )(%d+):(%d%d)" }
+local COUNTDOWNS = { "([Rr]ests )(%d+):(%d%d)", "(again in )(%d+):(%d%d)", "([Rr]ests for )(%d+):(%d%d)" }
+local COUNTDOWN_RESEND_S = 15  -- s: countdowns alone draw a joined player's window again this often (a game that does
+                               -- not count them itself, Beastmaster 1.15.0, still sees them move)
 
 -- Whether `text` holds a countdown.
 function M.has_countdown(text)
@@ -38,6 +40,7 @@ end
 function M.count_down(text, elapsed)
 	for _, p in ipairs(COUNTDOWNS) do
 		text = text:gsub(p, function(lead, m, s)
+			if #m > 4 then return nil end  -- no real countdown (left as it is)
 			local left = math.max(0, tonumber(m) * 60 + tonumber(s) - elapsed)
 			return string.format("%s%d:%02d", lead, math.floor(left / 60), math.floor(left % 60))
 		end)
@@ -101,6 +104,8 @@ function W:reset()
 	self.confirm = nil   -- {name, at}: Release clicked once
 	self.note = nil      -- the line under the buttons: what the last click did
 	self.drawn = nil     -- what the window shows now (to draw it again only when that changed)
+	self.drawn_full = nil  -- the same with its countdowns (a screen that counts them down)
+	self.drawn_at = nil    -- when it was drawn last
 end
 
 function W:loyalty_of(b)
@@ -298,17 +303,27 @@ function W:show(world, player, name)
 	end
 	self.open = true
 	self.drawn = signature(def.rows, self.screen.counts_down)
+	self.drawn_full = signature(def.rows)
+	self.drawn_at = self.env.now(world)
 	return true
 end
 
--- Draws the window again when what it shows changed (`force`: always).
+-- Draws the window again when what it shows changed (`force`: always); on a screen that counts the countdowns down,
+-- when only they moved, every COUNTDOWN_RESEND_S.
 function W:refresh(world, force)
 	if not self.open then return end
 	local def = self:def(world)
-	local sig = signature(def.rows, self.screen.counts_down)
-	if not force and sig == self.drawn then return end
+	local counts = self.screen.counts_down
+	local sig = signature(def.rows, counts)
+	local full = signature(def.rows)
+	local now = self.env.now(world)
+	if not force and sig == self.drawn then
+		if not counts or full == self.drawn_full then return end
+		local at = self.drawn_at or now
+		if now >= at and now - at < COUNTDOWN_RESEND_S then return end
+	end
 	if self.screen.update(world, def) then
-		self.drawn = sig
+		self.drawn, self.drawn_full, self.drawn_at = sig, full, now
 	else
 		self.open = false  -- the player closed it meanwhile
 	end

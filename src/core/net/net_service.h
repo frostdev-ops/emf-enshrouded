@@ -104,7 +104,7 @@ public:
     bool client_line(std::string_view text, uint64_t speaker);
     std::vector<std::string> client_take(size_t max);
     void client_put_back(std::vector<std::string> lines);
-    void client_reset();
+    void client_reset(bool keep_held_beacon = false);  // ClientLink::reset
     bool server_on() const { return server_ != nullptr; }
     bool client_on() const { return client_ != nullptr; }
     // This game's channels with their versions (what hello and welcome say).

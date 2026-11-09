@@ -195,6 +195,7 @@ function on.stables(self, world, player, account, msg)
 		self.pending[account] = { player = player, list = msg.list }
 		return
 	end
+	self.pending[account] = nil  -- this one is newer
 	local t, last = self.env.now(world), self.reported_at[account]
 	if last and t >= last and t - last < REPORT_EVERY_S then return end
 	self.reported_at[account] = t

@@ -585,10 +585,12 @@ void hk_register_all_programs(void* world) {
             g_state->damage_queue.clear();                // hits for the old session never land
             ++g_state->server_session;                    // mods notice the new session (API v9)
         }
-        // a new client world (a new session): the server the last one talked to is forgotten (its welcome, its lines)
+        // a new client world (a new session): the server the last one talked to is forgotten (its welcome, its lines);
+        // a beacon held while the game did not know its own account stays (the same connection, still loading: a new
+        // connection's GameClient drops it)
         if (kind == EMF_WORLD_CLIENT) {
             ++g_state->client_session;
-            if (g_state->net) g_state->net->client_reset();
+            if (g_state->net) g_state->net->client_reset(/*keep_held_beacon=*/true);
         }
         g_state->relay.forget_world(world);                  // nothing an earlier world left at this address
         if (g_register_program_addr && !g_state->relay.closed()) {

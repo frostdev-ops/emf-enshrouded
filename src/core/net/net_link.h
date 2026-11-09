@@ -187,8 +187,10 @@ public:
     size_t waiting();
     bool welcomed();
     uint32_t server_version(const std::string& channel);  // 0: no welcome or no such channel
-    // The server's world is gone (or a new one begins): no welcome, nothing waiting.
-    void reset();
+    // The server's world is gone (or a new one begins): no welcome, nothing waiting. `keep_held_beacon`: a beacon held
+    // while this game did not know its own account stays (a new client world on the same connection: the game still
+    // loads); a new connection drops it (logged).
+    void reset(bool keep_held_beacon = false);
 
 private:
     // The server's beacon, spoken as this player: a new conversation, this game's hello queued. Under m_; the log line.

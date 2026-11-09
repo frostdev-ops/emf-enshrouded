@@ -261,8 +261,10 @@ Beastmaster runs where the world runs (the host, or a dedicated server). A playe
   the news as notes at the top of the screen. The beast's turning picture is drawn from their own game. The server
   decides everything: their game only shows what the server sends and passes clicks back, so nothing can happen that
   the server did not allow. It needs the same Beastmaster version on both sides (1.15 or newer). Their game shows a
-  Beasts window the server opens only within 5 s after they pressed E or their stable key (one window per press), so
-  a server cannot keep opening it on them; while it is open, their game counts its rests down itself.
+  Beasts window the server opens only at a stable it shows (the game's E prompt, whatever key or controller they use;
+  not again within 3 s of closing one) or within 5 s after they pressed E or their stable key, so a server cannot keep
+  opening it on them; while it is open, their game counts its rests down itself (with 1.15.0 on their side they move
+  every 15 s).
 - **without it** plays as before: the stable's commands and everything else with `/beastmaster` in the chat, the news
   as chat lines. When they join, EMF's greeting may show in their chat, at most twice: "This server runs EMF mods. Get
   EMF to see their windows; you can play without it." Only they see it.
@@ -277,7 +279,7 @@ so a player could make a prop count as one; a stable only opens the window and h
 
 `beastmaster.as #2 give wolf`, `beastmaster.as #2 open` and the like (console only) run a word as another player, for
 testing on a dedicated server, where the console has no player of its own. `open` shows the window on that player's
-game once without a key press; after that, only within 5 s after they pressed E or their stable key.
+game once without a key press; after that, only at a stable or within 5 s after they pressed E or their stable key.
 
 ## Commands
 
