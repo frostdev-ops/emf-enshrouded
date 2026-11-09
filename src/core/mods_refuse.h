@@ -78,7 +78,8 @@ inline std::vector<Needed> refusal_needs(const std::vector<ModEntry>& server, co
     return out;
 }
 
-// The chat line of a refusal (the words are the core's own call; every game shows them, EMF or not).
+// The chat line of a refusal (the words are the core's own call; every game shows them, EMF or not). The game shows a
+// line only with a speaker, so the player sees their own name before it; "[EMF]" says who speaks, as in command replies.
 inline std::string refuse_text(const std::vector<Needed>& needs, bool no_emf, const std::string& info) {
     std::string names;
     for (size_t i = 0; i < needs.size() && i < kRefuseMaxNamed; ++i) {
@@ -89,9 +90,9 @@ inline std::string refuse_text(const std::vector<Needed>& needs, bool no_emf, co
     if (needs.size() > kRefuseMaxNamed) names += ", and " + std::to_string(needs.size() - kRefuseMaxNamed) + " more";
     std::string t;
     if (no_emf)
-        t = "This server needs EMF" + (needs.empty() ? std::string() : " and these mods: " + names) + ".";
+        t = "[EMF] This server needs EMF" + (needs.empty() ? std::string() : " and these mods: " + names) + ".";
     else
-        t = "This server needs these mods: " + names + ".";
+        t = "[EMF] This server needs these mods: " + names + ".";
     if (!info.empty()) {
         const char last = info.back();
         t += std::string(" Get ") + (needs.empty() ? "it" : "them") + " from " + info +

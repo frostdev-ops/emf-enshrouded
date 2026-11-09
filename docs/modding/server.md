@@ -170,7 +170,7 @@ are not compared.
 - By default it only warns. A server owner can refuse such players instead: `[net] mods_check=refuse` in
   `emf\emf_core.ini` (or the Players' mods card on EMF.exe's Server tab), read when the server starts. A player whose
   game lacks a required mod or has another version of one, or has no EMF (no mod list 60 s after they are in the
-  world), is told why in the chat ("This server needs these mods: beasts_pack 2.2.0 (you: none). Get them from ...
+  world), is told why in the chat ("[EMF] This server needs these mods: beasts_pack 2.2.0 (you: none). Get them from ...
   You will be disconnected in 5 seconds."), and 5 s later the game's own kick disconnects them (the game's "kicked"
   popup). Nothing is banned: they can come back once they have the mods.
   - Required: the content and side-both mods above, plus the ids in `[net] mods_required = beastmaster, hudmod`

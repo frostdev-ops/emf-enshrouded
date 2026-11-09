@@ -388,14 +388,14 @@ TEST_CASE("refuse: needs are the server's content and side-both mods and the req
 TEST_CASE("refuse: the words for a player without EMF and for one with other versions") {
     using emf::core::refuse_text;
     CHECK(refuse_text({{'c', "beasts_pack", "2.2.0", ""}, {'u', "hudmod", "", ""}}, true, "nexusmods.com") ==
-          "This server needs EMF and these mods: beasts_pack 2.2.0, hudmod. Get them from nexusmods.com. You will be "
-          "disconnected in 5 seconds.");
+          "[EMF] This server needs EMF and these mods: beasts_pack 2.2.0, hudmod. Get them from nexusmods.com. You will "
+          "be disconnected in 5 seconds.");  // the game shows the player's own name before it: "[EMF]" says who speaks
     CHECK(refuse_text({{'c', "beasts_pack", "2.2.0", ""}, {'b', "emberbrand", "1.2.0", "1.1.0"}}, false, "") ==
-          "This server needs these mods: beasts_pack 2.2.0 (you: none), emberbrand 1.2.0 (you: 1.1.0). Install them with "
-          "EMF.exe. You will be disconnected in 5 seconds.");
-    CHECK(refuse_text({}, true, "") == "This server needs EMF. You will be disconnected in 5 seconds.");
+          "[EMF] This server needs these mods: beasts_pack 2.2.0 (you: none), emberbrand 1.2.0 (you: 1.1.0). Install them "
+          "with EMF.exe. You will be disconnected in 5 seconds.");
+    CHECK(refuse_text({}, true, "") == "[EMF] This server needs EMF. You will be disconnected in 5 seconds.");
     CHECK(refuse_text({}, true, "discord.gg/x.") ==
-          "This server needs EMF. Get it from discord.gg/x. You will be disconnected in 5 seconds.");
+          "[EMF] This server needs EMF. Get it from discord.gg/x. You will be disconnected in 5 seconds.");
     std::vector<Needed> many;
     for (int i = 0; i < 12; ++i) many.push_back({'c', "p" + std::to_string(i), "1.0", ""});
     const std::string t = refuse_text(many, false, "");
@@ -440,7 +440,7 @@ TEST_CASE("refuse: no list within 60 s of being ready means no EMF; the time sta
     CHECK(g.tells.empty());
     g.r.tick({seen(2, 0xCC)}, 190000);
     REQUIRE(g.tells.size() == 1);
-    CHECK(g.tells[0].second.rfind("This server needs EMF and these mods: beasts_pack 2.2.0, emberbrand 1.2.0.", 0) == 0);
+    CHECK(g.tells[0].second.rfind("[EMF] This server needs EMF and these mods: beasts_pack 2.2.0, emberbrand 1.2.0.", 0) == 0);
     CHECK(g.logged("no EMF") == 1);
     RefuseRig late;
     late.r.tick({seen(2, 0xDD)}, 0);
