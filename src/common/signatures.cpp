@@ -175,6 +175,17 @@ constexpr SigDef kSignatures[] = {
     // empty password when +password gave one). The pregame dispatcher sets Client_Online and enters Start Play. Client
     // only; checked on 1287369 alone (one match).
     {Sig::PostJoinPending, "PostJoinPending", "48 89 5C 24 10 48 89 6C 24 18 56 57 41 56 48 83 EC 20 48 8B 81 D0 00 00 00 4C 8B F2 48 8B B0 ?? ?? 03 00 8B 46 10 48 3B 46 18 0F 84 ?? ?? ?? ?? 8B 5E 40 8B C3 83 E0 0F 74 05 2B D8 83 C3 10 48 8B 7E 30 33 D2 8B CB 41 B8 01 04 00 00 48 03 F9 48 8D 4F 01 E8 ?? ?? ?? ?? 33 C0 C6 07 2A", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xd6fa30u, 0u}, false},
+    // ---- refusing a join ([net] mods_check=refuse; private research kick_player_2026-11-09.md) ----
+    // void handleAccountAction(GameServer* gs, const AccountActionEvent* ev): the server's handler of an admin's
+    // account action (after the world tick, on the server thread). For Kick (ev+0x14 == 0) it finds the connection of
+    // the account at ev+8, skips players with CanKickBan (record +0x10 bit 0) and asks the session to kick that machine
+    // (the target's game shows "kicked" and leaves; nothing is stored, they can rejoin). EMF passes Kick only, never Ban
+    // or UnBan (both write the ban lists). The start through `cmp byte [rdx+14h], 2` (UnBan first); 1287369 alone.
+    {Sig::HandleAccountAction, "HandleAccountAction", "48 89 5C 24 18 48 89 74 24 20 55 57 41 54 41 56 41 57 48 8D AC 24 ?? ?? FF FF 48 81 EC ?? ?? 00 00 80 7A 14 02", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xe4b3b0u, 0x7a6e50u}, false},
+    // sessionRequestKick(session, u32 machine, bool ban) through the handler's Kick call site: the CanKickBan test of
+    // the record (+0x1F0), its machine handle (+0x1E4), ban = false, GameServer+0x10, the call. EMF never calls it: it
+    // is the check that the handler's layout is still the one above (refuse needs both).
+    {Sig::SessionRequestKick, "SessionRequestKick", "41 F6 86 F0 01 00 00 01 75 ?? 41 8B 96 E4 01 00 00 45 33 C0 49 8B 4F 10 E8", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xa6edc0u, 0xa02c90u}, false, 0x18},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

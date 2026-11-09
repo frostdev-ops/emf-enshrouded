@@ -38,6 +38,8 @@ enum class Sig : size_t {
     ChatClientSend, ClientOutboxFlush,
     // the main menu's "About to join" prompt: "Join Session" posts this command (the debug bridge's join)
     PostJoinPending,
+    // the game's admin kick, server side (refusing a join, [net] mods_check=refuse): the handler and its Kick call
+    HandleAccountAction, SessionRequestKick,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

@@ -107,6 +107,7 @@ TEST_CASE("signature table: build 1283531's RVAs, game and dedicated server, as 
     for (const auto& d : all_signatures()) {
         if (d.id >= Sig::UiScopeOpen && d.id <= Sig::UiPopTransform) continue;
         if (d.id == Sig::ChatClientSend || d.id == Sig::ClientOutboxFlush || d.id == Sig::PostJoinPending) continue;
+        if (d.id == Sig::HandleAccountAction || d.id == Sig::SessionRequestKick) continue;  // 1287369 alone
         CHECK(d.rva[static_cast<size_t>(client)] != kRvaUnchecked);
         CHECK(d.rva[static_cast<size_t>(server)] != kRvaUnchecked);
     }
@@ -260,7 +261,7 @@ TEST_CASE("signature table has the inventory transaction and readOther, optional
         CHECK(d->rva[1] == w.rva_1273043);
         CHECK_FALSE(d->required);
     }
-    CHECK(kSigCount == 60);
+    CHECK(kSigCount == 62);
 }
 
 TEST_CASE("signature table has XpRequired and MaxPlayerLevel (API v22 levels), optional, on both exes of 1283531") {
@@ -628,4 +629,23 @@ TEST_CASE("signature table has the UI scope open and close and the layer's trans
     CHECK(has("UiPopTransform", "E0 21 00 00"));
     CHECK(has("UiPopTransform", "2C 52 03 00"));
     CHECK(has("UiPopTransform", "D2 52 03 00"));
+}
+
+TEST_CASE("signature table has HandleAccountAction and SessionRequestKick (refusing a join), optional, both exes of 1287369") {
+    const SigDef* h = find_signature("HandleAccountAction");
+    REQUIRE(h != nullptr);
+    CHECK(h->id == Sig::HandleAccountAction);
+    CHECK_FALSE(h->required);
+    CHECK(h->call_at == -1);
+    CHECK(h->rva[7] == 0xe4b3b0u);  // 1287369 client (a game that hosts)
+    CHECK(h->rva[8] == 0x7a6e50u);  // its dedicated server
+    CHECK_FALSE(rva_checked(*h, 5));
+    const SigDef* k = find_signature("SessionRequestKick");
+    REQUIRE(k != nullptr);
+    CHECK(k->id == Sig::SessionRequestKick);
+    CHECK_FALSE(k->required);
+    CHECK(k->call_at == 0x18);  // the handler's Kick call site; the function is the call's target
+    CHECK(k->rva[7] == 0xa6edc0u);
+    CHECK(k->rva[8] == 0xa02c90u);
+    CHECK_FALSE(rva_checked(*k, 5));
 }
