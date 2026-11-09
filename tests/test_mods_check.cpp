@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "core/mods_check.h"
+#include "core/mods_check_content.h"
 #include "core/mods_check_service.h"
 
 using emf::core::compare_mods;
@@ -58,9 +59,11 @@ TEST_CASE("mods check: what the player's game lacks or has in another version, c
     REQUIRE(d.extra.size() == 1);
     CHECK(d.extra[0].id == "my_pack");
     const std::string note = player_note(d);
-    CHECK(note.find("beasts_pack (server 2.2.0, you: none)") != std::string::npos);
-    CHECK(note.find("emberbrand (server 1.2.0, you: 1.1.0)") != std::string::npos);
-    CHECK(note.find("[Invalid Item Stack]") != std::string::npos);
+    CHECK(note.rfind("Missing mods for this server (items from them can be lost): ", 0) == 0);  // the risk first
+    CHECK(note.find("beasts_pack 2.2.0 (you: none)") != std::string::npos);
+    CHECK(note.find("emberbrand 1.2.0 (you: 1.1.0)") != std::string::npos);
+    CHECK(note.find("EMF.exe") != std::string::npos);
+    CHECK(note.size() <= 200);  // 3 rows of an on-screen note
     CHECK(note.find("beastmaster") == std::string::npos);  // a server mod: players do not need it
     CHECK(note.find("lua") == std::string::npos);          // unknown side: not compared
     CHECK(diff_text(d).find("extra: c my_pack 1.0.0") != std::string::npos);
@@ -69,8 +72,8 @@ TEST_CASE("mods check: what the player's game lacks or has in another version, c
 TEST_CASE("mods check: without a content mod missing, the note says features may not work; the same mods say nothing") {
     const auto d = compare_mods({{'b', "emberbrand", "1.2.0"}}, {});
     const std::string note = player_note(d);
-    CHECK(note.find("emberbrand (server 1.2.0, you: none)") != std::string::npos);
-    CHECK(note.find("[Invalid Item Stack]") == std::string::npos);
+    CHECK(note.find("emberbrand 1.2.0 (you: none)") != std::string::npos);
+    CHECK(note.find("can be lost") == std::string::npos);
     CHECK(note.find("may not work") != std::string::npos);
     const auto same = compare_mods({{'c', "beasts_pack", "2.2.0"}}, {{'c', "beasts_pack", "2.2.0"}, {'l', "clock", "1"}});
     CHECK(player_note(same).empty());
@@ -79,13 +82,13 @@ TEST_CASE("mods check: without a content mod missing, the note says features may
     CHECK(player_note(only_extra).empty());  // harmless for the world: no note
 }
 
-TEST_CASE("mods check: a long list in the note is cut after 8 with how many more") {
+TEST_CASE("mods check: a long list in the note is cut after 3, the rest in the console") {
     std::vector<ModEntry> server;
     for (int i = 0; i < 12; ++i) server.push_back({'c', "pack" + std::to_string(i), "1.0"});
     const std::string note = player_note(compare_mods(server, {}));
-    CHECK(note.find("pack7") != std::string::npos);
-    CHECK(note.find("pack8") == std::string::npos);
-    CHECK(note.find("and 4 more") != std::string::npos);
+    CHECK(note.find("pack2") != std::string::npos);
+    CHECK(note.find("pack3") == std::string::npos);
+    CHECK(note.find("and 9 more in the console") != std::string::npos);
 }
 
 TEST_CASE("mods check: this game's list is its content mods, then the running mods by their side") {
@@ -189,7 +192,7 @@ TEST_CASE("mods check: the joined game notes what it lacks once per session; the
     const std::string server_list = "e emf 0.6.3\nc beasts_pack 2.2.0\nb emberbrand 1.2.0\n";
     game.m.on_player_message(server_list);
     REQUIRE(game.notes.size() == 1);
-    CHECK(game.notes[0].find("beasts_pack (server 2.2.0, you: none)") != std::string::npos);
+    CHECK(game.notes[0].find("beasts_pack 2.2.0 (you: none)") != std::string::npos);
     CHECK(game.logged("beasts_pack") == 1);  // and the whole list in the log
     game.m.on_player_message(server_list);
     CHECK(game.notes.size() == 1);  // once per session
@@ -210,4 +213,50 @@ TEST_CASE("mods check: a list that is too big or broken is dropped and logged on
     game.m.on_player_message(std::string(20000, 'x'));
     CHECK(game.notes.empty());
     CHECK(game.logged("16384") == 1);
+}
+
+TEST_CASE("mods check: the content mods are the EML mods of a start whose content was built or is current") {
+    wchar_t tmp[MAX_PATH];
+    GetTempPathW(MAX_PATH, tmp);
+    const std::wstring game = std::wstring(tmp) + L"emf_mods_check_content_" + std::to_wstring(GetCurrentProcessId());
+    CreateDirectoryW(game.c_str(), nullptr);
+    CreateDirectoryW((game + L"\\mods").c_str(), nullptr);
+    CreateDirectoryW((game + L"\\mods\\beasts").c_str(), nullptr);
+    {
+        FILE* f = _wfopen((game + L"\\mods\\beasts\\mod.json").c_str(), L"wb");
+        REQUIRE(f);
+        std::fputs(R"({"id": "beasts_pack", "name": "Beasts", "version": "2.2.0", "capabilities": ["patch"]})", f);
+        std::fclose(f);
+    }
+    emf::loader::ContentStatus built;
+    built.kind = "built";
+    const auto got = emf::core::applied_content_mods(built, game);
+    REQUIRE(got.size() == 1);
+    CHECK(got[0].first == "beasts_pack");
+    CHECK(got[0].second == "2.2.0");
+    emf::loader::ContentStatus current;
+    current.kind = "current";
+    CHECK(emf::core::applied_content_mods(current, game).size() == 1);
+    emf::loader::ContentStatus failed;
+    failed.kind = "failed";
+    CHECK(emf::core::applied_content_mods(failed, game).empty());  // the game runs without them
+    CHECK(emf::core::applied_content_mods(std::nullopt, game).empty());
+    DeleteFileW((game + L"\\mods\\beasts\\mod.json").c_str());
+    RemoveDirectoryW((game + L"\\mods\\beasts").c_str());
+    RemoveDirectoryW((game + L"\\mods").c_str());
+    RemoveDirectoryW(game.c_str());
+}
+
+TEST_CASE("mods check: players.mods shows a player's list only while that very connection has emf/mods") {
+    std::map<uint32_t, bool> peers{{2, true}};
+    ModsCheck m(ModsCheck::Deps{[] { return std::vector<ModEntry>{{'e', "emf", "0.6.3"}}; }, [] { return false; },
+                                [] { return 0u; }, [] { return 1u; }, [](const std::string&) { return true; },
+                                [](uint32_t, const std::string&) { return true; }, [](const std::string&) {},
+                                [](const std::string&) {}, [&](uint32_t p) { return peers[p]; }});
+    m.on_server_message(2, 0xBB, "e emf 0.6.3\n");
+    REQUIRE(m.current(0xBB, 2));
+    peers[2] = false;  // back without EMF (or an older one)
+    CHECK_FALSE(m.current(0xBB, 2));
+    peers[5] = true;
+    CHECK_FALSE(m.current(0xBB, 5));  // another entity than the list came from
 }

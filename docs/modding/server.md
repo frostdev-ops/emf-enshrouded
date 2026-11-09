@@ -160,17 +160,18 @@ two compare the mods that must match: every EML content mod (it changes the game
 `mod.json` says `"side": "both"`, by id and version. Mods marked `"server"` or `"client"`, and mods without `side`,
 are not compared.
 
-- The player's game shows a note when it lacks one of those mods or has another version, once per session: "This
-  server uses mods your game does not have or has in another version: beasts_pack (server 2.2.0, you: none). Items
-  from content mods can show as [Invalid Item Stack] and be lost: install the same versions (EMF.exe) before you play
-  here." Its console log has the whole list.
+- The player's game shows a note when it lacks one of those mods or has another version, once per session: "Missing
+  mods for this server (items from them can be lost): beasts_pack 2.2.0 (you: none). Install the same versions with
+  EMF.exe." (at most 3 mods by name; a player missing a content mod would see its items as [Invalid Item Stack]). Its
+  console log has the whole list.
 - The server writes one line per player to `emf\emf_core.log` (`mods check: player 0x... (entity 2, EMF 0.6.3):
   missing: ...`), and `players.mods` (the server's console, `emf\commands.txt`, or a `[chat] admins` account) lists
   every player in the world: their EMF and what differs, or "no EMF" (a player without EMF cannot be checked).
 - It only warns. Nothing is refused or turned off.
 - The greeting: a server greets new connections (the line a game without EMF shows, at most twice) when one of its
   mods talks to players' games, or when it has mods its players must match. A server whose mods players do not need
-  stays silent.
+  stays silent, and then has nothing to compare (`players.mods` shows "no EMF" for everyone there). `[net] greet=0`
+  in `emf\emf_core.ini` switches the greeting, and with it the check, off.
 - It travels as the core's own message channel `emf/mods` (version 1); an older EMF at either end takes no part.
 
 ## Keeping a test server private

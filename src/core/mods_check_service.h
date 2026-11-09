@@ -32,6 +32,7 @@ public:
         std::function<bool(uint32_t player, const std::string&)> to_player;
         std::function<void(const std::string&)> notify;  // the player's note
         std::function<void(const std::string&)> log;
+        std::function<bool(uint32_t player)> has_peer;   // the server: that player's connection has emf/mods now
     };
     struct Seen {
         uint32_t player = 0;
@@ -100,6 +101,14 @@ public:
         noted_ = true;
         noted_session_ = session;
         if (d_.notify) d_.notify(note);
+    }
+
+    // The list `player` (entity) sent, while their connection still has emf/mods (a player back without EMF, or with
+    // an older one, has none: the old list is not theirs any more).
+    std::optional<Seen> current(uint64_t account, uint32_t player) const {
+        auto s = this->player(account);
+        if (!s || s->player != player || !d_.has_peer || !d_.has_peer(player)) return std::nullopt;
+        return s;
     }
 
     std::optional<Seen> player(uint64_t account) const {

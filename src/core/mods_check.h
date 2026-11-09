@@ -22,7 +22,7 @@ namespace emf::core {
 constexpr size_t kMaxModEntries = 512;
 constexpr size_t kMaxModListBytes = 16384;
 constexpr size_t kMaxModVersionBytes = 32;
-constexpr size_t kNoteMaxMods = 8;  // the player's note names at most this many, then "and N more"
+constexpr size_t kNoteMaxMods = 3;  // the player's note names at most this many (3 rows on screen), then "and N more"
 
 struct ModEntry {
     char kind = 'u';
@@ -132,24 +132,21 @@ inline std::vector<ModEntry> this_games_mods(const std::vector<ModRecord>& mods,
     return out;
 }
 
-// What the player's game shows (once per session); "" when nothing is missing.
+// What the player's game shows (once per session; an on-screen note has 3 rows): the risk first, at most kNoteMaxMods
+// mods, the rest in the console. "" when nothing is missing.
 inline std::string player_note(const ModDiff& d) {
     if (d.missing.empty()) return "";
-    std::string s = "This server uses mods your game does not have or has in another version: ";
     bool content = false;
-    for (size_t i = 0; i < d.missing.size(); ++i) {
-        if (i == kNoteMaxMods) {
-            s += ", and " + std::to_string(d.missing.size() - kNoteMaxMods) + " more";
-            break;
-        }
-        if (i) s += ", ";
-        const auto& [m, mine] = d.missing[i];
-        s += m.id + " (server " + m.version + ", you: " + (mine.empty() ? std::string("none") : mine) + ")";
-    }
     for (const auto& [m, mine] : d.missing) content |= m.kind == 'c';
-    s += content ? ". Items from content mods can show as [Invalid Item Stack] and be lost: install the same versions "
-                   "(EMF.exe) before you play here."
-                 : ". Their features may not work for you: install the same versions (EMF.exe).";
+    std::string s = content ? "Missing mods for this server (items from them can be lost): "
+                            : "Missing mods for this server (their features may not work): ";
+    for (size_t i = 0; i < d.missing.size() && i < kNoteMaxMods; ++i) {
+        const auto& [m, mine] = d.missing[i];
+        s += (i ? ", " : "") + m.id + " " + m.version + " (you: " + (mine.empty() ? std::string("none") : mine) + ")";
+    }
+    if (d.missing.size() > kNoteMaxMods)
+        s += ", and " + std::to_string(d.missing.size() - kNoteMaxMods) + " more in the console";
+    s += ". Install the same versions with EMF.exe.";
     return s;
 }
 

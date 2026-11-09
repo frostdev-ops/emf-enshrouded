@@ -65,7 +65,7 @@
 #include "system_programs.h"
 #include "world_jobs.h"
 #include "mods_check_service.h"
-#include "loader/eml_mods.h"
+#include "mods_check_content.h"
 
 // The Vulkan layer entry point lives in emf_core_lib (a static library): keep it in emf_core.dll's exports.
 #pragma comment(linker, "/include:emf_vk_negotiate")
@@ -91,7 +91,7 @@ void cmd_players_mods(EmfWorld* world, int, const char* const*, void*) {
             emf::core::command_reply_line(who + ": the host (this game)");
             continue;
         }
-        const auto seen = g_mods_check && p.account ? g_mods_check->player(p.account) : std::nullopt;
+        const auto seen = g_mods_check && p.account ? g_mods_check->current(p.account, p.entity) : std::nullopt;
         if (seen)
             emf::core::command_reply_line(who + ": EMF " + (seen->emf.empty() ? std::string("?") : seen->emf) + ", " + seen->diff);
         else
@@ -122,6 +122,7 @@ std::vector<emf::core::LoadedMod> g_mods;
 emf::core::ReadyGate g_mods_ready;
 // EML content at this start (content_status.h): set once in emf_core_start; its notice is shown when a world loads
 emf::core::ContentLines g_content_lines;
+std::optional<emf::loader::ContentStatus> g_content_status;  // read once (reading clears it): the mod check uses it too
 std::atomic<bool> g_content_notice_said{false};
 constexpr auto kModsReadyTimeout = std::chrono::seconds(30);
 emf::core::BuiltinContext g_builtin;                     // the core's own commands
@@ -772,7 +773,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     emf::logf("%s starting (game dir %s)", kVersion, utf8(dir).c_str());
     {
         // EML content at this start, as the loader set it before it started the core (content_status.h)
-        g_content_lines = emf::core::content_lines(emf::core::read_content_status(),
+        g_content_status = emf::core::read_content_status();
+        g_content_lines = emf::core::content_lines(g_content_status,
                                                    emf::saves::read_auto_settings(dir + L"\\emf\\emf_core.ini").on);
         if (!g_content_lines.console.empty()) emf::logf("%s", g_content_lines.console.c_str());
         wchar_t self[MAX_PATH];
@@ -1339,8 +1341,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_state->players = players.get();
     // the mod check on join (core channel emf/mods): this game's list is its applied EML content mods and its mods
     static std::vector<std::pair<std::string, std::string>> content_mods;
-    if (auto cs = emf::core::read_content_status(); cs && (cs->kind == "built" || cs->kind == "current"))
-        for (const auto& m : emf::loader::scan_eml_mods(dir + L"\\mods").usable) content_mods.emplace_back(m.id, m.version);
+    content_mods = emf::core::applied_content_mods(g_content_status, dir);
     static std::unique_ptr<emf::core::ModsCheck> mods_check;
     mods_check = std::make_unique<emf::core::ModsCheck>(emf::core::ModsCheck::Deps{
         [] {
@@ -1362,7 +1363,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         [](const std::string& n) {
             if (g_state->notify) g_state->notify(n);
         },
-        [](const std::string& s) { emf::logf("%s", s.c_str()); }});
+        [](const std::string& s) { emf::logf("%s", s.c_str()); },
+        [](uint32_t p) { return g_state->net && g_state->net->peer(p, emf::core::kModsChannel) != 0; }});
     g_mods_check = mods_check.get();
     {
         emf::core::net::ChannelDef c;
@@ -1380,7 +1382,16 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         std::string why;
         if (!net->add_channel("emf", c, &why)) emf::logf("mods check: off (%s)", why.c_str());
         // the core's channel alone greets players only when this server has mods they must match
-        net->set_core_greets([] { return g_mods_check && g_mods_check->has_shared_mods(); });
+        net->set_core_greets([] {  // asked on every receive-loop run: the answer is kept for 2 s
+            static std::atomic<uint64_t> at{0};
+            static std::atomic<bool> yes{false};
+            const uint64_t now = GetTickCount64();
+            if (now - at.load() >= 2000) {
+                yes = g_mods_check && g_mods_check->has_shared_mods();
+                at = now;
+            }
+            return yes.load();
+        });
     }
     // a joined game: once a second, its list goes to an EMF server that has emf/mods (once per session)
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
