@@ -199,6 +199,9 @@ void NetService::enable_server(ServerEnv env) {
     l.beacon_delay_ms = env.beacon_delay_ms;
     l.on_message = [this](uint32_t handle, uint64_t account, const std::string& channel, uint32_t peer_version,
                           const std::string& data) { remote_to_server(handle, account, channel, peer_version, data); };
+    l.on_peer = [this](uint32_t, uint64_t account, bool joined) {
+        if (peer_watch_) peer_watch_(account, joined);
+    };
     server_owned_ = std::make_unique<ServerLink>(std::move(l));
     server_.store(server_owned_.get());
 }

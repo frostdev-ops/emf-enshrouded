@@ -274,3 +274,15 @@ TEST_CASE("net remote: without the transport switched on nothing is taken and no
     s.s.server_tick({{1, 2}});  // nothing happens
     s.s.client_reset();
 }
+
+TEST_CASE("net remote: the server's peer watch hears a game's hello and its leaving") {
+    Pair p;
+    std::vector<std::pair<uint64_t, bool>> seen;
+    p.server.s.set_peer_watch([&](uint64_t account, bool joined) { seen.emplace_back(account, joined); });
+    p.join();
+    REQUIRE(seen.size() == 1);
+    CHECK(seen[0] == std::make_pair(kAcct, true));
+    p.server.s.server_tick({});  // the connection is gone
+    REQUIRE(seen.size() == 2);
+    CHECK(seen[1] == std::make_pair(kAcct, false));
+}

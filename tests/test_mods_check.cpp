@@ -510,3 +510,17 @@ TEST_CASE("refuse: state_of says what happened") {
     CHECK(g.r.state_of(0xEE).rfind("admin", 0) == 0);
     CHECK(g.r.state_of(0x99).empty());
 }
+
+TEST_CASE("mods check: a player's list is forgotten when their game says hello again or leaves") {
+    // Live: a player came back as the same entity on the same connection with the mod installed; between the new hello
+    // and the new list, the old list (without it) still counted and the player was refused.
+    End server({{'e', "emf", "0.6.3"}});
+    server.m.on_server_message(2, 0xBB, "e emf 0.6.3\n");
+    REQUIRE(server.m.player(0xBB));
+    server.m.forget(0xBB);
+    CHECK_FALSE(server.m.player(0xBB));
+    server.m.forget(0xCC);  // nothing there: nothing happens
+    server.m.on_server_message(2, 0xBB, "e emf 0.6.3\nb emberbrand 1.2.0\n");  // the new list counts
+    REQUIRE(server.m.player(0xBB));
+    CHECK(server.m.player(0xBB)->mods.size() == 2);
+}

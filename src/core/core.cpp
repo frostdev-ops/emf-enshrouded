@@ -1390,6 +1390,10 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         };
         std::string why;
         if (!net->add_channel("emf", c, &why)) emf::logf("mods check: off (%s)", why.c_str());
+        // a game's new hello (or its leaving) ends the list it sent before: only the new one counts
+        net->set_peer_watch([](uint64_t account, bool) {
+            if (g_mods_check) g_mods_check->forget(account);
+        });
         // the core's channel alone greets players only when this server has mods they must match
         net->set_core_greets([] {  // asked on every receive-loop run: the answer is kept for 2 s
             static std::atomic<uint64_t> at{0};
@@ -1407,9 +1411,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     // Kick event; never an admin, never the host). Only with both kick signatures on this build, with the greeting on.
     {
         const std::wstring ini = dir + L"\\emf\\emf_core.ini";
-        wchar_t check[64] = {}, required[2048] = {}, info[512] = {};
+        wchar_t check[64] = {}, required[4096] = {}, info[512] = {};  // 64 ids of up to 48 fit
         GetPrivateProfileStringW(L"net", L"mods_check", L"", check, 64, ini.c_str());
-        GetPrivateProfileStringW(L"net", L"mods_required", L"", required, 2048, ini.c_str());
+        GetPrivateProfileStringW(L"net", L"mods_required", L"", required, 4096, ini.c_str());
         GetPrivateProfileStringW(L"net", L"mods_info", L"", info, 512, ini.c_str());
         std::vector<std::string> problems;
         auto policy = emf::core::parse_mods_policy(utf8(check), utf8(required), utf8(info), &problems);

@@ -3,6 +3,7 @@
 // sends its list once per session when the server has the channel; the server keeps it per account, logs the
 // differences and answers with its own list; the game compares and shows a note once per session when it lacks or has
 // another version of a mod that must match. The host's own game never sends (its server is this process).
+#include <algorithm>
 #include <cstdint>
 #include <cstdio>
 #include <functional>
@@ -109,6 +110,14 @@ public:
         auto s = this->player(account);
         if (!s || s->player != player || !d_.has_peer || !d_.has_peer(player)) return std::nullopt;
         return s;
+    }
+
+    // The server: `account`'s game said hello again, or its peer is gone: the list it sent before is not this
+    // connection's (a player back as the same entity on the same connection kept it until the new list came).
+    void forget(uint64_t account) {
+        std::lock_guard<std::mutex> l(m_);
+        if (!seen_.erase(account)) return;
+        order_.erase(std::remove(order_.begin(), order_.end(), account), order_.end());
     }
 
     // This game's own list (with its "e emf <version>" entry).

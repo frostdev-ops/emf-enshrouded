@@ -119,9 +119,13 @@ public:
     std::map<std::string, uint32_t> channel_versions();
     // The core's own channels alone make the server greet only while this says yes (greets_for).
     void set_core_greets(std::function<bool()> f) { core_greets_ = std::move(f); }
+    // The server end: called (the receive loop's thread, no lock held) when a player's game said hello (joined) and when
+    // that peer is gone (its connection left, or a hello came on another connection). Set before enable_server.
+    void set_peer_watch(std::function<void(uint64_t account, bool joined)> f) { peer_watch_ = std::move(f); }
 
 private:
     std::function<bool()> core_greets_;  // set_core_greets
+    std::function<void(uint64_t, bool)> peer_watch_;  // set_peer_watch
     struct Channel {
         ChannelDef def;
         std::string owner;
