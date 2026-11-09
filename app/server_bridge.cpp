@@ -407,7 +407,12 @@ ServerDesk::Reply ServerDesk::handle(const std::string& cmd, const core::json::V
                                   "id in the mod's mod.json and in the Mods tab).");
         if (!problems.empty()) {  // more than 64 ids, a where-to-get text over 200 bytes: the core would cut them
             std::string why;
-            for (const auto& p : problems) why += (why.empty() ? "" : "; ") + (p.rfind("[net] ", 0) == 0 ? p.substr(6) : p);
+            for (const auto& p : problems)
+                why += (why.empty() ? "" : "; ") +
+                       std::string(p.find("mods_required") != std::string::npos ? "more than 64 mod ids (at most 64)"
+                                   : p.find("mods_info") != std::string::npos
+                                       ? "the where-to-get text is over 200 bytes (a letter such as \xC3\xA5 takes 2)"
+                                       : p);
             return say(false, "Not saved: " + why + ".");
         }
         ModsCheckSettings s;

@@ -337,12 +337,14 @@ TEST_CASE("server_mods_save: bad ids are refused and named; good ones are saved 
     REQUIRE(res);
     CHECK_FALSE(flag(*res, "ok"));
     CHECK(text(*res, "error").find("64") != std::string::npos);
+    CHECK(text(*res, "error").find("skipped") == std::string::npos);  // nothing was saved, nothing skipped
     std::string long_info;
     for (int i = 0; i < 150; ++i) long_info += "Ã¥";  // 150 letters, 300 bytes
     res = last_of(b.handle(R"({"cmd":"server_mods_save","refuse":true,"required":"","info":")" + long_info + R"("})"), "result");
     REQUIRE(res);
     CHECK_FALSE(flag(*res, "ok"));
     CHECK(text(*res, "error").find("200") != std::string::npos);
+    CHECK(text(*res, "error").find("where-to-get") != std::string::npos);  // the card's words, not the ini key
     CHECK(read_mods_check_settings(w.server.dir).info == "Get them on Nexus");  // unchanged
     // only for a server folder
     w.host.dir = w.game.dir;

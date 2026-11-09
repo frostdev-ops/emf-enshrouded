@@ -127,6 +127,7 @@ public:
             const auto mine = d_.mine ? d_.mine() : std::vector<ModEntry>{};
             std::string missing;
             for (const auto& id : p_.required) {
+                if (id == "emf") continue;  // EMF itself, never a required mod (refusal_needs skips it too)
                 bool runs = false;
                 for (const auto& m : mine) runs = runs || (m.kind != 'e' && m.id == id);
                 if (!runs) missing += (missing.empty() ? "" : ", ") + id;

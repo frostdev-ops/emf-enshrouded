@@ -861,6 +861,11 @@ TEST_CASE("mods check settings: a non-ASCII text turns the file into UTF-16, so 
     GetPrivateProfileStringW(L"net", L"mods_info", L"", buf, 512, ini.c_str());
     CHECK(std::wstring(buf) == L"\"Nexus\"");
     CHECK(read_mods_check_settings(srv.dir).info == "\"Nexus\"");
+    s.info = "'Nexus'";  // single quotes too
+    REQUIRE(save_mods_check_settings(srv.dir, s).ok);
+    GetPrivateProfileStringW(L"net", L"mods_info", L"", buf, 512, ini.c_str());
+    CHECK(std::wstring(buf) == L"'Nexus'");
+    CHECK(read_mods_check_settings(srv.dir).info == "'Nexus'");
     srv.write(L"emf\\emf_core.ini", "[net]\r\n");  // plain ASCII leaves an ASCII file as it is
     s.info = "nexusmods.com";
     REQUIRE(save_mods_check_settings(srv.dir, s).ok);

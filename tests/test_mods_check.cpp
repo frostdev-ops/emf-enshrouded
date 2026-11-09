@@ -567,9 +567,10 @@ TEST_CASE("mods check: a list without EMF's own entry is not taken (lines that a
 }
 
 TEST_CASE("refuse: required ids this server does not run are named once (a typo would refuse everyone)") {
-    RefuseRig g(refusing({"beastmaster", "hudmod", "hud_mdo"}));
+    RefuseRig g(refusing({"beastmaster", "hudmod", "hud_mdo", "emf"}));
     g.r.tick({}, 0);
     CHECK(g.logged("does not run") == 1);
+    CHECK(g.logged(", emf") == 0);  // EMF itself is never a required mod
     CHECK(g.logged("hudmod, hud_mdo") == 1);
     CHECK(g.logged("does not run: beastmaster") == 0);
     g.r.tick({}, 1000);
