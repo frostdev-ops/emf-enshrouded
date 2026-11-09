@@ -5850,3 +5850,37 @@ TEST_CASE("beastmaster net: without Beastmaster on the server the wheel key says
     CHECK(b.noted("type /beastmaster in the chat"));
     CHECK(sent_up(b).empty());
 }
+
+TEST_CASE("beastmaster net: a joined player's game shows their beast line and counts rests down itself; the server sends it only when it changes") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    write(b.data, "b 0x00000000000000bb wolf 80 0 Grey\n");  // resting 80 s
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    REQUIRE(sent_to(b, 2).size() == 1u);
+    CHECK(sent_to(b, 2)[0].find("\"t\":\"line\"") != std::string::npos);
+    CHECK(sent_to(b, 2)[0].find("\"state\":\"rest\"") != std::string::npos);
+    relay_down(b, 2);  // the client keeps rest 80 from now
+    b.seconds(5);
+    CHECK(sent_to(b, 2).empty());  // the countdown alone sends nothing
+    client_steps(b, 181 + 60);     // 300 + 241 ticks since it came: 80 - 9.02 s
+    CHECK(b.hud("out") == "Beasts (defending): Grey (rests 1:10)");
+    client_steps(b, 10 * 60);  // 80 - 19.02 s
+    CHECK(b.hud("out") == "Beasts (defending): Grey (rests 1:00)");
+}
+
+TEST_CASE("beastmaster net: the line goes away on a joined player's game when the server no longer answers") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    write(b.data, "b 0x00000000000000bb wolf 80 0 Grey\n");
+    b.r.fake.session = 2;
+    fire_load(1);
+    b.seconds(1);
+    relay_down(b, 2);
+    client_steps(b, 181 + 60);
+    REQUIRE(b.hud("out").find("Grey (rests") != std::string::npos);
+    b.r.fake.net_peer_version = 0;  // another server, or it left
+    client_steps(b, 60);
+    CHECK(b.hud("out") == "");
+}

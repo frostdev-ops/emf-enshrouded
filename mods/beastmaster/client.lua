@@ -6,10 +6,12 @@
 local wire = require("wire")
 local window_mod = require("beasts_window")
 local stable_mod = require("stable")
+local beast_line = require("beast_line")
 
 local OPEN_NEAR_M = 6  -- m: the stable key asks the server for the window with a stable this close (the server checks)
 local WHEEL_WAIT_S = 2  -- s: the wheel's items from the server open the wheel this long after the key was pressed
 local NO_SERVER_WHEEL = "The server's Beastmaster does not answer (it needs 1.15 or newer): type /beastmaster in the chat."
+local LINE_STATES = { out = true, aside = true, rest = true }
 
 
 local M = {}
@@ -33,6 +35,8 @@ function C:reset()
 	self.since = nil       -- this game's time when the server's Beastmaster first answered in this session
 	self.sent = nil        -- the stables last reported to the server in this session
 	self.asked = nil       -- this game's time when the wheel key asked the server for the items
+	self.line = nil        -- the server's beast line: {head, parts, at (this game's time when it came)}
+	self.drawn = nil       -- the line's text on screen now
 end
 
 -- The wheel key (on the client world): the server is asked for this player's items.
@@ -54,6 +58,13 @@ function C:step(world)
 		self.since = self.since or t
 	else
 		self.since, self.sent = nil, nil
+		self.line = nil  -- another server, or none: its line goes
+	end
+	-- the beast line, its rests counted down by this game's clock (drawn when its text changes)
+	local text = self.line and beast_line.text(self.line.head, self.line.parts, t - self.line.at) or ""
+	if text ~= (self.drawn or "") then
+		emf.hud("out", text, "bottom_left")
+		self.drawn = text
 	end
 	local list = self.reporter:step(world, t, emf.local_player())
 	if list and up and t - self.since >= stable_mod.SETTLE_S and not (self.sent and stable_mod.same_list(list, self.sent)) then
@@ -173,6 +184,23 @@ function on.wheel(self, world, msg)
 	emf.wheel("Beasts", labels, emf.setting("wheel_key"), function(w, choice)
 		if choice and labels[choice] then wire.send({ t = "pick", seq = seq, i = choice, label = labels[choice] }) end
 	end)
+end
+
+-- The beast line (checked: a head, at most 16 parts of a name and a state, a rest of 0..3600 s).
+function on.line(self, world, msg)
+	if type(msg.head) ~= "string" or #msg.head > 64 or type(msg.parts) ~= "table" then return end
+	local parts = {}
+	for i = 1, math.min(#msg.parts, 16) do
+		local p = msg.parts[i]
+		if type(p) ~= "table" or type(p.name) ~= "string" or #p.name > 40 or not LINE_STATES[p.state] then return end
+		local rest
+		if p.state == "rest" then
+			if type(p.rest) ~= "number" or p.rest ~= p.rest or p.rest < 0 or p.rest > 3600 then return end
+			rest = p.rest
+		end
+		parts[i] = { name = p.name, state = p.state, rest = rest }
+	end
+	self.line = { head = msg.head, parts = parts, at = self.env.now(world) }
 end
 
 function on.close(self, world, msg)

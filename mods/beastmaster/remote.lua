@@ -7,8 +7,9 @@
 -- `screen`), stable_key(world, player) (a stable without the game's prompt is under that player's crosshair: their
 -- stable key opens the window there), report(world, player, list) (the stables their game shows), wheel_items(world,
 -- player) -> labels, entries (that player's wheel), run(world, player, account, entry) -> text (a wheel pick done),
--- tell(world, player, text).
+-- tell(world, player, text), line(world, account) -> head, parts (beast_line.lua).
 local wire = require("wire")
+local beast_line = require("beast_line")
 
 local M = {}
 
@@ -29,6 +30,7 @@ end
 function R:reset()
 	self.windows = {}  -- account -> {w (the window), n (its number), player}
 	self.wheels = {}   -- account -> {seq, labels, entries, player}: the wheel sent last, until a pick from it
+	self.lines = {}    -- account -> the beast line sent last (beast_line.snapshot)
 end
 
 -- Whether `player` gets Beastmaster's screens on their own game: a player who joined (not this game's own) whose game
@@ -94,6 +96,24 @@ function R:step(world)
 	end
 	for account, s in pairs(self.wheels) do
 		if present[account] ~= s.player then self.wheels[account] = nil end
+	end
+	-- each joined player's beast line, when it changed (the first only when it shows something)
+	local now = self.env.now(world)
+	for account, player in pairs(present) do
+		if self:is_remote(world, player) then
+			local head, parts = self.env.line(world, account)
+			local sent = self.lines[account]
+			if (sent or #parts > 0) and beast_line.changed(sent, head, parts, now) then
+				if wire.send_to(world, player, { t = "line", head = head, parts = parts }) then
+					self.lines[account] = beast_line.snapshot(head, parts, now)
+				end
+			end
+		else
+			self.lines[account] = nil  -- not (or no longer) a peer: a new hello gets the line again
+		end
+	end
+	for account in pairs(self.lines) do
+		if not present[account] then self.lines[account] = nil end
 	end
 end
 

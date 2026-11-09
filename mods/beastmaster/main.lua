@@ -17,6 +17,7 @@ local talents = require("talents")
 local wire = require("wire")
 local remote_mod = require("remote")
 local client_mod = require("client")
+local beast_line = require("beast_line")
 
 emf.emits({ "StartGuardingEvent", "AddThreatTargetEvent" })
 
@@ -730,6 +731,9 @@ remote = remote_mod.new({
 		return b ~= nil and not stables:prompted(world, b)
 	end,
 	wheel_items = wheel_items,
+	line = function(world, account)
+		return beast_line.head(beasts:mode(account)), beast_line.parts(beasts:list(account), pack:is_aside(account))
+	end,
 	run = function(world, player, account, entry) return actions[entry.action](world, player, account, entry.key) end,
 	tell = function(world, player, text) tell(world, player, text) end,
 	report = function(world, player, list)
@@ -759,17 +763,8 @@ local function update_hud(world)
 	if now_s < next_hud then return end
 	next_hud = now_s + 1
 	local account = world:account(emf.local_player())
-	local parts = {}
-	local away = account and pack:is_aside(account)
-	for _, b in ipairs(account and beasts:list(account) or {}) do
-		if b.out then
-			parts[#parts + 1] = b.name .. (away and " (aside)" or " (out)")
-		elseif b.rest > 0 then
-			parts[#parts + 1] = string.format("%s (rests %d:%02d)", b.name, math.floor(b.rest / 60), math.floor(b.rest % 60))
-		end
-	end
-	local head = account and string.format("Beasts (%s): ", beasts:mode(account)) or "Beasts: "
-	emf.hud("out", #parts > 0 and (head .. table.concat(parts, ", ")) or "", "bottom_left")
+	local parts = account and beast_line.parts(beasts:list(account), pack:is_aside(account)) or {}
+	emf.hud("out", beast_line.text(beast_line.head(account and beasts:mode(account)), parts, 0), "bottom_left")
 	window:refresh(world)
 	remote:step(world)
 	publish(world)  -- the shared wheel shows what the other class mod's key opens with
