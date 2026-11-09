@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "core/net/net_link.h"
+#include "core/net/net_service.h"
 
 using namespace emf::core::net;
 
@@ -205,6 +206,38 @@ TEST_CASE("net link: the first beacon waits a few seconds after the connection; 
     r2.now += 60000;
     s2.tick({{kHandle, kAcct}});
     CHECK(r2.to_players.empty());
+}
+
+TEST_CASE("net link: by default the beacon goes 10 s after a connection appears and once more 35 s later, never a third time; it says the server runs EMF mods and that one can play without it") {
+    CHECK(ServerLinkDeps{}.beacon_delay_ms == 10000u);
+    CHECK(ServerLinkDeps{}.beacon_retry_ms == 35000u);
+    CHECK(ServerLinkDeps{}.beacon_tries == 2u);
+    CHECK(ServerEnv{}.beacon_delay_ms == 10000u);
+    Rig r;
+    ServerLinkDeps d = r.server_deps();
+    d.beacon_delay_ms = ServerLinkDeps{}.beacon_delay_ms;
+    ServerLink server(d);
+    server.tick({{kHandle, kAcct}});
+    r.now += 9999;
+    server.tick({{kHandle, kAcct}});
+    CHECK(r.to_players.empty());
+    r.now += 1;
+    server.tick({{kHandle, kAcct}});
+    REQUIRE(r.to_players.size() == 1);
+    const auto line = parse_line(r.to_players[0].second, nullptr);
+    REQUIRE(line);
+    CHECK(line->payload == "This server runs EMF mods. Get EMF to see their windows; you can play without it.");
+    r.now += 34999;
+    server.tick({{kHandle, kAcct}});
+    CHECK(r.to_players.size() == 1);
+    r.now += 1;
+    server.tick({{kHandle, kAcct}});
+    CHECK(r.to_players.size() == 2);
+    for (int i = 0; i < 10; ++i) {
+        r.now += 35000;
+        server.tick({{kHandle, kAcct}});
+    }
+    CHECK(r.to_players.size() == 2);  // a game without EMF shows each one
 }
 
 TEST_CASE("net link: beacon, hello, welcome; each side then knows the other's channels") {

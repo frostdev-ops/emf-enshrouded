@@ -312,10 +312,7 @@ void ServerLink::tick(const std::vector<Connection>& connected) {
         }
     }
     const std::string beacon = [&] {
-        const auto lines = split_message('S', 0, kControl, kControlVersion,
-                                         "This server uses EMF mods (EMF " + clean_version(d_.emf_version) +
-                                             "). If you can read this, your game does not run EMF.",
-                                         nullptr);
+        const auto lines = split_message('S', 0, kControl, kControlVersion, kBeaconText, nullptr);
         return lines.empty() ? std::string() : encode_line(lines.front());
     }();
     for (size_t i = 0; i < fresh.size(); ++i) {

@@ -54,6 +54,11 @@ std::string hello_text(const HelloInfo& h);
 std::optional<HelloInfo> parse_hello_text(std::string_view text);
 
 // ---- the server's end ----
+// The beacon's words after its marker and fields: what a player whose game has no EMF reads in the chat (at most
+// twice). An EMF game takes the line by its type and never reads them.
+inline constexpr const char* kBeaconText =
+    "This server runs EMF mods. Get EMF to see their windows; you can play without it.";
+
 struct ServerLinkDeps {
     // the channels this server has (name -> version); none: no beacon is sent
     std::function<std::map<std::string, uint32_t>()> channels;
@@ -78,10 +83,10 @@ struct ServerLinkDeps {
     uint32_t build = 0;
     bool greet = true;  // [net] greet: send the beacon (a server without it never gets a hello)
     // The first beacon this long after a connection appears (a line sent while the game still loads is lost), then
-    // again this often until the game says hello, at most this many times (a game without EMF shows each one).
-    uint64_t beacon_delay_ms = 5000;
-    uint64_t beacon_retry_ms = 15000;
-    uint32_t beacon_tries = 4;
+    // again this often until the game says hello, at most this many times (a game without EMF shows each one: twice).
+    uint64_t beacon_delay_ms = 10000;
+    uint64_t beacon_retry_ms = 35000;
+    uint32_t beacon_tries = 2;
 };
 
 // A player on a connection, as the server's records name it.
