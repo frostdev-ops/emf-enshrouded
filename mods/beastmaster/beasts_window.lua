@@ -242,15 +242,17 @@ local function signature(rows)
 	return table.concat(parts, ";")
 end
 
--- Opens the window for `player` (the screen's player); not while it is open (one E press can reach both the stable's prompt and
--- the E key). Each opening answers only its own events: a window from before (a world loaded again under it) that
--- closes late leaves the one opened since alone. True when it opened.
-function W:show(world, player)
+-- Opens the window for `player` (the screen's player), on beast `name`'s tab when given; not while it is open (one E
+-- press can reach both the stable's prompt and the E key). Each opening answers only its own events: a window from
+-- before (a world loaded again under it) that closes late leaves the one opened since alone. True when it opened.
+function W:show(world, player, name)
 	if self.open then return false end
 	local account = world:account(player)
 	if not account then return false end
 	self:reset()
 	self.account, self.player = account, player
+	local b = name and self.env.beasts():find(account, name)
+	if b then self:select(b) end
 	local def = self:def(world)
 	self.opening = self.opening + 1
 	local opening = self.opening

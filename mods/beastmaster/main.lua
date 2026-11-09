@@ -137,8 +137,12 @@ emf.on_world_data(function(world, text)
 	loaded = true
 end)
 
--- Who a command is for: the player who typed it in the chat, else the host. Returns entity, account text.
+local as_player = nil  -- beastmaster.as: the player a word runs as (who answers them while it runs)
+
+-- Who a command is for: the player beastmaster.as names, the player who typed it in the chat, else the host. Returns
+-- entity, account text.
 local function who(world)
+	if as_player then return as_player, world:account(as_player) end
 	local s = emf.sender()
 	if s and s.chat then return s.entity, s.account end
 	local p = emf.local_player()
@@ -878,7 +882,7 @@ emf.command("idle", ": what your beasts do while you stand still now", function(
 end)
 
 -- Admin: set a beast's loyalty (console only, not from the chat; for tests and live checks).
-emf.command("loyalty", "<name or number> <1-10>: set a beast's loyalty (admin)", function(world, args)
+local function loyalty_command(world, args)
 	local sender = emf.sender()
 	if sender and sender.chat then
 		emf.reply("beastmaster.loyalty is for the host's console")
@@ -898,10 +902,11 @@ emf.command("loyalty", "<name or number> <1-10>: set a beast's loyalty (admin)",
 	b.points = loyalty.points_for(n, setting("loyalty_pace"))
 	save()
 	emf.reply(string.format("%s's loyalty is now %d. Talents: %s.", b.name, n, talents.summary(b, setting("loyalty_pace"))))
-end)
+end
+emf.command("loyalty", "<name or number> <1-10>: set a beast's loyalty (admin)", loyalty_command)
 
 -- Admin: add a beast to your collection without taming it (console only, not from the chat).
-emf.command("give", "<species>: add a beast to your collection (admin)", function(world, args)
+local function give_command(world, args)
 	local sender = emf.sender()
 	if sender and sender.chat then
 		emf.reply("beastmaster.give is for the host's console")
@@ -920,4 +925,78 @@ emf.command("give", "<species>: add a beast to your collection (admin)", functio
 	if not b then emf.reply(why) return end
 	save()
 	emf.reply(string.format("added %s (%s) to your collection", b.name, s.id))
+end
+emf.command("give", "<species>: add a beast to your collection (admin)", give_command)
+
+-- ---- beastmaster.as: a player's word run as that player from the host's or the server's console (tests on a
+-- dedicated server, where the console has no player of its own) ----
+
+-- The players in the world, lowest entity id first (#k).
+local function players_by_id(world)
+	local ids = {}
+	for _, id in ipairs(world:entities()) do
+		if world:get("PlayerState", id) and world:account(id) then ids[#ids + 1] = id end
+	end
+	table.sort(ids)
+	return ids
+end
+
+-- The Beasts window for `player` as at a stable (on beast `name`'s tab when given): the host's own, or drawn on a
+-- joined player's game. The reply.
+local function open_as(world, player, name)
+	local host = emf.local_player()
+	if host and host ~= 0 and player == host then
+		if not window:show(world, player, name) then return "The Beasts window did not open (another window is open)." end
+		return "Opened the Beasts window."
+	end
+	if remote:is_remote(world, player) then
+		if remote:open_window(world, player, name) then return "Opened the Beasts window on that player's game." end
+		return "The Beasts window could not be sent to that player's game."
+	end
+	return "That player's game has no Beastmaster window (it needs EMF with Beastmaster 1.15 or newer switched on)."
+end
+
+local AS_WORDS = { give = give_command, loyalty = loyalty_command }
+local AS_USAGE = "beastmaster.as <#k or player entity> <word> [...]: give, loyalty, open [name], or a /beastmaster word"
+
+emf.command("as", "<#k or player entity> <word> [...]: run a player's word as that player: give, loyalty, open " ..
+	"[name], or any /beastmaster word (console only; for tests on a dedicated server)", function(world, args)
+	local sender = emf.sender()
+	if sender and sender.chat then
+		emf.reply("beastmaster.as is for the host's or the server's console")
+		return
+	end
+	local target = args[1] or ""
+	local player
+	local k = target:match("^#(%d+)$")
+	if k then
+		player = players_by_id(world)[tonumber(k)]
+		if not player then
+			emf.reply(string.format("No player #%s in the world.", k))
+			return
+		end
+	else
+		local id = tonumber(target)
+		if not (id and world:get("PlayerState", id) and world:account(id)) then
+			emf.reply(target == "" and AS_USAGE or string.format("No player with entity %s.", target))
+			return
+		end
+		player = id
+	end
+	local word = args[2] and args[2]:lower()
+	local rest = { table.unpack(args, 3) }
+	if word == "open" then
+		local name = table.concat(rest, " ")
+		emf.reply(open_as(world, player, name ~= "" and name or nil))
+		return
+	end
+	local fn = word and (AS_WORDS[word] or words[word])
+	if not fn then
+		emf.reply(AS_USAGE)
+		return
+	end
+	as_player = player
+	local ok, err = pcall(fn, world, rest)
+	as_player = nil
+	if not ok then error(err, 0) end
 end)

@@ -73,13 +73,8 @@ function R:open_window(world, player, name)
 	self.n = self.n + 1
 	local n = self.n
 	local w = self.env.make_window(screen(player, n))
-	if not w:show(world, player) then return false end
+	if not w:show(world, player, name) then return false end
 	self.windows[account] = { w = w, n = n, player = player }
-	local b = name and w.env.beasts():find(account, name)
-	if b then
-		w:select(b)
-		w:refresh(world, true)
-	end
 	return true
 end
 

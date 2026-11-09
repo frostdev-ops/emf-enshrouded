@@ -5884,3 +5884,28 @@ TEST_CASE("beastmaster net: the line goes away on a joined player's game when th
     client_steps(b, 60);
     CHECK(b.hud("out") == "");
 }
+
+TEST_CASE("beastmaster: beastmaster.as runs a player's word as that player from the console; from the chat it is refused") {
+    BeastRig b;
+    CHECK(b.reply("beastmaster.as #2 give wolf") == "added Wolf (wolf) to your collection");
+    CHECK(b.reply("beastmaster.list", 2, 0xBB).find("1. Wolf - wolf") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("no beasts") != std::string::npos);  // not the host's
+    CHECK(b.reply("beastmaster.as #2 list").find("1. Wolf - wolf") != std::string::npos);
+    CHECK(b.reply("beastmaster.as 2 list").find("1. Wolf - wolf") != std::string::npos);
+    CHECK(b.reply("beastmaster.list").find("no beasts") != std::string::npos);  // the console is the host's again
+    CHECK(b.reply("beastmaster.as #3 list") == "No player #3 in the world.");
+    CHECK(b.reply("beastmaster.as 77 list") == "No player with entity 77.");
+    CHECK(b.reply("beastmaster.as #2 give wolf", 2, 0xBB) == "beastmaster.as is for the host's or the server's console");
+    CHECK(b.reply("beastmaster.list", 2, 0xBB).find("2. ") == std::string::npos);
+}
+
+TEST_CASE("beastmaster net: beastmaster.as #k open opens a joined player's Beasts window on their game") {
+    BeastRig b({}, true);
+    b.r.fake.net_peer_version = 1;
+    joined_beasts(b);
+    CHECK(b.reply("beastmaster.as #2 open Grey") == "Opened the Beasts window on that player's game.");
+    REQUIRE(sent_to(b, 2).size() == 1u);  // opened on Grey's tab (one message)
+    CHECK(has_part(sent_to(b, 2), "\"open\":true", "Talents: "));
+    b.r.fake.net_peer_version = 0;
+    CHECK(b.reply("beastmaster.as #2 open").rfind("That player's game has no Beastmaster window", 0) == 0);
+}
