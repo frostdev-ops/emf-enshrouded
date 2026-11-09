@@ -300,7 +300,10 @@ TEST_CASE("mods policy: the info text is trimmed, control characters become spac
           "nexusmods.com/enshrouded or discord");
     const std::string text = std::string(199, 'a') + "Ã©";  // the 2-byte character would end at byte 201
     CHECK(parse_mods_policy("", "", text, nullptr).info == std::string(199, 'a'));
-    CHECK(parse_mods_policy("", "", std::string(300, 'b'), nullptr).info.size() == emf::core::kMaxModsInfoBytes);
+    std::vector<std::string> problems;
+    CHECK(parse_mods_policy("", "", std::string(300, 'b'), &problems).info.size() == emf::core::kMaxModsInfoBytes);
+    REQUIRE(problems.size() == 1);  // cut, and said so
+    CHECK(problems[0].find("200") != std::string::npos);
 }
 
 namespace {
@@ -551,4 +554,27 @@ TEST_CASE("refuse: two entities with the same account count once (the one alread
     for (uint64_t t = 0; t <= 6000; t += 1000) g.r.tick(both, t);
     CHECK(g.tells.size() == 1);
     CHECK(g.kicks.size() == 1);
+}
+
+TEST_CASE("mods check: a list without EMF's own entry is not taken (lines that are all broken are no list)") {
+    End server({{'e', "emf", "0.6.3"}, {'c', "beasts_pack", "2.2.0"}});
+    server.m.on_server_message(2, 0xBB, "garbage\nmore garbage\n");
+    CHECK_FALSE(server.m.player(0xBB));
+    CHECK(server.down.empty());
+    CHECK(server.logged("not taken") == 1);
+    server.m.on_server_message(2, 0xBB, "b emberbrand 1.2.0\n");  // entries, but no "e emf"
+    CHECK_FALSE(server.m.player(0xBB));
+}
+
+TEST_CASE("refuse: required ids this server does not run are named once (a typo would refuse everyone)") {
+    RefuseRig g(refusing({"beastmaster", "hudmod", "hud_mdo"}));
+    g.r.tick({}, 0);
+    CHECK(g.logged("does not run") == 1);
+    CHECK(g.logged("hudmod, hud_mdo") == 1);
+    CHECK(g.logged("does not run: beastmaster") == 0);
+    g.r.tick({}, 1000);
+    CHECK(g.logged("does not run") == 1);
+    RefuseRig fine(refusing({"beastmaster"}));
+    fine.r.tick({}, 0);
+    CHECK(fine.logged("does not run") == 0);
 }

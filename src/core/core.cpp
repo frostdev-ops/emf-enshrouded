@@ -1752,7 +1752,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
                 if (everyone)
                     emf::logf("players' chat commands: on, for every player ([chat] everyone=1)");
                 else
-                    emf::logf("players' chat commands: on, for %zu admin account(s) ([chat] admins in emf\emf_core.ini; "
+                    emf::logf("players' chat commands: on, for %zu admin account(s) ([chat] admins in emf\\emf_core.ini; "
                               "a refused player's account is logged)",
                               admin_count);
             }

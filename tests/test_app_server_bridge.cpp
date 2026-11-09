@@ -330,6 +330,20 @@ TEST_CASE("server_mods_save: bad ids are refused and named; good ones are saved 
     CHECK(flag(*mods, "refuse"));
     CHECK(mods->get("required")->arr.size() == 3);
     CHECK(text(*mods, "info") == "Get them on Nexus");
+    // more than 64 ids, or a where-to-get text over 200 bytes: not saved, and said why
+    std::string many;
+    for (int i = 0; i < 65; ++i) many += "m" + std::to_string(i) + "\\n";  // a JSON "\n" (an escaped line break)
+    res = last_of(b.handle(R"({"cmd":"server_mods_save","refuse":true,"required":")" + many + R"(","info":"x"})"), "result");
+    REQUIRE(res);
+    CHECK_FALSE(flag(*res, "ok"));
+    CHECK(text(*res, "error").find("64") != std::string::npos);
+    std::string long_info;
+    for (int i = 0; i < 150; ++i) long_info += "Ã¥";  // 150 letters, 300 bytes
+    res = last_of(b.handle(R"({"cmd":"server_mods_save","refuse":true,"required":"","info":")" + long_info + R"("})"), "result");
+    REQUIRE(res);
+    CHECK_FALSE(flag(*res, "ok"));
+    CHECK(text(*res, "error").find("200") != std::string::npos);
+    CHECK(read_mods_check_settings(w.server.dir).info == "Get them on Nexus");  // unchanged
     // only for a server folder
     w.host.dir = w.game.dir;
     b.handle(R"({"cmd":"state"})");

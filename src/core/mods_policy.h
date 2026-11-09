@@ -78,6 +78,7 @@ inline ModsPolicy parse_mods_policy(std::string_view check, std::string_view req
     for (char& c : text)
         if (static_cast<unsigned char>(c) < 0x20 || c == 0x7F) c = ' ';
     if (text.size() > kMaxModsInfoBytes) {
+        say("[net] mods_info: over " + std::to_string(kMaxModsInfoBytes) + " bytes (a letter such as \xC3\xA5 is 2): cut");
         size_t n = kMaxModsInfoBytes;
         while (n > 0 && (static_cast<unsigned char>(text[n]) & 0xC0) == 0x80) --n;  // not inside a UTF-8 character
         text.resize(n);

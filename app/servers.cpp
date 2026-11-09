@@ -663,7 +663,9 @@ Change save_mods_check_settings(const std::wstring& folder_in, const ModsCheckSe
     }
     ini.text = set_ini_value(ini.text, "net", "mods_check", s.refuse ? "refuse" : "warn");
     ini.text = set_ini_value(ini.text, "net", "mods_required", admins_value(s.required));
-    ini.text = set_ini_value(ini.text, "net", "mods_info", s.info);
+    // both readers take one pair of quotes off a value: a text in quotes keeps them inside one more pair
+    const bool quoted = s.info.size() >= 2 && s.info.front() == '"' && s.info.back() == '"';
+    ini.text = set_ini_value(ini.text, "net", "mods_info", quoted ? "\"" + s.info + "\"" : s.info);
     std::error_code ec;
     std::filesystem::create_directories(std::filesystem::path(folder + L"\\emf"), ec);
     return write_file_whole(path, encode_ini(ini), "emf\\emf_core.ini");

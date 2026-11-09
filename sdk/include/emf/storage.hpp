@@ -102,7 +102,7 @@ public:
     bool save(const std::string& text) {
         if (!ready()) return false;
         if (text == written_) return true;
-        if (!write_whole(path(), text)) return false;
+        if (!write_whole(path(), text, failed_path_)) return false;
         written_ = text;
         return true;
     }
@@ -146,14 +146,15 @@ public:
                      static_cast<unsigned>(kMaxPlayersFile));
             return false;
         }
-        if (!write_whole(players_path(), all)) return false;
+        if (!write_whole(players_path(), all, failed_players_path_)) return false;
         players_ = std::move(next);
         return true;
     }
 
 private:
     // `text` into `file` whole: a temporary file renamed over it (a crash leaves the old file or the new one).
-    bool write_whole(const std::wstring& file, const std::string& text) {
+    // `failed`: the file of this kind whose write failure was logged (each kind logs once, not on every save).
+    bool write_whole(const std::wstring& file, const std::string& text, std::wstring& failed) {
         CreateDirectoryW(parent(dir_).c_str(), nullptr);
         CreateDirectoryW(dir_.c_str(), nullptr);
         const std::wstring tmp = file + L".tmp";
@@ -166,14 +167,14 @@ private:
         ok = ok && MoveFileExW(tmp.c_str(), file.c_str(), MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
         if (!ok) {
             DeleteFileW(tmp.c_str());
-            if (failed_path_ != file) {  // once per file, not on every save
-                failed_path_ = file;
+            if (failed != file) {  // once per file, not on every save
+                failed = file;
                 if (api_->log)
                     api_->log(mod_.c_str(), "could not write %ls (further failures for it are not logged)", file.c_str());
             }
             return false;
         }
-        if (failed_path_ == file) failed_path_.clear();
+        failed.clear();
         return true;
     }
     // Reads the world's players file: none is no players; one another program holds is read again by poll; one that is
@@ -294,7 +295,8 @@ private:
     uint16_t file_slot_ = 0;
     uint32_t file_session_ = 0, read_loads_ = 0;
     std::string written_;
-    std::wstring failed_path_;  // the file whose write failure was logged
+    std::wstring failed_path_;          // the world file whose write failure was logged
+    std::wstring failed_players_path_;  // the players file whose write failure was logged
     std::map<uint64_t, std::string> players_;  // the running world's player texts (read by poll)
     enum class PlayersState { Ok, Unreadable, Bad };  // Unreadable: poll reads it again; Bad: never overwritten
     PlayersState players_state_ = PlayersState::Ok;

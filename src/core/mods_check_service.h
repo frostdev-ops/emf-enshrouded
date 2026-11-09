@@ -76,6 +76,12 @@ public:
             told("a mod list from " + acct(account) + " was not taken: " + why);
             return;
         }
+        bool has_emf = false;  // every game's list starts with its EMF: without it (or with broken lines only) it is no list
+        for (const auto& e : *theirs) has_emf = has_emf || (e.kind == 'e' && e.id == "emf");
+        if (!has_emf) {
+            told("a mod list from " + acct(account) + " was not taken: no EMF entry");
+            return;
+        }
         const auto mine = d_.mine ? d_.mine() : std::vector<ModEntry>{};
         Seen s;
         s.player = player;

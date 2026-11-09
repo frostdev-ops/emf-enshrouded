@@ -255,6 +255,10 @@ TEST_CASE("storage: a folder that cannot be written is logged once, not on every
     CHECK_FALSE(file.save("b"));
     CHECK_FALSE(file.save("c"));
     CHECK(g_logged.size() == 1);
+    CHECK_FALSE(file.save_player(0xAA, "x"));  // the players file: its own line, once
+    CHECK_FALSE(file.save("d"));
+    CHECK_FALSE(file.save_player(0xAA, "y"));
+    CHECK(g_logged.size() == 2);
     DeleteFileW(blocker.c_str());
 }
 

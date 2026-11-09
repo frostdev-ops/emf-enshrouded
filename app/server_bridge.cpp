@@ -405,6 +405,11 @@ ServerDesk::Reply ServerDesk::handle(const std::string& cmd, const core::json::V
             return say(false, "Not saved: " + bad + (bad_count == 1 ? " is" : " are") +
                                   " not a mod id. A mod id is 1-48 characters of a-z, 0-9, _ . - , like beastmaster (it is the "
                                   "id in the mod's mod.json and in the Mods tab).");
+        if (!problems.empty()) {  // more than 64 ids, a where-to-get text over 200 bytes: the core would cut them
+            std::string why;
+            for (const auto& p : problems) why += (why.empty() ? "" : "; ") + (p.rfind("[net] ", 0) == 0 ? p.substr(6) : p);
+            return say(false, "Not saved: " + why + ".");
+        }
         ModsCheckSettings s;
         s.refuse = policy.refuse;
         s.required = policy.required;
