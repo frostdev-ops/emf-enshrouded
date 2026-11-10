@@ -13,6 +13,7 @@
 
 #include "core/emf_settings.h"
 #include "core/game_text.h"
+#include "core/hud_editor/lines.h"
 #include "core/screen_glyphs.h"
 #include "console_ui.h"
 #include "image_store.h"
@@ -482,11 +483,34 @@ void build(ImVec2 display) {
     g_page_showing = g_router->open() && g_ui.tab == 2 && g_settings_ui.page == kPageHud;
     g_router->set_esc_to_console(g_router->open() && (g_ui.wants_escape || capturing_key(g_mods_ui)));
     const TextLook look = text_look();
-    if (g_ui.open_fraction <= 0.0f) {
+    if (g_ui.open_fraction <= 0.0f)
         draw_notes(toast_lines(*g_model, ToastState{g_toast_from.load(), g_toast_until.load()}, GetTickCount64()),
                    display, look);
-        if (g_deps.hud && show_hud(false, !g_deps.hud->empty(), world_live()))
-            draw_hud(g_deps.hud->lines(), display, look);
+    // Mods' lines: with the console closed, or behind the HUD page (with a sample line for each empty place) so they
+    // can be picked and dragged there; the HUD editor's layout moves, scales and hides each place.
+    if (g_deps.hud && (g_ui.open_fraction <= 0.0f || g_page_showing)) {
+        const hud::HudSnapshot* snap = g_deps.hud_editor ? g_deps.hud_editor->snapshots().current() : nullptr;
+        const bool samples = g_page_showing && snap && snap->active;
+        if (show_hud(false, !g_deps.hud->empty() || samples, world_live())) {
+            std::array<std::optional<ImVec4>, 3> rects{};
+            HudLinesView view;
+            view.samples = samples;
+            view.rects = &rects;
+            for (int p = 0; p < 3; ++p) view.edits[static_cast<size_t>(p)] = lines_edit(snap, static_cast<HudPlace>(p), display);
+            draw_hud(g_deps.hud->lines(), display, look, view);
+            const hud::UiSpace ui = hud::hud_ui_space();
+            const uint64_t now = GetTickCount64();
+            for (int p = 0; p < 3; ++p) {
+                const auto& r = rects[static_cast<size_t>(p)];
+                if (!r || !(display.x > 0) || !(display.y > 0)) {
+                    hud::lines_not_drawn(p);
+                    continue;
+                }
+                const float sx = ui.w / display.x, sy = ui.h / display.y;
+                const float units[4] = {r->x * sx, r->y * sy, r->z * sx, r->w * sy};
+                hud::set_lines_live(p, units, now);
+            }
+        }
     }
     draw_wheel(g_wheel, display, look);
 }

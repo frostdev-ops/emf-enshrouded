@@ -19,9 +19,11 @@ struct HudElement {
     bool confirm_hide;  // the page asks before hiding it
     int bar;            // -1: a scope part; 0 health, 1 mana, 2 stamina: a bar of the vitals (moved by the bar detour,
                         // no scope: hash 0)
+    int lines;          // -1, or the place of mods' HUD lines (0 top right, 1 bottom right, 2 bottom left): EMF draws
+                        // them (no scope: hash 0)
 };
 
-constexpr size_t kHudElementCount = 16;
+constexpr size_t kHudElementCount = 19;
 constexpr uint64_t kUiSpaceHash = 0xf5139eefe5b90316ull;  // "doPlayStateUi()", the UI space
 constexpr int kNoElement = -1, kUiSpaceIndex = -2;
 
@@ -34,6 +36,9 @@ constexpr int kBarHealth = 0, kBarMana = 1, kBarStamina = 2;
 int bar_element(int bar);
 // "health", "mana", "stamina"; "" for anything else.
 const char* bar_id(int bar);
+// The element index of the mods' lines at a place (0 top right, 1 bottom right, 2 bottom left), kNoElement for anything
+// else.
+int lines_element(int place);
 // The order the bars are stacked in, top first (bar numbers).
 using BarOrder = std::array<uint8_t, kBarCount>;
 constexpr BarOrder kDefaultOrder{0, 1, 2};

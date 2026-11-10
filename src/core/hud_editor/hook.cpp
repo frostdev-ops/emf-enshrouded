@@ -13,6 +13,7 @@
 #include "core/hud_editor/elements.h"
 #include "core/hud_editor/gate.h"
 #include "core/hud_editor/layout.h"
+#include "core/hud_editor/lines.h"
 
 namespace emf::core::hud {
 
@@ -282,6 +283,7 @@ LiveInfo hud_live(size_t element) {
     LiveInfo li;
     if (element >= kHudElementCount) return li;
     if (hud_elements()[element].bar >= 0) return bar_live(hud_elements()[element].bar);
+    if (hud_elements()[element].lines >= 0) return lines_live(hud_elements()[element].lines);
     const Live& l = g_live[element];
     li.seen = l.seen.load(std::memory_order_relaxed);
     li.last_seen_ms = l.last_seen_ms.load(std::memory_order_relaxed);
@@ -340,6 +342,7 @@ void hud_reset_live_for_tests() {
     }
     g_ui_space = 0;
     bars_reset_for_tests();
+    lines_reset_for_tests();
     t_food_h = -1;
     for (auto& g : g_guard) g = WroteGuard{};
     t_tracker.clear();

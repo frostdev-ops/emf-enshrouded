@@ -179,7 +179,7 @@ std::vector<std::string> list_lines(HudEditor& editor) {
         const ElementLayout& e = v.elements[i];
         std::string line = std::string("  ") + parts[i].id + " (" + parts[i].scope + "): ";
         if (e.is_default()) {
-            line += "where the game draws it";
+            line += parts[i].lines >= 0 ? "where EMF puts them" : "where the game draws it";
         } else {
             line += pos_text(e) + ", scale " + number_text(e.scale);
             if (e.hidden) line += ", hidden";
@@ -245,7 +245,7 @@ std::vector<std::string> run_hud_command(HudEditor& editor, const std::vector<st
         std::string line = std::string("hud: ") + hud_elements()[static_cast<size_t>(part)].id + " scale " +
                            number_text(v.elements[static_cast<size_t>(part)].scale) + " (layout \"" + v.layout_name + "\")";
         if (s < kScaleMin || s > kScaleMax) line += " (kept within 0.5 to 2)";
-        if (!v.scale_works) line += " (kept; " + v.scale_note + ")";
+        if (!v.scale_works && hud_elements()[static_cast<size_t>(part)].lines < 0) line += " (kept; " + v.scale_note + ")";
         out.push_back(line);
         add_not_shown(editor, out);
         return out;

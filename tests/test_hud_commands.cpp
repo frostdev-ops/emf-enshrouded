@@ -35,7 +35,8 @@ TEST_CASE("hud.move: usage, unknown part, bad number") {
     CHECK(run(e, {"hud.move", "vitals"}) == Lines{"usage: hud.move <part> <x> <y> (percent of the screen, -100 to 100)"});
     CHECK(run(e, {"hud.move", "nope", "1", "1"}) ==
           Lines{"hud: no HUD part \"nope\"; the parts: vitals, buffs, hotbar, compass, shroud, quests, oxygen, loot, boss, "
-                "crosshair, chat, notifications, multitool, health, mana, stamina"});
+                "crosshair, chat, notifications, multitool, health, mana, stamina, lines_top_right, lines_bottom_right, "
+                "lines_bottom_left"});
     CHECK(run(e, {"hud.move", "vitals", "abc", "1"}) == Lines{"hud.move: \"abc\" is not a number"});
     CHECK(run(e, {"hud.move", "vitals", "1", "nan"}) == Lines{"hud.move: \"nan\" is not a number"});
     CHECK(run(e, {"hud.move", "vitals", "1", "5x"}) == Lines{"hud.move: \"5x\" is not a number"});
@@ -103,14 +104,15 @@ TEST_CASE("hud.list: the state, every part, the layouts") {
     run(e, {"hud.hide", "buffs"});
     r.live[0].seen = true;
     const Lines l = run(e, {"hud.list"});
-    REQUIRE(l.size() == 19);
+    REQUIRE(l.size() == 22);
     CHECK(l[0] == "hud: on, layout \"Default\"");
     CHECK(l[1] == "hud: scale on (pushes 0, pops 0, mismatches 0)");
     CHECK(l[2] == "  vitals (playerStatusParent): x 5 %, y -2.5 %, scale 1");
     CHECK(l[3] == "  buffs (buffRow): x 0 %, y 0 %, scale 1, hidden, not seen yet");
     CHECK(l[4] == "  hotbar (doActionbar): where the game draws it, not seen yet");
     CHECK(l[15] == "  health (bar:health): where the game draws it, not seen yet");
-    CHECK(l[18].rfind("hud: layouts: Default (active)", 0) == 0);
+    CHECK(l[18] == "  lines_top_right (lines:top_right): where EMF puts them, not seen yet");
+    CHECK(l[21].rfind("hud: layouts: Default (active)", 0) == 0);
 }
 
 TEST_CASE("hud.list: off, with the gate's words") {
@@ -196,14 +198,14 @@ TEST_CASE("hud.list: the order and grow upward when set, and the bars' note when
     run(e, {"hud.swap", "health", "mana"});
     run(e, {"hud.grow", "up"});
     const Lines l = run(e, {"hud.list"});
-    REQUIRE(l.size() == 21);
+    REQUIRE(l.size() == 24);
     CHECK(l[2] == "hud: order mana, health, stamina");
     CHECK(l[3] == "hud: status effects grow upward");
     HudRig off;
     off.bars = false;
     HudEditor& f = off.make();
     const Lines m = run(f, {"hud.list"});
-    REQUIRE(m.size() == 20);
+    REQUIRE(m.size() == 23);
     CHECK(m[2] == "hud: Moving health, mana and stamina on their own is not available on this game build.");
 }
 
@@ -353,4 +355,12 @@ TEST_CASE("hud.list: the colours and their counters when set") {
     const Lines l = run(e, {"hud.list"});
     CHECK(has(l, "hud: colours: health fill #ff4040"));
     CHECK(has(l, "hud: colour calls 5, panel writes 2, panel restores 2"));
+}
+
+TEST_CASE("hud.scale on a mod lines part needs no transform stack") {
+    HudRig r;
+    r.scale = ScaleState{false, false};
+    HudEditor& e = r.make();
+    CHECK(run(e, {"hud.scale", "lines_bottom_left", "1.5"}) == Lines{"hud: lines_bottom_left scale 1.5 (layout \"Default\")"});
+    CHECK(e.view().elements[static_cast<size_t>(lines_element(2))].scale == 1.5f);
 }

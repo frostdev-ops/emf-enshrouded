@@ -1,5 +1,7 @@
 #include "console_ui.h"
 
+#include "core/hud_editor/elements.h"
+
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
@@ -491,31 +493,52 @@ void draw_notes_boxed(const ConsoleLines& lines, ImVec2 display, const TextLook&
     if (look.font) ImGui::PopFont();
 }
 
+// The label of the HUD part of the mods' lines at a place (the HUD page's sample line).
+const char* lines_label(int place) {
+    const int e = hud::lines_element(place);
+    return e < 0 ? "" : hud::hud_elements()[static_cast<size_t>(e)].label;
+}
+
+// A colour at half its alpha (the samples).
+uint32_t dimmed(uint32_t rgba) { return (rgba & 0xFFFFFF00u) | ((rgba & 0xFFu) / 2u); }
+
 // style=boxed: one small window per place (EMF's earlier look).
-void draw_hud_boxed(const std::vector<HudLine>& lines, ImVec2 display, const TextLook& look) {
+void draw_hud_boxed(const std::vector<HudLine>& lines, ImVec2 display, const TextLook& look, const HudLinesView& view) {
     ImFont* font = look.bold ? look.bold : look.font;  // HUD lines are bold (with font=console: the console's font)
     if (font) ImGui::PushFont(font);
     const float pad = ImGui::GetFontSize();
     static const char* const kNames[] = {"##emf_hud_top_right", "##emf_hud_bottom_right", "##emf_hud_bottom_left"};
     for (int place = 0; place < 3; ++place) {
+        const LinesEdit& ed = view.edits[static_cast<size_t>(place)];
+        if (ed.hidden) continue;
         bool any = false;
         for (const auto& l : lines) any |= static_cast<int>(l.place) == place;
-        if (!any) continue;
+        if (!any && !view.samples) continue;
         // the game's own HUD keeps the top left, the top centre and the bottom centre; its quest tracker sits in the
         // top right (seen in game), so top-right lines start below it
         const ImVec2 pos = place == 0 ? ImVec2(display.x - pad, display.y * 0.24f)
                          : place == 1 ? ImVec2(display.x - pad, display.y - pad)
                                       : ImVec2(pad, display.y - pad);
         const ImVec2 pivot = place == 0 ? ImVec2(1.0f, 0.0f) : place == 1 ? ImVec2(1.0f, 1.0f) : ImVec2(0.0f, 1.0f);
-        ImGui::SetNextWindowPos(pos, ImGuiCond_Always, pivot);
+        ImGui::SetNextWindowPos(ImVec2(pos.x + ed.offset.x, pos.y + ed.offset.y), ImGuiCond_Always, pivot);
         ImGui::SetNextWindowBgAlpha(0.55f);
         ImGui::PushStyleColor(ImGuiCol_WindowBg, kBoxBack);
         ImGui::Begin(kNames[place], nullptr, kBoxFlags);
+        ImGui::SetWindowFontScale(ed.scale);
+        if (!any) {
+            ImGui::PushStyleColor(ImGuiCol_Text, look_colour4(dimmed(look.colour)));
+            ImGui::TextUnformatted(lines_label(place));
+            ImGui::PopStyleColor();
+        }
         for (const auto& l : lines) {
             if (static_cast<int>(l.place) != place) continue;
             ImGui::PushStyleColor(ImGuiCol_Text, look_colour4(l.rgba ? l.rgba : look.colour));
             ImGui::TextUnformatted(l.text.c_str(), l.text.c_str() + l.text.size());
             ImGui::PopStyleColor();
+        }
+        if (view.rects) {
+            const ImVec2 p = ImGui::GetWindowPos(), s = ImGui::GetWindowSize();
+            (*view.rects)[static_cast<size_t>(place)] = ImVec4(p.x, p.y, s.x, s.y);
         }
         ImGui::End();
         ImGui::PopStyleColor();
@@ -568,21 +591,37 @@ void draw_notes(const ConsoleLines& lines, ImVec2 display, const TextLook& look)
     }
 }
 
-void draw_hud(const std::vector<HudLine>& lines, ImVec2 display, const TextLook& look) {
-    if (lines.empty()) return;
+void draw_hud(const std::vector<HudLine>& lines, ImVec2 display, const TextLook& look, const HudLinesView& view) {
+    if (view.rects) view.rects->fill(std::nullopt);
+    if (lines.empty() && !view.samples) return;
     if (look.style == HudStyle::Boxed) {
-        draw_hud_boxed(lines, display, look);
+        draw_hud_boxed(lines, display, look, view);
         return;
     }
     // the game's own lines are bold
     ImFont* font = look.bold ? look.bold : look.font ? look.font : ImGui::GetFont();
-    const float size = font->FontSize;
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
     for (const HudPlace place : {HudPlace::TopRight, HudPlace::BottomRight, HudPlace::BottomLeft}) {
+        const LinesEdit& ed = view.edits[static_cast<size_t>(place)];
+        if (ed.hidden) continue;
+        const float size = font->FontSize * ed.scale;
         const HudLine* here[HudModel::kMaxLines];  // drawn every frame: no allocation
         size_t n = 0;
         for (const auto& l : lines)
             if (l.place == place && n < HudModel::kMaxLines) here[n++] = &l;
+        ImVec2 lo(FLT_MAX, FLT_MAX), hi(-FLT_MAX, -FLT_MAX);
+        auto grow = [&lo, &hi](ImVec2 at, ImVec2 s) {
+            lo = ImVec2((std::min)(lo.x, at.x), (std::min)(lo.y, at.y));
+            hi = ImVec2((std::max)(hi.x, at.x + s.x), (std::max)(hi.y, at.y + s.y));
+        };
+        if (n == 0 && view.samples) {
+            const char* label = lines_label(static_cast<int>(place));
+            const ImVec2 s = font->CalcTextSizeA(size, FLT_MAX, 0.0f, label);
+            ImVec2 at = hud_line_position(place, 0, 1, s, size, display);
+            at = ImVec2(at.x + ed.offset.x, at.y + ed.offset.y);
+            draw_look_text(dl, look, font, size, at, dimmed(look.colour), label);
+            grow(at, s);
+        }
         for (size_t i = 0; i < n; ++i) {
             char text[HudModel::kMaxText + 1];  // one line: a line break becomes a space
             const size_t len = (std::min)(here[i]->text.size(), HudModel::kMaxText);
@@ -592,9 +631,13 @@ void draw_hud(const std::vector<HudLine>& lines, ImVec2 display, const TextLook&
             }
             text[len] = '\0';
             const ImVec2 s = font->CalcTextSizeA(size, FLT_MAX, 0.0f, text, text + len);
-            const ImVec2 at = hud_line_position(place, i, n, s, size, display);
+            ImVec2 at = hud_line_position(place, i, n, s, size, display);
+            at = ImVec2(at.x + ed.offset.x, at.y + ed.offset.y);
             draw_look_text(dl, look, font, size, at, here[i]->rgba ? here[i]->rgba : look.colour, text, text + len);
+            grow(at, s);
         }
+        if (view.rects && hi.x > lo.x)
+            (*view.rects)[static_cast<size_t>(place)] = ImVec4(lo.x, lo.y, hi.x - lo.x, hi.y - lo.y);
     }
 }
 

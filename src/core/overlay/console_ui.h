@@ -2,8 +2,10 @@
 // Draws the drop-down console with Dear ImGui (mockup B): top half of the screen, see-through dark, coloured lines,
 // an input line with suggestions as you type (console_suggest.h; or Tab completion) and Up/Down history.
 // Renderer-agnostic (no Vulkan here).
+#include <array>
 #include <cstdint>
 #include <functional>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -80,6 +82,12 @@ ConsoleLines toast_lines(const ConsoleModel& model, const ToastState& toast, uin
 void draw_notes(const ConsoleLines& lines, ImVec2 display, const TextLook& look);
 // The mods' on-screen lines (API v12): game style, text with a soft shadow; plain, the text alone; boxed, one small
 // window per place (EMF's earlier look).
-void draw_hud(const std::vector<HudLine>& lines, ImVec2 display, const TextLook& look);
+// The HUD editor's view of the mods' lines: each place's edit, the samples for the HUD page, and where each place drew.
+struct HudLinesView {
+    std::array<LinesEdit, 3> edits{};  // by place
+    bool samples = false;  // a place without lines shows its part's label, dimmed (the HUD page)
+    std::array<std::optional<ImVec4>, 3>* rects = nullptr;  // out: each place's drawn block (x, y, w, h) in pixels
+};
+void draw_hud(const std::vector<HudLine>& lines, ImVec2 display, const TextLook& look, const HudLinesView& view = {});
 
 }  // namespace emf::core

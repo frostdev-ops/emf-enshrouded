@@ -11,6 +11,10 @@
 #include "imgui.h"
 #include "look_settings.h"
 
+namespace emf::core::hud {
+struct HudSnapshot;
+}
+
 namespace emf::core {
 
 // The shadow's strength (tune it here after looking at bright snow and sky in the game).
@@ -57,6 +61,17 @@ float shadow_offset(float pixel_size);
 // screen with lines `line_h` high. The right places align lines to the right edge, the bottom places grow upwards;
 // the mods' order stays top to bottom everywhere. The margin to the screen's edges is one line height.
 ImVec2 hud_line_position(HudPlace place, size_t index, size_t count, ImVec2 text, float line_h, ImVec2 screen);
+
+// The HUD editor's edit of the mods' lines at one place, in pixels: added to every line's position, the text size
+// multiplied by scale, nothing drawn when hidden.
+struct LinesEdit {
+    ImVec2 offset{0.0f, 0.0f};
+    float scale = 1.0f;
+    bool hidden = false;
+};
+// From the snapshot (its x and y percent of the display, its scale kept within 0.5 to 2, hidden); the default while the
+// editor is off (no snapshot, or not active).
+LinesEdit lines_edit(const hud::HudSnapshot* snap, HudPlace place, ImVec2 display);
 
 // Where a note shows: the band (fades included), how far it fades out at each end, and the text block inside it.
 struct NoteBand {

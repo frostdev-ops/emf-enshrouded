@@ -13,14 +13,19 @@ constexpr const char* kNoteVitals = "The buffs and food row moves and scales wit
 constexpr const char* kNoteHotbar = "The item hints and the item name above the bars move and scale with it.";
 constexpr const char* kNoteCompass = "The shroud timer and meters move and scale with it; their own changes add to these.";
 constexpr const char* kNoteBar = "Moves on its own inside Health, mana and stamina; that part moves it too.";
+constexpr const char* kNoteLines = "Lines mods keep on screen here (emf.hud). EMF draws them, so scale always works.";
 
 constexpr HudElement make(const char* id, const char* scope, const char* label, const char* note = nullptr,
                           bool confirm = false) {
-    return HudElement{id, scope, label, note, fnv1a64(scope), confirm, -1};
+    return HudElement{id, scope, label, note, fnv1a64(scope), confirm, -1, -1};
 }
 
 constexpr HudElement make_bar(const char* id, const char* scope, const char* label, int bar) {
-    return HudElement{id, scope, label, kNoteBar, 0, bar == 0, bar};
+    return HudElement{id, scope, label, kNoteBar, 0, bar == 0, bar, -1};
+}
+
+constexpr HudElement make_lines(const char* id, const char* scope, const char* label, int place) {
+    return HudElement{id, scope, label, kNoteLines, 0, false, -1, place};
 }
 
 constexpr std::array<HudElement, kHudElementCount> kElements = {{
@@ -40,6 +45,9 @@ constexpr std::array<HudElement, kHudElementCount> kElements = {{
     make_bar("health", "bar:health", "Health", 0),
     make_bar("mana", "bar:mana", "Mana", 1),
     make_bar("stamina", "bar:stamina", "Stamina", 2),
+    make_lines("lines_top_right", "lines:top_right", "Mod lines, top right", 0),
+    make_lines("lines_bottom_right", "lines:bottom_right", "Mod lines, bottom right", 1),
+    make_lines("lines_bottom_left", "lines:bottom_left", "Mod lines, bottom left", 2),
 }};
 
 // 32 slots, linear probing on hash & 31; the slot holds an element index, kUiSpaceIndex or kNoElement.
@@ -53,7 +61,7 @@ constexpr std::array<int8_t, kSlots> build_table() {
         t[s] = static_cast<int8_t>(idx);
     };
     for (size_t i = 0; i < kHudElementCount; ++i)
-        if (kElements[i].hash != 0) put(kElements[i].hash, static_cast<int>(i));  // the bars have no scope
+        if (kElements[i].hash != 0) put(kElements[i].hash, static_cast<int>(i));  // the bars and lines have no scope
     put(kUiSpaceHash, kUiSpaceIndex);
     return t;
 }
@@ -98,6 +106,13 @@ int find_element(std::string_view id_or_scope) {
 int bar_element(int bar) {
     for (size_t i = 0; i < kHudElementCount; ++i)
         if (kElements[i].bar == bar && bar >= 0) return static_cast<int>(i);
+    return kNoElement;
+}
+
+int lines_element(int place) {
+    if (place < 0) return kNoElement;
+    for (size_t i = 0; i < kHudElementCount; ++i)
+        if (kElements[i].lines == place) return static_cast<int>(i);
     return kNoElement;
 }
 

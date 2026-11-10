@@ -8,6 +8,7 @@
 #include "common/fnv.h"
 #include "core/hud_editor/bars.h"
 #include "core/hud_editor/hook.h"
+#include "core/hud_editor/lines.h"
 
 using namespace emf::core::hud;
 
@@ -908,4 +909,23 @@ TEST_CASE("panel: nothing written without a panel colour or with the editor off"
         close(p.widget);
     }
     CHECK(colour_stats().panel_writes == 0);
+}
+
+TEST_CASE("lines_live: the overlay's rect of a place is that part's live rect") {
+    reset();
+    CHECK_FALSE(hud_live(static_cast<size_t>(lines_element(2))).seen);
+    const float rect[4] = {20, 900, 300, 40};
+    set_lines_live(2, rect, 77);
+    const LiveInfo li = hud_live(static_cast<size_t>(lines_element(2)));
+    CHECK(li.seen);
+    CHECK(li.last_seen_ms == 77);
+    CHECK(li.rect[1] == 900.0f);
+    CHECK(li.rect[2] == 300.0f);
+    CHECK_FALSE(hud_live(static_cast<size_t>(lines_element(0))).seen);
+    set_lines_live(5, rect, 1);  // not a place: ignored
+    lines_not_drawn(2);           // its lines are gone: still seen, no area left to pick
+    CHECK(hud_live(static_cast<size_t>(lines_element(2))).seen);
+    CHECK(hud_live(static_cast<size_t>(lines_element(2))).rect[2] == 0.0f);
+    reset();
+    CHECK_FALSE(hud_live(static_cast<size_t>(lines_element(2))).seen);
 }

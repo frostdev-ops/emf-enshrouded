@@ -32,7 +32,7 @@ TEST_CASE("editor: a first start is on with an empty Default, hooked once, logge
     CHECK(v.layouts == std::vector<std::string>{"Default"});
     CHECK(r.installs == 1);
     CHECK(e.snapshots().current()->active);
-    CHECK(r.count_logged("HUD editor: on (layout \"Default\", 16 parts)") == 1);
+    CHECK(r.count_logged("HUD editor: on (layout \"Default\", 19 parts)") == 1);
     CHECK(r.files().empty());
     CHECK(r.writes == 0);
 }

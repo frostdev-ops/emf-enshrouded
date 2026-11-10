@@ -6,6 +6,8 @@
 #include <string>
 #include <vector>
 
+#include "core/hud_editor/elements.h"
+#include "core/hud_editor/snapshot.h"
 #include "core/overlay/console_model.h"
 #include "core/overlay/console_ui.h"
 #include "core/overlay/look_layout.h"
@@ -526,4 +528,106 @@ TEST_CASE("look drawing: the mods' wheel labels still fit in the serif at the bi
         }
     }
     ImGui::DestroyContext(ctx);
+}
+
+// ---- mods' HUD lines as HUD parts: offset, scale, hidden, the drawn rect, the samples ----
+namespace {
+ImVec4 drawn_box() {  // x0, y0, x1, y1 of the background draw list
+    ImVec4 b(FLT_MAX, FLT_MAX, -FLT_MAX, -FLT_MAX);
+    for (const ImDrawVert& v : ImGui::GetBackgroundDrawList()->VtxBuffer) {
+        b.x = (std::min)(b.x, v.pos.x);
+        b.y = (std::min)(b.y, v.pos.y);
+        b.z = (std::max)(b.z, v.pos.x);
+        b.w = (std::max)(b.w, v.pos.y);
+    }
+    return b;
+}
+int hud_vertices_view(const std::vector<HudLine>& lines, const TextLook& look, const HudLinesView& view) {
+    ImGui::NewFrame();
+    draw_hud(lines, ImVec2(1920, 1080), look, view);
+    ImGui::Render();
+    return ImGui::GetBackgroundDrawList()->VtxBuffer.Size;
+}
+}  // namespace
+
+TEST_CASE("lines_edit: the layout's offset in pixels, its scale, hidden; nothing while the editor is off") {
+    using emf::core::hud::HudSnapshot;
+    HudSnapshot s;
+    auto& e = s.edits[static_cast<size_t>(emf::core::hud::lines_element(2))];
+    e.x_percent = 10;
+    e.y_percent = -5;
+    e.scale = 3;
+    e.hidden = true;
+    LinesEdit off = lines_edit(&s, HudPlace::BottomLeft, ImVec2(1920, 1080));  // not active
+    CHECK(off.offset.x == 0.0f);
+    CHECK(off.scale == 1.0f);
+    CHECK_FALSE(off.hidden);
+    CHECK(lines_edit(nullptr, HudPlace::BottomLeft, ImVec2(1920, 1080)).scale == 1.0f);
+    s.active = true;
+    const LinesEdit on = lines_edit(&s, HudPlace::BottomLeft, ImVec2(1920, 1080));
+    CHECK(on.offset.x == doctest::Approx(192));
+    CHECK(on.offset.y == doctest::Approx(-54));
+    CHECK(on.scale == 2.0f);  // kept within 0.5 to 2
+    CHECK(on.hidden);
+    CHECK(lines_edit(&s, HudPlace::TopRight, ImVec2(1920, 1080)).offset.x == 0.0f);  // another place
+}
+
+TEST_CASE("look drawing: mod lines move by their offset, scale their text, hide, and report their rect") {
+    Headless h;
+    const std::vector<HudLine> one{{"x", "Hi", HudPlace::BottomRight, 0}};
+    std::array<std::optional<ImVec4>, 3> rects{};
+    HudLinesView view;
+    view.rects = &rects;
+    hud_vertices_view(one, look_of(HudStyle::Plain), view);
+    const ImVec4 at = drawn_box();
+    REQUIRE(rects[1].has_value());
+    CHECK_FALSE(rects[0].has_value());
+    CHECK_FALSE(rects[2].has_value());
+    CHECK(rects[1]->x <= at.x + 0.5f);
+    CHECK(rects[1]->x + rects[1]->z >= at.z - 0.5f);
+    view.edits[1].offset = ImVec2(-100, -50);
+    hud_vertices_view(one, look_of(HudStyle::Plain), view);
+    const ImVec4 moved = drawn_box();
+    CHECK(moved.x == doctest::Approx(at.x - 100));
+    CHECK(moved.y == doctest::Approx(at.y - 50));
+    view.edits[1] = LinesEdit{};
+    view.edits[1].scale = 2;
+    hud_vertices_view(one, look_of(HudStyle::Plain), view);
+    CHECK(drawn_box().w - drawn_box().y == doctest::Approx((at.w - at.y) * 2).epsilon(0.1));
+    view.edits[1] = LinesEdit{};
+    view.edits[1].hidden = true;
+    rects = {};
+    CHECK(hud_vertices_view(one, look_of(HudStyle::Plain), view) == 0);
+    CHECK_FALSE(rects[1].has_value());
+}
+
+TEST_CASE("look drawing: samples show each empty place's label for the HUD page") {
+    Headless h;
+    std::array<std::optional<ImVec4>, 3> rects{};
+    HudLinesView view;
+    view.samples = true;
+    view.rects = &rects;
+    CHECK(hud_vertices_view({}, look_of(HudStyle::Plain), view) > 0);
+    for (int place = 0; place < 3; ++place) CHECK(rects[static_cast<size_t>(place)].has_value());
+    rects = {};
+    view.samples = false;
+    CHECK(hud_vertices_view({}, look_of(HudStyle::Plain), view) == 0);
+    CHECK_FALSE(rects[0].has_value());
+}
+
+TEST_CASE("look drawing: style=boxed moves each place's box by its offset") {
+    Headless h;
+    const std::vector<HudLine> one{{"a", "Hi", HudPlace::BottomLeft, 0}};
+    HudLinesView view;
+    hud_vertices_view(one, look_of(HudStyle::Boxed), view);
+    hud_vertices_view(one, look_of(HudStyle::Boxed), view);  // a window takes its size in the second frame
+    const ImVec2 before = window("##emf_hud_bottom_left")->Pos;
+    view.edits[2].offset = ImVec2(40, -30);
+    hud_vertices_view(one, look_of(HudStyle::Boxed), view);
+    const ImVec2 after = window("##emf_hud_bottom_left")->Pos;
+    CHECK(after.x == doctest::Approx(before.x + 40));
+    CHECK(after.y == doctest::Approx(before.y - 30));
+    view.edits[2].hidden = true;
+    hud_vertices_view(one, look_of(HudStyle::Boxed), view);
+    CHECK_FALSE(drawn("##emf_hud_bottom_left"));
 }

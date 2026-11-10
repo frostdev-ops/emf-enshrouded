@@ -257,3 +257,16 @@ TEST_CASE("layout colours: bad values are skipped with notes, the rest loads") {
     CHECK_FALSE(g.layout->colours[0].any());
     CHECK_FALSE(g.layout->panel.set);
 }
+
+TEST_CASE("layout: a mod lines part round trips under its key") {
+    const LayoutRead r = layout_from_json(
+        "{\"format\": 1, \"elements\": {\"lines:bottom_left\": {\"x\": 2, \"y\": -5, \"scale\": 1.5, \"hidden\": false}}}");
+    REQUIRE(r.layout.has_value());
+    CHECK(r.notes.empty());
+    const ElementLayout& e = r.layout->elements[static_cast<size_t>(lines_element(2))];
+    CHECK(e.x == 2.0f);
+    CHECK(e.y == -5.0f);
+    CHECK(e.scale == 1.5f);
+    const std::string j = layout_to_json(*r.layout, 1);
+    CHECK(contains(j, "\"lines:bottom_left\": {\"x\": 2, \"y\": -5, \"scale\": 1.5, \"hidden\": false}"));
+}

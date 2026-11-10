@@ -260,19 +260,21 @@ void draw_part_panel(HudEditor& editor, HudPageState& st, const HudView& v, ImVe
     ImGui::TextDisabled("%d px", percent_to_pixels(y, display.y));
     if (moved) editor.set_offset(i, x, y, Save::Later);
 
+    const bool lines = part.lines >= 0;  // EMF draws them: their scale needs no transform stack
     if (bar) {
         ImGui::TextDisabled("No scale of its own: scale Health, mana and stamina.");
     } else {
         float s = el.scale;
-        ImGui::BeginDisabled(!v.scale_works);
+        const bool scale_works = v.scale_works || lines;
+        ImGui::BeginDisabled(!scale_works);
         if (ImGui::SliderFloat("Scale", &s, kScaleMin, kScaleMax, "%.2f")) editor.set_scale(i, s, Save::Later);
         ImGui::EndDisabled();
-        if (!v.scale_works) {
+        if (!scale_works) {
             ImGui::PushTextWrapPos(0.0f);
             ImGui::TextDisabled("%s", v.scale_note.c_str());
             ImGui::PopTextWrapPos();
         }
-        ImGui::TextDisabled("Scales around the screen edge the part is nearest.");
+        ImGui::TextDisabled(lines ? "Scales the text." : "Scales around the screen edge the part is nearest.");
     }
     if (i == 0 || bar) draw_order(editor, v);
     if (bar) draw_bar_colours(editor, v, part.bar);

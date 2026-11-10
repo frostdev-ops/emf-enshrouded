@@ -274,3 +274,16 @@ TEST_CASE("hud page: the colour controls draw in every state") {
     }
     CHECK(std::string(emf_imgui_last_assert()).empty());
 }
+
+TEST_CASE("hud page: a mod lines card draws, and scales even without the game's transform stack") {
+    PageRig p;
+    p.rig.scale = ScaleState{false, false};
+    for (int place = 0; place < 3; ++place) {
+        p.st.selected = static_cast<size_t>(lines_element(place));
+        p.frame();
+    }
+    p.st.selected = static_cast<size_t>(lines_element(1));
+    p.press(ImGuiKey_Equal);
+    CHECK(p.e->view().elements[static_cast<size_t>(lines_element(1))].scale == doctest::Approx(1.05f));
+    CHECK(std::string(emf_imgui_last_assert()).empty());
+}

@@ -1,5 +1,8 @@
 #include "look_layout.h"
 
+#include "core/hud_editor/layout.h"
+#include "core/hud_editor/snapshot.h"
+
 #include <algorithm>
 #include <cmath>
 
@@ -119,6 +122,18 @@ ImVec2 hud_line_position(HudPlace place, size_t index, size_t count, ImVec2 text
     if (place == HudPlace::TopRight) return ImVec2(x, screen.y * kTopRightY + step * static_cast<float>(index));
     const float last = screen.y - pad - line_h;  // the bottom lines grow upwards from here
     return ImVec2(x, last - step * static_cast<float>(count - 1 - index));
+}
+
+LinesEdit lines_edit(const hud::HudSnapshot* snap, HudPlace place, ImVec2 display) {
+    LinesEdit e;
+    if (!snap || !snap->active) return e;
+    const int i = hud::lines_element(static_cast<int>(place));
+    if (i < 0) return e;
+    const hud::ElementEdit& ed = snap->edits[static_cast<size_t>(i)];
+    e.offset = ImVec2(hud::percent_to_units(ed.x_percent, display.x), hud::percent_to_units(ed.y_percent, display.y));
+    e.scale = hud::clamp_scale(ed.scale);
+    e.hidden = ed.hidden;
+    return e;
 }
 
 float note_wrap_width(NotesPlace, ImVec2 screen) { return screen.x * 0.50f; }

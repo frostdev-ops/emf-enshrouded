@@ -39,7 +39,7 @@ TEST_CASE("fnv1a64: the hash the game passes with a UI scope's name") {
     static_assert(emf::fnv1a64("playerStatusParent") == 0x9f1a106062b445daull);
 }
 TEST_CASE("hud elements: the 13 scope parts of phase 1 in order, each hash fnv1a64 of its scope") {
-    REQUIRE(hud_elements().size() == 16);
+    REQUIRE(hud_elements().size() == 19);
     for (size_t i = 0; i < 13; ++i) {
         CAPTURE(i);
         CHECK(std::string(hud_elements()[i].id) == want[i].id);
@@ -74,12 +74,13 @@ TEST_CASE("find_element: by id or scope name, ignoring case") {
 }
 TEST_CASE("element_ids: the ids in table order, for replies") {
     CHECK(element_ids() == "vitals, buffs, hotbar, compass, shroud, quests, oxygen, loot, boss, crosshair, chat, "
-                           "notifications, multitool, health, mana, stamina");
+                           "notifications, multitool, health, mana, stamina, lines_top_right, lines_bottom_right, "
+                           "lines_bottom_left");
 }
 
 TEST_CASE("hud elements: the 13 scope parts, then health, mana and stamina (bars, no scope hash)") {
     const auto p = hud_elements();
-    REQUIRE(p.size() == 16);
+    REQUIRE(p.size() == 19);
     CHECK(std::string(p[0].label) == "Health, mana and stamina");
     for (int b = 0; b < static_cast<int>(kBarCount); ++b) {
         CAPTURE(b);
@@ -113,4 +114,32 @@ TEST_CASE("valid_order: permutations of 0..2 only") {
     CHECK_FALSE(valid_order(BarOrder{1, 1, 2}));
     CHECK_FALSE(valid_order(BarOrder{0, 1, 3}));
     CHECK(valid_order(kDefaultOrder));
+}
+
+TEST_CASE("hud elements: the three mod line parts, one per place, no scope hash") {
+    const auto p = hud_elements();
+    REQUIRE(p.size() == 19);
+    const char* ids[] = {"lines_top_right", "lines_bottom_right", "lines_bottom_left"};
+    const char* scopes[] = {"lines:top_right", "lines:bottom_right", "lines:bottom_left"};
+    const char* labels[] = {"Mod lines, top right", "Mod lines, bottom right", "Mod lines, bottom left"};
+    for (int place = 0; place < 3; ++place) {
+        CAPTURE(place);
+        const int i = lines_element(place);
+        REQUIRE(i == 16 + place);
+        const auto& e = p[static_cast<size_t>(i)];
+        CHECK(std::string(e.id) == ids[place]);
+        CHECK(std::string(e.scope) == scopes[place]);
+        CHECK(std::string(e.label) == labels[place]);
+        CHECK(e.lines == place);
+        CHECK(e.bar == -1);
+        CHECK(e.hash == 0);
+        CHECK_FALSE(e.confirm_hide);
+        CHECK(e.note != nullptr);
+        CHECK(find_element(ids[place]) == i);
+        CHECK(find_element(scopes[place]) == i);
+        CHECK(find_scope(emf::fnv1a64(scopes[place])) == kNoElement);
+    }
+    for (size_t i = 0; i < 16; ++i) CHECK(p[i].lines == -1);
+    CHECK(lines_element(3) == kNoElement);
+    CHECK(lines_element(-1) == kNoElement);
 }
