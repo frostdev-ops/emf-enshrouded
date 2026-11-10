@@ -106,12 +106,31 @@ struct OverlayFonts {
     ImFont* hud = nullptr;
     ImFont* hud_bold = nullptr;
 };
+// The characters the item names need beyond kFontRanges (ScreenGlyphs), and the extra font that has the ones EMF's
+// fonts lack (Japanese, Korean, Chinese, Thai; null: none). The bytes stay the caller's until the next build.
+struct ExtraGlyphs {
+    std::vector<uint32_t> glyphs;  // sorted
+    const unsigned char* font = nullptr;
+    size_t font_size = 0;
+};
+
+// The characters of `glyphs` the font in `data` has (its first face, as ImGui reads it); empty for a file stb_truetype
+// cannot read. Never throws or crashes.
+std::vector<uint32_t> font_has_glyphs(const unsigned char* data, size_t size, const std::vector<uint32_t>& glyphs);
+
 // atlas.Build() under a fault guard: an ImGui assert (EMF's raises an exception) or a fault while building gives false,
 // never a crash; the atlas must then be cleared.
 bool guarded_atlas_build(ImFontAtlas& atlas, std::string* why = nullptr);
 // Clears `atlas` (between frames only) and adds the plan's faces, one ImFont per distinct file and size, each with
-// kFontRanges; the console's face is the atlas's first font (ImGui's default). A file that cannot be read or is not a
-// font becomes ImGui's built-in font at its size, with a line in *problems. Builds the atlas.
-OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vector<std::string>* problems);
+// kFontRanges and `extra`'s characters (those its file has); the console's face is the atlas's first font (ImGui's
+// default). With an extra font, each face then merges the characters it has. A file that cannot be read or is not a
+// font becomes ImGui's built-in font at its size, with a line in *problems; so does an extra font that cannot be used
+// (left out). An atlas that cannot be built with the extra font is built again without it. Render thread only (the
+// glyph ranges live in statics until the next build).
+OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vector<std::string>* problems,
+                              const ExtraGlyphs* extra = nullptr);
+
+// The characters of `glyphs` every distinct face of `fonts` has (none above U+FFFF).
+std::vector<uint32_t> drawable_glyphs(const OverlayFonts& fonts, const std::vector<uint32_t>& glyphs);
 
 }  // namespace emf::core

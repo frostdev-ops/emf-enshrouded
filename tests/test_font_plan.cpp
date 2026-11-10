@@ -4,12 +4,14 @@
 
 #include <windows.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <fstream>
 #include <set>
 #include <string>
 #include <vector>
 
+#include "core/overlay/extra_font.h"
 #include "core/overlay/font_plan.h"
 #include "imgui.h"
 #include "imgui_internal.h"
@@ -509,4 +511,115 @@ TEST_CASE("font rebuild: a font change in the settings asks for a rebuild at onc
     CHECK(r.due(a, 30));  // still due until it is built
     r.built(a);
     CHECK_FALSE(r.due(a, 40));  // one rebuild per change, never per frame
+}
+
+namespace {
+// The four faces of a plan at 20 px: Cascadia for the console, the bundled serif for the rest.
+FontPlan four_faces() {
+    FontPlan plan;
+    plan.pixel_size = 20.0f;
+    plan.faces = {{FontRole::Console, source_font(L"cascadia\\CascadiaMono-Regular.ttf"), 20.0f},
+                  {FontRole::Tabs, source_font(L"alegreya\\Alegreya-Regular.ttf"), 20.0f},
+                  {FontRole::Hud, source_font(L"alegreya\\Alegreya-Regular.ttf"), 20.0f},
+                  {FontRole::HudBold, source_font(L"alegreya\\Alegreya-Bold.ttf"), 20.0f}};
+    return plan;
+}
+bool has(const std::vector<std::wstring>& v, const std::wstring& s) { return std::find(v.begin(), v.end(), s) != v.end(); }
+}  // namespace
+
+TEST_CASE("extra font: the files for each script, the player's Noto file first, then Windows' own") {
+    const auto ja = extra_font_files(11, L"E", L"W");
+    REQUIRE_FALSE(ja.empty());
+    CHECK(ja.front() == L"E\\NotoSansJP-Regular.ttf");
+    CHECK(has(ja, L"W\\YuGothR.ttc"));
+    CHECK(extra_font_files(13, L"E", L"W").front() == L"E\\NotoSansKR-Regular.ttf");
+    CHECK(has(extra_font_files(13, L"E", L"W"), L"W\\malgun.ttf"));
+    CHECK(extra_font_files(17, L"E", L"W").front() == L"E\\NotoSansThai-Regular.ttf");
+    CHECK(has(extra_font_files(17, L"E", L"W"), L"W\\LeelawUI.ttf"));
+    CHECK(extra_font_files(20, L"E", L"W").front() == L"E\\NotoSansSC-Regular.ttf");
+    CHECK(has(extra_font_files(20, L"E", L"W"), L"W\\msyh.ttc"));
+    CHECK(extra_font_files(21, L"E", L"W").front() == L"E\\NotoSansTC-Regular.ttf");
+    CHECK(has(extra_font_files(21, L"E", L"W"), L"W\\msjh.ttc"));
+    CHECK(extra_font_files(3, L"E", L"W").empty());  // German: the base fonts
+    CHECK(std::string(extra_font_download(20)) == "https://fonts.google.com/noto/specimen/Noto+Sans+SC");
+    CHECK(std::string(extra_font_download(17)) == "https://fonts.google.com/noto/specimen/Noto+Sans+Thai");
+    CHECK(std::string(extra_font_download(3)).empty());
+}
+
+TEST_CASE("glyph ranges: the base pairs, then the extra characters joined into pairs, nothing above U+FFFF") {
+    const std::vector<ImWchar> base = glyph_ranges({});
+    REQUIRE(base.size() == 7);  // three pairs and the 0
+    for (size_t i = 0; i < base.size(); ++i) CHECK(base[i] == kFontRanges[i]);
+    const std::vector<ImWchar> r = glyph_ranges({0x1EA1, 0x1EA2, 0x4E38, 0x1F600});
+    REQUIRE(r.size() == 11);
+    CHECK(std::vector<ImWchar>(r.begin() + 6, r.end()) == std::vector<ImWchar>{0x1EA1, 0x1EA2, 0x4E38, 0x4E38, 0});
+}
+
+TEST_CASE("font atlas: the extra characters come from each face's own file (Vietnamese from the bundled fonts)") {
+    Headless h;
+    ImFontAtlas atlas;
+    const FontPlan plan = four_faces();
+    std::vector<std::string> problems;
+    ExtraGlyphs extra;
+    extra.glyphs = {0x1EA1, 0x4E38};  // ạ (in the bundled fonts), 丸 (not)
+    const OverlayFonts f = build_font_atlas(atlas, plan, &problems, &extra);
+    CHECK(problems.empty());
+    CHECK(f.hud->FindGlyphNoFallback(0x1EA1) != nullptr);
+    CHECK(f.console->FindGlyphNoFallback(0x1EA1) != nullptr);
+    CHECK(drawable_glyphs(f, {0x1EA1, 0x4E38}) == std::vector<uint32_t>{0x1EA1});
+    const OverlayFonts g = build_font_atlas(atlas, plan, &problems);  // without: only the base ranges
+    CHECK(g.hud->FindGlyphNoFallback(0x1EA1) == nullptr);
+    CHECK(drawable_glyphs(g, {0x1EA1}).empty());
+}
+
+TEST_CASE("font atlas: Japanese merged from Windows' Yu Gothic into every face; Latin still from the face's file") {
+    wchar_t windir[MAX_PATH] = {};
+    GetWindowsDirectoryW(windir, MAX_PATH);
+    const std::wstring yu = std::wstring(windir) + L"\\Fonts\\YuGothR.ttc";
+    if (!font_file_ok(yu)) {
+        MESSAGE("skipped: no Yu Gothic on this PC");
+        return;
+    }
+    const std::vector<unsigned char> bytes = bytes_of(yu);
+    Headless h;
+    ImFontAtlas atlas;
+    const FontPlan plan = four_faces();
+    std::vector<std::string> problems;
+    const float advance = build_font_atlas(atlas, plan, &problems).hud->FindGlyphNoFallback('A')->AdvanceX;
+    ExtraGlyphs extra;
+    extra.glyphs = {0x4E38, 0x592A, 0x1F600};  // 丸太, and one ImGui cannot hold
+    extra.font = bytes.data();
+    extra.font_size = bytes.size();
+    const OverlayFonts f = build_font_atlas(atlas, plan, &problems, &extra);
+    CHECK(problems.empty());
+    CHECK(atlas.IsBuilt());
+    CHECK(drawable_glyphs(f, extra.glyphs) == std::vector<uint32_t>{0x4E38, 0x592A});
+    CHECK(f.console->FindGlyphNoFallback(0x4E38) != nullptr);
+    CHECK(f.hud_bold->FindGlyphNoFallback(0x592A) != nullptr);
+    CHECK(f.hud->FindGlyphNoFallback('A')->AdvanceX == advance);  // the serif's own 'A', not Yu Gothic's
+}
+
+TEST_CASE("font atlas: an extra font that is no font, or has none of the characters, is left out with a line") {
+    Headless h;
+    ImFontAtlas atlas;
+    const FontPlan plan = four_faces();
+    std::vector<std::string> problems;
+    const std::vector<unsigned char> zeros(1024, 0);
+    ExtraGlyphs extra;
+    extra.glyphs = {0x4E38};
+    extra.font = zeros.data();
+    extra.font_size = zeros.size();
+    OverlayFonts f = build_font_atlas(atlas, plan, &problems, &extra);
+    CHECK(atlas.IsBuilt());
+    CHECK(problems.size() == 1);
+    CHECK(drawable_glyphs(f, {0x4E38}).empty());
+    CHECK(f.hud->FindGlyphNoFallback('A') != nullptr);
+    problems.clear();
+    const std::vector<unsigned char> serif = bytes_of(source_font(L"alegreya\\Alegreya-Regular.ttf"));
+    extra.font = serif.data();  // a real font without 丸: never ImGui's assert on a font that adds nothing
+    extra.font_size = serif.size();
+    f = build_font_atlas(atlas, plan, &problems, &extra);
+    CHECK(atlas.IsBuilt());
+    CHECK(problems.size() == 1);
+    CHECK(drawable_glyphs(f, {0x4E38}).empty());
 }

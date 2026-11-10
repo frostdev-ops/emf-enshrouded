@@ -8,6 +8,8 @@
 #include <malloc.h>
 #include <map>
 
+#include "extra_font.h"
+
 // EMF's own copy of ImGui's stb_truetype (static: invisible outside this file), to check a font file before ImGui
 // gets it: ImGui stops at an IM_ASSERT on a font it cannot parse, which turns the whole overlay off.
 #pragma warning(push, 0)
@@ -225,6 +227,19 @@ bool stb_reads(const unsigned char* data, int offset) {
     return ok;
 }
 
+// Which of the `n` code points the font at `offset` has (out[i] = 1). Plain data only (__try).
+bool has_glyphs_guarded(const unsigned char* data, int offset, const uint32_t* cps, size_t n, unsigned char* out,
+                        DWORD* fault) {
+    __try {
+        stbtt_fontinfo info;
+        if (!stbtt_InitFont(&info, data, offset)) return false;
+        for (size_t i = 0; i < n; ++i) out[i] = stbtt_FindGlyphIndex(&info, static_cast<int>(cps[i])) ? 1 : 0;
+        return true;
+    } __except (*fault = GetExceptionCode(), EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 bool build_guarded(ImFontAtlas* atlas, DWORD* fault) {
     __try {
         return atlas->Build();
@@ -241,6 +256,20 @@ bool font_bytes_ok(const unsigned char* data, size_t size) {
     const int start = stbtt_GetFontOffsetForIndex(data, 0);
     if (start < 0 || !tables_inside(data, size, static_cast<size_t>(start))) return false;
     return stb_reads(data, start);
+}
+
+std::vector<uint32_t> font_has_glyphs(const unsigned char* data, size_t size, const std::vector<uint32_t>& glyphs) {
+    std::vector<uint32_t> out;
+    if (glyphs.empty() || !font_bytes_ok(data, size)) return out;
+    std::vector<unsigned char> flags(glyphs.size(), 0);
+    DWORD fault = 0;
+    const bool ok = has_glyphs_guarded(data, stbtt_GetFontOffsetForIndex(data, 0), glyphs.data(), glyphs.size(),
+                                       flags.data(), &fault);
+    after_fault(fault);
+    if (!ok) return out;
+    for (size_t i = 0; i < glyphs.size(); ++i)
+        if (flags[i] && glyphs[i] > 0 && glyphs[i] <= 0xFFFF) out.push_back(glyphs[i]);
+    return out;
 }
 
 bool font_file_ok(const std::wstring& path, size_t max_bytes) {
@@ -260,9 +289,23 @@ bool guarded_atlas_build(ImFontAtlas& atlas, std::string* why) {
     return ok;
 }
 
-OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vector<std::string>* problems) {
+OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vector<std::string>* problems,
+                              const ExtraGlyphs* extra) {
+    // ImGui reads the ranges while it builds (and keeps pointers to them until the next Clear): render thread only
+    static std::vector<ImWchar> s_ranges, s_merge;
     atlas.Clear();
     atlas.TexDesiredWidth = 4096;  // wide and low: big text on 4K stays within a few rows
+    const std::vector<uint32_t> wanted = extra ? extra->glyphs : std::vector<uint32_t>{};
+    s_ranges = glyph_ranges(wanted);
+    std::vector<uint32_t> merged;  // the characters the extra font gives every face
+    if (extra && extra->font && !wanted.empty()) {
+        merged = font_has_glyphs(extra->font, extra->font_size, wanted);
+        if (merged.empty() && problems)
+            problems->push_back(font_bytes_ok(extra->font, extra->font_size)
+                                    ? "the extra font has none of the characters the item names need; it is left out"
+                                    : "the extra font could not be read; it is left out");
+    }
+    s_merge = merged.empty() ? std::vector<ImWchar>{} : glyph_pairs(merged);
     struct Made {
         std::wstring file;
         float size;
@@ -286,7 +329,8 @@ OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vec
                 std::memcpy(data, bytes.data(), bytes.size());
                 ImFontConfig cfg;
                 cfg.FontDataOwnedByAtlas = true;
-                font = atlas.AddFontFromMemoryTTF(data, static_cast<int>(bytes.size()), f.pixel_size, &cfg, kFontRanges);
+                font = atlas.AddFontFromMemoryTTF(data, static_cast<int>(bytes.size()), f.pixel_size, &cfg,
+                                                  s_ranges.data());
             } else if (problems) {
                 const std::string line = "font " + narrow(f.file) + ": could not be loaded, ImGui's own font is used";
                 if (std::find(problems->begin(), problems->end(), line) == problems->end()) problems->push_back(line);
@@ -297,13 +341,28 @@ OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vec
             cfg.SizePixels = f.pixel_size;
             font = atlas.AddFontDefault(&cfg);
         }
+        if (!s_merge.empty()) {  // the extra font's characters into this face (it keeps its own for the rest)
+            ImFontConfig m;
+            m.MergeMode = true;
+            m.FontDataOwnedByAtlas = false;  // the caller's bytes, alive until the next build
+            atlas.AddFontFromMemoryTTF(const_cast<unsigned char*>(extra->font), static_cast<int>(extra->font_size),
+                                       f.pixel_size, &m, s_merge.data());
+        }
         made.push_back({f.file, f.pixel_size, font});
         roles[i] = font;
     }
     for (auto& r : roles)
         if (!r) r = roles[0];  // a plan with fewer faces: the console's font
     std::string why;
-    if (atlas.Fonts.Size == 0 || !guarded_atlas_build(atlas, &why)) {
+    const bool built = atlas.Fonts.Size > 0 && guarded_atlas_build(atlas, &why);
+    if (!built && !s_merge.empty()) {  // again without the extra font (its characters from the faces' own files)
+        if (problems)
+            problems->push_back("the font atlas could not be built with the extra font; it is left out (" + why + ")");
+        ExtraGlyphs plain;
+        plain.glyphs = wanted;
+        return build_font_atlas(atlas, plan, problems, &plain);
+    }
+    if (!built) {
         if (atlas.Fonts.Size && problems)
             problems->push_back("the font atlas could not be built, ImGui's own font is used (" + why + ")");
         atlas.Clear();
@@ -312,6 +371,21 @@ OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vec
         for (auto& r : roles) r = d;
     }
     return OverlayFonts{roles[0], roles[1], roles[2], roles[3]};
+}
+
+std::vector<uint32_t> drawable_glyphs(const OverlayFonts& fonts, const std::vector<uint32_t>& glyphs) {
+    std::vector<ImFont*> faces;
+    for (ImFont* f : {fonts.console, fonts.tabs, fonts.hud, fonts.hud_bold})
+        if (f && std::find(faces.begin(), faces.end(), f) == faces.end()) faces.push_back(f);
+    std::vector<uint32_t> out;
+    if (faces.empty()) return out;
+    for (uint32_t c : glyphs) {
+        if (c == 0 || c > 0xFFFF) continue;
+        bool all = true;
+        for (ImFont* f : faces) all = all && f->FindGlyphNoFallback(static_cast<ImWchar>(c)) != nullptr;
+        if (all) out.push_back(c);
+    }
+    return out;
 }
 
 }  // namespace emf::core
