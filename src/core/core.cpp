@@ -59,6 +59,7 @@
 #include "overlay/submit.h"
 #include "file_poll.h"
 #include "mods.h"
+#include "game_text.h"
 #include "menu_start.h"
 #include "ready_gate.h"
 #include "version.h"
@@ -934,6 +935,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         if (emf::core::install_menu_start(g_state->sigs, known, build, std::move(menu), &g_load_world_off)) {
             emf::logf("load_world: on (main-menu hooks installed; the guard acts only during a load_world); join: %s",
                       emf::core::menu_start()->can_join() ? "on" : "off (PostJoinPending not usable on this build)");
+            // the game's text (item names in the player's language) reads the LocaPool through MenuStart's gameApp
+            emf::core::install_game_text(g_state->sigs, known, build);
             // [debug] local_only=1: tests that join a server at boot (+connect) post no load_world, so the guard is on for
             // every start of this process; [debug] local_only_name: the LOCAL character must have this name too
             const std::wstring ini = dir + L"\\emf\\emf_core.ini";

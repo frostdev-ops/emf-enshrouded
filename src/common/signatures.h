@@ -42,6 +42,8 @@ enum class Sig : size_t {
     HandleAccountAction, SessionRequestKick,
     // the player widget's three bar calls (health, mana, stamina), client only (the HUD editor's bars; re_ui_scopes.md)
     PlayerVitalBar,
+    // the game's text (item names in the player's language), client only: the pool's lookup and its one-slot search
+    LocaPoolLookup, LocaSlotFind,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

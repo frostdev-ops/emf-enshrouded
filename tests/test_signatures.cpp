@@ -108,7 +108,7 @@ TEST_CASE("signature table: build 1283531's RVAs, game and dedicated server, as 
         if (d.id >= Sig::UiScopeOpen && d.id <= Sig::UiPopTransform) continue;
         if (d.id == Sig::ChatClientSend || d.id == Sig::ClientOutboxFlush || d.id == Sig::PostJoinPending) continue;
         if (d.id == Sig::HandleAccountAction || d.id == Sig::SessionRequestKick) continue;  // 1287369 alone
-        if (d.id == Sig::PlayerVitalBar) continue;                                          // 1287369 alone
+        if (d.id == Sig::PlayerVitalBar || d.id == Sig::LocaPoolLookup || d.id == Sig::LocaSlotFind) continue;  // 1287369 alone
         CHECK(d.rva[static_cast<size_t>(client)] != kRvaUnchecked);
         CHECK(d.rva[static_cast<size_t>(server)] != kRvaUnchecked);
     }
@@ -188,7 +188,8 @@ TEST_CASE("signature table: one entry per Sig, in order, unique names, valid pat
                                      all[i].id == Sig::ClientOutboxFlush || all[i].id == Sig::PostJoinPending ||
                                      (all[i].id >= Sig::UiFrame && all[i].id <= Sig::CharacterSelected) ||
                                      (all[i].id >= Sig::UiScopeOpen && all[i].id <= Sig::UiPopTransform) ||
-                                     all[i].id == Sig::PlayerVitalBar;
+                                     all[i].id == Sig::PlayerVitalBar || all[i].id == Sig::LocaPoolLookup ||
+                                     all[i].id == Sig::LocaSlotFind;
             CHECK((all[i].rva[b] == 0) == (known_builds()[b].server && client_only));
         }
     }
@@ -263,7 +264,7 @@ TEST_CASE("signature table has the inventory transaction and readOther, optional
         CHECK(d->rva[1] == w.rva_1273043);
         CHECK_FALSE(d->required);
     }
-    CHECK(kSigCount == 63);
+    CHECK(kSigCount == 65);
 }
 
 TEST_CASE("signature table has XpRequired and MaxPlayerLevel (API v22 levels), optional, on both exes of 1283531") {
@@ -664,5 +665,23 @@ TEST_CASE("signature table has PlayerVitalBar (the HUD parts): a call site, clie
     CHECK(std::string(d->pattern).find("4C 8D 86 F8 DB 00 00 48 8D 57 18") == 0);
     CHECK(std::string(d->pattern).find("48 8D 97 F0 00 00 00") != std::string::npos);
     CHECK(std::string(d->pattern).find("48 8D 97 C8 01 00 00") != std::string::npos);
-    CHECK(kSigCount == 63);
+    CHECK(kSigCount == 65);
+}
+
+TEST_CASE("signature table has LocaPoolLookup and LocaSlotFind (item names): function starts, client only, 1287369") {
+    const SigDef* l = find_signature("LocaPoolLookup");
+    REQUIRE(l != nullptr);
+    CHECK(l->id == Sig::LocaPoolLookup);
+    CHECK_FALSE(l->required);
+    CHECK(l->call_at == -1);
+    CHECK(l->rva[7] == 0x12169B0u);
+    CHECK(l->rva[8] == 0u);  // the dedicated server has no text
+    CHECK(std::string(l->pattern).find("39 BE D8 00 00 00") != std::string::npos);  // the active language at +0xD8
+    const SigDef* f = find_signature("LocaSlotFind");
+    REQUIRE(f != nullptr);
+    CHECK(f->id == Sig::LocaSlotFind);
+    CHECK_FALSE(f->required);
+    CHECK(f->rva[7] == 0x1216280u);
+    CHECK(f->rva[8] == 0u);
+    CHECK(std::string(f->pattern).find("48 8B 42 20") != std::string::npos);  // the slot's table at +0x20
 }

@@ -191,6 +191,12 @@ constexpr SigDef kSignatures[] = {
     // in a list of at most 4 (docs/engine_parts/re_ui_scopes.md). The pattern is the three calls: a game update that
     // moves an offset breaks it and the HUD editor's bars turn off. The function is the first call's target.
     {Sig::PlayerVitalBar, "PlayerVitalBar", "4C 8D 86 F8 DB 00 00 48 8D 57 18 48 8D 4C 24 40 E8 ?? ?? ?? ?? 0F 10 00 0F B6 45 F8 3C 04 0F 84 ?? ?? ?? ?? 48 03 C0 0F 11 44 C5 B8 FE 45 F8 45 38 27 75 ?? 4C 8D 86 58 DC 00 00 48 8D 97 F0 00 00 00 48 8D 4C 24 40 E8 ?? ?? ?? ?? 0F 10 00 0F B6 45 F8 3C 04 0F 84 ?? ?? ?? ?? 48 03 C0 0F 11 44 C5 B8 FE 45 F8 45 38 26 75 ?? 4C 8D 86 28 DC 00 00 48 8D 97 C8 01 00 00 48 8D 4C 24 40 E8", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xc7fc40u, 0u}, false, 0x10},
+    // The game's text (private research item_names_2026-11-10 §5, L1 and L5): LocaPool_lookup(out, pool, tag), the
+    // lookup with the game's own fallbacks (it pins error 0x12, the null-tag id at +0x18, the slots +0xE0/+0x40/+0x90,
+    // the language at +0xD8 and a slot's table at +0x20), and LocaSlot_find(out, slot, tag), one slot's binary search
+    // (English while another language is active). Client only: the dedicated server has no text.
+    {Sig::LocaPoolLookup, "LocaPoolLookup", "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 30 33 FF 48 8B F2 48 8B D9 45 85 C0 75 ?? 48 89 79 08 48 8B C1 48 89 79 10 89 79 04 C6 01 12 48 8B 5C 24 48 48 8B 74 24 50 48 83 C4 30 5F C3 44 3B 42 18 75 ?? 0F 10 05 ?? ?? ?? ?? 89 79 04 48 8B C3 40 88 39 0F 11 41 08 48 8B 5C 24 48 48 8B 74 24 50 48 83 C4 30 5F C3 48 81 C2 E0 00 00 00 48 89 6C 24 40 48 89 7C 24 20 48 89 7C 24 28 48 39 7A 20 74 ?? 48 8D 4C 24 20 E8 ?? ?? ?? ?? 84 C0 75 ?? 48 8D 6E 40 39 BE D8 00 00 00 75 ?? 48 8B D5 48 8D 4C 24 20 E8 ?? ?? ?? ?? 84 C0 75 ?? 48 8D 96 90 00 00 00", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x12169b0u, 0u}, false},
+    {Sig::LocaSlotFind, "LocaSlotFind", "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 48 8B 42 20 48 8B F1 48 85 C0 0F 84 ?? ?? ?? ?? 44 8B 48 04 45 85 C9 0F 84 ?? ?? ?? ?? 48 63 10", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x1216280u, 0u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

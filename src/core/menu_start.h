@@ -58,12 +58,15 @@ struct AppLayout {
     // gameApp: u8 != 0 while a session to join is pending (+connect's server answered: the "About to join" prompt);
     // command 0x2a does nothing without it. 0 = not known for this layout (join does not wait for it)
     uint32_t pending_join;
+    // gameApp: the LocaPool* (the game's text; written once by the application's creation steps). 0 = not known
+    uint32_t loca_pool = 0;
 };
 inline constexpr AppLayout kApp1273043{0x33CC0, 0x34FA8, 0x34FE8, 0x35058, 0x3505A, 0x35270, 0};
 // every field 0x20 later: counted as disp32 in 1283531's client (the queue 356 times, the old value 3 times; mode 27,
 // session name 8, play slot 19, adventure 25), and the four post* functions read the queue there
 // pending_join: read in 1287369's pregame dispatcher (command 0x2a: gameApp+0x35120, then +0x130)
-inline constexpr AppLayout kApp1283531{0x33CE0, 0x34FC8, 0x35008, 0x35078, 0x3507A, 0x35290, 0x35250};
+// loca_pool: 1287369 (live-checked 2026-11-10; the creation steps store it there: mov [rsi+0x352B8], rax)
+inline constexpr AppLayout kApp1283531{0x33CE0, 0x34FC8, 0x35008, 0x35078, 0x3507A, 0x35290, 0x35250, 0x352B8};
 // record states (u8 at +0)
 constexpr uint8_t kRecordExists = 2, kRecordLoaded = 3, kRecordChanged = 4;
 constexpr uint8_t kNoCharacterSelected = 0x1F;  // the "character selected?" check's error: back to the menu
