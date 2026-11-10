@@ -796,3 +796,116 @@ TEST_CASE("the game's colours are recorded per bar; stamina not seen stays empty
     CHECK_FALSE(bar_game_colours(kBarStamina).has_value());
     CHECK_FALSE(bar_game_colours(3).has_value());
 }
+
+// ---- the panel colour: a scoped write into health's frame colour ----
+namespace {
+
+bool g_writable = true;
+bool test_writable(const void*, size_t) { return g_writable; }
+
+void open_widget(Node& n) {
+    const NameInfo ni{"doPlayerHealthWidget()", 22, kPlayerWidgetHash};
+    hud_open_path(n.scope, &ni, no_open, 1000);
+}
+
+struct PanelRig {
+    BarRig bars;
+    StyleBlock health = test_block(0x4FD17CFF);
+    UiColour frame{};
+    Node widget;
+    explicit PanelRig(const HudSnapshot& s, bool writable = true) : bars(s) {
+        g_writable = writable;
+        set_panel_writable_check(&test_writable);
+        frame = health[kFrame];
+    }
+    ~PanelRig() { set_panel_writable_check(nullptr); }
+    // the widget opens, vitalBars opens, health is drawn, vitalBars closes (the widget stays open)
+    void draw_bars() {
+        open_widget(widget);
+        open(bars.vitals, "vitalBars");
+        float o[4];
+        call_bar_style(0, &health, bars.snap(), o);
+        close(bars.vitals);
+    }
+    bool frame_is_game() const {
+        return health[kFrame].value == frame.value && health[kFrame].intensity == frame.intensity;
+    }
+};
+
+HudSnapshot with_panel() {
+    HudSnapshot s = active();
+    s.panel = *parse_colour("#20208080").colour;
+    return s;
+}
+
+}  // namespace
+
+TEST_CASE("kPlayerWidgetHash is the hash of doPlayerHealthWidget()") {
+    CHECK(emf::fnv1a64("doPlayerHealthWidget()") == kPlayerWidgetHash);
+}
+
+TEST_CASE("panel: written when vitalBars closes, put back when the player widget closes") {
+    PanelRig p(with_panel());
+    p.draw_bars();
+    CHECK(p.health[kFrame].value == rgba_to_game(0x20208080));
+    CHECK(p.health[kFrame].intensity == p.frame.intensity);  // the game's intensity
+    close(p.widget);
+    CHECK(p.frame_is_game());
+    CHECK(colour_stats().panel_writes == 1);
+    CHECK(colour_stats().panel_restores == 1);
+    CHECK(panel_status() == PanelStatus::Writable);
+}
+
+TEST_CASE("panel: put back at the next vitalBars open when the widget close was missed") {  // Review Focus 2
+    PanelRig p(with_panel());
+    p.draw_bars();
+    CHECK_FALSE(p.frame_is_game());
+    open(p.bars.vitals, "vitalBars");  // the next frame; the widget's close was never seen
+    CHECK(p.frame_is_game());
+    close(p.bars.vitals);
+}
+
+TEST_CASE("panel: put back when the editor turned off before the widget closed") {  // Review Focus 2
+    {
+        PanelRig p(with_panel());
+        p.draw_bars();
+        hud_set_for_tests(&p.bars.box, false);
+        close(p.widget);
+        CHECK(p.frame_is_game());
+    }
+    {
+        PanelRig p(with_panel());
+        p.draw_bars();
+        hud_set_for_tests(&p.bars.box, false);
+        Node other;
+        open(other, "somethingElse");  // any scope opened while off puts it back
+        CHECK(p.frame_is_game());
+    }
+}
+
+TEST_CASE("panel: not written when the memory is not writable") {
+    PanelRig p(with_panel(), false);
+    p.draw_bars();
+    CHECK(p.frame_is_game());
+    CHECK(panel_status() == PanelStatus::ReadOnly);
+    CHECK(colour_stats().panel_writes == 0);
+    close(p.widget);
+}
+
+TEST_CASE("panel: nothing written without a panel colour or with the editor off") {
+    {
+        PanelRig p(active());
+        p.draw_bars();
+        CHECK(p.frame_is_game());
+        close(p.widget);
+    }
+    {
+        HudSnapshot s = with_panel();
+        s.active = false;
+        PanelRig p(s);
+        p.draw_bars();
+        CHECK(p.frame_is_game());
+        close(p.widget);
+    }
+    CHECK(colour_stats().panel_writes == 0);
+}

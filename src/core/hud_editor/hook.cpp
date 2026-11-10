@@ -38,7 +38,7 @@ thread_local ScopeTracker t_tracker;
 // while it is open), the food column (its height, this frame) and the status effects list (moved when it grows upward).
 constexpr uint64_t kVitalBarsHash = fnv1a64("vitalBars"), kFoodColumnHash = fnv1a64("foodIconParent"),
                    kStatusListHash = fnv1a64("buffDebuffParent");
-constexpr int kTrackVitals = -10, kTrackStatus = -11;  // OpenScope::element for those two (never a part's index)
+constexpr int kTrackVitals = -10, kTrackStatus = -11, kTrackWidget = -12;  // OpenScope::element (never a part's index)
 thread_local float t_food_h = -1;                      // the food column's height this frame, -1 = not seen yet
 
 BarFn g_o_bar = nullptr;
@@ -65,6 +65,10 @@ bool special_open(void* scope, uint8_t* node, uint64_t hash, const HudSnapshot* 
             t_tracker.opened(OpenScope{scope, node, kTrackVitals, {}});  // its close is seen even after the editor turned off
             bars_vitals_open(node);
         }
+        return true;
+    }
+    if (hash == kPlayerWidgetHash) {  // its close puts a written panel colour back
+        if (node && t_tracker.has_room()) t_tracker.opened(OpenScope{scope, node, kTrackWidget, {}});
         return true;
     }
     if (hash == kFoodColumnHash) {
@@ -126,12 +130,17 @@ void before_close_body(void* scope, const HudSnapshot* snap, ScopeTracker::Close
     *c = t_tracker.closed(scope, node);
     for (int i = 0; i < c->dropped_count; ++i) {
         scale_lost(c->dropped[i].push);
-        if (c->dropped[i].element == kTrackVitals) bars_vitals_close();
+        if (c->dropped[i].element == kTrackVitals) bars_vitals_close(nullptr);
+        if (c->dropped[i].element == kTrackWidget) panel_restore();
     }
     if (!c->found) return;
     const int e = c->scope.element;
     if (e == kTrackVitals) {
-        bars_vitals_close();
+        bars_vitals_close(snap);
+        return;
+    }
+    if (e == kTrackWidget) {
+        panel_restore();
         return;
     }
     if (e < 0 || static_cast<size_t>(e) >= kHudElementCount || !node) return;
@@ -191,6 +200,24 @@ void guarded_bar_after(const BarCall* c, void* result) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         fault(GetExceptionCode());
     }
+}
+
+void guarded_panel_restore() {
+    __try {
+        panel_restore();
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        fault(GetExceptionCode());
+    }
+}
+
+// The panel colour's write check: committed memory that may be written as it is (EMF never changes protection).
+bool memory_writable(const void* p, size_t n) {
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!p || VirtualQuery(p, &mbi, sizeof mbi) != sizeof mbi) return false;
+    if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
+    if (!(mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE))) return false;
+    const uintptr_t end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    return reinterpret_cast<uintptr_t>(p) + n <= end;
 }
 
 void* hk_bar(void* out, void* data, void* style) {
@@ -284,7 +311,10 @@ bool hud_bars_hooked() { return g_bars_hooked.load(std::memory_order_relaxed); }
 // ---- the detours' bodies ----
 void* hud_open_path(void* scope, const NameInfo* ni, OpenFn original, uint64_t now_ms) {
     void* r = original(scope, ni);
-    if (is_on()) guarded_after_open(scope, ni, current_snapshot(), now_ms);
+    if (is_on())
+        guarded_after_open(scope, ni, current_snapshot(), now_ms);
+    else
+        guarded_panel_restore();  // the editor turned off with the panel colour written
     return r;
 }
 
@@ -339,6 +369,7 @@ bool install_hud_hooks(const std::array<Resolved, kSigCount>& sigs, bool known_b
                           reinterpret_cast<void*>(&hk_open), reinterpret_cast<void**>(&g_o_open)))
         return fail("the UI scope open could not be hooked");
     g_box.store(box, std::memory_order_release);
+    set_panel_writable_check(&memory_writable);
     g_on.store(true, std::memory_order_relaxed);
     // The bars (optional): without them the rest of the editor works.
     if (hud_bars_ready(sigs, known_build, build_index))

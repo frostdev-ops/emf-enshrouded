@@ -61,9 +61,21 @@ void bar_after(const BarCall& c, void* result, uint64_t now_ms);
 // bar_before, the original, bar_after: the tests' entry (no SEH).
 void* bar_call_path(void* out, void* data, void* style, BarFn original, const HudSnapshot* snap, UiSpace ui,
                     uint64_t now_ms);
-// vitalBars opened / closed on this thread (hook.cpp): at open, this frame's game rects become last frame's.
+// vitalBars opened / closed on this thread (hook.cpp): at open, this frame's game rects become last frame's (and a panel
+// colour still written is put back); at close, the panel colour is written when the snapshot has one (null: not).
 void bars_vitals_open(uint8_t* node);
-void bars_vitals_close();
+void bars_vitals_close(const HudSnapshot* snap);
+
+// ---- the panel colour: a scoped write into health's frame colour (the widget tints the panel behind the bars with it,
+// after vitalBars closed and before its inner "doPlayerHealthWidget()" scope closes) ----
+constexpr uint64_t kPlayerWidgetHash = 0x9442c26a6a17b7a0ull;  // fnv1a64("doPlayerHealthWidget()")
+// Whether n bytes at p may be written as they are (hook.cpp: VirtualQuery; EMF never changes page protection). Null:
+// never written.
+using WritableFn = bool (*)(const void* p, size_t n);
+void set_panel_writable_check(WritableFn f);
+// Puts the saved frame colour back when it was written (the widget closed, the next vitalBars opened, the editor is off).
+void panel_restore();
+PanelStatus panel_status();
 LiveInfo bar_live(int bar);
 // The game's own colour block of a bar, as last drawn inside vitalBars; empty until then (stamina while full).
 std::optional<StyleBlock> bar_game_colours(int bar);

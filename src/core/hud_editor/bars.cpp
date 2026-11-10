@@ -37,6 +37,19 @@ thread_local int t_calls = 0;
 thread_local uintptr_t t_base = 0;
 thread_local std::array<BarRect, kBarCount> t_cur{}, t_last{};
 
+// the panel colour: health's style (the game's block: its first field is the frame colour) this frame, what was written
+thread_local const void* t_health_style = nullptr;
+struct PanelWrite {
+    uint8_t* addr = nullptr;
+    UiColour saved{};
+    bool written = false;
+};
+thread_local PanelWrite t_panel;
+thread_local const void* t_checked = nullptr;  // the address last checked, and whether it was writable
+thread_local bool t_checked_ok = false;
+std::atomic<WritableFn> g_writable{nullptr};
+std::atomic<uint8_t> g_panel_status{static_cast<uint8_t>(PanelStatus::Unknown)};
+
 }  // namespace
 
 int bar_index(uintptr_t data, uintptr_t base) {
@@ -90,6 +103,8 @@ float grow_up_dy(float list_y, float list_h, float column_h, const Xform& top, f
 }
 
 void bars_vitals_open(uint8_t* node) {
+    panel_restore();  // the widget's close was not seen last frame
+    t_health_style = nullptr;
     // a bar the game did not draw in the frame that ended (stamina while full): no area left for the HUD page to pick
     for (size_t b = 0; b < kBarCount; ++b)
         if (!t_cur[b].seen) g_bar_live[b].rect_b.store(0, std::memory_order_relaxed);
@@ -100,7 +115,39 @@ void bars_vitals_open(uint8_t* node) {
     t_cur = {};
 }
 
-void bars_vitals_close() { t_vitals = nullptr; }
+void bars_vitals_close(const HudSnapshot* snap) {
+    t_vitals = nullptr;
+    if (!snap || !snap->active || !snap->panel.set || !t_health_style || t_panel.written) return;
+    uint8_t* addr = static_cast<uint8_t*>(const_cast<void*>(t_health_style)) + kFrame * sizeof(UiColour);
+    if (addr != t_checked) {
+        const WritableFn f = g_writable.load(std::memory_order_relaxed);
+        t_checked_ok = f && f(addr, sizeof(UiColour));
+        t_checked = addr;
+        g_panel_status.store(static_cast<uint8_t>(t_checked_ok ? PanelStatus::Writable : PanelStatus::ReadOnly),
+                             std::memory_order_relaxed);
+    }
+    if (!t_checked_ok) return;
+    UiColour saved;
+    std::memcpy(&saved, addr, sizeof saved);  // the caller guards the write and the read
+    const UiColour now = with_colour(saved, snap->panel);
+    std::memcpy(addr, &now, sizeof now);
+    t_panel = PanelWrite{addr, saved, true};
+    g_panel_writes.fetch_add(1, std::memory_order_relaxed);
+}
+
+void panel_restore() {
+    if (!t_panel.written) return;
+    t_panel.written = false;  // first: a fault in the copy must not make every later call fault again
+    std::memcpy(t_panel.addr, &t_panel.saved, sizeof t_panel.saved);
+    g_panel_restores.fetch_add(1, std::memory_order_relaxed);
+}
+
+void set_panel_writable_check(WritableFn f) {
+    g_writable.store(f, std::memory_order_relaxed);
+    t_checked = nullptr;
+}
+
+PanelStatus panel_status() { return static_cast<PanelStatus>(g_panel_status.load(std::memory_order_relaxed)); }
 
 BarCall bar_before(void* data, const void* style, const HudSnapshot* snap, UiSpace ui) {
     BarCall c;
@@ -111,6 +158,7 @@ BarCall bar_before(void* data, const void* style, const HudSnapshot* snap, UiSpa
         t_base = d - kBarDataFirst;  // the first call is always health's
     }
     c.bar = bar_index(d, t_base);
+    if (c.bar == kBarHealth && style) t_health_style = style;
     if (c.bar >= 0 && style) {
         StyleBlock game;
         std::memcpy(&game, style, sizeof game);  // the caller guards the read
@@ -217,6 +265,11 @@ void bars_reset_for_tests() {
     g_recoloured = 0;
     g_panel_writes = 0;
     g_panel_restores = 0;
+    t_health_style = nullptr;
+    t_panel = PanelWrite{};
+    t_checked = nullptr;
+    t_checked_ok = false;
+    g_panel_status = static_cast<uint8_t>(PanelStatus::Unknown);
 }
 
 }  // namespace emf::core::hud
