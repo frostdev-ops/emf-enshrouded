@@ -22,6 +22,8 @@ struct ElementEdit {
 struct HudSnapshot {
     bool active = false;  // false: the hooks change nothing
     std::array<ElementEdit, kHudElementCount> edits{};
+    BarOrder order = kDefaultOrder;  // the vitals' bars, top first
+    bool buffs_up = false;           // the status effects list grows upward
     uint64_t serial = 0;
 };
 

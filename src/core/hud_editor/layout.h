@@ -27,7 +27,10 @@ struct ElementLayout {
 struct HudLayout {
     std::string name;
     std::array<ElementLayout, kHudElementCount> elements{};
+    BarOrder order = kDefaultOrder;  // the vitals' bars, top first
+    bool buffs_up = false;           // the status effects list grows upward from the food icons' bottom edge
     bool is_default() const {
+        if (order != kDefaultOrder || buffs_up) return false;
         for (const auto& e : elements)
             if (!e.is_default()) return false;
         return true;

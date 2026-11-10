@@ -87,6 +87,12 @@ std::string layout_to_json(const HudLayout& l, uint32_t build) {
         body += "    " + bridge::json_quote(parts[i].scope) + ": {\"x\": " + number_text(e.x) + ", \"y\": " + number_text(e.y) +
                 ", \"scale\": " + number_text(e.scale) + ", \"hidden\": " + (e.hidden ? "true" : "false") + "}";
     }
+    if (l.order != kDefaultOrder) {
+        out += "  \"vitals_order\": [";
+        for (size_t i = 0; i < kBarCount; ++i) out += (i ? ", " : "") + bridge::json_quote(bar_id(l.order[i]));
+        out += "],\n";
+    }
+    if (l.buffs_up) out += "  \"buffs_up\": true,\n";
     if (body.empty())
         out += "  \"elements\": {}\n";
     else
@@ -166,6 +172,30 @@ LayoutRead layout_from_json(std::string_view text) {
                     r.notes.push_back(key + ".hidden is not true or false, left at false");
             }
         }
+    }
+    if (const json::Value* ord = root.get("vitals_order")) {
+        BarOrder o{};
+        bool ok = ord->is(json::Value::Type::Array) && ord->arr.size() == kBarCount;
+        for (size_t i = 0; ok && i < kBarCount; ++i) {
+            const json::Value& v = ord->arr[i];
+            ok = false;
+            if (!v.is(json::Value::Type::String)) break;
+            for (int b = 0; b < static_cast<int>(kBarCount); ++b)
+                if (v.s == bar_id(b)) {
+                    o[i] = static_cast<uint8_t>(b);
+                    ok = true;
+                }
+        }
+        if (ok && valid_order(o))
+            l.order = o;
+        else
+            r.notes.push_back("vitals_order is not health, mana and stamina once each, left at health, mana, stamina");
+    }
+    if (const json::Value* up = root.get("buffs_up")) {
+        if (up->is(json::Value::Type::Bool))
+            l.buffs_up = up->b;
+        else
+            r.notes.push_back("buffs_up is not true or false, left at false");
     }
     r.layout = std::move(l);
     return r;

@@ -1,4 +1,5 @@
-// The HUD editor's 13 parts: names, hashes (FNV-1a 64 of the game's UI scope names) and lookups.
+// The HUD editor's parts: the 13 scope parts (names, hashes: FNV-1a 64 of the game's UI scope names), the three bars,
+// and lookups.
 #include <doctest.h>
 
 #include <string>
@@ -37,8 +38,8 @@ TEST_CASE("fnv1a64: the hash the game passes with a UI scope's name") {
     CHECK(emf::fnv1a64("doBasicProgressBar()") == 0xb37b692b58e08ab5ull);
     static_assert(emf::fnv1a64("playerStatusParent") == 0x9f1a106062b445daull);
 }
-TEST_CASE("hud elements: the 13 parts of phase 1 in order, each hash fnv1a64 of its scope") {
-    REQUIRE(hud_elements().size() == 13);
+TEST_CASE("hud elements: the 13 scope parts of phase 1 in order, each hash fnv1a64 of its scope") {
+    REQUIRE(hud_elements().size() == 16);
     for (size_t i = 0; i < 13; ++i) {
         CAPTURE(i);
         CHECK(std::string(hud_elements()[i].id) == want[i].id);
@@ -48,6 +49,7 @@ TEST_CASE("hud elements: the 13 parts of phase 1 in order, each hash fnv1a64 of 
         CHECK(std::string(hud_elements()[i].label).size() > 0);
         CHECK(hud_elements()[i].confirm_hide == (i == 0));
         CHECK((hud_elements()[i].note != nullptr) == (i == 0 || i == 2 || i == 3));
+        CHECK(hud_elements()[i].bar == -1);
     }
     CHECK(emf::fnv1a64("doPlayStateUi()") == kUiSpaceHash);
 }
@@ -72,5 +74,43 @@ TEST_CASE("find_element: by id or scope name, ignoring case") {
 }
 TEST_CASE("element_ids: the ids in table order, for replies") {
     CHECK(element_ids() == "vitals, buffs, hotbar, compass, shroud, quests, oxygen, loot, boss, crosshair, chat, "
-                           "notifications, multitool");
+                           "notifications, multitool, health, mana, stamina");
+}
+
+TEST_CASE("hud elements: the 13 scope parts, then health, mana and stamina (bars, no scope hash)") {
+    const auto p = hud_elements();
+    REQUIRE(p.size() == 16);
+    CHECK(std::string(p[0].label) == "Health, mana and stamina");
+    for (int b = 0; b < static_cast<int>(kBarCount); ++b) {
+        CAPTURE(b);
+        REQUIRE(bar_element(b) >= 13);
+        const auto& e = p[static_cast<size_t>(bar_element(b))];
+        CHECK(e.bar == b);
+        CHECK(e.hash == 0);
+        CHECK(std::string(e.id) == bar_id(b));
+        CHECK(std::string(e.scope) == std::string("bar:") + bar_id(b));
+        CHECK(e.note != nullptr);
+        CHECK(e.confirm_hide == (b == kBarHealth));
+    }
+    CHECK(std::string(bar_id(kBarHealth)) == "health");
+    CHECK(std::string(bar_id(kBarMana)) == "mana");
+    CHECK(std::string(bar_id(kBarStamina)) == "stamina");
+    CHECK(bar_element(3) == kNoElement);
+    CHECK(bar_element(-1) == kNoElement);
+}
+
+TEST_CASE("find_scope never returns a bar; find_element finds them by id or their scope text") {
+    CHECK(find_scope(0) == kNoElement);
+    CHECK(find_element("Mana") == bar_element(kBarMana));
+    CHECK(find_element("bar:stamina") == bar_element(kBarStamina));
+    CHECK(find_element("health") == bar_element(kBarHealth));
+}
+
+TEST_CASE("valid_order: permutations of 0..2 only") {
+    CHECK(valid_order(BarOrder{0, 1, 2}));
+    CHECK(valid_order(BarOrder{1, 0, 2}));
+    CHECK(valid_order(BarOrder{2, 1, 0}));
+    CHECK_FALSE(valid_order(BarOrder{1, 1, 2}));
+    CHECK_FALSE(valid_order(BarOrder{0, 1, 3}));
+    CHECK(valid_order(kDefaultOrder));
 }

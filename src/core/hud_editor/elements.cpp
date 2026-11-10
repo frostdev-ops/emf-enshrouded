@@ -12,14 +12,19 @@ namespace {
 constexpr const char* kNoteVitals = "The buffs and food row moves and scales with it; its own changes add to these.";
 constexpr const char* kNoteHotbar = "The item hints and the item name above the bars move and scale with it.";
 constexpr const char* kNoteCompass = "The shroud timer and meters move and scale with it; their own changes add to these.";
+constexpr const char* kNoteBar = "Moves on its own inside Health, mana and stamina; that part moves it too.";
 
 constexpr HudElement make(const char* id, const char* scope, const char* label, const char* note = nullptr,
                           bool confirm = false) {
-    return HudElement{id, scope, label, note, fnv1a64(scope), confirm};
+    return HudElement{id, scope, label, note, fnv1a64(scope), confirm, -1};
+}
+
+constexpr HudElement make_bar(const char* id, const char* scope, const char* label, int bar) {
+    return HudElement{id, scope, label, kNoteBar, 0, bar == 0, bar};
 }
 
 constexpr std::array<HudElement, kHudElementCount> kElements = {{
-    make("vitals", "playerStatusParent", "Health and stamina", kNoteVitals, true),
+    make("vitals", "playerStatusParent", "Health, mana and stamina", kNoteVitals, true),
     make("buffs", "buffRow", "Buffs and food"),
     make("hotbar", "doActionbar", "Hotbar", kNoteHotbar),
     make("compass", "compassSurvivalMeterParent", "Compass", kNoteCompass),
@@ -32,6 +37,9 @@ constexpr std::array<HudElement, kHudElementCount> kElements = {{
     make("chat", "chatParent", "Chat"),
     make("notifications", "notificationParent", "Notifications"),
     make("multitool", "multiToolRoot", "Multi-tool"),
+    make_bar("health", "bar:health", "Health", 0),
+    make_bar("mana", "bar:mana", "Mana", 1),
+    make_bar("stamina", "bar:stamina", "Stamina", 2),
 }};
 
 // 32 slots, linear probing on hash & 31; the slot holds an element index, kUiSpaceIndex or kNoElement.
@@ -44,7 +52,8 @@ constexpr std::array<int8_t, kSlots> build_table() {
         while (t[s] != static_cast<int8_t>(kNoElement)) s = (s + 1) & (kSlots - 1);
         t[s] = static_cast<int8_t>(idx);
     };
-    for (size_t i = 0; i < kHudElementCount; ++i) put(kElements[i].hash, static_cast<int>(i));
+    for (size_t i = 0; i < kHudElementCount; ++i)
+        if (kElements[i].hash != 0) put(kElements[i].hash, static_cast<int>(i));  // the bars have no scope
     put(kUiSpaceHash, kUiSpaceIndex);
     return t;
 }
@@ -63,6 +72,7 @@ bool equals_nocase(std::string_view a, std::string_view b) {
 std::span<const HudElement> hud_elements() { return kElements; }
 
 int find_scope(uint64_t hash) {
+    if (hash == 0) return kNoElement;
     size_t s = static_cast<size_t>(hash & (kSlots - 1));
     for (size_t n = 0; n < kSlots; ++n, s = (s + 1) & (kSlots - 1)) {
         const int v = kTable[s];
@@ -83,6 +93,26 @@ int find_element(std::string_view id_or_scope) {
     for (size_t i = 0; i < kHudElementCount; ++i)
         if (equals_nocase(id_or_scope, kElements[i].scope)) return static_cast<int>(i);
     return kNoElement;
+}
+
+int bar_element(int bar) {
+    for (size_t i = 0; i < kHudElementCount; ++i)
+        if (kElements[i].bar == bar && bar >= 0) return static_cast<int>(i);
+    return kNoElement;
+}
+
+const char* bar_id(int bar) {
+    const int e = bar_element(bar);
+    return e == kNoElement ? "" : kElements[static_cast<size_t>(e)].id;
+}
+
+bool valid_order(const BarOrder& order) {
+    bool seen[kBarCount] = {};
+    for (uint8_t b : order) {
+        if (b >= kBarCount || seen[b]) return false;
+        seen[b] = true;
+    }
+    return true;
 }
 
 std::string element_ids() {

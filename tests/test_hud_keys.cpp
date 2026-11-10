@@ -28,8 +28,8 @@ TEST_CASE("page_command: Tab steps, arrows move 0.5 % (Shift 5 %), + and - scale
 }
 
 TEST_CASE("step_element: wraps both ways") {
-    CHECK(step_element(12, false) == 0);
-    CHECK(step_element(0, true) == 12);
+    CHECK(step_element(15, false) == 0);
+    CHECK(step_element(0, true) == 15);
     CHECK(step_element(3, false) == 4);
     CHECK(step_element(3, true) == 2);
 }

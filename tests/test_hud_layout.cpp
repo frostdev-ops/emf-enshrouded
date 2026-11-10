@@ -152,3 +152,50 @@ TEST_CASE("layout_from_json: a name a profile could not have is left empty with 
     REQUIRE(r.notes.size() == 1);
     CHECK(r.notes[0].rfind("name: ", 0) == 0);
 }
+
+TEST_CASE("layout_to_json/from_json: the bar order and buffs_up round trip; defaults are not written") {
+    HudLayout l;
+    l.name = "Bars";
+    CHECK(layout_to_json(l, 1).find("vitals_order") == std::string::npos);
+    CHECK(layout_to_json(l, 1).find("buffs_up") == std::string::npos);
+    l.order = {1, 0, 2};
+    l.buffs_up = true;
+    l.elements[static_cast<size_t>(bar_element(kBarMana))].y = -3;
+    const std::string j = layout_to_json(l, 1);
+    CHECK(j.find("\"vitals_order\": [\"mana\", \"health\", \"stamina\"]") != std::string::npos);
+    CHECK(j.find("\"buffs_up\": true") != std::string::npos);
+    CHECK(j.find("\"bar:mana\"") != std::string::npos);
+    const LayoutRead r = layout_from_json(j);
+    REQUIRE(r.layout);
+    CHECK(r.layout->order == BarOrder{1, 0, 2});
+    CHECK(r.layout->buffs_up);
+    CHECK(r.layout->elements[static_cast<size_t>(bar_element(kBarMana))].y == doctest::Approx(-3));
+    CHECK(r.notes.empty());
+}
+
+TEST_CASE("layout_from_json: an order that is not a permutation is left at the default with a note") {  // Review Focus 3
+    for (const char* bad : {R"(["mana","mana","health"])", R"(["mana","health"])", R"(["mana","health","fire"])",
+                            R"("mana")", R"([1,0,2])"}) {
+        CAPTURE(bad);
+        const LayoutRead r =
+            layout_from_json(std::string(R"({"format": 1, "elements": {"bar:mana": {"y": 2}}, "vitals_order": )") + bad + "}");
+        REQUIRE(r.layout);
+        CHECK(r.layout->order == kDefaultOrder);
+        CHECK(r.notes.size() == 1);
+        CHECK(r.layout->elements[static_cast<size_t>(bar_element(kBarMana))].y == doctest::Approx(2));  // the rest loads
+    }
+    const LayoutRead b = layout_from_json(R"({"format": 1, "elements": {}, "buffs_up": "yes"})");
+    REQUIRE(b.layout);
+    CHECK_FALSE(b.layout->buffs_up);
+    CHECK(b.notes.size() == 1);
+}
+
+TEST_CASE("is_default: the order and buffs_up count") {
+    HudLayout l;
+    CHECK(l.is_default());
+    l.order = {0, 2, 1};
+    CHECK_FALSE(l.is_default());
+    l.order = kDefaultOrder;
+    l.buffs_up = true;
+    CHECK_FALSE(l.is_default());
+}

@@ -35,7 +35,7 @@ TEST_CASE("hud.move: usage, unknown part, bad number") {
     CHECK(run(e, {"hud.move", "vitals"}) == Lines{"usage: hud.move <part> <x> <y> (percent of the screen, -100 to 100)"});
     CHECK(run(e, {"hud.move", "nope", "1", "1"}) ==
           Lines{"hud: no HUD part \"nope\"; the parts: vitals, buffs, hotbar, compass, shroud, quests, oxygen, loot, boss, "
-                "crosshair, chat, notifications, multitool"});
+                "crosshair, chat, notifications, multitool, health, mana, stamina"});
     CHECK(run(e, {"hud.move", "vitals", "abc", "1"}) == Lines{"hud.move: \"abc\" is not a number"});
     CHECK(run(e, {"hud.move", "vitals", "1", "nan"}) == Lines{"hud.move: \"nan\" is not a number"});
     CHECK(run(e, {"hud.move", "vitals", "1", "5x"}) == Lines{"hud.move: \"5x\" is not a number"});
@@ -103,13 +103,14 @@ TEST_CASE("hud.list: the state, every part, the layouts") {
     run(e, {"hud.hide", "buffs"});
     r.live[0].seen = true;
     const Lines l = run(e, {"hud.list"});
-    REQUIRE(l.size() == 16);
+    REQUIRE(l.size() == 19);
     CHECK(l[0] == "hud: on, layout \"Default\"");
     CHECK(l[1] == "hud: scale on (pushes 0, pops 0, mismatches 0)");
     CHECK(l[2] == "  vitals (playerStatusParent): x 5 %, y -2.5 %, scale 1");
     CHECK(l[3] == "  buffs (buffRow): x 0 %, y 0 %, scale 1, hidden, not seen yet");
     CHECK(l[4] == "  hotbar (doActionbar): where the game draws it, not seen yet");
-    CHECK(l[15].rfind("hud: layouts: Default (active)", 0) == 0);
+    CHECK(l[15] == "  health (bar:health): where the game draws it, not seen yet");
+    CHECK(l[18].rfind("hud: layouts: Default (active)", 0) == 0);
 }
 
 TEST_CASE("hud.list: off, with the gate's words") {
