@@ -21,8 +21,8 @@ std::vector<uint32_t> utf8_code_points(std::string_view s);
 // Extended-A (0x100-0x17F), Cyrillic and its Supplement (0x400-0x52F).
 bool in_base_ranges(uint32_t cp);
 
-// At most this many characters are added to the atlas (a few hundred for a language's item names; the cap keeps a
-// broken table from making the atlas huge).
+// At most this many characters are added to the atlas (Japanese or Chinese item names may need 1000-2000; the cap
+// keeps a broken table from making the atlas huge, and the overlay's kMaxAtlasHeight bounds its size as well).
 inline constexpr size_t kMaxExtraGlyphs = 4000;
 
 // The characters of `texts` outside the base ranges (U+FFFD and control characters left out): sorted, unique, the

@@ -504,8 +504,13 @@ void hk_sim_step(void* storage, char ticked) {
         // never on the dedicated server, which has no game text)
         if (emf::core::game_text().table_key() != emf::core::screen_glyphs().collected_key()) {
             const auto* registry = static_cast<const uint8_t*>(view.singleton("g38_items::ItemRegistry"));
+            const uint64_t before = emf::core::screen_glyphs().wanted_version();
             emf::core::pump_screen_glyphs(registry, emf::core::item_names(), emf::core::game_text(),
                                           emf::core::screen_glyphs());
+            const emf::core::GlyphWant w = emf::core::screen_glyphs().wanted();
+            if (w.version != before)
+                emf::logf("item names: the %s names use %zu characters beyond EMF's base fonts",
+                          emf::core::language_code(w.language), w.glyphs.size());
         }
     } catch (...) {
         // never let a C++ exception reach game code

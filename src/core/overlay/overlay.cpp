@@ -196,11 +196,12 @@ void setup_fonts(ImGuiIO& io, float height) {
                           code, utf8(extra_font_file_name(want.language)).c_str(), extra_font_download(want.language),
                           utf8(paths.fonts_dir).c_str());
         else if (needs_font)
-            std::snprintf(line, sizeof line, "item names: %s on EMF's screens with %s (%zu of %zu characters)", code,
-                          utf8(g_extra_file).c_str(), drawable.size(), want.glyphs.size());
+            std::snprintf(line, sizeof line, "item names: %s on EMF's screens with %s (%zu of %zu characters, atlas %dx%d)",
+                          code, utf8(g_extra_file).c_str(), drawable.size(), want.glyphs.size(), io.Fonts->TexWidth,
+                          io.Fonts->TexHeight);
         else
-            std::snprintf(line, sizeof line, "item names: %zu of %zu characters beyond EMF's base fonts for %s", drawable.size(),
-                          want.glyphs.size(), code);
+            std::snprintf(line, sizeof line, "item names: %zu of %zu characters beyond EMF's base fonts for %s (atlas %dx%d)",
+                          drawable.size(), want.glyphs.size(), code, io.Fonts->TexWidth, io.Fonts->TexHeight);
         problems.push_back(line);
     }
     for (const auto& p : problems) {

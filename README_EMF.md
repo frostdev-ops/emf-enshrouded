@@ -242,8 +242,9 @@ only the characters your item names use. If your Windows lacks it, or you prefer
 On the page, choose **Get font**, then **Download all**; the file is in the zip's `static` folder. Then start the game
 again: nothing to switch on. `emf\emf_core.log` says which font EMF uses ("item names: ja_jp on EMF's screens with
 ..."), or which file to add. Until a font is found, those names show in English on EMF's screens (the console, HUD
-lines, wheels and mod windows); the game's chat shows every language by itself. The same goes for any name EMF's fonts
-cannot draw: it shows in English, never as boxes.
+lines, wheels and mod windows); the game's chat shows every language by itself. A name with any other character EMF's
+fonts lack shows in English too, instead of boxes. (A font of your own, `font=file:...`, must have the letters of your
+game's language: EMF does not check those.)
 
 **HDR.** With the game's HDR on, EMF does not convert its colours yet: the screen reads them as HDR values, so
 bright ones (the warm white text, channel values above about 150) look very bright. A darker `colour=` (for example

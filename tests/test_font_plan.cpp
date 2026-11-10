@@ -597,6 +597,15 @@ TEST_CASE("font atlas: Japanese merged from Windows' Yu Gothic into every face; 
     CHECK(f.console->FindGlyphNoFallback(0x4E38) != nullptr);
     CHECK(f.hud_bold->FindGlyphNoFallback(0x592A) != nullptr);
     CHECK(f.hud->FindGlyphNoFallback('A')->AdvanceX == advance);  // the serif's own 'A', not Yu Gothic's
+    // review Important 1: one copy of the 14 MB font, the caller's, not one per face (ImGui copies what it does not own)
+    int merged = 0;
+    for (const ImFontConfig& src : atlas.Sources) {
+        if (!src.MergeMode) continue;
+        ++merged;
+        CHECK(src.FontData == static_cast<const void*>(bytes.data()));
+        CHECK_FALSE(src.FontDataOwnedByAtlas);
+    }
+    CHECK(merged == 3);  // the three distinct faces
 }
 
 TEST_CASE("font atlas: an extra font that is no font, or has none of the characters, is left out with a line") {
@@ -634,4 +643,30 @@ TEST_CASE("extra font: the first usable file is picked: the player's Noto file, 
     CHECK(pick_extra_font(11, L"E", L"W", ok).empty());
     CHECK(pick_extra_font(3, L"E", L"W", [](const std::wstring&) { return true; }).empty());  // German: none needed
     CHECK(std::wstring(extra_font_file_name(13)) == L"NotoSansKR-Regular.ttf");
+}
+
+TEST_CASE("font atlas: the item names' characters are left out when they would make the atlas taller than allowed") {  // review Important 2
+    Headless h;
+    ImFontAtlas atlas;
+    const FontPlan plan = four_faces();
+    std::vector<std::string> problems;
+    build_font_atlas(atlas, plan, &problems);
+    const int base_height = atlas.TexHeight;
+    REQUIRE(base_height > 0);
+    ExtraGlyphs extra;
+    for (uint32_t c = 0x1EA0; c <= 0x1EF9; ++c) extra.glyphs.push_back(c);  // Vietnamese: in the bundled fonts
+    extra.max_atlas_height = base_height;  // no room for one more row
+    const OverlayFonts f = build_font_atlas(atlas, plan, &problems, &extra);
+    CHECK(atlas.IsBuilt());
+    CHECK(atlas.TexHeight <= base_height);
+    CHECK(drawable_glyphs(f, extra.glyphs).empty());  // their names show in English
+    REQUIRE(problems.size() == 1);
+    CHECK(problems[0].find("left out") != std::string::npos);
+    problems.clear();
+    extra.max_atlas_height = kMaxAtlasHeight;  // the real budget: room for them
+    const OverlayFonts g = build_font_atlas(atlas, plan, &problems, &extra);
+    CHECK(problems.empty());
+    CHECK(drawable_glyphs(g, extra.glyphs).size() == extra.glyphs.size());
+    CHECK(atlas.TexHeight > base_height);
+    CHECK(atlas.TexHeight < 2 * base_height);  // not rounded up to a power of two
 }

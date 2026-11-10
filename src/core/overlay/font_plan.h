@@ -106,12 +106,18 @@ struct OverlayFonts {
     ImFont* hud = nullptr;
     ImFont* hud_bold = nullptr;
 };
+// The tallest atlas the item names' characters may make (4096 wide: 128 MB of RGBA at the most): Vulkan's
+// maxImageDimension2D is 16384 on many GPUs, and the atlas grows with the text size and the screen's height.
+inline constexpr int kMaxAtlasHeight = 8192;
+
 // The characters the item names need beyond kFontRanges (ScreenGlyphs), and the extra font that has the ones EMF's
-// fonts lack (Japanese, Korean, Chinese, Thai; null: none). The bytes stay the caller's until the next build.
+// fonts lack (Japanese, Korean, Chinese, Thai; null: none). The atlas points into the font's bytes: they stay the
+// caller's and alive until the next build.
 struct ExtraGlyphs {
     std::vector<uint32_t> glyphs;  // sorted
     const unsigned char* font = nullptr;
     size_t font_size = 0;
+    int max_atlas_height = kMaxAtlasHeight;  // taller with them: built without them (their names show in English)
 };
 
 // The characters of `glyphs` the font in `data` has (its first face, as ImGui reads it); empty for a file stb_truetype

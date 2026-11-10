@@ -295,6 +295,7 @@ OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vec
     static std::vector<ImWchar> s_ranges, s_merge;
     atlas.Clear();
     atlas.TexDesiredWidth = 4096;  // wide and low: big text on 4K stays within a few rows
+    atlas.Flags |= ImFontAtlasFlags_NoPowerOfTwoHeight;  // the rows it needs (Vulkan takes any height), not up to 2^n
     const std::vector<uint32_t> wanted = extra ? extra->glyphs : std::vector<uint32_t>{};
     s_ranges = glyph_ranges(wanted);
     std::vector<uint32_t> merged;  // the characters the extra font gives every face
@@ -344,9 +345,15 @@ OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vec
         if (!s_merge.empty()) {  // the extra font's characters into this face (it keeps its own for the rest)
             ImFontConfig m;
             m.MergeMode = true;
-            m.FontDataOwnedByAtlas = false;  // the caller's bytes, alive until the next build
+            m.FontDataOwnedByAtlas = false;
             atlas.AddFontFromMemoryTTF(const_cast<unsigned char*>(extra->font), static_cast<int>(extra->font_size),
                                        f.pixel_size, &m, s_merge.data());
+            // ImGui copies bytes it does not own, once per face (14-21 MB each for a CJK font): free its copy and point
+            // it at the caller's, which stays alive until the next build
+            ImFontConfig& src = atlas.Sources.back();
+            if (src.FontDataOwnedByAtlas && src.FontData != extra->font) IM_FREE(src.FontData);
+            src.FontData = const_cast<unsigned char*>(extra->font);
+            src.FontDataOwnedByAtlas = false;
         }
         made.push_back({f.file, f.pixel_size, font});
         roles[i] = font;
@@ -355,6 +362,14 @@ OverlayFonts build_font_atlas(ImFontAtlas& atlas, const FontPlan& plan, std::vec
         if (!r) r = roles[0];  // a plan with fewer faces: the console's font
     std::string why;
     const bool built = atlas.Fonts.Size > 0 && guarded_atlas_build(atlas, &why);
+    if (built && !wanted.empty() && atlas.TexHeight > extra->max_atlas_height) {  // too tall: again without them
+        if (problems)
+            problems->push_back("the font atlas would be " + std::to_string(atlas.TexWidth) + "x" +
+                                std::to_string(atlas.TexHeight) + " with the item names' " +
+                                std::to_string(wanted.size()) +
+                                " characters; they are left out (those names show in English on EMF's screens)");
+        return build_font_atlas(atlas, plan, problems, nullptr);
+    }
     if (!built && !s_merge.empty()) {  // again without the extra font (its characters from the faces' own files)
         if (problems)
             problems->push_back("the font atlas could not be built with the extra font; it is left out (" + why + ")");
