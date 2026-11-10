@@ -47,6 +47,7 @@ struct HudRig {
     std::vector<std::string> logs;
     std::array<emf::core::hud::LiveInfo, emf::core::hud::kHudElementCount> live{};
     emf::core::hud::ScaleState scale{true, false};
+    bool bars = true;  // the bar detour is installed
     emf::core::hud::GateInput gate{false, true, "1287369"};
     std::unique_ptr<emf::core::hud::HudEditor> editor;
 
@@ -84,6 +85,7 @@ struct HudRig {
         d.fault_code = [this] { return fault; };
         d.live = [this](size_t i) { return live[i]; };
         d.scale_state = [this] { return scale; };
+        d.bars_ready = [this] { return bars; };
         d.key_down = [this](uint32_t vk) { return down.count(vk) > 0; };
         d.toggle_page = [this] { ++toggles; };
         d.run = [this](std::function<void()> f) {

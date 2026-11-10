@@ -31,6 +31,7 @@ struct HudEditorDeps {
     std::function<uint32_t()> fault_code;                 // the hooks' fault, 0 = none
     std::function<LiveInfo(size_t)> live;
     std::function<ScaleState()> scale_state;              // empty = not available
+    std::function<bool()> bars_ready;                     // the bar detour is installed; empty = not available
     std::function<bool(uint32_t vk)> key_down;            // a key held now with the game in front
     std::function<void()> toggle_page;                    // opens (or closes) the console on the HUD page
     std::function<void(std::function<void()>)> run;       // file writes; empty = on the caller's thread
@@ -47,6 +48,10 @@ struct HudView {
     ScaleState scale;           // from scale_state()
     bool scale_works = false;   // scale.available && !scale.off
     std::string scale_note;     // "" when it works, else the reason
+    BarOrder order = kDefaultOrder;  // the vitals' bars, top first
+    bool buffs_up = false;           // the status effects list grows upward
+    bool bars_work = false;          // the bars move on their own (bars_ready)
+    std::string bars_note;           // "" when they work, else the reason
 };
 
 enum class Save { Now, Later };
@@ -67,7 +72,10 @@ public:
     void nudge(size_t element, float dx_percent, float dy_percent, Save save);
     void set_scale(size_t element, float scale, Save save);
     void set_hidden(size_t element, bool hidden, Save save);
-    void reset(size_t element, Save save);
+    void reset(size_t element, Save save);  // the vitals part also restores the order, the buffs part grow-upward
+    void set_order(const BarOrder& order, Save save);  // an order that is not a permutation is ignored
+    void swap_bars(int a, int b, Save save);            // the two bars change places in the order
+    void set_buffs_up(bool on, Save save);
     void flush();  // a pending Later save now
 
     // Named layouts. Each result message is the reply text without the "hud: " prefix.

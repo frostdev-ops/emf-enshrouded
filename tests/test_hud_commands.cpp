@@ -131,7 +131,7 @@ TEST_CASE("hud commands: an edit while off says the HUD does not show it now") {
           "hud: not shown now: The HUD editor does not know this game build (1287369); your HUD is untouched.");
 }
 
-TEST_CASE("add_hud_commands: seven commands that run without a world") {
+TEST_CASE("add_hud_commands: ten commands that run without a world") {
     HudRig r;
     HudEditor& e = r.make();
     CommandCenter c;
@@ -139,10 +139,70 @@ TEST_CASE("add_hud_commands: seven commands that run without a world") {
     int found = 0;
     for (const auto& [name, help] : c.list())
         if (name.rfind("hud.", 0) == 0) ++found;
-    CHECK(found == 7);
+    CHECK(found == 10);
     std::vector<std::string> out;
     CommandOutcome outcome = CommandOutcome::Refused;
     c.run_without_world("hud.list", [&](const std::string& s) { out.push_back(s); }, "no world", &outcome);
     CHECK(outcome == CommandOutcome::Ran);
     CHECK_FALSE(out.empty());
+}
+
+TEST_CASE("hud.swap, hud.order, hud.grow") {
+    HudRig r;
+    HudEditor& e = r.make();
+    CHECK(run(e, {"hud.swap", "health", "mana"}) == Lines{"hud: order mana, health, stamina (layout \"Default\")"});
+    CHECK(e.view().order == BarOrder{1, 0, 2});
+    CHECK(run(e, {"hud.swap", "Stamina", "HEALTH"}) == Lines{"hud: order mana, stamina, health (layout \"Default\")"});
+    CHECK(run(e, {"hud.order", "stamina", "mana", "health"}) == Lines{"hud: order stamina, mana, health (layout \"Default\")"});
+    const Lines order_usage{"usage: hud.order <bar> <bar> <bar> (health, mana and stamina once each, top first)"};
+    CHECK(run(e, {"hud.order", "mana", "mana", "health"}) == order_usage);
+    CHECK(run(e, {"hud.order", "mana", "health"}) == order_usage);
+    const Lines swap_usage{"usage: hud.swap <bar> <bar> (two of health, mana, stamina)"};
+    CHECK(run(e, {"hud.swap", "health", "health"}) == swap_usage);
+    CHECK(run(e, {"hud.swap", "health", "fire"}) == swap_usage);
+    CHECK(run(e, {"hud.swap", "health"}) == swap_usage);
+    CHECK(e.view().order == BarOrder{2, 1, 0});
+    CHECK(run(e, {"hud.grow", "up"}) == Lines{"hud: status effects grow upward (layout \"Default\")"});
+    CHECK(e.view().buffs_up);
+    CHECK(run(e, {"hud.grow", "down"}) == Lines{"hud: status effects grow downward, as the game draws them (layout \"Default\")"});
+    CHECK_FALSE(e.view().buffs_up);
+    CHECK(run(e, {"hud.grow", "sideways"}) == Lines{"usage: hud.grow up|down"});
+    CHECK(run(e, {"hud.grow"}) == Lines{"usage: hud.grow up|down"});
+}
+
+TEST_CASE("hud.scale on a bar is refused with the reason") {
+    HudRig r;
+    HudEditor& e = r.make();
+    CHECK(run(e, {"hud.scale", "mana", "1.5"}) == Lines{"hud: mana has no scale of its own; scale vitals instead"});
+    CHECK(e.view().elements[static_cast<size_t>(bar_element(kBarMana))].scale == 1.0f);
+}
+
+TEST_CASE("hud.move on a bar; bar commands say so when the bars are not available on this build") {
+    HudRig r;
+    HudEditor& e = r.make();
+    CHECK(run(e, {"hud.move", "mana", "0", "5"}) == Lines{"hud: mana at x 0 %, y 5 % (layout \"Default\")"});
+    HudRig off;
+    off.bars = false;
+    HudEditor& f = off.make();
+    const std::string note = "hud: not shown now: Moving health, mana and stamina on their own is not available on this game build.";
+    CHECK(run(f, {"hud.move", "mana", "0", "5"}) == Lines{"hud: mana at x 0 %, y 5 % (layout \"Default\")", note});
+    CHECK(run(f, {"hud.swap", "health", "mana"}) == Lines{"hud: order mana, health, stamina (layout \"Default\")", note});
+    CHECK(run(f, {"hud.move", "vitals", "1", "1"}) == Lines{"hud: vitals at x 1 %, y 1 % (layout \"Default\")"});
+}
+
+TEST_CASE("hud.list: the order and grow upward when set, and the bars' note when they are not available") {
+    HudRig r;
+    HudEditor& e = r.make();
+    run(e, {"hud.swap", "health", "mana"});
+    run(e, {"hud.grow", "up"});
+    const Lines l = run(e, {"hud.list"});
+    REQUIRE(l.size() == 21);
+    CHECK(l[2] == "hud: order mana, health, stamina");
+    CHECK(l[3] == "hud: status effects grow upward");
+    HudRig off;
+    off.bars = false;
+    HudEditor& f = off.make();
+    const Lines m = run(f, {"hud.list"});
+    REQUIRE(m.size() == 20);
+    CHECK(m[2] == "hud: Moving health, mana and stamina on their own is not available on this game build.");
 }

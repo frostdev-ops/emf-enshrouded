@@ -1537,6 +1537,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         hd.fault_code = hud_fault_code;
         hd.live = hud_live;
         hd.scale_state = hud_scale_state;
+        hd.bars_ready = hud_bars_hooked;
         hd.key_down = [](uint32_t vk) { return emf::keys::down(vk); };
         hd.toggle_page = [] { emf::core::overlay_toggle_settings_page(emf::core::kPageHud); };
         hd.run = emf::core::profile_worker_runner();

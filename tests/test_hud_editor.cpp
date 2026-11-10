@@ -599,3 +599,67 @@ TEST_CASE("editor: a pending edit is saved to the old layout before save_as") {
         if (f.slug == "default") ok = f.layout.has_value() && f.layout->elements[0].x == 7.0f;
     CHECK(ok);
 }
+
+TEST_CASE("editor: swap_bars and set_order reach the snapshot and the file; an invalid order is ignored") {
+    HudRig r;
+    HudEditor& e = r.make();
+    e.swap_bars(kBarHealth, kBarMana, Save::Now);
+    CHECK(e.view().order == BarOrder{1, 0, 2});
+    CHECK(e.snapshots().current()->order == BarOrder{1, 0, 2});
+    bool in_file = false;
+    for (const auto& f : r.files())
+        if (f.layout && f.layout->order == BarOrder{1, 0, 2}) in_file = true;
+    CHECK(in_file);
+    e.set_order(BarOrder{1, 1, 2}, Save::Now);
+    CHECK(e.view().order == BarOrder{1, 0, 2});
+    e.swap_bars(kBarHealth, kBarStamina, Save::Now);  // health and stamina change places in the order
+    CHECK(e.view().order == BarOrder{1, 2, 0});
+    e.swap_bars(kBarMana, kBarMana, Save::Now);  // nothing to swap
+    e.swap_bars(kBarMana, 3, Save::Now);         // not a bar
+    CHECK(e.view().order == BarOrder{1, 2, 0});
+    e.set_order(kDefaultOrder, Save::Now);
+    CHECK(e.view().order == kDefaultOrder);
+    CHECK(e.snapshots().current()->order == kDefaultOrder);
+}
+
+TEST_CASE("editor: set_buffs_up reaches the snapshot; reset(buffs) turns it off, reset(vitals) restores the order, reset_all both") {
+    HudRig r;
+    HudEditor& e = r.make();
+    e.set_buffs_up(true, Save::Now);
+    CHECK(e.view().buffs_up);
+    CHECK(e.snapshots().current()->buffs_up);
+    e.reset(1, Save::Now);  // the buffs part
+    CHECK_FALSE(e.view().buffs_up);
+    CHECK_FALSE(e.snapshots().current()->buffs_up);
+    e.swap_bars(kBarHealth, kBarMana, Save::Now);
+    e.reset(0, Save::Now);  // the vitals part
+    CHECK(e.view().order == kDefaultOrder);
+    e.swap_bars(kBarHealth, kBarMana, Save::Now);
+    e.set_buffs_up(true, Save::Now);
+    CHECK(e.reset_all().ok);
+    CHECK(e.view().order == kDefaultOrder);
+    CHECK_FALSE(e.view().buffs_up);
+    CHECK_FALSE(e.snapshots().current()->buffs_up);
+}
+
+TEST_CASE("editor: a bar part has no scale of its own") {
+    HudRig r;
+    HudEditor& e = r.make();
+    const size_t mana = static_cast<size_t>(bar_element(kBarMana));
+    e.set_scale(mana, 1.5f, Save::Now);
+    CHECK(e.view().elements[mana].scale == 1.0f);
+    e.set_offset(mana, 0, 5, Save::Now);
+    CHECK(e.view().elements[mana].y == 5.0f);
+    CHECK(e.snapshots().current()->edits[mana].y_percent == 5.0f);
+}
+
+TEST_CASE("editor: bars_work and its note follow bars_ready") {
+    HudRig r;
+    r.bars = false;
+    HudEditor& e = r.make();
+    CHECK_FALSE(e.view().bars_work);
+    CHECK(e.view().bars_note == "Moving health, mana and stamina on their own is not available on this game build.");
+    r.bars = true;
+    CHECK(e.view().bars_work);
+    CHECK(e.view().bars_note.empty());
+}

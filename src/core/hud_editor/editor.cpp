@@ -19,7 +19,7 @@ std::string lower(std::string s) {
 }
 
 bool same_snapshot(const HudSnapshot& a, const HudSnapshot& b) {
-    if (a.active != b.active) return false;
+    if (a.active != b.active || a.order != b.order || a.buffs_up != b.buffs_up) return false;
     for (size_t i = 0; i < kHudElementCount; ++i) {
         const ElementEdit &x = a.edits[i], &y = b.edits[i];
         if (x.x_percent != y.x_percent || x.y_percent != y.y_percent || x.scale != y.scale || x.hidden != y.hidden ||
@@ -133,6 +133,8 @@ void HudEditor::publish_locked() {
         e.hidden = l.elements[i].hidden;
         e.outline = outlines_on && (i != selected_ || (now / kBlinkMs) % 2 == 0);
     }
+    next.order = l.order;
+    next.buffs_up = l.buffs_up;
     if (same_snapshot(*box_.current(), next)) return;
     next.serial = ++serial_;
     box_.publish(next, now_locked());
@@ -265,6 +267,10 @@ HudView HudEditor::view() const {
         v.scale_note =
             "Scale stopped for this session: the game's drawing did not match what EMF expects (see emf_core.log). Move "
             "and hide still work.";
+    v.order = active_locked().order;
+    v.buffs_up = active_locked().buffs_up;
+    v.bars_work = deps_.bars_ready && deps_.bars_ready();
+    if (!v.bars_work) v.bars_note = "Moving health, mana and stamina on their own is not available on this game build.";
     return v;
 }
 
@@ -291,7 +297,7 @@ void HudEditor::nudge(size_t element, float dx_percent, float dy_percent, Save s
 }
 
 void HudEditor::set_scale(size_t element, float scale, Save save) {
-    if (element >= kHudElementCount) return;
+    if (element >= kHudElementCount || hud_elements()[element].bar >= 0) return;  // the bars: the group's scale
     std::lock_guard<std::mutex> lock(mu_);
     active_locked().elements[element].scale = clamp_scale(scale);
     publish_locked();
@@ -310,6 +316,34 @@ void HudEditor::reset(size_t element, Save save) {
     if (element >= kHudElementCount) return;
     std::lock_guard<std::mutex> lock(mu_);
     active_locked().elements[element] = ElementLayout{};
+    if (element == 0) active_locked().order = kDefaultOrder;  // the vitals' card holds the order
+    if (element == 1) active_locked().buffs_up = false;       // the buffs' card holds grow-upward
+    publish_locked();
+    mark_changed_locked(save);
+}
+
+void HudEditor::set_order(const BarOrder& order, Save save) {
+    if (!valid_order(order)) return;
+    std::lock_guard<std::mutex> lock(mu_);
+    active_locked().order = order;
+    publish_locked();
+    mark_changed_locked(save);
+}
+
+void HudEditor::swap_bars(int a, int b, Save save) {
+    if (a == b || a < 0 || b < 0 || a >= static_cast<int>(kBarCount) || b >= static_cast<int>(kBarCount)) return;
+    BarOrder o;
+    {
+        std::lock_guard<std::mutex> lock(mu_);
+        o = active_locked().order;
+    }
+    for (uint8_t& v : o) v = v == a ? static_cast<uint8_t>(b) : v == b ? static_cast<uint8_t>(a) : v;
+    set_order(o, save);
+}
+
+void HudEditor::set_buffs_up(bool on, Save save) {
+    std::lock_guard<std::mutex> lock(mu_);
+    active_locked().buffs_up = on;
     publish_locked();
     mark_changed_locked(save);
 }
@@ -376,6 +410,8 @@ LayoutResult HudEditor::reset_all_locked() {
     }
     HudLayout& now_active = active_locked();
     now_active.elements = {};
+    now_active.order = kDefaultOrder;
+    now_active.buffs_up = false;
     publish_locked();
     write_active_locked();
     if (!backup) return {true, "every part is back where the game draws it"};

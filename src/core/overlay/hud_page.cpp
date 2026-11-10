@@ -158,9 +158,26 @@ void draw_part_list(HudPageState& st, const HudView& v) {
     }
 }
 
+std::string order_line(const BarOrder& o) {
+    std::string s = "Order: ";
+    for (size_t k = 0; k < kBarCount; ++k) s += (k ? ", " : "") + std::string(bar_id(o[k]));
+    return s;
+}
+
+// The vitals' card and the bars' cards: the two swap buttons and the order.
+void draw_order(HudEditor& editor, const HudView& v) {
+    ImGui::BeginDisabled(!v.bars_work);
+    if (ImGui::Button("Swap health and mana")) editor.swap_bars(kBarHealth, kBarMana, Save::Later);
+    ImGui::SameLine();
+    if (ImGui::Button("Swap health and stamina")) editor.swap_bars(kBarHealth, kBarStamina, Save::Later);
+    ImGui::EndDisabled();
+    ImGui::TextDisabled("%s", order_line(v.order).c_str());
+}
+
 void draw_part_panel(HudEditor& editor, HudPageState& st, const HudView& v, ImVec2 display) {
     const size_t i = st.selected;
     const HudElement& part = hud_elements()[i];
+    const bool bar = part.bar >= 0;
     ElementLayout el = v.elements[i];
     ImGui::TextUnformatted(part.label);
     ImGui::TextDisabled("%s", part.scope);
@@ -170,6 +187,11 @@ void draw_part_panel(HudEditor& editor, HudPageState& st, const HudView& v, ImVe
         ImGui::PopTextWrapPos();
     }
     ImGui::Spacing();
+    if (bar && !v.bars_work) {
+        ImGui::PushTextWrapPos(0.0f);
+        ImGui::TextColored(kErrorColour, "%s", v.bars_note.c_str());
+        ImGui::PopTextWrapPos();
+    }
     float x = el.x, y = el.y;
     bool moved = ImGui::SliderFloat("Offset X", &x, kOffsetMin, kOffsetMax, "%.1f %%");
     ImGui::SameLine();
@@ -179,16 +201,30 @@ void draw_part_panel(HudEditor& editor, HudPageState& st, const HudView& v, ImVe
     ImGui::TextDisabled("%d px", percent_to_pixels(y, display.y));
     if (moved) editor.set_offset(i, x, y, Save::Later);
 
-    float s = el.scale;
-    ImGui::BeginDisabled(!v.scale_works);
-    if (ImGui::SliderFloat("Scale", &s, kScaleMin, kScaleMax, "%.2f")) editor.set_scale(i, s, Save::Later);
-    ImGui::EndDisabled();
-    if (!v.scale_works) {
+    if (bar) {
+        ImGui::TextDisabled("No scale of its own: scale Health, mana and stamina.");
+    } else {
+        float s = el.scale;
+        ImGui::BeginDisabled(!v.scale_works);
+        if (ImGui::SliderFloat("Scale", &s, kScaleMin, kScaleMax, "%.2f")) editor.set_scale(i, s, Save::Later);
+        ImGui::EndDisabled();
+        if (!v.scale_works) {
+            ImGui::PushTextWrapPos(0.0f);
+            ImGui::TextDisabled("%s", v.scale_note.c_str());
+            ImGui::PopTextWrapPos();
+        }
+        ImGui::TextDisabled("Scales around the screen edge the part is nearest.");
+    }
+    if (i == 0 || bar) draw_order(editor, v);
+    if (i == 1) {
+        bool up = v.buffs_up;
+        if (ImGui::Checkbox("Status effects grow upward", &up)) editor.set_buffs_up(up, Save::Later);
         ImGui::PushTextWrapPos(0.0f);
-        ImGui::TextDisabled("%s", v.scale_note.c_str());
+        ImGui::TextDisabled(
+            "The list sits on the food icons' bottom edge and grows up; it stops at the screen's edge. Move this part where "
+            "the list has room.");
         ImGui::PopTextWrapPos();
     }
-    ImGui::TextDisabled("Scales around the screen edge the part is nearest.");
 
     bool hidden = el.hidden;
     if (ImGui::Checkbox("Hidden", &hidden)) request_hide(editor, st, v, i, hidden);

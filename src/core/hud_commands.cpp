@@ -1,5 +1,6 @@
 #include "hud_commands.h"
 
+#include <cctype>
 #include <cmath>
 #include <cstdlib>
 
@@ -29,10 +30,34 @@ std::string bad_number(const std::string& cmd, const std::string& x) { return cm
 
 std::string no_part(const std::string& x) { return "hud: no HUD part \"" + x + "\"; the parts: " + element_ids(); }
 
-// The gate's line when an edit is not shown now.
-void add_not_shown(const HudEditor& editor, std::vector<std::string>& out) {
+// The gate's line when an edit is not shown now; for a bar (or the order) also when the bars do not work on this build.
+void add_not_shown(const HudEditor& editor, std::vector<std::string>& out, bool bar = false) {
     const HudView v = editor.view();
-    if (v.gate.state != GateState::On) out.push_back("hud: not shown now: " + v.gate.message);
+    if (v.gate.state != GateState::On)
+        out.push_back("hud: not shown now: " + v.gate.message);
+    else if (bar && !v.bars_work)
+        out.push_back("hud: not shown now: " + v.bars_note);
+}
+
+bool is_bar(int part) { return part >= 0 && hud_elements()[static_cast<size_t>(part)].bar >= 0; }
+
+// A bar by its id, ignoring case; -1 for anything else.
+int find_bar(const std::string& word) {
+    for (int b = 0; b < static_cast<int>(kBarCount); ++b) {
+        const std::string id = bar_id(b);
+        if (word.size() != id.size()) continue;
+        bool same = true;
+        for (size_t i = 0; i < id.size(); ++i)
+            if (std::tolower(static_cast<unsigned char>(word[i])) != id[i]) same = false;
+        if (same) return b;
+    }
+    return -1;
+}
+
+std::string order_text(const BarOrder& o) {
+    std::string s;
+    for (size_t i = 0; i < kBarCount; ++i) s += (i ? ", " : "") + std::string(bar_id(o[i]));
+    return s;
 }
 
 std::string pos_text(const ElementLayout& e) { return "x " + number_text(e.x) + " %, y " + number_text(e.y) + " %"; }
@@ -47,6 +72,9 @@ std::vector<std::string> list_lines(HudEditor& editor) {
                       ", mismatches " + std::to_string(v.scale.mismatches) + ")");
     else
         out.push_back("hud: scale off: " + v.scale_note);
+    if (!v.bars_work) out.push_back("hud: " + v.bars_note);
+    if (v.order != kDefaultOrder) out.push_back("hud: order " + order_text(v.order));
+    if (v.buffs_up) out.push_back("hud: status effects grow upward");
     const auto parts = hud_elements();
     for (size_t i = 0; i < kHudElementCount; ++i) {
         const ElementLayout& e = v.elements[i];
@@ -99,7 +127,7 @@ std::vector<std::string> run_hud_command(HudEditor& editor, const std::vector<st
         const bool clamped = x < kOffsetMin || x > kOffsetMax || y < kOffsetMin || y > kOffsetMax;
         if (clamped) line += " (kept within -100 to 100)";
         out.push_back(line);
-        add_not_shown(editor, out);
+        add_not_shown(editor, out, is_bar(part));
         return out;
     }
 
@@ -107,6 +135,9 @@ std::vector<std::string> run_hud_command(HudEditor& editor, const std::vector<st
         if (n != 3) return {"usage: hud.scale <part> <0.5-2>"};
         const int part = find_element(argv[1]);
         if (part == kNoElement) return {no_part(argv[1])};
+        if (is_bar(part))
+            return {std::string("hud: ") + hud_elements()[static_cast<size_t>(part)].id +
+                    " has no scale of its own; scale vitals instead"};
         double s = 0;
         if (!parse_number(argv[2], &s)) return {bad_number(cmd, argv[2])};
         editor.set_scale(static_cast<size_t>(part), clamp_scale(s), Save::Now);
@@ -128,7 +159,7 @@ std::vector<std::string> run_hud_command(HudEditor& editor, const std::vector<st
         editor.set_hidden(static_cast<size_t>(part), hide, Save::Now);
         const std::string id = hud_elements()[static_cast<size_t>(part)].id;
         out.push_back(hide ? "hud: " + id + " hidden (hud.show " + id + " brings it back)" : "hud: " + id + " shown");
-        add_not_shown(editor, out);
+        add_not_shown(editor, out, is_bar(part));
         return out;
     }
 
@@ -158,6 +189,43 @@ std::vector<std::string> run_hud_command(HudEditor& editor, const std::vector<st
         const LayoutResult r = sub == "save" ? editor.save_as(name) : sub == "load" ? editor.load(name) : editor.remove(name);
         return {"hud: " + r.message};
     }
+
+    if (cmd == "hud.swap") {
+        const int a = n == 3 ? find_bar(argv[1]) : -1, b = n == 3 ? find_bar(argv[2]) : -1;
+        if (a < 0 || b < 0 || a == b) return {"usage: hud.swap <bar> <bar> (two of health, mana, stamina)"};
+        editor.swap_bars(a, b, Save::Now);
+        const HudView v = editor.view();
+        out.push_back("hud: order " + order_text(v.order) + " (layout \"" + v.layout_name + "\")");
+        add_not_shown(editor, out, true);
+        return out;
+    }
+
+    if (cmd == "hud.order") {
+        BarOrder o{};
+        bool ok = n == 1 + kBarCount;
+        for (size_t i = 0; ok && i < kBarCount; ++i) {
+            const int b = find_bar(argv[1 + i]);
+            ok = b >= 0;
+            if (ok) o[i] = static_cast<uint8_t>(b);
+        }
+        if (!ok || !valid_order(o)) return {"usage: hud.order <bar> <bar> <bar> (health, mana and stamina once each, top first)"};
+        editor.set_order(o, Save::Now);
+        const HudView v = editor.view();
+        out.push_back("hud: order " + order_text(v.order) + " (layout \"" + v.layout_name + "\")");
+        add_not_shown(editor, out, true);
+        return out;
+    }
+
+    if (cmd == "hud.grow") {
+        if (n != 2 || (argv[1] != "up" && argv[1] != "down")) return {"usage: hud.grow up|down"};
+        const bool up = argv[1] == "up";
+        editor.set_buffs_up(up, Save::Now);
+        const HudView v = editor.view();
+        out.push_back(std::string(up ? "hud: status effects grow upward" : "hud: status effects grow downward, as the game draws them") +
+                      " (layout \"" + v.layout_name + "\")");
+        add_not_shown(editor, out);
+        return out;
+    }
     return {"hud: unknown command " + cmd};
 }
 
@@ -175,6 +243,9 @@ void cmd_hide(EmfWorld*, int argc, const char* const* argv, void* user) { run_co
 void cmd_show(EmfWorld*, int argc, const char* const* argv, void* user) { run_command(argc, argv, user); }
 void cmd_reset(EmfWorld*, int argc, const char* const* argv, void* user) { run_command(argc, argv, user); }
 void cmd_layout(EmfWorld*, int argc, const char* const* argv, void* user) { run_command(argc, argv, user); }
+void cmd_swap(EmfWorld*, int argc, const char* const* argv, void* user) { run_command(argc, argv, user); }
+void cmd_order(EmfWorld*, int argc, const char* const* argv, void* user) { run_command(argc, argv, user); }
+void cmd_grow(EmfWorld*, int argc, const char* const* argv, void* user) { run_command(argc, argv, user); }
 
 }  // namespace
 
@@ -187,6 +258,9 @@ bool add_hud_commands(CommandCenter& center, HudEditor& editor) {
     ok &= center.add("hud.show", "<part>: show a hidden HUD part again", cmd_show, &editor, nullptr, true);
     ok &= center.add("hud.reset", "[part]: put one HUD part, or every part, back where the game draws it", cmd_reset, &editor, nullptr, true);
     ok &= center.add("hud.layout", "[save|load|delete <name>]: the HUD layouts in emf\\hud (save as a new name, switch, delete); without words, the list", cmd_layout, &editor, nullptr, true);
+    ok &= center.add("hud.swap", "health|mana|stamina health|mana|stamina: two of the vitals' bars change places (e.g. hud.swap health mana: mana on top)", cmd_swap, &editor, nullptr, true);
+    ok &= center.add("hud.order", "<bar> <bar> <bar>: the vitals' bars from the top (e.g. hud.order mana health stamina)", cmd_order, &editor, nullptr, true);
+    ok &= center.add("hud.grow", "up|down: the status effects list grows upward from the food icons' bottom edge, or down as the game draws it", cmd_grow, &editor, nullptr, true);
     return ok;
 }
 
