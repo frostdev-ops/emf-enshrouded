@@ -60,6 +60,99 @@ std::string order_text(const BarOrder& o) {
     return s;
 }
 
+// The set colours: "health fill #ff4040, mana empty #00000000; panel #20202080" ("" when every colour is the game's).
+std::string colours_summary(const HudView& v) {
+    std::string s;
+    for (int b = 0; b < static_cast<int>(kBarCount); ++b)
+        for (size_t i = 0; i < kBarPartCount; ++i) {
+            const Colour& c = v.colours[static_cast<size_t>(b)].part[i];
+            if (!c.set) continue;
+            s += (s.empty() ? "" : ", ") + std::string(bar_id(b)) + " " + bar_part_id(static_cast<BarPart>(i)) + " " +
+                 colour_text(c);
+        }
+    if (v.panel.set) s += (s.empty() ? "panel " : "; panel ") + colour_text(v.panel);
+    return s;
+}
+
+// The game's colour of a field of a bar in its own text form, or "not seen yet".
+std::string game_text(const HudView& v, int bar, size_t field) {
+    const auto& g = v.game_colours[static_cast<size_t>(bar)];
+    return g ? ui_colour_text((*g)[field]) : "not seen yet";
+}
+
+const char* kColourUsage =
+    "usage: hud.colour [health|mana|stamina|panel] [fill|empty|end|damage|heal|all] [#rrggbb|#rrggbbaa|game]";
+
+std::vector<std::string> run_colour(HudEditor& editor, const std::vector<std::string>& argv) {
+    const size_t n = argv.size();
+    std::vector<std::string> out;
+    if (n == 1) {
+        const std::string s = colours_summary(editor.view());
+        return {s.empty() ? "hud: every colour is the game's" : "hud: colours: " + s};
+    }
+    std::string target = argv[1];
+    for (char& ch : target) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+    const bool panel = target == "panel";
+    const int bar = panel ? -1 : find_bar(target);
+    if (!panel && bar < 0) return {"hud: no bar \"" + argv[1] + "\"; health, mana, stamina or panel"};
+    if (n == 2) {
+        const HudView v = editor.view();
+        if (panel) {
+            if (v.panel.set) return {"hud: panel: " + colour_text(v.panel)};
+            return {"hud: panel: the game's (" + game_text(v, kBarHealth, kFrame) + ")"};
+        }
+        static constexpr size_t kField[kBarPartCount] = {kFill, kRange, kFillEnd, kDamage, kHeal};
+        const BarColours& c = v.colours[static_cast<size_t>(bar)];
+        std::string line = std::string("hud: ") + bar_id(bar) + ": ";
+        for (size_t i = 0; i < kBarPartCount; ++i) {
+            const BarPart p = static_cast<BarPart>(i);
+            line += (i ? ", " : "") + std::string(bar_part_id(p)) + " ";
+            if (c.part[i].set)
+                line += colour_text(c.part[i]);
+            else if (p == BarPart::End && c.part[static_cast<size_t>(BarPart::Fill)].set)
+                line += "follows the fill";
+            else
+                line += "the game's (" + game_text(v, bar, kField[i]) + ")";
+        }
+        return {line};
+    }
+    if (n > 4 || (panel && n != 3)) return {kColourUsage};
+    std::optional<BarPart> part = BarPart::Fill;
+    bool all = false;
+    if (n == 4) {
+        std::string word = argv[2];
+        for (char& ch : word) ch = static_cast<char>(std::tolower(static_cast<unsigned char>(ch)));
+        all = word == "all";
+        part = all ? std::optional<BarPart>(BarPart::Fill) : find_bar_part(word);
+        if (!part) return {"hud.colour: \"" + argv[2] + "\" is not a part (fill, empty, end, damage, heal or all)"};
+    }
+    const std::string& text = argv[n - 1];
+    const ColourText t = parse_colour(text);
+    if (!t.colour && !t.game) return {"hud.colour: \"" + text + "\" is not a colour (#rrggbb, #rrggbbaa or game)"};
+    if (all && !t.game) return {kColourUsage};
+    std::string what;
+    if (panel) {
+        editor.set_panel(t.colour, Save::Now);
+        what = t.game ? "panel is the game's again" : "panel " + colour_text(*t.colour);
+    } else if (all) {
+        editor.clear_colours(bar, Save::Now);
+        what = std::string(bar_id(bar)) + ": every colour is the game's again";
+    } else {
+        editor.set_colour(bar, *part, t.colour, Save::Now);
+        what = std::string(bar_id(bar)) + " " + bar_part_id(*part) +
+               (t.game ? std::string(" is the game's again") : " " + colour_text(*t.colour));
+    }
+    const HudView v = editor.view();
+    out.push_back("hud: " + what + " (layout \"" + v.layout_name + "\")");
+    if (v.gate.state != GateState::On)
+        out.push_back("hud: not shown now: " + v.gate.message);
+    else if (!panel && !v.colours_work)
+        out.push_back("hud: not shown now: " + v.colours_note);
+    else if (panel && !v.panel_works)
+        out.push_back("hud: not shown now: " + v.panel_note);
+    return out;
+}
+
 std::string pos_text(const ElementLayout& e) { return "x " + number_text(e.x) + " %, y " + number_text(e.y) + " %"; }
 
 std::vector<std::string> list_lines(HudEditor& editor) {
@@ -75,6 +168,12 @@ std::vector<std::string> list_lines(HudEditor& editor) {
     if (!v.bars_work) out.push_back("hud: " + v.bars_note);
     if (v.order != kDefaultOrder) out.push_back("hud: order " + order_text(v.order));
     if (v.buffs_up) out.push_back("hud: status effects grow upward");
+    if (const std::string colours = colours_summary(v); !colours.empty()) {
+        out.push_back("hud: colours: " + colours);
+        out.push_back("hud: colour calls " + std::to_string(v.colour_stats.recoloured) + ", panel writes " +
+                      std::to_string(v.colour_stats.panel_writes) + ", panel restores " +
+                      std::to_string(v.colour_stats.panel_restores));
+    }
     const auto parts = hud_elements();
     for (size_t i = 0; i < kHudElementCount; ++i) {
         const ElementLayout& e = v.elements[i];
@@ -112,6 +211,7 @@ std::vector<std::string> run_hud_command(HudEditor& editor, const std::vector<st
     const std::string& cmd = argv[0];
     const size_t n = argv.size();
     if (cmd == "hud.list") return list_lines(editor);
+    if (cmd == "hud.colour") return run_colour(editor, argv);
 
     if (cmd == "hud.move") {
         if (n != 4) return {"usage: hud.move <part> <x> <y> (percent of the screen, -100 to 100)"};
@@ -247,6 +347,7 @@ void cmd_layout(EmfWorld*, int argc, const char* const* argv, void* user) { run_
 void cmd_swap(EmfWorld*, int argc, const char* const* argv, void* user) { run_command(argc, argv, user); }
 void cmd_order(EmfWorld*, int argc, const char* const* argv, void* user) { run_command(argc, argv, user); }
 void cmd_grow(EmfWorld*, int argc, const char* const* argv, void* user) { run_command(argc, argv, user); }
+void cmd_colour(EmfWorld*, int argc, const char* const* argv, void* user) { run_command(argc, argv, user); }
 
 }  // namespace
 
@@ -261,6 +362,7 @@ bool add_hud_commands(CommandCenter& center, HudEditor& editor) {
     ok &= center.add("hud.layout", "[save|load|delete <name>]: the HUD layouts in emf\\hud (save as a new name, switch, delete); without words, the list", cmd_layout, &editor, nullptr, true);
     ok &= center.add("hud.swap", "health|mana|stamina health|mana|stamina: two of the vitals' bars change places (e.g. hud.swap health mana: mana on top)", cmd_swap, &editor, nullptr, true);
     ok &= center.add("hud.order", "<bar> <bar> <bar>: the vitals' bars from the top (e.g. hud.order mana health stamina)", cmd_order, &editor, nullptr, true);
+    ok &= center.add("hud.colour", "[bar] [part] [colour]: the vitals' bar colours (e.g. hud.colour health #ff4040, hud.colour mana empty #00000000, hud.colour panel #20202080, hud.colour health game)", cmd_colour, &editor, nullptr, true);
     ok &= center.add("hud.grow", "up|down: the status effects list grows upward from the food icons' bottom edge, or down as the game draws it", cmd_grow, &editor, nullptr, true);
     return ok;
 }

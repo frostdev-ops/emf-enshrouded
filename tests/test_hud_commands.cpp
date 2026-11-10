@@ -131,7 +131,7 @@ TEST_CASE("hud commands: an edit while off says the HUD does not show it now") {
           "hud: not shown now: The HUD editor does not know this game build (1287369); your HUD is untouched.");
 }
 
-TEST_CASE("add_hud_commands: ten commands that run without a world") {
+TEST_CASE("add_hud_commands: eleven commands that run without a world") {
     HudRig r;
     HudEditor& e = r.make();
     CommandCenter c;
@@ -139,7 +139,7 @@ TEST_CASE("add_hud_commands: ten commands that run without a world") {
     int found = 0;
     for (const auto& [name, help] : c.list())
         if (name.rfind("hud.", 0) == 0) ++found;
-    CHECK(found == 10);
+    CHECK(found == 11);
     std::vector<std::string> out;
     CommandOutcome outcome = CommandOutcome::Refused;
     c.run_without_world("hud.list", [&](const std::string& s) { out.push_back(s); }, "no world", &outcome);
@@ -218,4 +218,139 @@ TEST_CASE("hud.grow says so when growing upward cannot show") {  // review: Impo
           Lines{"hud: mana at x 0 %, y 5 % (layout \"Default\")",
                 "hud: not shown now: Moving health, mana and stamina on their own stopped with scale for this session (see "
                 "emf_core.log)."});
+}
+
+// ---- hud.colour ----
+namespace {
+StyleBlock health_block() {
+    StyleBlock b{};
+    b[kFrame] = {rgba_to_game(0x10101080), 1.0f};
+    b[kRange] = {rgba_to_game(0x202020C0), 1.0f};
+    b[kFill] = {rgba_to_game(0x4FD17CFF), 1.0f};
+    b[kFillEnd] = {rgba_to_game(0xA0F0B0E0), 1.2f};
+    b[kDamage] = {rgba_to_game(0xD04040FF), 1.0f};
+    b[kHeal] = {rgba_to_game(0xF0F0A0FF), 1.0f};
+    return b;
+}
+}  // namespace
+
+TEST_CASE("hud.colour: a bar's fill by default, a part by name, the game's again, all of a bar") {
+    HudRig r;
+    HudEditor& e = r.make();
+    CHECK(run(e, {"hud.colour", "health", "#FF4040"}) == Lines{"hud: health fill #ff4040 (layout \"Default\")"});
+    CHECK(e.view().colours[kBarHealth].part[0].rgba == 0xFF4040FFu);
+    CHECK(run(e, {"hud.colour", "Mana", "EMPTY", "#00000000"}) == Lines{"hud: mana empty #00000000 (layout \"Default\")"});
+    CHECK(e.view().colours[kBarMana].part[static_cast<size_t>(BarPart::Empty)].has_alpha);
+    CHECK(run(e, {"hud.colour", "health", "game"}) == Lines{"hud: health fill is the game's again (layout \"Default\")"});
+    CHECK_FALSE(e.view().colours[kBarHealth].any());
+    run(e, {"hud.colour", "stamina", "heal", "#00ff00"});
+    run(e, {"hud.colour", "stamina", "#00ff00"});
+    CHECK(e.view().colours[kBarStamina].any());
+    CHECK(run(e, {"hud.colour", "stamina", "all", "game"}) ==
+          Lines{"hud: stamina: every colour is the game's again (layout \"Default\")"});
+    CHECK_FALSE(e.view().colours[kBarStamina].any());
+}
+
+TEST_CASE("hud.colour panel: set, shown, the game's again") {
+    HudRig r;
+    HudEditor& e = r.make();
+    CHECK(run(e, {"hud.colour", "panel"}) == Lines{"hud: panel: the game's (not seen yet)"});
+    CHECK(run(e, {"hud.colour", "panel", "#20202080"}) == Lines{"hud: panel #20202080 (layout \"Default\")"});
+    CHECK(e.view().panel.set);
+    CHECK(run(e, {"hud.colour", "panel"}) == Lines{"hud: panel: #20202080"});
+    CHECK(run(e, {"hud.colour", "panel", "game"}) == Lines{"hud: panel is the game's again (layout \"Default\")"});
+    CHECK_FALSE(e.view().panel.set);
+}
+
+TEST_CASE("hud.colour: lists the set colours, or says every colour is the game's") {
+    HudRig r;
+    HudEditor& e = r.make();
+    CHECK(run(e, {"hud.colour"}) == Lines{"hud: every colour is the game's"});
+    run(e, {"hud.colour", "panel", "#20202080"});
+    CHECK(run(e, {"hud.colour"}) == Lines{"hud: colours: panel #20202080"});
+    run(e, {"hud.colour", "health", "#ff4040"});
+    run(e, {"hud.colour", "mana", "empty", "#00000000"});
+    CHECK(run(e, {"hud.colour"}) == Lines{"hud: colours: health fill #ff4040, mana empty #00000000; panel #20202080"});
+}
+
+TEST_CASE("hud.colour <bar>: the set colours and the game's; a bar not drawn yet says so") {  // Review Focus 5
+    HudRig r;
+    const StyleBlock b = health_block();
+    HudEditorDeps d = r.deps();
+    d.game_colours = [&b](int bar) -> std::optional<StyleBlock> {
+        if (bar == kBarHealth) return b;
+        return std::nullopt;
+    };
+    r.editor = std::make_unique<HudEditor>(d);
+    r.editor->start();
+    HudEditor& e = *r.editor;
+    CHECK(run(e, {"hud.colour", "health"}) ==
+          Lines{"hud: health: fill the game's (4fd17c), empty the game's (202020-c0), end the game's (a0f0b0-e0*1.20), damage "
+                "the game's (d04040), heal the game's (f0f0a0)"});
+    run(e, {"hud.colour", "health", "#ff4040"});
+    CHECK(run(e, {"hud.colour", "health"}) ==
+          Lines{"hud: health: fill #ff4040, empty the game's (202020-c0), end follows the fill, damage the game's (d04040), "
+                "heal the game's (f0f0a0)"});
+    CHECK(run(e, {"hud.colour", "panel"}) == Lines{"hud: panel: the game's (101010-80)"});
+    CHECK(run(e, {"hud.colour", "stamina"}) ==
+          Lines{"hud: stamina: fill the game's (not seen yet), empty the game's (not seen yet), end the game's (not seen yet), "
+                "damage the game's (not seen yet), heal the game's (not seen yet)"});
+}
+
+TEST_CASE("hud.colour: usage, unknown bar, unknown part, bad colour") {
+    HudRig r;
+    HudEditor& e = r.make();
+    const std::string usage =
+        "usage: hud.colour [health|mana|stamina|panel] [fill|empty|end|damage|heal|all] [#rrggbb|#rrggbbaa|game]";
+    CHECK(run(e, {"hud.colour", "health", "fill", "#ff0000", "x"}) == Lines{usage});
+    CHECK(run(e, {"hud.colour", "health", "all", "#ff0000"}) == Lines{usage});
+    CHECK(run(e, {"hud.colour", "panel", "fill", "#ff0000"}) == Lines{usage});
+    CHECK(run(e, {"hud.colour", "fire", "#ff0000"}) == Lines{"hud: no bar \"fire\"; health, mana, stamina or panel"});
+    CHECK(run(e, {"hud.colour", "health", "red"}) == Lines{"hud.colour: \"red\" is not a colour (#rrggbb, #rrggbbaa or game)"});
+    CHECK(run(e, {"hud.colour", "panel", "#12"}) == Lines{"hud.colour: \"#12\" is not a colour (#rrggbb, #rrggbbaa or game)"});
+    CHECK(run(e, {"hud.colour", "health", "glow", "#ff0000"}) ==
+          Lines{"hud.colour: \"glow\" is not a part (fill, empty, end, damage, heal or all)"});
+    for (const auto& c : e.view().colours) CHECK_FALSE(c.any());
+    CHECK_FALSE(e.view().panel.set);
+}
+
+TEST_CASE("hud.colour: says when a colour does not show now") {
+    HudRig r;
+    r.bars = false;
+    HudEditor& e = r.make();
+    CHECK(run(e, {"hud.colour", "health", "#ff0000"}) ==
+          Lines{"hud: health fill #ff0000 (layout \"Default\")", "hud: not shown now: Bar colours are not available on this game build."});
+    HudRig r2;
+    HudEditorDeps d = r2.deps();
+    d.panel_status = [] { return PanelStatus::ReadOnly; };
+    r2.editor = std::make_unique<HudEditor>(d);
+    r2.editor->start();
+    CHECK(run(*r2.editor, {"hud.colour", "panel", "#000000"}) ==
+          Lines{"hud: panel #000000 (layout \"Default\")",
+                "hud: not shown now: The panel colour is not available on this game build (the game's data there is read-only)."});
+    HudRig r3;
+    r3.gate.build_known = false;
+    HudEditor& e3 = r3.make();
+    const Lines l = run(e3, {"hud.colour", "mana", "#0000ff"});
+    REQUIRE(l.size() == 2);
+    CHECK(l[1] == "hud: not shown now: The HUD editor does not know this game build (1287369); your HUD is untouched.");
+}
+
+TEST_CASE("hud.list: the colours and their counters when set") {
+    HudRig r;
+    HudEditorDeps d = r.deps();
+    d.colour_stats = [] { return ColourStats{5, 2, 2}; };
+    r.editor = std::make_unique<HudEditor>(d);
+    r.editor->start();
+    HudEditor& e = *r.editor;
+    auto has = [](const Lines& l, const std::string& line) {
+        for (const auto& s : l)
+            if (s == line) return true;
+        return false;
+    };
+    CHECK_FALSE(has(run(e, {"hud.list"}), "hud: colour calls 5, panel writes 2, panel restores 2"));
+    run(e, {"hud.colour", "health", "#ff4040"});
+    const Lines l = run(e, {"hud.list"});
+    CHECK(has(l, "hud: colours: health fill #ff4040"));
+    CHECK(has(l, "hud: colour calls 5, panel writes 2, panel restores 2"));
 }
