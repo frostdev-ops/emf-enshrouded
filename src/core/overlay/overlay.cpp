@@ -12,11 +12,14 @@
 #include <set>
 
 #include "core/emf_settings.h"
+#include "core/game_text.h"
+#include "core/screen_glyphs.h"
 #include "console_ui.h"
 #include "image_store.h"
 #include "window_model.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
+#include "extra_font.h"
 #include "font_plan.h"
 #include "input_hook.h"
 #include "mods_ui.h"
@@ -84,6 +87,10 @@ LookSettings g_look;                // [hud] and the look keys of [overlay], rea
 OverlayFonts g_fonts;               // render thread: the atlas's fonts (new pointers after each rebuild)
 FontRebuild g_font_rebuild;         // render thread
 std::set<std::string> g_font_told;  // render thread: the font problems already in the log
+uint64_t g_glyphs_built = 0;        // render thread: the ScreenGlyphs want the atlas was built for
+uint32_t g_extra_language = 0;      // render thread: the language g_extra_file was picked for
+std::wstring g_extra_file;          // render thread: its extra font ("" none)
+std::vector<unsigned char> g_extra_bytes;  // render thread: its bytes; the atlas points into them until the next build
 
 void log_line(const char* s);
 bool world_live();
@@ -132,6 +139,7 @@ std::string utf8(const std::wstring& w) {
 // Whether the fonts must be built again for a swapchain `height` pixels high (render thread, before a frame): the
 // first time, and when a new size changed the faces' pixel sizes and held for a moment.
 bool fonts_due(float height) {
+    if (screen_glyphs().wanted_version() != g_glyphs_built) g_font_rebuild.request();  // new item names' characters
     return g_font_rebuild.due(font_sizes(g_look, static_cast<int>(height)), GetTickCount64());
 }
 
@@ -144,11 +152,61 @@ void setup_fonts(ImGuiIO& io, float height) {
     const FontPaths paths{g_deps.emf_dir + L"\\fonts", std::wstring(windir) + L"\\Fonts\\consola.ttf"};
     const FontPlan plan = plan_fonts(g_look, h, paths, [](const std::wstring& f) { return font_file_ok(f); });
     std::vector<std::string> problems = plan.problems;
-    g_fonts = build_font_atlas(*io.Fonts, plan, &problems);
+    // the characters the item names need (ScreenGlyphs), and for Japanese, Korean, Chinese and Thai the extra font: picked
+    // once per language (the player's Noto file in emf\fonts, else Windows' own), its bytes kept for the atlas
+    const GlyphWant want = screen_glyphs().wanted();
+    const bool needs_font = !want.glyphs.empty() && language_needs_extra_font(want.language);
+    const bool new_pick = needs_font && want.language != g_extra_language;
+    std::vector<unsigned char> fresh;
+    if (new_pick) {
+        g_extra_language = want.language;
+        g_extra_file = pick_extra_font(want.language, paths.fonts_dir, std::wstring(windir) + L"\\Fonts",
+                                       [](const std::wstring& f) { return font_file_ok(f); });
+        if (!g_extra_file.empty() && !read_font_file(g_extra_file, kMaxFontBytes, fresh)) g_extra_file.clear();
+    }
+    // the same file as last time: its kept bytes (the atlas lets go of them when it is cleared, then points into them
+    // again); a new one: the fresh bytes, kept once the atlas is built
+    const std::vector<unsigned char>& font = new_pick ? fresh : g_extra_bytes;
+    ExtraGlyphs extra;
+    extra.glyphs = want.glyphs;
+    if (needs_font && !font.empty()) {
+        extra.font = font.data();
+        extra.font_size = font.size();
+    }
+    g_fonts = build_font_atlas(*io.Fonts, plan, &problems, &extra);
+    if (new_pick) g_extra_bytes.swap(fresh);  // the old bytes go when this returns: the atlas no longer points into them
+    if (!needs_font) {                        // no extra font now: nothing points into them
+        g_extra_bytes.clear();
+        g_extra_bytes.shrink_to_fit();
+        g_extra_language = 0;
+        g_extra_file.clear();
+    }
+    const std::vector<uint32_t> drawable = drawable_glyphs(g_fonts, want.glyphs);
+    screen_glyphs().baked(want.version, drawable);
+    g_glyphs_built = want.version;
     g_ui.tabs_font = g_fonts.tabs;  // the old fonts are gone
     g_font_rebuild.built(font_sizes(g_look, h));
-    for (const auto& p : problems)
-        if (g_font_told.insert(p).second) log_line(("overlay: " + p).c_str());
+    if (!want.glyphs.empty()) {
+        const char* code = language_code(want.language);
+        char line[700];
+        if (needs_font && g_extra_file.empty())
+            std::snprintf(line, sizeof line,
+                          "item names: no font for %s on EMF's screens: put %s from %s into %s and restart the game; "
+                          "until then they show in English",
+                          code, utf8(extra_font_file_name(want.language)).c_str(), extra_font_download(want.language),
+                          utf8(paths.fonts_dir).c_str());
+        else if (needs_font)
+            std::snprintf(line, sizeof line, "item names: %s on EMF's screens with %s (%zu of %zu characters)", code,
+                          utf8(g_extra_file).c_str(), drawable.size(), want.glyphs.size());
+        else
+            std::snprintf(line, sizeof line, "item names: %zu of %zu characters beyond EMF's base fonts for %s", drawable.size(),
+                          want.glyphs.size(), code);
+        problems.push_back(line);
+    }
+    for (const auto& p : problems) {
+        if (!g_font_told.insert(p).second) continue;
+        log_line((p.rfind("item names: ", 0) == 0 ? p : "overlay: " + p).c_str());
+    }
     constexpr int kLoggedBuilds = 10;
     static int builds = 0;
     if (++builds <= kLoggedBuilds) {

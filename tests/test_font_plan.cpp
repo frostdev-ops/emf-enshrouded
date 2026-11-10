@@ -623,3 +623,15 @@ TEST_CASE("font atlas: an extra font that is no font, or has none of the charact
     CHECK(problems.size() == 1);
     CHECK(drawable_glyphs(f, {0x4E38}).empty());
 }
+
+TEST_CASE("extra font: the first usable file is picked: the player's Noto file, else Windows' own, else none") {
+    std::set<std::wstring> usable = {L"W\\YuGothR.ttc", L"W\\msgothic.ttc"};
+    const auto ok = [&usable](const std::wstring& f) { return usable.count(f) > 0; };
+    CHECK(pick_extra_font(11, L"E", L"W", ok) == L"W\\YuGothR.ttc");
+    usable.insert(L"E\\NotoSansJP-Regular.ttf");
+    CHECK(pick_extra_font(11, L"E", L"W", ok) == L"E\\NotoSansJP-Regular.ttf");
+    usable.clear();
+    CHECK(pick_extra_font(11, L"E", L"W", ok).empty());
+    CHECK(pick_extra_font(3, L"E", L"W", [](const std::wstring&) { return true; }).empty());  // German: none needed
+    CHECK(std::wstring(extra_font_file_name(13)) == L"NotoSansKR-Regular.ttf");
+}

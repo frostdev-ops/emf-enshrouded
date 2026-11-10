@@ -60,6 +60,8 @@
 #include "file_poll.h"
 #include "mods.h"
 #include "game_text.h"
+#include "item_text.h"
+#include "screen_glyphs.h"
 #include "menu_start.h"
 #include "ready_gate.h"
 #include "version.h"
@@ -498,6 +500,13 @@ void hk_sim_step(void* storage, char ticked) {
         g_state->tracker.on_tick(world, kind, GetTickCount64());
         g_state->dispatcher.run(world, kind, [](const std::string& e) { emf::logf("dispatch: %s", e.c_str()); });
         emf::core::pump_setting_changes(world);  // v13 on_setting_changed
+        // the characters of the item names for EMF's screens, once per text table (two reads and a compare otherwise;
+        // never on the dedicated server, which has no game text)
+        if (emf::core::game_text().table_key() != emf::core::screen_glyphs().collected_key()) {
+            const auto* registry = static_cast<const uint8_t*>(view.singleton("g38_items::ItemRegistry"));
+            emf::core::pump_screen_glyphs(registry, emf::core::item_names(), emf::core::game_text(),
+                                          emf::core::screen_glyphs());
+        }
     } catch (...) {
         // never let a C++ exception reach game code
     }

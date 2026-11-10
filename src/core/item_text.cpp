@@ -92,7 +92,7 @@ void pump_screen_glyphs(const uint8_t* registry, ItemNames& names, const GameTex
 }
 
 ItemNames& item_names() {
-    static ItemNames names(game_text(), [](std::string_view) -> std::optional<bool> { return std::nullopt; });
+    static ItemNames names(game_text(), [](std::string_view s) { return screen_glyphs().can_draw(s); });
     return names;
 }
 
