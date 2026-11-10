@@ -14,7 +14,8 @@ namespace emf::core {
 
 struct NamedItem {
     uint32_t id = 0;
-    std::string name;  // the game's debug name
+    std::string name;   // the game's debug name
+    std::string shown;  // the name the game shows, in the player's language ("" when there is none)
 };
 
 // The words of a debug name or of what was typed, in lower case: split at '_', '-' and spaces, where a capital follows a
