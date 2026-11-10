@@ -108,6 +108,7 @@ TEST_CASE("signature table: build 1283531's RVAs, game and dedicated server, as 
         if (d.id >= Sig::UiScopeOpen && d.id <= Sig::UiPopTransform) continue;
         if (d.id == Sig::ChatClientSend || d.id == Sig::ClientOutboxFlush || d.id == Sig::PostJoinPending) continue;
         if (d.id == Sig::HandleAccountAction || d.id == Sig::SessionRequestKick) continue;  // 1287369 alone
+        if (d.id == Sig::PlayerVitalBar) continue;                                          // 1287369 alone
         CHECK(d.rva[static_cast<size_t>(client)] != kRvaUnchecked);
         CHECK(d.rva[static_cast<size_t>(server)] != kRvaUnchecked);
     }
@@ -186,7 +187,8 @@ TEST_CASE("signature table: one entry per Sig, in order, unique names, valid pat
             const bool client_only = all[i].id == Sig::ClientWorldSetup || all[i].id == Sig::QueueChatMessage ||
                                      all[i].id == Sig::ClientOutboxFlush || all[i].id == Sig::PostJoinPending ||
                                      (all[i].id >= Sig::UiFrame && all[i].id <= Sig::CharacterSelected) ||
-                                     (all[i].id >= Sig::UiScopeOpen && all[i].id <= Sig::UiPopTransform);
+                                     (all[i].id >= Sig::UiScopeOpen && all[i].id <= Sig::UiPopTransform) ||
+                                     all[i].id == Sig::PlayerVitalBar;
             CHECK((all[i].rva[b] == 0) == (known_builds()[b].server && client_only));
         }
     }
@@ -261,7 +263,7 @@ TEST_CASE("signature table has the inventory transaction and readOther, optional
         CHECK(d->rva[1] == w.rva_1273043);
         CHECK_FALSE(d->required);
     }
-    CHECK(kSigCount == 62);
+    CHECK(kSigCount == 63);
 }
 
 TEST_CASE("signature table has XpRequired and MaxPlayerLevel (API v22 levels), optional, on both exes of 1283531") {
@@ -648,4 +650,19 @@ TEST_CASE("signature table has HandleAccountAction and SessionRequestKick (refus
     CHECK(k->rva[7] == 0xa6edc0u);
     CHECK(k->rva[8] == 0xa02c90u);
     CHECK_FALSE(rva_checked(*k, 5));
+}
+
+TEST_CASE("signature table has PlayerVitalBar (the HUD parts): a call site, client only, 1287369's function at 0xc7fc40") {
+    const SigDef* d = find_signature("PlayerVitalBar");
+    REQUIRE(d != nullptr);
+    CHECK(d->id == Sig::PlayerVitalBar);
+    CHECK_FALSE(d->required);
+    CHECK(d->call_at == 0x10);  // the health bar's call; the pattern holds the three data and style offsets
+    CHECK(d->rva[7] == 0xc7fc40u);
+    CHECK(d->rva[8] == 0u);  // the dedicated server has no UI
+    CHECK(absent_on(*d, 8));
+    CHECK(std::string(d->pattern).find("4C 8D 86 F8 DB 00 00 48 8D 57 18") == 0);
+    CHECK(std::string(d->pattern).find("48 8D 97 F0 00 00 00") != std::string::npos);
+    CHECK(std::string(d->pattern).find("48 8D 97 C8 01 00 00") != std::string::npos);
+    CHECK(kSigCount == 63);
 }

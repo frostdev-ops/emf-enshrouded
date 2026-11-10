@@ -40,6 +40,8 @@ bool hud_build_known(int build_index);
 bool hud_signatures_ready(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index);
 // The build is known and both layer transform signatures are usable.
 bool hud_scale_ready(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index);
+// The bars (health, mana, stamina) can move on their own: the bar signature, and the transform stack they move through.
+bool hud_bars_ready(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index);
 // "1287369"; without a build number "sha256 <12 hex digits>"; without either "unknown".
 std::string build_label(uint32_t build_number, const std::string& sha256);
 

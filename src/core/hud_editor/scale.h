@@ -54,6 +54,9 @@ struct ScalePush {
 // After the original open: pushes the scaled transform, or returns {} (scale 1 or out of range, no functions, scale off,
 // no UI layer, a rectangle or top that is not usable).
 ScalePush scale_open(uint8_t* node, float s);
+// Pushes a translation by (dx, dy) layer units on top of the stack's top ({S, tx + S*dx, ty + S*dy}), or returns {} (no
+// functions, scale off, no UI layer, a top that is not usable, an offset that is not finite). Popped with scale_close.
+ScalePush shift_open(uint8_t* node, float dx, float dy);
 // After the original close: pops what scale_open pushed, only when the stack stands exactly one above where it was.
 // Otherwise scale turns off for the session. Pops even when the editor is off.
 void scale_close(const ScalePush& p);

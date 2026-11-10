@@ -40,6 +40,8 @@ enum class Sig : size_t {
     PostJoinPending,
     // the game's admin kick, server side (refusing a join, [net] mods_check=refuse): the handler and its Kick call
     HandleAccountAction, SessionRequestKick,
+    // the player widget's three bar calls (health, mana, stamina), client only (the HUD editor's bars; re_ui_scopes.md)
+    PlayerVitalBar,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

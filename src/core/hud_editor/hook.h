@@ -77,6 +77,7 @@ struct UiSpace {
 LiveInfo hud_live(size_t element);
 UiSpace hud_ui_space();
 uint32_t hud_fault_code();  // the exception code of a fault in a detour, 0 for none
+bool hud_bars_hooked();     // the bar detour is installed (the bars can move on their own)
 
 // The detours' bodies, with the original passed in (tests pass a do-nothing original).
 void* hud_open_path(void* scope, const NameInfo* ni, OpenFn original, uint64_t now_ms);

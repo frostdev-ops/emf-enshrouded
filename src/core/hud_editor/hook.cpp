@@ -7,7 +7,9 @@
 #include <cmath>
 #include <cstring>
 
+#include "common/fnv.h"
 #include "core/api.h"
+#include "core/hud_editor/bars.h"
 #include "core/hud_editor/elements.h"
 #include "core/hud_editor/gate.h"
 #include "core/hud_editor/layout.h"
@@ -32,6 +34,16 @@ std::atomic<uint64_t> g_ui_space{0};  // w, h as a float pair; 0 = not measured
 WroteGuard g_guard[kHudElementCount];  // only the UI thread writes
 thread_local ScopeTracker t_tracker;
 
+// Scopes that are not parts but matter (docs/engine_parts/re_ui_scopes.md): the bars' container (the bar detour acts only
+// while it is open), the food column (its height, this frame) and the status effects list (moved when it grows upward).
+constexpr uint64_t kVitalBarsHash = fnv1a64("vitalBars"), kFoodColumnHash = fnv1a64("foodIconParent"),
+                   kStatusListHash = fnv1a64("buffDebuffParent");
+constexpr int kTrackVitals = -10, kTrackStatus = -11;  // OpenScope::element for those two (never a part's index)
+thread_local float t_food_h = -1;                      // the food column's height this frame, -1 = not seen yet
+
+BarFn g_o_bar = nullptr;
+std::atomic<bool> g_bars_hooked{false};
+
 OpenFn g_o_open = nullptr;
 CloseFn g_o_close = nullptr;
 
@@ -46,13 +58,49 @@ const HudSnapshot* current_snapshot() {
 }
 
 // ---- the bodies (no SEH here; the guarded functions below call them) ----
+// vitalBars, the food column and the status list; true when the scope was one of them.
+bool special_open(void* scope, uint8_t* node, uint64_t hash, const HudSnapshot* snap) {
+    if (hash == kVitalBarsHash) {
+        if (node && t_tracker.has_room()) {
+            t_tracker.opened(OpenScope{scope, node, kTrackVitals, {}});  // its close is seen even after the editor turned off
+            bars_vitals_open(node);
+        }
+        return true;
+    }
+    if (hash == kFoodColumnHash) {
+        if (node) {
+            float r[4];
+            std::memcpy(r, node + kNodeRect, sizeof r);
+            if (std::isfinite(r[3]) && r[3] > 0) t_food_h = r[3];
+        }
+        return true;
+    }
+    if (hash == kStatusListHash) {
+        if (!node || !snap || !snap->active || !snap->buffs_up || t_food_h <= 0 || !t_tracker.has_room()) return true;
+        float r[4];
+        std::memcpy(r, node + kNodeRect, sizeof r);  // last frame's layout
+        uint8_t* layer = layer_of(node);
+        Xform top;
+        uint64_t depth = 0;
+        if (!layer || !read_top(layer, &top, &depth)) return true;
+        const float dy = grow_up_dy(r[1], r[3], t_food_h, top, hud_ui_space().h);
+        if (dy == 0) return true;
+        const ScalePush p = shift_open(node, 0, dy);
+        if (p.pushed) t_tracker.opened(OpenScope{scope, node, kTrackStatus, p});  // popped after its close
+        return true;
+    }
+    return false;
+}
+
 void after_open_body(void* scope, const NameInfo* ni, const HudSnapshot* snap, uint64_t now) {
     if (!ni) return;
+    uint8_t* node = *reinterpret_cast<uint8_t**>(static_cast<uint8_t*>(scope) + kScopeNode);
+    if (special_open(scope, node, ni->hash, snap)) return;
     const int e = find_scope(ni->hash);
     if (e == kNoElement) return;
-    uint8_t* node = *reinterpret_cast<uint8_t**>(static_cast<uint8_t*>(scope) + kScopeNode);
     if (!node) return;
     if (e == kUiSpaceIndex) {
+        t_food_h = -1;  // a new frame
         float r[4];
         std::memcpy(r, node + kNodeRect, sizeof r);
         if (std::isfinite(r[2]) && std::isfinite(r[3]) && r[2] > 0 && r[3] > 0)
@@ -76,9 +124,16 @@ void after_open_body(void* scope, const NameInfo* ni, const HudSnapshot* snap, u
 void before_close_body(void* scope, const HudSnapshot* snap, ScopeTracker::Closed* c) {
     const uint8_t* node = *reinterpret_cast<uint8_t**>(static_cast<uint8_t*>(scope) + kScopeNode);
     *c = t_tracker.closed(scope, node);
-    for (int i = 0; i < c->dropped_count; ++i) scale_lost(c->dropped[i].push);
+    for (int i = 0; i < c->dropped_count; ++i) {
+        scale_lost(c->dropped[i].push);
+        if (c->dropped[i].element == kTrackVitals) bars_vitals_close();
+    }
     if (!c->found) return;
     const int e = c->scope.element;
+    if (e == kTrackVitals) {
+        bars_vitals_close();
+        return;
+    }
     if (e < 0 || static_cast<size_t>(e) >= kHudElementCount || !node) return;
     float r[4];
     std::memcpy(r, node + kNodeRect, sizeof r);
@@ -120,6 +175,30 @@ void guarded_after_close(const ScalePush* push) {
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         fault(GetExceptionCode());
     }
+}
+
+void guarded_bar_before(void* data, const HudSnapshot* snap, BarCall* c) {
+    __try {
+        *c = bar_before(data, snap, hud_ui_space());
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        fault(GetExceptionCode());
+    }
+}
+
+void guarded_bar_after(const BarCall* c, void* result) {
+    __try {
+        bar_after(*c, result, GetTickCount64());
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        fault(GetExceptionCode());
+    }
+}
+
+void* hk_bar(void* out, void* data, void* style) {
+    BarCall c;
+    if (is_on()) guarded_bar_before(data, current_snapshot(), &c);
+    void* r = g_o_bar(out, data, style);
+    if (c.bar >= 0 || c.push.pushed) guarded_bar_after(&c, r);
+    return r;
 }
 
 void* hk_open(void* scope, const NameInfo* ni) { return hud_open_path(scope, ni, g_o_open, GetTickCount64()); }
@@ -175,6 +254,7 @@ bool apply_position(uint8_t* node, float dx_units, float dy_units, bool hidden, 
 LiveInfo hud_live(size_t element) {
     LiveInfo li;
     if (element >= kHudElementCount) return li;
+    if (hud_elements()[element].bar >= 0) return bar_live(hud_elements()[element].bar);
     const Live& l = g_live[element];
     li.seen = l.seen.load(std::memory_order_relaxed);
     li.last_seen_ms = l.last_seen_ms.load(std::memory_order_relaxed);
@@ -198,6 +278,8 @@ UiSpace hud_ui_space() {
 }
 
 uint32_t hud_fault_code() { return g_fault.load(std::memory_order_relaxed); }
+
+bool hud_bars_hooked() { return g_bars_hooked.load(std::memory_order_relaxed); }
 
 // ---- the detours' bodies ----
 void* hud_open_path(void* scope, const NameInfo* ni, OpenFn original, uint64_t now_ms) {
@@ -227,6 +309,8 @@ void hud_reset_live_for_tests() {
         l.rect_b = 0;
     }
     g_ui_space = 0;
+    bars_reset_for_tests();
+    t_food_h = -1;
     for (auto& g : g_guard) g = WroteGuard{};
     t_tracker.clear();
     g_fault = 0;
@@ -256,6 +340,11 @@ bool install_hud_hooks(const std::array<Resolved, kSigCount>& sigs, bool known_b
         return fail("the UI scope open could not be hooked");
     g_box.store(box, std::memory_order_release);
     g_on.store(true, std::memory_order_relaxed);
+    // The bars (optional): without them the rest of the editor works.
+    if (hud_bars_ready(sigs, known_build, build_index))
+        g_bars_hooked.store(install_emf_hook("PlayerVitalBar (HUD editor)", sigs[static_cast<size_t>(Sig::PlayerVitalBar)].addr,
+                                             reinterpret_cast<void*>(&hk_bar), reinterpret_cast<void**>(&g_o_bar)),
+                            std::memory_order_relaxed);
     return true;
 }
 

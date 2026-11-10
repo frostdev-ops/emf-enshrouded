@@ -88,6 +88,19 @@ TEST_CASE("hud_scale_ready: the build and both transform signatures, apart from 
     CHECK_FALSE(hud_scale_ready(sigs, true, 7));
 }
 
+TEST_CASE("hud_bars_ready: the bar signature and the transform functions") {
+    auto sigs = all_usable();
+    CHECK(hud_bars_ready(sigs, true, 7));
+    CHECK_FALSE(hud_bars_ready(sigs, true, 5));
+    CHECK_FALSE(hud_bars_ready(sigs, true, 8));
+    sigs[static_cast<size_t>(Sig::PlayerVitalBar)].count = 0;
+    CHECK_FALSE(hud_bars_ready(sigs, true, 7));
+    CHECK(hud_scale_ready(sigs, true, 7));
+    sigs = all_usable();
+    sigs[static_cast<size_t>(Sig::UiPushTransform)].count = 2;  // the bars move through the transform stack
+    CHECK_FALSE(hud_bars_ready(sigs, true, 7));
+}
+
 TEST_CASE("build_label: the number, or the start of the exe's sha256") {
     CHECK(build_label(1287369, "5d9ef2f140b8ed49aaaa") == "1287369");
     CHECK(build_label(0, "5d9ef2f140b8ed49aaaa") == "sha256 5d9ef2f140b8");

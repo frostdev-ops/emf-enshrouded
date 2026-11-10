@@ -6,7 +6,9 @@
 #include <cstdint>
 
 #include "core/hud_editor/elements.h"
+#include "core/hud_editor/hook.h"
 #include "core/hud_editor/scale.h"
+#include "core/hud_editor/snapshot.h"
 
 namespace emf::core::hud {
 
@@ -33,5 +35,29 @@ std::array<float, kBarCount> order_dy(const std::array<BarRect, kBarCount>& game
 // keeps its top on screen (the top wins); top is the transform stack's top (screen = scale * p + t), ui_h the screen's
 // height in UI units. 0 when an input is not usable.
 float grow_up_dy(float list_y, float list_h, float column_h, const Xform& top, float ui_h);
+
+// ---- the bar detour (the player widget's bar function: out, data, style -> out, a {x, y, w, h} rect) ----
+using BarFn = void* (*)(void* out, void* data, void* style);
+
+// The detour's work around one call, split so hook.cpp guards each half and calls the original between them.
+struct BarCall {
+    int bar = -1;          // the bar this call draws (inside vitalBars only), -1: the original runs untouched
+    float dx = 0, dy = 0;  // the offset applied (layer units): only when the translation was pushed
+    ScalePush push;
+};
+// Before the original: which bar (the first call in vitalBars sets the base), its offset (the layout's, plus the order's
+// from last frame's rects, plus kHideShift when hidden) and the pushed translation.
+BarCall bar_before(void* data, const HudSnapshot* snap, UiSpace ui);
+// After the original: pops, records the game's rect for the next frame's order, shifts the returned rect by the offset
+// (the bar's panel piece follows) and records it as the bar's live rect.
+void bar_after(const BarCall& c, void* result, uint64_t now_ms);
+// bar_before, the original, bar_after: the tests' entry (no SEH).
+void* bar_call_path(void* out, void* data, void* style, BarFn original, const HudSnapshot* snap, UiSpace ui,
+                    uint64_t now_ms);
+// vitalBars opened / closed on this thread (hook.cpp): at open, this frame's game rects become last frame's.
+void bars_vitals_open(uint8_t* node);
+void bars_vitals_close();
+LiveInfo bar_live(int bar);
+void bars_reset_for_tests();  // this thread's state and the live info
 
 }  // namespace emf::core::hud

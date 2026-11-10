@@ -75,6 +75,11 @@ bool hud_scale_ready(const std::array<Resolved, kSigCount>& sigs, bool known_bui
     return sigs_usable(sigs, known_build, build_index, Sig::UiPushTransform, Sig::UiPopTransform);
 }
 
+bool hud_bars_ready(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index) {
+    return hud_scale_ready(sigs, known_build, build_index) &&
+           sigs_usable(sigs, known_build, build_index, Sig::PlayerVitalBar, Sig::PlayerVitalBar);
+}
+
 std::string build_label(uint32_t build_number, const std::string& sha256) {
     if (build_number != 0) return std::to_string(build_number);
     if (sha256.empty()) return "unknown";

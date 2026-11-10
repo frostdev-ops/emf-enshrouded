@@ -186,6 +186,11 @@ constexpr SigDef kSignatures[] = {
     // the record (+0x1F0), its machine handle (+0x1E4), ban = false, GameServer+0x10, the call. EMF never calls it: it
     // is the check that the handler's layout is still the one above (refuse needs both).
     {Sig::SessionRequestKick, "SessionRequestKick", "41 F6 86 F0 01 00 00 01 75 ?? 41 8B 96 E4 01 00 00 45 33 C0 49 8B 4F 10 E8", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xa6edc0u, 0xa02c90u}, false, 0x18},
+    // The player widget (doPlayerHealthWidget) calls its bar function three times inside vitalBars: health (data at
+    // widget+0x18, style +0xdbf8), mana (+0xf0, +0xdc58) and stamina (+0x1c8, +0xdc28), each storing the returned rect
+    // in a list of at most 4 (docs/engine_parts/re_ui_scopes.md). The pattern is the three calls: a game update that
+    // moves an offset breaks it and the HUD editor's bars turn off. The function is the first call's target.
+    {Sig::PlayerVitalBar, "PlayerVitalBar", "4C 8D 86 F8 DB 00 00 48 8D 57 18 48 8D 4C 24 40 E8 ?? ?? ?? ?? 0F 10 00 0F B6 45 F8 3C 04 0F 84 ?? ?? ?? ?? 48 03 C0 0F 11 44 C5 B8 FE 45 F8 45 38 27 75 ?? 4C 8D 86 58 DC 00 00 48 8D 97 F0 00 00 00 48 8D 4C 24 40 E8 ?? ?? ?? ?? 0F 10 00 0F B6 45 F8 3C 04 0F 84 ?? ?? ?? ?? 48 03 C0 0F 11 44 C5 B8 FE 45 F8 45 38 26 75 ?? 4C 8D 86 28 DC 00 00 48 8D 97 C8 01 00 00 48 8D 4C 24 40 E8", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xc7fc40u, 0u}, false, 0x10},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

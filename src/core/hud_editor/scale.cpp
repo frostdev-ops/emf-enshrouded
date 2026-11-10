@@ -120,6 +120,21 @@ ScalePush scale_open(uint8_t* node, float s) {
     return ScalePush{layer, depth, true};
 }
 
+ScalePush shift_open(uint8_t* node, float dx, float dy) {
+    if (!std::isfinite(dx) || !std::isfinite(dy)) return {};
+    const PushXformFn push = g_push.load(std::memory_order_acquire);
+    if (!push || !g_pop.load(std::memory_order_acquire) || g_off.load(std::memory_order_relaxed)) return {};
+    uint8_t* layer = layer_of(node);
+    if (!layer) return {};
+    Xform top;
+    uint64_t depth = 0;
+    if (!read_top(layer, &top, &depth)) return {};
+    const float xf[3] = {top.scale, top.tx + top.scale * dx, top.ty + top.scale * dy};
+    push(layer, xf);
+    g_pushes.fetch_add(1, std::memory_order_relaxed);
+    return ScalePush{layer, depth, true};
+}
+
 void scale_close(const ScalePush& p) {
     if (!p.pushed || !p.layer) return;
     const PopXformFn pop = g_pop.load(std::memory_order_acquire);
