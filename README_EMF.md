@@ -284,8 +284,9 @@ stamina is not full).
   damage blink, the heal glow, the HUD fading out) work with any colour; the red "not enough mana / stamina" flash and the
   ticks stay as the game draws them. The colours follow the bar when the order changes. A card's **Reset** (and R,
   `hud.reset <part>`) moves the part back and keeps its colours; **Game's colours** and **Reset all** put them back.
-- **Panel colour:** a switch on the vitals' card gives the dark panel behind the bars a colour and opacity of your own
-  (`hud.colour panel #20208080`).
+- **Panel colour:** a switch on the vitals' card for the dark panel behind the bars (`hud.colour panel #20208080`). On
+  game build 1287369 the game keeps that colour in read-only memory, so EMF leaves it alone: the switch and the log say
+  so, and the panel keeps the game's colour.
 - **Mods' lines** (`emf.hud`) are three parts, one per corner a mod can use: move, scale (the text size) and hide each
   corner like a part of the game's HUD. While the page is open they show behind it, and an empty corner shows a dim sample
   line so you can place it before a mod uses it.
