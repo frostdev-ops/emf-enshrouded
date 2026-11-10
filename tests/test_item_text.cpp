@@ -11,6 +11,7 @@
 #include "common/offsets.h"
 #include "core/game_text.h"
 #include "core/item_text.h"
+#include "core/screen_glyphs.h"
 #include "fake_world.h"
 
 using namespace emf::core;
@@ -71,6 +72,9 @@ uint32_t add_named(emf::test::FakeItemRegistry& r, uint32_t id, const char* debu
     return emf::fnv1a32(g, 16);
 }
 
+// EMF's screens have not said yet what they can draw (before the overlay's first atlas).
+const ScreenCanDraw kUnknown = [](std::string_view) -> std::optional<bool> { return std::nullopt; };
+
 }  // namespace
 
 TEST_CASE("item_name_tag: FNV-1a-32 of the name GUID at ItemInfo+0x48; none for a null GUID or no info") {
@@ -89,17 +93,17 @@ TEST_CASE("ItemNames: the player's language, and English on EMF's screens where 
     Pool de(3);
     GameText de_text = text_over(de);
     g_shown = {{tag, "Holzscheite"}};
-    ItemNames names(de_text, [](uint32_t) { return false; });
+    ItemNames names(de_text, kUnknown);
     CHECK(names.name(r.reg, 0x11, NameFor::Game) == std::optional<std::string>("Holzscheite"));
     CHECK(names.name(r.reg, 0x11, NameFor::Screen) == std::optional<std::string>("Holzscheite"));
     CHECK_FALSE(names.name(r.reg, 0x99, NameFor::Game));  // an unknown item
     Pool ja(11);
     GameText ja_text = text_over(ja);
     g_shown = {{tag, "\xE4\xB8\xB8\xE5\xA4\xAA"}};  // 丸太
-    ItemNames ja_names(ja_text, [](uint32_t) { return false; });
+    ItemNames ja_names(ja_text, kUnknown);
     CHECK(ja_names.name(r.reg, 0x11, NameFor::Game) == std::optional<std::string>("\xE4\xB8\xB8\xE5\xA4\xAA"));
     CHECK(ja_names.name(r.reg, 0x11, NameFor::Screen) == std::optional<std::string>("Wood Logs"));
-    ItemNames ja_font(ja_text, [](uint32_t lang) { return lang == 11; });  // part 2's font is there
+    ItemNames ja_font(ja_text, [](std::string_view) -> std::optional<bool> { return true; });  // part 2: drawable
     CHECK(ja_font.name(r.reg, 0x11, NameFor::Screen) == std::optional<std::string>("\xE4\xB8\xB8\xE5\xA4\xAA"));
 }
 
@@ -109,7 +113,7 @@ TEST_CASE("ItemNames: cached per language; a language change (the table key) loo
     Pool p(3);
     GameText t = text_over(p);
     g_shown = {{tag, "Holzscheite"}};
-    ItemNames names(t, [](uint32_t) { return false; });
+    ItemNames names(t, kUnknown);
     g_lookups = 0;
     CHECK(names.name(r.reg, 0x11, NameFor::Game) == std::optional<std::string>("Holzscheite"));
     CHECK(names.name(r.reg, 0x11, NameFor::Game) == std::optional<std::string>("Holzscheite"));
@@ -125,7 +129,7 @@ TEST_CASE("ItemNames: no game text (the dedicated server, before the menu): noth
     emf::test::FakeItemRegistry r;
     add_named(r, 0x11, "Material_T1_Wood_Logs", 7);
     GameText none{LocaAccess{}};
-    ItemNames names(none, [](uint32_t) { return false; });
+    ItemNames names(none, kUnknown);
     CHECK_FALSE(names.name(r.reg, 0x11, NameFor::Game));
     CHECK_FALSE(names.name(r.reg, 0x11, NameFor::Screen));
     const auto all = names.named(r.reg);
@@ -141,7 +145,7 @@ TEST_CASE("ItemNames: named lists every item with its debug name and its shown n
     Pool p(3);
     GameText t = text_over(p);
     g_shown = {{tag, "Holzscheite"}};
-    ItemNames names(t, [](uint32_t) { return false; });
+    ItemNames names(t, kUnknown);
     const auto all = names.named(r.reg);
     REQUIRE(all.size() == 2);
     for (const auto& n : all) {
@@ -153,4 +157,56 @@ TEST_CASE("ItemNames: named lists every item with its debug name and its shown n
             CHECK(n.shown.empty());
         }
     }
+}
+
+TEST_CASE("ItemNames: EMF's screens use a name only when they can draw it, else English, in any language") {  // part 2
+    emf::test::FakeItemRegistry r;
+    const uint32_t tag = add_named(r, 0x11, "Material_T1_Wood_Logs", 7);
+    g_english = {{tag, "Wood Logs"}};
+    Pool vi(19);
+    GameText t = text_over(vi);
+    g_shown = {{tag, "G\xE1\xBB\x97"}};  // Gỗ
+    std::optional<bool> verdict;
+    ItemNames names(t, [&verdict](std::string_view) { return verdict; });
+    CHECK(names.name(r.reg, 0x11, NameFor::Screen) == std::optional<std::string>("G\xE1\xBB\x97"));  // not known yet
+    verdict = false;
+    CHECK(names.name(r.reg, 0x11, NameFor::Screen) == std::optional<std::string>("Wood Logs"));
+    CHECK(names.name(r.reg, 0x11, NameFor::Game) == std::optional<std::string>("G\xE1\xBB\x97"));  // the chat: always
+    verdict = true;
+    CHECK(names.name(r.reg, 0x11, NameFor::Screen) == std::optional<std::string>("G\xE1\xBB\x97"));
+    Pool ja(11);
+    GameText ja_text = text_over(ja);
+    g_shown = {{tag, "\xE4\xB8\xB8\xE5\xA4\xAA"}};
+    ItemNames ja_names(ja_text, [&verdict](std::string_view) { return verdict; });
+    verdict = false;  // the font lacks a character
+    CHECK(ja_names.name(r.reg, 0x11, NameFor::Screen) == std::optional<std::string>("Wood Logs"));
+}
+
+TEST_CASE("pump_screen_glyphs: once per text table, the characters of every item's name in the player's language") {
+    emf::test::FakeItemRegistry r;
+    const uint32_t wood = add_named(r, 0x11, "Material_T1_Wood_Logs", 7);
+    const uint32_t berry = add_named(r, 0x22, "Food_Berry", 9);
+    Pool ja(11);
+    GameText t = text_over(ja);
+    const std::string logs = "\xE4\xB8\xB8\xE5\xA4\xAA", berries = "\xE3\x83\x99\xE3\x83\xAA\xE3\x83\xBC";  // 丸太, ベリー
+    g_shown = {{wood, logs}, {berry, berries}};
+    ItemNames names(t, kUnknown);
+    ScreenGlyphs g;
+    pump_screen_glyphs(r.reg, names, t, g);
+    const GlyphWant w = g.wanted();
+    CHECK(w.version == 1);
+    CHECK(w.language == 11);
+    CHECK(w.key == t.table_key());
+    CHECK(w.glyphs == extra_glyphs({logs, berries}));
+    pump_screen_glyphs(r.reg, names, t, g);
+    CHECK(g.wanted().version == 1);  // the same table: nothing new
+    ja.put64(0x100, 0x5000);          // the table loaded again (a language switch and back)
+    pump_screen_glyphs(r.reg, names, t, g);
+    CHECK(g.wanted().version == 2);
+    ScreenGlyphs none_yet;
+    pump_screen_glyphs(nullptr, names, t, none_yet);  // no world's registry yet: nothing, tried again later
+    CHECK(none_yet.wanted().version == 0);
+    GameText no_text{LocaAccess{}};
+    pump_screen_glyphs(r.reg, names, no_text, none_yet);  // the dedicated server
+    CHECK(none_yet.wanted().version == 0);
 }

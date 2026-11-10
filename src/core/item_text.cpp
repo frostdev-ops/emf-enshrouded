@@ -14,19 +14,21 @@ uint32_t item_name_tag(const uint8_t* info) {
     return zero ? 0 : fnv1a32(g, sizeof g);
 }
 
-void ItemNames::set_font_ready(ExtraFontReady font) {
+void ItemNames::set_can_draw(ScreenCanDraw can_draw) {
     std::lock_guard<std::mutex> lock(mu_);
-    font_ = std::move(font);
+    can_draw_ = std::move(can_draw);
 }
 
-bool ItemNames::screen_wants_english(uint32_t language) {
-    if (!language_needs_extra_font(language)) return false;
-    ExtraFontReady f;
+bool ItemNames::screen_wants_english(uint32_t language, const std::optional<std::string>& shown) {
+    ScreenCanDraw f;
     {
         std::lock_guard<std::mutex> lock(mu_);
-        f = font_;
+        f = can_draw_;
     }
-    return !(f && f(language));
+    if (shown && f)
+        if (const std::optional<bool> drawable = f(*shown)) return !*drawable;
+    // not known yet: the scripts EMF's base fonts lack
+    return language_needs_extra_font(language);
 }
 
 std::optional<std::string> ItemNames::name(const uint8_t* registry, uint32_t item, NameFor f) {
@@ -34,7 +36,8 @@ std::optional<std::string> ItemNames::name(const uint8_t* registry, uint32_t ite
     if (tag == 0) return std::nullopt;
     const uint64_t key = text_.table_key();
     if (key == 0) return std::nullopt;
-    const bool english = f == NameFor::Screen && screen_wants_english(text_.language());
+    Entry e;
+    bool cached = false;
     {
         std::lock_guard<std::mutex> lock(mu_);
         if (key != key_) {
@@ -42,26 +45,28 @@ std::optional<std::string> ItemNames::name(const uint8_t* registry, uint32_t ite
             key_ = key;
         }
         const auto it = cache_.find(tag);
-        if (it != cache_.end() && (!english || it->second.english_done))
-            return english ? it->second.english : it->second.shown;
+        if (it != cache_.end()) {
+            e = it->second;
+            cached = true;
+        }
     }
     // the game's lookups outside the lock (they copy under SEH)
-    Entry e;
-    e.shown = text_.text(tag);
-    if (english) {
-        e.english = text_.english(tag);
-        e.english_done = true;
+    if (!cached) {
+        e.shown = text_.text(tag);
+        std::lock_guard<std::mutex> lock(mu_);
+        if (key_ == key) cache_[tag].shown = e.shown;
     }
-    std::lock_guard<std::mutex> lock(mu_);
-    if (key_ == key) {
-        Entry& slot = cache_[tag];
-        slot.shown = e.shown;
-        if (e.english_done) {
+    if (f == NameFor::Game || !screen_wants_english(text_.language(), e.shown)) return e.shown;
+    if (!e.english_done) {
+        e.english = text_.english(tag);
+        std::lock_guard<std::mutex> lock(mu_);
+        if (key_ == key) {
+            Entry& slot = cache_[tag];
             slot.english = e.english;
             slot.english_done = true;
         }
     }
-    return english ? e.english : e.shown;
+    return e.english;
 }
 
 std::vector<NamedItem> ItemNames::named(const uint8_t* registry) {
@@ -76,8 +81,18 @@ std::vector<NamedItem> ItemNames::named(const uint8_t* registry) {
     return out;
 }
 
+void pump_screen_glyphs(const uint8_t* registry, ItemNames& names, const GameText& text, ScreenGlyphs& glyphs) {
+    if (!registry) return;
+    const uint64_t key = text.table_key();
+    if (key == 0 || key == glyphs.collected_key()) return;
+    std::vector<std::string> shown;
+    for (const ItemRecord& r : list_items(registry))
+        if (auto s = names.name(registry, r.id, NameFor::Game)) shown.push_back(std::move(*s));
+    glyphs.want(key, text.language(), extra_glyphs(shown));
+}
+
 ItemNames& item_names() {
-    static ItemNames names(game_text(), [](uint32_t) { return false; });
+    static ItemNames names(game_text(), [](std::string_view) -> std::optional<bool> { return std::nullopt; });
     return names;
 }
 
