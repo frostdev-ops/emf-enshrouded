@@ -19,7 +19,9 @@ std::string lower(std::string s) {
 }
 
 bool same_snapshot(const HudSnapshot& a, const HudSnapshot& b) {
-    if (a.active != b.active || a.order != b.order || a.buffs_up != b.buffs_up) return false;
+    if (a.active != b.active || a.order != b.order || a.buffs_up != b.buffs_up || a.colours != b.colours ||
+        a.panel != b.panel)
+        return false;
     for (size_t i = 0; i < kHudElementCount; ++i) {
         const ElementEdit &x = a.edits[i], &y = b.edits[i];
         if (x.x_percent != y.x_percent || x.y_percent != y.y_percent || x.scale != y.scale || x.hidden != y.hidden ||
@@ -135,6 +137,8 @@ void HudEditor::publish_locked() {
     }
     next.order = l.order;
     next.buffs_up = l.buffs_up;
+    next.colours = l.colours;
+    next.panel = l.panel;
     if (same_snapshot(*box_.current(), next)) return;
     next.serial = ++serial_;
     box_.publish(next, now_locked());
@@ -230,6 +234,19 @@ void HudEditor::tick() {
     }
     update_gate_locked(true);
     if (dirty_ && now - last_change_ >= kSaveDelayMs) write_active_locked();
+    if (deps_.game_colours) {
+        for (int b = 0; b < static_cast<int>(kBarCount); ++b) {
+            if (colours_logged_[static_cast<size_t>(b)]) continue;
+            const std::optional<StyleBlock> g = deps_.game_colours(b);
+            if (!g) continue;
+            colours_logged_[static_cast<size_t>(b)] = true;
+            const StyleBlock& s = *g;
+            log_locked(std::string("HUD editor: the game's ") + bar_id(b) + " colours: frame " + ui_colour_text(s[kFrame]) +
+                       ", empty " + ui_colour_text(s[kRange]) + ", fill " + ui_colour_text(s[kFill]) + ", end " +
+                       ui_colour_text(s[kFillEnd]) + ", damage " + ui_colour_text(s[kDamage]) + ", heal " +
+                       ui_colour_text(s[kHeal]));
+        }
+    }
     if (deps_.scale_state && !scale_off_logged_ && deps_.scale_state().off) {
         scale_off_logged_ = true;
         log_locked(
@@ -276,6 +293,19 @@ HudView HudEditor::view() const {
         v.bars_note = "Moving health, mana and stamina on their own is not available on this game build.";
     else if (v.scale.off)
         v.bars_note = "Moving health, mana and stamina on their own stopped with scale for this session (see emf_core.log).";
+    v.colours = active_locked().colours;
+    v.panel = active_locked().panel;
+    for (int b = 0; b < static_cast<int>(kBarCount); ++b)
+        if (deps_.game_colours) v.game_colours[static_cast<size_t>(b)] = deps_.game_colours(b);
+    v.colours_work = bars_hooked;
+    if (!v.colours_work) v.colours_note = "Bar colours are not available on this game build.";
+    const PanelStatus panel = deps_.panel_status ? deps_.panel_status() : PanelStatus::Unknown;
+    v.panel_works = v.colours_work && panel != PanelStatus::ReadOnly;
+    if (!v.colours_work)
+        v.panel_note = v.colours_note;
+    else if (panel == PanelStatus::ReadOnly)
+        v.panel_note = "The panel colour is not available on this game build (the game's data there is read-only).";
+    if (deps_.colour_stats) v.colour_stats = deps_.colour_stats();
     v.grow_works = v.scale_works;
     if (!v.scale.available)
         v.grow_note = "Status effects growing upward is not available on this game build.";
@@ -326,7 +356,12 @@ void HudEditor::reset(size_t element, Save save) {
     if (element >= kHudElementCount) return;
     std::lock_guard<std::mutex> lock(mu_);
     active_locked().elements[element] = ElementLayout{};
-    if (element == 0) active_locked().order = kDefaultOrder;  // the vitals' card holds the order
+    if (const int bar = hud_elements()[element].bar; bar >= 0)
+        active_locked().colours[static_cast<size_t>(bar)] = BarColours{};  // a bar's card holds its colours
+    if (element == 0) {  // the vitals' card holds the order and the panel colour
+        active_locked().order = kDefaultOrder;
+        active_locked().panel = Colour{};
+    }
     if (element == 1) active_locked().buffs_up = false;       // the buffs' card holds grow-upward
     publish_locked();
     mark_changed_locked(save);
@@ -354,6 +389,29 @@ void HudEditor::swap_bars(int a, int b, Save save) {
 void HudEditor::set_buffs_up(bool on, Save save) {
     std::lock_guard<std::mutex> lock(mu_);
     active_locked().buffs_up = on;
+    publish_locked();
+    mark_changed_locked(save);
+}
+
+void HudEditor::set_colour(int bar, BarPart part, std::optional<Colour> c, Save save) {
+    if (bar < 0 || bar >= static_cast<int>(kBarCount) || static_cast<size_t>(part) >= kBarPartCount) return;
+    std::lock_guard<std::mutex> lock(mu_);
+    active_locked().colours[static_cast<size_t>(bar)].part[static_cast<size_t>(part)] = c && c->set ? *c : Colour{};
+    publish_locked();
+    mark_changed_locked(save);
+}
+
+void HudEditor::clear_colours(int bar, Save save) {
+    if (bar < 0 || bar >= static_cast<int>(kBarCount)) return;
+    std::lock_guard<std::mutex> lock(mu_);
+    active_locked().colours[static_cast<size_t>(bar)] = BarColours{};
+    publish_locked();
+    mark_changed_locked(save);
+}
+
+void HudEditor::set_panel(std::optional<Colour> c, Save save) {
+    std::lock_guard<std::mutex> lock(mu_);
+    active_locked().panel = c && c->set ? *c : Colour{};
     publish_locked();
     mark_changed_locked(save);
 }
@@ -422,6 +480,8 @@ LayoutResult HudEditor::reset_all_locked() {
     now_active.elements = {};
     now_active.order = kDefaultOrder;
     now_active.buffs_up = false;
+    now_active.colours = {};
+    now_active.panel = Colour{};
     publish_locked();
     write_active_locked();
     if (!backup) return {true, "every part is back where the game draws it"};

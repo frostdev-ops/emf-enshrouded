@@ -199,3 +199,61 @@ TEST_CASE("is_default: the order and buffs_up count") {
     l.buffs_up = true;
     CHECK_FALSE(l.is_default());
 }
+
+TEST_CASE("layout colours round trip") {
+    HudLayout l;
+    l.name = "Colours";
+    l.colours[0].part[static_cast<size_t>(BarPart::Fill)] = *parse_colour("#ff4040").colour;
+    l.colours[1].part[static_cast<size_t>(BarPart::Empty)] = *parse_colour("#00000000").colour;
+    l.panel = *parse_colour("#20202080").colour;
+    CHECK_FALSE(l.is_default());
+    const std::string j = layout_to_json(l, 1287369);
+    CHECK(contains(j, "\"colours\": {\"health\": {\"fill\": \"#ff4040\"}, \"mana\": {\"empty\": \"#00000000\"}, \"panel\": \"#20202080\"}"));
+    const LayoutRead r = layout_from_json(j);
+    REQUIRE(r.layout.has_value());
+    CHECK(r.notes.empty());
+    CHECK(r.layout->colours == l.colours);
+    CHECK(r.layout->panel == l.panel);
+    HudLayout plain;
+    plain.name = "Plain";
+    CHECK_FALSE(contains(layout_to_json(plain, 1287369), "colours"));
+    HudLayout only_panel;
+    only_panel.panel = *parse_colour("#000000").colour;
+    CHECK_FALSE(only_panel.is_default());
+    CHECK(contains(layout_to_json(only_panel, 1), "\"colours\": {\"panel\": \"#000000\"}"));
+}
+
+TEST_CASE("layout colours: bad values are skipped with notes, the rest loads") {  // Review Focus 4
+    auto read = [](const std::string& colours) {
+        return layout_from_json(std::string("{\"format\": 1, \"elements\": {\"buffRow\": {\"x\": 3}}, \"colours\": ") +
+                                colours + "}");
+    };
+    auto has_note = [](const LayoutRead& r, const std::string& note) {
+        for (const auto& n : r.notes)
+            if (n == note) return true;
+        return false;
+    };
+    struct Case {
+        const char* colours;
+        const char* note;
+    } cases[] = {
+        {"[1]", "colours is not an object, skipped"},
+        {"{\"fire\": {}}", "colours: unknown bar \"fire\" skipped"},
+        {"{\"health\": 3}", "colours.health: not an object, skipped"},
+        {"{\"health\": {\"glow\": \"#fff000\"}}", "colours.health: unknown part \"glow\" skipped"},
+        {"{\"health\": {\"fill\": \"#zz\"}}",
+         "colours.health.fill: \"#zz\" is not a colour (#rrggbb or #rrggbbaa), left at the game's"},
+        {"{\"panel\": 5}", "colours.panel: 5 is not a colour (#rrggbb or #rrggbbaa), left at the game's"},
+    };
+    for (const Case& c : cases) {
+        const LayoutRead r = read(c.colours);
+        REQUIRE_MESSAGE(r.layout.has_value(), c.colours);
+        CHECK_MESSAGE(has_note(r, c.note), c.colours);
+        CHECK_MESSAGE(r.layout->elements[1].x == 3.0f, c.colours);
+    }
+    const LayoutRead g = read("{\"health\": {\"fill\": \"game\"}, \"panel\": \"game\"}");  // the game's: no note
+    REQUIRE(g.layout.has_value());
+    CHECK(g.notes.empty());
+    CHECK_FALSE(g.layout->colours[0].any());
+    CHECK_FALSE(g.layout->panel.set);
+}

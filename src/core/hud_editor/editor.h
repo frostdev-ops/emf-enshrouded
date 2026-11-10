@@ -6,6 +6,7 @@
 #include <functional>
 #include <map>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <string>
 #include <vector>
@@ -32,6 +33,9 @@ struct HudEditorDeps {
     std::function<LiveInfo(size_t)> live;
     std::function<ScaleState()> scale_state;              // empty = not available
     std::function<bool()> bars_ready;                     // the bar detour is installed; empty = not available
+    std::function<std::optional<StyleBlock>(int bar)> game_colours;  // the game's colour block for a bar, once drawn
+    std::function<PanelStatus()> panel_status;            // whether the panel colour can be written; empty = unknown
+    std::function<ColourStats()> colour_stats;            // the bar detour's colour counters; empty = none
     std::function<bool(uint32_t vk)> key_down;            // a key held now with the game in front
     std::function<void()> toggle_page;                    // opens (or closes) the console on the HUD page
     std::function<void(std::function<void()>)> run;       // file writes; empty = on the caller's thread
@@ -54,6 +58,14 @@ struct HudView {
     std::string bars_note;           // "" when they work, else the reason
     bool grow_works = false;         // the status list can grow upward (the transform stack works)
     std::string grow_note;           // "" when it works, else the reason
+    std::array<BarColours, kBarCount> colours{};                  // the player's bar colours, by bar
+    Colour panel{};                                               // the panel colour; not set: the game's
+    std::array<std::optional<StyleBlock>, kBarCount> game_colours{};  // the game's own, once the bar was drawn
+    bool colours_work = false;   // the bar detour is installed (colours need no transform stack)
+    std::string colours_note;    // "" when they work, else the reason
+    bool panel_works = false;    // colours work and the panel's memory is not read-only
+    std::string panel_note;      // "" when it works, else the reason
+    ColourStats colour_stats;
 };
 
 enum class Save { Now, Later };
@@ -78,6 +90,10 @@ public:
     void set_order(const BarOrder& order, Save save);  // an order that is not a permutation is ignored
     void swap_bars(int a, int b, Save save);            // the two bars change places in the order
     void set_buffs_up(bool on, Save save);
+    // A bar's colour for one part; nullopt (or a colour not set): the game's. Anything but a bar is ignored.
+    void set_colour(int bar, BarPart part, std::optional<Colour> c, Save save);
+    void clear_colours(int bar, Save save);  // all five of that bar's colours back to the game's
+    void set_panel(std::optional<Colour> c, Save save);
     void flush();  // a pending Later save now
 
     // Named layouts. Each result message is the reply text without the "hud: " prefix.
@@ -135,6 +151,7 @@ private:
     uint64_t last_conflict_check_ = 0;
     bool other_checked_ = false;
     bool scale_off_logged_ = false;
+    std::array<bool, kBarCount> colours_logged_{};  // the game's colours of each bar logged once
 
     // keys and the page
     Hotkeys hotkeys_;

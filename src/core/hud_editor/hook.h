@@ -70,6 +70,13 @@ struct LiveInfo {
     uint64_t last_seen_ms = 0;
     float rect[4] = {};  // UI units, as last laid out
 };
+// Whether the panel colour can be written (health's frame colour in the game's UI data): not checked yet, writable as it
+// is, or read-only (EMF never changes page protection).
+enum class PanelStatus : uint8_t { Unknown, Writable, ReadOnly };
+// How often the bar detour passed EMF's colour copy, and the panel colour was written and put back (hud.list).
+struct ColourStats {
+    uint64_t recoloured = 0, panel_writes = 0, panel_restores = 0;
+};
 struct UiSpace {
     float w = 1920.0f, h = 1080.0f;
     bool measured = false;

@@ -682,3 +682,99 @@ TEST_CASE("editor: the bars and grow-upward stop with scale, and say so") {  // 
     CHECK_FALSE(e.view().grow_works);
     CHECK(e.view().grow_note == "Status effects growing upward is not available on this game build.");
 }
+
+TEST_CASE("editor: set_colour publishes and saves; nullopt brings the game's back") {
+    HudRig r;
+    HudEditor& e = r.make();
+    const Colour red = *parse_colour("#ff0000").colour;
+    e.set_colour(kBarMana, BarPart::Fill, red, Save::Now);
+    CHECK(e.view().colours[kBarMana].part[0] == red);
+    CHECK(e.snapshots().current()->colours[kBarMana].part[0] == red);
+    bool in_file = false;
+    for (const auto& f : r.files())
+        if (f.layout && f.layout->colours[kBarMana].part[0] == red) in_file = true;
+    CHECK(in_file);
+    e.set_colour(kBarMana, BarPart::Fill, std::nullopt, Save::Now);
+    CHECK_FALSE(e.view().colours[kBarMana].any());
+    CHECK_FALSE(e.snapshots().current()->colours[kBarMana].any());
+    e.set_colour(3, BarPart::Fill, red, Save::Now);  // not a bar
+    e.set_colour(-1, BarPart::Fill, red, Save::Now);
+    for (const auto& c : e.view().colours) CHECK_FALSE(c.any());
+    e.set_colour(kBarHealth, BarPart::Heal, red, Save::Now);
+    e.set_colour(kBarHealth, BarPart::Empty, red, Save::Now);
+    e.clear_colours(kBarHealth, Save::Now);
+    CHECK_FALSE(e.view().colours[kBarHealth].any());
+    e.set_panel(red, Save::Now);
+    CHECK(e.view().panel == red);
+    CHECK(e.snapshots().current()->panel == red);
+    e.set_panel(std::nullopt, Save::Now);
+    CHECK_FALSE(e.view().panel.set);
+}
+
+TEST_CASE("editor: reset of a bar clears its colours; the vitals' reset clears the panel; reset all clears everything") {
+    HudRig r;
+    HudEditor& e = r.make();
+    const Colour red = *parse_colour("#ff0000").colour;
+    e.set_colour(kBarMana, BarPart::Fill, red, Save::Now);
+    e.set_colour(kBarStamina, BarPart::Fill, red, Save::Now);
+    e.set_panel(red, Save::Now);
+    e.reset(static_cast<size_t>(bar_element(kBarMana)), Save::Now);
+    CHECK_FALSE(e.view().colours[kBarMana].any());
+    CHECK(e.view().colours[kBarStamina].any());
+    CHECK(e.view().panel.set);
+    e.reset(0, Save::Now);  // the vitals part
+    CHECK_FALSE(e.view().panel.set);
+    CHECK(e.view().colours[kBarStamina].any());
+    e.set_panel(red, Save::Now);
+    CHECK(e.reset_all().ok);
+    CHECK_FALSE(e.view().colours[kBarStamina].any());
+    CHECK_FALSE(e.view().panel.set);
+    CHECK_FALSE(e.snapshots().current()->panel.set);
+}
+
+TEST_CASE("editor: colours work without scale; the panel follows its status") {
+    HudRig r;
+    PanelStatus status = PanelStatus::Unknown;
+    HudEditorDeps d = r.deps();
+    d.panel_status = [&status] { return status; };
+    r.editor = std::make_unique<HudEditor>(d);
+    r.editor->start();
+    HudEditor& e = *r.editor;
+    r.scale = ScaleState{true, true};  // scale stopped: moving the bars stops, colours do not
+    CHECK(e.view().colours_work);
+    CHECK(e.view().colours_note.empty());
+    CHECK(e.view().panel_works);
+    status = PanelStatus::ReadOnly;
+    CHECK_FALSE(e.view().panel_works);
+    CHECK(e.view().panel_note == "The panel colour is not available on this game build (the game's data there is read-only).");
+    r.bars = false;
+    CHECK_FALSE(e.view().colours_work);
+    CHECK(e.view().colours_note == "Bar colours are not available on this game build.");
+    CHECK_FALSE(e.view().panel_works);
+}
+
+TEST_CASE("editor: the game's colours are logged once per bar") {
+    HudRig r;
+    StyleBlock b{};
+    b[kFrame] = {rgba_to_game(0x10101080), 1.0f};
+    b[kRange] = {rgba_to_game(0x202020C0), 1.0f};
+    b[kFill] = {rgba_to_game(0x4FD17CFF), 1.0f};
+    b[kFillEnd] = {rgba_to_game(0xA0F0B0E0), 1.2f};
+    b[kDamage] = {rgba_to_game(0xD04040FF), 1.0f};
+    b[kHeal] = {rgba_to_game(0xF0F0A0FF), 1.0f};
+    HudEditorDeps d = r.deps();
+    d.game_colours = [&b](int bar) -> std::optional<StyleBlock> {
+        if (bar == kBarHealth) return b;
+        return std::nullopt;
+    };
+    r.editor = std::make_unique<HudEditor>(d);
+    r.editor->start();
+    r.editor->tick();
+    CHECK(r.count_logged("HUD editor: the game's health colours: frame 101010-80, empty 202020-c0, fill 4fd17c, end "
+                         "a0f0b0-e0*1.20, damage d04040, heal f0f0a0") == 1);
+    CHECK_FALSE(r.logged("the game's mana colours"));
+    r.editor->tick();
+    CHECK(r.count_logged("the game's health colours") == 1);
+    REQUIRE(r.editor->view().game_colours[kBarHealth].has_value());
+    CHECK_FALSE(r.editor->view().game_colours[kBarMana].has_value());
+}

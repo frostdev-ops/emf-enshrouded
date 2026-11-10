@@ -9,6 +9,7 @@
 #include <utility>
 #include <vector>
 
+#include "core/hud_editor/colours.h"
 #include "core/hud_editor/elements.h"
 
 namespace emf::core::hud {
@@ -24,6 +25,8 @@ struct HudSnapshot {
     std::array<ElementEdit, kHudElementCount> edits{};
     BarOrder order = kDefaultOrder;  // the vitals' bars, top first
     bool buffs_up = false;           // the status effects list grows upward
+    std::array<BarColours, kBarCount> colours{};  // the bars' colours, by bar
+    Colour panel{};                               // the panel behind the bars; not set: the game's
     uint64_t serial = 0;
 };
 

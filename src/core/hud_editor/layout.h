@@ -9,6 +9,7 @@
 #include <string_view>
 #include <vector>
 
+#include "core/hud_editor/colours.h"
 #include "core/hud_editor/elements.h"
 
 namespace emf::core::hud {
@@ -29,8 +30,12 @@ struct HudLayout {
     std::array<ElementLayout, kHudElementCount> elements{};
     BarOrder order = kDefaultOrder;  // the vitals' bars, top first
     bool buffs_up = false;           // the status effects list grows upward from the food icons' bottom edge
+    std::array<BarColours, kBarCount> colours{};  // the vitals' bar colours, by bar (they follow the bar, not its place)
+    Colour panel{};                               // the dark panel behind the bars (health's frame colour)
     bool is_default() const {
-        if (order != kDefaultOrder || buffs_up) return false;
+        if (order != kDefaultOrder || buffs_up || panel.set) return false;
+        for (const auto& c : colours)
+            if (c.any()) return false;
         for (const auto& e : elements)
             if (!e.is_default()) return false;
         return true;

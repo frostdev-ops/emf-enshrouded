@@ -36,6 +36,26 @@ void read_number(const json::Value& obj, const char* field, const std::string& k
                         number_text(static_cast<float>(hi)) + ", kept at " + number_text(*out));
 }
 
+// A colour from a file into *out: a colour, or "game" (the game's: left unset); anything else is a note.
+void read_colour(const json::Value& v, const std::string& where, Colour* out, std::vector<std::string>& notes) {
+    if (v.is(json::Value::Type::String)) {
+        const ColourText t = parse_colour(v.s);
+        if (t.colour) {
+            *out = *t.colour;
+            return;
+        }
+        if (t.game) return;
+    }
+    std::string shown = "that value";
+    if (v.is(json::Value::Type::String))
+        shown = bridge::json_quote(v.s);
+    else if (v.is(json::Value::Type::Number))
+        shown = raw_text(v.n);
+    else if (v.is(json::Value::Type::Bool))
+        shown = v.b ? "true" : "false";
+    notes.push_back(where + ": " + shown + " is not a colour (#rrggbb or #rrggbbaa), left at the game's");
+}
+
 }  // namespace
 
 float clamp_offset(double percent) {
@@ -93,6 +113,21 @@ std::string layout_to_json(const HudLayout& l, uint32_t build) {
         out += "],\n";
     }
     if (l.buffs_up) out += "  \"buffs_up\": true,\n";
+    std::string colours;
+    for (int b = 0; b < static_cast<int>(kBarCount); ++b) {
+        const BarColours& bc = l.colours[static_cast<size_t>(b)];
+        if (!bc.any()) continue;
+        std::string fields;
+        for (size_t i = 0; i < kBarPartCount; ++i) {
+            if (!bc.part[i].set) continue;
+            if (!fields.empty()) fields += ", ";
+            fields += bridge::json_quote(bar_part_id(static_cast<BarPart>(i))) + ": " + bridge::json_quote(colour_text(bc.part[i]));
+        }
+        if (!colours.empty()) colours += ", ";
+        colours += bridge::json_quote(bar_id(b)) + ": {" + fields + "}";
+    }
+    if (l.panel.set) colours += (colours.empty() ? "" : ", ") + std::string("\"panel\": ") + bridge::json_quote(colour_text(l.panel));
+    if (!colours.empty()) out += "  \"colours\": {" + colours + "},\n";
     if (body.empty())
         out += "  \"elements\": {}\n";
     else
@@ -196,6 +231,38 @@ LayoutRead layout_from_json(std::string_view text) {
             l.buffs_up = up->b;
         else
             r.notes.push_back("buffs_up is not true or false, left at false");
+    }
+    if (const json::Value* cv = root.get("colours")) {
+        if (!cv->is(json::Value::Type::Object)) {
+            r.notes.push_back("colours is not an object, skipped");
+        } else {
+            for (const auto& [key, val] : cv->obj) {
+                if (key == "panel") {
+                    read_colour(val, "colours.panel", &l.panel, r.notes);
+                    continue;
+                }
+                int bar = -1;
+                for (int b = 0; b < static_cast<int>(kBarCount); ++b)
+                    if (key == bar_id(b)) bar = b;
+                if (bar < 0) {
+                    r.notes.push_back("colours: unknown bar \"" + key + "\" skipped");
+                    continue;
+                }
+                if (!val.is(json::Value::Type::Object)) {
+                    r.notes.push_back("colours." + key + ": not an object, skipped");
+                    continue;
+                }
+                for (const auto& [pk, pv] : val.obj) {
+                    const std::optional<BarPart> part = find_bar_part(pk);
+                    if (!part) {
+                        r.notes.push_back("colours." + key + ": unknown part \"" + pk + "\" skipped");
+                        continue;
+                    }
+                    read_colour(pv, "colours." + key + "." + pk,
+                                &l.colours[static_cast<size_t>(bar)].part[static_cast<size_t>(*part)], r.notes);
+                }
+            }
+        }
     }
     r.layout = std::move(l);
     return r;
