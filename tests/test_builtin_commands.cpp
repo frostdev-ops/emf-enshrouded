@@ -965,3 +965,79 @@ TEST_CASE("builtin commands: with the game's names, items and give show them and
     CHECK(g_pickup_amounts == std::vector<uint32_t>{2, 1, 1});
     emf::core::set_game_text_for_tests(emf::core::LocaAccess{});
 }
+
+namespace {
+const std::string kWoodJa = "\xE4\xB8\xB8\xE5\xA4\xAA";  // 丸太
+const std::string kWoodEn = "Wood Logs";
+emf::core::LocaResult* ja_lookup(emf::core::LocaResult* out, void*, uint32_t tag) {
+    std::memset(out, 0, sizeof *out);
+    if (tag != g_wood_tag) {
+        out->error = 0x1F;
+        return out;
+    }
+    out->text = kWoodJa.data();
+    out->length = kWoodJa.size();
+    return out;
+}
+bool ja_slot_find(emf::core::LocaStringView* out, void*, uint32_t tag) {
+    if (tag != g_wood_tag) return false;
+    out->text = kWoodEn.data();
+    out->length = kWoodEn.size();
+    return true;
+}
+}  // namespace
+
+TEST_CASE("builtin commands: in the game's chat the names are the player's language; on EMF's console English for Japanese") {  // review: Important 2
+    BFixture f;
+    ItemsWorld iw;
+    uint8_t* wood = emf::core::item_data_ptr(iw.reg.reg, 0x11);
+    REQUIRE(wood);
+    uint8_t g[16];
+    for (int i = 0; i < 16; ++i) g[i] = static_cast<uint8_t>(0x60 + i);
+    std::memcpy(wood + 0x48, g, 16);
+    g_wood_tag = emf::fnv1a32(g, 16);
+    NamesPool pool;
+    const uint32_t ja = 11;
+    const uint64_t table = 0x7711, fallback = 0x7712;
+    std::memcpy(pool.mem + 0xD8, &ja, 4);
+    std::memcpy(pool.mem + 0x100, &table, 8);
+    std::memcpy(pool.mem + 0xB0, &fallback, 8);
+    emf::core::LocaAccess a;
+    a.pool = [&pool] { return pool.mem; };
+    a.lookup = &ja_lookup;
+    a.slot_find = &ja_slot_find;
+    emf::core::set_game_text_for_tests(std::move(a));
+    g_pickup_amounts.clear();
+    CommandSender admin;
+    admin.from_chat = true;
+    admin.account = 0xaa;
+    f.center.enqueue("give " + kWoodJa + " 2", GetTickCount64(), admin);  // typed in Japanese, in the chat
+    f.center.enqueue("give wood logs 1");                                   // the console
+    f.run(iw.w);
+    CHECK(bsaid("gave 2 x " + kWoodJa + " (Material_T1_Wood_Logs) to player"));
+    CHECK(bsaid("gave 1 x Wood Logs (Material_T1_Wood_Logs) to player"));
+    CHECK(g_pickup_amounts == std::vector<uint32_t>{2, 1});
+    emf::core::set_game_text_for_tests(emf::core::LocaAccess{});
+}
+
+TEST_CASE("builtin commands: stack's reply names the item as the game shows it") {
+    BFixture f;
+    ItemsWorld iw;
+    uint8_t* wood = emf::core::item_data_ptr(iw.reg.reg, 0x11);
+    REQUIRE(wood);
+    uint8_t g[16];
+    for (int i = 0; i < 16; ++i) g[i] = static_cast<uint8_t>(0x70 + i);
+    std::memcpy(wood + 0x48, g, 16);
+    g_wood_tag = emf::fnv1a32(g, 16);
+    NamesPool pool;
+    const uint64_t table = 0x7720;
+    std::memcpy(pool.mem + 0x100, &table, 8);
+    emf::core::LocaAccess a;
+    a.pool = [&pool] { return pool.mem; };
+    a.lookup = &names_lookup;
+    emf::core::set_game_text_for_tests(std::move(a));
+    f.center.enqueue("stack wood logs 500");
+    f.run(iw.w);
+    CHECK(bsaid("Wood Logs (Material_T1_Wood_Logs): stack"));
+    emf::core::set_game_text_for_tests(emf::core::LocaAccess{});
+}

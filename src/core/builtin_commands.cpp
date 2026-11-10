@@ -72,6 +72,13 @@ struct ItemList {
     std::vector<uint16_t> stack;  // max stack, in the same order
 };
 
+// A command typed in the game's chat: names in the player's language (the game's chat draws every script); on EMF's
+// own console the names its font can draw.
+bool from_game_chat() {
+    const CommandSender* s = current_sender();
+    return s && s->from_chat;
+}
+
 ItemList all_items(BuiltinContext& c, EmfWorld* w) {
     ItemList l;
     c.api->for_each_item(w, [](const EmfItemInfo* i, void* p) {
@@ -81,17 +88,18 @@ ItemList all_items(BuiltinContext& c, EmfWorld* w) {
     }, &l);
     if (c.api->item_name) {  // v29: the names the game shows (none on the dedicated server)
         char buf[256];
+        const uint32_t flags = from_game_chat() ? EMF_ITEM_NAME_GAME_TEXT : 0u;
         for (NamedItem& n : l.named)
-            if (c.api->item_name(w, n.id, 0, buf, sizeof buf)) n.shown = buf;
+            if (c.api->item_name(w, n.id, flags, buf, sizeof buf)) n.shown = buf;
     }
     return l;
 }
 
 // "Wood Logs (Material_T1_Wood_Logs)" when the game has a name for the item here, else the debug name.
-std::string item_label(const EmfApi* api, EmfWorld* w, uint32_t id, const char* debug_name) {
+std::string item_label(const EmfApi* api, EmfWorld* w, uint32_t id, const char* debug_name, bool game_chat) {
     char buf[256];
     const std::string debug = debug_name ? debug_name : "";
-    if (api->item_name && api->item_name(w, id, 0, buf, sizeof buf))
+    if (api->item_name && api->item_name(w, id, game_chat ? EMF_ITEM_NAME_GAME_TEXT : 0u, buf, sizeof buf))
         return debug.empty() ? std::string(buf) : std::string(buf) + " (" + debug + ")";
     return debug;
 }
@@ -537,7 +545,7 @@ void cmd_give(EmfWorld* w, int argc, const char* const* argv, void* u) {
     c.api->item_info(w, id, &info);
     const uint32_t player = c.player ? c.player() : 0;
     const uint32_t pickup = c.api->give_item(w, player, id, count);
-    command_reply_line(pickup ? fmt("gave %u x %s to player %u", count, item_label(c.api, w, id, info.name).c_str(), player)
+    command_reply_line(pickup ? fmt("gave %u x %s to player %u", count, item_label(c.api, w, id, info.name, from_game_chat()).c_str(), player)
                               : std::string("give failed (see the log)"));
 }
 
@@ -546,6 +554,7 @@ void cmd_give(EmfWorld* w, int argc, const char* const* argv, void* u) {
 struct LateItems {
     BuiltinContext* c;
     ReplyFn reply;
+    bool game_chat = false;  // typed in the game's chat: the answer names the item in the player's language
 };
 
 void items_done(EmfWorld* w, uint32_t entity, uint32_t item, uint32_t requested, uint32_t n, void* user, bool take) {
@@ -556,7 +565,7 @@ void items_done(EmfWorld* w, uint32_t entity, uint32_t item, uint32_t requested,
     const bool named = late->c->api->item_info(w, item, &info) && info.name[0];
     const std::string why = InventoryService::delivering_reason();
     late->reply(fmt(take ? "take %u x %s from entity %u: %u taken%s" : "put %u x %s into entity %u: %u added%s",
-                    requested, named ? item_label(late->c->api, w, item, info.name).c_str() : fmt("0x%08x", item).c_str(), entity, n,
+                    requested, named ? item_label(late->c->api, w, item, info.name, late->game_chat).c_str() : fmt("0x%08x", item).c_str(), entity, n,
                     why.empty() ? "" : (" (" + why + ")").c_str()));
 }
 void put_done(EmfWorld* w, uint32_t entity, uint32_t item, uint32_t requested, uint32_t added, void* user) {
@@ -584,7 +593,7 @@ void cmd_items(EmfWorld* w, int argc, const char* const* argv, void* u, bool tak
         return;
     }
     if (!entity) entity = c.player ? c.player() : 0;
-    auto* late = new LateItems{&c, current_reply()};  // freed by the result callback, or below when refused
+    auto* late = new LateItems{&c, current_reply(), from_game_chat()};  // freed by the result callback, or below when refused
     bool queued = false;
     if (!take && numbers.size() < 3) {
         queued = c.api->put_items(w, entity, id, count, put_done, late);
@@ -1012,10 +1021,10 @@ void cmd_stack(EmfWorld* w, int argc, const char* const* argv, void* u) {
     c.api->item_info(w, id, &info);
     const unsigned before = info.max_stack;
     if (!c.api->set_item_max_stack || !c.api->set_item_max_stack(id, static_cast<uint16_t>(max))) {
-        command_reply_line(fmt("%s: could not change the stack size (see the log)", info.name));
+        command_reply_line(fmt("%s: could not change the stack size (see the log)", item_label(c.api, w, id, info.name, from_game_chat()).c_str()));
         return;
     }
-    command_reply_line(fmt("%s: stack %u -> %u (until the game restarts)", info.name, before, max));
+    command_reply_line(fmt("%s: stack %u -> %u (until the game restarts)", item_label(c.api, w, id, info.name, from_game_chat()).c_str(), before, max));
 }
 
 void cmd_entities(EmfWorld* w, int, const char* const*, void* u) {

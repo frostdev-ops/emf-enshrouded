@@ -6,6 +6,7 @@
 
 #include "api.h"
 #include "common/seh.h"
+#include "core/game_text.h"
 #include "core/menu_start.h"
 
 namespace emf::core {
@@ -182,6 +183,11 @@ using PregameStateFn = uint64_t (*)(void*, uint64_t, uint64_t, void*, uint64_t, 
 PregameStateFn o_pregame_state = nullptr;
 
 uint64_t hk_pregame_state(void* pregame, uint64_t state, uint64_t phase, void* cmd, uint64_t a5, uint64_t a6) {
+    if (pregame && !noted_game_app()) {  // the game's application object, for its text (item names)
+        uintptr_t app = 0;
+        if (seh_read(static_cast<const uint8_t*>(pregame) + menu_layout::kPregameGameApp, &app, sizeof app) && app)
+            note_game_app(app);
+    }
     try {
         if (g_recorder) g_recorder->on_pregame(pregame, static_cast<uint8_t>(state & 0xFF), static_cast<uint8_t>(phase & 0xFF));
     } catch (...) {

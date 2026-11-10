@@ -2,7 +2,9 @@
 #include <doctest.h>
 
 #include <cstring>
+#include <array>
 #include <map>
+#include <vector>
 #include <string>
 
 #include "core/game_text.h"
@@ -185,4 +187,25 @@ TEST_CASE("GameText: English from the fallback slot, or from the active table wh
     g_english.clear();  // the fallback slot is empty while English is active
     CHECK(e.english(0x54F69AC6u) == std::optional<std::string>("Wood Logs"));
     CHECK(g_slot_calls == 0);
+}
+
+TEST_CASE("install_game_text: the pool comes from the game app the pregame hook noted, without the debug bridge's menu hooks") {  // review: Critical 1
+    std::vector<uint8_t> app(0x35300, 0);
+    FakePool pool(3);
+    make(&pool);  // the fake texts
+    uint8_t* pp = pool.mem;
+    std::memcpy(app.data() + 0x352B8, &pp, sizeof pp);
+    note_game_app(reinterpret_cast<uintptr_t>(app.data()));
+    std::array<emf::Resolved, emf::kSigCount> sigs{};
+    sigs[static_cast<size_t>(emf::Sig::LocaPoolLookup)] = emf::Resolved{reinterpret_cast<uintptr_t>(&fake_lookup), 1, true};
+    std::string why;
+    CHECK(install_game_text(sigs, true, emf::known_build_index(1287369u), &why));
+    CHECK(game_text().language() == 3);
+    CHECK(game_text().text(0x54F69AC6u) == std::optional<std::string>("Wood Logs"));
+    note_game_app(0);
+    CHECK(game_text().language() == 0);  // no game app known (yet): nothing
+    sigs[static_cast<size_t>(emf::Sig::LocaPoolLookup)] = emf::Resolved{};
+    CHECK_FALSE(install_game_text(sigs, true, emf::known_build_index(1287369u), &why));
+    CHECK(why.find("LocaPoolLookup") != std::string::npos);
+    set_game_text_for_tests(LocaAccess{});
 }

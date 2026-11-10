@@ -74,9 +74,15 @@ private:
 };
 
 // The core's instance: empty until install_game_text found the pool's place and the lookup (the game exe of a known
-// build); then the pool is read from MenuStart's gameApp each time.
+// build); then the pool is read from the noted gameApp (or MenuStart's) each time.
 const GameText& game_text();
-void install_game_text(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index);
+// True when the game's text can be read on this build; *why says what is missing otherwise.
+bool install_game_text(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index,
+                       std::string* why);
+// The game's application object (gameApp), as the pregame hook sees it (every player of the game exe, debug bridge
+// or not); 0 = not seen yet. The pool is read from it.
+void note_game_app(uintptr_t app);
+uintptr_t noted_game_app();
 void set_game_text_for_tests(LocaAccess access);
 
 }  // namespace emf::core

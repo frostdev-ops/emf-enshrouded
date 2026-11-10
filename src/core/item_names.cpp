@@ -1,5 +1,10 @@
 #include "core/item_names.h"
 
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+
 #include <algorithm>
 #include <cctype>
 
@@ -11,7 +16,27 @@ char low(char c) { return static_cast<char>(std::tolower(static_cast<unsigned ch
 bool is_digit(char c) { return c >= '0' && c <= '9'; }
 bool is_alpha(char c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
 
+// Lower case for UTF-8 beyond ASCII (Cyrillic, accented Latin, Greek: the names the game shows), through Windows'
+// invariant mapping; the text as it was when it is not UTF-8.
+std::string lower_unicode(std::string_view s) {
+    const int wn = MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), nullptr, 0);
+    if (wn <= 0) return std::string(s);
+    std::wstring w(static_cast<size_t>(wn), L'\0');
+    MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, s.data(), static_cast<int>(s.size()), w.data(), wn);
+    const int ln = LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, w.data(), wn, nullptr, 0, nullptr, nullptr, 0);
+    if (ln <= 0) return std::string(s);
+    std::wstring l(static_cast<size_t>(ln), L'\0');
+    LCMapStringEx(LOCALE_NAME_INVARIANT, LCMAP_LOWERCASE, w.data(), wn, l.data(), ln, nullptr, nullptr, 0);
+    const int un = WideCharToMultiByte(CP_UTF8, 0, l.data(), ln, nullptr, 0, nullptr, nullptr);
+    if (un <= 0) return std::string(s);
+    std::string out(static_cast<size_t>(un), '\0');
+    WideCharToMultiByte(CP_UTF8, 0, l.data(), ln, out.data(), un, nullptr, nullptr);
+    return out;
+}
+
 std::string lower(std::string_view s) {
+    for (char c : s)
+        if (static_cast<unsigned char>(c) >= 0x80) return lower_unicode(s);
     std::string out(s);
     for (char& c : out) c = low(c);
     return out;

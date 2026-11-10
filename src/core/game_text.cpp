@@ -2,6 +2,7 @@
 
 #include <windows.h>
 
+#include <atomic>
 #include <cstring>
 
 #include "common/seh.h"
@@ -220,23 +221,41 @@ const GameText& game_text() { return g_text; }
 
 void set_game_text_for_tests(LocaAccess access) { g_text = GameText(std::move(access)); }
 
-void install_game_text(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index) {
+namespace {
+std::atomic<uintptr_t> g_app{0};
+}  // namespace
+
+void note_game_app(uintptr_t app) { g_app.store(app, std::memory_order_release); }
+uintptr_t noted_game_app() { return g_app.load(std::memory_order_acquire); }
+
+bool install_game_text(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index, std::string* why) {
     const Resolved& l = sigs[static_cast<size_t>(Sig::LocaPoolLookup)];
     const auto layout = menu_app_layout(build_index);
-    if (!is_usable(l, known_build) || !layout || layout->loca_pool == 0) return;
+    if (!is_usable(l, known_build)) {
+        if (why) *why = "the LocaPoolLookup signature is not usable on this game build";
+        return false;
+    }
+    if (!layout || layout->loca_pool == 0) {
+        if (why) *why = "EMF does not know where this game build keeps its text pool";
+        return false;
+    }
     LocaAccess a;
     a.lookup = reinterpret_cast<LocaLookupFn>(l.addr);
     const Resolved& f = sigs[static_cast<size_t>(Sig::LocaSlotFind)];
     if (is_usable(f, known_build)) a.slot_find = reinterpret_cast<LocaSlotFindFn>(f.addr);
     const uint32_t off = layout->loca_pool;
     a.pool = [off]() -> uint8_t* {
-        MenuStart* m = menu_start();
-        const uintptr_t app = m ? m->game_app() : 0;
+        uintptr_t app = noted_game_app();  // the pregame hook (every player of the game exe)
+        if (!app) {
+            MenuStart* m = menu_start();  // the debug bridge's menu hooks, when they are on
+            app = m ? m->game_app() : 0;
+        }
         if (!app) return nullptr;
         uint8_t* pool = nullptr;
         return seh_read(reinterpret_cast<const void*>(app + off), &pool, sizeof pool) ? pool : nullptr;
     };
     g_text = GameText(std::move(a));
+    return true;
 }
 
 }  // namespace emf::core

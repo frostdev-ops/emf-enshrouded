@@ -441,3 +441,16 @@ TEST_CASE("search_items: shown-name matches come after the debug-name ones") {
     CHECK(found[0] == 2);  // its debug name holds the word
     CHECK(found[1] == 1);  // only its shown name does
 }
+
+TEST_CASE("match_item: shown names fold case beyond ASCII (Cyrillic, accented Latin)") {  // review: Important 3
+    const std::vector<NamedItem> items = {{1, "Material_T1_Wood_Logs", "\xD0\x91\xD1\x80\xD0\xB5\xD0\xB2\xD0\xBD\xD0\xB0"},  // Бревна
+                                          {2, "Weapon_Sword_Bronze", "\xC3\x89p\xC3\xA9" "e en bronze"}};                   // Épée en bronze
+    auto m = match_item(items, "\xD0\xB1\xD1\x80\xD0\xB5\xD0\xB2\xD0\xBD\xD0\xB0");  // бревна
+    CHECK(m.id == 1);
+    CHECK(m.how == ItemHow::Exact);
+    m = match_item(items, "\xC3\xA9p\xC3\xA9" "e");  // épée: a word of the shown name
+    CHECK(m.id == 2);
+    m = match_item(items, "\xC3\x89P\xC3\x89" "E EN BRONZE");  // ÉPÉE EN BRONZE
+    CHECK(m.id == 2);
+    CHECK(m.how == ItemHow::Exact);
+}

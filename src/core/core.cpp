@@ -935,8 +935,6 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         if (emf::core::install_menu_start(g_state->sigs, known, build, std::move(menu), &g_load_world_off)) {
             emf::logf("load_world: on (main-menu hooks installed; the guard acts only during a load_world); join: %s",
                       emf::core::menu_start()->can_join() ? "on" : "off (PostJoinPending not usable on this build)");
-            // the game's text (item names in the player's language) reads the LocaPool through MenuStart's gameApp
-            emf::core::install_game_text(g_state->sigs, known, build);
             // [debug] local_only=1: tests that join a server at boot (+connect) post no load_world, so the guard is on for
             // every start of this process; [debug] local_only_name: the LOCAL character must have this name too
             const std::wstring ini = dir + L"\\emf\\emf_core.ini";
@@ -979,6 +977,13 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             emf::logf("save info: on (the main menu's slot names and levels go to save-info.json)");
         else
             emf::logf("save info: off (%s)", why.c_str());
+        // the game's item names in the player's language: its text pool, read through the gameApp the pregame hook (just
+        // installed with save info) notes; also without the debug bridge
+        std::string text_why;
+        if (emf::core::install_game_text(g_state->sigs, known, build, &text_why))
+            emf::logf("item names: on (the game's own text, in the player's language)");
+        else
+            emf::logf("item names: off (%s); debug names are used", text_why.c_str());
     }
     const auto& iter_begin = g_state->sigs[static_cast<size_t>(emf::Sig::IterBegin)];
     if (emf::is_usable(iter_begin, known)) {
