@@ -4,6 +4,7 @@
 #include <atomic>
 #include <bit>
 #include <cmath>
+#include <cstring>
 
 #include "core/hud_editor/layout.h"
 
@@ -17,6 +18,15 @@ struct BarLive {
     std::atomic<uint64_t> rect_a{0}, rect_b{0};  // x,y and w,h as float pairs
 };
 BarLive g_bar_live[kBarCount];
+
+// The game's colour block of each bar (one UiColour per atomic: the page and the log read them on another thread; a torn
+// block between two fields is harmless there).
+struct BarGame {
+    std::atomic<bool> seen{false};
+    std::atomic<uint64_t> field[6]{};
+};
+BarGame g_bar_game[kBarCount];
+std::atomic<uint64_t> g_recoloured{0}, g_panel_writes{0}, g_panel_restores{0};
 
 uint64_t pack2(float a, float b) { return std::bit_cast<uint64_t>(std::array<float, 2>{a, b}); }
 std::array<float, 2> unpack2(uint64_t v) { return std::bit_cast<std::array<float, 2>>(v); }
@@ -92,7 +102,7 @@ void bars_vitals_open(uint8_t* node) {
 
 void bars_vitals_close() { t_vitals = nullptr; }
 
-BarCall bar_before(void* data, const HudSnapshot* snap, UiSpace ui) {
+BarCall bar_before(void* data, const void* style, const HudSnapshot* snap, UiSpace ui) {
     BarCall c;
     if (!t_vitals) return c;
     const uintptr_t d = reinterpret_cast<uintptr_t>(data);
@@ -101,6 +111,18 @@ BarCall bar_before(void* data, const HudSnapshot* snap, UiSpace ui) {
         t_base = d - kBarDataFirst;  // the first call is always health's
     }
     c.bar = bar_index(d, t_base);
+    if (c.bar >= 0 && style) {
+        StyleBlock game;
+        std::memcpy(&game, style, sizeof game);  // the caller guards the read
+        BarGame& g = g_bar_game[static_cast<size_t>(c.bar)];
+        for (size_t f = 0; f < game.size(); ++f) g.field[f].store(std::bit_cast<uint64_t>(game[f]), std::memory_order_relaxed);
+        g.seen.store(true, std::memory_order_relaxed);
+        if (snap && snap->active && snap->colours[static_cast<size_t>(c.bar)].any()) {
+            c.style = recoloured(game, snap->colours[static_cast<size_t>(c.bar)]);
+            c.recolour = true;
+            g_recoloured.fetch_add(1, std::memory_order_relaxed);
+        }
+    }
     if (c.bar < 0 || !snap || !snap->active) return c;
     std::array<bool, kBarCount> hidden{};
     for (int b = 0; b < static_cast<int>(kBarCount); ++b)
@@ -135,10 +157,12 @@ void bar_after(const BarCall& c, void* result, uint64_t now_ms) {
     l.seen.store(true, std::memory_order_relaxed);
 }
 
+void* bar_style(BarCall& c, void* style) { return c.recolour ? static_cast<void*>(c.style.data()) : style; }
+
 void* bar_call_path(void* out, void* data, void* style, BarFn original, const HudSnapshot* snap, UiSpace ui,
                     uint64_t now_ms) {
-    const BarCall c = bar_before(data, snap, ui);
-    void* r = original(out, data, style);
+    BarCall c = bar_before(data, style, snap, ui);
+    void* r = original(out, data, bar_style(c, style));
     bar_after(c, r, now_ms);
     return r;
 }
@@ -157,6 +181,23 @@ LiveInfo bar_live(int bar) {
     return li;
 }
 
+std::optional<StyleBlock> bar_game_colours(int bar) {
+    if (bar < 0 || bar >= static_cast<int>(kBarCount)) return std::nullopt;
+    const BarGame& g = g_bar_game[static_cast<size_t>(bar)];
+    if (!g.seen.load(std::memory_order_relaxed)) return std::nullopt;
+    StyleBlock b;
+    for (size_t f = 0; f < b.size(); ++f) b[f] = std::bit_cast<UiColour>(g.field[f].load(std::memory_order_relaxed));
+    return b;
+}
+
+ColourStats colour_stats() {
+    ColourStats s;
+    s.recoloured = g_recoloured.load(std::memory_order_relaxed);
+    s.panel_writes = g_panel_writes.load(std::memory_order_relaxed);
+    s.panel_restores = g_panel_restores.load(std::memory_order_relaxed);
+    return s;
+}
+
 void bars_reset_for_tests() {
     t_vitals = nullptr;
     t_calls = 0;
@@ -169,6 +210,13 @@ void bars_reset_for_tests() {
         l.rect_a = 0;
         l.rect_b = 0;
     }
+    for (auto& g : g_bar_game) {
+        g.seen = false;
+        for (auto& f : g.field) f = 0;
+    }
+    g_recoloured = 0;
+    g_panel_writes = 0;
+    g_panel_restores = 0;
 }
 
 }  // namespace emf::core::hud

@@ -177,9 +177,9 @@ void guarded_after_close(const ScalePush* push) {
     }
 }
 
-void guarded_bar_before(void* data, const HudSnapshot* snap, BarCall* c) {
+void guarded_bar_before(void* data, const void* style, const HudSnapshot* snap, BarCall* c) {
     __try {
-        *c = bar_before(data, snap, hud_ui_space());
+        *c = bar_before(data, style, snap, hud_ui_space());
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         fault(GetExceptionCode());
     }
@@ -195,8 +195,8 @@ void guarded_bar_after(const BarCall* c, void* result) {
 
 void* hk_bar(void* out, void* data, void* style) {
     BarCall c;
-    if (is_on()) guarded_bar_before(data, current_snapshot(), &c);
-    void* r = g_o_bar(out, data, style);
+    if (is_on()) guarded_bar_before(data, style, current_snapshot(), &c);
+    void* r = g_o_bar(out, data, bar_style(c, style));
     if (c.bar >= 0 || c.push.pushed) guarded_bar_after(&c, r);
     return r;
 }

@@ -687,3 +687,112 @@ TEST_CASE("bar_live: a bar not drawn in the last frame stays seen but has no are
     CHECK(bar_live(kBarMana).rect[2] == doctest::Approx(260));
     close(r.vitals);
 }
+
+// ---- bar colours (EMF's copy of the game's colour block) ----
+namespace {
+
+StyleBlock g_style_seen{};
+const void* g_style_ptr = nullptr;
+std::vector<const void*> g_style_ptrs;
+void* colour_bar(void* out, void* data, void* style) {
+    g_style_ptr = style;
+    g_style_ptrs.push_back(style);
+    if (style) std::memcpy(&g_style_seen, style, sizeof g_style_seen);
+    return fake_bar(out, data, style);
+}
+StyleBlock test_block(uint32_t fill_rgba) {
+    StyleBlock b{};
+    b[kFrame] = {rgba_to_game(0x10101080), 1.0f};
+    b[kRange] = {rgba_to_game(0x202020C0), 1.0f};
+    b[kFill] = {rgba_to_game(fill_rgba), 1.0f};
+    b[kFillEnd] = {rgba_to_game(0xA0F0B0E0), 1.2f};
+    b[kDamage] = {rgba_to_game(0xD04040FF), 1.0f};
+    b[kHeal] = {rgba_to_game(0xF0F0A0FF), 1.0f};
+    return b;
+}
+void call_bar_style(int k, StyleBlock* style, const HudSnapshot* snap, float out[4]) {
+    bar_call_path(out, bar_data(k), style, &colour_bar, snap, UiSpace{2084.2f, 1080.0f, true}, 5);
+}
+Colour red() { return *parse_colour("#ff0000").colour; }
+
+}  // namespace
+
+TEST_CASE("bar colours: a bar with colours gets EMF's copy; the game's block is unchanged") {
+    HudSnapshot s = active();
+    s.colours[kBarHealth].part[static_cast<size_t>(BarPart::Fill)] = red();
+    BarRig r(s);
+    StyleBlock game = test_block(0x4FD17CFF);
+    const StyleBlock before = game;
+    open(r.vitals, "vitalBars");
+    float o[4];
+    call_bar_style(0, &game, r.snap(), o);
+    close(r.vitals);
+    CHECK(g_style_ptr != &game);
+    CHECK(g_style_seen[kFill].value == rgba_to_game(0xFF0000FF));
+    CHECK(std::memcmp(&game, &before, sizeof game) == 0);
+    CHECK(colour_stats().recoloured == 1);
+}
+
+TEST_CASE("bar colours: without colours the game's own block is passed") {
+    BarRig r(active());
+    StyleBlock game = test_block(0x4FD17CFF);
+    open(r.vitals, "vitalBars");
+    float o[4];
+    call_bar_style(0, &game, r.snap(), o);
+    close(r.vitals);
+    CHECK(g_style_ptr == &game);
+    CHECK(colour_stats().recoloured == 0);
+}
+
+TEST_CASE("bar colours: outside vitalBars or with the editor off, the game's block") {
+    HudSnapshot s = active();
+    s.colours[kBarHealth].part[static_cast<size_t>(BarPart::Fill)] = red();
+    BarRig r(s);
+    StyleBlock game = test_block(0x4FD17CFF);
+    float o[4];
+    call_bar_style(0, &game, r.snap(), o);  // an enemy's bar, outside vitalBars
+    CHECK(g_style_ptr == &game);
+    s.active = false;
+    r.box.publish(s, 1);
+    open(r.vitals, "vitalBars");
+    call_bar_style(0, &game, r.snap(), o);
+    close(r.vitals);
+    CHECK(g_style_ptr == &game);
+}
+
+TEST_CASE("bar colours follow the bar, not its slot") {  // Review Focus 1
+    HudSnapshot s = active();
+    s.order = {1, 0, 2};
+    s.colours[kBarMana].part[static_cast<size_t>(BarPart::Fill)] = red();
+    BarRig r(s);
+    StyleBlock health = test_block(0x4FD17CFF), mana = test_block(0x3060F0FF);
+    g_style_ptrs.clear();
+    float o[4];
+    for (int frame = 0; frame < 2; ++frame) {  // the second frame has last frame's rects: the order applies
+        open(r.vitals, "vitalBars");
+        call_bar_style(0, &health, r.snap(), o);
+        call_bar_style(1, &mana, r.snap(), o);
+        close(r.vitals);
+    }
+    REQUIRE(g_style_ptrs.size() == 4);
+    CHECK(g_style_ptrs[2] == &health);
+    CHECK(g_style_ptrs[3] != &mana);
+    CHECK(g_style_seen[kFill].value == rgba_to_game(0xFF0000FF));
+}
+
+TEST_CASE("the game's colours are recorded per bar; stamina not seen stays empty") {
+    BarRig r(active());
+    StyleBlock health = test_block(0x4FD17CFF), mana = test_block(0x3060F0FF);
+    CHECK_FALSE(bar_game_colours(kBarHealth).has_value());
+    open(r.vitals, "vitalBars");
+    float o[4];
+    call_bar_style(0, &health, r.snap(), o);
+    call_bar_style(1, &mana, r.snap(), o);
+    close(r.vitals);
+    REQUIRE(bar_game_colours(kBarHealth).has_value());
+    REQUIRE(bar_game_colours(kBarMana).has_value());
+    const StyleBlock seen = *bar_game_colours(kBarMana);
+    CHECK(std::memcmp(&seen, &mana, sizeof mana) == 0);
+    CHECK_FALSE(bar_game_colours(kBarStamina).has_value());
+    CHECK_FALSE(bar_game_colours(3).has_value());
+}

@@ -4,7 +4,9 @@
 // grow upward from the food icons' bottom edge while it stays on screen. Pure functions; no Windows headers.
 #include <array>
 #include <cstdint>
+#include <optional>
 
+#include "core/hud_editor/colours.h"
 #include "core/hud_editor/elements.h"
 #include "core/hud_editor/hook.h"
 #include "core/hud_editor/scale.h"
@@ -44,10 +46,15 @@ struct BarCall {
     int bar = -1;          // the bar this call draws (inside vitalBars only), -1: the original runs untouched
     float dx = 0, dy = 0;  // the offset applied (layer units): only when the translation was pushed
     ScalePush push;
+    bool recolour = false;  // the original gets `style` (EMF's copy with the player's colours), not the game's block
+    StyleBlock style{};
 };
-// Before the original: which bar (the first call in vitalBars sets the base), its offset (the layout's, plus the order's
-// from last frame's rects, plus kHideShift when hidden) and the pushed translation.
-BarCall bar_before(void* data, const HudSnapshot* snap, UiSpace ui);
+// Before the original: which bar (the first call in vitalBars sets the base), the game's colour block recorded (read from
+// `style`, the game's) and EMF's copy when the bar has colours, its offset (the layout's, plus the order's from last
+// frame's rects, plus kHideShift when hidden) and the pushed translation.
+BarCall bar_before(void* data, const void* style, const HudSnapshot* snap, UiSpace ui);
+// The style the original gets: EMF's copy in `c` when it recolours, else the game's own.
+void* bar_style(BarCall& c, void* style);
 // After the original: pops, records the game's rect for the next frame's order, shifts the returned rect by the offset
 // (the bar's panel piece follows) and records it as the bar's live rect.
 void bar_after(const BarCall& c, void* result, uint64_t now_ms);
@@ -58,6 +65,9 @@ void* bar_call_path(void* out, void* data, void* style, BarFn original, const Hu
 void bars_vitals_open(uint8_t* node);
 void bars_vitals_close();
 LiveInfo bar_live(int bar);
-void bars_reset_for_tests();  // this thread's state and the live info
+// The game's own colour block of a bar, as last drawn inside vitalBars; empty until then (stamina while full).
+std::optional<StyleBlock> bar_game_colours(int bar);
+ColourStats colour_stats();
+void bars_reset_for_tests();  // this thread's state, the live info, the game's colours and the counters
 
 }  // namespace emf::core::hud

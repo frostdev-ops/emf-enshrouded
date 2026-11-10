@@ -28,6 +28,7 @@
 #include "profile_commands.h"
 #include "hud_commands.h"
 #include "hud_editor/editor.h"
+#include "hud_editor/bars.h"
 #include "hud_editor/gate.h"
 #include "hud_editor/hook.h"
 #include "emf/keys.hpp"
@@ -1560,6 +1561,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         hd.live = hud_live;
         hd.scale_state = hud_scale_state;
         hd.bars_ready = hud_bars_hooked;
+        hd.game_colours = bar_game_colours;
+        hd.colour_stats = colour_stats;
         hd.key_down = [](uint32_t vk) { return emf::keys::down(vk); };
         hd.toggle_page = [] { emf::core::overlay_toggle_settings_page(emf::core::kPageHud); };
         hd.run = emf::core::profile_worker_runner();
