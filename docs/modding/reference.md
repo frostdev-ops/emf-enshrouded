@@ -719,7 +719,7 @@ if (!api->item_name(w, item_id, 0, name, sizeof name)) { /* no name here: use th
 
 | C++ (`emf.hpp`) | C | What |
 |---|---|---|
-| `emf::shown_item_name(w, item[, game_text])` | `item_name(world, item_id, flags, buf, size)` | the item's name, UTF-8 with the game's markup removed; the full length, 0 when there is none (the dedicated server, before the game's text is known, an item without a name, an unknown item). flags 0: for EMF's screens (windows, wheels, HUD lines, the console): English where they cannot draw the language's script (Japanese, Korean, Chinese, Thai); `EMF_ITEM_NAME_GAME_TEXT`: the player's language always, for the game's own chat. Any thread but the render thread. |
+| `emf::shown_item_name(w, item[, game_text])` | `item_name(world, item_id, flags, buf, size)` | the item's name, UTF-8 with the game's markup removed; the full length, 0 when there is none (the dedicated server, before the game's text is known, an item without a name, an unknown item). flags 0: for EMF's screens (windows, wheels, HUD lines, the console): the English name where they cannot draw it (Japanese, Korean, Chinese and Thai until EMF found a font for them: Windows' own or the player's Noto file, README_EMF.md; any name with a character EMF's fonts lack); `EMF_ITEM_NAME_GAME_TEXT`: the player's language always, for the game's own chat. Any thread but the render thread. |
 | `emf::game_language()` | `game_language(code_out, size)` | the `keen::LanguageId` the game shows text in (1 En_Us, 3 De_De, 11 Ja_Jp, ...; a language without a table reports En_Us), 0 on the dedicated server; `code_out` gets `"en_us"`, `"de_de"`, ... |
 
 EMF copies the text at once and checks that the game's table did not change during the copy (a language change in the

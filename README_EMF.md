@@ -225,6 +225,26 @@ in `<game>\emf\fonts\` and set `font=file:<its file name>`; use only fonts from 
 missing or is not a font EMF can read is skipped with a line in the log: then the bundled one, then Consolas, then the
 console's built-in font.
 
+**Item names in Japanese, Korean, Chinese and Thai.** EMF's own fonts have no characters for these scripts, and EMF
+does not ship any (they are big). Usually you need to do nothing: EMF uses the font Windows 10 and 11 already have
+for your game's language (Yu Gothic, Malgun Gothic, Microsoft YaHei, Microsoft JhengHei or Leelawadee UI), and adds
+only the characters your item names use. If your Windows lacks it, or you prefer the Noto look, get the free font
+(SIL Open Font License) for your language from Google Fonts and put one file into `<game>\emf\fonts\`:
+
+| Game language | Download (free) | The file to put in `emf\fonts\` |
+|---|---|---|
+| Japanese | https://fonts.google.com/noto/specimen/Noto+Sans+JP | `NotoSansJP-Regular.ttf` |
+| Korean | https://fonts.google.com/noto/specimen/Noto+Sans+KR | `NotoSansKR-Regular.ttf` |
+| Chinese (Simplified) | https://fonts.google.com/noto/specimen/Noto+Sans+SC | `NotoSansSC-Regular.ttf` |
+| Chinese (Traditional) | https://fonts.google.com/noto/specimen/Noto+Sans+TC | `NotoSansTC-Regular.ttf` |
+| Thai | https://fonts.google.com/noto/specimen/Noto+Sans+Thai | `NotoSansThai-Regular.ttf` |
+
+On the page, choose **Get font**, then **Download all**; the file is in the zip's `static` folder. Then start the game
+again: nothing to switch on. `emf\emf_core.log` says which font EMF uses ("item names: ja_jp on EMF's screens with
+..."), or which file to add. Until a font is found, those names show in English on EMF's screens (the console, HUD
+lines, wheels and mod windows); the game's chat shows every language by itself. The same goes for any name EMF's fonts
+cannot draw: it shows in English, never as boxes.
+
 **HDR.** With the game's HDR on, EMF does not convert its colours yet: the screen reads them as HDR values, so
 bright ones (the warm white text, channel values above about 150) look very bright. A darker `colour=` (for example
 `#969690`) tones the text down.
@@ -349,7 +369,7 @@ end the game; use `commands.txt` then.)
 | `saves.backup [label]` | backs up every save file now, Steam Cloud and Local, into `%LOCALAPPDATA%\EMF\save-backups` ([docs/saves.md](docs/saves.md)); only at the main menu: while a world runs it says why not (the game writes its saves every 30 seconds) |
 | `saves.list` | the save backups, newest first, with what each holds and where they are; restoring needs the game closed (EMF.exe's Saves tab, or by hand: [docs/saves.md](docs/saves.md)) |
 | `items [words]` | the game's items with the names the game shows (in your language) and their debug names, id and stack size, best match first (e.g. `items wood log`) |
-| `give <item name> [count]` | drops items 1 m above you; the game collects them (e.g. `give wood logs 3`, the name the game shows in your language (`give holzscheite 3` in German), or `give Material_T1_Wood_Logs 3`: item names take spaces, any case, words in any order and parts of words; several matches are listed, see docs/modding/reference.md). On EMF's own screens, Japanese, Korean, Chinese and Thai names show in English (EMF's font cannot draw those scripts) |
+| `give <item name> [count]` | drops items 1 m above you; the game collects them (e.g. `give wood logs 3`, the name the game shows in your language (`give holzscheite 3` in German), or `give Material_T1_Wood_Logs 3`: item names take spaces, any case, words in any order and parts of words; several matches are listed, see docs/modding/reference.md). Japanese, Korean, Chinese and Thai names on EMF's own screens: see "Item names in Japanese, Korean, Chinese and Thai" above |
 | `put <item name> [count] [entity] [level] [rarity 0-4]` | puts items straight into an inventory, yours by default (e.g. `put Weapon_T1_1H_SwordEpic_01`, `put Material_T1_Wood_Logs 2 1025` for a villager, `put Weapon_T1_1H_SwordEpic_01 1 1 10 3` for a level-10 Epic sword; the game may cap the level an item can have); the reply comes one tick later with how many fitted, and why when fewer did (`0 added (entity 77 has no inventory ...)`, `3 added (only 3 of 5 fit: no room for the rest)`) |
 | `take <item name> [count] [entity]` | takes items out of an inventory, yours by default: all or nothing (`take Material_T1_Wood_Logs 5`; when fewer are there nothing is taken and the reply says how many were missing). It searches every inventory of the entity, **equipped gear included**, and a taken gear item is gone for good (its level and perks with it) |
 | `spawn <template guid> [count 1-20] [at <x> <y> <z>]` | spawns templates 2 m from you, or at a place in metres (a dedicated server's console has no "you") (GUIDs from `export/template_guids.csv`) |
