@@ -706,6 +706,25 @@ chat name, "" where players' chat is off).
   first run); a later first call gets joined and left only (logged).
 - The player list is read at most 4 times a second and only while a mod watches.
 
+## v29: item names and the game's language
+
+The names the game shows for items ("Wood Logs", "Holzscheite" in German), from the game's own text tables, in the
+language the player plays in. Only the game exe has text: on the dedicated server both answer nothing, so use the debug
+name there (and send item ids over mod messages for each player's game to name in its own language).
+
+```c
+char name[128];
+if (!api->item_name(w, item_id, 0, name, sizeof name)) { /* no name here: use the debug name (item_info) */ }
+```
+
+| C++ (`emf.hpp`) | C | What |
+|---|---|---|
+| `emf::shown_item_name(w, item[, game_text])` | `item_name(world, item_id, flags, buf, size)` | the item's name, UTF-8 with the game's markup removed; the full length, 0 when there is none (the dedicated server, before the game's text is known, an item without a name, an unknown item). flags 0: for EMF's screens (windows, wheels, HUD lines, the console): English where they cannot draw the language's script (Japanese, Korean, Chinese, Thai); `EMF_ITEM_NAME_GAME_TEXT`: the player's language always, for the game's own chat. Any thread but the render thread. |
+| `emf::game_language()` | `game_language(code_out, size)` | the `keen::LanguageId` the game shows text in (1 En_Us, 3 De_De, 11 Ja_Jp, ...; a language without a table reports En_Us), 0 on the dedicated server; `code_out` gets `"en_us"`, `"de_de"`, ... |
+
+EMF copies the text at once and checks that the game's table did not change during the copy (a language change in the
+settings frees the old one), so a name is never half old, half new; the names are cached per language.
+
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
 
 ## SDK headers (header-only C++, no ABI)
@@ -741,8 +760,11 @@ running world's settings, [world_settings.md](world_settings.md)). Commands go i
 console window (`[console] window=1` in `emf\emf_core.ini`), or `<game>\emf\commands.txt` (one per line; EMF runs the
 file about once a second). Replies are `[cmd]` lines in the log.
 
-**Item names** in `give`, `put`, `take` and `stack` are the game's debug names (`Material_T1_Wood_Logs`), typed the
-easy way: any case, spaces instead of `_`, words in any order, a part of a word is enough (`give wood logs 20`, `give
+**Item names** in `give`, `put`, `take` and `stack` are the names the game shows, in the language you play in (`give wood
+logs 20`, `give holzscheite 20` in German; the replies show them too: "gave 20 x Wood Logs (Material_T1_Wood_Logs)"),
+or the game's debug names (`Material_T1_Wood_Logs`). A shown name typed exactly wins; when several items share it, or
+the words only partly match, the debug-name rules below decide, and the shown names' words count when those decide
+nothing. Debug names are typed the easy way: any case, spaces instead of `_`, words in any order, a part of a word is enough (`give wood logs 20`, `give
 simple bait 5`, `give hardwood 10`). An item matches when its name holds every word typed; a typed number only matches
 a whole number in the name (the 3 of `torch 3` matches the 03 of `Tool_Torch03_Wax`, never the 3 of a T3). Of the matches, in this order: the exact
 name; the item with exactly the words typed; the only match; the only match whose own words were all typed (`wood logs`
@@ -758,5 +780,6 @@ belongs to the name (`take tool torch 01 5` takes 5 torches from you, not 1 from
 exactly an item's (`put tool torch 1 5`: Tool_Torch01) differs from reading every number at the end as the command's,
 the exact one wins; when two readings name different items, nothing happens and the reply shows how to type each
 (`'torch 2' can be read more than one way; type one of: give Torch_2 | give Torch 2`). A "quoted name" is the whole
-name. The names the game shows ("Wood Log") are in its text tables, which EMF does not read: type words of the debug
-name (`items wood` lists them). Mods still look items up by the exact debug name (`find_item`, `emf.item`).
+name. `items wood` lists the matches with both names ("Wood Logs: Material_T1_Wood_Logs (...)"). The dedicated server
+has no shown names (it has no text): there only the debug names work. Mods still look items up by the exact debug name
+(`find_item`, `emf.item`) and get the shown name with `item_name` / `emf.item_name`.
