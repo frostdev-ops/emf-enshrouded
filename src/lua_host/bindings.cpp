@@ -367,6 +367,52 @@ int l_item_info(lua_State* L) {
     return 1;
 }
 
+// emf.item_name(item [, "game"]) (lua 1.21, API v29): item is an id or a debug name. The game's name and true; the debug
+// name and false when the game has none here (the dedicated server, before its text is known, an older core); nil and
+// false for an unknown item. "game": the player's language even where EMF's screens cannot draw it (for the chat).
+int l_item_name(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = current_world(L, "emf.item_name");
+    const EmfApi* api = s->host->api;
+    uint32_t id = 0;
+    if (lua_isinteger(L, 1))
+        id = static_cast<uint32_t>(lua_tointeger(L, 1));
+    else
+        id = api->find_item(w, luaL_checkstring(L, 1));
+    const char* how = luaL_optstring(L, 2, "");
+    if (*how && std::strcmp(how, "game") != 0) return luaL_error(L, "emf.item_name: the second argument is \"game\" or nothing");
+    const bool v29 = api->size >= offsetof(EmfApi, game_language) + sizeof(api->game_language) && api->item_name;
+    if (id && v29) {
+        char buf[256];
+        if (api->item_name(w, id, *how ? EMF_ITEM_NAME_GAME_TEXT : 0u, buf, sizeof buf)) {
+            lua_pushstring(L, buf);
+            lua_pushboolean(L, 1);
+            return 2;
+        }
+    }
+    EmfItemInfo info{};
+    info.size = sizeof info;
+    if (id && api->item_info(w, id, &info) && info.name[0])
+        lua_pushstring(L, info.name);
+    else
+        lua_pushnil(L);
+    lua_pushboolean(L, 0);
+    return 2;
+}
+
+// emf.language() (lua 1.21, API v29): "en_us", "de_de", ... the language the game shows text in; nil on the dedicated
+// server, before the game's text is known, or on an older core.
+int l_language(lua_State* L) {
+    const EmfApi* api = script_of(L)->host->api;
+    char code[16] = {};
+    if (api->size >= offsetof(EmfApi, game_language) + sizeof(api->game_language) && api->game_language &&
+        api->game_language(code, sizeof code) && code[0])
+        lua_pushstring(L, code);
+    else
+        lua_pushnil(L);
+    return 1;
+}
+
 void handed_on(Script& s, uint32_t item, uint32_t n);
 
 int l_give(lua_State* L) {
@@ -3026,7 +3072,7 @@ int l_net_peer(lua_State* L) {
 }
 
 void open_bindings(lua_State* L, Script&) {
-    static const luaL_Reg fns[] = {{"item", l_item},       {"item_info", l_item_info}, {"give", l_give},
+    static const luaL_Reg fns[] = {{"item", l_item},       {"item_info", l_item_info}, {"item_name", l_item_name}, {"language", l_language}, {"give", l_give},
                                    {"put", l_put},         {"take", l_take},           {"move", l_move},           {"spawn", l_spawn},
                                    {"destroy", l_destroy}, {"kill", l_kill},           {"time_of_day", l_time_of_day},
                                    {"health", l_health},   {"attribute", l_attribute}, {"attribute_add", l_attribute_add},

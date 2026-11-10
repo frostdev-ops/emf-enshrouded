@@ -1353,3 +1353,67 @@ TEST_CASE("lua 1.20: a script reloaded while players are in the world is told ab
     host.tick(kServer);
     CHECK_FALSE(logged("again 1"));  // told once
 }
+
+TEST_CASE("lua 1.21: emf.item_name gives the shown name, or the debug name and false; emf.language the code") {
+    Rig r(L"item_name");
+    r.fake.item_names[0x22] = "Torch";
+    add_script(r.dir, "nm",
+               "emf.command('go', '', function(w)\n"
+               "  local n, shown = emf.item_name('Wood')\n"
+               "  emf.reply('name ' .. n .. ' ' .. tostring(shown))\n"
+               "  local g, gs = emf.item_name(0x11, 'game')\n"
+               "  emf.reply('game ' .. g .. ' ' .. tostring(gs))\n"
+               "  local d, ds = emf.item_name(0x22)\n"
+               "  emf.reply('debug ' .. tostring(d) .. ' ' .. tostring(ds))\n"
+               "  local u, us = emf.item_name(0x99)\n"
+               "  emf.reply('unknown ' .. tostring(u) .. ' ' .. tostring(us))\n"
+               "  local x, xs = emf.item_name('Nope')\n"
+               "  emf.reply('noname ' .. tostring(x) .. ' ' .. tostring(xs))\n"
+               "  emf.reply('lang ' .. tostring(emf.language()))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("nm.go");
+    auto said = [&](const std::string& s) {
+        for (const auto& x : r.fake.replies)
+            if (x.find(s) != std::string::npos) return true;
+        return false;
+    };
+    CHECK(said("name Holzscheite true"));
+    CHECK(said("game Holzscheite true"));
+    CHECK(said("debug Torch false"));
+    CHECK(said("unknown nil false"));
+    CHECK(said("noname nil false"));
+    CHECK(said("lang de_de"));
+}
+
+TEST_CASE("lua 1.21: emf.item_name passes 'game' as EMF_ITEM_NAME_GAME_TEXT") {
+    Rig r(L"item_name_flags");
+    add_script(r.dir, "nf",
+               "emf.command('screen', '', function(w) emf.item_name(0x11) end)\n"
+               "emf.command('game', '', function(w) emf.item_name(0x11, 'game') end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("nf.screen");
+    CHECK(r.fake.last_name_flags == 0u);
+    r.run_command("nf.game");
+    CHECK(r.fake.last_name_flags == EMF_ITEM_NAME_GAME_TEXT);
+}
+
+TEST_CASE("lua 1.21: on an older core emf.item_name gives the debug name and false, emf.language nil") {
+    Rig r(L"item_name_old");
+    r.api.item_name = nullptr;
+    r.api.game_language = nullptr;
+    add_script(r.dir, "no",
+               "emf.command('go', '', function(w)\n"
+               "  local n, shown = emf.item_name('Wood')\n"
+               "  emf.reply('name ' .. n .. ' ' .. tostring(shown) .. ' lang ' .. tostring(emf.language()))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("no.go");
+    bool ok = false;
+    for (const auto& x : r.fake.replies)
+        if (x.find("name Wood false lang nil") != std::string::npos) ok = true;
+    CHECK(ok);
+}
