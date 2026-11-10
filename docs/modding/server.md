@@ -42,8 +42,8 @@ log and `emf_core.log` as they grow (EMF's docs/app.md, "Servers", has the detai
 A player types `/help`, `/give wood logs 20` (item names as `/items wood` lists them, typed the easy way: see
 [reference.md](reference.md#console-commands-built-in)) or any EMF command
 (`/<mod>.<command>` for a mod's own) into the game's chat. EMF runs it, nobody else sees the line, and the replies
-come back as chat lines that only that player sees, under their own name: `Ember: [EMF] gave 20 x
-Material_T1_Wood_Logs to player 1` (the game shows no chat line without a speaker). At most 10 lines per command; the
+come back as chat lines that only that player sees, with no name in front, the way the game shows a player joining:
+`[EMF] gave 20 x Material_T1_Wood_Logs to player 1` (they show even when the server has text chat off). At most 10 lines per command; the
 server log has the rest. "You" in a command (`give`, `pos`, `spawn`) is the player who typed it: EMF finds their
 player by the account hash the chat line carries. If a command answers "player position unknown" or "player
 unknown", EMF could not tell which player you are; commands with an explicit target still work. The results of `put`
@@ -120,8 +120,9 @@ Mods can write into the game's chat and read it, where players' chat is on (a de
 `[chat] players=1`):
 
 - **A line for one player** (`chat_tell`, Lua `emf.tell`) reaches only that player, outside any command, and shows under
-  their own name (`Ember: [Server] Welcome!`), as command replies do: the game shows no chat line without a speaker. In
-  a game you host, a line for the host becomes a note at the top of the host's screen.
+  their own name (`Ember: [Server] Welcome!`). With `EMF_CHAT_SYSTEM` (`chat_tell_ex`, Lua `{system = true}`) it shows
+  with no name (`[Server] Welcome!`), as command replies do; a label is only a prefix in the text. In a game you host, a
+  line for the host becomes a note at the top of the host's screen.
 - **A line for everyone** (`chat_broadcast`, Lua `emf.broadcast`): each player sees it under their own name.
 - **Players' lines** (`on_chat`, Lua `emf.on_chat`): every chat line a player sends that is no EMF command reaches the
   mods that ask, read-only (a chat log, a Discord mirror).

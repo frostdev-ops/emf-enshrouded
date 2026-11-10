@@ -725,6 +725,15 @@ if (!api->item_name(w, item_id, 0, name, sizeof name)) { /* no name here: use th
 EMF copies the text at once and checks that the game's table did not change during the copy (a language change in the
 settings frees the old one), so a name is never half old, half new; the names are cached per language.
 
+## v30: character names and chat lines without a speaker
+
+| C | What |
+|---|---|
+| `player_character_name(world, player, buf, size)` | the player's character name (the one the game's Social tab shows; `player_name` is their platform name), UTF-8, cut to size-1 and NUL-terminated. Each player's game sends it a few seconds after joining, so it is not there at `EMF_PLAYER_JOINED` yet: ask again later. It is text the player's game chose, not an identity: key data by the account. False until it is known, for something that is not a player, on a client world. Server world (a game you host or the dedicated server); players' chat need not be on. |
+| `chat_tell_ex(world, player, text, flags)` / `chat_broadcast_ex(text, flags)` | `chat_tell` / `chat_broadcast` with flags. `EMF_CHAT_SYSTEM`: the line shows with no speaker's name, the way the game shows a player joining, still only to that player, and also on a server with text chat off. A label is only possible as a prefix in the text (`"[Raid] The gate is under attack"`). Players without EMF see the same. 0: as `chat_tell`. Other bits: refused (logged). |
+
+EMF's own command replies to players and the mods-check refusal are such lines now (`[EMF] ...` with no name in front).
+
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
 
 ## SDK headers (header-only C++, no ABI)
