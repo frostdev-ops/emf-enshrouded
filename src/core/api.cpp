@@ -1,5 +1,7 @@
 // The C API table handed to mods. Every function is safe to call with a null/stale world:
 // reads are fault-guarded and return 0/NULL.
+#include "core/game_text.h"
+#include "core/item_text.h"
 #include "api.h"
 #include "api_sizes.h"
 #include "common/pattern_find.h"
@@ -666,6 +668,32 @@ uint32_t api_find_item(EmfWorld* w, const char* name) {
     if (!name) return 0;
     const auto r = item_by_name(item_registry(w), name);
     return r ? r->id : 0;
+}
+
+// v29: the game's item names and language (game_text.h, item_text.h)
+uint32_t copy_out(const std::string& s, char* buf, uint32_t size) {
+    if (buf && size) {
+        size_t n = s.size() < size - 1 ? s.size() : size - 1;
+        while (n > 0 && n < s.size() && (static_cast<unsigned char>(s[n]) & 0xC0) == 0x80) --n;  // whole characters
+        std::memcpy(buf, s.data(), n);
+        buf[n] = 0;
+    }
+    return static_cast<uint32_t>(s.size());
+}
+
+uint32_t api_item_name(EmfWorld* w, uint32_t item, uint32_t flags, char* buf, uint32_t size) {
+    if (buf && size) buf[0] = 0;
+    const uint8_t* reg = item_registry(w);
+    if (!reg) return 0;
+    const auto name = item_names().name(reg, item, (flags & EMF_ITEM_NAME_GAME_TEXT) ? NameFor::Game : NameFor::Screen);
+    return name ? copy_out(*name, buf, size) : 0;
+}
+
+uint32_t api_game_language(char* code_out, uint32_t size) {
+    if (code_out && size) code_out[0] = 0;
+    const uint32_t lang = game_text().language();
+    if (lang) copy_out(language_code(lang), code_out, size);
+    return lang;
 }
 
 bool api_item_info(EmfWorld* w, uint32_t id, EmfItemInfo* out) {
@@ -2138,6 +2166,8 @@ const EmfApi kApi = {
     api_net_to_players,
     api_net_peer,
     api_on_player,
+    api_item_name,
+    api_game_language,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

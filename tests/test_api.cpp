@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "core/api.h"
+#include "core/game_text.h"
+#include "core/items.h"
 #include "core/api_sizes.h"
 #include "core/events.h"
 #include "core/inventory.h"
@@ -582,6 +584,67 @@ struct ItemWorld {
     }
 };
 }  // namespace
+
+// ---- v29: item names and the game's language ----
+namespace {
+struct V29Pool {
+    alignas(16) uint8_t mem[0x128]{};
+    explicit V29Pool(uint32_t language) {
+        const uint32_t null_tag = 0x69691905u, fallback = 1;
+        const uint64_t table = 0x5000;
+        std::memcpy(mem + 0x18, &null_tag, 4);
+        std::memcpy(mem + 0x88, &fallback, 4);
+        std::memcpy(mem + 0xD8, &language, 4);
+        std::memcpy(mem + 0x100, &table, 8);
+    }
+};
+const std::string kV29Text = "Wood Logs";
+emf::core::LocaResult* v29_lookup(emf::core::LocaResult* out, void*, uint32_t) {
+    std::memset(out, 0, sizeof *out);
+    out->text = kV29Text.data();
+    out->length = kV29Text.size();
+    return out;
+}
+}  // namespace
+
+TEST_CASE("api v29: item_name and game_language through the game's text; nothing without it") {  // Review Focus 2
+    Fixture f;
+    ItemWorld iw;
+    const EmfApi* api = api_table();
+    REQUIRE(api->item_name);
+    REQUIRE(api->game_language);
+    uint8_t* info = emf::core::item_data_ptr(iw.reg.reg, 0x11);
+    REQUIRE(info);
+    for (int i = 0; i < 16; ++i) info[0x48 + i] = static_cast<uint8_t>(i + 1);  // Wood_Log has a name tag, Torch none
+    emf::core::set_game_text_for_tests(emf::core::LocaAccess{});
+    char buf[32];
+    std::memset(buf, 'x', sizeof buf);
+    CHECK(api->item_name(as_world(iw.w), 0x11, 0, buf, sizeof buf) == 0);
+    CHECK(buf[0] == 0);
+    char code[16];
+    std::memset(code, 'x', sizeof code);
+    CHECK(api->game_language(code, sizeof code) == 0);
+    CHECK(code[0] == 0);
+    V29Pool pool(3);
+    emf::core::LocaAccess a;
+    a.pool = [&pool] { return pool.mem; };
+    a.lookup = &v29_lookup;
+    emf::core::set_game_text_for_tests(std::move(a));
+    CHECK(api->item_name(as_world(iw.w), 0x11, 0, buf, sizeof buf) == 9);
+    CHECK(std::string(buf) == "Wood Logs");
+    CHECK(api->item_name(as_world(iw.w), 0x11, EMF_ITEM_NAME_GAME_TEXT, buf, sizeof buf) == 9);
+    char tiny[5];
+    CHECK(api->item_name(as_world(iw.w), 0x11, 0, tiny, sizeof tiny) == 9);  // the full length; the copy cut
+    CHECK(std::string(tiny) == "Wood");
+    CHECK(api->item_name(as_world(iw.w), 0x11, 0, nullptr, 0) == 9);
+    CHECK(api->item_name(as_world(iw.w), 0x22, 0, buf, sizeof buf) == 0);  // no name tag
+    CHECK(api->item_name(as_world(iw.w), 0x99, 0, buf, sizeof buf) == 0);  // no such item
+    CHECK(api->item_name(nullptr, 0x11, 0, buf, sizeof buf) == 0);         // no world
+    CHECK(api->game_language(code, sizeof code) == 3);
+    CHECK(std::string(code) == "de_de");
+    CHECK(api->game_language(nullptr, 0) == 3);
+    emf::core::set_game_text_for_tests(emf::core::LocaAccess{});
+}
 
 TEST_CASE("api v5: version 5 with the item functions") {
     const EmfApi* api = api_table();

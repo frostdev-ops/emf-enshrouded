@@ -918,6 +918,25 @@ bool on_player(const char* mod, F f) {
     return ok;
 }
 
+// ---- v29: the game's item names and language (the game exe only) ----
+inline bool has_v29() { return api() && api()->size >= offsetof(EmfApi, game_language) + sizeof(api()->game_language); }
+// The item's name as the game shows it, in the player's language: for EMF's screens (windows, wheels, HUD lines;
+// English where they cannot draw Japanese, Korean, Chinese or Thai), or with game_text for the game's own chat (the
+// player's language always). Empty on the dedicated server, before the game's text is known, for an item without a
+// name, or on an older core: use the debug name then. (Named so it does not clash with mods' own item_name helpers.)
+inline std::string shown_item_name(World w, uint32_t item, bool game_text = false) {
+    if (!has_v29() || !api()->item_name) return {};
+    char buf[256];
+    return api()->item_name(w.raw(), item, game_text ? EMF_ITEM_NAME_GAME_TEXT : 0u, buf, sizeof buf) ? std::string(buf)
+                                                                                                      : std::string();
+}
+// The language the game shows text in ("en_us", "de_de", ...); empty on the dedicated server or an older core.
+inline std::string game_language() {
+    if (!has_v29() || !api()->game_language) return {};
+    char code[16];
+    return api()->game_language(code, sizeof code) ? std::string(code) : std::string();
+}
+
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
 inline bool request_save() { return has_v19() && api()->request_save && api()->request_save(); }
 

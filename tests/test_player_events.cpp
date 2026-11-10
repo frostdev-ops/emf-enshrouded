@@ -200,8 +200,8 @@ TEST_CASE("player events: the reader lists the server world's players with accou
 TEST_CASE("player events: the core's API table is v28 with on_player at its end") {
     const EmfApi* api = emf::core::api_table();
     REQUIRE(api);
-    CHECK(api->version == 28u);
-    CHECK(api->size == emf::core::kApiV28Size);
+    CHECK(api->version >= 28u);
+    CHECK(api->size >= emf::core::kApiV28Size);  // later versions append
     REQUIRE(api->on_player != nullptr);
     CHECK_FALSE(api->on_player(nullptr, nullptr));
 }

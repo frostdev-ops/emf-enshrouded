@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 28 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 29 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 28
+#define EMF_API_VERSION 29
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -984,7 +984,22 @@ typedef struct EmfApi {
      * thread, after its step). False for a null cb. "Died" needs the call before the first world starts (the game's
      * events are wired then, as on_event's); later only joined and left come (logged). Any thread. */
     bool (*on_player)(EmfPlayerCallback cb, void* user);
+
+    /* ---- v29: the game's item names and language (the game exe only: the dedicated server has no text) ---- */
+    /* The item's name as the game shows it, in the player's language. flags 0: for EMF's screens (windows, wheels, HUD
+     * lines, the console), English where they cannot draw the language's script (Japanese, Korean, Chinese, Thai);
+     * EMF_ITEM_NAME_GAME_TEXT: the player's language always (for the game's own chat). Copies at most size-1 bytes and a
+     * NUL into buf (UTF-8, markup removed); returns the name's full length in bytes, 0 when there is none (the dedicated
+     * server, before the game's text is known, an item without a name, an unknown item): use the debug name then. Any
+     * thread but the render thread. */
+    uint32_t (*item_name)(EmfWorld* world, uint32_t item_id, uint32_t flags, char* buf, uint32_t size);
+    /* The language the game shows text in: a keen::LanguageId (1 En_Us, 3 De_De, 11 Ja_Jp, ...; a language without a
+     * table reports En_Us), 0 on the dedicated server or before the game's text is known. code_out (may be NULL) gets
+     * "en_us", "de_de", ... ("" for 0). */
+    uint32_t (*game_language)(char* code_out, uint32_t size);
 } EmfApi;
+
+#define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);
 
