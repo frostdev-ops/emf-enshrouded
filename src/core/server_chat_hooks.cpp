@@ -35,6 +35,7 @@ ChatRateLimit g_limit;  // players who are no admins: 5 command lines per 10 s
 thread_local uint8_t* t_server = nullptr;  // the server whose receive loop runs on this thread
 std::atomic<uint8_t*> g_server{nullptr};   // the server the receive loop last ran for (v19: chat.players, tells)
 std::atomic<bool> g_on{false};             // the hooks are in place
+std::atomic<bool> g_spoof_logged{false};   // a dropped spoofed line was logged (once per session)
 
 bool copy_text(const ChatText* t, char* out, size_t cap, size_t* n) {
     __try {
@@ -48,14 +49,14 @@ bool copy_text(const ChatText* t, char* out, size_t cap, size_t* n) {
 }
 
 // The game's chatLogAdd for a reply line, spoken by the player it answers (players' games do not show a line without a
-// speaker: confirmed in game); false if it faulted.
-bool add_reply(uint8_t* sys, const ChatText* text, uint32_t handle, uint64_t account, uint8_t* result) {
+// known speaker: confirmed in game); kind 4 (kChatKindSession, tags 0) shows its text with no name. False if it faulted.
+bool add_reply(uint8_t* sys, const ChatText* text, uint32_t handle, uint64_t account, uint8_t* result, uint8_t kind) {
     struct {
         uint64_t time;
         uint64_t has;  // low byte: 0 = no time given
     } when{0, 0};
     __try {
-        o_log_add(result, sys, kChatKindTyped, text, 0, 0, handle, account, &when);
+        o_log_add(result, sys, kind, text, 0, 0, handle, account, &when);
         return true;
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         return false;
@@ -191,14 +192,14 @@ bool read_connections(const uint8_t* server, std::vector<uint8_t>* out) {
     return server && seh_read(server + kConnections, out->data(), out->size());
 }
 
-// Adds `text` spoken by (handle, account) and narrows it to `reader`. False when adding faulted (stop sending).
-bool send_line(uint8_t* sys, const std::string& text, uint32_t handle, uint64_t account, uint32_t reader) {
+// Adds `text` of `kind` spoken by (handle, account) and narrows it to `reader`. False when adding faulted (stop sending).
+bool send_line(uint8_t* sys, const std::string& text, uint32_t handle, uint64_t account, uint32_t reader, uint8_t kind) {
     std::string t = text;
     if (t.size() > kChatMaxBytes) t.resize(kChatMaxBytes);
     const ChatText view{t.data(), t.size()};
     uint8_t result[16] = {};
     debug_chat("before reply", sys);
-    if (!add_reply(sys, &view, handle, account, result)) {
+    if (!add_reply(sys, &view, handle, account, result, kind)) {
         if (g_deps.log) g_deps.log("chat replies: adding a line faulted; replies stop here");
         return false;
     }
@@ -270,7 +271,9 @@ void flush_replies(uint8_t* server) {
                 return;
             }
             for (const auto& c : players)
-                if (!send_line(sys, reply.text, c.handle, c.account, c.reader)) return;
+                if (!send_line(sys, reply.text, c.handle, c.account, c.reader,
+                               reply.system ? kChatKindSession : kChatKindTyped))
+                    return;
             sent += static_cast<int>(players.size());
             continue;
         }
@@ -315,7 +318,9 @@ void flush_replies(uint8_t* server) {
             deferred.push_back(reply);
             continue;
         }
-        if (!send_line(sys, reply.raw ? reply.text : "[EMF] " + reply.text, handle, reply.account, *reader)) return;
+        // a command's reply and a mod's system line show without a speaker's name; a mod message line stays typed text
+        const uint8_t kind = !reply.net && (reply.system || !reply.raw) ? kChatKindSession : kChatKindTyped;
+        if (!send_line(sys, reply.raw ? reply.text : "[EMF] " + reply.text, handle, reply.account, *reader, kind)) return;
     }
 }
 
@@ -412,8 +417,14 @@ uint8_t* __fastcall hk_log_add(uint8_t* out, uint8_t* sys, uint8_t kind, const C
     }
     if (t_server && out) {
         bool taken = false;
+        if (spoofed_line(kind, tag1)) {  // no unmodified game sends it: it would look like EMF's lines without a speaker
+            taken = true;
+            if (!g_spoof_logged.exchange(true) && g_deps.log)
+                g_deps.log("chat: a line of kind " + std::to_string(kind) + (tag1 ? "" : " without a text id") +
+                           " from account " + account_text(account) + " was dropped (no unmodified game sends it; said once)");
+        }
         try {
-            taken = take_line(text, kind, handle, account);
+            if (!taken) taken = take_line(text, kind, handle, account);
         } catch (...) {
         }
         if (taken) {  // as if added: the receive loop does not read the result
@@ -474,6 +485,7 @@ ClientChatDetours client_chat_for_test(ClientFlushFn game_flush, ChatClientSendF
 
 ServerChatDetours server_chat_for_test(ChatReceiveFn game_receive, ChatLogAddFn game_log_add, ServerChatDeps deps) {
     g_limit.reset();
+    g_spoof_logged = false;
     o_receive = game_receive;
     o_log_add = game_log_add;
     g_deps = std::move(deps);
@@ -489,11 +501,13 @@ ServerChatDetours server_chat_for_test(ChatReceiveFn game_receive, ChatLogAddFn 
 
 bool server_chat_on() { return g_on.load(); }
 
-bool queue_chat_tell(uint32_t handle_hint, uint64_t account, std::string line) {
-    return g_on.load() && g_outbox.add(handle_hint, account, std::move(line), true);
+bool queue_chat_tell(uint32_t handle_hint, uint64_t account, std::string line, bool system) {
+    return g_on.load() && g_outbox.add(handle_hint, account, std::move(line), true, false, system);
 }
 
-bool queue_chat_everyone(std::string line) { return g_on.load() && g_outbox.add_everyone(std::move(line)); }
+bool queue_chat_everyone(std::string line, bool system) {
+    return g_on.load() && g_outbox.add_everyone(std::move(line), system);
+}
 
 bool queue_net_line(uint32_t handle, uint64_t account, std::string line) {
     return queue_net_lines(handle, account, {std::move(line)});

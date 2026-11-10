@@ -1489,7 +1489,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
                     const auto c = net_connection_of(entity);
                     bool ok = true;
                     for (const auto& line : emf::core::chat_lines(text, 2))
-                        ok = emf::core::queue_chat_tell(c ? c->first : 0, account, line) && ok;
+                        ok = emf::core::queue_chat_tell(c ? c->first : 0, account, line, true) && ok;
                     return ok;
                 },
                 [](uint64_t account) { return emf::core::kick_account(g_kick_fn, emf::core::chat_server(), account); },

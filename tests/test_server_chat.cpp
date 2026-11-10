@@ -409,3 +409,23 @@ TEST_CASE("chat_line_limit: 30 lines per mod in 10 s; the Lua host (every Lua mo
     CHECK_FALSE(b.take("lua", 1, 1000, chat_line_limit("lua")));
     CHECK_FALSE(b.take("herald", 31, 1000, chat_line_limit("herald")));
 }
+
+TEST_CASE("ChatOutbox v30: a line's system flag survives add, add_everyone, take and put_back") {
+    ChatOutbox box;
+    REQUIRE(box.add(1, 2, "a", true, false, true));
+    REQUIRE(box.add(1, 2, "b", true));
+    REQUIRE(box.add_everyone("c", true));
+    REQUIRE(box.add_everyone("d"));
+    auto items = box.take();
+    REQUIRE(items.size() == 4);
+    CHECK(items[0].system);
+    CHECK_FALSE(items[1].system);
+    CHECK(items[2].system);
+    CHECK(items[2].everyone);
+    CHECK_FALSE(items[3].system);
+    box.put_back(items);
+    items = box.take();
+    REQUIRE(items.size() == 4);
+    CHECK(items[0].system);
+    CHECK(items[2].system);
+}

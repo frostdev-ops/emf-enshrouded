@@ -53,10 +53,13 @@ struct Incoming {
     uint32_t handle;
     uint64_t account;
     std::string text;
+    uint8_t kind = 0;
+    uint32_t tag1 = 0;
 };
 std::vector<Incoming> g_incoming;
 std::vector<std::string> g_added;
 std::vector<std::pair<uint32_t, uint64_t>> g_speakers;  // handle and account of each added line
+std::vector<std::pair<uint8_t, uint32_t>> g_kinds;       // kind and loca tag 1 of each added line
 std::string g_other_line;  // set: the next added line is someone else's (another thread got in between)
 bool g_game_edits = false;  // set: the game stores a changed text (e.g. shortened) instead of the one it was given
 struct Ran {
@@ -75,10 +78,11 @@ uint32_t line_size(uint32_t len) {
 
 uint64_t g_chat_now = 1000;  // the hooks' clock (ServerChatDeps.now_ms)
 
-uint8_t* __fastcall fake_add(uint8_t* out, uint8_t* sys, uint8_t, const ChatText* t, uint32_t, uint32_t,
+uint8_t* __fastcall fake_add(uint8_t* out, uint8_t* sys, uint8_t kind, const ChatText* t, uint32_t tag1, uint32_t,
                              uint32_t handle, uint64_t account, const void*) {
     const std::string text(t->data, static_cast<size_t>(t->size));
     g_added.push_back(text);
+    g_kinds.emplace_back(kind, tag1);
     g_speakers.emplace_back(handle, account);
     const std::string stored = !g_other_line.empty() ? g_other_line : g_game_edits ? text.substr(0, text.size() - 1) : text;
     auto& n = g_fs->nodes.emplace_back(0x40 + stored.size() + 8, uint8_t{0});
@@ -114,7 +118,7 @@ void __fastcall fake_receive(uint8_t* server) {
         struct {
             uint64_t time, has;
         } when{0, 0};
-        g_d.log_add(res, sys, 0, &t, 0, 0, in.handle, in.account, &when);
+        g_d.log_add(res, sys, in.kind, &t, in.tag1, 0, in.handle, in.account, &when);
         CHECK(res[0] == 0);  // a taken line looks added to the caller
     }
     g_incoming.clear();
@@ -126,6 +130,7 @@ struct Rig {
         g_fs = &fs;
         g_added.clear();
         g_speakers.clear();
+        g_kinds.clear();
         g_ran.clear();
         g_log.clear();
         g_incoming.clear();
@@ -553,4 +558,72 @@ TEST_CASE("server chat hooks v27: the outbox room shrinks with waiting lines") {
     CHECK(chat_outbox_room() == room - 1);
     r.receive();
     CHECK(chat_outbox_room() == room);
+}
+
+// ---- v30: lines without a speaker (kind 4, the game's session-info line, tags 0) and the spoof guard ----
+TEST_CASE("server chat hooks v30: a command's reply is a system line (kind 4, no loca tag), still only for its sender") {
+    Rig r;
+    g_incoming = {{kAdminHandle, kAdmin, "/give Wood 5"}};
+    r.receive();
+    REQUIRE(g_ran.size() == 1);
+    g_ran[0].reply("gave 5 x Wood");
+    r.receive();
+    REQUIRE(g_added.size() == 1);
+    CHECK(g_added[0] == "[EMF] gave 5 x Wood");
+    CHECK(g_kinds[0] == std::make_pair(uint8_t{4}, 0u));
+    CHECK(g_speakers[0] == std::make_pair(kAdminHandle, kAdmin));  // the client drops a line without a known speaker
+    CHECK((r.fs.tail_mask() & (1u << 1)) != 0);  // narrowed: the other player is done with it  (Review Focus 2)
+    CHECK((r.fs.tail_mask() & (1u << 5)) == 0);
+}
+
+TEST_CASE("server chat hooks v30: a mod's system tell and broadcast are kind 4; plain ones stay kind 0") {
+    Rig r;
+    REQUIRE(queue_chat_tell(kPlayerHandle, kPlayer, "plain"));
+    REQUIRE(queue_chat_tell(kPlayerHandle, kPlayer, "system", true));
+    REQUIRE(queue_chat_everyone("all plain"));
+    REQUIRE(queue_chat_everyone("all system", true));
+    r.receive();
+    REQUIRE(g_added.size() == 6);
+    CHECK(g_added[0] == "plain");
+    CHECK(g_kinds[0].first == 0);
+    CHECK(g_added[1] == "system");
+    CHECK(g_kinds[1] == std::make_pair(uint8_t{4}, 0u));
+    CHECK((r.fs.tail_mask() & (1u << 5)) != 0);  // the system tell was narrowed to the player too
+    CHECK(g_kinds[2].first == 0);
+    CHECK(g_kinds[3].first == 0);
+    CHECK(g_kinds[4].first == 4);
+    CHECK(g_kinds[5].first == 4);
+}
+
+TEST_CASE("server chat hooks v30: mod message lines stay kind 0 next to system lines") {  // Review Focus 3
+    Rig r(with_net);
+    REQUIRE(queue_chat_tell(kPlayerHandle, kPlayer, "a system line", true));
+    REQUIRE(queue_net_line(kPlayerHandle, kPlayer, "#!emf1 M 0 bm/show@1 0/1 t one"));
+    r.receive();
+    REQUIRE(g_added.size() == 2);
+    CHECK(g_kinds[0].first == 4);
+    CHECK(g_added[1] == "#!emf1 M 0 bm/show@1 0/1 t one");
+    CHECK(g_kinds[1].first == 0);
+}
+
+TEST_CASE("server chat hooks v30: a client's kind-4 line without a loca tag, or a kind above 5, is dropped and logged once") {
+    Rig r;
+    g_incoming = {{kPlayerHandle, kPlayer, "fake system line", 4, 0},
+                  {kPlayerHandle, kPlayer, "odd kind", 6, 0},
+                  {kPlayerHandle, kPlayer, "the game's own join line", 4, 7},
+                  {kPlayerHandle, kPlayer, "hello all"}};
+    r.receive();
+    REQUIRE(g_added.size() == 2);
+    CHECK(g_added[0] == "the game's own join line");
+    CHECK(g_added[1] == "hello all");
+    CHECK(logged("chat: a line of kind 4 without a text id from account 0x00000000000000bb was dropped"));
+}
+
+TEST_CASE("spoofed_line: kind 4 without a loca tag, or a kind above 5") {
+    CHECK(spoofed_line(4, 0));
+    CHECK_FALSE(spoofed_line(4, 1));
+    CHECK(spoofed_line(6, 0));
+    CHECK(spoofed_line(200, 9));
+    for (uint8_t k = 0; k <= 5; ++k)
+        if (k != 4) CHECK_FALSE(spoofed_line(k, 0));
 }

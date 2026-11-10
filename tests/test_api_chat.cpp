@@ -28,6 +28,7 @@ uint64_t g_now = 900000;
 std::vector<std::string> g_lines, g_notes;
 std::vector<std::tuple<uint32_t, uint64_t, std::string>> g_tells;  // handle hint, account, line
 std::vector<std::string> g_everyone;
+std::vector<bool> g_tell_system, g_everyone_system;  // v30: each queued line's system flag
 bool g_chat_on = true;
 bool g_queue_ok = true;
 std::vector<void*> g_saves;  // the instance each requestServerSave call got
@@ -46,6 +47,8 @@ struct Fixture {
         g_notes.clear();
         g_tells.clear();
         g_everyone.clear();
+        g_tell_system.clear();
+        g_everyone_system.clear();
         g_saves.clear();
         g_chat_on = true;
         g_queue_ok = true;
@@ -55,14 +58,16 @@ struct Fixture {
         state.notify = [](const std::string& s) { g_notes.push_back(s); };
         state.exe.server = dedicated;
         state.chat_on = [] { return g_chat_on; };
-        state.chat_tell_line = [](uint32_t h, uint64_t a, const std::string& l) {
+        state.chat_tell_line = [](uint32_t h, uint64_t a, const std::string& l, bool system) {
             if (!g_queue_ok) return false;
             g_tells.emplace_back(h, a, l);
+            g_tell_system.push_back(system);
             return true;
         };
-        state.chat_everyone_line = [](const std::string& l) {
+        state.chat_everyone_line = [](const std::string& l, bool system) {
             if (!g_queue_ok) return false;
             g_everyone.push_back(l);
+            g_everyone_system.push_back(system);
             return true;
         };
         server_ss.plant(server, "BasicPlayerInfos", infos.data());
@@ -508,4 +513,40 @@ TEST_CASE("player_character_name (v30): the name from the server's table; false 
     CHECK_FALSE(api->player_character_name(f.w(), 2, buf, sizeof buf));
     g_name_id = emf::fnv1a64("Character 3");  // an id the table does not hold
     CHECK_FALSE(api->player_character_name(f.w(), 2, buf, sizeof buf));
+}
+
+// ---- v30: chat_tell_ex / chat_broadcast_ex ----
+TEST_CASE("chat_tell_ex (v30): EMF_CHAT_SYSTEM queues system lines, flags 0 plain ones; unknown flags are refused, logged") {  // Review Focus 5
+    Fixture f;
+    f.player(2, 0x41, 0xB2);
+    const EmfApi* api = api_table();
+    REQUIRE(api->size >= offsetof(EmfApi, chat_broadcast_ex) + sizeof(api->chat_broadcast_ex));
+    REQUIRE(api->chat_tell_ex);
+    f.in_callback([&](EmfWorld* w) {
+        CHECK(api->chat_tell_ex(w, 2, "system line", EMF_CHAT_SYSTEM));
+        CHECK(api->chat_tell_ex(w, 2, "plain line", 0));
+        CHECK_FALSE(api->chat_tell_ex(w, 2, "odd", 2));
+    });
+    REQUIRE(g_tells.size() == 2);
+    CHECK(std::get<2>(g_tells[0]) == "system line");
+    CHECK(g_tell_system[0]);
+    CHECK(std::get<2>(g_tells[1]) == "plain line");
+    CHECK_FALSE(g_tell_system[1]);
+    CHECK(logged("chat_tell_ex refused: unknown flags 0x2"));
+    f.in_callback([&](EmfWorld* w) { CHECK(api->chat_tell(w, 2, "old call")); });
+    REQUIRE(g_tell_system.size() == 3);
+    CHECK_FALSE(g_tell_system[2]);
+}
+
+TEST_CASE("chat_broadcast_ex (v30): EMF_CHAT_SYSTEM for every player; unknown flags are refused, logged") {
+    Fixture f;
+    const EmfApi* api = api_table();
+    REQUIRE(api->chat_broadcast_ex);
+    CHECK(api->chat_broadcast_ex("restart soon", EMF_CHAT_SYSTEM));
+    CHECK(api->chat_broadcast_ex("plain", 0));
+    CHECK_FALSE(api->chat_broadcast_ex("odd", 0x80));
+    REQUIRE(g_everyone.size() == 2);
+    CHECK(g_everyone_system[0]);
+    CHECK_FALSE(g_everyone_system[1]);
+    CHECK(logged("chat_broadcast_ex refused: unknown flags 0x80"));
 }

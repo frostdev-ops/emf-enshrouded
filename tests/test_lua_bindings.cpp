@@ -1435,3 +1435,31 @@ TEST_CASE("lua 1.22: world:character_name gives the character's name or nil; nil
     r.run_command("cn.go");
     CHECK(replied("cn nil nil nil"));
 }
+
+TEST_CASE("lua 1.22: emf.tell and emf.broadcast with {system = true} send lines without a speaker; an unknown option is an error") {
+    Rig r(L"tell_system");
+    add_script(r.dir, "ts",
+               "emf.command('go', '', function(w)\n"
+               "  emf.reply('tell ' .. tostring(emf.tell(w, 3, 'sys', {system = true})))\n"
+               "  emf.reply('plain ' .. tostring(emf.tell(w, 3, 'plain', {system = false})))\n"
+               "  emf.reply('all ' .. tostring(emf.broadcast('sys all', {system = true})))\n"
+               "end)\n"
+               "emf.command('bad', '', function(w)\n"
+               "  local ok, err = pcall(emf.tell, w, 3, 'x', {bogus = 1})\n"
+               "  emf.reply('bad ' .. tostring(ok) .. ' ' .. tostring(err))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("ts.go");
+    CHECK(replied("tell true"));
+    CHECK(replied("plain true"));
+    CHECK(replied("all true"));
+    REQUIRE(r.fake.tell_flags.size() == 2);
+    CHECK(r.fake.tell_flags[0] == EMF_CHAT_SYSTEM);
+    CHECK(r.fake.tell_flags[1] == 0u);
+    REQUIRE(r.fake.broadcast_flags.size() == 1);
+    CHECK(r.fake.broadcast_flags[0] == EMF_CHAT_SYSTEM);
+    r.run_command("ts.bad");
+    CHECK(replied("bad false"));
+    CHECK(replied("unknown option \"bogus\""));
+}

@@ -1360,11 +1360,17 @@ bool guarded_request_save(CoreState::RequestSaveFn fn, void* inst) {
 }
 
 bool chat_on() { return g_state->chat_on ? g_state->chat_on() : server_chat_on(); }
-bool chat_tell_line(uint32_t handle, uint64_t account, const std::string& line) {
-    return g_state->chat_tell_line ? g_state->chat_tell_line(handle, account, line) : queue_chat_tell(handle, account, line);
+bool chat_tell_line(uint32_t handle, uint64_t account, const std::string& line, bool system) {
+    return g_state->chat_tell_line ? g_state->chat_tell_line(handle, account, line, system)
+                                   : queue_chat_tell(handle, account, line, system);
 }
-bool chat_everyone_line(const std::string& line) {
-    return g_state->chat_everyone_line ? g_state->chat_everyone_line(line) : queue_chat_everyone(line);
+bool chat_everyone_line(const std::string& line, bool system) {
+    return g_state->chat_everyone_line ? g_state->chat_everyone_line(line, system) : queue_chat_everyone(line, system);
+}
+std::string hex_flags(uint32_t flags) {
+    char b[16];
+    std::snprintf(b, sizeof b, "0x%x", flags);
+    return b;
 }
 // A game this process hosts with a local player (not the dedicated server): the host's own game does not show the
 // server's chat lines, so a line for the host is a notify.
@@ -1405,7 +1411,7 @@ std::optional<PlayerInfo> player_info_of(EmfWorld* w, uint32_t player, uint8_t* 
 }
 
 // chat_tell on the server world's thread: the host's notify, or the outbox for the receive loop. How many lines went.
-size_t chat_tell_now(EmfWorld* w, uint32_t player, const std::vector<std::string>& lines) {
+size_t chat_tell_now(EmfWorld* w, uint32_t player, const std::vector<std::string>& lines, bool system) {
     const std::string what = "chat_tell(" + std::to_string(player) + ")";
     uint32_t local = 0;
     if (hosted_with_local_player(&local) && local == player) {
@@ -1424,7 +1430,7 @@ size_t chat_tell_now(EmfWorld* w, uint32_t player, const std::vector<std::string
     }
     size_t sent = 0;
     for (const auto& l : lines) {
-        if (!chat_tell_line(info->handle, info->account, l)) {
+        if (!chat_tell_line(info->handle, info->account, l, system)) {
             refuse_limited(what + " refused: too many chat lines are waiting for the server");
             return sent;
         }
@@ -1434,9 +1440,8 @@ size_t chat_tell_now(EmfWorld* w, uint32_t player, const std::vector<std::string
     return sent;
 }
 
-bool api_chat_tell(EmfWorld* w, uint32_t player, const char* text) {
-    if (!g_state) return false;
-    const std::string mod = module_name_of(_ReturnAddress());
+// chat_tell and chat_tell_ex (v30: system, a line without a speaker's name) for the mod `mod`.
+bool chat_tell_from(EmfWorld* w, uint32_t player, const char* text, bool system, const std::string& mod) {
     if (!w || WorldView(raw(w)).kind() != EMF_WORLD_SERVER) {
         refuse_limited("chat_tell refused: not a server world (" + mod + ")");
         return false;
@@ -1448,7 +1453,7 @@ bool api_chat_tell(EmfWorld* w, uint32_t player, const char* text) {
     }
     if (!chat_budget_ok(mod, "chat_tell", lines.size())) return false;
     if (dispatching_world() == w) {
-        const size_t sent = chat_tell_now(w, player, lines);
+        const size_t sent = chat_tell_now(w, player, lines, system);
         chat_budget_return(mod, lines.size(), sent);
         return sent == lines.size();
     }
@@ -1457,8 +1462,9 @@ bool api_chat_tell(EmfWorld* w, uint32_t player, const char* text) {
         uint32_t session, player;
         std::vector<std::string> lines;
         std::string mod;
+        bool system;
     };
-    auto* job = new Job{w, g_state->server_session.load(), player, lines, mod};
+    auto* job = new Job{w, g_state->server_session.load(), player, lines, mod, system};
     g_state->dispatcher.post(EMF_WORLD_SERVER, [](EmfWorld* world, void* u) {
         std::unique_ptr<Job> j(static_cast<Job*>(u));
         if (!g_state) return;
@@ -1467,14 +1473,28 @@ bool api_chat_tell(EmfWorld* w, uint32_t player, const char* text) {
             chat_budget_return(j->mod, j->lines.size(), 0);
             return;
         }
-        chat_budget_return(j->mod, j->lines.size(), chat_tell_now(world, j->player, j->lines));
+        chat_budget_return(j->mod, j->lines.size(), chat_tell_now(world, j->player, j->lines, j->system));
     }, job);
     return true;
 }
 
-bool api_chat_broadcast(const char* text) {
+bool api_chat_tell(EmfWorld* w, uint32_t player, const char* text) {
+    if (!g_state) return false;
+    return chat_tell_from(w, player, text, false, module_name_of(_ReturnAddress()));
+}
+
+bool api_chat_tell_ex(EmfWorld* w, uint32_t player, const char* text, uint32_t flags) {
     if (!g_state) return false;
     const std::string mod = module_name_of(_ReturnAddress());
+    if (flags & ~EMF_CHAT_SYSTEM) {
+        refuse_limited("chat_tell_ex refused: unknown flags " + hex_flags(flags & ~EMF_CHAT_SYSTEM) + " (" + mod + ")");
+        return false;
+    }
+    return chat_tell_from(w, player, text, (flags & EMF_CHAT_SYSTEM) != 0, mod);
+}
+
+// chat_broadcast and chat_broadcast_ex (v30: system) for the mod `mod`.
+bool chat_broadcast_from(const char* text, bool system, const std::string& mod) {
     if (!g_state->exe.server && !api_server_world()) {
         refuse_limited("chat_broadcast refused: this game hosts no world (a client of someone else's game) (" + mod + ")");
         return false;
@@ -1500,7 +1520,7 @@ bool api_chat_broadcast(const char* text) {
     }
     size_t sent = 0;
     for (const auto& l : lines) {
-        if (!chat_everyone_line(l)) {
+        if (!chat_everyone_line(l, system)) {
             refuse_limited("chat_broadcast refused: too many chat lines are waiting for the server");
             if (!host) chat_budget_return(mod, lines.size(), sent);  // the host's notes were shown: they count
             return host;
@@ -1509,6 +1529,21 @@ bool api_chat_broadcast(const char* text) {
         ++sent;
     }
     return true;
+}
+
+bool api_chat_broadcast(const char* text) {
+    if (!g_state) return false;
+    return chat_broadcast_from(text, false, module_name_of(_ReturnAddress()));
+}
+
+bool api_chat_broadcast_ex(const char* text, uint32_t flags) {
+    if (!g_state) return false;
+    const std::string mod = module_name_of(_ReturnAddress());
+    if (flags & ~EMF_CHAT_SYSTEM) {
+        refuse_limited("chat_broadcast_ex refused: unknown flags " + hex_flags(flags & ~EMF_CHAT_SYSTEM) + " (" + mod + ")");
+        return false;
+    }
+    return chat_broadcast_from(text, (flags & EMF_CHAT_SYSTEM) != 0, mod);
 }
 
 bool api_player_name(EmfWorld* w, uint32_t player, char* buf, uint32_t size) {
@@ -2186,6 +2221,8 @@ const EmfApi kApi = {
     api_item_name,
     api_game_language,
     api_player_character_name,
+    api_chat_tell_ex,
+    api_chat_broadcast_ex,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

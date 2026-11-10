@@ -1216,24 +1216,53 @@ bool chat_spent(Script& s, const std::string& text, bool queued) {
 }
 
 // emf.tell(world, id, text): a chat line only that player sees (the host of a game you host: a note); true when queued.
+bool has_v30_chat(const EmfApi* a) {
+    return a && a->size >= offsetof(EmfApi, chat_broadcast_ex) + sizeof(a->chat_broadcast_ex) && a->chat_tell_ex &&
+           a->chat_broadcast_ex;
+}
+
+// The optional last argument of emf.tell / emf.broadcast (lua 1.22): {system = true} for a line without a speaker's
+// name. -1: no options; else the flags. An unknown key is an error.
+int64_t chat_options(lua_State* L, int idx, const char* fn) {
+    if (lua_isnoneornil(L, idx)) return -1;
+    luaL_checktype(L, idx, LUA_TTABLE);
+    int64_t flags = 0;
+    lua_pushnil(L);
+    while (lua_next(L, idx) != 0) {
+        const char* key = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : nullptr;
+        if (!key || std::strcmp(key, "system") != 0)
+            luaL_error(L, "%s: unknown option \"%s\" (the options: system)", fn, key ? key : luaL_typename(L, -2));
+        flags = lua_toboolean(L, -1) ? EMF_CHAT_SYSTEM : 0;
+        lua_pop(L, 1);
+    }
+    return flags;
+}
+
 int l_tell(lua_State* L) {
     Script* s = script_of(L);
     EmfWorld* w = world_arg(L, 1);
     const auto id = static_cast<uint32_t>(luaL_checkinteger(L, 2));
     const std::string text = to_text(L, 3);
+    const int64_t flags = chat_options(L, 4, "emf.tell");
     const EmfApi* a = s->host->api;
+    // with options on a v30 core: chat_tell_ex; else chat_tell (an older core shows a system line under the player's name)
+    const bool ex = flags >= 0 && has_v30_chat(a);
     lua_pushboolean(L, has_v19(a) && a->chat_tell && chat_budget(*s, text, "emf.tell") &&
-                           chat_spent(*s, text, a->chat_tell(w, id, text.c_str())));
+                           chat_spent(*s, text, ex ? a->chat_tell_ex(w, id, text.c_str(), static_cast<uint32_t>(flags))
+                                                   : a->chat_tell(w, id, text.c_str())));
     return 1;
 }
 
-// emf.broadcast(text): the line for every connected player; true when queued.
+// emf.broadcast(text [, opts]): the line for every connected player; true when queued.
 int l_broadcast(lua_State* L) {
     Script* s = script_of(L);
     const std::string text = to_text(L, 1);
+    const int64_t flags = chat_options(L, 2, "emf.broadcast");
     const EmfApi* a = s->host->api;
+    const bool ex = flags >= 0 && has_v30_chat(a);
     lua_pushboolean(L, has_v19(a) && a->chat_broadcast && chat_budget(*s, text, "emf.broadcast") &&
-                           chat_spent(*s, text, a->chat_broadcast(text.c_str())));
+                           chat_spent(*s, text, ex ? a->chat_broadcast_ex(text.c_str(), static_cast<uint32_t>(flags))
+                                                   : a->chat_broadcast(text.c_str())));
     return 1;
 }
 

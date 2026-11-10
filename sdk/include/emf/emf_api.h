@@ -1005,9 +1005,16 @@ typedef struct EmfApi {
      * something that is not a player, or on a client world. Server world (a game you host or the dedicated server; players'
      * chat need not be on); same thread rules as get_component. */
     bool (*player_character_name)(EmfWorld* world, uint32_t player, char* buf, uint32_t size);
+    /* chat_tell with flags: EMF_CHAT_SYSTEM shows the line without a speaker's name (the game's session-info line, as for
+     * a player joining), still only to that player, also on a server with text chat off; a prefix in the text ("[Raid] ")
+     * is the only label there is. 0: chat_tell. Other bits: refused (logged). Players without EMF see it the same way. */
+    bool (*chat_tell_ex)(EmfWorld* world, uint32_t player, const char* text, uint32_t flags);
+    /* chat_broadcast with flags, as chat_tell_ex. */
+    bool (*chat_broadcast_ex)(const char* text, uint32_t flags);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */
+#define EMF_CHAT_SYSTEM 1u         /* v30 chat_tell_ex / chat_broadcast_ex: a line without a speaker's name */
 
 typedef bool (*EmfModLoadFn)(const EmfApi* api);
 

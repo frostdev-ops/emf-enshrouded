@@ -77,6 +77,7 @@ struct ChatReply {
     bool raw = false;
     bool everyone = false;
     bool net = false;  // a mod message line (API v27): waits while the player's chat reader has too much pending
+    bool system = false;  // v30: a line without a speaker (kind 4); a command's reply always is one, a net line never
     uint64_t queued_ms = 0;  // net: when it was queued (a line that waits too long is dropped)
 };
 // Lines waiting for the receive loop's thread (commands and mods run on the server world's thread). Any thread. At most
@@ -87,8 +88,8 @@ constexpr size_t kMaxChatOutbox = 1024;
 constexpr int kMaxChatLinesPerRun = 32;
 class ChatOutbox {
 public:
-    bool add(uint32_t handle, uint64_t account, std::string text, bool raw = false, bool net = false);
-    bool add_everyone(std::string text);
+    bool add(uint32_t handle, uint64_t account, std::string text, bool raw = false, bool net = false, bool system = false);
+    bool add_everyone(std::string text, bool system = false);
     // A mod message's lines for one player, all or none (false: they do not all fit).
     bool add_net_lines(uint32_t handle, uint64_t account, const std::vector<std::string>& lines, uint64_t now_ms);
     std::vector<ChatReply> take();
@@ -295,9 +296,13 @@ bool install_server_chat(uintptr_t receive, uintptr_t chat_log_add, ServerChatDe
 bool server_chat_on();  // the hooks are in place (install_server_chat, or server_chat_for_test)
 // A mod's line for one player: `handle_hint` from their BasicPlayerInfos entry, checked against the connection record
 // (else the account's record is used). False when the hooks are not in place or the outbox is full.
-bool queue_chat_tell(uint32_t handle_hint, uint64_t account, std::string line);
+// system (v30): shown without a speaker's name (still only to that player).
+bool queue_chat_tell(uint32_t handle_hint, uint64_t account, std::string line, bool system = false);
 // A mod's line for every connected player. False as queue_chat_tell.
-bool queue_chat_everyone(std::string line);
+bool queue_chat_everyone(std::string line, bool system = false);
+// A line a player's game sent that no unmodified game sends: kind 4 without a loca tag (it would show as a line without
+// a speaker, EMF's system lines), or a kind above 5. The server's chat hook drops it.
+bool spoofed_line(uint8_t kind, uint32_t tag1);
 // A mod message line (API v27) for one player: as queue_chat_tell, but it waits while that player's reader is behind.
 bool queue_net_line(uint32_t handle, uint64_t account, std::string line);
 // A mod message's lines for one player, all or none. Sent only on that very connection (never to another connection

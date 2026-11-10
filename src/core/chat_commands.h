@@ -14,6 +14,8 @@ struct ChatText {  // the game's string view: UTF-8 bytes, not NUL-terminated
     const char* data;
     uint64_t size;
 };
+constexpr uint8_t kChatKindSession = 4;    // the game's session-info line (join, leave): with loca tag 1 = 0 the client draws
+                                           // its text with no speaker's name (private research chat_system_lines)
 constexpr uint8_t kChatKindTyped = 0;      // a line the player typed (the other kinds are pings with no text)
 constexpr uint64_t kChatMaxBytes = 0x400;  // the game's limit for one chat message
 

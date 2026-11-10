@@ -54,6 +54,8 @@ std::string skipped_admin_warning(std::string_view entry) {
            "a Steam64 id is not one: the log line \"chat command refused from account 0x...\" shows the value to add)";
 }
 
+bool spoofed_line(uint8_t kind, uint32_t tag1) { return (kind == 4 && tag1 == 0) || kind > 5; }
+
 std::string account_text(uint64_t account) {
     char buf[24];
     std::snprintf(buf, sizeof buf, "0x%016llx", static_cast<unsigned long long>(account));
@@ -87,7 +89,7 @@ ChatRateLimit::Verdict ChatRateLimit::check(uint64_t account, uint64_t now_ms) {
     return w.count == max_ + 1 ? Verdict::Warn : Verdict::Drop;
 }
 
-bool ChatOutbox::add(uint32_t handle, uint64_t account, std::string text, bool raw, bool net) {
+bool ChatOutbox::add(uint32_t handle, uint64_t account, std::string text, bool raw, bool net, bool system) {
     std::lock_guard<std::mutex> l(m_);
     if (items_.size() >= kMaxChatOutbox) return false;
     ChatReply r;
@@ -96,17 +98,19 @@ bool ChatOutbox::add(uint32_t handle, uint64_t account, std::string text, bool r
     r.text = std::move(text);
     r.raw = raw;
     r.net = net;
+    r.system = system;
     items_.push_back(std::move(r));
     return true;
 }
 
-bool ChatOutbox::add_everyone(std::string text) {
+bool ChatOutbox::add_everyone(std::string text, bool system) {
     std::lock_guard<std::mutex> l(m_);
     if (items_.size() >= kMaxChatOutbox) return false;
     ChatReply r;
     r.text = std::move(text);
     r.raw = true;
     r.everyone = true;
+    r.system = system;
     items_.push_back(std::move(r));
     return true;
 }

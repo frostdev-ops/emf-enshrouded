@@ -147,8 +147,8 @@ struct CoreState {
     std::atomic<bool> has_chat_watchers{false};
     // The server chat glue (empty: server_chat_on / queue_chat_tell / queue_chat_everyone; tests replace them).
     std::function<bool()> chat_on;
-    std::function<bool(uint32_t handle_hint, uint64_t account, const std::string& line)> chat_tell_line;
-    std::function<bool(const std::string& line)> chat_everyone_line;
+    std::function<bool(uint32_t handle_hint, uint64_t account, const std::string& line, bool system)> chat_tell_line;
+    std::function<bool(const std::string& line, bool system)> chat_everyone_line;
     std::function<uint32_t(uint64_t account)> entity_by_account;  // on_chat's entity, on the server world's thread
     // API v27 mod messages (the chat transport; set when it starts): a player entity's connection, an account's entity
     // (the server world's thread) and whether an account is an admin
