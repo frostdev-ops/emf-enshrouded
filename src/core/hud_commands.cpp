@@ -224,6 +224,7 @@ std::vector<std::string> run_hud_command(HudEditor& editor, const std::vector<st
         out.push_back(std::string(up ? "hud: status effects grow upward" : "hud: status effects grow downward, as the game draws them") +
                       " (layout \"" + v.layout_name + "\")");
         add_not_shown(editor, out);
+        if (up && v.gate.state == GateState::On && !v.grow_works) out.push_back("hud: not shown now: " + v.grow_note);
         return out;
     }
     return {"hud: unknown command " + cmd};

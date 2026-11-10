@@ -269,8 +269,18 @@ HudView HudEditor::view() const {
             "and hide still work.";
     v.order = active_locked().order;
     v.buffs_up = active_locked().buffs_up;
-    v.bars_work = deps_.bars_ready && deps_.bars_ready();
-    if (!v.bars_work) v.bars_note = "Moving health, mana and stamina on their own is not available on this game build.";
+    // the bars and grow-upward move through the transform stack, as scale does: they stop with it
+    const bool bars_hooked = deps_.bars_ready && deps_.bars_ready();
+    v.bars_work = bars_hooked && v.scale_works;
+    if (!bars_hooked || !v.scale.available)
+        v.bars_note = "Moving health, mana and stamina on their own is not available on this game build.";
+    else if (v.scale.off)
+        v.bars_note = "Moving health, mana and stamina on their own stopped with scale for this session (see emf_core.log).";
+    v.grow_works = v.scale_works;
+    if (!v.scale.available)
+        v.grow_note = "Status effects growing upward is not available on this game build.";
+    else if (v.scale.off)
+        v.grow_note = "Status effects growing upward stopped with scale for this session (see emf_core.log).";
     return v;
 }
 

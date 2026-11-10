@@ -52,6 +52,8 @@ struct HudView {
     bool buffs_up = false;           // the status effects list grows upward
     bool bars_work = false;          // the bars move on their own (bars_ready)
     std::string bars_note;           // "" when they work, else the reason
+    bool grow_works = false;         // the status list can grow upward (the transform stack works)
+    std::string grow_note;           // "" when it works, else the reason
 };
 
 enum class Save { Now, Later };

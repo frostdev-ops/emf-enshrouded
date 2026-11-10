@@ -663,3 +663,22 @@ TEST_CASE("editor: bars_work and its note follow bars_ready") {
     CHECK(e.view().bars_work);
     CHECK(e.view().bars_note.empty());
 }
+
+TEST_CASE("editor: the bars and grow-upward stop with scale, and say so") {  // review: Important 1
+    HudRig r;
+    HudEditor& e = r.make();
+    CHECK(e.view().bars_work);
+    CHECK(e.view().grow_works);
+    CHECK(e.view().grow_note.empty());
+    r.scale = ScaleState{true, true};  // scale stopped after a mismatch
+    CHECK_FALSE(e.view().bars_work);
+    CHECK(e.view().bars_note ==
+          "Moving health, mana and stamina on their own stopped with scale for this session (see emf_core.log).");
+    CHECK_FALSE(e.view().grow_works);
+    CHECK(e.view().grow_note == "Status effects growing upward stopped with scale for this session (see emf_core.log).");
+    r.scale = ScaleState{false, false};  // no transform functions on this build
+    CHECK_FALSE(e.view().bars_work);
+    CHECK(e.view().bars_note == "Moving health, mana and stamina on their own is not available on this game build.");
+    CHECK_FALSE(e.view().grow_works);
+    CHECK(e.view().grow_note == "Status effects growing upward is not available on this game build.");
+}

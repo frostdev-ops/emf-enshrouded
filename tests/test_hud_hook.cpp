@@ -665,3 +665,25 @@ TEST_CASE("status list: off by default, and nothing without the food column this
     close(list);
     CHECK(off.layer.pushes == 0);
 }
+
+TEST_CASE("bar_live: a bar not drawn in the last frame stays seen but has no area left to pick") {  // review: Important 2
+    BarRig r(active());
+    float o[4];
+    open(r.vitals, "vitalBars");  // stamina drawn
+    call_bar(0, r.snap(), o);
+    call_bar(1, r.snap(), o);
+    call_bar(2, r.snap(), o);
+    close(r.vitals);
+    CHECK(bar_live(kBarStamina).rect[2] == doctest::Approx(200));
+    open(r.vitals, "vitalBars");  // stamina full again: not drawn
+    call_bar(0, r.snap(), o);
+    call_bar(1, r.snap(), o);
+    close(r.vitals);
+    open(r.vitals, "vitalBars");  // the next frame starts
+    const LiveInfo s = bar_live(kBarStamina);
+    CHECK(s.seen);
+    CHECK(s.rect[2] == 0);
+    CHECK(s.rect[3] == 0);
+    CHECK(bar_live(kBarMana).rect[2] == doctest::Approx(260));
+    close(r.vitals);
+}

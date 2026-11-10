@@ -218,8 +218,11 @@ void draw_part_panel(HudEditor& editor, HudPageState& st, const HudView& v, ImVe
     if (i == 0 || bar) draw_order(editor, v);
     if (i == 1) {
         bool up = v.buffs_up;
+        ImGui::BeginDisabled(!v.grow_works);
         if (ImGui::Checkbox("Status effects grow upward", &up)) editor.set_buffs_up(up, Save::Later);
+        ImGui::EndDisabled();
         ImGui::PushTextWrapPos(0.0f);
+        if (!v.grow_works) ImGui::TextColored(kErrorColour, "%s", v.grow_note.c_str());
         ImGui::TextDisabled(
             "The list sits on the food icons' bottom edge and grows up; it stops at the screen's edge. Move this part where "
             "the list has room.");

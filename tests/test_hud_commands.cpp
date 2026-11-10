@@ -206,3 +206,16 @@ TEST_CASE("hud.list: the order and grow upward when set, and the bars' note when
     REQUIRE(m.size() == 20);
     CHECK(m[2] == "hud: Moving health, mana and stamina on their own is not available on this game build.");
 }
+
+TEST_CASE("hud.grow says so when growing upward cannot show") {  // review: Important 1
+    HudRig r;
+    r.scale = ScaleState{true, true};
+    HudEditor& e = r.make();
+    CHECK(run(e, {"hud.grow", "up"}) ==
+          Lines{"hud: status effects grow upward (layout \"Default\")",
+                "hud: not shown now: Status effects growing upward stopped with scale for this session (see emf_core.log)."});
+    CHECK(run(e, {"hud.move", "mana", "0", "5"}) ==
+          Lines{"hud: mana at x 0 %, y 5 % (layout \"Default\")",
+                "hud: not shown now: Moving health, mana and stamina on their own stopped with scale for this session (see "
+                "emf_core.log)."});
+}

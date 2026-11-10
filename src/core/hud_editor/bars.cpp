@@ -80,6 +80,9 @@ float grow_up_dy(float list_y, float list_h, float column_h, const Xform& top, f
 }
 
 void bars_vitals_open(uint8_t* node) {
+    // a bar the game did not draw in the frame that ended (stamina while full): no area left for the HUD page to pick
+    for (size_t b = 0; b < kBarCount; ++b)
+        if (!t_cur[b].seen) g_bar_live[b].rect_b.store(0, std::memory_order_relaxed);
     t_vitals = node;
     t_calls = 0;
     t_base = 0;
