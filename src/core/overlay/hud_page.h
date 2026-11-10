@@ -25,6 +25,16 @@ struct HudPageState {
 // Draws the page into the current window. `display` is the game's screen in pixels.
 void draw_hud_page(hud::HudEditor& editor, HudPageState& st, ImVec2 display);
 
+// The colour a picker on a bar's card shows (0xRRGGBBAA): the player's (a colour without alpha shows the game's alpha
+// for that part when known, else 0xff), else the game's for that part, else white (the bar was not drawn yet).
+uint32_t page_colour(const hud::HudView& v, int bar, hud::BarPart part);
+// The panel's picker: the set panel colour, else health's frame colour from the game, else 0x000000B0.
+uint32_t page_panel_colour(const hud::HudView& v);
+// A picker's floats (0..1, clamped) as a colour with alpha.
+hud::Colour picked(const float rgba[4]);
+// The set colours the page has no button for, as "end #00ff00, heal #0000ff80"; "" for none.
+std::string console_only_colours(const hud::BarColours& c);
+
 enum class PageToggle { Open, Show, Close, Refuse };
 // What the HUD page key does: `busy` is a mod's wheel or window holding the input.
 PageToggle page_toggle(bool console_open, bool showing_page, bool busy);

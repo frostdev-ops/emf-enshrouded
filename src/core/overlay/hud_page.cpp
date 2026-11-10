@@ -1,6 +1,7 @@
 #include "hud_page.h"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 
 #include "core/hud_editor/elements.h"
@@ -174,6 +175,64 @@ void draw_order(HudEditor& editor, const HudView& v) {
     ImGui::TextDisabled("%s", order_line(v.order).c_str());
 }
 
+void to_floats(uint32_t rgba, float out[4]) {
+    for (int k = 0; k < 4; ++k) out[k] = static_cast<float>(rgba >> (24 - 8 * k) & 0xFFu) / 255.0f;
+}
+
+bool colour_button(const char* label, uint32_t rgba, float out[4]) {
+    to_floats(rgba, out);
+    return ImGui::ColorEdit4(label, out,
+                             ImGuiColorEditFlags_AlphaBar | ImGuiColorEditFlags_AlphaPreviewHalf | ImGuiColorEditFlags_NoInputs);
+}
+
+// A bar's card: the filled and the empty part's colours, and the game's colours back.
+void draw_bar_colours(HudEditor& editor, const HudView& v, int bar) {
+    ImGui::Spacing();
+    ImGui::TextUnformatted("Colours");
+    ImGui::BeginDisabled(!v.colours_work);
+    float c[4];
+    if (colour_button("Filled", page_colour(v, bar, BarPart::Fill), c))
+        editor.set_colour(bar, BarPart::Fill, picked(c), Save::Later);
+    ImGui::SameLine();
+    if (colour_button("Empty", page_colour(v, bar, BarPart::Empty), c))
+        editor.set_colour(bar, BarPart::Empty, picked(c), Save::Later);
+    ImGui::SameLine();
+    if (ImGui::Button("Game's colours")) editor.clear_colours(bar, Save::Later);
+    ImGui::EndDisabled();
+    ImGui::PushTextWrapPos(0.0f);
+    const std::string more = console_only_colours(v.colours[static_cast<size_t>(bar)]);
+    if (!more.empty()) ImGui::TextDisabled("Also set in the console: %s", more.c_str());
+    if (!v.colours_work) ImGui::TextColored(kErrorColour, "%s", v.colours_note.c_str());
+    ImGui::PopTextWrapPos();
+}
+
+// The vitals' card: the colour and opacity of the dark panel behind the bars.
+void draw_panel_colour(HudEditor& editor, const HudView& v) {
+    ImGui::Spacing();
+    ImGui::BeginDisabled(!v.panel_works);
+    bool on = v.panel.set;
+    float c[4];
+    if (ImGui::Checkbox("Panel colour", &on)) {
+        if (on) {
+            to_floats(page_panel_colour(v), c);
+            editor.set_panel(picked(c), Save::Later);
+        } else {
+            editor.set_panel(std::nullopt, Save::Later);
+        }
+    }
+    if (v.panel.set) {
+        ImGui::SameLine();
+        if (colour_button("##panel_colour", page_panel_colour(v), c)) editor.set_panel(picked(c), Save::Later);
+    }
+    ImGui::EndDisabled();
+    ImGui::PushTextWrapPos(0.0f);
+    if (!v.panel_works)
+        ImGui::TextColored(kErrorColour, "%s", v.panel_note.c_str());
+    else
+        ImGui::TextDisabled("The dark panel behind the bars, with its opacity.");
+    ImGui::PopTextWrapPos();
+}
+
 void draw_part_panel(HudEditor& editor, HudPageState& st, const HudView& v, ImVec2 display) {
     const size_t i = st.selected;
     const HudElement& part = hud_elements()[i];
@@ -216,6 +275,8 @@ void draw_part_panel(HudEditor& editor, HudPageState& st, const HudView& v, ImVe
         ImGui::TextDisabled("Scales around the screen edge the part is nearest.");
     }
     if (i == 0 || bar) draw_order(editor, v);
+    if (bar) draw_bar_colours(editor, v, part.bar);
+    if (i == 0) draw_panel_colour(editor, v);
     if (i == 1) {
         bool up = v.buffs_up;
         ImGui::BeginDisabled(!v.grow_works);
@@ -275,6 +336,54 @@ void draw_hud_page(HudEditor& editor, HudPageState& st, ImVec2 display) {
     apply_keys(editor, st, v);
     apply_mouse(editor, st, v, display);
     editor.page_frame(st.selected);
+}
+
+uint32_t page_colour(const HudView& v, int bar, BarPart part) {
+    static constexpr size_t kField[kBarPartCount] = {kFill, kRange, kFillEnd, kDamage, kHeal};
+    const size_t p = static_cast<size_t>(part);
+    if (bar < 0 || bar >= static_cast<int>(kBarCount) || p >= kBarPartCount) return 0xFFFFFFFFu;
+    const std::optional<StyleBlock>& g = v.game_colours[static_cast<size_t>(bar)];
+    const Colour& c = v.colours[static_cast<size_t>(bar)].part[p];
+    if (c.set) {
+        if (c.has_alpha) return c.rgba;
+        const uint32_t alpha = g ? game_to_rgba((*g)[kField[p]].value) & 0xFFu : 0xFFu;
+        return (c.rgba & 0xFFFFFF00u) | alpha;
+    }
+    return g ? game_to_rgba((*g)[kField[p]].value) : 0xFFFFFFFFu;
+}
+
+uint32_t page_panel_colour(const HudView& v) {
+    const std::optional<StyleBlock>& g = v.game_colours[static_cast<size_t>(kBarHealth)];
+    if (v.panel.set) {
+        if (v.panel.has_alpha) return v.panel.rgba;
+        const uint32_t alpha = g ? game_to_rgba((*g)[kFrame].value) & 0xFFu : 0xFFu;
+        return (v.panel.rgba & 0xFFFFFF00u) | alpha;
+    }
+    return g ? game_to_rgba((*g)[kFrame].value) : 0x000000B0u;
+}
+
+Colour picked(const float rgba[4]) {
+    uint32_t v = 0;
+    for (int k = 0; k < 4; ++k) {
+        float f = rgba[k];
+        if (!(f > 0.0f)) f = 0.0f;
+        if (f > 1.0f) f = 1.0f;
+        v = v << 8 | static_cast<uint32_t>(std::lround(f * 255.0f));
+    }
+    Colour c;
+    c.rgba = v;
+    c.set = true;
+    c.has_alpha = true;
+    return c;
+}
+
+std::string console_only_colours(const BarColours& c) {
+    std::string s;
+    for (BarPart p : {BarPart::End, BarPart::Damage, BarPart::Heal}) {
+        const Colour& col = c.part[static_cast<size_t>(p)];
+        if (col.set) s += (s.empty() ? "" : ", ") + std::string(bar_part_id(p)) + " " + colour_text(col);
+    }
+    return s;
 }
 
 PageToggle page_toggle(bool console_open, bool showing_page, bool busy) {
