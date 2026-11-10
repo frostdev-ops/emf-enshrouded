@@ -9,8 +9,10 @@
 #include <tuple>
 #include <vector>
 
+#include "common/fnv.h"
 #include "common/offsets.h"
 #include "core/api.h"
+#include "core/player_strings.h"
 #include "core/api_sizes.h"
 #include "emf/emf.hpp"
 #include "fake_world.h"
@@ -433,4 +435,77 @@ TEST_CASE("chat_broadcast on a joined client (this game hosts no server world): 
     CHECK(g_notes.empty());
     CHECK(g_everyone.empty());
     CHECK(logged("this game hosts no world"));
+}
+
+// ---- v30: player_character_name ----
+namespace {
+uint64_t g_name_id = 0;  // player 2's CustomPlayerString id
+void* fake_gc_name(void* out, void*, uint32_t hash, uint32_t entity) {
+    auto o = static_cast<uint64_t*>(out);
+    o[0] = o[1] = 0;
+    if (hash == kCustomPlayerStringHash && entity == 2) {
+        o[0] = reinterpret_cast<uint64_t>(&g_name_id);
+        o[1] = 8;
+    }
+    return out;
+}
+// A CustomPlayerStringsSystem with one name in its map (8 slots).
+struct NameTable {
+    std::vector<uint8_t> sys = std::vector<uint8_t>(0x200, 0);
+    uint64_t bits = 0, keys[8] = {};
+    const uint8_t* values[8] = {};
+    alignas(8) uint8_t entry[0x140] = {};
+    std::string text;
+    explicit NameTable(const std::string& t) : text(t) {
+        const uint64_t id = emf::fnv1a64(text);
+        const size_t slot = static_cast<uint32_t>(id) & 7u;
+        bits = 1ull << slot;
+        keys[slot] = id;
+        values[slot] = entry;
+        const char* p = text.data();
+        const uint64_t len = text.size();
+        std::memcpy(entry + kEntryId, &id, 8);
+        std::memcpy(entry + kEntryText, &p, 8);
+        std::memcpy(entry + kEntryLen, &len, 8);
+        uint8_t* map = sys.data() + kCustomStringsMap;
+        const void* b = &bits;
+        const void* k = keys;
+        const void* v = values;
+        const uint64_t cap = 8;
+        const uint32_t count = 1;
+        std::memcpy(map + off::kMapBits, &b, 8);
+        std::memcpy(map + off::kMapCapacity, &cap, 8);
+        std::memcpy(map + off::kMapKeys, &k, 8);
+        std::memcpy(map + off::kMapValues, &v, 8);
+        std::memcpy(map + off::kMapCount, &count, 4);
+    }
+};
+}  // namespace
+
+TEST_CASE("player_character_name (v30): the name from the server's table; false before it is known or on a client world; needs no players' chat") {
+    Fixture f;
+    f.state.get_component = fake_gc_name;
+    NameTable t("Character 2");
+    g_name_id = emf::fnv1a64("Character 2");
+    f.server_ss.plant(f.server, "CustomPlayerStringsSystem", t.sys.data());
+    g_chat_on = false;  // players' chat is not needed
+    const EmfApi* api = api_table();
+    CHECK(EMF_API_VERSION == 30);
+    REQUIRE(api->size >= offsetof(EmfApi, player_character_name) + sizeof(api->player_character_name));
+    REQUIRE(api->player_character_name);
+    char buf[64] = "junk";
+    CHECK(api->player_character_name(f.w(), 2, buf, sizeof buf));
+    CHECK(std::string(buf) == "Character 2");
+    char tiny[4];
+    CHECK(api->player_character_name(f.w(), 2, tiny, sizeof tiny));
+    CHECK(std::string(tiny) == "Cha");  // cut to size - 1
+    CHECK_FALSE(api->player_character_name(f.w(), 3, buf, sizeof buf));  // no CustomPlayerString
+    CHECK(buf[0] == '\0');
+    CHECK_FALSE(api->player_character_name(f.c(), 2, buf, sizeof buf));  // a client world
+    CHECK_FALSE(api->player_character_name(f.w(), 2, buf, 1));
+    CHECK_FALSE(api->player_character_name(f.w(), 2, nullptr, 8));
+    g_name_id = 0;  // the player's game has not sent it yet
+    CHECK_FALSE(api->player_character_name(f.w(), 2, buf, sizeof buf));
+    g_name_id = emf::fnv1a64("Character 3");  // an id the table does not hold
+    CHECK_FALSE(api->player_character_name(f.w(), 2, buf, sizeof buf));
 }

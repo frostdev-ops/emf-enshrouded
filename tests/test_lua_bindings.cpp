@@ -1417,3 +1417,21 @@ TEST_CASE("lua 1.21: on an older core emf.item_name gives the debug name and fal
         if (x.find("name Wood false lang nil") != std::string::npos) ok = true;
     CHECK(ok);
 }
+
+TEST_CASE("lua 1.22: world:character_name gives the character's name or nil; nil on an older core") {
+    Rig r(L"character_name");
+    r.fake.character_names[3] = "Character 2";
+    add_script(r.dir, "cn",
+               "emf.command('go', '', function(w)\n"
+               "  emf.reply('cn ' .. tostring(w:character_name(3)) .. ' ' .. tostring(w:character_name(4)) .. ' ' .. "
+               "tostring(w:character_name(5000)))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("cn.go");
+    CHECK(replied("cn Character 2 nil nil"));
+    r.api.size = offsetof(EmfApi, player_character_name);  // a v29 core
+    r.fake.replies.clear();
+    r.run_command("cn.go");
+    CHECK(replied("cn nil nil nil"));
+}

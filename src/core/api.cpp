@@ -2,6 +2,7 @@
 // reads are fault-guarded and return 0/NULL.
 #include "core/game_text.h"
 #include "core/item_text.h"
+#include "core/player_strings.h"
 #include "api.h"
 #include "api_sizes.h"
 #include "common/pattern_find.h"
@@ -687,6 +688,22 @@ uint32_t api_item_name(EmfWorld* w, uint32_t item, uint32_t flags, char* buf, ui
     if (!reg) return 0;
     const auto name = item_names().name(reg, item, (flags & EMF_ITEM_NAME_GAME_TEXT) ? NameFor::Game : NameFor::Screen);
     return name ? copy_out(*name, buf, size) : 0;
+}
+
+// v30: the character name from the server's table of custom player strings (core/player_strings.h).
+bool api_player_character_name(EmfWorld* w, uint32_t player, char* buf, uint32_t size) {
+    if (buf && size) buf[0] = '\0';
+    if (!g_state || !w || !buf || size < 2 || WorldView(raw(w)).kind() != EMF_WORLD_SERVER) return false;
+    const ComponentRef c = get_component(g_state->get_component, raw(w), kCustomPlayerStringHash, player);
+    uint64_t id = 0;
+    if (!c.ptr || c.size < sizeof id || !seh_read(c.ptr, &id, sizeof id) || id == 0) return false;
+    const auto* sys = static_cast<const uint8_t*>(WorldView(raw(w)).singleton(kCustomStringsSingleton));
+    const auto name = custom_player_string(sys, id);
+    if (!name) return false;
+    const size_t n = (std::min)(name->size(), static_cast<size_t>(size - 1));
+    std::memcpy(buf, name->data(), n);
+    buf[n] = '\0';
+    return true;
 }
 
 uint32_t api_game_language(char* code_out, uint32_t size) {
@@ -2168,6 +2185,7 @@ const EmfApi kApi = {
     api_on_player,
     api_item_name,
     api_game_language,
+    api_player_character_name,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

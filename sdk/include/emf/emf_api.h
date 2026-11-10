@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 29 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 30 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 29
+#define EMF_API_VERSION 30
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -997,6 +997,14 @@ typedef struct EmfApi {
      * table reports En_Us), 0 on the dedicated server or before the game's text is known. code_out (may be NULL) gets
      * "en_us", "de_de", ... ("" for 0). */
     uint32_t (*game_language)(char* code_out, uint32_t size);
+
+    /* ---- v30: character names and chat lines without a speaker ---- */
+    /* The player's character name (the one the game's Social tab shows), UTF-8, cut to size-1 bytes and NUL-terminated.
+     * Each player's game sends it a few seconds after joining, so it is not known at the join itself. It is display text
+     * the player's game chose, not an identity: key data by the account. False (buf = "") when it is not known yet, for
+     * something that is not a player, or on a client world. Server world (a game you host or the dedicated server; players'
+     * chat need not be on); same thread rules as get_component. */
+    bool (*player_character_name)(EmfWorld* world, uint32_t player, char* buf, uint32_t size);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */

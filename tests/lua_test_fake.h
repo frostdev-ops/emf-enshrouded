@@ -100,6 +100,7 @@ struct Fake {
     std::vector<std::pair<uint32_t, std::string>> tells;  // player, text
     std::vector<std::string> broadcasts;
     std::map<uint32_t, std::string> names;  // player entity -> name (absent: player_name answers false)
+    std::map<uint32_t, std::string> character_names;  // v30 player_character_name
     std::vector<std::pair<EmfChatCallback, void*>> chat_cbs;
     std::vector<std::pair<EmfPlayerCallback, void*>> player_cbs;  // v28 on_player listeners
     int saves = 0;
@@ -608,6 +609,13 @@ bool f_player_name(EmfWorld*, uint32_t player, char* buf, uint32_t size) {
     std::snprintf(buf, size, "%s", it->second.c_str());
     return true;
 }
+bool f_player_character_name(EmfWorld*, uint32_t player, char* buf, uint32_t size) {
+    if (size) buf[0] = 0;
+    auto it = g->character_names.find(player);
+    if (it == g->character_names.end() || !size) return false;
+    std::snprintf(buf, size, "%s", it->second.c_str());
+    return true;
+}
 bool f_on_chat(EmfChatCallback cb, void* user) {
     if (!g->chat_ok || !cb) return false;
     g->chat_cbs.emplace_back(cb, user);
@@ -671,6 +679,7 @@ EmfApi fake_api() {
     a.item_info = f_item_info;
     a.item_name = f_item_name;
     a.game_language = f_game_language;
+    a.player_character_name = f_player_character_name;  // v30
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;

@@ -1252,6 +1252,26 @@ int w_name(lua_State* L) {
     return 1;
 }
 
+bool has_v30(const EmfApi* a) {
+    return a && a->size >= offsetof(EmfApi, player_character_name) + sizeof(a->player_character_name);
+}
+
+// world:character_name(id) (lua 1.22, API v30): the character's name (the Social tab's), or nil until the player's game
+// has sent it (a few seconds after joining), on an older core, or for anything but a player of this server world
+int w_character_name(lua_State* L) {
+    WorldUD* w = check_world(L, 1);
+    const lua_Integer id = luaL_checkinteger(L, 2);
+    const EmfApi* a = w->script->host->api;
+    char buf[260] = {};
+    if (id < 1 || id > 0xFFFFFFFF || !has_v30(a) || !a->player_character_name ||
+        !a->player_character_name(w->world, static_cast<uint32_t>(id), buf, sizeof buf) || !buf[0]) {
+        lua_pushnil(L);
+        return 1;
+    }
+    lua_pushstring(L, buf);
+    return 1;
+}
+
 void chat_cb_body(EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {
     auto* h = static_cast<Host::Impl*>(user);
     char hex[24];
@@ -3102,7 +3122,7 @@ void open_bindings(lua_State* L, Script&) {
     if (luaL_newmetatable(L, kWorldMeta)) {
         static const luaL_Reg methods[] = {{"is_server", w_is_server}, {"is_client", w_is_client}, {"tick", w_tick},
                                            {"get", w_get},             {"entities", w_entities},   {"position", w_position},
-                                           {"account", w_account},     {"name", w_name},
+                                           {"account", w_account},     {"name", w_name}, {"character_name", w_character_name},
                                            {"template", w_template},   {nullptr, nullptr}};
         luaL_newlib(L, methods);
         lua_setfield(L, -2, "__index");
