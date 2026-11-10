@@ -94,6 +94,10 @@ struct NameList {
     const std::vector<std::string>* names = nullptr;
     size_t size() const { return items ? items->size() : names->size(); }
     const std::string& name(size_t i) const { return items ? (*items)[i].name : (*names)[i]; }
+    const std::string& shown(size_t i) const {
+        static const std::string none;
+        return items ? (*items)[i].shown : none;
+    }
     uint32_t id(size_t i) const { return items ? (*items)[i].id : static_cast<uint32_t>(i + 1); }
 };
 
@@ -163,6 +167,24 @@ std::vector<std::string> item_words(std::string_view text) {
 }
 
 namespace {
+// The items whose shown name (the game's name, in the player's language) holds every typed word (a part of a word is
+// enough), and those with exactly the typed words.
+void shown_matches(const NameList& items, const std::vector<std::string>& typed, std::vector<size_t>* hits,
+                   std::vector<size_t>* same) {
+    const auto typed_values = by_value(typed);
+    for (size_t i = 0; i < items.size(); ++i) {
+        if (items.shown(i).empty()) continue;
+        const auto words = item_words(items.shown(i));
+        if (words.empty()) continue;
+        std::string compact;
+        for (const auto& w : words) compact += w;
+        if (!std::all_of(typed.begin(), typed.end(), [&](const std::string& t) { return word_in(t, words, compact); }))
+            continue;
+        hits->push_back(i);
+        if (same && by_value(words) == typed_values) same->push_back(i);
+    }
+}
+
 ItemMatch match_in(const NameList& items, std::string_view typed_in) {
     ItemMatch m;
     const std::string typed = trimmed(typed_in);
@@ -184,6 +206,15 @@ ItemMatch match_in(const NameList& items, std::string_view typed_in) {
             found(i, ItemHow::Exact);
             return m;
         }
+    std::vector<size_t> shown_exact;  // the name the game shows, in any case: one item wins; a shared one goes on
+    for (size_t i = 0; i < items.size(); ++i)
+        if (!items.shown(i).empty() && lower(items.shown(i)) == want) shown_exact.push_back(i);
+    if (shown_exact.size() == 1) {
+        m.id = items.id(shown_exact[0]);
+        m.how = ItemHow::Exact;
+        m.own_words_typed = true;
+        return m;
+    }
     if (typed_words.empty()) return m;
     const auto scored = scored_matches(items, typed_words);
     for (const auto& s : scored) m.matches.push_back(s.index);
@@ -207,12 +238,33 @@ ItemMatch match_in(const NameList& items, std::string_view typed_in) {
     } else if (meant.empty() && whole.size() == 1) {
         found(whole[0]->index, ItemHow::Whole);
     }
+    if (m.id) return m;
+    // the debug names decided nothing: the shown names' words (as typed in the player's language)
+    std::vector<size_t> shown_hits, shown_same;
+    shown_matches(items, typed_words, &shown_hits, &shown_same);
+    for (size_t h : shown_hits)
+        if (std::find(m.matches.begin(), m.matches.end(), h) == m.matches.end()) m.matches.push_back(h);
+    if (shown_hits.size() == 1) {
+        m.id = items.id(shown_hits[0]);
+        m.how = ItemHow::Only;
+        m.own_words_typed = !shown_same.empty();
+    } else if (shown_same.size() == 1) {
+        m.id = items.id(shown_same[0]);
+        m.how = ItemHow::SameWords;
+        m.own_words_typed = true;
+    }
     return m;
 }
 
 std::vector<size_t> search_in(const NameList& items, std::string_view typed) {
     std::vector<size_t> out;
-    for (const auto& s : scored_matches(items, item_words(typed))) out.push_back(s.index);
+    const auto words = item_words(typed);
+    for (const auto& s : scored_matches(items, words)) out.push_back(s.index);
+    if (words.empty()) return out;
+    std::vector<size_t> hits;  // then the items only their shown name matches
+    shown_matches(items, words, &hits, nullptr);
+    for (size_t h : hits)
+        if (std::find(out.begin(), out.end(), h) == out.end()) out.push_back(h);
     return out;
 }
 }  // namespace

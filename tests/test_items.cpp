@@ -391,3 +391,53 @@ TEST_CASE("item names: a quoted name is the whole name; readings that name diffe
     CHECK(a.id == 0);
     CHECK(a.name == "wood logs many");
 }
+
+// ---- the names the game shows (NamedItem.shown) ----
+TEST_CASE("match_item: a shown name typed exactly finds its item, in any case") {  // Review Focus 4
+    const std::vector<NamedItem> items = {{1, "Material_T1_Wood_Logs", "Wood Logs"},
+                                          {2, "Material_T1_Wood_Logs_Dead", "Dead Wood Logs"},
+                                          {3, "Tool_Torch01", "Torch"}};
+    auto m = match_item(items, "wood logs");
+    CHECK(m.id == 1);
+    CHECK(m.how == ItemHow::Exact);
+    m = match_item(items, "Dead Wood Logs");
+    CHECK(m.id == 2);
+    CHECK(m.how == ItemHow::Exact);
+    m = match_item(items, "torch");
+    CHECK(m.id == 3);
+}
+
+TEST_CASE("match_item: names in the player's language, whole or in part") {
+    const std::vector<NamedItem> items = {{1, "Material_T1_Wood_Logs", "Holzscheite"},
+                                          {2, "Tool_Torch01", "Fackel"}};
+    auto m = match_item(items, "holzscheite");
+    CHECK(m.id == 1);
+    CHECK(m.how == ItemHow::Exact);
+    m = match_item(items, "fack");  // a part of the shown name, no debug name has it
+    CHECK(m.id == 2);
+    CHECK(m.how == ItemHow::Only);
+    m = match_item(items, "wood logs");  // the debug name's words still work
+    CHECK(m.id == 1);
+}
+
+TEST_CASE("match_item: the debug names decide as before when a shown name is shared") {  // Review Focus 4
+    const std::vector<NamedItem> items = {{1, "Tool_Torch01", "Torch"}, {2, "Prop_Decoration_Wall_Torch", "Torch"}};
+    const auto m = match_item(items, "torch");
+    CHECK(m.id == 1);  // as without shown names: Tool_Torch01's own words are all typed
+}
+
+TEST_CASE("match_item: two items with the same shown name that no debug name tells apart: none, both listed") {
+    const std::vector<NamedItem> items = {{1, "Prop_A_01", "Lantern"}, {2, "Prop_B_02", "Lantern"}, {3, "Tool_X", "Rope"}};
+    const auto m = match_item(items, "lantern");
+    CHECK(m.id == 0);
+    CHECK(m.matches.size() == 2);
+}
+
+TEST_CASE("search_items: shown-name matches come after the debug-name ones") {
+    const std::vector<NamedItem> items = {{1, "Material_T1_Wood_Logs", "Holzscheite"}, {2, "Tool_Torch01", "Fackel"},
+                                          {3, "Fackel_Debug_Thing", ""}};
+    const auto found = search_items(items, "fackel");
+    REQUIRE(found.size() == 2);
+    CHECK(found[0] == 2);  // its debug name holds the word
+    CHECK(found[1] == 1);  // only its shown name does
+}

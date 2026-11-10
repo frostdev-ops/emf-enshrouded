@@ -2,8 +2,8 @@
 // Item names as people type them, for the console and chat commands (give, put, take, stack, items). The game names
 // its items with debug names (Material_T1_Wood_Logs, Material_T0_simple_FishingBait, Tool_Torch01); these rules find
 // one from what a player types: case ignored, spaces for '_', words in any order, a part of a word is enough ("wood
-// log", "Simple Bait", "torch"). The names the game shows ("Wood Log") are in its text tables, which EMF does not read:
-// a name that is only there is not found.
+// log", "Simple Bait", "torch"). The names the game shows (NamedItem.shown: "Wood Logs", "Holzscheite" in German) are found
+// too: typed exactly they win; their words count when the debug names decide nothing.
 #include <cstdint>
 #include <string>
 #include <string_view>

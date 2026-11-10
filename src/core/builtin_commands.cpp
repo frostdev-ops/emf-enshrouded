@@ -76,10 +76,24 @@ ItemList all_items(BuiltinContext& c, EmfWorld* w) {
     ItemList l;
     c.api->for_each_item(w, [](const EmfItemInfo* i, void* p) {
         auto* list = static_cast<ItemList*>(p);
-        list->named.push_back({i->item_id, i->name});
+        list->named.push_back({i->item_id, i->name, {}});
         list->stack.push_back(i->max_stack);
     }, &l);
+    if (c.api->item_name) {  // v29: the names the game shows (none on the dedicated server)
+        char buf[256];
+        for (NamedItem& n : l.named)
+            if (c.api->item_name(w, n.id, 0, buf, sizeof buf)) n.shown = buf;
+    }
     return l;
+}
+
+// "Wood Logs (Material_T1_Wood_Logs)" when the game has a name for the item here, else the debug name.
+std::string item_label(const EmfApi* api, EmfWorld* w, uint32_t id, const char* debug_name) {
+    char buf[256];
+    const std::string debug = debug_name ? debug_name : "";
+    if (api->item_name && api->item_name(w, id, 0, buf, sizeof buf))
+        return debug.empty() ? std::string(buf) : std::string(buf) + " (" + debug + ")";
+    return debug;
 }
 
 // What read_item found.
@@ -498,7 +512,10 @@ void cmd_items(EmfWorld* w, int argc, const char* const* argv, void* u) {
     }
     for (size_t k = 0; k < found.size() && k < 50; ++k) {
         const NamedItem& it = l.named[found[k]];
-        command_reply_line(fmt("%s (0x%08x, stack %u)", it.name.c_str(), it.id, unsigned(l.stack[found[k]])));
+        if (!it.shown.empty())
+            command_reply_line(fmt("%s: %s (0x%08x, stack %u)", it.shown.c_str(), it.name.c_str(), it.id, unsigned(l.stack[found[k]])));
+        else
+            command_reply_line(fmt("%s (0x%08x, stack %u)", it.name.c_str(), it.id, unsigned(l.stack[found[k]])));
     }
     command_reply_line(
         fmt("%zu of %zu items%s", found.size(), l.named.size(), found.size() > 50 ? " (first 50 shown)" : ""));
@@ -520,7 +537,7 @@ void cmd_give(EmfWorld* w, int argc, const char* const* argv, void* u) {
     c.api->item_info(w, id, &info);
     const uint32_t player = c.player ? c.player() : 0;
     const uint32_t pickup = c.api->give_item(w, player, id, count);
-    command_reply_line(pickup ? fmt("gave %u x %s to player %u", count, info.name, player)
+    command_reply_line(pickup ? fmt("gave %u x %s to player %u", count, item_label(c.api, w, id, info.name).c_str(), player)
                               : std::string("give failed (see the log)"));
 }
 
@@ -539,7 +556,7 @@ void items_done(EmfWorld* w, uint32_t entity, uint32_t item, uint32_t requested,
     const bool named = late->c->api->item_info(w, item, &info) && info.name[0];
     const std::string why = InventoryService::delivering_reason();
     late->reply(fmt(take ? "take %u x %s from entity %u: %u taken%s" : "put %u x %s into entity %u: %u added%s",
-                    requested, named ? info.name : fmt("0x%08x", item).c_str(), entity, n,
+                    requested, named ? item_label(late->c->api, w, item, info.name).c_str() : fmt("0x%08x", item).c_str(), entity, n,
                     why.empty() ? "" : (" (" + why + ")").c_str()));
 }
 void put_done(EmfWorld* w, uint32_t entity, uint32_t item, uint32_t requested, uint32_t added, void* user) {

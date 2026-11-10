@@ -7,10 +7,12 @@
 #include <string>
 #include <vector>
 
+#include "common/fnv.h"
 #include "core/api.h"
 #include "core/builtin_commands.h"
 #include "core/commands.h"
 #include "core/daytime.h"
+#include "core/game_text.h"
 #include "core/emf_settings.h"
 #include "core/inventory.h"
 #include "core/items.h"
@@ -907,4 +909,59 @@ TEST_CASE("builtin commands: hooks lists every hook with its owner; pattern find
     CHECK(bsaid("found once in .text at exe+0x210"));
     CHECK(bsaid("not found"));
     CHECK(bsaid("not a pattern"));
+}
+
+// ---- the game's item names (API v29, game_text) ----
+namespace {
+struct NamesPool {
+    alignas(16) uint8_t mem[0x128]{};
+    NamesPool() {
+        const uint32_t null_tag = 0x69691905u, one = 1, lang = 1;
+        const uint64_t table = 0x7700;
+        std::memcpy(mem + 0x18, &null_tag, 4);
+        std::memcpy(mem + 0x88, &one, 4);
+        std::memcpy(mem + 0xD8, &lang, 4);
+        std::memcpy(mem + 0x100, &table, 8);
+    }
+};
+uint32_t g_wood_tag = 0;
+const std::string kWoodText = "Wood Logs";
+emf::core::LocaResult* names_lookup(emf::core::LocaResult* out, void*, uint32_t tag) {
+    std::memset(out, 0, sizeof *out);
+    if (tag != g_wood_tag) {
+        out->error = 0x1F;
+        return out;
+    }
+    out->text = kWoodText.data();
+    out->length = kWoodText.size();
+    return out;
+}
+}  // namespace
+
+TEST_CASE("builtin commands: with the game's names, items and give show them and take them typed") {
+    BFixture f;
+    ItemsWorld iw;
+    uint8_t* wood = emf::core::item_data_ptr(iw.reg.reg, 0x11);
+    REQUIRE(wood);
+    uint8_t g[16];
+    for (int i = 0; i < 16; ++i) g[i] = static_cast<uint8_t>(0x40 + i);
+    std::memcpy(wood + 0x48, g, 16);
+    g_wood_tag = emf::fnv1a32(g, 16);
+    NamesPool pool;
+    emf::core::LocaAccess a;
+    a.pool = [&pool] { return pool.mem; };
+    a.lookup = &names_lookup;
+    emf::core::set_game_text_for_tests(std::move(a));
+    g_pickup_amounts.clear();
+    f.center.enqueue("items wood");
+    f.center.enqueue("give wood logs 2");
+    f.center.enqueue("give Wood Logs");
+    f.center.enqueue("give torch");
+    f.run(iw.w);
+    CHECK(bsaid("Wood Logs: Material_T1_Wood_Logs (0x00000011, stack 250)"));
+    CHECK(bsaid("gave 2 x Wood Logs (Material_T1_Wood_Logs) to player"));
+    CHECK(bsaid("gave 1 x Wood Logs (Material_T1_Wood_Logs) to player"));
+    CHECK(bsaid("gave 1 x Torch to player"));  // no shown name: the debug name alone
+    CHECK(g_pickup_amounts == std::vector<uint32_t>{2, 1, 1});
+    emf::core::set_game_text_for_tests(emf::core::LocaAccess{});
 }
