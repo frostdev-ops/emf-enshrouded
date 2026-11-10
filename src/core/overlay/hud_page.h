@@ -30,6 +30,8 @@ void draw_hud_page(hud::HudEditor& editor, HudPageState& st, ImVec2 display);
 uint32_t page_colour(const hud::HudView& v, int bar, hud::BarPart part);
 // The panel's picker: the set panel colour, else health's frame colour from the game, else 0x000000B0.
 uint32_t page_panel_colour(const hud::HudView& v);
+// The panel switch works when the panel colour does, and always to turn a set colour off.
+bool panel_switch_enabled(const hud::HudView& v);
 // A picker's floats (0..1, clamped) as a colour with alpha.
 hud::Colour picked(const float rgba[4]);
 // The set colours the page has no button for, as "end #00ff00, heal #0000ff80"; "" for none.

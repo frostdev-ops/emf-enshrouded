@@ -287,3 +287,13 @@ TEST_CASE("hud page: a mod lines card draws, and scales even without the game's 
     CHECK(p.e->view().elements[static_cast<size_t>(lines_element(1))].scale == doctest::Approx(1.05f));
     CHECK(std::string(emf_imgui_last_assert()).empty());
 }
+
+TEST_CASE("panel_switch_enabled: on when the panel works, and always to turn a set colour off") {  // review Minor 3
+    HudView v;
+    CHECK_FALSE(panel_switch_enabled(v));
+    v.panel_works = true;
+    CHECK(panel_switch_enabled(v));
+    v.panel_works = false;
+    v.panel = *parse_colour("#000000").colour;
+    CHECK(panel_switch_enabled(v));
+}

@@ -35,6 +35,7 @@ struct HudEditorDeps {
     std::function<bool()> bars_ready;                     // the bar detour is installed; empty = not available
     std::function<std::optional<StyleBlock>(int bar)> game_colours;  // the game's colour block for a bar, once drawn
     std::function<PanelStatus()> panel_status;            // whether the panel colour can be written; empty = unknown
+    std::function<std::string()> panel_memory;            // the checked memory's type and protection, for the log
     std::function<ColourStats()> colour_stats;            // the bar detour's colour counters; empty = none
     std::function<bool(uint32_t vk)> key_down;            // a key held now with the game in front
     std::function<void()> toggle_page;                    // opens (or closes) the console on the HUD page
@@ -86,7 +87,7 @@ public:
     void nudge(size_t element, float dx_percent, float dy_percent, Save save);
     void set_scale(size_t element, float scale, Save save);
     void set_hidden(size_t element, bool hidden, Save save);
-    void reset(size_t element, Save save);  // the vitals part also restores the order, the buffs part grow-upward
+    void reset(size_t element, Save save);  // the vitals part also restores the order, the buffs part grow-upward; colours stay
     void set_order(const BarOrder& order, Save save);  // an order that is not a permutation is ignored
     void swap_bars(int a, int b, Save save);            // the two bars change places in the order
     void set_buffs_up(bool on, Save save);
@@ -152,6 +153,7 @@ private:
     bool other_checked_ = false;
     bool scale_off_logged_ = false;
     std::array<bool, kBarCount> colours_logged_{};  // the game's colours of each bar logged once
+    bool panel_refusal_logged_ = false;
 
     // keys and the page
     Hotkeys hotkeys_;

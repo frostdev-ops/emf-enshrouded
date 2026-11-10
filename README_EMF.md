@@ -282,7 +282,8 @@ stamina is not full).
   fill colour. Three more colours per bar are set from the console: `end` (the bright end), `damage` (the part shown while
   the value drops) and `heal` (while it rises), for example `hud.colour health damage #ff8000`. The game's effects (the
   damage blink, the heal glow, the HUD fading out) work with any colour; the red "not enough mana / stamina" flash and the
-  ticks stay as the game draws them. The colours follow the bar when the order changes.
+  ticks stay as the game draws them. The colours follow the bar when the order changes. A card's **Reset** (and R,
+  `hud.reset <part>`) moves the part back and keeps its colours; **Game's colours** and **Reset all** put them back.
 - **Panel colour:** a switch on the vitals' card gives the dark panel behind the bars a colour and opacity of your own
   (`hud.colour panel #20208080`).
 - **Mods' lines** (`emf.hud`) are three parts, one per corner a mod can use: move, scale (the text size) and hide each
@@ -374,7 +375,7 @@ end the game; use `commands.txt` then.)
 | `hud.move <part> <x> <y>` | moves a HUD part, in percent of the screen from where the game draws it (e.g. `hud.move vitals 5 -2.5`) |
 | `hud.scale <part> <0.5-2>` | a HUD part's size, around the screen edge it is nearest (e.g. `hud.scale hotbar 0.75`) |
 | `hud.hide <part>` / `hud.show <part>` | hides a HUD part / brings it back |
-| `hud.reset [part]` | puts one HUD part, or every part, back where the game draws it; a reset of every part keeps the layout before as "Before reset" |
+| `hud.reset [part]` | puts one HUD part, or every part, back where the game draws it (one part keeps its colours; a reset of every part puts the colours back too and keeps the layout before as "Before reset") |
 | `hud.layout [save\|load\|delete <name>]` | the HUD layouts in `emf\hud`: without words the list, else save the current one under a name, switch to one, or delete one |
 | `hud.swap <bar> <bar>` | two of the vitals' bars (`health`, `mana`, `stamina`) change places (e.g. `hud.swap health mana`: mana on top) |
 | `hud.order <bar> <bar> <bar>` | the vitals' bars from the top (e.g. `hud.order mana health stamina`) |

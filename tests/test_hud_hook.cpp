@@ -1,6 +1,8 @@
 // The HUD editor's UI scope detours, against fake scopes, nodes and a fake UI layer (no game, no MinHook).
 #include <doctest.h>
 
+#include <windows.h>
+
 #include <cmath>
 #include <cstring>
 #include <vector>
@@ -802,7 +804,11 @@ TEST_CASE("the game's colours are recorded per bar; stamina not seen stays empty
 namespace {
 
 bool g_writable = true;
-bool test_writable(const void*, size_t) { return g_writable; }
+bool test_writable(const void*, size_t, uint32_t* type, uint32_t* protect) {
+    if (type) *type = 0x20000;  // MEM_PRIVATE
+    if (protect) *protect = g_writable ? 0x04u : 0x02u;
+    return g_writable;
+}
 
 void open_widget(Node& n) {
     const NameInfo ni{"doPlayerHealthWidget()", 22, kPlayerWidgetHash};
@@ -928,4 +934,61 @@ TEST_CASE("lines_live: the overlay's rect of a place is that part's live rect") 
     CHECK(hud_live(static_cast<size_t>(lines_element(2))).rect[2] == 0.0f);
     reset();
     CHECK_FALSE(hud_live(static_cast<size_t>(lines_element(2))).seen);
+}
+
+TEST_CASE("panel: not written when the bytes there are not health's frame colour from this frame") {  // review Important 1
+    PanelRig p(with_panel());
+    open_widget(p.widget);
+    open(p.bars.vitals, "vitalBars");
+    float o[4];
+    call_bar_style(0, &p.health, p.bars.snap(), o);
+    p.health[kFrame].value = rgba_to_game(0x12345678);  // changed since the bar read it (a copy that died, reused memory)
+    close(p.bars.vitals);
+    CHECK(p.health[kFrame].value == rgba_to_game(0x12345678));
+    CHECK(colour_stats().panel_writes == 0);
+    close(p.widget);
+}
+
+TEST_CASE("panel: not put back when the bytes changed after the write") {  // review Important 1
+    PanelRig p(with_panel());
+    p.draw_bars();
+    REQUIRE(colour_stats().panel_writes == 1);
+    p.health[kFrame].value = rgba_to_game(0x11223344);  // something else wrote there since
+    close(p.widget);
+    CHECK(p.health[kFrame].value == rgba_to_game(0x11223344));
+    CHECK(colour_stats().panel_restores == 0);
+}
+
+TEST_CASE("panel: the refused memory's type and protection are kept for the log") {
+    PanelRig p(with_panel(), false);
+    p.draw_bars();
+    CHECK(panel_status() == PanelStatus::ReadOnly);
+    CHECK(panel_memory_text() == "memory type 0x20000, protection 0x2");
+    close(p.widget);
+}
+
+TEST_CASE("memory_writable: private read-write memory only, never this thread's stack or a shared view") {
+    uint32_t type = 0, protect = 0;
+    void* rw = VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    REQUIRE(rw);
+    CHECK(memory_writable(rw, 8, &type, &protect));
+    CHECK(type == MEM_PRIVATE);
+    CHECK(protect == PAGE_READWRITE);
+    CHECK_FALSE(memory_writable(static_cast<uint8_t*>(rw) + 4092, 8, &type, &protect));  // past the region's end
+    DWORD old = 0;
+    REQUIRE(VirtualProtect(rw, 4096, PAGE_READONLY, &old));
+    CHECK_FALSE(memory_writable(rw, 8, &type, &protect));
+    CHECK(protect == PAGE_READONLY);
+    VirtualFree(rw, 0, MEM_RELEASE);
+    uint64_t on_stack = 0;
+    CHECK_FALSE(memory_writable(&on_stack, 8, &type, &protect));
+    HANDLE m = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4096, nullptr);
+    REQUIRE(m);
+    void* view = MapViewOfFile(m, FILE_MAP_WRITE, 0, 0, 4096);
+    REQUIRE(view);
+    CHECK_FALSE(memory_writable(view, 8, &type, &protect));
+    CHECK(type == MEM_MAPPED);
+    UnmapViewOfFile(view);
+    CloseHandle(m);
+    CHECK_FALSE(memory_writable(nullptr, 8, &type, &protect));
 }

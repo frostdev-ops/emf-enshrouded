@@ -247,6 +247,12 @@ void HudEditor::tick() {
                        ui_colour_text(s[kHeal]));
         }
     }
+    if (deps_.panel_status && !panel_refusal_logged_ && deps_.panel_status() == PanelStatus::ReadOnly) {
+        panel_refusal_logged_ = true;
+        const std::string detail = deps_.panel_memory ? deps_.panel_memory() : std::string();
+        log_locked("HUD editor: the panel colour cannot be written on this game build (" +
+                   (detail.empty() ? std::string("memory not checked") : detail) + "); the panel keeps the game's colour");
+    }
     if (deps_.scale_state && !scale_off_logged_ && deps_.scale_state().off) {
         scale_off_logged_ = true;
         log_locked(
@@ -356,12 +362,8 @@ void HudEditor::reset(size_t element, Save save) {
     if (element >= kHudElementCount) return;
     std::lock_guard<std::mutex> lock(mu_);
     active_locked().elements[element] = ElementLayout{};
-    if (const int bar = hud_elements()[element].bar; bar >= 0)
-        active_locked().colours[static_cast<size_t>(bar)] = BarColours{};  // a bar's card holds its colours
-    if (element == 0) {  // the vitals' card holds the order and the panel colour
-        active_locked().order = kDefaultOrder;
-        active_locked().panel = Colour{};
-    }
+    // colours stay: Game's colours, hud.colour ... game and reset all put them back
+    if (element == 0) active_locked().order = kDefaultOrder;  // the vitals' card holds the order
     if (element == 1) active_locked().buffs_up = false;       // the buffs' card holds grow-upward
     publish_locked();
     mark_changed_locked(save);

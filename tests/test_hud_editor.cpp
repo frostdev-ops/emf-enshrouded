@@ -711,21 +711,21 @@ TEST_CASE("editor: set_colour publishes and saves; nullopt brings the game's bac
     CHECK_FALSE(e.view().panel.set);
 }
 
-TEST_CASE("editor: reset of a bar clears its colours; the vitals' reset clears the panel; reset all clears everything") {
+TEST_CASE("editor: a part's reset keeps its colours and the panel; reset all clears everything") {  // review Minor 4
     HudRig r;
     HudEditor& e = r.make();
     const Colour red = *parse_colour("#ff0000").colour;
     e.set_colour(kBarMana, BarPart::Fill, red, Save::Now);
     e.set_colour(kBarStamina, BarPart::Fill, red, Save::Now);
     e.set_panel(red, Save::Now);
+    e.set_offset(static_cast<size_t>(bar_element(kBarMana)), 0, 5, Save::Now);
     e.reset(static_cast<size_t>(bar_element(kBarMana)), Save::Now);
-    CHECK_FALSE(e.view().colours[kBarMana].any());
-    CHECK(e.view().colours[kBarStamina].any());
+    CHECK(e.view().elements[static_cast<size_t>(bar_element(kBarMana))].is_default());
+    CHECK(e.view().colours[kBarMana].any());
     CHECK(e.view().panel.set);
     e.reset(0, Save::Now);  // the vitals part
-    CHECK_FALSE(e.view().panel.set);
+    CHECK(e.view().panel.set);
     CHECK(e.view().colours[kBarStamina].any());
-    e.set_panel(red, Save::Now);
     CHECK(e.reset_all().ok);
     CHECK_FALSE(e.view().colours[kBarStamina].any());
     CHECK_FALSE(e.view().panel.set);
@@ -777,4 +777,21 @@ TEST_CASE("editor: the game's colours are logged once per bar") {
     CHECK(r.count_logged("the game's health colours") == 1);
     REQUIRE(r.editor->view().game_colours[kBarHealth].has_value());
     CHECK_FALSE(r.editor->view().game_colours[kBarMana].has_value());
+}
+
+TEST_CASE("editor: a panel colour that cannot be written is logged once, with the memory's detail") {
+    HudRig r;
+    PanelStatus status = PanelStatus::Unknown;
+    HudEditorDeps d = r.deps();
+    d.panel_status = [&status] { return status; };
+    d.panel_memory = [] { return std::string("memory type 0x40000, protection 0x2"); };
+    r.editor = std::make_unique<HudEditor>(d);
+    r.editor->start();
+    r.editor->tick();
+    CHECK_FALSE(r.logged("panel colour cannot be written"));
+    status = PanelStatus::ReadOnly;
+    r.editor->tick();
+    r.editor->tick();
+    CHECK(r.count_logged("HUD editor: the panel colour cannot be written on this game build (memory type 0x40000, "
+                         "protection 0x2); the panel keeps the game's colour") == 1);
 }

@@ -631,3 +631,26 @@ TEST_CASE("look drawing: style=boxed moves each place's box by its offset") {
     hud_vertices_view(one, look_of(HudStyle::Boxed), view);
     CHECK_FALSE(drawn("##emf_hud_bottom_left"));
 }
+
+TEST_CASE("look drawing: boxed lines are made behind the console's window (the HUD page)") {  // review Minor 1
+    Headless h;
+    const std::vector<HudLine> one{{"a", "Hi", HudPlace::BottomLeft, 0}};
+    ImGui::NewFrame();
+    ImGui::Begin("console test");
+    ImGui::End();
+    ImGui::Render();
+    ImGui::NewFrame();
+    ImGui::Begin("console test");
+    ImGui::End();
+    draw_hud(one, ImVec2(1920, 1080), look_of(HudStyle::Boxed), HudLinesView{});
+    ImGui::Render();
+    int box = -1, console = -1;
+    for (int i = 0; i < GImGui->Windows.Size; ++i) {
+        const std::string name = GImGui->Windows[i]->Name;
+        if (name.find("##emf_hud_bottom_left") != std::string::npos) box = i;
+        if (name == "console test") console = i;
+    }
+    REQUIRE(box >= 0);
+    REQUIRE(console >= 0);
+    CHECK(box < console);  // g.Windows is back to front
+}

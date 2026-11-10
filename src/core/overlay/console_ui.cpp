@@ -523,7 +523,8 @@ void draw_hud_boxed(const std::vector<HudLine>& lines, ImVec2 display, const Tex
         ImGui::SetNextWindowPos(ImVec2(pos.x + ed.offset.x, pos.y + ed.offset.y), ImGuiCond_Always, pivot);
         ImGui::SetNextWindowBgAlpha(0.55f);
         ImGui::PushStyleColor(ImGuiCol_WindowBg, kBoxBack);
-        ImGui::Begin(kNames[place], nullptr, kBoxFlags);
+        // behind the console (the HUD page shows them): a new window is otherwise made on top
+        ImGui::Begin(kNames[place], nullptr, kBoxFlags | ImGuiWindowFlags_NoBringToFrontOnFocus);
         ImGui::SetWindowFontScale(ed.scale);
         if (!any) {
             ImGui::PushStyleColor(ImGuiCol_Text, look_colour4(dimmed(look.colour)));

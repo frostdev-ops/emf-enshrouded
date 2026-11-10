@@ -5,6 +5,7 @@
 #include <array>
 #include <cstdint>
 #include <optional>
+#include <string>
 
 #include "core/hud_editor/colours.h"
 #include "core/hud_editor/elements.h"
@@ -69,10 +70,12 @@ void bars_vitals_close(const HudSnapshot* snap);
 // ---- the panel colour: a scoped write into health's frame colour (the widget tints the panel behind the bars with it,
 // after vitalBars closed and before its inner "doPlayerHealthWidget()" scope closes) ----
 constexpr uint64_t kPlayerWidgetHash = 0x9442c26a6a17b7a0ull;  // fnv1a64("doPlayerHealthWidget()")
-// Whether n bytes at p may be written as they are (hook.cpp: VirtualQuery; EMF never changes page protection). Null:
-// never written.
-using WritableFn = bool (*)(const void* p, size_t n);
+// Whether n bytes at p may be written as they are (hook.cpp's memory_writable; EMF never changes page protection), with
+// the memory's type and protection for the log. Null: never written.
+using WritableFn = bool (*)(const void* p, size_t n, uint32_t* type, uint32_t* protect);
 void set_panel_writable_check(WritableFn f);
+// The last checked memory's type and protection, "memory type 0x20000, protection 0x4" ("" before any check).
+std::string panel_memory_text();
 // Puts the saved frame colour back when it was written (the widget closed, the next vitalBars opened, the editor is off).
 void panel_restore();
 PanelStatus panel_status();

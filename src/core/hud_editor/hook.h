@@ -81,6 +81,9 @@ struct UiSpace {
     float w = 1920.0f, h = 1080.0f;
     bool measured = false;
 };
+// The panel colour's write check: committed private memory, readable and writable as it is (EMF never changes
+// protection), not this thread's stack, all n bytes inside one region. *type and *protect get what VirtualQuery says.
+bool memory_writable(const void* p, size_t n, uint32_t* type, uint32_t* protect);
 LiveInfo hud_live(size_t element);
 UiSpace hud_ui_space();
 uint32_t hud_fault_code();  // the exception code of a fault in a detour, 0 for none

@@ -209,7 +209,7 @@ void draw_bar_colours(HudEditor& editor, const HudView& v, int bar) {
 // The vitals' card: the colour and opacity of the dark panel behind the bars.
 void draw_panel_colour(HudEditor& editor, const HudView& v) {
     ImGui::Spacing();
-    ImGui::BeginDisabled(!v.panel_works);
+    ImGui::BeginDisabled(!panel_switch_enabled(v));
     bool on = v.panel.set;
     float c[4];
     if (ImGui::Checkbox("Panel colour", &on)) {
@@ -220,11 +220,13 @@ void draw_panel_colour(HudEditor& editor, const HudView& v) {
             editor.set_panel(std::nullopt, Save::Later);
         }
     }
+    ImGui::EndDisabled();
     if (v.panel.set) {
         ImGui::SameLine();
+        ImGui::BeginDisabled(!v.panel_works);
         if (colour_button("##panel_colour", page_panel_colour(v), c)) editor.set_panel(picked(c), Save::Later);
+        ImGui::EndDisabled();
     }
-    ImGui::EndDisabled();
     ImGui::PushTextWrapPos(0.0f);
     if (!v.panel_works)
         ImGui::TextColored(kErrorColour, "%s", v.panel_note.c_str());
@@ -363,6 +365,8 @@ uint32_t page_panel_colour(const HudView& v) {
     }
     return g ? game_to_rgba((*g)[kFrame].value) : 0x000000B0u;
 }
+
+bool panel_switch_enabled(const HudView& v) { return v.panel_works || v.panel.set; }
 
 Colour picked(const float rgba[4]) {
     uint32_t v = 0;

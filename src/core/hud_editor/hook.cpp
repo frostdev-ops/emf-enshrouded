@@ -211,16 +211,6 @@ void guarded_panel_restore() {
     }
 }
 
-// The panel colour's write check: committed memory that may be written as it is (EMF never changes protection).
-bool memory_writable(const void* p, size_t n) {
-    MEMORY_BASIC_INFORMATION mbi{};
-    if (!p || VirtualQuery(p, &mbi, sizeof mbi) != sizeof mbi) return false;
-    if (mbi.State != MEM_COMMIT || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
-    if (!(mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE))) return false;
-    const uintptr_t end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
-    return reinterpret_cast<uintptr_t>(p) + n <= end;
-}
-
 void* hk_bar(void* out, void* data, void* style) {
     BarCall c;
     if (is_on()) guarded_bar_before(data, style, current_snapshot(), &c);
@@ -233,6 +223,23 @@ void* hk_open(void* scope, const NameInfo* ni) { return hud_open_path(scope, ni,
 void hk_close(void* scope) { hud_close_path(scope, g_o_close); }
 
 }  // namespace
+
+bool memory_writable(const void* p, size_t n, uint32_t* type, uint32_t* protect) {
+    if (type) *type = 0;
+    if (protect) *protect = 0;
+    MEMORY_BASIC_INFORMATION mbi{};
+    if (!p || VirtualQuery(p, &mbi, sizeof mbi) != sizeof mbi) return false;
+    if (type) *type = mbi.Type;
+    if (protect) *protect = mbi.Protect;
+    if (mbi.State != MEM_COMMIT || mbi.Type != MEM_PRIVATE || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
+    if (!(mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE))) return false;
+    const uintptr_t at = reinterpret_cast<uintptr_t>(p);
+    const uintptr_t end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
+    if (at + n > end) return false;
+    ULONG_PTR lo = 0, hi = 0;
+    GetCurrentThreadStackLimits(&lo, &hi);
+    return !(at + n > lo && at < hi);
+}
 
 // ---- ScopeTracker ----
 void ScopeTracker::opened(const OpenScope& s) {
