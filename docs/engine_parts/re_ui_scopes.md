@@ -50,7 +50,16 @@ Build 1287369, static and live (private research `hud_parts_2026-11-10`).
   `resourceBarRange` and `resourceBarFill` and draws its end mark itself. The returned `out` is the bar's rect
   `{x, y, w, h}` (health 320x18 at 24.4,33.4, mana 260x12 at 24.4,57.4, a 6-unit gap); the widget keeps the rects in a
   list of at most 4 and, after `vitalBars` closes, draws the dark backing panel from them, one piece per bar, inside its
-  own area. The style offsets are colour blocks in `*(*(0x14283f408)+200)` (mana is +0xdc58, stamina +0xdc28).
+  own area. The style offsets are colour blocks in the UI bundle `*(*(0x14283f4a8)+0xc8)` (health +0xdbf8, mana
+  +0xdc58, stamina +0xdc28; `0x14283f4a8` is the UI frame context, set only while the UI frame is built).
+- **Bar colours** (private research `hud_colours_2026-11-10`): a style block is `keen::FbUiAnimatedHealthBarColors`, six
+  `keen::UiColor {u32 colour (bytes R, G, B, A); float intensity}`: frame, range (the empty part), fill, fill end (the
+  bright end of the fill and the "restored" pulse), damage (while the value falls), heal (while it rises). The bar
+  function reads the block by value and keeps no pointer, and only changes alpha and intensity (blinks, fades), never the
+  hue. The HUD editor passes it a copy with the player's colours (`hud.colour`); nothing in the game is written. The dark
+  panel is tinted by health's frame colour, read by the widget after `vitalBars` closes: the panel colour is a short write
+  there, put back when the inner `doPlayerHealthWidget()` scope closes. The red "not enough" flash and the ticks are
+  hard-coded.
 - Moving `resourceBarRange`/`resourceBarFill` by their position does not work: the game clips them to their old slot and
   the panel stays. What works (the HUD editor's bars): a translation pushed on the layer's transform stack around the
   whole bar call (bar, fill and end mark move together) and the same offset added to the returned rect (that bar's panel

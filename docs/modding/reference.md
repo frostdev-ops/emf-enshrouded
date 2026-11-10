@@ -210,7 +210,7 @@ value that moves is reported to the mod as a change.
 
 | C++ | C | Rules |
 |---|---|---|
-| `emf::hud(id, text, place, rgba)` | `hud_set(id, text, place, rgba)` | keeps a line of text on screen until changed; empty text removes it. `id`: 1-48 of `A-Za-z0-9_.-` (prefix your mod); `place`: `EMF_HUD_TOP_RIGHT` (default), `EMF_HUD_BOTTOM_RIGHT`, `EMF_HUD_BOTTOM_LEFT`; `rgba` 0xRRGGBBAA (0 = default). At most 32 lines in all; hidden while the console is open and while no world runs (main menu, loading); text longer than 160 bytes is cut. Any thread. |
+| `emf::hud(id, text, place, rgba)` | `hud_set(id, text, place, rgba)` | keeps a line of text on screen until changed; empty text removes it. `id`: 1-48 of `A-Za-z0-9_.-` (prefix your mod); `place`: `EMF_HUD_TOP_RIGHT` (default), `EMF_HUD_BOTTOM_RIGHT`, `EMF_HUD_BOTTOM_LEFT`; `rgba` 0xRRGGBBAA (0 = default). At most 32 lines in all; hidden while the console is open and while no world runs (main menu, loading); text longer than 160 bytes is cut. The player can move, scale and hide each place in the HUD editor (parts `lines_top_right`, `lines_bottom_right`, `lines_bottom_left`). Any thread. |
 | `emf::has_v12()` | — | true when the core has it. |
 
 ## v13: settings and mod info
@@ -746,9 +746,10 @@ Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod
 `help`, `mods` (every mod, its version and status), `hooks` (every inline hook and its owner), `pattern <bytes> [.section]` (test a pattern live), `settings <mod>`, `set <mod> <key> <value>` (`enabled` = the switch,
 from the next start), `profile [save <name> [--settings] [--replace] | load <name>]` (mod profiles: the switches of
 every mod under a name, as in EMF.exe; a load applies at the next start), `hud.list`, `hud.move <part> <x> <y>`, `hud.scale <part> <s>`, `hud.hide <part>`, `hud.show <part>`, `hud.reset [part]`,
-`hud.layout [save|load|delete <name>]`, `hud.swap <bar> <bar>`, `hud.order <bar> <bar> <bar>`, `hud.grow up|down` (the HUD
-editor: offsets in percent of the screen, scale 0.5 to 2, the bars `health`, `mana`, `stamina` move on their own, layouts in
-`emf\hud`; the mods' HUD lines are the `hud` command's), `items [part]`, `give <item> [n]`, `put <item> [n] [entity] [level] [rarity]`,
+`hud.layout [save|load|delete <name>]`, `hud.swap <bar> <bar>`, `hud.order <bar> <bar> <bar>`, `hud.grow up|down`,
+`hud.colour [bar] [part] [colour]` (the HUD editor: offsets in percent of the screen, scale 0.5 to 2, the bars `health`,
+`mana`, `stamina` move on their own and take colours, the mods' HUD lines are the parts `lines_top_right`,
+`lines_bottom_right`, `lines_bottom_left`, layouts in `emf\hud`), `items [part]`, `give <item> [n]`, `put <item> [n] [entity] [level] [rarity]`,
 `take <item> [n] [entity]`, `spawn <guid> [n]`, `time <hours>`, `pos`, `perf` (how long each world step took since the last `perf`: the game's own steps, EMF's wait
 for the server world's jobs and each mod), `goto [#k] <x> <y> <z> [ground]` / `goto [#k] <entity> [ground]`
 (v20: teleports you, or the k-th player, there or beside that entity; the result follows a few steps later), `entities`, `near [radius]`, `inv <entity>`,

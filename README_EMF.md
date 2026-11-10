@@ -260,10 +260,11 @@ Discord's overlay lock another key in Discord's settings (Game Overlay), or give
 above (a scan code, from the next game start).
 
 ### The HUD editor
-The **HUD** page of the Settings tab moves, scales and hides 16 parts of the game's HUD while you play. The parts, by the
-names the commands use: `vitals` (health, mana and stamina together), `buffs` (buffs and food), `hotbar`, `compass`,
-`shroud` (the shroud timer and meters), `quests`, `oxygen` (oxygen and glider), `loot` (loot log), `boss` (boss bar),
-`crosshair`, `chat`, `notifications`, `multitool`, and the three bars on their own: `health`, `mana` and `stamina`. A part
+The **HUD** page of the Settings tab moves, scales and hides 19 parts of the HUD while you play. The parts, by the names
+the commands use: `vitals` (health, mana and stamina together), `buffs` (buffs and food), `hotbar`, `compass`, `shroud`
+(the shroud timer and meters), `quests`, `oxygen` (oxygen and glider), `loot` (loot log), `boss` (boss bar), `crosshair`,
+`chat`, `notifications`, `multitool`, the three bars on their own: `health`, `mana` and `stamina`, and the lines mods keep
+on screen: `lines_top_right`, `lines_bottom_right` and `lines_bottom_left`. A part
 that sits inside another moves and scales with it: `vitals` carries the three bars and `buffs`, `compass` carries
 `shroud`, and the `hotbar` carries its item hints and the item name above it. A part's own change adds on top. A part the
 game has not drawn yet is marked "not seen yet" (a boss bar shows only in a boss fight; the stamina bar only while your
@@ -276,6 +277,17 @@ stamina is not full).
 - **Status effects grow upward:** a switch on the buffs' card (`hud.grow up`). The list of status effects then sits on the
   food icons' bottom edge and grows up instead of down; it never leaves the screen (at the top edge it stops and the rest
   grows down). With the vitals at the bottom of the screen, move the buffs part above the bars so the list has room.
+- **Bar colours:** the Health, Mana and Stamina cards have a colour button each for the **Filled** and the **Empty** part
+  (with opacity: an empty part at 0 opacity disappears) and **Game's colours**. The bright end of the fill follows a new
+  fill colour. Three more colours per bar are set from the console: `end` (the bright end), `damage` (the part shown while
+  the value drops) and `heal` (while it rises), for example `hud.colour health damage #ff8000`. The game's effects (the
+  damage blink, the heal glow, the HUD fading out) work with any colour; the red "not enough mana / stamina" flash and the
+  ticks stay as the game draws them. The colours follow the bar when the order changes.
+- **Panel colour:** a switch on the vitals' card gives the dark panel behind the bars a colour and opacity of your own
+  (`hud.colour panel #20208080`).
+- **Mods' lines** (`emf.hud`) are three parts, one per corner a mod can use: move, scale (the text size) and hide each
+  corner like a part of the game's HUD. While the page is open they show behind it, and an empty corner shows a dim sample
+  line so you can place it before a mod uses it.
 
 - **Offsets** are percent of the screen, from where the game draws the part, so a layout fits other screen sizes. The page
   shows the pixels at your resolution next to each value. Tab picks the next part, the arrow keys move it by 0.5 % (Shift:
@@ -367,6 +379,7 @@ end the game; use `commands.txt` then.)
 | `hud.swap <bar> <bar>` | two of the vitals' bars (`health`, `mana`, `stamina`) change places (e.g. `hud.swap health mana`: mana on top) |
 | `hud.order <bar> <bar> <bar>` | the vitals' bars from the top (e.g. `hud.order mana health stamina`) |
 | `hud.grow up\|down` | the status effects list grows upward from the food icons' bottom edge, or down as the game draws it |
+| `hud.colour [bar] [part] [colour]` | the vitals' bar colours: `hud.colour health #ff4040` (the fill), `hud.colour mana empty #00000000` (a part: `fill`, `empty`, `end`, `damage`, `heal`), `hud.colour panel #20208080`, `game` for the game's colour again (`hud.colour health all game`: every colour of a bar); `hud.colour health` shows a bar's colours, `hud.colour` every colour you set |
 | `saves.backup [label]` | backs up every save file now, Steam Cloud and Local, into `%LOCALAPPDATA%\EMF\save-backups` ([docs/saves.md](docs/saves.md)); only at the main menu: while a world runs it says why not (the game writes its saves every 30 seconds) |
 | `saves.list` | the save backups, newest first, with what each holds and where they are; restoring needs the game closed (EMF.exe's Saves tab, or by hand: [docs/saves.md](docs/saves.md)) |
 | `items [words]` | the game's items with the names the game shows (in your language) and their debug names, id and stack size, best match first (e.g. `items wood log`) |
