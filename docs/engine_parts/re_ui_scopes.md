@@ -40,10 +40,26 @@ pushes and 4408 pops, and the text stayed sharp.
   and `doActionbar` took them along. So a HUD part must be the outermost scope that holds all its visuals.
 - The UI-scale getter at 0x140d46090 is a lerp by resolution, not a scale.
 
-## Not tried
+## The vitals' bars and the status list (2026-11-10)
 
-The vitals fill colours are a style block (+0xdbf8 health, +0xdc58 stamina, +0xdc28 mana, in `*(*(0x14283f408)+200)`).
-This was not tried live.
+Build 1287369, static and live (private research `hud_parts_2026-11-10`).
+
+- `doPlayerHealthWidget()` (function 0x140c68c60) opens `vitalBars` and calls one bar function (RVA 0xc7fc40,
+  `out = bar(out, data, style)`) three times: health (data at widget+0x18, style +0xdbf8) always, then mana (+0xf0,
+  +0xdc58) unless a flag hides it, then stamina (+0x1c8, +0xdc28) only while stamina is not full. Each bar opens
+  `resourceBarRange` and `resourceBarFill` and draws its end mark itself. The returned `out` is the bar's rect
+  `{x, y, w, h}` (health 320x18 at 24.4,33.4, mana 260x12 at 24.4,57.4, a 6-unit gap); the widget keeps the rects in a
+  list of at most 4 and, after `vitalBars` closes, draws the dark backing panel from them, one piece per bar, inside its
+  own area. The style offsets are colour blocks in `*(*(0x14283f408)+200)` (mana is +0xdc58, stamina +0xdc28).
+- Moving `resourceBarRange`/`resourceBarFill` by their position does not work: the game clips them to their old slot and
+  the panel stays. What works (the HUD editor's bars): a translation pushed on the layer's transform stack around the
+  whole bar call (bar, fill and end mark move together) and the same offset added to the returned rect (that bar's panel
+  piece follows while it stays inside the widget's area; far away the bar is drawn without it). EMF finds the function
+  through `Sig::PlayerVitalBar`, the widget's three calls (the pattern holds the data and style offsets).
+- The status effects are `buffDebuffParent` (the Rested box and `buffDebuffListing`, one row per effect: its icon is an
+  `iconFrame` scope, its text is drawn by the list) beside the food column `foodIconParent` (3 icons, 120 units high),
+  both in `buffRow`. The list grows downward; a translation on `buffDebuffParent` by `food height - list height` puts it on
+  the column's bottom edge so it grows upward. Night away from a fire gives "Exposed", one row 21.6 units high.
 
 ## How EMF finds them
 

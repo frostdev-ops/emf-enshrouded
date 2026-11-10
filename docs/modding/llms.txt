@@ -327,7 +327,7 @@ Kinds:
 
 Typed into the in-game console (key under Esc), the bridge's console command, or <game>\emf\commands.txt
 (read about once a second while a world runs). (host) = needs a world you host.
-help, mods, settings, set, hooks, pattern, hud.list, hud.move, hud.scale, hud.hide, hud.show, hud.reset, hud.layout, profile, saves.backup, saves.list also work at the main menu.
+help, mods, settings, set, hooks, pattern, hud.list, hud.move, hud.scale, hud.hide, hud.show, hud.reset, hud.layout, hud.swap, hud.order, hud.grow, profile, saves.backup, saves.list also work at the main menu.
 
 - help [page]: list the commands (in the chat 8 per page)
 - mods: list the mods and what became of them
@@ -360,6 +360,9 @@ help, mods, settings, set, hooks, pattern, hud.list, hud.move, hud.scale, hud.hi
 - hud.show <part>: show a hidden HUD part again
 - hud.reset [part]: put one HUD part, or every part, back where the game draws it
 - hud.layout [save|load|delete <name>]: the HUD layouts in emf\\hud (save as a new name, switch, delete); without words, the list
+- hud.swap health|mana|stamina health|mana|stamina: two of the vitals' bars change places (e.g. hud.swap health mana: mana on top)
+- hud.order <bar> <bar> <bar>: the vitals' bars from the top (e.g. hud.order mana health stamina)
+- hud.grow up|down: the status effects list grows upward from the food icons' bottom edge, or down as the game draws it
 - profile [save <name> [--settings] [--replace] | load <name>]: mod profiles (the mods' switches by name; a load applies at the next game start)
 - saves.backup [label]: back up every save file now (at the main menu)
 - saves.list: the save backups, newest first, and where they are

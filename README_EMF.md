@@ -239,12 +239,22 @@ Discord's overlay lock another key in Discord's settings (Game Overlay), or give
 above (a scan code, from the next game start).
 
 ### The HUD editor
-The **HUD** page of the Settings tab moves, scales and hides 13 parts of the game's HUD while you play. The parts, by the
-names the commands use: `vitals` (health and stamina), `buffs` (buffs and food), `hotbar`, `compass`, `shroud` (the shroud
-timer and meters), `quests`, `oxygen` (oxygen and glider), `loot` (loot log), `boss` (boss bar), `crosshair`, `chat`,
-`notifications` and `multitool`. A part that sits inside another moves and scales with it: `vitals` carries `buffs`,
-`compass` carries `shroud`, and the `hotbar` carries its item hints and the item name above it. A part's own change adds
-on top. A part the game has not drawn yet is marked "not seen yet" (a boss bar shows only in a boss fight).
+The **HUD** page of the Settings tab moves, scales and hides 16 parts of the game's HUD while you play. The parts, by the
+names the commands use: `vitals` (health, mana and stamina together), `buffs` (buffs and food), `hotbar`, `compass`,
+`shroud` (the shroud timer and meters), `quests`, `oxygen` (oxygen and glider), `loot` (loot log), `boss` (boss bar),
+`crosshair`, `chat`, `notifications`, `multitool`, and the three bars on their own: `health`, `mana` and `stamina`. A part
+that sits inside another moves and scales with it: `vitals` carries the three bars and `buffs`, `compass` carries
+`shroud`, and the `hotbar` carries its item hints and the item name above it. A part's own change adds on top. A part the
+game has not drawn yet is marked "not seen yet" (a boss bar shows only in a boss fight; the stamina bar only while your
+stamina is not full).
+
+- **Health, mana and stamina** each move and hide on their own, anywhere on the screen (only the vitals part scales
+  them). Inside the vitals' area a bar keeps its dark backing; moved far away from it, the game draws the bar without it.
+  The vitals' card has **Swap health and mana** and **Swap health and stamina**: the bars stack in the new order with the
+  game's own spacing (`hud.swap`, `hud.order`). A hidden bar, or stamina while it is full, leaves no gap.
+- **Status effects grow upward:** a switch on the buffs' card (`hud.grow up`). The list of status effects then sits on the
+  food icons' bottom edge and grows up instead of down; it never leaves the screen (at the top edge it stops and the rest
+  grows down). With the vitals at the bottom of the screen, move the buffs part above the bars so the list has room.
 
 - **Offsets** are percent of the screen, from where the game draws the part, so a layout fits other screen sizes. The page
   shows the pixels at your resolution next to each value. Tab picks the next part, the arrow keys move it by 0.5 % (Shift:
@@ -333,6 +343,9 @@ end the game; use `commands.txt` then.)
 | `hud.hide <part>` / `hud.show <part>` | hides a HUD part / brings it back |
 | `hud.reset [part]` | puts one HUD part, or every part, back where the game draws it; a reset of every part keeps the layout before as "Before reset" |
 | `hud.layout [save\|load\|delete <name>]` | the HUD layouts in `emf\hud`: without words the list, else save the current one under a name, switch to one, or delete one |
+| `hud.swap <bar> <bar>` | two of the vitals' bars (`health`, `mana`, `stamina`) change places (e.g. `hud.swap health mana`: mana on top) |
+| `hud.order <bar> <bar> <bar>` | the vitals' bars from the top (e.g. `hud.order mana health stamina`) |
+| `hud.grow up\|down` | the status effects list grows upward from the food icons' bottom edge, or down as the game draws it |
 | `saves.backup [label]` | backs up every save file now, Steam Cloud and Local, into `%LOCALAPPDATA%\EMF\save-backups` ([docs/saves.md](docs/saves.md)); only at the main menu: while a world runs it says why not (the game writes its saves every 30 seconds) |
 | `saves.list` | the save backups, newest first, with what each holds and where they are; restoring needs the game closed (EMF.exe's Saves tab, or by hand: [docs/saves.md](docs/saves.md)) |
 | `items [words]` | the game's items with their debug names, id and stack size, best match first (e.g. `items wood log`) |
