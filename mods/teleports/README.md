@@ -2,7 +2,8 @@
 
 `/unstuck` frees a player who is stuck (246 votes on the official board ask for it: players get stuck in the shroud, in
 holes, under ledges), and `/home` takes a player to their spawn point. Admins get `tp`, `bring`, `tp.pos`, `tp.back` and
-`tp.list`. Players are moved the way the game's own fast travel moves them (EMF's `teleport`, API v20): the game loads
+`tp.list`, and **teleport by the map**: hold Shift and the left mouse button on a spot of the world map (you can let
+everyone do it). `/tp.mark` goes to your map waypoint. Players are moved the way the game's own fast travel moves them (EMF's `teleport`, API v20): the game loads
 the place around them, resets fall damage, and every player's game shows the jump at once, with no rubber-banding.
 
 It runs where the world runs, so on the host or a dedicated server it works for every player, also those who joined
@@ -38,6 +39,24 @@ The countdown, cancels, refusals and results reach each player as chat lines onl
 of a game you host sees them on screen). Where players' chat is off (a game you host without `[chat] players=1`), a guest
 sees only the command's answer.
 
+## Teleport by the map
+
+Open the map, hold **Shift** and hold the **left mouse button** on a spot for **1 second**: a ring fills at the mouse.
+Let go early, right-click or close the map to cancel; the click does not reach the game's map. Then you travel there.
+
+- **Who may**: the setting **Map teleport**: `Admins only` (the default; in your own game you are the admin),
+  `Everyone`, or `Off`. Everyone: not inside the shroud (unless `home_in_shroud`), not within 10 s of a hit
+  (`home_combat_seconds`), not while dead, once a minute (`map_cooldown_seconds`), no cost. Admins have no cooldown.
+- **Players need EMF on their game** (to do the gesture and send the spot), not this mod: it runs where the world runs.
+  A player without EMF can use `/tp.mark`.
+- **The landing**: the map gives the spot, not its height. The server finds the ground there with the game's own
+  terrain ray, then the game's ground search settles you on it. A place nobody is near is not loaded yet: you wait high
+  over it for a moment while it loads, then go down to the ground. If there is still no ground, you are put back where
+  you stood. Unexplored spots are allowed (the server cannot see a player's map fog).
+- **`/tp.mark`**: to your map waypoint (right-click a spot on the map, Set Waypoint), with the same rules. Admins:
+  `tp.mark #k` sends player k to their own waypoint.
+- `tp.back` takes you back to where you stood before a map teleport, too.
+
 ## For admins
 
 The console, `emf\commands.txt`, the host's own chat, and the accounts in `[chat] admins` (with `[chat] everyone=1`
@@ -52,6 +71,7 @@ works too (as the chat shows it); when two players share it, use `#k`. No countd
 | `tp.pos [#k] <x> <y> <z> [ground]` | you (or player k) to a position; `ground`: the game's ground search there |
 | `tp.back [#k]` | you (or player k) back to where you stood before your last teleport by this mod (this session) |
 | `tp.list` | the players, their `#k` and where they are |
+| `tp.mark #k` | player k to their own map waypoint |
 
 ## Settings (Mods tab, EMF.exe, or `set teleports <key> <value>`)
 
@@ -69,6 +89,8 @@ works too (as the chat shows it); when two players share it, use `#k`. No countd
 | Also inside the shroud (`home_in_shroud`) | off | |
 | Countdown (s) (`countdown_seconds`) | 3 | 0-10, for /unstuck and /home |
 | Commands (`enabled_commands`) | all | the commands that work here, separated by spaces |
+| Map teleport (`map_teleport`) | admins | `admins`, `everyone` or `off`; also for `/tp.mark` |
+| Cooldown for everyone (s) (`map_cooldown_seconds`) | 60 | 0-600, between map teleports of one player |
 
 Cooldowns, the combat window and `tp.back` positions last for the session (a reload forgets them).
 
@@ -86,7 +108,9 @@ the game's: it finds walkable ground only within about 10 m of the point it is g
 exactly there, which EMF reports; that is when `/unstuck` falls back to the spawn point. The player's spawn point is the
 one the game keeps for its own "emergency teleport" (the player's `SelectedTargets` slot 9). "Inside the shroud" is the
 game's own fast-travel test: the player's `EnvironmentSensor` reads dangerous or deadly fog, and the player is not in a
-spawn point's safe zone. The rules are in `tp_logic.h` (unit-tested in `tests/test_teleports.cpp`), the game side in
+spawn point's safe zone. The map teleport is EMF's map action (API v34): each player's EMF does the gesture and sends
+the spot over the core's mod messages; EMF's `ground_at` reads the game's voxel ray once the place has loaded. The rules
+are in `tp_logic.h` (unit-tested in `tests/test_teleports.cpp`), the game side in
 `tp_glue.h` (`tests/test_teleports_glue.cpp`).
 
 ## Good to know

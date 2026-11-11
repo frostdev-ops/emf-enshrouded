@@ -35,6 +35,13 @@ struct Fake {
     std::vector<std::pair<uint32_t, std::string>> tells;
     std::map<uint32_t, std::string> names;
     uint32_t session = 1;
+    struct GroundAsk {
+        EmfWorld* world;
+        double x, z;
+        EmfGroundCallback cb;
+        void* user;
+    };
+    std::vector<GroundAsk> grounds;
 };
 Fake* f = nullptr;
 
@@ -71,6 +78,10 @@ bool f_name(EmfWorld*, uint32_t player, char* buf, uint32_t size) {
     return true;
 }
 uint32_t f_session() { return f->session; }
+bool f_ground_at(EmfWorld* w, double x, double z, EmfGroundCallback cb, void* user) {
+    f->grounds.push_back({w, x, z, cb, user});
+    return true;
+}
 void* f_singleton(EmfWorld*, const char*) { return nullptr; }
 bool f_teleport(EmfWorld*, const EmfTeleport* t) {
     f->teleports.push_back(*t);
@@ -142,6 +153,7 @@ struct Rig {
         api.chat_tell = f_tell;
         api.player_name = f_name;
         api.server_session = f_session;
+        api.ground_at = f_ground_at;  // v34
         REQUIRE(emf::init(&api));
     }
     ~Rig() {
@@ -358,4 +370,56 @@ TEST_CASE("teleports glue: lines for a guest go to their chat (chat_tell); names
     CHECK(g.players_named("EMBER") == std::vector<uint32_t>{2, 3});
     CHECK(g.players_named("host") == std::vector<uint32_t>{1});
     CHECK(g.name_of(2) == "Ember");
+}
+
+
+TEST_CASE("teleports glue: ground_at asks EMF's ground_at and maps its answer (ok, not loaded with hop_y, failed)") {
+    Rig r;
+    ApiGame g("teleports");
+    g.set_world(emf::World(kW));
+    std::vector<Ground> got;
+    REQUIRE(g.ground_at(1500, 4740, [&](const Ground& gr) { got.push_back(gr); }));
+    REQUIRE(g.ground_at(9000, 9000, [&](const Ground& gr) { got.push_back(gr); }));
+    REQUIRE(r.fake.grounds.size() == 2);
+    CHECK(r.fake.grounds[0].world == kW);
+    CHECK(r.fake.grounds[0].x == 1500);
+    CHECK(r.fake.grounds[0].z == 4740);
+    EmfGround a{};
+    a.size = sizeof a;
+    a.status = EMF_GROUND_OK;
+    a.x = 1500;
+    a.y = 321;
+    a.z = 4740;
+    a.why = "";
+    r.fake.grounds[0].cb(kW, &a, r.fake.grounds[0].user);
+    EmfGround b{};
+    b.size = sizeof b;
+    b.status = EMF_GROUND_NOT_LOADED;
+    b.hop_y = 1100;
+    b.why = "not loaded";
+    r.fake.grounds[1].cb(kW, &b, r.fake.grounds[1].user);
+    REQUIRE(got.size() == 2);
+    CHECK(got[0].status == GroundStatus::Ok);
+    CHECK(got[0].y == 321);
+    CHECK(got[1].status == GroundStatus::NotLoaded);
+    CHECK(got[1].hop_y == 1100);
+    CHECK(got[1].why == "not loaded");
+    r.api.ground_at = nullptr;  // an older EMF
+    CHECK_FALSE(g.ground_at(1, 1, [](const Ground&) {}));
+}
+
+TEST_CASE("teleports glue: the waypoint is PlayerWaypoint when enabled; none when it is off or missing") {
+    Rig r;
+    ApiGame g("teleports");
+    g.set_world(emf::World(kW));
+    CHECK_FALSE(g.waypoint(1).has_value());
+    auto& w = plant<gen::PlayerWaypoint>(1);
+    w.waypointPosition = {static_cast<int64_t>(2000.5 * 4294967296.0), 0, static_cast<int64_t>(3000.0 * 4294967296.0)};
+    CHECK_FALSE(g.waypoint(1).has_value());  // not enabled
+    w.enabled = true;
+    const auto at = g.waypoint(1);
+    REQUIRE(at.has_value());
+    CHECK(at->x == doctest::Approx(2000.5));
+    CHECK(at->y == 0);
+    CHECK(at->z == doctest::Approx(3000.0));
 }

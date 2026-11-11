@@ -11,6 +11,10 @@
 //           shroud unless home_in_shroud. Not while dead.
 // Admins:   tp <#k|name> [<#m|name>], bring <#k|name>, tp.pos [#k] x y z [ground], tp.back [#k], tp.list. No countdown.
 //           tp.back: where the player stood before their last teleport by this mod (per account, for the session).
+// The map:  EMF's map action (Shift + hold on the map) and /tp.mark (the player's own waypoint): the ground under the
+//           spot (EMF's ground_at), then a teleport just above it with the game's ground search. A place nobody is near
+//           gets a hop high over it first (it loads around the player), the ground again, else back where they stood.
+//           map_teleport: admins (default), everyone (/home's checks, its own cooldown, no cost) or off.
 #include <algorithm>
 #include <cmath>
 #include <cstdint>
@@ -38,7 +42,7 @@ constexpr double kStuckMetres = 1.5;    // an /unstuck hop that ended this close
 constexpr double kBesideMetres = 1.0;   // tp/bring: land this far beside the other player
 constexpr uint64_t kSecond = 1000;
 
-enum class Kind { Unstuck, Home, Tp, Bring, TpPos, TpBack };
+enum class Kind { Unstuck, Home, Tp, Bring, TpPos, TpBack, MapTp, Mark };
 inline const char* kind_name(Kind k) {
     switch (k) {
         case Kind::Unstuck: return "unstuck";
@@ -47,6 +51,8 @@ inline const char* kind_name(Kind k) {
         case Kind::Bring: return "bring";
         case Kind::TpPos: return "tp.pos";
         case Kind::TpBack: return "tp.back";
+        case Kind::MapTp: return "map teleport";
+        case Kind::Mark: return "tp.mark";
     }
     return "?";
 }
@@ -59,7 +65,7 @@ inline std::string lower(std::string s) {
 
 // "unstuck home, tp bring" -> the known command names in it (lower case); words that are no command are ignored.
 inline std::set<std::string> parse_enabled(const std::string& text) {
-    static const char* const kAll[] = {"unstuck", "home", "tp", "bring", "tp.pos", "tp.back", "tp.list"};
+    static const char* const kAll[] = {"unstuck", "home", "tp", "bring", "tp.pos", "tp.back", "tp.list", "tp.mark"};
     std::set<std::string> out;
     std::string word;
     auto flush = [&] {
@@ -75,7 +81,16 @@ inline std::set<std::string> parse_enabled(const std::string& text) {
     flush();
     return out;
 }
-inline const char* kDefaultEnabled = "unstuck home tp bring tp.pos tp.back tp.list";
+inline const char* kDefaultEnabled = "unstuck home tp bring tp.pos tp.back tp.list tp.mark";
+
+// Who may teleport by the map (and /tp.mark): the setting map_teleport.
+enum class MapWho { Admins, Everyone, Off };
+inline MapWho parse_map_who(const std::string& s) {
+    const std::string v = lower(s);
+    if (v == "everyone") return MapWho::Everyone;
+    if (v == "off") return MapWho::Off;
+    return MapWho::Admins;
+}
 
 struct Settings {
     bool unstuck = true;
@@ -89,6 +104,8 @@ struct Settings {
     int home_cost_count = 1;
     bool home_in_shroud = false;
     int countdown_s = 3;
+    MapWho map_teleport = MapWho::Admins;
+    int map_cooldown_s = 60;  // everyone: between map teleports (and /tp.mark) of one player
     std::set<std::string> enabled = parse_enabled(kDefaultEnabled);
     bool on(const std::string& cmd) const { return enabled.count(cmd) != 0; }
 };
@@ -208,6 +225,16 @@ struct Outcome {
     std::string reason;
     bool session_ended = false;  // the session ended first: touch nothing, give nothing back
 };
+// EMF's ground_at: the ground under a spot, or nobody is near it (hop_y: a height over it where a player may wait while
+// it loads), or no ground.
+enum class GroundStatus { Ok, NotLoaded, Failed };
+struct Ground {
+    GroundStatus status = GroundStatus::Failed;
+    double y = 0, hop_y = 0;
+    std::string why;
+};
+constexpr double kAboveGround = 0.5;  // the teleport lands this far above the ground found (the game's search settles it)
+
 struct Game {
     virtual ~Game() = default;
     virtual uint64_t now_ms() = 0;
@@ -226,6 +253,10 @@ struct Game {
     // Takes the /home cost from the player (all or nothing); done(true) when taken. False when it could not be asked.
     virtual bool take_cost(uint32_t player, const std::string& item, int count, std::function<void(bool)> done) = 0;
     virtual void give_back(uint32_t player, const std::string& item, int count) = 0;
+    // The ground under (x, z): false when it cannot be asked; else done() once, later, on the server thread.
+    virtual bool ground_at(double x, double z, std::function<void(const Ground&)> done) = 0;
+    // The player's map waypoint (set and enabled), else nothing.
+    virtual std::optional<Vec> waypoint(uint32_t player) = 0;
     // A line for a player after their command returned (the host: on screen; a guest: as EMF can reach them).
     virtual void tell(uint32_t player, const std::string& text) = 0;
     virtual void log(const std::string& text) = 0;
@@ -244,6 +275,8 @@ public:
         cooldowns_.clear();
         combat_.clear();
         back_.clear();
+        moving_.clear();
+        ++epoch_;  // answers for the old session's map teleports are dropped
     }
     void on_hit(uint32_t target) {
         if (target >= 1 && target <= 1023) combat_.hit(target, g_.now_ms());
@@ -327,6 +360,42 @@ public:
         }
         return out.empty() ? "no players" : out;
     }
+
+    // A player finished EMF's map gesture at (x, z); `admin`: the server's own view (the host's game or a [chat] admin).
+    // What happens is told to the player.
+    void map_teleport(uint32_t player, bool admin, double x, double z) {
+        const std::string no = map_refusal(player, admin, Kind::MapTp);
+        if (!no.empty()) {
+            g_.tell(player, no);
+            return;
+        }
+        spot_start(Spot{player, player, admin, Kind::MapTp, x, z});
+    }
+
+    // /tp.mark: the sender to their own waypoint, with the map teleport's rules; admins: tp.mark #k moves player k to
+    // k's waypoint. The reply for the command.
+    std::string tp_mark(uint32_t sender, bool sender_admin, const std::vector<std::string>& args) {
+        if (!s_.on("tp.mark")) return "tp.mark is switched off here";
+        if (args.size() > 1) return "usage: tp.mark (you to your waypoint) or tp.mark #k (admins)";
+        uint32_t who = sender;
+        if (args.size() == 1) {
+            if (!sender_admin) return "tp.mark #k is for admins";
+            std::string err;
+            who = resolve(args[0], &err);
+            if (!who) return err;
+        } else if (!sender) {
+            return "tp.mark: from the console name the player: tp.mark #k";
+        }
+        const bool self = who == sender;
+        const std::string no = map_refusal(who, sender_admin, Kind::Mark, self);
+        if (!no.empty()) return no;
+        const auto w = g_.waypoint(who);
+        if (!w) return self ? "Set a waypoint on your map first" : "tp.mark: player " + std::to_string(who) + " has no waypoint";
+        if (!spot_start(Spot{who, sender, sender_admin, Kind::Mark, w->x, w->z})) return "";  // told already
+        return self ? "To your waypoint: finding the ground there"
+                    : "tp.mark: player " + std::to_string(who) + " to their waypoint: finding the ground there";
+    }
+    bool moving(uint32_t player) const { return moving_.count(player) != 0; }
 
     // Every server tick: the countdowns.
     void tick() {
@@ -590,8 +659,150 @@ private:
         }
     }
 
+    // ---- the map teleport ----
+    struct Spot {
+        uint32_t who = 0, sender = 0;  // the player moved; who asked (0: the console)
+        bool admin = false;            // the asker is an admin: no player checks but position and death, no cooldown
+        Kind kind = Kind::MapTp;
+        double x = 0, z = 0;
+        Vec from;                      // where `who` stood (the way back, and tp.back)
+        uint64_t acct = 0;
+        uint64_t epoch = 0;
+        bool hopped = false;
+    };
+
+    // "" when `who` may go; else the line why not. `self`: the asker is the player moved.
+    std::string map_refusal(uint32_t who, bool admin, Kind kind, bool self = true) {
+        if (s_.map_teleport == MapWho::Off) return "Map teleport is switched off here";
+        if (s_.map_teleport == MapWho::Admins && !admin) return "Map teleport is for admins here";
+        const std::string label = self ? "You" : "Player " + std::to_string(who);
+        if (!g_.position(who)) return self ? "Map teleport: you have no position yet" : label + " has no position";
+        if (g_.dead(who)) return self ? "You are dead: respawn first" : label + " is dead";
+        if (moving_.count(who)) return self ? "You are already on your way" : label + " is already on the way";
+        if (admin) return "";
+        if (const uint64_t left = combat_left(who, Kind::Home))
+            return "You were hit just now: the map teleport works " + duration(left) + " after the last hit";
+        if (!s_.home_in_shroud && g_.in_shroud(who)) return "Not inside the shroud: leave it first (as with fast travel)";
+        if (const uint64_t left = cooldowns_.left(g_.account(who), Kind::MapTp, g_.now_ms(),
+                                                  static_cast<uint64_t>(std::max(0, s_.map_cooldown_s)) * kSecond))
+            return "Map teleport again in " + duration(left);
+        (void)kind;
+        return "";
+    }
+
+    void tell_both(const Spot& s, const std::string& to_player, const std::string& to_sender) {
+        g_.tell(s.who, to_player);
+        if (s.sender && s.sender != s.who) g_.tell(s.sender, to_sender);
+    }
+
+    // The checks passed: the ground under the spot. False (told) when it could not be asked.
+    bool spot_start(Spot s) {
+        s.from = g_.position(s.who).value_or(Vec{});
+        s.acct = g_.account(s.who);
+        s.epoch = epoch_;
+        moving_.insert(s.who);
+        if (spot_ground(s)) return true;
+        moving_.erase(s.who);
+        return false;
+    }
+
+    bool spot_ground(const Spot& s) {
+        const bool asked = g_.ground_at(s.x, s.z, [this, s](const Ground& gr) { on_ground(s, gr); });
+        if (!asked) {
+            g_.log(std::string(kind_name(s.kind)) + ": ground_at was refused (EMF API v34 needed, or the spot is outside "
+                                                     "the world)");
+            tell_both(s, "Map teleport: the ground cannot be read here (see the log)",
+                      std::string(kind_name(s.kind)) + ": the ground cannot be read here (see the log)");
+        }
+        return asked;
+    }
+
+    void on_ground(Spot s, const Ground& gr) {
+        if (s.epoch != epoch_) return;  // another session: the player and the world mean nothing now
+        if (gr.status == GroundStatus::Ok) {
+            land(s, gr.y);
+            return;
+        }
+        if (s.hopped) {  // the place loaded around the player and still has no ground: back
+            go_back(s);
+            return;
+        }
+        if (gr.status == GroundStatus::NotLoaded) {
+            hop(s, gr.hop_y);
+            return;
+        }
+        moving_.erase(s.who);
+        tell_both(s, "Map teleport: no ground there (" + gr.why + ")",
+                  std::string(kind_name(s.kind)) + ": no ground there (" + gr.why + ")");
+    }
+
+    void hop(Spot s, double y) {
+        const bool ok = g_.teleport(s.who, {{s.x, y, s.z}, false, 0}, [this, s](const Outcome& o) mutable {
+            if (s.epoch != epoch_ || o.session_ended) return;
+            if (!o.moved) {
+                moving_.erase(s.who);
+                tell_both(s, "Map teleport did not work: " + o.reason, std::string(kind_name(s.kind)) + ": not moved: " + o.reason);
+                return;
+            }
+            s.hopped = true;
+            if (!spot_ground(s)) go_back(s);
+        });
+        if (!ok) refused(s);
+    }
+
+    void land(const Spot& s, double ground_y) {
+        const bool ok = g_.teleport(s.who, {{s.x, ground_y + kAboveGround, s.z}, true, 0}, [this, s](const Outcome& o) {
+            if (s.epoch != epoch_ || o.session_ended) return;
+            if (!o.moved) {
+                if (s.hopped) {
+                    go_back(s);
+                    return;
+                }
+                moving_.erase(s.who);
+                tell_both(s, "Map teleport did not work: " + o.reason, std::string(kind_name(s.kind)) + ": not moved: " + o.reason);
+                return;
+            }
+            moving_.erase(s.who);
+            if (s.acct) back_[s.acct] = s.from;
+            if (!s.admin) cooldowns_.start(s.acct, Kind::MapTp, g_.now_ms());
+            char me[96], them[128];
+            std::snprintf(me, sizeof me, "You are at (%.0f, %.0f, %.0f)", o.pos.x, o.pos.y, o.pos.z);
+            std::snprintf(them, sizeof them, "%s: player %u is at (%.0f, %.0f, %.0f)", kind_name(s.kind), s.who, o.pos.x,
+                          o.pos.y, o.pos.z);
+            g_.log(them);
+            tell_both(s, me, them);
+        });
+        if (!ok) {
+            if (s.hopped) go_back(s);
+            else refused(s);
+        }
+    }
+
+    void go_back(const Spot& s) {
+        const bool ok = g_.teleport(s.who, {s.from, false, 0}, [this, s](const Outcome& o) {
+            if (s.epoch != epoch_ || o.session_ended) return;
+            moving_.erase(s.who);
+            if (!o.moved) {
+                tell_both(s, "No ground found there, and the way back failed: " + o.reason,
+                          std::string(kind_name(s.kind)) + ": no ground there; player " + std::to_string(s.who) +
+                              " could not be moved back: " + o.reason);
+                return;
+            }
+            tell_both(s, "No ground found there: you are back where you were",
+                      std::string(kind_name(s.kind)) + ": no ground there; player " + std::to_string(s.who) + " is back");
+        });
+        if (!ok) refused(s);
+    }
+
+    void refused(const Spot& s) {
+        moving_.erase(s.who);
+        tell_both(s, "Map teleport was refused (see the log)", std::string(kind_name(s.kind)) + ": refused (see the log)");
+    }
+
     Game& g_;
     Settings s_;
+    std::set<uint32_t> moving_;  // players on a map teleport (one at a time)
+    uint64_t epoch_ = 0;         // new_session() moves it on
     std::map<uint32_t, Pending> pending_;
     Cooldowns cooldowns_;
     Combat combat_;

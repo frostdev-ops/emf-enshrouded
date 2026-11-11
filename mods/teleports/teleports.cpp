@@ -1,5 +1,6 @@
 // teleports (Waypoint Teleports): an EMF mod. /unstuck and /home for every player, tp / bring / tp.pos / tp.back /
 // tp.list for admins, through EMF's teleport (API v20), which moves a player the way the game's own fast travel does.
+// With EMF API v34: the map teleport (EMF's map action "teleport": Shift + hold on the map) and /tp.mark.
 // Runs where the world runs (the host or a dedicated server); players who join need nothing. Installed switched off.
 // The decisions (tested without the game) are tp_logic.h; the game side is tp_glue.h.
 #define NOMINMAX
@@ -53,7 +54,38 @@ tp::Settings read_settings() {
     s.home_in_shroud = emf::setting_bool(kMod, "home_in_shroud", false);
     s.countdown_s = static_cast<int>(emf::setting_int(kMod, "countdown_seconds", 3));
     s.enabled = tp::parse_enabled(emf::setting_text(kMod, "enabled_commands", tp::kDefaultEnabled));
+    s.map_teleport = tp::parse_map_who(emf::setting_text(kMod, "map_teleport", "admins"));
+    s.map_cooldown_s = static_cast<int>(emf::setting_int(kMod, "map_cooldown_seconds", 60));
     return s;
+}
+
+// EMF's map action: a player's game does the gesture and sends the spot; it arrives here on the server world's thread.
+void on_map_done(EmfWorld* w, const EmfMapDone* d, void*) {
+    if (!d || g_switched_off) return;
+    const emf::World world(w);
+    if (!world.is_server()) return;
+    g_game.set_world(world);
+    g_tp.map_teleport(d->player, d->admin != 0, d->x, d->z);
+}
+
+// The action is offered while the map teleport is on (off: players' Shift + clicks stay the game's). Any thread.
+void update_map_action(const tp::Settings& s) {
+    if (!emf::has_v34() || !emf::api()->map_action) return;
+    static std::atomic<int> offered{-1};
+    const int want = !g_switched_off && s.map_teleport != tp::MapWho::Off ? 1 : 0;
+    if (offered.exchange(want) == want) return;
+    if (want) {
+        if (!emf::api()->map_action("teleport", "Teleport here", 0, on_map_done, nullptr))
+            EMF_LOG(kMod, "the map teleport could not be offered (see the core log)");
+    } else {
+        emf::api()->map_action("teleport", nullptr, 0, nullptr, nullptr);
+    }
+}
+
+bool sender_admin() {
+    EmfCommandSender s{};
+    if (emf::command_sender(&s)) return s.admin != 0;
+    return true;  // an older EMF: only admins reach commands that are not for players
 }
 
 // Who "you" is for the running command: the chat sender, else (the console of a game you host) the local player.
@@ -115,9 +147,12 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
     g_tp.set(read_settings());
     emf::on_setting_changed(kMod, [](emf::World, const std::string& key) {
         if (key == "enabled") g_switched_off = !switch_on();
+        const tp::Settings s = read_settings();
+        update_map_action(s);
         std::lock_guard<std::mutex> l(g_settings_lock);
-        g_new_settings = read_settings();
+        g_new_settings = s;
     });
+    update_map_action(g_tp.settings());
     bool ok = true;
     ok &= emf::add_command("unstuck", ": a hop to free ground, else a /home",
                            [](emf::World w, const std::vector<std::string>&) { run(w, [] { return g_tp.unstuck(sender_player()); }); },
@@ -143,6 +178,11 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
                            }, 0);
     ok &= emf::add_command("tp.list", ": the players' #k (admin)",
                            [](emf::World w, const std::vector<std::string>&) { run(w, [] { return g_tp.tp_list(); }); }, 0);
+    ok &= emf::add_command("tp.mark", "[#k]: to your map waypoint (#k: player k to theirs, admin)",
+                           [](emf::World w, const std::vector<std::string>& a) {
+                               run(w, [&] { return g_tp.tp_mark(sender_player(), sender_admin(), rest(a)); });
+                           },
+                           EMF_COMMAND_PLAYERS);
     if (!ok) EMF_LOG(kMod, "a command could not be added (see the core log): another mod may use the name");
     emf::on_event<tp::gen::HitEvent>(EMF_WORLD_SERVER, [](emf::World w, const tp::gen::HitEvent& e) {
         g_game.set_world(w);
@@ -151,7 +191,11 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
     });
     emf::on_tick(on_tick);
     const auto s = g_tp.settings();
-    EMF_LOG(kMod, "ready: /unstuck %s, /home %s, countdown %d s", s.unstuck ? "on" : "off", s.home ? "on" : "off",
-            s.countdown_s);
+    EMF_LOG(kMod, "ready: /unstuck %s, /home %s, countdown %d s, map teleport %s", s.unstuck ? "on" : "off",
+            s.home ? "on" : "off", s.countdown_s,
+            !emf::has_v34()                       ? "off (needs EMF API v34)"
+            : s.map_teleport == tp::MapWho::Off    ? "off"
+            : s.map_teleport == tp::MapWho::Admins ? "for admins"
+                                                   : "for everyone");
     return true;
 }

@@ -159,6 +159,24 @@ public:
         drop(w_, p, id, n, item, from, known);
     }
 
+    // EMF's ground_at (API v34): the answer comes on the server world's thread after a few steps.
+    bool ground_at(double x, double z, std::function<void(const Ground&)> done) override {
+        if (!emf::has_v34() || !emf::api()->ground_at) return false;
+        auto* slot = new GroundSlot{this, std::move(done)};
+        if (emf::api()->ground_at(w_.raw(), x, z, &ground_answer, slot)) return true;
+        delete slot;
+        return false;
+    }
+
+    // The player's map waypoint (PlayerWaypoint, saved and replicated; y is 0 for a free map spot).
+    std::optional<Vec> waypoint(uint32_t p) override {
+        const auto* wp = w_.get<gen::PlayerWaypoint>(p);
+        if (!wp || !wp->enabled) return std::nullopt;
+        constexpr double kFixed = 4294967296.0;
+        return Vec{static_cast<double>(wp->waypointPosition.x) / kFixed, static_cast<double>(wp->waypointPosition.y) / kFixed,
+                   static_cast<double>(wp->waypointPosition.z) / kFixed};
+    }
+
     void tell(uint32_t p, const std::string& text) override {
         EMF_LOG(mod_, "to player %u: %s", p, text.c_str());
         // A chat line only they see (API v19; the host of a game you host gets it on screen). Without players' chat the
@@ -169,6 +187,26 @@ public:
     void log(const std::string& text) override { EMF_LOG(mod_, "%s", text.c_str()); }
 
 private:
+    struct GroundSlot {
+        ApiGame* game;
+        std::function<void(const Ground&)> done;
+    };
+    static void ground_answer(EmfWorld* w, const EmfGround* g, void* user) {
+        auto* slot = static_cast<GroundSlot*>(user);
+        slot->game->set_world(emf::World(w));
+        Ground out;
+        if (g) {
+            out.status = g->status == EMF_GROUND_OK           ? GroundStatus::Ok
+                         : g->status == EMF_GROUND_NOT_LOADED ? GroundStatus::NotLoaded
+                                                              : GroundStatus::Failed;
+            out.y = g->y;
+            out.hop_y = g->hop_y;
+            out.why = g->why ? g->why : "";
+        }
+        slot->done(out);
+        delete slot;
+    }
+
     // The rest of a refund: at the player's feet, else (they left) at the nearest other player, else logged LOST.
     void drop(emf::World w, uint32_t p, uint32_t id, uint32_t n, const std::string& item, const Vec& from, bool known) {
         if (emf::api()->give_item(w.raw(), p, id, n)) return;

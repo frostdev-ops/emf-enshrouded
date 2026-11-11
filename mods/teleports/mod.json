@@ -1,8 +1,8 @@
 {
   "id": "teleports",
   "name": "Waypoint Teleports",
-  "version": "1.0.0",
-  "description": "/unstuck frees a stuck player (a short hop to free ground nearby, else a /home to their spawn point) and /home takes them to their spawn point, for every player, after a short countdown standing still; cooldowns, an optional cost, no /home inside the shroud. Admins get tp, bring, tp.pos, tp.back and tp.list. Moves players the way the game's own fast travel does. Host or dedicated server; players who join need nothing. Installed switched off.",
+  "version": "1.1.0",
+  "description": "/unstuck frees a stuck player (a short hop to free ground nearby, else a /home to their spawn point) and /home takes them to their spawn point, for every player, after a short countdown standing still; cooldowns, an optional cost, no /home inside the shroud. Admins get tp, bring, tp.pos, tp.back and tp.list, and teleport by holding Shift and the left mouse button on the map (or everyone, if you allow it; /tp.mark goes to your map waypoint). Moves players the way the game's own fast travel does. Host or dedicated server; players who join need nothing. Installed switched off.",
   "authors": ["EMF"],
   "enabled": false,
   "emf": 20,
@@ -35,8 +35,16 @@
     {"key": "countdown_seconds", "type": "slider", "min": 0, "max": 10, "step": 1, "default": 3,
      "label": "Countdown (s)", "live": true, "group": "Both",
      "help": "/unstuck and /home wait this long; moving 2 m cancels them."},
-    {"key": "enabled_commands", "type": "text", "default": "unstuck home tp bring tp.pos tp.back tp.list", "maxLength": 120,
+    {"key": "enabled_commands", "type": "text", "default": "unstuck home tp bring tp.pos tp.back tp.list tp.mark", "maxLength": 120,
      "label": "Commands", "live": true, "group": "Both",
-     "help": "The commands that work here, separated by spaces. tp, bring, tp.pos, tp.back and tp.list are for admins only."}
+     "help": "The commands that work here, separated by spaces. tp, bring, tp.pos, tp.back and tp.list are for admins only; tp.mark follows the map teleport's rule."},
+    {"key": "map_teleport", "type": "select", "default": "admins", "label": "Map teleport (Shift + hold on the map)", "live": true,
+     "group": "Map",
+     "options": [{"value": "admins", "label": "Admins only"}, {"value": "everyone", "label": "Everyone"},
+                 {"value": "off", "label": "Off"}],
+     "help": "Open the map, hold Shift and the left mouse button on a spot for 1 s. Players need EMF on their game (not this mod). In your own game you are the admin. Everyone: not in the shroud, not just after a hit, not dead, and the cooldown below; no cost. /tp.mark (to your map waypoint) follows the same rule."},
+    {"key": "map_cooldown_seconds", "type": "slider", "min": 0, "max": 600, "step": 10, "default": 60,
+     "label": "Cooldown for everyone (s)", "live": true, "group": "Map",
+     "enabledWhen": {"setting": "map_teleport", "equals": "everyone"}}
   ]
 }

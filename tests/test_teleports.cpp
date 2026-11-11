@@ -44,6 +44,14 @@ struct FakeGame : Game {
     std::map<uint32_t, std::string> names_of;  // player -> name (player_name)
     std::vector<std::pair<uint32_t, std::string>> tells;
     std::vector<std::string> logs;
+    // the map: ground_at's requests (answer them with ground()), the players' waypoints
+    struct GroundAsk {
+        double x, z;
+        std::function<void(const Ground&)> done;
+    };
+    std::vector<GroundAsk> grounds;
+    bool ground_ok = true;
+    std::map<uint32_t, Vec> waypoints;
 
     uint64_t now_ms() override { return now; }
     std::vector<uint32_t> players() override { return list; }
@@ -83,6 +91,27 @@ struct FakeGame : Game {
     }
     void give_back(uint32_t p, const std::string& item, int count) override { given_back.push_back({p, item, count}); }
     void tell(uint32_t p, const std::string& t) override { tells.push_back({p, t}); }
+    bool ground_at(double x, double z, std::function<void(const Ground&)> done) override {
+        if (!ground_ok) return false;
+        grounds.push_back({x, z, std::move(done)});
+        return true;
+    }
+    std::optional<Vec> waypoint(uint32_t p) override {
+        auto it = waypoints.find(p);
+        if (it == waypoints.end()) return std::nullopt;
+        return it->second;
+    }
+    // the last ground_at is answered
+    void ground(GroundStatus st, double y = 0, double hop_y = 0, const std::string& why = "") {
+        REQUIRE(!grounds.empty());
+        GroundAsk a = grounds.back();
+        Ground gr;
+        gr.status = st;
+        gr.y = y;
+        gr.hop_y = hop_y;
+        gr.why = why;
+        a.done(gr);
+    }
     void log(const std::string& t) override { logs.push_back(t); }
 
     // the game moves the last teleport's player to `at` and answers
@@ -119,7 +148,12 @@ struct Rig {
 TEST_CASE("teleports: parsing: enabled commands, durations, players and positions") {
     CHECK(parse_enabled("unstuck, HOME tp.pos nonsense") == std::set<std::string>{"unstuck", "home", "tp.pos"});
     CHECK(parse_enabled("").empty());
-    CHECK(parse_enabled(kDefaultEnabled).size() == 7);
+    CHECK(parse_enabled(kDefaultEnabled).size() == 8);
+    CHECK(parse_enabled("tp.mark") == std::set<std::string>{"tp.mark"});
+    CHECK(parse_map_who("everyone") == MapWho::Everyone);
+    CHECK(parse_map_who("OFF") == MapWho::Off);
+    CHECK(parse_map_who("admins") == MapWho::Admins);
+    CHECK(parse_map_who("nonsense") == MapWho::Admins);
     CHECK(duration(500) == "1 s");
     CHECK(duration(45000) == "45 s");
     CHECK(duration(125000) == "2 min 5 s");
@@ -557,4 +591,155 @@ TEST_CASE("teleports: names: one match is that player, two players with one name
     r.g.names_of = {{2, "Ember"}, {3, "Ash"}};
     CHECK(r.t.bring(1, {"ash"}).find("bring: moving player 3") == 0);
     CHECK(r.t.tp_list().find("#2 = Ember (player 2)") != std::string::npos);
+}
+
+
+// ---- the map teleport (EMF's map action) and /tp.mark ----
+
+TEST_CASE("teleports map: an admin's spot: the ground, then a teleport just above it with the ground search") {
+    Rig r;
+    r.t.map_teleport(1, true, 1500, 4740);
+    REQUIRE(r.g.grounds.size() == 1);
+    CHECK(r.g.grounds[0].x == 1500);
+    CHECK(r.g.grounds[0].z == 4740);
+    CHECK(r.g.tps.empty());
+    r.g.ground(GroundStatus::Ok, 321.25);
+    REQUIRE(r.g.tps.size() == 1);
+    CHECK(r.g.tps[0].player == 1u);
+    CHECK(r.g.tps[0].ask.to.x == 1500);
+    CHECK(r.g.tps[0].ask.to.y == doctest::Approx(321.75));
+    CHECK(r.g.tps[0].ask.to.z == 4740);
+    CHECK(r.g.tps[0].ask.ground);
+    r.g.answer(true, {1500, 321.5, 4740});
+    CHECK(r.g.last_tell().find("You are at (1500, 322, 4740)") == 0);
+    CHECK(r.t.tp_back(1, {}).find("tp.back: moving player 1 to (4000.0, 700.0, 1200.0)") == 0);  // where they stood
+}
+
+TEST_CASE("teleports map: admins only by default; off refuses everyone; a refusal is told, nothing is asked") {
+    Rig r;
+    r.t.map_teleport(2, false, 1500, 4740);
+    CHECK(r.g.last_tell() == "Map teleport is for admins here");
+    CHECK(r.g.grounds.empty());
+    Settings s;
+    s.map_teleport = MapWho::Off;
+    r.t.set(s);
+    r.t.map_teleport(1, true, 1500, 4740);
+    CHECK(r.g.last_tell() == "Map teleport is switched off here");
+    CHECK(r.g.grounds.empty());
+}
+
+TEST_CASE("teleports map: everyone: /home's checks (dead, a hit, the shroud) and its own cooldown, no cost") {
+    Rig r;
+    Settings s;
+    s.map_teleport = MapWho::Everyone;
+    s.home_cost_item = "Wood Log";  // /home's cost is not the map teleport's
+    r.t.set(s);
+    r.g.dead_ones.insert(2);
+    r.t.map_teleport(2, false, 1500, 4740);
+    CHECK(r.g.last_tell() == "You are dead: respawn first");
+    r.g.dead_ones.clear();
+    r.t.on_hit(2);
+    r.t.map_teleport(2, false, 1500, 4740);
+    CHECK(r.g.last_tell().find("You were hit just now: the map teleport works 10 s after the last hit") == 0);
+    r.g.now += 10000;
+    r.g.shrouded.insert(2);
+    r.t.map_teleport(2, false, 1500, 4740);
+    CHECK(r.g.last_tell() == "Not inside the shroud: leave it first (as with fast travel)");
+    r.g.shrouded.clear();
+    CHECK(r.g.grounds.empty());
+    r.t.map_teleport(2, false, 1500, 4740);
+    r.g.ground(GroundStatus::Ok, 300);
+    r.g.answer(true, {1500, 300.5, 4740});
+    CHECK(r.g.takes.empty());
+    r.t.map_teleport(2, false, 10, 10);
+    CHECK(r.g.last_tell() == "Map teleport again in 1 min");
+    r.g.now += 60000;
+    r.t.map_teleport(2, false, 10, 10);
+    CHECK(r.g.grounds.size() == 2);
+}
+
+TEST_CASE("teleports map: a place nobody is near: a hop over it, the ground again, then down to it") {
+    Rig r;
+    r.t.map_teleport(1, true, 9000, 9000);
+    r.g.ground(GroundStatus::NotLoaded, 0, 1100, "not loaded");
+    REQUIRE(r.g.tps.size() == 1);
+    CHECK(r.g.tps[0].ask.to.y == 1100);  // waits high over the spot while it loads
+    CHECK_FALSE(r.g.tps[0].ask.ground);
+    r.g.answer(true, {9000, 1100, 9000});
+    REQUIRE(r.g.grounds.size() == 2);  // asked again from there
+    r.g.ground(GroundStatus::Ok, 250);
+    REQUIRE(r.g.tps.size() == 2);
+    CHECK(r.g.tps[1].ask.to.y == doctest::Approx(250.5));
+    r.g.answer(true, {9000, 250.7, 9000});
+    CHECK(r.g.last_tell().find("You are at (9000, 251, 9000)") == 0);
+    CHECK(r.t.tp_back(1, {}).find("(4000.0, 700.0, 1200.0)") != std::string::npos);  // the start, not the hop
+}
+
+TEST_CASE("teleports map: still no ground after the hop: back where they stood; a place without ground is told") {
+    Rig r;
+    r.t.map_teleport(1, true, 9000, 9000);
+    r.g.ground(GroundStatus::NotLoaded, 0, 1100, "not loaded");
+    r.g.answer(true, {9000, 1100, 9000});
+    r.g.ground(GroundStatus::NotLoaded, 0, 1100, "not loaded");
+    REQUIRE(r.g.tps.size() == 2);
+    CHECK(r.g.tps[1].ask.to.x == 4000);
+    CHECK(r.g.tps[1].ask.to.y == 700);
+    r.g.answer(true, {4000, 700, 1200});
+    CHECK(r.g.last_tell() == "No ground found there: you are back where you were");
+    r.t.map_teleport(1, true, 100, 100);
+    r.g.ground(GroundStatus::Failed, 0, 0, "the ground could not be read here");
+    CHECK(r.g.last_tell() == "Map teleport: no ground there (the ground could not be read here)");
+    CHECK(r.g.tps.size() == 2);
+}
+
+TEST_CASE("teleports map: one at a time per player; a new session drops what is under way") {
+    Rig r;
+    r.t.map_teleport(1, true, 1500, 4740);
+    r.t.map_teleport(1, true, 1600, 4740);
+    CHECK(r.g.last_tell() == "You are already on your way");
+    CHECK(r.g.grounds.size() == 1);
+    r.t.new_session();
+    r.g.ground(GroundStatus::Ok, 300);  // an answer for the old session
+    CHECK(r.g.tps.empty());
+    r.t.map_teleport(1, true, 1600, 4740);
+    CHECK(r.g.grounds.size() == 2);
+}
+
+TEST_CASE("teleports map: the ground cannot be read on this build: told at once") {
+    Rig r;
+    r.g.ground_ok = false;
+    r.t.map_teleport(1, true, 1500, 4740);
+    CHECK(r.g.last_tell() == "Map teleport: the ground cannot be read here (see the log)");
+}
+
+TEST_CASE("teleports /tp.mark: the player's own waypoint (its x and z), with the map teleport's rules") {
+    Rig r;
+    CHECK(r.t.tp_mark(1, true, {}) == "Set a waypoint on your map first");
+    r.g.waypoints[1] = {2000, 0, 3000};  // a free map spot: y is 0
+    CHECK(r.t.tp_mark(1, true, {}) == "To your waypoint: finding the ground there");
+    REQUIRE(r.g.grounds.size() == 1);
+    CHECK(r.g.grounds[0].x == 2000);
+    CHECK(r.g.grounds[0].z == 3000);
+    r.g.waypoints[2] = {2000, 0, 3000};
+    CHECK(r.t.tp_mark(2, false, {}) == "Map teleport is for admins here");
+    Settings s;
+    s.enabled = parse_enabled("unstuck home");
+    r.t.set(s);
+    CHECK(r.t.tp_mark(1, true, {}) == "tp.mark is switched off here");
+}
+
+TEST_CASE("teleports /tp.mark #k: an admin moves player k to k's own waypoint; players cannot name another") {
+    Rig r;
+    r.g.waypoints[2] = {2000, 0, 3000};
+    CHECK(r.t.tp_mark(1, true, {"#2"}) == "tp.mark: player 2 to their waypoint: finding the ground there");
+    r.g.ground(GroundStatus::Ok, 400);
+    REQUIRE(r.g.tps.size() == 1);
+    CHECK(r.g.tps[0].player == 2u);
+    r.g.answer(true, {2000, 400.7, 3000});
+    bool told_admin = false;
+    for (const auto& [p, t] : r.g.tells)
+        if (p == 1 && t.find("player 2 is at (2000, 401, 3000)") != std::string::npos) told_admin = true;
+    CHECK(told_admin);
+    CHECK(r.t.tp_mark(2, false, {"#1"}) == "tp.mark #k is for admins");
+    CHECK(r.t.tp_mark(0, true, {}) == "tp.mark: from the console name the player: tp.mark #k");
 }
