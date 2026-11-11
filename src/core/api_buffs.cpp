@@ -213,7 +213,10 @@ void buffs_server_step(EmfWorld* w) {
         for (const auto& x : s->buff_watchers)
             if (x.on) watchers.push_back(x);
     }
-    if (watchers.empty()) return;
+    if (watchers.empty()) {  // nobody listens: a later callback starts from a first sight, not a stale copy
+        if (s->buff_diff.size() || !s->buff_player_list.empty()) buffs_new_session();
+        return;
+    }
     const uint64_t now = s->now_ms ? s->now_ms() : GetTickCount64();
     if (!s->buff_diff_ms || now - s->buff_diff_ms >= kBuffDiffMs) {
         s->buff_diff_ms = now;

@@ -2439,8 +2439,9 @@ bool read_env_slice(void* ctx, EnvSlice* s) {
 thread_local EnvSnapshot t_env;
 
 bool env_wanted() {
+    // a v31 rule alone (entity hits only) wants no env hits
     return g_state && g_state->env_off_why.empty() &&
-           (g_state->hit_rules.size() || g_state->hit_callbacks.before_count() || g_state->hit_callbacks.after_count());
+           (g_state->hit_rules.any_env() || g_state->hit_callbacks.before_count() || g_state->hit_callbacks.after_count());
 }
 
 uint8_t* env_server_world(void* ctx) {

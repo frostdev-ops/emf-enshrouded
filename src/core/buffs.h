@@ -45,10 +45,11 @@ using BuffNetFn = BuffNet (*)(uint32_t buff_entity, void* ctx);
 // The active buffs in slot order (food 3 slots, or 4 with extendedFoodBuffSlots; buffs 16; debuffs 16; rested;
 // terrain): the number there is; fills `out` up to `cap`.
 uint32_t read_buffs(const uint8_t* container, BuffNetFn net, void* ctx, int64_t now_ns, EmfBuff* out, uint32_t cap);
-// The container's offset and slot count of a slot group (all 4 food slots: the game's cleanse looks at all four).
+// Whether the container holds `type` and it is not being removed already (all 4 food slots: the game's cleanse looks at
+// all four).
 bool buff_has(const uint8_t* container, uint32_t type);
-// The first instance of `type` gets cleansed = 1 (what the game's cleanseBuffType does; update_buffcontainer ends it
-// the next step). False and nothing written when the container has none.
+// The first instance of `type` not being removed yet gets cleansed = 1 (what the game's cleanseBuffType does;
+// update_buffcontainer ends it the next step). False and nothing written when the container has none.
 bool buff_cleanse(uint8_t* container, uint32_t type);
 
 // ---- giving: the ApplyBuffCtx ----
@@ -77,8 +78,9 @@ struct BuffCheck {
     bool applied = false;
     std::string why;
 };
+// target_faction -1: not read. EMF passes no actor, so the core's dead check never runs for EMF's gives.
 BuffCheck check_applied(uint8_t err, const uint8_t* container, uint32_t type, uint8_t slot, uint16_t faction_exclude,
-                        int target_faction, bool despawn_on_death);
+                        int target_faction);
 const char* buff_slot_name(uint8_t slot);  // "food", "buff", "debuff", "rested", "terrain"
 
 // ---- events: a player's container against the step before ----

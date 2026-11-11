@@ -68,6 +68,7 @@ bool env_apply(uint8_t kind, const EnvDrop& d, const EnvEnv& env, const HitRules
             h.cancel = 0;
             h.amount = dropped;
             h.health_after = std::max(0, d.after);
+            if (h.amount > 0 && d.after <= 0) h.flags |= EMF_HIT_KILLED;
             if (out) *out = h;
             return true;
         }
@@ -75,6 +76,7 @@ bool env_apply(uint8_t kind, const EnvDrop& d, const EnvEnv& env, const HitRules
         ++st.changed;
     }
     h.amount = final_amount;
+    if (!h.cancel && h.amount > 0 && h.health_after <= 0) h.flags |= EMF_HIT_KILLED;
     if (h.cancel) ++st.cancelled;
     if (out) *out = h;
     return !h.cancel;

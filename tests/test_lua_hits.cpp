@@ -284,3 +284,16 @@ TEST_CASE("lua 1.23: hit.instant says the game's own damage kills at once (deadl
     fire_hit(kServer, h);
     CHECK(logged("instant cold false"));
 }
+
+TEST_CASE("lua 1.23: emf.hit_rule types takes one name as attack does; emf.on_hit options refuse unknown keys (polish)") {
+    Rig r(L"hit_rule_polish");
+    add_script(r.dir, "hp",
+               "emf.hit_rule{types = 'fire', cancel = true}\n"
+               "local ok = pcall(emf.on_hit, function() end, {kind = 'fall'})\n"
+               "emf.log('onhit typo ' .. tostring(ok))\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    REQUIRE(r.fake.hit_rules_added.size() == 1);
+    CHECK(r.fake.hit_rules_added[0].damage_types_any == (1u << 3));
+    CHECK(logged("onhit typo false"));
+}

@@ -179,6 +179,18 @@ bool BuffService::gather(const ProgramCall& call, Handles& hs, std::string& why)
     h.balancing = singleton("BalancingRegistry");
     h.item_registry = singleton("g38_items::ItemRegistry");
     h.skill_tree = singleton("g38_skilltree::SkillTree");
+    if (call.world) {
+        const WorldView view(call.world);
+        for (const auto& [name, slot] : {std::pair<const char*, void*>{"BalancingRegistry", h.balancing},
+                                         {"g38_items::ItemRegistry", h.item_registry},
+                                         {"g38_skilltree::SkillTree", h.skill_tree}}) {
+            void* own = view.singleton(name);
+            if (own && own != slot) {
+                why = std::string("the ") + name + " slot does not match the world's singleton (iterator layout?)";
+                return false;
+            }
+        }
+    }
     h.container_w = accessor("BuffContainer", true, &hs.container);
     h.lifetime_w = accessor("LifeTime", true, nullptr);
     h.faction_r = accessor("Faction", false, &hs.faction);
@@ -256,8 +268,7 @@ BuffService::Done BuffService::one(const ProgramCall& call, const Handles& hs, c
             if (seh_read(f, &v, 1)) faction = v;
         }
     if (!seh_read(live, box, sizeof box)) return refused("the target's buff container cannot be read back");
-    const BuffCheck k = check_applied(c.out[0], box, r.type, t.slot, t.faction_exclude, faction,
-                                      (t.flags & EMF_BUFF_DESPAWN_ON_DEATH) != 0);
+    const BuffCheck k = check_applied(c.out[0], box, r.type, t.slot, t.faction_exclude, faction);
     if (!k.applied) return refused(k.why);
     d.ev.kind = EMF_BUFF_APPLIED;
     d.ev.buff_entity = buff_entity_of(box, r.type, t.slot);

@@ -307,3 +307,26 @@ TEST_CASE("api v32: the same refusal within 10 s is logged once (review M3: a mo
     for (const auto& l : g_lines) lines += l.find("server world only") != std::string::npos ? 1 : 0;
     CHECK(lines == 1);
 }
+
+TEST_CASE("api v32: when no on_buff callback is left, the comparison starts over (polish: no burst for a later one)") {
+    Fixture f;
+    const EmfApi* api = api_table();
+    REQUIRE(api->on_buff(faulting_cb, nullptr));
+    container(1);
+    buffs_server_step(f.w());  // first sight
+    set_buff(1, 0x30, 0, 901, kElixir);
+    g_now += 16;
+    buffs_server_step(f.w());  // the faulting one is switched off
+    set_buff(1, 0x30, 1, 902, kWet);
+    g_now += 16;
+    buffs_server_step(f.w());  // nobody listens: nothing compared
+    REQUIRE(api->on_buff(on_buff_cb, nullptr));
+    g_now += 16;
+    buffs_server_step(f.w());  // a first sight again: 902 is not news to the new callback
+    CHECK(g_seen.empty());
+    set_buff(1, 0x30, 2, 903, kElixir);
+    g_now += 16;
+    buffs_server_step(f.w());
+    REQUIRE(g_seen.size() == 1);
+    CHECK(g_seen[0].kind == EMF_BUFF_APPLIED);
+}

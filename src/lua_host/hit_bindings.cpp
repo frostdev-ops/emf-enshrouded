@@ -248,6 +248,12 @@ int l_on_hit(lua_State* L) {
     }
     uint8_t kinds = 1u << EMF_HIT_KIND_HIT;  // entity hits only unless asked (env kinds come 60 a second)
     if (lua_istable(L, 2)) {
+        lua_pushnil(L);
+        while (lua_next(L, 2)) {
+            const char* k = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "";
+            if (std::strcmp(k, "kinds") != 0) return luaL_error(L, "emf.on_hit: unknown option '%s' (kinds)", k);
+            lua_pop(L, 1);
+        }
         if (const uint8_t asked = kinds_at(L, 2, "emf.on_hit")) kinds = asked;
     }
     lua_pushvalue(L, 1);
@@ -280,7 +286,7 @@ int l_hit_rule(lua_State* L) {
     if (flag_of(L, "crit")) r.flags_all |= EMF_HIT_CRIT;
     if (flag_of(L, "backstab")) r.flags_all |= EMF_HIT_BACKSTAB;
     if (flag_of(L, "weakspot")) r.flags_all |= EMF_HIT_WEAKSPOT;
-    r.damage_types_any = static_cast<uint16_t>(names_of(L, "types", kTypes, kTypeCount, true));
+    r.damage_types_any = static_cast<uint16_t>(names_of(L, "types", kTypes, kTypeCount, false));
     r.attacks = static_cast<uint8_t>(names_of(L, "attack", kAttacks, kAttackCount, false));
     r.healing = flag_of(L, "healing") ? 1 : 0;
     r.cancel = flag_of(L, "cancel") ? 1 : 0;

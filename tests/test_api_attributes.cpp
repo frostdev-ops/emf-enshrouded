@@ -971,3 +971,19 @@ TEST_CASE("env hooks: a new world drops the old world's queued env hits and carr
     deliver_env_hits(f.w());
     CHECK(g_after.empty());
 }
+
+TEST_CASE("env hooks: only a v31 rule (kinds 0) wants no env hits: the four programs read nothing (polish)") {
+    Fixture f;
+    f.state.hit_hook_off_why.clear();
+    put_health(1, kHealthRoot, 80, 100);
+    EnvRig e(f, {1});
+    EmfHitRule hits_only{};
+    hits_only.size = sizeof hits_only;
+    hits_only.scale = 1.0f;
+    hits_only.cancel = 1;
+    REQUIRE(api_table()->hit_rule_add(&hits_only) != 0);
+    env_pre(e.ctx.p(), EMF_HIT_KIND_COLD);
+    put_health(1, kHealthRoot, 78, 100);
+    env_post(e.ctx.p(), EMF_HIT_KIND_COLD);
+    CHECK(f.state.hit_stats.seen.load() == 0);
+}

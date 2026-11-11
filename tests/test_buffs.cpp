@@ -228,21 +228,21 @@ TEST_CASE("buff apply ctx: the 0xE8 bytes at the research's offsets") {
 TEST_CASE("buff check: applied only when the slot group holds the type; the reasons of a refusal") {
     Container k;
     k.set(kDebuffs, 4, 950, kWet);
-    BuffCheck r = check_applied(0, k.b, kWet, EMF_BUFF_DEBUFF, 0, -1, false);
+    BuffCheck r = check_applied(0, k.b, kWet, EMF_BUFF_DEBUFF, 0, -1);
     CHECK(r.applied);
-    r = check_applied(0, k.b, kPoisoned, EMF_BUFF_DEBUFF, 0xFF7F, 6, true);  // a wild beast
+    r = check_applied(0, k.b, kPoisoned, EMF_BUFF_DEBUFF, 0xFF7F, 6);  // a wild beast
     CHECK_FALSE(r.applied);
     CHECK(r.why.find("faction") != std::string::npos);
-    r = check_applied(0, k.b, kPoisoned, EMF_BUFF_DEBUFF, 0, -1, true);
+    r = check_applied(0, k.b, kPoisoned, EMF_BUFF_DEBUFF, 0, -1);
     CHECK_FALSE(r.applied);
-    CHECK(r.why.find("dead") != std::string::npos);
-    r = check_applied(0x14, k.b, kPoisoned, EMF_BUFF_DEBUFF, 0, -1, false);
+    CHECK(r.why.find("faction could not be read") != std::string::npos);  // EMF never passes the actor: no dead check
+    r = check_applied(0x14, k.b, kPoisoned, EMF_BUFF_DEBUFF, 0, -1);
     CHECK(r.why.find("no free debuff slot") != std::string::npos);
-    r = check_applied(0x11, k.b, kWet, EMF_BUFF_DEBUFF, 0, -1, false);
+    r = check_applied(0x11, k.b, kWet, EMF_BUFF_DEBUFF, 0, -1);
     CHECK(r.why.find("again") != std::string::npos);
-    r = check_applied(0x12, k.b, kWet, EMF_BUFF_DEBUFF, 0, -1, false);
+    r = check_applied(0x12, k.b, kWet, EMF_BUFF_DEBUFF, 0, -1);
     CHECK(r.why.find("no buff container") != std::string::npos);
-    r = check_applied(0, k.b, kWet, EMF_BUFF_BUFF, 0, -1, false);  // the type in another group does not count
+    r = check_applied(0, k.b, kWet, EMF_BUFF_BUFF, 0, -1);  // the type in another group does not count
     CHECK_FALSE(r.applied);
 }
 
@@ -342,4 +342,15 @@ TEST_CASE("buff diff: a replace says removed (replaced) before applied (review I
     const auto gone = d.step(1, k.b, &net_of, nullptr, 300);
     REQUIRE(gone.size() == 1);
     CHECK(gone[0].replaced == 0);  // it ended: nothing took its place
+}
+
+TEST_CASE("buff cleanse: an instance already being removed does not count again (polish: two removes)") {
+    Container k;
+    k.set(kDebuffs, 3, 961, kWet, 1);  // cleansed: gone after the next step
+    CHECK_FALSE(buff_has(k.b, kWet));
+    CHECK_FALSE(buff_cleanse(k.b, kWet));
+    k.set(kDebuffs, 4, 962, kWet);  // a second Wet that is not being removed
+    CHECK(buff_has(k.b, kWet));
+    CHECK(buff_cleanse(k.b, kWet));
+    CHECK(k.b[kDebuffs + 4 * 12 + 8] == 1);
 }

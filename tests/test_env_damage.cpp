@@ -302,3 +302,17 @@ TEST_CASE("env apply: a correction that fails is reported as what happened, not 
     CHECK(r.st.faults.load() == 1);
 }
 
+
+TEST_CASE("env apply: a drop that leaves no health says killed; one a rule kept alive does not (polish)") {
+    Rig r;
+    EmfHit h{};
+    r.apply(EMF_HIT_KIND_FALL, 5, 30, 0, &h);
+    CHECK((h.flags & EMF_HIT_KILLED) != 0);
+    EmfHitRule keep = rule();
+    keep.min_health = 1;
+    std::string why;
+    REQUIRE(r.rules.add(keep, &why) != 0);
+    r.apply(EMF_HIT_KIND_FALL, 6, 30, -5, &h);
+    CHECK((h.flags & EMF_HIT_KILLED) == 0);
+    CHECK(h.health_after == 1);
+}

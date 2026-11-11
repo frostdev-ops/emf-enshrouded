@@ -229,6 +229,7 @@ uint32_t HitRules::add(const EmfHitRule& r, std::string* why) {
         EmfHitRule copy = r;
         copy.size = sizeof copy;
         rules_.emplace_back(id, copy);
+        if (copy.kinds & ~1u) env_rules_.fetch_add(1, std::memory_order_release);
     }
     ReleaseSRWLockExclusive(&lock_);
     return id;
@@ -238,6 +239,7 @@ bool HitRules::remove(uint32_t id) {
     AcquireSRWLockExclusive(&lock_);
     const auto it = std::find_if(rules_.begin(), rules_.end(), [&](const auto& e) { return e.first == id; });
     const bool found = it != rules_.end();
+    if (found && (it->second.kinds & ~1u)) env_rules_.fetch_sub(1, std::memory_order_release);
     if (found) rules_.erase(it);
     ReleaseSRWLockExclusive(&lock_);
     return found;
@@ -263,6 +265,7 @@ bool HitRules::apply(EmfHit& h, HitClassify classify, void* ctx, HitCarry* carry
 void HitRules::reset() {
     AcquireSRWLockExclusive(&lock_);
     rules_.clear();
+    env_rules_ = 0;
     next_id_ = 1;
     ReleaseSRWLockExclusive(&lock_);
 }

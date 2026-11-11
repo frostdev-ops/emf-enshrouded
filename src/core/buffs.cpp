@@ -129,7 +129,7 @@ bool buff_has(const uint8_t* c, uint32_t type) {
     if (!type) return false;
     for (const Group& g : kGroups)
         for (uint8_t i = 0; i < g.count; ++i)
-            if (at<uint32_t>(c, g.offset + i * kInstance + 4) == type) return true;
+            if (at<uint32_t>(c, g.offset + i * kInstance + 4) == type && !c[g.offset + i * kInstance + 8]) return true;
     return false;
 }
 
@@ -138,7 +138,7 @@ bool buff_cleanse(uint8_t* c, uint32_t type) {
     for (const Group& g : kGroups)
         for (uint8_t i = 0; i < g.count; ++i) {
             uint8_t* inst = c + g.offset + i * kInstance;
-            if (at<uint32_t>(inst, 4) == type) {
+            if (at<uint32_t>(inst, 4) == type && !inst[8]) {
                 inst[8] = 1;
                 return true;
             }
@@ -177,7 +177,7 @@ const char* buff_slot_name(uint8_t slot) {
 }
 
 BuffCheck check_applied(uint8_t err, const uint8_t* c, uint32_t type, uint8_t slot, uint16_t faction_exclude,
-                        int target_faction, bool despawn_on_death) {
+                        int target_faction) {
     BuffCheck r;
     switch (err) {
         case 0: break;
@@ -197,8 +197,8 @@ BuffCheck check_applied(uint8_t err, const uint8_t* c, uint32_t type, uint8_t sl
     }
     if (target_faction >= 0 && target_faction < 16 && ((faction_exclude >> target_faction) & 1u))
         r.why = "the type is never given to the target's faction (" + std::to_string(target_faction) + ")";
-    else if (despawn_on_death)
-        r.why = "the target is dead (this type is never given to the dead)";
+    else if (target_faction < 0)
+        r.why = "the game did not give it (the target's faction could not be read)";
     else
         r.why = "the game did not give it";
     return r;

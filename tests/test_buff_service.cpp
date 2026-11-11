@@ -424,3 +424,14 @@ TEST_CASE("buff service: requests end refused when emf_buffs has not run in the 
     REQUIRE(g_got.size() == 1);
     CHECK(g_got[0].why.find("not running") != std::string::npos);
 }
+
+TEST_CASE("buff service: every singleton slot must be the world's own (polish)") {
+    Fixture f;
+    alignas(8) static uint8_t other_balancing[8];
+    f.singles.plant(f.w, "BalancingRegistry", other_balancing);  // the slot holds g_balancing: a shifted layout
+    REQUIRE(f.give(1, kWet));
+    f.tick();
+    CHECK(g_core.calls == 0);
+    REQUIRE(!g_got.empty());
+    CHECK(g_got.back().why.find("iterator layout") != std::string::npos);
+}

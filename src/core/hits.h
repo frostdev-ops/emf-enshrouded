@@ -4,6 +4,7 @@
 // (private research hit_hooks_2026-11-11). Game-free: the detour (hit_hook.h) feeds it.
 #include <windows.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -62,11 +63,15 @@ public:
     bool remove(uint32_t id);
     size_t size() const;
     bool apply(EmfHit& h, HitClassify classify, void* ctx, HitCarry* carry = nullptr) const;
+    // Whether a rule takes part in fall, shroud, cold or drowning (kinds beyond entity hits): the env programs read
+    // nothing for a v31 rule alone. Lock-free.
+    bool any_env() const { return env_rules_.load(std::memory_order_acquire) != 0; }
     void reset();  // tests
 
 private:
     mutable SRWLOCK lock_ = SRWLOCK_INIT;
     std::vector<std::pair<uint32_t, EmfHitRule>> rules_;
+    std::atomic<uint32_t> env_rules_{0};
     uint32_t next_id_ = 1;
 };
 
