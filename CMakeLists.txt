@@ -59,7 +59,7 @@ target_include_directories(lua54 PUBLIC third_party/lua)
 if(MSVC)
   target_compile_options(lua54 PRIVATE /W0 /TP /EHsc)
 endif()
-add_library(emf_lua_lib STATIC src/lua_host/fields.cpp src/lua_host/host.cpp src/lua_host/bindings.cpp src/lua_host/lua_json.cpp
+add_library(emf_lua_lib STATIC src/lua_host/fields.cpp src/lua_host/host.cpp src/lua_host/bindings.cpp src/lua_host/hit_bindings.cpp src/lua_host/lua_json.cpp
   src/core/json.cpp src/core/manifest.cpp)
 target_include_directories(emf_lua_lib PUBLIC src sdk/include)
 target_link_libraries(emf_lua_lib PUBLIC lua54)
@@ -796,4 +796,4 @@ target_sources(emf_tests PRIVATE tests/test_hud_pick.cpp)
 
 # --- Hits (API v31): rules and callbacks before a hit lands, the hits after it landed ---
 target_sources(emf_core_lib PRIVATE src/core/hits.cpp src/core/hit_hook.cpp)
-target_sources(emf_tests PRIVATE tests/test_hits.cpp tests/test_hit_hook.cpp)
+target_sources(emf_tests PRIVATE tests/test_hits.cpp tests/test_hit_hook.cpp tests/test_lua_hits.cpp)

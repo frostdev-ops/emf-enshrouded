@@ -1,0 +1,165 @@
+// Lua 1.23 hits: emf.on_hit (each landing hit after the server step) and emf.hit_rule / emf.hit_rule_remove (rules
+// the core applies before a hit lands; a script's rules go when it reloads or pauses), over the fake core API.
+#include <windows.h>
+
+#include <doctest.h>
+
+#include <string>
+
+#include "lua_host/host.h"
+#include "lua_test_fake.h"
+
+using emf::lua::Host;
+
+TEST_CASE("lua 1.23: emf.hit_rule builds the C rule") {
+    Rig r(L"hit_rule");
+    add_script(r.dir, "hr",
+               "local id = emf.hit_rule{from = 'creatures', to = 'players', types = {'fire', 'ice'},\n"
+               "                        attack = {'melee', 'ranged'}, scale = 0.5}\n"
+               "emf.log('rule ' .. tostring(id))\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK(logged("rule 100"));
+    REQUIRE(r.fake.hit_rules_added.size() == 1);
+    const EmfHitRule& h = r.fake.hit_rules_added[0];
+    CHECK(h.size == sizeof(EmfHitRule));
+    CHECK(h.attacker == EMF_HIT_CREATURES);
+    CHECK(h.target == EMF_HIT_PLAYERS);
+    CHECK(h.damage_types_any == ((1u << 3) | (1u << 4)));
+    CHECK(h.attacks == 3);
+    CHECK(h.scale == doctest::Approx(0.5f));
+    CHECK(h.cancel == 0);
+    CHECK(h.healing == 0);
+}
+
+TEST_CASE("lua 1.23: emf.hit_rule with crit, min_health, an entity, objects, healing and cancel") {
+    Rig r(L"hit_rule2");
+    add_script(r.dir, "hr2",
+               "emf.hit_rule{to = 5, min_health = 1}\n"
+               "emf.hit_rule{from = 'players', crit = true, backstab = true, scale = 1.5}\n"
+               "emf.hit_rule{from = 'players', to = 'objects', attack = 'tool', add = -3}\n"
+               "emf.hit_rule{to = 'players', healing = true, cancel = true}\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    REQUIRE(r.fake.hit_rules_added.size() == 4);
+    CHECK(r.fake.hit_rules_added[0].target == 5);
+    CHECK(r.fake.hit_rules_added[0].min_health == 1);
+    CHECK(r.fake.hit_rules_added[0].scale == 1.0f);
+    CHECK(r.fake.hit_rules_added[1].flags_all == (EMF_HIT_CRIT | EMF_HIT_BACKSTAB));
+    CHECK(r.fake.hit_rules_added[2].target == EMF_HIT_OBJECTS);
+    CHECK(r.fake.hit_rules_added[2].attacks == (1u << 3));
+    CHECK(r.fake.hit_rules_added[2].add == -3);
+    CHECK(r.fake.hit_rules_added[3].healing == 1);
+    CHECK(r.fake.hit_rules_added[3].cancel == 1);
+}
+
+TEST_CASE("lua 1.23: emf.hit_rule raises on an unknown key or a bad type name") {
+    Rig r(L"hit_rule_bad");
+    add_script(r.dir, "hb",
+               "local ok, err = pcall(emf.hit_rule, {colour = 1})\n"
+               "emf.log('key ' .. tostring(ok) .. ' ' .. tostring(err))\n"
+               "ok, err = pcall(emf.hit_rule, {types = {'plasma'}, scale = 2})\n"
+               "emf.log('type ' .. tostring(ok) .. ' ' .. tostring(err))\n"
+               "ok, err = pcall(emf.hit_rule, {attack = 'lasso', scale = 2})\n"
+               "emf.log('attack ' .. tostring(ok) .. ' ' .. tostring(err))\n"
+               "ok, err = pcall(emf.hit_rule, {from = 'dragons', scale = 2})\n"
+               "emf.log('from ' .. tostring(ok) .. ' ' .. tostring(err))\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK(logged("key false"));
+    CHECK(logged("colour"));
+    CHECK(logged("type false"));
+    CHECK(logged("plasma"));
+    CHECK(logged("attack false"));
+    CHECK(logged("lasso"));
+    CHECK(logged("from false"));
+    CHECK(logged("dragons"));
+    CHECK(r.fake.hit_rules_added.empty());
+}
+
+TEST_CASE("lua 1.23: a reload removes the script's rules; a pause does too") {
+    Rig r(L"hit_rule_reload");
+    add_script(r.dir, "hrl", "emf.hit_rule{scale = 2}\nemf.hit_rule{to = 'players', cancel = true}\n");
+    add_script(r.dir, "hrp",
+               "emf.hit_rule{to = 'players', min_health = 1}\n"
+               "emf.command('boom', ': fails', function() error('boom') end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    REQUIRE(r.fake.hit_rules_added.size() == 3);  // ids 100, 101 (hrl), 102 (hrp)
+    Sleep(20);
+    write(r.dir + L"\\hrl\\main.lua", "emf.log('reloaded without rules')\n");
+    host.check_reload_now();
+    CHECK(logged("reloaded without rules"));
+    REQUIRE(r.fake.hit_rules_removed.size() == 2);
+    CHECK(r.fake.hit_rules_removed[0] + r.fake.hit_rules_removed[1] == 201u);
+    r.run_command("hrp.boom");
+    REQUIRE(host.status("hrp").rfind("paused", 0) == 0);
+    REQUIRE(r.fake.hit_rules_removed.size() == 3);
+    CHECK(r.fake.hit_rules_removed[2] == 102u);
+}
+
+TEST_CASE("lua 1.23: emf.hit_rule_remove only removes the script's own rule") {
+    Rig r(L"hit_rule_own");
+    add_script(r.dir, "ha", "rule = emf.hit_rule{scale = 2}\n"
+                            "emf.command('rm', ': remove', function() emf.reply('own ' .. tostring(emf.hit_rule_remove(rule))) end)\n");
+    add_script(r.dir, "hz", "emf.command('rm', ': remove', function() emf.reply('other ' .. tostring(emf.hit_rule_remove(100))) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("hz.rm");
+    r.run_command("ha.rm");
+    r.run_command("ha.rm");
+    bool other = false, own = false, again = false;
+    for (const auto& l : r.fake.replies) {
+        other = other || l == "other false";
+        own = own || l == "own true";
+        again = again || l == "own false";
+    }
+    CHECK(other);
+    CHECK(own);
+    CHECK(again);
+    REQUIRE(r.fake.hit_rules_removed.size() == 1);
+    CHECK(r.fake.hit_rules_removed[0] == 100u);
+}
+
+TEST_CASE("lua 1.23: emf.on_hit gets the hit table; one core listener; false on an older core") {
+    Rig r(L"on_hit");
+    add_script(r.dir, "oh",
+               "emf.log('on_hit ' .. tostring(emf.on_hit(function(w, h)\n"
+               "  emf.log('hit ' .. h.attacker .. ' ' .. h.target .. ' ' .. h.part .. ' ' .. h.amount .. ' crit ' ..\n"
+               "          tostring(h.crit) .. ' blocked ' .. tostring(h.blocked) .. ' ' .. h.types[1] .. ' ' .. #h.types ..\n"
+               "          ' ' .. h.attack .. ' killed ' .. tostring(h.killed) .. ' after ' .. h.health_after ..\n"
+               "          ' mod ' .. tostring(h.from_mod) .. ' weapon ' .. h.weapon_item .. ' x ' .. h.position.x ..\n"
+               "          ' server ' .. tostring(w:is_server()))\n"
+               "end)))\n");
+    add_script(r.dir, "oh2", "emf.on_hit(function(w, h) emf.log('second ' .. h.amount) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK(logged("on_hit true"));
+    CHECK(r.fake.hit_cbs.size() == 1);
+    EmfHit h{};
+    h.size = sizeof h;
+    h.attacker = 1;
+    h.target = 6808;
+    h.part = 6809;
+    h.amount = 120;
+    h.flags = EMF_HIT_CRIT | EMF_HIT_KILLED;
+    h.damage_types = (1u << 3) | (1u << 0);
+    h.attack = 1;
+    h.health_after = 0;
+    h.health_before = -1;
+    h.weapon_item = 0xABCDu;
+    h.position[0] = 2.5f;
+    fire_hit(kServer, h);
+    CHECK(logged("hit 1 6808 6809 120 crit true blocked false cut 2 ranged killed true after 0 mod false weapon 43981 x 2.5 server true"));
+    CHECK(logged("second 120"));
+}
+
+TEST_CASE("lua 1.23: on an older core emf.on_hit is false and emf.hit_rule nil") {
+    Rig old(L"on_hit_old");
+    old.api.on_hit = nullptr;
+    old.api.hit_rule_add = nullptr;
+    add_script(old.dir, "oo", "emf.log('old ' .. tostring(emf.on_hit(function() end)) .. ' ' .. tostring(emf.hit_rule{scale = 2}))\n");
+    Host host2(&old.api, old.dir);
+    host2.load_all();
+    CHECK(logged("old false nil"));
+}

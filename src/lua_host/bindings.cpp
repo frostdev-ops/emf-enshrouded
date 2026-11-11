@@ -3134,6 +3134,7 @@ void open_bindings(lua_State* L, Script&) {
                                    {"tell", l_tell},       {"broadcast", l_broadcast}, {"on_chat", l_on_chat},
                                    {"on_player_joined", l_on_player_joined}, {"on_player_left", l_on_player_left},
                                    {"on_player_died", l_on_player_died},
+                                   {"on_hit", l_on_hit}, {"hit_rule", l_hit_rule}, {"hit_rule_remove", l_hit_rule_remove},
                                    {"request_save", l_request_save}, {"teleport", l_teleport},
                                    {"on_world_setting_changed", l_on_world_setting_changed},
                                    {"on_event", l_on_event}, {"emits", l_emits},       {"emit", l_emit},

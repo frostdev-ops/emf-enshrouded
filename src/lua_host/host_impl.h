@@ -75,6 +75,8 @@ struct Script {
     std::vector<int> player_cbs[3];                    // emf.on_player_joined, _left, _died (lua 1.20)
     std::vector<int> player_intro;                     // joined functions registered after players came: told next step
     std::vector<int> ws_cbs;                           // emf.on_world_setting_changed (lua 1.10)
+    std::vector<int> hit_cbs;                          // emf.on_hit (lua 1.23)
+    std::set<uint32_t> hit_rules;                      // its emf.hit_rule ids (lua 1.23): removed on unload and pause
     std::map<std::string, std::vector<BusSubscription>> bus_subs;  // cross-mod message callbacks
     uint64_t next_bus_subscription = 0;             // unique callback tokens, even after unsubscribe
     // While a take's callback runs: the taken items not handed on yet (emf.put / emf.give of that item lower it). If the
@@ -172,6 +174,7 @@ struct Host::Impl {
     std::atomic<uint64_t> server_seen{0};                // GetTickCount64 of the last server world step
     std::atomic<int> chat_hooked{0};                     // the core's on_chat for emf.on_chat: 0 not asked, 1 on, -1 refused
     std::atomic<int> player_hooked{0};                   // the core's on_player (lua 1.20): 0 not asked, 1 on, -1 refused
+    std::atomic<int> hit_hooked{0};                      // the core's on_hit (lua 1.23): 0 not asked, 1 on, -1 refused
     struct PresentPlayer {
         uint32_t player = 0;
         std::string name;
@@ -218,5 +221,12 @@ std::string utf8(const std::wstring& w);
 // lua 1.14 offers (bindings.cpp): unload queues a script's offers; every server step removes the queued ones.
 void queue_script_offers(Host::Impl& h, Script& s);
 void run_offer_drops(Host::Impl& h, EmfWorld* w);
+
+// lua 1.23 hits (hit_bindings.cpp): emf.on_hit, emf.hit_rule, emf.hit_rule_remove; a script's rules leave the core
+// when it unloads or pauses.
+int l_on_hit(lua_State* L);
+int l_hit_rule(lua_State* L);
+int l_hit_rule_remove(lua_State* L);
+void drop_hit_rules(Host::Impl& h, Script& s);
 
 }  // namespace emf::lua

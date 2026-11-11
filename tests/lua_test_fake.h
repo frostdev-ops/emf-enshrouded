@@ -104,6 +104,10 @@ struct Fake {
     std::map<uint32_t, std::string> character_names;  // v30 player_character_name
     std::vector<std::pair<EmfChatCallback, void*>> chat_cbs;
     std::vector<std::pair<EmfPlayerCallback, void*>> player_cbs;  // v28 on_player listeners
+    std::vector<std::pair<EmfHitCallback, void*>> hit_cbs;        // v31 on_hit listeners
+    std::vector<EmfHitRule> hit_rules_added;                      // v31 hit_rule_add's rules
+    std::vector<uint32_t> hit_rules_removed;                      // v31 hit_rule_remove's ids
+    uint32_t next_hit_rule = 100;
     int saves = 0;
     bool chat_ok = true;  // what chat_tell / chat_broadcast / on_chat / request_save answer
     // v20 teleport: the requests made (answer them with their cb/user as the core would)
@@ -663,6 +667,25 @@ void fire_player(EmfWorld* world, uint32_t kind, uint32_t player, uint64_t accou
     const auto cbs = g->player_cbs;
     for (auto& [cb, user] : cbs) cb(world, &e, user);
 }
+bool f_on_hit(EmfHitCallback cb, void* user) {
+    if (!cb) return false;
+    g->hit_cbs.emplace_back(cb, user);
+    return true;
+}
+uint32_t f_hit_rule_add(const EmfHitRule* r) {
+    if (!r) return 0;
+    g->hit_rules_added.push_back(*r);
+    return g->next_hit_rule++;
+}
+bool f_hit_rule_remove(uint32_t id) {
+    g->hit_rules_removed.push_back(id);
+    return true;
+}
+// A hit the server applied (every on_hit listener hears it).
+void fire_hit(EmfWorld* world, const EmfHit& h) {
+    const auto cbs = g->hit_cbs;
+    for (auto& [cb, user] : cbs) cb(world, &h, user);
+}
 // The host loaded world save `slot` (every on_load listener hears it).
 void fire_load(uint16_t slot) {
     for (auto& [cb, user] : g->load_cbs) cb(slot, user);
@@ -695,6 +718,9 @@ EmfApi fake_api() {
     a.player_character_name = f_player_character_name;  // v30
     a.chat_tell_ex = f_chat_tell_ex;
     a.chat_broadcast_ex = f_chat_broadcast_ex;
+    a.on_hit = f_on_hit;  // v31
+    a.hit_rule_add = f_hit_rule_add;
+    a.hit_rule_remove = f_hit_rule_remove;
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;

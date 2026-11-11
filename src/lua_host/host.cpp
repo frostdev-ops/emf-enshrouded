@@ -883,6 +883,7 @@ void Host::Impl::pause(Script& s, const std::string& why) {
     s.bus_subs.clear();
     for (auto& n : s.bus_kind_subs) n = 0;
     drop_sections(s.id);  // a paused mod's wheel section is not shown (its state stays: the refs go with it later)
+    drop_hit_rules(*this, s);  // its hit rules stop too: they come back when the fixed file loads
     s.paused = true;
     s.error = why;
     api->log(s.id.c_str(), "%s (the mod is paused until one of its files changes)", why.c_str());
@@ -1003,6 +1004,7 @@ void Host::Impl::unload(Script& s) {
     for (const auto& id : windows)
         if (api->window_close) api->window_close(id.c_str());
     queue_script_offers(*this, s);  // its offers come off on the next server step (only a world call may)
+    drop_hit_rules(*this, s);       // its hit rules leave the core
     drop_bus(s.id);                 // also drops messages published from on_unload
     drop_sections(s.id);  // before the state (and its pick functions) goes
     lua_close(s.L);
@@ -1014,6 +1016,7 @@ void Host::Impl::unload(Script& s) {
     s.keys.clear();
     s.chat_cbs.clear();
     for (auto& v : s.player_cbs) v.clear();
+    s.hit_cbs.clear();
     s.player_intro.clear();
     s.ws_cbs.clear();
     s.bus_subs.clear();
