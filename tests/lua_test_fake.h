@@ -108,6 +108,22 @@ struct Fake {
     std::vector<EmfHitRule> hit_rules_added;                      // v31 hit_rule_add's rules
     std::vector<uint32_t> hit_rules_removed;                      // v31 hit_rule_remove's ids
     uint32_t next_hit_rule = 100;
+    // v32 buffs
+    std::vector<EmfBuffType> buff_types;
+    std::map<uint32_t, std::string> buff_names;
+    std::map<uint32_t, std::vector<EmfBuff>> buffs;  // entity -> active buffs
+    struct BuffAsk {
+        EmfWorld* world;
+        bool remove;
+        uint32_t target, type;
+        int64_t ns;
+        uint32_t source, item;
+        EmfBuffCallback done;
+        void* user;
+    };
+    std::vector<BuffAsk> buff_asks;
+    bool buff_ok = true;
+    std::vector<std::pair<EmfBuffCallback, void*>> buff_cbs;
     int saves = 0;
     bool chat_ok = true;  // what chat_tell / chat_broadcast / on_chat / request_save answer
     // v20 teleport: the requests made (answer them with their cb/user as the core would)
@@ -681,6 +697,51 @@ bool f_hit_rule_remove(uint32_t id) {
     g->hit_rules_removed.push_back(id);
     return true;
 }
+uint32_t f_buff_types(EmfWorld*, EmfBuffType* out, uint32_t cap) {
+    const uint32_t n = static_cast<uint32_t>(g->buff_types.size());
+    for (uint32_t i = 0; out && i < n && i < cap; ++i) out[i] = g->buff_types[i];
+    return n;
+}
+bool f_buff_type(EmfWorld*, uint32_t id, EmfBuffType* out) {
+    for (const auto& t : g->buff_types)
+        if (t.id == id) {
+            *out = t;
+            return true;
+        }
+    return false;
+}
+bool f_buff_text(uint32_t id, uint32_t which, char* buf, uint32_t cap) {
+    const auto it = g->buff_names.find(id);
+    if (it == g->buff_names.end() || which != 0) return false;
+    std::snprintf(buf, cap, "%s", it->second.c_str());
+    return true;
+}
+uint32_t f_buffs_of(EmfWorld*, uint32_t entity, EmfBuff* out, uint32_t cap) {
+    const auto it = g->buffs.find(entity);
+    if (it == g->buffs.end()) return 0;
+    const uint32_t n = static_cast<uint32_t>(it->second.size());
+    for (uint32_t i = 0; out && i < n && i < cap; ++i) out[i] = it->second[i];
+    return n;
+}
+bool f_buff_apply(EmfWorld* w, uint32_t target, uint32_t type, int64_t ns, uint32_t source, uint32_t item,
+                  EmfBuffCallback done, void* user) {
+    g->buff_asks.push_back({w, false, target, type, ns, source, item, done, user});
+    return g->buff_ok;
+}
+bool f_buff_remove(EmfWorld* w, uint32_t target, uint32_t type, EmfBuffCallback done, void* user) {
+    g->buff_asks.push_back({w, true, target, type, 0, 0, 0, done, user});
+    return g->buff_ok;
+}
+bool f_on_buff(EmfBuffCallback cb, void* user) {
+    if (!cb) return false;
+    g->buff_cbs.emplace_back(cb, user);
+    return true;
+}
+// A player's buff change (every on_buff listener hears it).
+void fire_buff(EmfWorld* world, const EmfBuffEvent& e) {
+    const auto cbs = g->buff_cbs;
+    for (auto& [cb, user] : cbs) cb(world, &e, user);
+}
 // A hit the server applied (every on_hit listener hears it).
 void fire_hit(EmfWorld* world, const EmfHit& h) {
     const auto cbs = g->hit_cbs;
@@ -721,6 +782,13 @@ EmfApi fake_api() {
     a.on_hit = f_on_hit;  // v31
     a.hit_rule_add = f_hit_rule_add;
     a.hit_rule_remove = f_hit_rule_remove;
+    a.buff_types = f_buff_types;  // v32
+    a.buff_type = f_buff_type;
+    a.buff_text = f_buff_text;
+    a.buffs_of = f_buffs_of;
+    a.buff_apply = f_buff_apply;
+    a.buff_remove = f_buff_remove;
+    a.on_buff = f_on_buff;
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;

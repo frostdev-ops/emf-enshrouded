@@ -2923,6 +2923,8 @@ void run_offer_drops(Host::Impl& h, EmfWorld* w) {
 }
 
 
+EmfWorld* lua_world_arg(lua_State* L, int index) { return world_arg(L, index); }
+
 void push_world(lua_State* L, Script& s, EmfWorld* world) {
     auto* w = static_cast<WorldUD*>(lua_newuserdatauv(L, sizeof(WorldUD), 0));
     w->world = world;
@@ -3135,6 +3137,8 @@ void open_bindings(lua_State* L, Script&) {
                                    {"on_player_joined", l_on_player_joined}, {"on_player_left", l_on_player_left},
                                    {"on_player_died", l_on_player_died},
                                    {"on_hit", l_on_hit}, {"hit_rule", l_hit_rule}, {"hit_rule_remove", l_hit_rule_remove},
+                                   {"buff_types", l_buff_types}, {"buff_type", l_buff_type}, {"buffs", l_buffs},
+                                   {"apply_buff", l_apply_buff}, {"remove_buff", l_remove_buff}, {"on_buff", l_on_buff},
                                    {"request_save", l_request_save}, {"teleport", l_teleport},
                                    {"on_world_setting_changed", l_on_world_setting_changed},
                                    {"on_event", l_on_event}, {"emits", l_emits},       {"emit", l_emit},

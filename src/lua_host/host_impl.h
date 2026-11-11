@@ -78,6 +78,8 @@ struct Script {
     std::vector<int> hit_cbs;                          // emf.on_hit (lua 1.23)
     std::vector<uint8_t> hit_cb_kinds;                 // the kinds each on_hit function asked for (bit per kind)
     std::atomic<uint32_t> hit_cb_kinds_any{0};         // their union, read without m: a hit of another kind skips
+    std::vector<int> buff_cbs;                         // emf.on_buff (lua 1.24)
+    std::atomic<uint32_t> buff_cb_count{0};            // buff_cbs.size(), read without m
     std::atomic<uint32_t> hit_cb_count{0};             // hit_cbs.size(), read without m: a hit skips scripts without
     std::set<uint32_t> hit_rules;                      // its emf.hit_rule ids (lua 1.23): removed on unload and pause
     std::map<std::string, std::vector<BusSubscription>> bus_subs;  // cross-mod message callbacks
@@ -177,6 +179,7 @@ struct Host::Impl {
     std::atomic<uint64_t> server_seen{0};                // GetTickCount64 of the last server world step
     std::atomic<int> chat_hooked{0};                     // the core's on_chat for emf.on_chat: 0 not asked, 1 on, -1 refused
     std::atomic<int> player_hooked{0};                   // the core's on_player (lua 1.20): 0 not asked, 1 on, -1 refused
+    std::atomic<int> buff_hooked{0};                     // the core's on_buff (lua 1.24): 0 not asked, 1 on, -1 refused
     std::atomic<int> hit_hooked{0};                      // the core's on_hit (lua 1.23): 0 not asked, 1 on, -1 refused
     struct PresentPlayer {
         uint32_t player = 0;
@@ -231,5 +234,16 @@ int l_on_hit(lua_State* L);
 int l_hit_rule(lua_State* L);
 int l_hit_rule_remove(lua_State* L);
 void drop_hit_rules(Host::Impl& h, Script& s);
+
+// lua 1.24 buffs (buff_bindings.cpp): emf.buff_types, emf.buff_type, emf.buffs, emf.apply_buff, emf.remove_buff,
+// emf.on_buff.
+int l_buff_types(lua_State* L);
+int l_buff_type(lua_State* L);
+int l_buffs(lua_State* L);
+int l_apply_buff(lua_State* L);
+int l_remove_buff(lua_State* L);
+int l_on_buff(lua_State* L);
+// The world argument at `index` (a world value from a callback); an error otherwise.
+EmfWorld* lua_world_arg(lua_State* L, int index);
 
 }  // namespace emf::lua

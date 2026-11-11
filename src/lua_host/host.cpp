@@ -1016,6 +1016,8 @@ void Host::Impl::unload(Script& s) {
     s.keys.clear();
     s.chat_cbs.clear();
     for (auto& v : s.player_cbs) v.clear();
+    s.buff_cbs.clear();
+    s.buff_cb_count = 0;
     s.hit_cbs.clear();
     s.hit_cb_kinds.clear();
     s.hit_cb_count = 0;
