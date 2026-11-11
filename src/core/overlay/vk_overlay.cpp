@@ -778,7 +778,7 @@ bool overlay_attach_device(const LayerDevice& d) {
     g_device_ready.store(true, std::memory_order_release);
     log("overlay: the game's Vulkan device came through " + overlay_way(current_overlay_path()) +
         (ok ? "" : " (some functions are missing; the console is off)") +
-        (d.set_loader_data ? "" : " (no loader-data callback)"));
+        (d.set_loader_data || overlay_way(current_overlay_path()) != "EMF's layer" ? "" : " (no loader-data callback)"));
     capture_attach(d);  // the debug bridge's screenshots (nothing happens until one is asked for)
     return true;
 }

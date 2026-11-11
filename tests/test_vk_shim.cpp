@@ -270,3 +270,49 @@ TEST_CASE("vk shim: a physical device the shim did not see falls back to the onl
     REQUIRE(g_attached.size() == 1);
     CHECK(g_attached[0].instance == inst);
 }
+
+// ---- the review's fixes ----
+namespace {
+int g_export_queue_calls = 0, g_export_presents = 0;
+void VKAPI_CALL export_get_queue(VkDevice, uint32_t, uint32_t, VkQueue* q) {
+    ++g_export_queue_calls;
+    *q = reinterpret_cast<VkQueue>(&g_queue[2]);
+}
+VkResult VKAPI_CALL export_present(VkQueue, const VkPresentInfoKHR*) {
+    ++g_export_presents;
+    return VK_SUCCESS;
+}
+PFN_vkVoidFunction test_export(const char* name) {
+    if (!std::strcmp(name, "vkGetDeviceQueue")) return reinterpret_cast<PFN_vkVoidFunction>(&export_get_queue);
+    if (!std::strcmp(name, "vkQueuePresentKHR")) return reinterpret_cast<PFN_vkVoidFunction>(&export_present);
+    return nullptr;
+}
+}  // namespace
+
+TEST_CASE("vk shim: a device or queue the shim never saw goes to vulkan-1's own function, never a failure (review)") {
+    Rig r;
+    vk_shim_set_export_resolver(&test_export);
+    g_export_queue_calls = g_export_presents = 0;
+    const VkInstance inst = r.make_instance();
+    const auto gdpa = r.fn<PFN_vkGetDeviceProcAddr>(inst, "vkGetDeviceProcAddr");
+    r.make_device(inst, r.first_phys(inst));  // a known device, so gdpa hands out the wrappers
+    FakeHandle unseen_dev{0x01CDC0DEull, 77};
+    FakeHandle unseen_queue{0x01CDC0DEull, 78};
+    VkQueue q = VK_NULL_HANDLE;
+    reinterpret_cast<PFN_vkGetDeviceQueue>(gdpa(h<VkDevice>(g_dev[0]), "vkGetDeviceQueue"))(
+        reinterpret_cast<VkDevice>(&unseen_dev), 0, 0, &q);
+    CHECK(g_export_queue_calls == 1);
+    CHECK(q != VK_NULL_HANDLE);  // written, not left as garbage
+    VkPresentInfoKHR pi{VK_STRUCTURE_TYPE_PRESENT_INFO_KHR};
+    CHECK(reinterpret_cast<PFN_vkQueuePresentKHR>(gdpa(h<VkDevice>(g_dev[0]), "vkQueuePresentKHR"))(
+              reinterpret_cast<VkQueue>(&unseen_queue), &pi) == VK_SUCCESS);
+    CHECK(g_export_presents == 1);
+}
+
+TEST_CASE("vk shim: vkGetInstanceProcAddr hands out no wrapper where the real function is missing (review)") {
+    Rig r;
+    const VkInstance inst = r.make_instance();
+    CHECK(r.gipa(inst, "vkGetDeviceQueue2") == nullptr);  // the fake loader has none
+    CHECK(r.gipa(inst, "vkGetDeviceQueue") == nullptr);   // nor this one at instance level
+    CHECK(r.gipa(inst, "vkGetInstanceProcAddr") != nullptr);
+}

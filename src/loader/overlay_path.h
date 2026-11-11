@@ -21,10 +21,20 @@ inline bool same_word(std::wstring_view a, const wchar_t* b) {
     return a.size() == n && _wcsnicmp(a.data(), b, n) == 0;
 }
 
+// The setting's word: GetPrivateProfileString keeps a comment after the value ("hook   ; how EMF draws"), so it is cut
+// at ';' or '#' and the spaces and tabs around it go.
+inline std::wstring_view setting_word(std::wstring_view v) {
+    if (const size_t c = v.find_first_of(L";#"); c != std::wstring_view::npos) v = v.substr(0, c);
+    while (!v.empty() && (v.front() == L' ' || v.front() == L'\t')) v.remove_prefix(1);
+    while (!v.empty() && (v.back() == L' ' || v.back() == L'\t')) v.remove_suffix(1);
+    return v;
+}
+
 // The path for this start: off when [overlay] enabled=0; "layer" / "hook" as asked; anything else (auto, empty, a typo)
 // the hook under Wine and the layer elsewhere.
 inline OverlayPath decide_overlay_path(std::wstring_view setting, bool overlay_enabled, bool wine) {
     if (!overlay_enabled) return OverlayPath::Off;
+    setting = setting_word(setting);
     if (same_word(setting, L"layer")) return OverlayPath::Layer;
     if (same_word(setting, L"hook")) return OverlayPath::Hook;
     return wine ? OverlayPath::Hook : OverlayPath::Layer;

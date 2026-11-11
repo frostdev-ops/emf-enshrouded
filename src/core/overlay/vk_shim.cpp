@@ -51,6 +51,18 @@ ShimOverlay g_overlay = default_overlay();
 std::atomic<uint64_t> g_presents{0};
 std::atomic<bool> g_active{false};
 
+// vulkan-1.dll's own export of a name (the Khronos loader's trampoline, or Wine's forwarder): for a handle the shim never
+// saw, so the call still works instead of failing.
+PFN_vkVoidFunction vulkan1_export(const char* name) {
+    const HMODULE vk = GetModuleHandleW(L"vulkan-1.dll");
+    return vk ? reinterpret_cast<PFN_vkVoidFunction>(GetProcAddress(vk, name)) : nullptr;
+}
+PFN_vkVoidFunction (*g_resolve)(const char* name) = &vulkan1_export;
+template <class F>
+F export_of(const char* name) {
+    return reinterpret_cast<F>(g_resolve(name));
+}
+
 template <class F>
 F as(PFN_vkVoidFunction f) {
     return reinterpret_cast<F>(f);
@@ -161,7 +173,10 @@ void note_phys(VkInstance instance, const VkPhysicalDevice* phys, uint32_t n) {
 
 VkResult VKAPI_CALL shim_EnumeratePhysicalDevices(VkInstance instance, uint32_t* count, VkPhysicalDevice* out) {
     InstanceRec rec{};
-    if (!find_instance(instance, &rec) || !rec.enum_phys) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!find_instance(instance, &rec) || !rec.enum_phys) {
+        const auto f = export_of<PFN_vkEnumeratePhysicalDevices>("vkEnumeratePhysicalDevices");
+        return f ? f(instance, count, out) : VK_ERROR_INITIALIZATION_FAILED;
+    }
     const VkResult r = rec.enum_phys(instance, count, out);
     if (out && count && (r == VK_SUCCESS || r == VK_INCOMPLETE)) note_phys(instance, out, *count);
     return r;
@@ -192,7 +207,8 @@ VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, const VkDeviceCreat
                                       const VkAllocationCallbacks* alloc, VkDevice* out) {
     const auto gipa = real_gipa();
     const InstanceRec inst = instance_of(phys);
-    const auto create = gipa ? as<PFN_vkCreateDevice>(gipa(inst.instance, "vkCreateDevice")) : nullptr;
+    auto create = gipa && inst.instance ? as<PFN_vkCreateDevice>(gipa(inst.instance, "vkCreateDevice")) : nullptr;
+    if (!create) create = export_of<PFN_vkCreateDevice>("vkCreateDevice");  // an instance the shim never saw
     if (!create) return VK_ERROR_INITIALIZATION_FAILED;
     const VkResult r = create(phys, ci, alloc, out);
     if (r != VK_SUCCESS) return r;
@@ -200,9 +216,9 @@ VkResult VKAPI_CALL shim_CreateDevice(VkPhysicalDevice phys, const VkDeviceCreat
     DeviceRec rec;
     rec.device = dev;
     rec.gdpa = as<PFN_vkGetDeviceProcAddr>(gipa(inst.instance, "vkGetDeviceProcAddr"));
+    if (!rec.gdpa) rec.gdpa = export_of<PFN_vkGetDeviceProcAddr>("vkGetDeviceProcAddr");
     if (rec.gdpa) {
-        PFN_vkGetDeviceProcAddr expected = nullptr;
-        g_real_gdpa.compare_exchange_strong(expected, rec.gdpa);
+        g_real_gdpa = rec.gdpa;  // the latest device's: vulkan-1 may have been loaded again since the first
         rec.destroy = as<PFN_vkDestroyDevice>(rec.gdpa(dev, "vkDestroyDevice"));
         rec.get_queue = as<PFN_vkGetDeviceQueue>(rec.gdpa(dev, "vkGetDeviceQueue"));
         rec.get_queue2 = as<PFN_vkGetDeviceQueue2>(rec.gdpa(dev, "vkGetDeviceQueue2"));
@@ -250,7 +266,10 @@ void note_queue(VkQueue queue, VkDevice device) {
 
 void VKAPI_CALL shim_GetDeviceQueue(VkDevice device, uint32_t family, uint32_t index, VkQueue* queue) {
     DeviceRec rec{};
-    if (!find_device(device, &rec) || !rec.get_queue) return;
+    if (!find_device(device, &rec) || !rec.get_queue) {
+        if (const auto f = export_of<PFN_vkGetDeviceQueue>("vkGetDeviceQueue")) f(device, family, index, queue);
+        return;
+    }
     rec.get_queue(device, family, index, queue);
     if (!queue || !*queue) return;
     note_queue(*queue, device);
@@ -259,7 +278,10 @@ void VKAPI_CALL shim_GetDeviceQueue(VkDevice device, uint32_t family, uint32_t i
 
 void VKAPI_CALL shim_GetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2* info, VkQueue* queue) {
     DeviceRec rec{};
-    if (!find_device(device, &rec) || !rec.get_queue2) return;
+    if (!find_device(device, &rec) || !rec.get_queue2) {
+        if (const auto f = export_of<PFN_vkGetDeviceQueue2>("vkGetDeviceQueue2")) f(device, info, queue);
+        return;
+    }
     rec.get_queue2(device, info, queue);
     if (!queue || !*queue) return;
     note_queue(*queue, device);
@@ -269,14 +291,20 @@ void VKAPI_CALL shim_GetDeviceQueue2(VkDevice device, const VkDeviceQueueInfo2* 
 VkResult VKAPI_CALL shim_CreateSwapchainKHR(VkDevice device, const VkSwapchainCreateInfoKHR* ci,
                                             const VkAllocationCallbacks* alloc, VkSwapchainKHR* out) {
     DeviceRec rec{};
-    if (!find_device(device, &rec) || !rec.create_swapchain) return VK_ERROR_INITIALIZATION_FAILED;
+    if (!find_device(device, &rec) || !rec.create_swapchain) {
+        const auto f = export_of<PFN_vkCreateSwapchainKHR>("vkCreateSwapchainKHR");
+        return f ? f(device, ci, alloc, out) : VK_ERROR_INITIALIZATION_FAILED;
+    }
     if (rec.overlay && g_overlay.create_swapchain) return g_overlay.create_swapchain(device, ci, alloc, out);
     return rec.create_swapchain(device, ci, alloc, out);
 }
 
 void VKAPI_CALL shim_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* alloc) {
     DeviceRec rec{};
-    if (!find_device(device, &rec) || !rec.destroy_swapchain) return;
+    if (!find_device(device, &rec) || !rec.destroy_swapchain) {
+        if (const auto f = export_of<PFN_vkDestroySwapchainKHR>("vkDestroySwapchainKHR")) f(device, swapchain, alloc);
+        return;
+    }
     if (rec.overlay && g_overlay.destroy_swapchain)
         g_overlay.destroy_swapchain(device, swapchain, alloc);
     else
@@ -285,7 +313,10 @@ void VKAPI_CALL shim_DestroySwapchainKHR(VkDevice device, VkSwapchainKHR swapcha
 
 VkResult VKAPI_CALL shim_QueuePresentKHR(VkQueue queue, const VkPresentInfoKHR* info) {
     DeviceRec rec{};
-    if (!find_queue_device(queue, &rec) || !rec.present) return VK_ERROR_DEVICE_LOST;
+    if (!find_queue_device(queue, &rec) || !rec.present) {
+        const auto f = export_of<PFN_vkQueuePresentKHR>("vkQueuePresentKHR");
+        return f ? f(queue, info) : VK_ERROR_DEVICE_LOST;
+    }
     g_presents.fetch_add(1, std::memory_order_relaxed);
     if (rec.overlay && g_overlay.present) return g_overlay.present(queue, info);
     return rec.present(queue, info);
@@ -320,15 +351,17 @@ PFN_vkVoidFunction VKAPI_CALL shim_GetInstanceProcAddr(VkInstance instance, cons
     if (!name) return nullptr;
     const auto gipa = real_gipa();
     const PFN_vkVoidFunction real = gipa ? gipa(instance, name) : nullptr;
-    bool optional = false;
-    if (const auto own = own_function(name, &optional)) return optional && !real ? nullptr : own;
+    // a wrapper only where the real function exists (as the spec has it: no vkCreateDevice for a null instance, no
+    // vkGetDeviceQueue2 on a 1.0 instance); EMF's gipa itself always
+    if (const auto own = own_function(name)) return real || !std::strcmp(name, "vkGetInstanceProcAddr") ? own : nullptr;
     return real;
 }
 
 PFN_vkVoidFunction VKAPI_CALL shim_GetDeviceProcAddr(VkDevice device, const char* name) {
     if (!name) return nullptr;
     DeviceRec rec{};
-    const auto gdpa = find_device(device, &rec) ? rec.gdpa : g_real_gdpa.load();
+    auto gdpa = find_device(device, &rec) ? rec.gdpa : g_real_gdpa.load();
+    if (!gdpa) gdpa = export_of<PFN_vkGetDeviceProcAddr>("vkGetDeviceProcAddr");
     const PFN_vkVoidFunction next = gdpa ? gdpa(device, name) : nullptr;
     if (const auto own = own_function(name)) {
         // a wrapper only for what the device has (no swapchain functions on a device without the extension)
@@ -341,6 +374,9 @@ PFN_vkVoidFunction VKAPI_CALL shim_GetDeviceProcAddr(VkDevice device, const char
 }  // namespace
 
 void vk_shim_set_overlay(const ShimOverlay& o) { g_overlay = o; }
+void vk_shim_set_export_resolver(PFN_vkVoidFunction (*resolve)(const char* name)) {
+    g_resolve = resolve ? resolve : &vulkan1_export;
+}
 
 PFN_vkVoidFunction vk_shim_proc(const char* name, PFN_vkVoidFunction real) {
     if (!name) return real;
@@ -370,6 +406,7 @@ void vk_shim_reset_for_tests() {
     g_real_gipa = nullptr;
     g_real_gdpa = nullptr;
     g_overlay = default_overlay();
+    g_resolve = &vulkan1_export;
     g_presents = 0;
     g_active = false;
 }

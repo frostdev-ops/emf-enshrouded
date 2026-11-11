@@ -25,6 +25,8 @@ struct ShimOverlay {
     void (*destroy_swapchain)(VkDevice device, VkSwapchainKHR swapchain, const VkAllocationCallbacks* alloc) = nullptr;
 };
 void vk_shim_set_overlay(const ShimOverlay& o);
+// vulkan-1.dll's own function of a name, for a handle the shim never saw (tests replace it).
+void vk_shim_set_export_resolver(PFN_vkVoidFunction (*resolve)(const char* name));
 
 // EMF's wrapper for an entry point the game asked vulkan-1.dll for (vkGetInstanceProcAddr above all, which also
 // remembers `real` as the real one), or `real` for anything EMF does not wrap.

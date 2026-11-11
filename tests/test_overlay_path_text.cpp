@@ -35,3 +35,10 @@ TEST_CASE("overlay text: why the console cannot be shown, per path") {
     CHECK(has(overlay_not_ready_text("", false, true, false), "no game frames passed through EMF's layer"));
     CHECK(overlay_not_ready_text("hook", false, true, true) == "overlay: the console is ready");
 }
+
+TEST_CASE("overlay text: the layer chosen by hand under Wine says Wine never loads layers (review)") {
+    const std::string t = overlay_not_ready_text("layer-wine", false, false, false);
+    CHECK(t.find("never loads Vulkan layers") != std::string::npos);
+    CHECK(t.find("path=auto") != std::string::npos);
+    CHECK(overlay_way("layer-wine") == "EMF's layer");
+}

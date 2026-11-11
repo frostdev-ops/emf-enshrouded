@@ -79,3 +79,10 @@ TEST_CASE("overlay path: GetProcAddress hands a vulkan-1 entry point to EMF's sh
     CHECK(overlay_get_proc(kVulkan, "vkGetInstanceProcAddr", &fake_real, &fake_name, nullptr) ==
           reinterpret_cast<FARPROC>(&g_sentinel_real));  // no core (its export missing): the game's own
 }
+
+TEST_CASE("overlay path: a comment after the value and spaces around it are left out (review I1)") {
+    CHECK(decide_overlay_path(L"hook      ; how EMF draws", true, false) == OverlayPath::Hook);
+    CHECK(decide_overlay_path(L"  layer\t", true, true) == OverlayPath::Layer);
+    CHECK(decide_overlay_path(L"hook # forced", true, false) == OverlayPath::Hook);
+    CHECK(decide_overlay_path(L"; only a comment", true, false) == OverlayPath::Layer);
+}

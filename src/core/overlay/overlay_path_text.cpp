@@ -16,7 +16,10 @@ std::string overlay_not_ready_text(std::string_view path, bool disabled, bool de
     if (!device_ready) {
         if (path == "hook-failed")
             return "overlay: the console cannot be shown: EMF's Vulkan hook could not be set (the game's GetProcAddress "
-                   "import was not found; see emf\\emf_loader.log)";
+                   "import was not found or could not be changed; see emf\\emf_loader.log)";
+        if (path == "layer-wine")
+            return "overlay: the console cannot be shown: Wine / Proton never loads Vulkan layers ([overlay] path=layer); "
+                   "use [overlay] path=auto or hook in emf\\emf_core.ini";
         if (path == "hook-wine")
             return "overlay: the console cannot be shown: the game's Vulkan device did not come through EMF's Vulkan hook "
                    "(Wine / Proton: please report it with emf\\emf_core.log and emf\\emf_loader.log)";

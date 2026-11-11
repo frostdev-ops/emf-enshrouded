@@ -129,12 +129,15 @@ Proton loads its own `dinput8.dll` unless told otherwise. In Steam, open the gam
 WINEDLLOVERRIDES="dinput8=n,b" %command%
 ```
 
-Then EMF starts with the game as on Windows: mods, the console (the ` key), the HUD editor, mod windows and wheels.
-Under Proton EMF draws through its own Vulkan hook instead of its Vulkan layer (Proton's Vulkan never loads layers);
-`emf\emf_loader.log` says which way it took (`overlay: Wine found: through EMF's Vulkan hook`). If nothing EMF draws
-shows up, send `emf\emf_loader.log` and `emf\emf_core.log` with your report. `[overlay] path` in `emf\emf_core.ini`
-picks the way by hand: `auto` (the default: the hook under Proton, the layer on Windows), `layer` or `hook`.
-A dedicated server under Wine needs the same `WINEDLLOVERRIDES`; it has no screen, so only the hook choice differs.
+Then EMF and its mods start with the game. Since this version EMF also draws under Proton (the console, the HUD
+editor, mod windows and wheels): it uses its own Vulkan hook there, because Proton's Vulkan never loads Vulkan layers.
+This is new and has been tried under Wine, but not yet in the game on a Linux PC or a Steam Deck: if nothing EMF draws
+shows up, send `emf\emf_loader.log` and `emf\emf_core.log` with your report. The loader's log says which way it took
+(`overlay: Wine found: through EMF's Vulkan hook`). `[overlay] path` in `emf\emf_core.ini` picks the way by hand: `auto`
+(the default: the hook under Proton, the layer on Windows), `layer` or `hook`.
+The Steam Deck has no ` key: give a button that key in Steam Input, or pick another key with `[overlay] key=` (a scan
+code, below).
+A dedicated server under Wine needs the same `WINEDLLOVERRIDES` (mods only: a server draws nothing).
 EMF.exe runs under Wine too, but its **Play** cannot reach Linux's Steam: start the game from Steam.
 
 ## In-game console
