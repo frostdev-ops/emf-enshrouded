@@ -1,3 +1,4 @@
+#include "core/map_input.h"
 #include "input_hook.h"
 
 #include "core/api.h"
@@ -147,6 +148,16 @@ bool apply_key(const KeyEvent& e, Route r, bool raw) {
     return false;
 }
 
+// The map gesture (map_input.h) for one mouse message on the game window.
+MapInputResult map_click_result(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    RECT rc{};
+    GetClientRect(hwnd, &rc);
+    return map_input().message(msg, wp, lp,
+                               map_input_env(static_cast<float>(rc.right - rc.left), static_cast<float>(rc.bottom - rc.top),
+                                             GetTickCount64()));
+}
+bool map_click_message(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) { return map_click_result(hwnd, msg, wp, lp).swallow; }
+
 LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_INPUT: {
@@ -236,6 +247,7 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             break;
         }
         case WM_MOUSEWHEEL:
+            if (!g_router->capturing() && map_click_message(hwnd, msg, wp, lp)) return 0;
             if (g_router->capturing()) {
                 const float notches = GET_WHEEL_DELTA_WPARAM(wp) / float(WHEEL_DELTA);
                 if (!g_raw_mouse && g_router->open() && g_cb.console_wheel) g_cb.console_wheel(notches);
@@ -243,13 +255,26 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             }
             break;
-        case WM_MOUSEMOVE:
         case WM_LBUTTONDOWN:
+        case WM_LBUTTONUP:
+        case WM_LBUTTONDBLCLK:
         case WM_RBUTTONDOWN:
+        case WM_RBUTTONUP:
+        case WM_RBUTTONDBLCLK:
+            if (g_router->capturing()) {
+                if (msg != WM_LBUTTONUP && msg != WM_RBUTTONUP) return 0;
+                break;
+            }
+            // the map gesture of map actions (API v34): EMF's clicks never reach the game
+            if (const MapInputResult r = map_click_result(hwnd, msg, wp, lp); r.swallow) {
+                return 0;
+            } else if (r.rewrite_down) {
+                return CallWindowProcW(g_original, hwnd, WM_LBUTTONDOWN, wp, lp);
+            }
+            break;
+        case WM_MOUSEMOVE:
         case WM_MBUTTONDOWN:
         case WM_XBUTTONDOWN:
-        case WM_LBUTTONDBLCLK:
-        case WM_RBUTTONDBLCLK:
             if (g_router->capturing()) return 0;
             break;
         default: break;

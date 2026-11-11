@@ -18,6 +18,7 @@
 #include "console_ui.h"
 #include "image_store.h"
 #include "marker_ui.h"
+#include "core/map_input.h"
 #include "window_model.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
@@ -450,10 +451,28 @@ std::optional<ImageDraw> window_picture(uint32_t handle, double seconds, uint32_
 }
 
 // Markers (API v33) over the 3D view or the game's map screen, under everything else EMF draws.
+// The map gesture's ring (API v34): a circle filling over 1 s at the held spot on the map.
+void draw_map_ring(ImVec2 display, uint64_t now) {
+    map_input().frame(map_input_env(display.x, display.y, now));
+    const MapRing r = map_input().ring(now);
+    MapView v;
+    if (!r.holding || !marker_map_view(&v) || !(v.rect[2] > 0) || !(v.ui_w > 0) || !(v.ui_h > 0)) return;
+    const float sx = display.x / v.ui_w, sy = display.y / v.ui_h, k = display.y / 1080.0f;
+    const ImVec2 c(static_cast<float>((v.rect[0] + r.x / kMapWorldSize * v.rect[2]) * sx),
+                   static_cast<float>((v.rect[1] + (1.0 - r.z / kMapWorldSize) * v.rect[3]) * sy));
+    ImDrawList* dl = ImGui::GetForegroundDrawList();
+    const float radius = 22.0f * k;
+    dl->AddCircle(c, radius, IM_COL32(0, 0, 0, 140), 40, 6.0f * k);
+    const float a0 = -1.5707963f;
+    dl->PathArcTo(c, radius, a0, a0 + 6.2831853f * r.progress, 40);
+    dl->PathStroke(look_colour(text_look().accent), 0, 4.0f * k);
+}
+
 void build_markers(ImVec2 display) {
     marker_capture_set_display(display.x, display.y);  // world_to_screen's pixels
-    if (!g_deps.markers) return;
     const uint64_t now = GetTickCount64();
+    draw_map_ring(display, now);
+    if (!g_deps.markers) return;
     const bool console = g_router->open() || g_ui.open_fraction > 0.0f;
     const MarkerSight sight = marker_sight(now);
     static const ImageLookup pictures = window_picture;
