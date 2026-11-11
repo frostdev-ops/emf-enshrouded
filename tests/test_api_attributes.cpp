@@ -5,6 +5,7 @@
 #include <doctest.h>
 
 #include <cstring>
+#include <initializer_list>
 #include <map>
 #include <string>
 #include <vector>
@@ -828,4 +829,82 @@ TEST_CASE("on_hit: the actor's health after when the part hit has none") {  // r
     CHECK(g_after[0].target == 6808);
     CHECK(g_after[0].part == 6809);
     CHECK(g_after[0].health_after == 58);
+}
+
+// ---- fall, shroud, cold and drowning: the program hooks and the after-queue ----
+
+namespace {
+struct EnvRig {
+    FakeProgramCtx ctx;
+    uint8_t list[2 * 16] = {};
+    const uint8_t* list_ptr = list;
+    uint64_t count = 0;
+    explicit EnvRig(Fixture& f, std::initializer_list<uint32_t> ids) : ctx(f.server.p()) {
+        f.state.env_off_why.clear();
+        f.state.env_list_off = 0x180;  // the fake job is small; the game's are read from code
+        f.state.env_count_off = 0x188;
+        for (uint32_t id : ids) std::memcpy(list + 16 * count++, &id, 4);
+        std::memcpy(ctx.job + 0x180, &list_ptr, 8);
+        std::memcpy(ctx.job + 0x188, &count, 8);
+    }
+};
+}  // namespace
+
+TEST_CASE("env hooks: a drop in the program's slice becomes an env hit for on_hit after the step") {
+    Fixture f;
+    g_after.clear();
+    put_health(1, kHealthRoot, 100, 100);
+    put_health(2000, kHealthRoot, 50, 50);
+    EnvRig e(f, {1, 2000});
+    REQUIRE(subscribe_hit_events());
+    REQUIRE(api_table()->on_hit(hit_after_cb, nullptr));
+    env_pre(e.ctx.p(), EMF_HIT_KIND_FALL);
+    put_health(1, kHealthRoot, 60, 100);  // the program's write
+    env_post(e.ctx.p(), EMF_HIT_KIND_FALL);
+    CHECK(f.state.env_queue.size() == 1);
+    deliver_env_hits(f.w());
+    REQUIRE(g_after.size() == 1);
+    CHECK(g_after[0].kind == EMF_HIT_KIND_FALL);
+    CHECK(g_after[0].target == 1);
+    CHECK(g_after[0].attacker == 0);
+    CHECK(g_after[0].amount == 40);
+    CHECK(g_after[0].health_before == 100);
+    CHECK(g_after[0].health_after == 60);
+    CHECK(f.state.env_queue.size() == 0);
+}
+
+TEST_CASE("env hooks: a rule for all kinds puts the health back before anyone sees it; a v31 rule does not") {
+    Fixture f;
+    f.state.hit_hook_off_why.clear();
+    put_health(1, kHealthRoot, 80, 100);
+    EnvRig e(f, {1});
+    EmfHitRule hits_only{};
+    hits_only.size = sizeof hits_only;
+    hits_only.scale = 1.0f;
+    hits_only.cancel = 1;
+    REQUIRE(api_table()->hit_rule_add(&hits_only) != 0);
+    env_pre(e.ctx.p(), EMF_HIT_KIND_COLD);
+    put_health(1, kHealthRoot, 78, 100);
+    env_post(e.ctx.p(), EMF_HIT_KIND_COLD);
+    CHECK(health_of(1) == 78);  // kinds 0: entity hits only
+    EmfHitRule keep = hits_only;
+    keep.cancel = 0;
+    keep.kinds = EMF_HIT_KINDS_ALL;
+    keep.min_health = 1;
+    REQUIRE(api_table()->hit_rule_add(&keep) != 0);
+    env_pre(e.ctx.p(), EMF_HIT_KIND_FALL);
+    put_health(1, kHealthRoot, -20, 100);  // a lethal fall
+    env_post(e.ctx.p(), EMF_HIT_KIND_FALL);
+    CHECK(health_of(1) == 1);
+}
+
+TEST_CASE("env hooks: nothing is read while no rule or callback wants hits; off on a client world") {
+    Fixture f;
+    put_health(1, kHealthRoot, 100, 100);
+    EnvRig e(f, {1});
+    env_pre(e.ctx.p(), EMF_HIT_KIND_SHROUD);
+    put_health(1, kHealthRoot, 90, 100);
+    env_post(e.ctx.p(), EMF_HIT_KIND_SHROUD);
+    CHECK(f.state.env_queue.size() == 0);
+    CHECK(f.state.hit_stats.seen.load() == 0);
 }

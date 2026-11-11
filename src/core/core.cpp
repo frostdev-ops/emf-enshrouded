@@ -556,7 +556,9 @@ void cmd_hits(EmfWorld*, int, const char* const*, void*) {
     const uint64_t seen = st.seen.load();
     char avg[32] = "-";
     if (seen) std::snprintf(avg, sizeof avg, "%.1f", static_cast<double>(st.ns.load()) / 1000.0 / static_cast<double>(seen));
-    const std::string before = emf::core::hit_hook_on() ? std::string("on") : "off (" + g_state->hit_hook_off_why + ")";
+    const std::string before = (emf::core::hit_hook_on() ? std::string("on") : "off (" + g_state->hit_hook_off_why + ")") +
+                               ", fall/shroud/cold/drowning " +
+                               (g_state->env_off_why.empty() ? std::string("on") : "off (" + g_state->env_off_why + ")");
     char line[512];
     std::snprintf(line, sizeof line,
                   "hits: before the hit %s, %zu rules, %zu before and %zu after callbacks; %llu seen, %llu changed, "
@@ -1113,6 +1115,45 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             emf::logf("hits: after the hit on (HitEvent on the server world)");
         else
             emf::logf("hits: after the hit off (%s): on_hit is refused", g_state->hit_events_off_why.c_str());
+        // fall, shroud, cold and drowning (feature 4b): pre/post hooks on the four programs; the program slice's
+        // layout read from the code of the current-entity and iterator functions (the count follows the list)
+        {
+            const auto& cur = g_state->sigs[static_cast<size_t>(emf::Sig::CurrentEntityId)];
+            const auto& nxt = g_state->sigs[static_cast<size_t>(emf::Sig::IterNext)];
+            int32_t list_off = 0, count_off = 0;
+            const bool layout = emf::is_usable(cur, known) && emf::is_usable(nxt, known) &&
+                                emf::seh_read(reinterpret_cast<const uint8_t*>(cur.addr) + 0x1C, &list_off, 4) &&
+                                emf::seh_read(reinterpret_cast<const uint8_t*>(nxt.addr) + 0x15, &count_off, 4) &&
+                                list_off > 0 && list_off < 0x10000 && count_off == list_off + 8;
+            if (!g_state->attr_find || !g_state->attr_add)
+                g_state->env_off_why = "attribute reads and writes are off on this game build";
+            else if (!g_state->programs)
+                g_state->env_off_why = "program hooks are not available";
+            else if (!layout)
+                g_state->env_off_why = "the program slice's layout was not found in the game's code";
+            else {
+                g_state->env_list_off = static_cast<uint32_t>(list_off);
+                g_state->env_count_off = static_cast<uint32_t>(count_off);
+                static const std::pair<const char*, uint8_t> kEnvPrograms[] = {
+                    {"fall_damage_infliction", EMF_HIT_KIND_FALL}, {"fog_resistance_update", EMF_HIT_KIND_SHROUD},
+                    {"bodyheat_depletion", EMF_HIT_KIND_COLD}, {"oxygen_update", EMF_HIT_KIND_DROWNING}};
+                for (const auto& [name, kind] : kEnvPrograms)
+                    g_state->programs->request_hook(
+                        name,
+                        [](void* ctx, void* user) { emf::core::env_pre(ctx, static_cast<uint8_t>(reinterpret_cast<uintptr_t>(user))); },
+                        [](void* ctx, void* user) { emf::core::env_post(ctx, static_cast<uint8_t>(reinterpret_cast<uintptr_t>(user))); },
+                        reinterpret_cast<void*>(static_cast<uintptr_t>(kind)));
+                g_state->env_off_why.clear();
+            }
+            if (g_state->env_off_why.empty())
+                emf::logf("hits: fall, shroud, cold and drowning on (hooks on their four programs, slice at +0x%x)",
+                          static_cast<unsigned>(list_off));
+            else
+                emf::logf("hits: fall, shroud, cold and drowning off (%s)", g_state->env_off_why.c_str());
+            g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
+                if (emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER) emf::core::deliver_env_hits(w);
+            }, nullptr);
+        }
         if (!g_state->commands.add("hits", ": the hit hooks' state, rules, callbacks and cost", cmd_hits, nullptr, nullptr))
             emf::logf("commands: \"hits\" could not be added");
     }

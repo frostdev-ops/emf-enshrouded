@@ -18,6 +18,7 @@
 #include "dispatcher.h"
 #include "event_relay.h"
 #include "player_events.h"
+#include "env_damage.h"
 #include "hit_hook.h"
 #include "hook_table.h"
 #include "mod_registry.h"
@@ -139,6 +140,12 @@ struct CoreState {
     std::string hit_hook_off_why = "it is not set up yet";  // why the detour is not installed ("" while it is)
     std::atomic<bool> hit_events{false};  // on_hit: the server world's HitEvents come through the relay
     std::string hit_events_off_why;
+    // fall, shroud, cold and drowning (feature 4b): the program slice's layout (read from code), the after-queue, the
+    // scale carry (the env programs run one at a time) and why they are off ("" while on)
+    uint32_t env_list_off = 0, env_count_off = 0;
+    EnvQueue env_queue;
+    HitCarry hit_carry;
+    std::string env_off_why = "it is not set up yet";
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them
     std::mutex setting_watchers_lock;
     std::vector<SettingWatcher> setting_watchers;  // v13 on_setting_changed (only appended to)
@@ -208,5 +215,10 @@ void note_program_hook(const std::string& program, bool installed);
 void fill_pre_hit_env(EmfWorld* w, PreHitEnv* env);
 // v31 on_hit: asks the event relay for the server world's HitEvents (the core does at start, before the relay closes).
 bool subscribe_hit_events();
+// Fall, shroud, cold and drowning: the pre and post hooks of fall_damage_infliction, fog_resistance_update,
+// bodyheat_depletion and oxygen_update (kind EMF_HIT_KIND_*), and the after-queue's delivery after the server step.
+void env_pre(void* program_context, uint8_t kind);
+void env_post(void* program_context, uint8_t kind);
+void deliver_env_hits(EmfWorld* w);
 
 }  // namespace emf::core

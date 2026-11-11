@@ -2366,6 +2366,121 @@ bool hit_before_ready() {
 
 }  // namespace
 
+// ---- fall, shroud, cold and drowning (the env programs' worker thread; their Health is theirs alone meanwhile) ----
+namespace {
+
+HitClass env_classify(uint32_t id, void*) {
+    if (!id) return HitClass::None;
+    return id <= 0x3FE ? HitClass::Player : HitClass::Creature;  // no Destructible read here: it may race
+}
+
+int32_t env_max_health(uint32_t id, void* ctx) {
+    AttrHome home;
+    std::string why;
+    int32_t v = 0;
+    if (!g_state->attr_find || attribute_home(env_world(ctx), id, kAttrMaxHealth, &home, &why) != AttrStatus::Ok ||
+        attr_read(g_state->attr_find, home.comp, home.size, home.registry, kAttrMaxHealth, &v) != AttrStatus::Ok)
+        return -1;
+    return v;
+}
+
+int32_t env_add_health(uint32_t id, int32_t delta, void* ctx) {
+    if (!g_state->attr_find || !g_state->attr_add) return -1;
+    AttrHome home;
+    std::string why;
+    if (attribute_home(env_world(ctx), id, kAttrHealth, &home, &why) != AttrStatus::Ok) return -1;
+    const int32_t max = env_max_health(id, ctx);
+    int32_t applied = 0, now = -1;
+    if (attr_add(g_state->attr_find, g_state->attr_add, home.comp, home.size, home.registry, kAttrHealth, delta,
+                 max > 0 ? std::optional<int32_t>(max) : std::nullopt, &applied, &now) != AttrStatus::Ok)
+        return -1;
+    return now;
+}
+
+// The slice of the program's job: J = *ctx, its entity list and count at the offsets read from code.
+bool read_env_slice(void* ctx, EnvSlice* s) {
+    uint8_t* job = nullptr;
+    if (!ctx || !seh_read(ctx, &job, sizeof job) || !job) return false;
+    const uint8_t* list = nullptr;
+    uint64_t count = 0;
+    if (!seh_read(job + g_state->env_list_off, &list, sizeof list) ||
+        !seh_read(job + g_state->env_count_off, &count, sizeof count) || (count && !list) || count > 65536)
+        return false;
+    s->list = list;
+    s->count = count;
+    return true;
+}
+
+thread_local EnvSnapshot t_env;
+
+bool env_wanted() {
+    return g_state && g_state->env_off_why.empty() &&
+           (g_state->hit_rules.size() || g_state->hit_callbacks.before_count() || g_state->hit_callbacks.after_count());
+}
+
+uint8_t* env_server_world(void* ctx) {
+    uint8_t* world = program_context_world(ctx);
+    return world && WorldView(world).kind() == EMF_WORLD_SERVER ? world : nullptr;
+}
+
+void env_pre_work(void* ctx, uint8_t) {
+    uint8_t* world = env_server_world(ctx);
+    EnvSlice s;
+    if (!world || !read_env_slice(ctx, &s)) return;
+    t_env.pre(ctx, s, &hit_env_health, world);
+}
+
+void env_post_work(void* ctx, uint8_t kind) {
+    uint8_t* world = env_server_world(ctx);
+    EnvSlice s;
+    if (!world || !read_env_slice(ctx, &s)) return;
+    const std::vector<EnvDrop> drops = t_env.post(ctx, s, &hit_env_health, world);
+    if (drops.empty()) return;
+    EnvEnv env;
+    env.world = reinterpret_cast<EmfWorld*>(world);
+    env.ctx = world;
+    env.classify = &env_classify;
+    env.add_health = &env_add_health;
+    env.max_health = &env_max_health;
+    for (const EnvDrop& d : drops) {
+        EmfHit out{};
+        if (env_apply(kind, d, env, g_state->hit_rules, g_state->hit_callbacks, g_state->hit_stats, g_state->hit_carry,
+                      &out))
+            g_state->env_queue.push(out);
+    }
+}
+
+bool guarded_env(void (*work)(void*, uint8_t), void* ctx, uint8_t kind) {
+    __try {
+        work(ctx, kind);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+}  // namespace
+
+void env_pre(void* program_context, uint8_t kind) {
+    if (!env_wanted()) return;
+    if (!guarded_env(&env_pre_work, program_context, kind)) ++g_state->hit_stats.faults;
+}
+
+void env_post(void* program_context, uint8_t kind) {
+    if (!env_wanted()) return;
+    if (!guarded_env(&env_post_work, program_context, kind)) ++g_state->hit_stats.faults;
+}
+
+void deliver_env_hits(EmfWorld* w) {
+    if (!g_state || !w) return;
+    for (EmfHit& h : g_state->env_queue.take()) {
+        double at[3] = {};
+        if (entity_position(w, h.target, at, nullptr))
+            for (int i = 0; i < 3; ++i) h.position[i] = static_cast<float>(at[i]);
+        g_state->hit_callbacks.call_after(w, h);
+    }
+}
+
 bool subscribe_hit_events() {
     if (!g_state) return false;
     std::string why;
