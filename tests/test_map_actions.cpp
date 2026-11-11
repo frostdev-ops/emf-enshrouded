@@ -104,3 +104,19 @@ TEST_CASE("map actions: an id with its mod's prefix (a Lua script's 'mod:id'); a
     CHECK(a.empty());
     CHECK_FALSE(a.add("lua", "teleports:teleport", nullptr, 0, nullptr, nullptr));  // nothing to remove
 }
+
+
+TEST_CASE("map actions (review M1): a logger set later hears junk and a flood (once per player)") {
+    g_did.clear();
+    std::vector<std::string> logs;
+    MapActions a(nullptr);
+    a.set_log([&](const std::string& l) { logs.push_back(l); });
+    a.add("lua", "teleport", "Teleport here", 0, on_action, nullptr);
+    CHECK_FALSE(a.on_done(nullptr, 7, false, "{broken", 1000));
+    REQUIRE(logs.size() == 1);
+    for (int i = 0; i < 20; ++i) a.on_done(nullptr, 9, false, done_msg("teleport", 1, 1), 2000);
+    CHECK_FALSE(a.on_done(nullptr, 9, false, done_msg("teleport", 1, 1), 2000));
+    CHECK_FALSE(a.on_done(nullptr, 9, false, done_msg("teleport", 1, 1), 2000));
+    REQUIRE(logs.size() == 2);
+    CHECK(logs[1].find("player 9") != std::string::npos);
+}

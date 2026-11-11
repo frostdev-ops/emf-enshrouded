@@ -127,3 +127,52 @@ TEST_CASE("map input: the hold time the server announced: not done at 1 s with 1
     in.frame(e);
     CHECK(done == 2);
 }
+
+
+TEST_CASE("map input (review I2): cancel() (focus lost) ends a hold: nothing is sent, the release stays EMF's") {
+    int done = 0;
+    MapInput in([&](double, double) { ++done; });
+    MapInputEnv e = env();
+    in.message(WM_LBUTTONDOWN, MK_LBUTTON | MK_SHIFT, at(500, 500), e);
+    in.cancel();
+    CHECK_FALSE(in.ring(1500).holding);
+    e.now_ms = 2500;
+    in.frame(e);
+    CHECK(done == 0);
+    CHECK(in.message(WM_LBUTTONUP, 0, at(500, 500), e).swallow);  // the game never saw the press
+}
+
+TEST_CASE("map input (review I2): while EMF's console or wheel takes the mouse, a hold ends") {
+    int done = 0;
+    MapInput in([&](double, double) { ++done; });
+    MapInputEnv e = env();
+    in.message(WM_LBUTTONDOWN, MK_LBUTTON | MK_SHIFT, at(500, 500), e);
+    e.captured = true;
+    e.now_ms = 1500;
+    in.frame(e);
+    CHECK_FALSE(in.ring(1500).holding);
+    e.now_ms = 2500;
+    in.frame(e);
+    CHECK(done == 0);
+}
+
+TEST_CASE("map input (review M3): Alt held with a click: the listener's mods have EMF_MAP_ALT") {
+    MapInput in([](double, double) {});
+    std::vector<EmfMapClick> got;
+    in.set_click_listener([&](const EmfMapClick& c) { got.push_back(c); });
+    MapInputEnv e = env(true, true, false);
+    e.alt = true;
+    in.message(WM_LBUTTONDOWN, MK_LBUTTON | MK_CONTROL, at(500, 500), e);
+    REQUIRE(got.size() == 1);
+    CHECK(got[0].mods == (EMF_MAP_ALT | EMF_MAP_CTRL));
+}
+
+TEST_CASE("map view (review I1): the open map counts only while its layout is at most 120 ms old") {
+    MapView v;
+    v.ms = 10000;
+    CHECK(map_view_fresh(v, 10000));
+    CHECK(map_view_fresh(v, 10120));
+    CHECK_FALSE(map_view_fresh(v, 10121));  // Esc closed the map: a hold must not finish on its last layout
+    v.ms = 0;
+    CHECK_FALSE(map_view_fresh(v, 10000));
+}

@@ -1332,6 +1332,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             emf::logf("map: ground_at off (%s)", why.c_str());
         }
         emf::core::map_input_setup();
+        g_state->map.actions.set_log([](const std::string& l) { emf::logf("%s", l.c_str()); });
         if (!emf::core::add_map_commands(g_state->commands)) emf::logf("commands: the map commands could not be added");
     }
     // teleport: an internal server program pushes the game's add-Teleport record (docs/engine_parts/re_teleport.md).

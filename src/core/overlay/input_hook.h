@@ -55,5 +55,7 @@ InjectedKeyHooks install_injected_keys(InjectedKeys* keys);
 
 // The game window EMF hooked (null until found).
 HWND input_game_window();
+// EMF's console, wheel or a mod window takes the mouse and keys now.
+bool input_capturing();
 
 }  // namespace emf::core

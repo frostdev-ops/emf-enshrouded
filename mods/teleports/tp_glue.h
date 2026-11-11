@@ -42,6 +42,14 @@ inline bool in_shroud(emf::World w, uint32_t player) {
     return !(a && (actor_state(*a) & kInSaveZone));
 }
 
+// In the deadly shroud (fog Death) outside a spawn point's safe zone: a player there dies within seconds.
+inline bool in_deadly_shroud(emf::World w, uint32_t player) {
+    const auto* es = w.get<gen::EnvironmentSensor>(player);
+    if (!es || es->fogType != emf::gen::FogType::Death) return false;
+    const auto* a = w.get<gen::Actor>(player);
+    return !(a && (actor_state(*a) & kInSaveZone));
+}
+
 // Dead: the health attribute as the game reads it (a player in the server world has Health but no NetworkHealth: the
 // same rule as EMF's core), else the replicated NetworkHealth.
 inline bool dead(emf::World w, uint32_t player) {
@@ -102,6 +110,7 @@ public:
     }
     bool dead(uint32_t p) override { return tp::dead(w_, p); }
     bool in_shroud(uint32_t p) override { return tp::in_shroud(w_, p); }
+    bool in_deadly_shroud(uint32_t p) override { return tp::in_deadly_shroud(w_, p); }
     uint32_t spawn_point(uint32_t p) override { return spawn_point_of(w_, p); }
 
     bool teleport(uint32_t p, const TeleportAsk& ask, std::function<void(const Outcome&)> done) override {

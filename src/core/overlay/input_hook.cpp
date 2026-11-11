@@ -227,7 +227,11 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             if (g_router->character(static_cast<wchar_t>(wp)) != Route::Game) return 0;
             break;
         }
+        case WM_ACTIVATEAPP:
+            if (!wp) map_input().cancel();  // another program came to the front: a map hold ends
+            break;
         case WM_KILLFOCUS:
+            map_input().cancel();  // a map hold ends (its release stays EMF's)
             g_keys.clear();  // keys held now are released in another window: none may stay "held" here
             g_router->focus_lost();
             if (g_cb.focus_lost) g_cb.focus_lost();
@@ -382,5 +386,6 @@ bool install_input_hooks(InputRouter* router, InputCallbacks callbacks) {
 }
 
 HWND input_game_window() { return game_window(); }
+bool input_capturing() { return g_router && g_router->capturing(); }
 
 }  // namespace emf::core

@@ -18,7 +18,7 @@ struct FakeGame : Game {
     uint64_t now = 100000;
     std::vector<uint32_t> list{1, 2, 3};
     std::map<uint32_t, Vec> pos{{1, {4000, 700, 1200}}, {2, {4100, 700, 1300}}, {3, {3000, 650, 900}}};
-    std::set<uint32_t> dead_ones, shrouded;
+    std::set<uint32_t> dead_ones, shrouded, deadly;
     std::map<uint32_t, uint32_t> spawn{{1, 1025}, {2, 1025}};
     struct Tp {
         uint32_t player;
@@ -76,6 +76,7 @@ struct FakeGame : Game {
     uint64_t account(uint32_t p) override { return 0xACC0 + p; }
     bool dead(uint32_t p) override { return dead_ones.count(p) != 0; }
     bool in_shroud(uint32_t p) override { return shrouded.count(p) != 0; }
+    bool in_deadly_shroud(uint32_t p) override { return deadly.count(p) != 0; }
     uint32_t spawn_point(uint32_t p) override {
         auto it = spawn.find(p);
         return it == spawn.end() ? 0 : it->second;
@@ -663,8 +664,8 @@ TEST_CASE("teleports map: a place nobody is near: a hop over it, the ground agai
     r.t.map_teleport(1, true, 9000, 9000);
     r.g.ground(GroundStatus::NotLoaded, 0, 1100, "not loaded");
     REQUIRE(r.g.tps.size() == 1);
-    CHECK(r.g.tps[0].ask.to.y == 1100);  // waits high over the spot while it loads
-    CHECK_FALSE(r.g.tps[0].ask.ground);
+    CHECK(r.g.tps[0].ask.to.y == 1100);  // high over the spot: the game streams it, the player waits where they stand
+    CHECK(r.g.tps[0].ask.ground);        // (review M7: nothing within 10 m, so the raw height)
     r.g.answer(true, {9000, 1100, 9000});
     REQUIRE(r.g.grounds.size() == 2);  // asked again from there
     r.g.ground(GroundStatus::Ok, 250);
@@ -742,4 +743,39 @@ TEST_CASE("teleports /tp.mark #k: an admin moves player k to k's own waypoint; p
     CHECK(told_admin);
     CHECK(r.t.tp_mark(2, false, {"#1"}) == "tp.mark #k is for admins");
     CHECK(r.t.tp_mark(0, true, {}) == "tp.mark: from the console name the player: tp.mark #k");
+}
+
+
+TEST_CASE("teleports map (live): landing in the deadly shroud: straight back where they stood, no cooldown spent") {
+    Rig r;
+    Settings s;
+    s.map_teleport = MapWho::Everyone;
+    r.t.set(s);
+    r.t.map_teleport(2, false, 9000, 9500);
+    r.g.ground(GroundStatus::Ok, 568);
+    r.g.answer(true, {9000, 568.5, 9500});
+    r.g.deadly.insert(2);  // the game's sensor says Death a step after the landing
+    r.wait(100);
+    REQUIRE(r.g.tps.size() == 2);
+    CHECK(r.g.tps[1].player == 2u);
+    CHECK(r.g.tps[1].ask.to.x == 4100);  // where they stood
+    CHECK(r.g.tps[1].ask.to.z == 1300);
+    CHECK_FALSE(r.g.tps[1].ask.ground);
+    r.g.deadly.clear();
+    r.g.answer(true, {4100, 700, 1300});
+    CHECK(r.g.last_tell() == "That place is in the deadly shroud: you are back where you were");
+    r.t.map_teleport(2, false, 10, 10);  // no cooldown: they never got there
+    CHECK(r.g.grounds.size() == 2);
+}
+
+TEST_CASE("teleports map (live): the deadly-shroud watch ends 3 s after the landing; ordinary shroud is the player's") {
+    Rig r;
+    r.t.map_teleport(1, true, 1500, 4740);
+    r.g.ground(GroundStatus::Ok, 300);
+    r.g.answer(true, {1500, 300.5, 4740});
+    r.g.shrouded.insert(1);  // dangerous shroud: allowed (a timer, as when walking in)
+    r.wait(3100);
+    r.g.deadly.insert(1);    // later: the player walked into it themselves
+    r.wait(500);
+    CHECK(r.g.tps.size() == 1);
 }

@@ -21,9 +21,10 @@ bool map_input_announced() { return g_announced.load(std::memory_order_relaxed);
 
 MapInputEnv map_input_env(float client_w, float client_h, uint64_t now_ms) {
     MapInputEnv e;
-    e.map_open = marker_sight(now_ms).map_open && marker_map_view(&e.view);
+    e.map_open = marker_sight(now_ms).map_open && marker_map_view(&e.view) && map_view_fresh(e.view, now_ms);
     e.announced = map_input_announced();
     e.shift = (GetKeyState(VK_SHIFT) & 0x8000) != 0;
+    e.alt = (GetKeyState(VK_MENU) & 0x8000) != 0;
     e.client_w = client_w;
     e.client_h = client_h;
     e.now_ms = now_ms;
@@ -33,6 +34,15 @@ MapInputEnv map_input_env(float client_w, float client_h, uint64_t now_ms) {
 void MapInput::set_done(std::function<void(double, double)> f) {
     std::lock_guard<std::mutex> lock(m_);
     done_ = std::move(f);
+}
+
+void MapInput::cancel() {
+    std::lock_guard<std::mutex> lock(m_);
+    hold_.closed();  // its release stays EMF's: the game never saw the press
+}
+
+bool map_view_fresh(const MapView& v, uint64_t now_ms) {
+    return v.ms != 0 && (now_ms <= v.ms || now_ms - v.ms <= kMapGestureFreshMs);
 }
 
 void MapInput::set_click_listener(std::function<void(const EmfMapClick&)> f) {
@@ -101,7 +111,8 @@ MapInputResult MapInput::message(UINT msg, WPARAM wp, LPARAM lp, const MapInputE
         EmfMapClick c{};
         c.size = sizeof c;
         c.button = static_cast<uint32_t>(click_button);
-        c.mods = ((wp & MK_SHIFT) ? EMF_MAP_SHIFT : 0u) | ((wp & MK_CONTROL) ? EMF_MAP_CTRL : 0u);
+        c.mods = ((wp & MK_SHIFT) ? EMF_MAP_SHIFT : 0u) | ((wp & MK_CONTROL) ? EMF_MAP_CTRL : 0u) |
+                 (env.alt ? EMF_MAP_ALT : 0u);
         c.x = x;
         c.z = z;
         click(c);
@@ -114,7 +125,7 @@ void MapInput::frame(const MapInputEnv& env) {
     {
         std::lock_guard<std::mutex> lock(m_);
         if (!hold_.holding()) return;
-        o = env.map_open ? hold_.tick(env.now_ms) : hold_.closed();
+        o = env.map_open && !env.captured ? hold_.tick(env.now_ms) : hold_.closed();
     }
     if (o.done) finish(o);
 }

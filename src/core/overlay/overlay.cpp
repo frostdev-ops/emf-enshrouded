@@ -453,7 +453,9 @@ std::optional<ImageDraw> window_picture(uint32_t handle, double seconds, uint32_
 // Markers (API v33) over the 3D view or the game's map screen, under everything else EMF draws.
 // The map gesture's ring (API v34): a circle filling over 1 s at the held spot on the map.
 void draw_map_ring(ImVec2 display, uint64_t now) {
-    map_input().frame(map_input_env(display.x, display.y, now));
+    MapInputEnv env = map_input_env(display.x, display.y, now);
+    env.captured = input_capturing();
+    map_input().frame(env);
     const MapRing r = map_input().ring(now);
     MapView v;
     if (!r.holding || !marker_map_view(&v) || !(v.rect[2] > 0) || !(v.ui_w > 0) || !(v.ui_h > 0)) return;

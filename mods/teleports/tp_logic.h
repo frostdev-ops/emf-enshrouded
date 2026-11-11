@@ -191,6 +191,7 @@ public:
         return it->second + cooldown_ms - now_ms;
     }
     void start(uint64_t account, Kind kind, uint64_t now_ms) { last_[{account, kind}] = now_ms; }
+    void clear(uint64_t account, Kind kind) { last_.erase({account, kind}); }
     void clear() { last_.clear(); }
 
 private:
@@ -233,7 +234,8 @@ struct Ground {
     double y = 0, hop_y = 0;
     std::string why;
 };
-constexpr double kAboveGround = 0.5;  // the teleport lands this far above the ground found (the game's search settles it)
+constexpr double kAboveGround = 0.5;
+constexpr uint64_t kDeadlyWatchMs = 3000;  // after a map teleport: landed in the deadly shroud -> back  // the teleport lands this far above the ground found (the game's search settles it)
 
 struct Game {
     virtual ~Game() = default;
@@ -247,6 +249,7 @@ struct Game {
     virtual uint64_t account(uint32_t player) = 0;
     virtual bool dead(uint32_t player) = 0;
     virtual bool in_shroud(uint32_t player) = 0;
+    virtual bool in_deadly_shroud(uint32_t player) = 0;  // fog Death, not in a spawn point's safe zone
     virtual uint32_t spawn_point(uint32_t player) = 0;  // the player's own, else the nearest flame altar; 0 = none
     // EMF's teleport: false when refused at once; else done() runs once, later, on the server thread.
     virtual bool teleport(uint32_t player, const TeleportAsk& ask, std::function<void(const Outcome&)> done) = 0;
@@ -276,6 +279,7 @@ public:
         combat_.clear();
         back_.clear();
         moving_.clear();
+        landed_.clear();
         ++epoch_;  // answers for the old session's map teleports are dropped
     }
     void on_hit(uint32_t target) {
@@ -397,9 +401,10 @@ public:
     }
     bool moving(uint32_t player) const { return moving_.count(player) != 0; }
 
-    // Every server tick: the countdowns.
+    // Every server tick: the countdowns, and a map teleport's first seconds (the deadly shroud).
     void tick() {
         const uint64_t now = g_.now_ms();
+        watch_landed(now);
         std::vector<Pending> go;
         for (auto it = pending_.begin(); it != pending_.end();) {
             Pending& p = it->second;
@@ -737,7 +742,9 @@ private:
     }
 
     void hop(Spot s, double y) {
-        const bool ok = g_.teleport(s.who, {{s.x, y, s.z}, false, 0}, [this, s](const Outcome& o) mutable {
+        // with the ground search: the game streams the place first, the player waits where they stand; with nothing
+        // within 10 m it uses the raw height
+        const bool ok = g_.teleport(s.who, {{s.x, y, s.z}, true, 0}, [this, s](const Outcome& o) mutable {
             if (s.epoch != epoch_ || o.session_ended) return;
             if (!o.moved) {
                 moving_.erase(s.who);
@@ -765,6 +772,7 @@ private:
             moving_.erase(s.who);
             if (s.acct) back_[s.acct] = s.from;
             if (!s.admin) cooldowns_.start(s.acct, Kind::MapTp, g_.now_ms());
+            landed_[s.who] = Landed{s, g_.now_ms() + kDeadlyWatchMs};
             char me[96], them[128];
             std::snprintf(me, sizeof me, "You are at (%.0f, %.0f, %.0f)", o.pos.x, o.pos.y, o.pos.z);
             std::snprintf(them, sizeof them, "%s: player %u is at (%.0f, %.0f, %.0f)", kind_name(s.kind), s.who, o.pos.x,
@@ -794,6 +802,37 @@ private:
         if (!ok) refused(s);
     }
 
+    // A map teleport that ended in the deadly shroud (the map shows it, the server cannot see it before the player is
+    // there): straight back, and no cooldown spent.
+    void watch_landed(uint64_t now) {
+        std::vector<Spot> back;
+        for (auto it = landed_.begin(); it != landed_.end();) {
+            if (now >= it->second.until || !g_.position(it->first)) {
+                it = landed_.erase(it);
+                continue;
+            }
+            if (g_.in_deadly_shroud(it->first) && !g_.dead(it->first)) {
+                back.push_back(it->second.spot);
+                it = landed_.erase(it);
+                continue;
+            }
+            ++it;
+        }
+        for (const Spot& s : back) {
+            if (!s.admin) cooldowns_.clear(s.acct, Kind::MapTp);
+            moving_.insert(s.who);
+            const bool ok = g_.teleport(s.who, {s.from, false, 0}, [this, s](const Outcome& o) {
+                if (s.epoch != epoch_ || o.session_ended) return;
+                moving_.erase(s.who);
+                tell_both(s, o.moved ? "That place is in the deadly shroud: you are back where you were"
+                                     : "That place is in the deadly shroud, and the way back failed: " + o.reason,
+                          std::string(kind_name(s.kind)) + ": player " + std::to_string(s.who) +
+                              (o.moved ? " landed in the deadly shroud and is back" : " is in the deadly shroud: " + o.reason));
+            });
+            if (!ok) refused(s);
+        }
+    }
+
     void refused(const Spot& s) {
         moving_.erase(s.who);
         tell_both(s, "Map teleport was refused (see the log)", std::string(kind_name(s.kind)) + ": refused (see the log)");
@@ -802,6 +841,11 @@ private:
     Game& g_;
     Settings s_;
     std::set<uint32_t> moving_;  // players on a map teleport (one at a time)
+    struct Landed {
+        Spot spot;
+        uint64_t until = 0;
+    };
+    std::map<uint32_t, Landed> landed_;  // just landed by a map teleport: watched for the deadly shroud
     uint64_t epoch_ = 0;         // new_session() moves it on
     std::map<uint32_t, Pending> pending_;
     Cooldowns cooldowns_;

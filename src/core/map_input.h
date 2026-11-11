@@ -19,6 +19,8 @@ struct MapInputEnv {
     bool map_open = false;   // the game's map screen was seen within kMarkerFreshMs
     bool announced = false;  // a server end announced a map action
     bool shift = false;      // Shift is down
+    bool alt = false;        // Alt is down (on_map_click's EMF_MAP_ALT)
+    bool captured = false;   // EMF's console, wheel or a mod window takes the mouse: a hold ends
     float client_w = 0, client_h = 0;  // the game window's client area, pixels
     MapView view{};
     uint64_t now_ms = 0;
@@ -40,7 +42,8 @@ public:
     explicit MapInput(std::function<void(double x, double z)> done = nullptr) : done_(std::move(done)) {}
     void set_done(std::function<void(double x, double z)> f);
     void set_click_listener(std::function<void(const EmfMapClick&)> f);
-    void set_hold_ms(uint64_t ms);  // what the server announced (0: 1 s); a hold under way keeps its time
+    void set_hold_ms(uint64_t ms);
+    void cancel();  // focus lost: a hold ends (its release stays EMF's)  // what the server announced (0: 1 s); a hold under way keeps its time
     MapInputResult message(UINT msg, WPARAM wp, LPARAM lp, const MapInputEnv& env);
     void frame(const MapInputEnv& env);
     MapRing ring(uint64_t now_ms) const;
@@ -63,5 +66,9 @@ void map_input_set_announced(bool on);
 bool map_input_announced();
 // The environment now: the map's view and sight from the capture, Shift from the keyboard, the window's client size.
 MapInputEnv map_input_env(float client_w, float client_h, uint64_t now_ms);
+// The map's layout counts as the open map only while it is at most kMapGestureFreshMs old (the 3D markers' 250 ms would
+// let a hold finish after Esc closed the map).
+constexpr uint64_t kMapGestureFreshMs = 120;
+bool map_view_fresh(const MapView& v, uint64_t now_ms);
 
 }  // namespace emf::core

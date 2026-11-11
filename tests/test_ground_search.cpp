@@ -94,3 +94,24 @@ TEST_CASE("ground: loaded without a hit (nothing under the spot) fails with a re
     CHECK_FALSE(ground_spot_ok(100, 10241, &why));
     CHECK_FALSE(why.empty());
 }
+
+
+TEST_CASE("ground (review I3): readings that keep jumping end after 20 s with a reason; after a hop: back") {
+    GroundSearch g(100, 200, limits(), 1000);
+    GroundSearch::Out o;
+    double y = 300;
+    for (uint64_t t = 1050; t < 21000; t += 50) {
+        y = y > 300 ? 300 : 310;  // 10 m apart every tick: never two that agree
+        o = g.on_ray(hit(y), t);
+        REQUIRE(o.step == GroundSearch::Step::Wait);
+    }
+    y = y > 300 ? 300 : 310;  // still jumping at 20 s
+    o = g.on_ray(hit(y), 21000);
+    CHECK(o.step == GroundSearch::Step::Fail);
+    CHECK(o.why.find("keeps changing") != std::string::npos);
+    GroundSearch h(100, 200, limits(), 1000);
+    h.on_ray(not_loaded(), 13000);  // hop asked
+    h.on_hopped(true, 13100);
+    h.on_ray(hit(300), 13200);
+    CHECK(h.on_ray(hit(310), 21000).step == GroundSearch::Step::Back);
+}

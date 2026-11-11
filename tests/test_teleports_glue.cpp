@@ -423,3 +423,18 @@ TEST_CASE("teleports glue: the waypoint is PlayerWaypoint when enabled; none whe
     CHECK(at->y == 0);
     CHECK(at->z == doctest::Approx(3000.0));
 }
+
+
+TEST_CASE("teleports glue (live): the deadly shroud = fogType Death outside a safe zone; dangerous shroud is not") {
+    Rig r;
+    ApiGame g("teleports");
+    g.set_world(emf::World(kW));
+    CHECK_FALSE(g.in_deadly_shroud(1));
+    auto& es = plant<gen::EnvironmentSensor>(1);
+    es.fogType = emf::gen::FogType::Dangerous;
+    CHECK_FALSE(g.in_deadly_shroud(1));
+    es.fogType = emf::gen::FogType::Death;
+    CHECK(g.in_deadly_shroud(1));
+    plant<gen::Actor>(1).currentState = kInSaveZone;
+    CHECK_FALSE(g.in_deadly_shroud(1));
+}

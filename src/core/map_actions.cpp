@@ -31,12 +31,19 @@ bool id_ok(const char* id) {
 }  // namespace
 
 void MapActions::log_once(const std::string& kind, const std::string& line) {
+    LogFn log;
     {
         std::lock_guard<std::mutex> lock(m_);
         if (told_[kind]) return;
         told_[kind] = true;
+        log = log_;
     }
-    if (log_) log_(line + " (logged once)");
+    if (log) log(line + " (logged once)");
+}
+
+void MapActions::set_log(LogFn log) {
+    std::lock_guard<std::mutex> lock(m_);
+    log_ = std::move(log);
 }
 
 bool MapActions::add(const std::string& owner, const char* id, const char* label, uint32_t hold_ms,
@@ -101,17 +108,23 @@ bool MapActions::on_done(EmfWorld* world, uint32_t player, bool admin, const std
     }
     EmfMapActionCallback cb = nullptr;
     void* user = nullptr;
+    bool flood = false;
     {
         std::lock_guard<std::mutex> lock(m_);
         auto& times = recent_[player];
         while (!times.empty() && now_ms - times.front() >= kWindowMs) times.pop_front();
-        if (times.size() >= kMapDonePer10s) return false;
-        times.push_back(now_ms);
+        flood = times.size() >= kMapDonePer10s;
+        if (!flood) times.push_back(now_ms);
         for (const Action& a : actions_)
             if (a.id == id->s) {
                 cb = a.cb;
                 user = a.user;
             }
+    }
+    if (flood) {
+        log_once("flood:" + std::to_string(player), "map actions: player " + std::to_string(player) +
+                                                         " sent more than 20 in 10 s; the rest are dropped");
+        return false;
     }
     if (!cb) {
         log_once("unknown", "map actions: a player asked for an action this server does not have (" + id->s + ")");

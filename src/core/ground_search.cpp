@@ -57,6 +57,10 @@ GroundSearch::Out GroundSearch::on_ray(const RayResult& r, uint64_t now_ms) {
     }
     have_candidate_ = true;
     candidate_ = r.y;
+    if (now_ms - start_ms_ >= kGiveUpMs) {  // two readings never agree: no endless search
+        o.step = hopped_ ? Step::Back : Step::Fail;
+        o.why = "the ground there keeps changing";
+    }
     return o;
 }
 
