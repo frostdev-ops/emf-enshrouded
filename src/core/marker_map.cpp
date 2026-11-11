@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "common/fnv.h"
+#include "common/seh.h"
 
 namespace emf::core {
 
@@ -44,14 +45,17 @@ void MapMarkers::pre(const MapList* list) {
     arenas_[step_].clear();  // this arena's labels were put three steps ago
     if (!list_ok(list)) return;
     game_last_ = list->count > appended_ ? list->count - appended_ : 0;
-    std::lock_guard<std::mutex> lock(seen_m_);
-    for (uint64_t i = appended_; i < list->count && seen_.size() < kMapSeenTypesMax; ++i) {
+    // the game's memory read guarded (a fault here must not leave seen_m_ held), the lock taken only to insert
+    std::vector<uint32_t> types;
+    for (uint64_t i = appended_; i < list->count && types.size() < kMapSeenTypesMax; ++i) {
         const uint8_t* e = list->data + i * kMapEntryBytes;
         uint32_t entity = 0, type = 0;
-        std::memcpy(&entity, e, 4);
-        std::memcpy(&type, e + 0x30, 4);
-        if (entity && type) seen_.insert(type);
+        if (!seh_read(e, &entity, 4) || !seh_read(e + 0x30, &type, 4)) break;
+        if (entity && type) types.push_back(type);
     }
+    std::lock_guard<std::mutex> lock(seen_m_);
+    for (uint32_t t : types)
+        if (seen_.size() < kMapSeenTypesMax) seen_.insert(t);
 }
 
 uint32_t MapMarkers::post(MapList* list, const std::vector<Marker>& markers, const double* player) {

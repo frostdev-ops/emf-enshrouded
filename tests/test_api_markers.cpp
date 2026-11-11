@@ -252,3 +252,56 @@ TEST_CASE("the server tick: a new server world starts the sender afresh") {
     markers_server_tick(reinterpret_cast<EmfWorld*>(other.p()));
     CHECK(f.sent.empty());
 }
+
+TEST_CASE("a new world: a client world's setup drops a server's markers, the map list's state and the UiPlayData; a server's restarts the sender") {
+    Fixture f;
+    EmfMarker r = mk("r");
+    REQUIRE(f.state.markers.store.set("lua", r, true) == MarkerStore::SetResult::Ok);
+    const EmfMarker own = mk("own");
+    REQUIRE(api_table()->marker_set(&own));
+    markers_client_tick(f.cw());
+    markers_world_setup(EMF_WORLD_CLIENT);
+    auto all = f.state.markers.store.snapshot();
+    REQUIRE(all.size() == 1);  // the game's own mods keep theirs
+    CHECK(all[0].id == "own");
+    EmfMarker beast = mk("beast", 0, 0, 0);
+    beast.entity = 77;
+    REQUIRE(api_table()->marker_send(5, &beast, 1) == 1u);
+    markers_world_setup(EMF_WORLD_SERVER);
+    place(77, 500, 0, 500);
+    f.sent.clear();
+    g_now += 5000;
+    markers_server_tick(reinterpret_cast<EmfWorld*>(f.server.p()));
+    CHECK(f.sent.empty());  // nothing of the old world is followed
+}
+
+TEST_CASE("world_to_screen: false once the newest frame is older than 250 ms (a menu, a loading screen)") {
+    Fixture f;
+    float v[16] = {1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0};
+    float p[16] = {};
+    p[0] = 0.5f;
+    p[5] = 1;
+    std::memcpy(f.uipd.data() + 0x1d20, v, sizeof v);
+    std::memcpy(f.uipd.data() + 0x1d60, p, sizeof p);
+    marker_capture_set_layout(0x1d20);
+    markers_client_tick(f.cw());
+    alignas(16) uint8_t node[0x170] = {};
+    const float r[4] = {0, 0, 1920, 1080};
+    std::memcpy(node + 0x114, r, sizeof r);
+    markers_ui_frame(kMarkerUiSpaceHash, node, g_now);
+    float x = 0, y = 0;
+    CHECK(api_table()->world_to_screen(0, 0, 10, &x, &y));
+    g_now += 1000;
+    CHECK_FALSE(api_table()->world_to_screen(0, 0, 10, &x, &y));
+}
+
+TEST_CASE("the markers commands run on any game, also one the player joined (no world of theirs)") {
+    Fixture f;
+    CommandCenter center;
+    REQUIRE(add_marker_commands(center));
+    std::vector<std::string> replies;
+    center.run_without_world("markers", [&](const std::string& l) { replies.push_back(l); }, "this is someone else's game");
+    bool status = false;
+    for (const auto& l : replies) status |= l.find("markers: ") != std::string::npos;
+    CHECK(status);
+}

@@ -39,6 +39,8 @@ struct Marker {
 
 // A valid marker id: 1-48 of A-Z a-z 0-9 _ . - :
 bool marker_id_ok(const char* id);
+// The store's number checks: v33's size, finite coordinates within kMarkerCoordMax, a sane height, max_distance and shape.
+bool marker_numbers_ok(const EmfMarker& m);
 // `s` cut to at most n bytes, never inside a UTF-8 character.
 std::string marker_cut_utf8(std::string s, size_t n);
 

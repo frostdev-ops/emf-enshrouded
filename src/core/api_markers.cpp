@@ -131,6 +131,8 @@ bool api_world_to_screen(double x, double y, double z, float* px, float* py) {
     CameraSnap c;
     float w = 0, h = 0;
     if (!marker_camera(&c) || !marker_display(&w, &h)) return false;
+    const uint64_t now = now_ms(core_state());
+    if (now < c.frame_ms || now - c.frame_ms > kMarkerFreshMs) return false;  // a menu, a loading screen: no answer
     const auto p = project(c, x, y, z, w, h);
     if (!p) return false;
     if (px) *px = p->x;
@@ -187,6 +189,21 @@ void markers_server_tick(EmfWorld* server) {
     if (now - s->markers.refresh_ms < kMarkerRefreshMs) return;
     s->markers.refresh_ms = now;
     s->markers.sender->refresh([server](uint32_t e, double out[3]) { return pos_in(server, e, out); });
+}
+
+void markers_world_setup(uint8_t kind) {
+    CoreState* s = core_state();
+    if (!s) return;
+    if (kind == EMF_WORLD_CLIENT) {
+        s->markers.receiver.reset(s->markers.store);  // a server's markers belong to the session that sent them
+        s->markers.map.reset();
+        marker_capture_set_uipd(nullptr, 0);
+        marker_capture_set_player(false, 0, 0, 0);
+        s->markers.client = nullptr;
+    } else if (kind == EMF_WORLD_SERVER) {
+        if (s->markers.sender) s->markers.sender->reset();
+        s->markers.server = nullptr;
+    }
 }
 
 void markers_map_pre(void* ctx) {
@@ -314,10 +331,11 @@ void cmd_markers_test(EmfWorld*, int argc, const char* const* argv, void*) {
 }  // namespace
 
 bool add_marker_commands(CommandCenter& commands) {
+    // anywhere: on a game the player joined too (markers are drawn on every game)
     bool ok = commands.add("markers", ": the markers this game draws, and whether drawing and the game's map list are on",
-                           cmd_markers, nullptr, nullptr);
+                           cmd_markers, nullptr, nullptr, true);
     ok &= commands.add("markers.test", " [text] [game icon type, hex] | clear: a marker 10 m ahead of you", cmd_markers_test,
-                       nullptr, nullptr);
+                       nullptr, nullptr, true);
     return ok;
 }
 

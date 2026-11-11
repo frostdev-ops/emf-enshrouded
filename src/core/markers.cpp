@@ -48,14 +48,16 @@ std::string marker_cut_utf8(std::string s, size_t n) {
     return s;
 }
 
+bool marker_numbers_ok(const EmfMarker& m) {
+    return m.size >= sizeof(EmfMarker) && finite_within(m.x, kMarkerCoordMax) && finite_within(m.y, kMarkerCoordMax) &&
+           finite_within(m.z, kMarkerCoordMax) && finite_within(m.height, 1000.0) &&
+           finite_within(m.max_distance, kMarkerCoordMax) && m.max_distance >= 0 && m.shape <= EMF_MARKER_NONE;
+}
+
 // ---- MarkerStore ----
 MarkerStore::SetResult MarkerStore::set(const std::string& owner, const EmfMarker& m, bool received) {
     if (!marker_id_ok(m.id)) return SetResult::BadId;
-    if (m.size < sizeof(EmfMarker)) return SetResult::BadNumbers;
-    if (!finite_within(m.x, kMarkerCoordMax) || !finite_within(m.y, kMarkerCoordMax) ||
-        !finite_within(m.z, kMarkerCoordMax) || !finite_within(m.height, 1000.0) ||
-        !finite_within(m.max_distance, kMarkerCoordMax) || m.max_distance < 0 || m.shape > EMF_MARKER_NONE)
-        return SetResult::BadNumbers;
+    if (!marker_numbers_ok(m)) return SetResult::BadNumbers;
     Marker k;
     k.owner = owner;
     k.id = m.id;

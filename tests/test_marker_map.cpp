@@ -147,3 +147,15 @@ TEST_CASE("map list: the types the game's own entries use are collected; labels 
     mm.reset();
     CHECK(mm.seen_types().empty());
 }
+
+TEST_CASE("map list: entries that cannot be read are skipped without a fault; the types stay readable") {
+    MapMarkers mm;
+    MapList bad;
+    bad.data = reinterpret_cast<uint8_t*>(0x10);  // not readable
+    bad.count = 3;
+    bad.capacity = 64;
+    mm.pre(&bad);  // must not fault
+    CHECK(mm.seen_types().empty());
+    mm.reset();
+    CHECK(mm.seen_types().empty());
+}

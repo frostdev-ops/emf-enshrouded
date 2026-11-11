@@ -93,6 +93,9 @@ void hud_close_path(void* scope, CloseFn original);
 void hud_set_for_tests(const SnapshotBox<HudSnapshot>* box, bool on);
 void hud_reset_live_for_tests();  // live info, UI space, guards, this thread's tracker, the fault code
 
+// The UI scope open/close detours alone, once (the HUD editor's install calls it too): while the editor is off they only
+// pass through and tell the markers (API v33) what the game's UI showed. False (*why) when they cannot be hooked.
+bool install_scope_hooks(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index, std::string* why);
 bool install_hud_hooks(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index,
                        const SnapshotBox<HudSnapshot>* box, std::string* why);
 

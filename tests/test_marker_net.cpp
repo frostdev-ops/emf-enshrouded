@@ -2,6 +2,8 @@
 // the cap, removing, refreshing followed entities' positions) and the receiver (into the store as received markers).
 #include <doctest.h>
 
+#include <algorithm>
+#include <limits>
 #include <map>
 #include <string>
 #include <utility>
@@ -153,4 +155,84 @@ TEST_CASE("marker receiver: a server's markers go into the store as received; re
     CHECK(store.size() == 1);
     rx.reset(store);  // the world ended or the server went away
     CHECK(store.size() == 0);
+}
+
+TEST_CASE("marker sender: when a player's game links up, what that player should have is sent again") {
+    Sent s;
+    MarkerSender snd(s.fn(), nullptr);
+    const EmfMarker ab[] = {mk("a"), mk("b", 1, 2, 3, 77)};
+    snd.send("lua", 5, ab, 2);
+    const EmfMarker c[] = {mk("c")};
+    snd.send("lua", 0, c, 1);
+    snd.send("other", 6, c, 1);  // another player's: not replayed to 5
+    snd.unsend("lua", 5, "a");
+    snd.refresh([](uint32_t, double out[3]) {  // b's entity moved: the replay has its new place
+        out[0] = 50;
+        out[1] = 0;
+        out[2] = 60;
+        return true;
+    });
+    s.msgs.clear();
+    snd.replay(5);
+    std::vector<std::string> ids;
+    for (const auto& [p, data] : s.msgs) {
+        CHECK(p == 5u);
+        DecodedMarkers d;
+        REQUIRE(decode_markers(data, &d));
+        CHECK(d.owner == "lua");
+        for (const auto& m : d.markers) {
+            ids.push_back(m.id);
+            if (m.id == "b") CHECK(m.marker.x == 50);
+        }
+    }
+    std::sort(ids.begin(), ids.end());
+    CHECK(ids == std::vector<std::string>{"b", "c"});
+    snd.forget(5);  // gone: only what every player has is left for 5
+    s.msgs.clear();
+    snd.replay(5);
+    REQUIRE(s.msgs.size() == 1);
+    CHECK(s.markers_in(0) == 1u);
+    snd.reset();
+    s.msgs.clear();
+    snd.replay(5);
+    CHECK(s.msgs.empty());
+}
+
+TEST_CASE("marker sender: the store's checks before sending: bad numbers skipped, text cut, messages kept under 15 KB") {
+    Sent s;
+    std::vector<std::string> logs;
+    MarkerSender snd(s.fn(), [&](const std::string& l) { logs.push_back(l); });
+    EmfMarker nan = mk("nan", std::numeric_limits<double>::quiet_NaN());
+    const std::string long_text(200, 'x');
+    EmfMarker text = mk("text");
+    text.text = long_text.c_str();
+    const EmfMarker two[] = {nan, text};
+    CHECK(snd.send("lua", 5, two, 2) == 1u);
+    REQUIRE(s.msgs.size() == 1);
+    DecodedMarkers d;
+    REQUIRE(decode_markers(s.msgs[0].second, &d));
+    REQUIRE(d.markers.size() == 1);  // the NaN one is not sent
+    CHECK(d.markers[0].text.size() == 64u);
+    // 256 markers with the longest ids and texts: every message fits the channel
+    std::vector<std::string> ids;
+    for (int i = 0; i < 256; ++i) ids.push_back(std::string(44, 'a') + std::to_string(1000 + i));
+    const std::string t64(64, 'y');
+    std::vector<EmfMarker> many;
+    for (const auto& id : ids) {
+        EmfMarker m = mk(id.c_str(), 1234.567891234, 345.678912345, 6789.12345678);
+        m.text = t64.c_str();
+        m.max_distance = 123.456f;
+        m.height = 2.345f;
+        many.push_back(m);
+    }
+    s.msgs.clear();
+    CHECK(snd.send("lua", 5, many.data(), 256) == 1u);
+    size_t total = 0;
+    for (const auto& [p, data] : s.msgs) {
+        CHECK(data.size() <= 15000u);
+        DecodedMarkers x;
+        REQUIRE(decode_markers(data, &x));
+        total += x.markers.size();
+    }
+    CHECK(total == 256u);
 }

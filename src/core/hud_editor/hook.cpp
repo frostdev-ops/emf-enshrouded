@@ -6,6 +6,7 @@
 #include <bit>
 #include <cmath>
 #include <cstring>
+#include <mutex>
 
 #include "common/fnv.h"
 #include "common/seh.h"
@@ -363,6 +364,28 @@ void hud_reset_live_for_tests() {
     g_box = nullptr;
 }
 
+bool install_scope_hooks(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index, std::string* why) {
+    static std::mutex m;
+    static bool hooked = false;
+    std::lock_guard<std::mutex> lock(m);
+    if (hooked) return true;
+    auto fail = [&](const char* msg) {
+        if (why) *why = msg;
+        return false;
+    };
+    if (!hud_signatures_ready(sigs, known_build, build_index)) return fail("the UI scope signatures are not usable on this game build");
+    // The close first, the open second; hooks are never removed, and while the editor is off they only pass through
+    // (the open path still tells the markers what the game's UI showed).
+    if (!install_emf_hook("UiScopeClose (HUD editor)", sigs[static_cast<size_t>(Sig::UiScopeClose)].addr,
+                          reinterpret_cast<void*>(&hk_close), reinterpret_cast<void**>(&g_o_close)))
+        return fail("the UI scope close could not be hooked");
+    if (!install_emf_hook("UiScopeOpen (HUD editor)", sigs[static_cast<size_t>(Sig::UiScopeOpen)].addr,
+                          reinterpret_cast<void*>(&hk_open), reinterpret_cast<void**>(&g_o_open)))
+        return fail("the UI scope open could not be hooked");
+    hooked = true;
+    return true;
+}
+
 bool install_hud_hooks(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index,
                        const SnapshotBox<HudSnapshot>* box, std::string* why) {
     auto fail = [&](const char* m) {
@@ -376,13 +399,7 @@ bool install_hud_hooks(const std::array<Resolved, kSigCount>& sigs, bool known_b
     } else {
         set_transform_functions(nullptr, nullptr);
     }
-    // The close first, the open second; hooks are never removed, and the close alone only passes through.
-    if (!install_emf_hook("UiScopeClose (HUD editor)", sigs[static_cast<size_t>(Sig::UiScopeClose)].addr,
-                          reinterpret_cast<void*>(&hk_close), reinterpret_cast<void**>(&g_o_close)))
-        return fail("the UI scope close could not be hooked");
-    if (!install_emf_hook("UiScopeOpen (HUD editor)", sigs[static_cast<size_t>(Sig::UiScopeOpen)].addr,
-                          reinterpret_cast<void*>(&hk_open), reinterpret_cast<void**>(&g_o_open)))
-        return fail("the UI scope open could not be hooked");
+    if (!install_scope_hooks(sigs, known_build, build_index, why)) return false;
     g_box.store(box, std::memory_order_release);
     g_on.store(true, std::memory_order_relaxed);
     // The bars (optional): without them the rest of the editor works.

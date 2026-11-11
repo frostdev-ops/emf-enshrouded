@@ -670,6 +670,7 @@ void hk_register_all_programs(void* world) {
             if (g_components) g_components->world_reset();  // component changes under way end (FAILED)    // teleports under way end (FAILED)
             g_state->damage_queue.clear();                // hits for the old session never land
             emf::core::env_new_session();                 // nor its env hits and carries
+            emf::core::markers_world_setup(EMF_WORLD_SERVER);  // nothing of the old world is followed or replayed
             ++g_state->server_session;                    // mods notice the new session (API v9)
         }
         // a new client world (a new session): the server the last one talked to is forgotten (its welcome, its lines);
@@ -678,6 +679,7 @@ void hk_register_all_programs(void* world) {
         if (kind == EMF_WORLD_CLIENT) {
             ++g_state->client_session;
             if (g_state->net) g_state->net->client_reset(/*keep_held_beacon=*/true);
+            emf::core::markers_world_setup(EMF_WORLD_CLIENT);  // the last server's markers go
         }
         g_state->relay.forget_world(world);                  // nothing an earlier world left at this address
         if (g_register_program_addr && !g_state->relay.closed()) {
@@ -1269,7 +1271,15 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         else if (!emf::seh_read(reinterpret_cast<const uint8_t*>(cam.addr) + 3, &view_off, 4) || view_off < 0x100 ||
                  view_off > 0x100000)
             mk.world_why = "the camera block's offset could not be read from the game's code";
-        if (mk.world_why.empty()) emf::core::marker_capture_set_layout(view_off);
+        if (mk.world_why.empty()) {
+            // the camera comes through the UI scope detours: hooked here in pass-through, so markers work also when
+            // the HUD editor is switched off (its own install reuses them)
+            std::string why;
+            if (emf::core::hud::install_scope_hooks(g_state->sigs, known, build, &why))
+                emf::core::marker_capture_set_layout(view_off);
+            else
+                mk.world_why = "the UI scope hooks: " + why;
+        }
         const auto& clr = g_state->sigs[static_cast<size_t>(Sig::MapMarkerSliceClear)];
         uint32_t count_off = 0;
         if (g_state->exe.server)
@@ -1626,8 +1636,18 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             emf::logf("markers: marker_send off (%s)", mwhy.c_str());
         }
         // a game's new hello (or its leaving) ends the list it sent before: only the new one counts
-        net->set_peer_watch([](uint64_t account, bool) {
+        net->set_peer_watch([](uint64_t account, bool joined) {
             if (g_mods_check) g_mods_check->forget(account);
+            // markers (v33): a game whose hello came gets what a mod sent it (or every player) before its link was up
+            if (joined && g_state->markers.sender) {
+                auto* acct = new uint64_t(account);
+                g_state->dispatcher.post(EMF_WORLD_SERVER, [](EmfWorld*, void* u) {
+                    const uint64_t a = *static_cast<uint64_t*>(u);
+                    delete static_cast<uint64_t*>(u);
+                    const uint32_t entity = g_state->net_entity_of ? g_state->net_entity_of(a) : 0;
+                    if (entity && g_state->markers.sender) g_state->markers.sender->replay(entity);
+                }, acct);
+            }
         });
         // the core's channel alone greets players only when this server has mods they must match
         net->set_core_greets([] {  // asked on every receive-loop run: the answer is kept for 2 s

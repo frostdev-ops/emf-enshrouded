@@ -270,6 +270,9 @@ uint32_t api_marker_unsend(uint32_t player, const char* id);
 void markers_client_tick(EmfWorld* client);
 // The server world's thread, after its step: followed entities' positions for players' games (every 2 s).
 void markers_server_tick(EmfWorld* server);
+// A world of that kind was set up (the game reuses addresses: the tick's pointer compare alone misses a new world):
+// client: a server's markers, the map list's state and the UiPlayData pointer go; server: the sender starts afresh.
+void markers_world_setup(uint8_t kind);
 // The pre- and post-hook of the game's clear_map_markers_for_ui (client world): EMF's entries in the game's map list.
 void markers_map_pre(void* program_ctx);
 void markers_map_post(void* program_ctx);
