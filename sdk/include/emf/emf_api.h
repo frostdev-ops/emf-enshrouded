@@ -553,7 +553,8 @@ typedef void (*EmfBuffCallback)(EmfWorld* world, const EmfBuffEvent* ev, void* u
 /* v33 markers: drawn by EMF on a player's game, over the 3D view and on the game's world map; a server sends them to
  * players' games with marker_send (players need EMF). Positions in world metres: x east, y up, z north. */
 #define EMF_MARKER_WORLD 0x01u      /* EmfMarker.flags: drawn over the 3D view */
-#define EMF_MARKER_GAME_MAP 0x02u   /* an entry on the game's world map, with the game's icon game_icon and the text */
+#define EMF_MARKER_GAME_MAP 0x02u   /* on the game's map screen (EMF draws it there, with its text; with game_icon the
+                                       game's own icon of that type instead of the shape) */
 #define EMF_MARKER_EDGE_ARROW 0x04u /* off screen or behind: an arrow at the screen's edge */
 #define EMF_MARKER_DISTANCE 0x08u   /* the distance under the text ("42 m") */
 #define EMF_MARKER_DIAMOND 0u       /* EmfMarker.shape, drawn when there is no icon */
@@ -573,7 +574,7 @@ typedef struct EmfMarker {
     uint32_t flags;     /* EMF_MARKER_WORLD ... */
     uint8_t shape;      /* EMF_MARKER_DIAMOND ... */
     uint8_t pad[3];
-    uint32_t game_icon; /* EMF_MARKER_GAME_MAP: the game's map marker type (marker_types), 0 = EMF's default */
+    uint32_t game_icon; /* EMF_MARKER_GAME_MAP: a game map icon type (marker_types) drawn by the game, 0 = EMF's shape */
     uint32_t pad2;
 } EmfMarker;
 #define EMF_MAP_TYPE_FAST_TRAVEL 0x01u /* EmfMapMarkerType.flags: a fast travel destination (shrines, altars) */
@@ -1231,8 +1232,9 @@ typedef struct EmfApi {
     bool (*marker_set)(const EmfMarker* m);
     bool (*marker_remove)(const char* id);  /* false: the mod has no such marker */
     uint32_t (*marker_clear)(void);         /* the mod's own markers on this game; how many were removed */
-    /* The game's map marker types for EmfMarker.game_icon: the number there is; fills `out` up to `cap` (may be NULL to
-     * count). 0 before a world is loaded, on the dedicated server, or where the game's list cannot be read. */
+    /* The game's map icon types for EmfMarker.game_icon that this world's own map entries used so far (id only: the
+     * name is empty): the number there is; fills `out` up to `cap` (may be NULL to count). 0 before the map list was
+     * seen, on the dedicated server, or where the game's list cannot be read. */
     uint32_t (*marker_types)(EmfMapMarkerType* out, uint32_t cap);
     /* A world point in display pixels with the camera of the newest frame: false when it is behind the camera or no
      * frame is known yet (a menu, a loading screen, the dedicated server). Any thread. */

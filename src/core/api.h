@@ -10,6 +10,9 @@
 
 #include "attributes.h"
 #include "buffs.h"
+#include "marker_map.h"
+#include "marker_net.h"
+#include "markers.h"
 #include "overlay/hud_model.h"
 #include "common/log_limiter.h"
 #include "common/pe_image.h"
@@ -164,6 +167,20 @@ struct CoreState {
     LogLimiter buff_log;                     // buff_apply / buff_remove refusals: the same line once per 10 s
     uint64_t buff_diff_ms = 0;
     std::function<std::vector<uint32_t>(EmfWorld*)> buff_players;  // the server world's players (empty: the roster)
+    // ---- v33 markers (api_markers.cpp) ----
+    struct Markers {
+        MarkerStore store;                     // every marker this game draws: its mods' own and a server's
+        MapMarkers map;                        // entries in the game's own map list (client world's thread)
+        std::unique_ptr<MarkerSender> sender;  // a server's markers for players' games (null: no mod messages)
+        MarkerReceiver receiver{nullptr};      // a server's markers for this game
+        uint32_t list_count_off = 0;           // the game's map list's count in UiPlayData (0: no entries there)
+        EmfWorld* client = nullptr;            // the client world of the last tick (another one: received markers go)
+        EmfWorld* server = nullptr;            // the server world of the last tick (another one: the sender starts afresh)
+        std::string world_why, list_why;       // why world markers / the game's map list entries are off ("" = on)
+        uint64_t refresh_ms = 0;               // the sender's last position refresh
+        std::mutex log_lock;
+        LogLimiter log;                        // refusals: the same line once per 10 s
+    } markers;
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them
     std::mutex setting_watchers_lock;
     std::vector<SettingWatcher> setting_watchers;  // v13 on_setting_changed (only appended to)
@@ -239,6 +256,28 @@ void env_pre(void* program_context, uint8_t kind);
 void env_post(void* program_context, uint8_t kind);
 void deliver_env_hits(EmfWorld* w);
 void env_new_session();  // a new server world: the old one's queued env hits and carries are dropped
+
+// ---- v33 markers (api_markers.cpp) ----
+bool api_marker_set(const EmfMarker* m);
+bool api_marker_remove(const char* id);
+uint32_t api_marker_clear();
+uint32_t api_marker_types(EmfMapMarkerType* out, uint32_t cap);
+bool api_world_to_screen(double x, double y, double z, float* px, float* py);
+uint32_t api_marker_send(uint32_t player, const EmfMarker* m, uint32_t count);
+uint32_t api_marker_unsend(uint32_t player, const char* id);
+// The client world's thread, after its step: the UiPlayData pointer, the local player's position, followed entities;
+// another client world than last time clears the received markers.
+void markers_client_tick(EmfWorld* client);
+// The server world's thread, after its step: followed entities' positions for players' games (every 2 s).
+void markers_server_tick(EmfWorld* server);
+// The pre- and post-hook of the game's clear_map_markers_for_ui (client world): EMF's entries in the game's map list.
+void markers_map_pre(void* program_ctx);
+void markers_map_post(void* program_ctx);
+// The console: `markers` (what is there, what is on) and `markers.test [text] [game icon]` (a marker 10 m ahead of the
+// player, owner "emf"; `markers.test clear` removes it).
+std::vector<std::string> markers_status();
+bool markers_test(const std::string& text, uint32_t game_icon, std::string* why);
+bool add_marker_commands(CommandCenter& commands);
 
 // ---- v32 buffs (api_buffs.cpp) ----
 uint32_t api_buff_types(EmfWorld* w, EmfBuffType* out, uint32_t cap);

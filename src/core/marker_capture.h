@@ -80,6 +80,10 @@ void marker_capture_set_player(bool known, double x, double y, double z);
 // The UI thread: every scope the game opens (node: the scope's node, may be null).
 void markers_ui_frame(uint64_t hash, const uint8_t* node, uint64_t now_ms);
 
+// The display's size in pixels (the overlay sets it every frame); before that the UI's size from doPlayStateUi().
+void marker_capture_set_display(float w, float h);
+bool marker_display(float* w, float* h);
+
 bool marker_camera(CameraSnap* out);
 bool marker_player_pos(double out[3]);
 MarkerSight marker_sight(uint64_t now_ms);

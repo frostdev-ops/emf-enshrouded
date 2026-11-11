@@ -451,6 +451,7 @@ std::optional<ImageDraw> window_picture(uint32_t handle, double seconds, uint32_
 
 // Markers (API v33) over the 3D view or the game's map screen, under everything else EMF draws.
 void build_markers(ImVec2 display) {
+    marker_capture_set_display(display.x, display.y);  // world_to_screen's pixels
     if (!g_deps.markers) return;
     const uint64_t now = GetTickCount64();
     const bool console = g_router->open() || g_ui.open_fraction > 0.0f;

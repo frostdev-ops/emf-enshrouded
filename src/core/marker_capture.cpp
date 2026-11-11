@@ -27,6 +27,7 @@ SeqBox<CameraSnap> g_camera;
 SeqBox<PlayerPos> g_player;
 SeqBox<UiSize> g_ui;
 SeqBox<MapRects> g_map;
+SeqBox<UiSize> g_display;
 // the UI thread's own copy of the map's two rects (they open in different scopes of one frame)
 thread_local MapRects t_map;
 
@@ -99,6 +100,18 @@ void markers_ui_frame(uint64_t hash, const uint8_t* node, uint64_t now_ms) {
     }
 }
 
+void marker_capture_set_display(float w, float h) {
+    if (w > 0 && h > 0) g_display.store(UiSize{w, h});
+}
+
+bool marker_display(float* w, float* h) {
+    UiSize s;
+    if (!g_display.load(&s) && !g_ui.load(&s)) return false;
+    if (w) *w = s.w;
+    if (h) *h = s.h;
+    return true;
+}
+
 bool marker_camera(CameraSnap* out) { return out && g_camera.load(out) && out->valid; }
 
 bool marker_player_pos(double out[3]) {
@@ -140,6 +153,7 @@ void marker_capture_reset_for_tests() {
     g_player.reset();
     g_ui.reset();
     g_map.reset();
+    g_display.reset();
     t_map = MapRects{};
 }
 

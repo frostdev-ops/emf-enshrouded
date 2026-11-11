@@ -42,6 +42,7 @@
 #include "console.h"
 #include "content_status.h"
 #include "buff_service.h"
+#include "marker_capture.h"
 #include "inventory.h"
 #include "teleport.h"
 #include "component_service.h"
@@ -1254,6 +1255,48 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         }
         if (!emf::core::add_buff_commands(g_state->commands)) emf::logf("commands: the buffs.* commands could not be added");
     }
+    // v33 markers (client only): the camera block's offset and the game's map list from the guards' matched code
+    // (private plans/2026-11-11-markers-step1.ledger.md, Task 1)
+    {
+        using emf::Sig;
+        auto& mk = g_state->markers;
+        const auto& cam = g_state->sigs[static_cast<size_t>(Sig::UiCameraBlock)];
+        uint32_t view_off = 0;
+        if (g_state->exe.server)
+            mk.world_why = "the dedicated server draws nothing";
+        else if (!emf::is_usable(cam, known))
+            mk.world_why = "the UiCameraBlock signature is not usable on this game build";
+        else if (!emf::seh_read(reinterpret_cast<const uint8_t*>(cam.addr) + 3, &view_off, 4) || view_off < 0x100 ||
+                 view_off > 0x100000)
+            mk.world_why = "the camera block's offset could not be read from the game's code";
+        if (mk.world_why.empty()) emf::core::marker_capture_set_layout(view_off);
+        const auto& clr = g_state->sigs[static_cast<size_t>(Sig::MapMarkerSliceClear)];
+        uint32_t count_off = 0;
+        if (g_state->exe.server)
+            mk.list_why = "the dedicated server has no map";
+        else if (!emf::is_usable(clr, known) ||
+                 !emf::is_usable(g_state->sigs[static_cast<size_t>(Sig::MapMarkerEntryLayout)], known) ||
+                 !emf::is_usable(g_state->sigs[static_cast<size_t>(Sig::MapMarkerEntryLabel)], known))
+            mk.list_why = "the map list's signatures are not usable on this game build";
+        else if (!emf::seh_read(reinterpret_cast<const uint8_t*>(clr.addr) + 15, &count_off, 4) || count_off < 0x1000 ||
+                 count_off > 0x1000000)
+            mk.list_why = "the map list's offset could not be read from the game's code";
+        else if (!g_state->programs)
+            mk.list_why = "program hooks are not available";
+        if (mk.list_why.empty()) {
+            mk.list_count_off = count_off;
+            g_state->reserved_programs.push_back("clear_map_markers_for_ui");
+            g_state->programs->request_hook(
+                "clear_map_markers_for_ui", [](void* ctx, void*) { emf::core::markers_map_pre(ctx); },
+                [](void* ctx, void*) { emf::core::markers_map_post(ctx); }, nullptr);
+        }
+        if (mk.world_why.empty())
+            emf::logf("markers: world on (camera block at +0x%x); the game's map list %s", view_off,
+                      mk.list_why.empty() ? "on" : ("off (" + mk.list_why + ")").c_str());
+        else
+            emf::logf("markers: drawing off (%s); marker_send works", mk.world_why.c_str());
+        if (!emf::core::add_marker_commands(g_state->commands)) emf::logf("commands: the markers commands could not be added");
+    }
     // teleport: an internal server program pushes the game's add-Teleport record (docs/engine_parts/re_teleport.md).
     {
         const auto& qp = g_state->sigs[static_cast<size_t>(emf::Sig::QueuePush)];
@@ -1472,6 +1515,14 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         if (g_inventory && emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER)
             g_inventory->on_server_tick(w);
     }, nullptr);
+    // v33 markers: the client world's UiPlayData, local player and followed entities; the server's followed positions.
+    g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
+        const uint8_t kind = emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind();
+        if (kind == EMF_WORLD_CLIENT)
+            emf::core::markers_client_tick(w);
+        else if (kind == EMF_WORLD_SERVER)
+            emf::core::markers_server_tick(w);
+    }, nullptr);
     // v32 buffs: the emf_buffs watchdog and the players' buff events after each server step.
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
         if (emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() != EMF_WORLD_SERVER) return;
@@ -1551,6 +1602,29 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         };
         std::string why;
         if (!net->add_channel("emf", c, &why)) emf::logf("mods check: off (%s)", why.c_str());
+        // v33 markers: a server's markers for players' games
+        emf::core::net::ChannelDef mc;
+        mc.name = emf::core::kMarkersChannel;
+        mc.version = emf::core::kMarkersChannelVersion;
+        mc.flags = emf::core::net::kToPlayers;
+        mc.max_size = emf::core::net::kMaxMessage;
+        mc.on_player = [](EmfWorld*, const emf::core::net::NetFrom&, const std::string& d) {
+            g_state->markers.receiver.on_message(d, g_state->markers.store);
+        };
+        std::string mwhy;
+        if (net->add_channel("emf", mc, &mwhy)) {
+            g_state->markers.receiver = emf::core::MarkerReceiver([](const std::string& l) { emf::logf("%s", l.c_str()); });
+            g_state->markers.sender = std::make_unique<emf::core::MarkerSender>(
+                [](uint32_t player, const std::string& d) -> uint32_t {
+                    if (!g_state->net) return 0;
+                    if (player == 0) return g_state->net->to_players("emf", emf::core::kMarkersChannel, d);
+                    std::string w;
+                    return g_state->net->to_player("emf", player, emf::core::kMarkersChannel, d, &w) ? 1u : 0u;
+                },
+                [](const std::string& l) { emf::logf("%s", l.c_str()); });
+        } else {
+            emf::logf("markers: marker_send off (%s)", mwhy.c_str());
+        }
         // a game's new hello (or its leaving) ends the list it sent before: only the new one counts
         net->set_peer_watch([](uint64_t account, bool) {
             if (g_mods_check) g_mods_check->forget(account);
@@ -1561,7 +1635,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             static std::atomic<bool> yes{false};
             const uint64_t now = GetTickCount64();
             if (now - at.load() >= 2000) {
-                yes = g_mods_refuse || (g_mods_check && g_mods_check->has_shared_mods());  // refuse asks every game
+                yes = g_mods_refuse || (g_mods_check && g_mods_check->has_shared_mods()) ||  // refuse asks every game
+                      (g_state->markers.sender && g_state->markers.sender->any_sent());  // a mod sent markers
                 at = now;
             }
             return yes.load();
@@ -1791,6 +1866,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             deps.mods = &g_state->mods;
             deps.settings = g_state->settings.get();
             deps.hud_editor = g_hud_editor.get();
+            deps.markers = &g_state->markers.store;
             if (emf::core::start_overlay(cfg, std::move(deps))) {
                 g_state->open_wheel = [](const emf::core::WheelRequest& r) {
                     const bool ok = emf::core::overlay_open_wheel(r);
