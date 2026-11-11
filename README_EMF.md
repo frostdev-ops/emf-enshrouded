@@ -122,6 +122,12 @@ that it did not load (select it to see why); the colours are for this game start
 
 ### Linux and the Steam Deck (Proton)
 
+`install.cmd` does not run on Linux: copy by hand. Copy everything inside the zip's `game` folder into the game folder,
+next to `enshrouded.exe`: `dinput8.dll` and the whole `emf` folder with all its subfolders. One mod's folder alone is not
+enough: the Lua mods (Beastmaster, Necromancer, Kill Counter, ...) run through the `lua` mod in `emf\mods\lua`.
+The creature packs (a separate download) go into the `mods` folder next to `enshrouded.exe` (with ShroudForge or EML
+installed, those load them; otherwise EMF builds them when the game starts).
+
 Proton loads its own `dinput8.dll` unless told otherwise. In Steam, open the game's **Properties**, and under
 **Launch options** put:
 

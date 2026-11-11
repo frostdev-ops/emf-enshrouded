@@ -8,6 +8,9 @@ FOR PLAYERS
 3. Double-click install.cmd. It finds the game through Steam and copies EMF and its mods next to enshrouded.exe.
    Game somewhere Steam does not know? Drag the game folder (the one with enshrouded.exe) onto install.cmd.
    With the mod manager (EMF.exe), it asks once whether to put a shortcut to EMF.exe on your desktop (Enter = yes).
+   Linux or Steam Deck: install.cmd does not run there. Copy everything inside this zip's game folder (dinput8.dll and
+   the whole emf folder with all its subfolders) next to enshrouded.exe, and in Steam put  WINEDLLOVERRIDES="dinput8=n,b"
+   %command%  into the game's Properties > Launch options. README_EMF.md's Linux section has more.
 4. Start the game normally. The key under Esc opens the EMF console; type  help  to see every command. Suggestions
    pop up as you type: Tab or Right takes one, Up/Down pick another, Esc hides them.
    Nothing happens, or Discord's overlay opens too? Discord's overlay lock is often Shift and the key under Esc:
