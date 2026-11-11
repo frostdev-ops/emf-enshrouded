@@ -360,8 +360,8 @@ with no script call per hit; `emf.on_hit` sees hits after they landed. See lua.m
 
 ```lua
 -- God mode for one player: a hit cannot take their last point of health (or use cancel = true to drop every hit).
-local god = emf.hit_rule{to = player_id, min_health = 1}
--- emf.hit_rule_remove(god) when it ends. All rules of this script go when it reloads or pauses.
+-- Keep the id and call emf.hit_rule_remove(id) when it ends. All rules of this script go when it reloads or pauses.
+local function god_mode(player) return emf.hit_rule{to = player, min_health = 1} end
 
 -- Who is on the server: the player events (the host's own player too).
 local online, count = {}, 0
@@ -371,6 +371,7 @@ emf.on_player_left(function(world, p) if online[p.player] then count = count - 1
 -- PvP off inside a zone (a square here): a rule per player while they are inside, removed when they leave it.
 local rules = {}   -- player id -> rule id
 emf.on_tick(function(world)
+  if not world:is_server() then return end
   for id in pairs(online) do
     local x, y, z = world:position(id)
     local inside = x and math.abs(x - 100) < 50 and math.abs(z - 200) < 50
@@ -395,11 +396,13 @@ end)
 -- Creatures hit players softer when more players are on the server: replace the rule when the count changes.
 local scale_rule, scaled_for = nil, 0
 emf.on_tick(function(world)
-  if count ~= scaled_for then
-    if scale_rule then emf.hit_rule_remove(scale_rule) end
-    scale_rule = emf.hit_rule{from = "creatures", to = "players", scale = 1 / math.max(count, 1)}
-    scaled_for = count
+  if not world:is_server() or count == scaled_for then return end
+  if scale_rule then emf.hit_rule_remove(scale_rule) end
+  scale_rule = nil
+  if count > 1 then  -- a rule with scale 1 does nothing and is refused
+    scale_rule = emf.hit_rule{from = "creatures", to = "players", scale = 1 / count}
   end
+  scaled_for = count
 end)
 ```
 
