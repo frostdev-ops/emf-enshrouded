@@ -944,6 +944,64 @@ api()->marker_send(0, &m, 1);  // on the server: every player with EMF sees it
 Console: `markers` (what is there, whether drawing and the game's map list are on), `markers.test [text] [game icon]`
 (a marker 10 m ahead of you; `markers.test clear` removes it).
 
+## v34: the map screen's mouse, map actions, the ground
+
+Players can act on the game's world map, and a server mod can find the ground under a spot.
+
+- `map_cursor` and `on_map_click` are for the game the mod runs in. They work while the game's map screen is open. The
+  game gets the click too. `on_map_click` calls come on the render thread: keep them short and do not call the game.
+- `map_action` is for the server end (the host's game or the dedicated server). A map action is something players do by
+  holding Shift and the left mouse button on their map for `hold_ms` (0 = 1000 ms, at most 10000); a ring fills at the
+  mouse, and the game does not get that click. EMF on each player's game does the gesture and sends the spot over its
+  core channel `emf/mapact` (mod messages), so a player needs EMF on their game, not the mod. The callback runs on the
+  server world's thread.
+- v34 has one gesture: only the FIRST announced action is what Shift + hold does. While no server end has an action,
+  Shift + clicks stay the game's.
+- The server checks every spot: inside 0..10240, a known action, and at most 20 per player in 10 s.
+- `ground_at` (server world only) finds the ground under a spot with the game's voxel ray after the next server steps
+  (two readings that agree), so an answer may take a few seconds. The callback runs once on the server world's thread.
+- Caps: 16 `on_map_click` listeners, 16 map actions, 64 `ground_at` requests waiting. Ids are 1-48 of `A-Z a-z 0-9 _ . - :`.
+
+| C | C++ | What |
+|---|---|---|
+| `map_cursor(&x, &z)` | `api()->map_cursor(&x, &z)` | the world x, z under the mouse while the map is open; false when it is not, or the mouse is off the map. |
+| `on_map_click(cb, user)` | | `cb(const EmfMapClick*, user)` for each click on this game's map screen. False for a null `cb` or 16 listeners already. |
+| `map_action(id, label, hold_ms, cb, user)` | | server end: adds a map action. The same id again replaces it; a null `cb` removes the caller's action with that id (false: it had none). False for a bad id, 16 actions already, or no mod messages on this game build. |
+| `ground_at(world, x, z, cb, user)` | | server world: the ground under (x, z), once. False when refused at once: not the server world, outside the world, 64 waiting, or not available on this game build. |
+| | `emf::has_v34()` | true when the core has these functions. |
+
+`EmfMapClick` (`size`, then): `button` (0 left, 1 right), `mods` (`EMF_MAP_SHIFT` 1, `EMF_MAP_CTRL` 2, `EMF_MAP_ALT` 4),
+`x`, `z` (world metres).
+
+`EmfMapDone` (`size`, then): `player` (their entity in the server world), `admin` (1 = the host's own game, or an account
+in `[chat] admins`; also 1 for everyone when `everyone=1`; it is the server's own view, never taken from the message),
+`x`, `z` (inside the world), `action` (the id; valid during the callback).
+
+`EmfGround` (`size`, then): `status`, `x`, `y`, `z`, `hop_y`, `why` (valid during the callback). `status` is
+`EMF_GROUND_OK` (0: `y` is the ground), `EMF_GROUND_NOT_LOADED` (1: nobody is near the spot; `hop_y` is a height over it
+where a player may be teleported so the game loads the place; ask again once they are there) or `EMF_GROUND_FAILED` (2:
+`why` says why).
+
+```cpp
+static void on_ground(EmfWorld*, const EmfGround* g, void* user) {
+    uint32_t player = (uint32_t)(uintptr_t)user;
+    if (g->status == EMF_GROUND_OK)
+        EMF_LOG("mymod", "ground at %.0f %.0f is %.1f (asked by %u)", g->x, g->z, g->y, player);
+    else
+        EMF_LOG("mymod", "no ground: %s", g->status == EMF_GROUND_FAILED ? g->why : "not loaded");
+}
+static void on_ping(EmfWorld* w, const EmfMapDone* d, void*) {
+    api()->ground_at(w, d->x, d->z, on_ground, (void*)(uintptr_t)d->player);
+}
+// at load, in the server end:
+api()->map_action("ping", "Ping here", 800, on_ping, nullptr);
+```
+
+Console: `map.where` (runs anywhere, also on a game you joined: the world spot under the mouse on the open map, and whether
+this game's server offers a map action) and `ground <x> <z>` (needs a world you host: the ground's height at that spot;
+the answer follows a moment later). The Teleports mod uses a map action: see `mods/teleports/README.md`, "Teleport by the
+map".
+
 ## SDK headers (header-only C++, no ABI)
 
 | Header | What |

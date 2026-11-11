@@ -522,6 +522,39 @@ emf.on_hit(function(world, hit)
 end)
 ```
 
+## Ping a spot for everyone
+
+Players hold Shift and the left mouse button on their map; every player gets a "Ping" marker there for 30 seconds. It
+needs EMF on the players' games (not your mod), Lua 1.26 and a server world (a game you host or a dedicated server).
+
+```lua
+local pings = {}  -- id -> time it ends
+local n = 0
+
+emf.map_action("ping", {label = "Ping here", hold_ms = 600}, function(world, player, x, z, admin)
+  emf.ground_at(world, x, z, function(world, ok, gx, gy, gz, why)
+    n = n + 1
+    local id = "ping" .. n
+    emf.send_marker(nil, id, {x = x, z = z, y = ok and gy or 0, text = "Ping", game_map = true, edge_arrow = true})
+    pings[id] = os.time() + 30
+  end)
+end)
+
+emf.on_tick(function(world)
+  if not world:is_server() then return end
+  local now = os.time()
+  for id, ends in pairs(pings) do
+    if now >= ends then
+      emf.unsend_marker(nil, id)
+      pings[id] = nil
+    end
+  end
+end)
+```
+
+When the ground is not found, the marker is placed at height 0 here; you could skip it instead. `emf.ground_at` is
+described in lua.md, "The map (1.26)".
+
 ## Run code before or after one of the game's programs
 
 ```cpp

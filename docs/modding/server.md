@@ -149,6 +149,12 @@ A server mod puts markers on players' games with `marker_send` (Lua `emf.send_ma
 map. EMF on the player's game draws them, so a player needs EMF (not the mod); players without EMF see nothing. The
 server itself draws nothing. Beastmaster's beast and stable markers (off at the start) work this way.
 
+### Map actions (EMF API v34)
+
+A server mod adds a map action with `map_action` (Lua `emf.map_action`): players hold Shift and the left mouse button on
+their map. EMF on the player's game does the gesture, so a player needs EMF (not the mod); players without EMF cannot
+use it. Teleports' map teleport works this way, so it needs EMF on the player's game too; `/tp.mark` works without.
+
 ### In a game you host
 
 Your own `/commands` already work from your chat (the client side, `[overlay] chat=1`). To let your friends run

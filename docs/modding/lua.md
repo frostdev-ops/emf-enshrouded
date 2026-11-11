@@ -43,7 +43,7 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    E prompts (`emf.offer`, `emf.spawn_offer`, `emf.offer_remove`; EMF API v25): depend on `">=1.14"`. 1.15 adds
    pictures in windows (`emf.image`, the `image`, `icon`, `fps` and `height` row fields; EMF API v26): depend on
    `">=1.15"`. 1.17 adds the inter-mod message bus (`emf.bus.subscribe`, `.publish`, `.unsubscribe`): mods using it
-   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. 1.23 adds hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`; EMF API v31): depend on `">=1.23"`. 1.24 adds buffs (`emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff`; EMF API v32): depend on `">=1.24"`. Ranges are explained in
+   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. 1.23 adds hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`; EMF API v31): depend on `">=1.23"`. 1.24 adds buffs (`emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff`; EMF API v32): depend on `">=1.24"`. 1.25 adds markers (`emf.marker`, `emf.send_marker` and more; EMF API v33): depend on `">=1.25"`. 1.26 adds the map (`emf.map_cursor`, `emf.on_map_click`, `emf.map_action`, `emf.remove_map_action`, `emf.ground_at`; EMF API v34): depend on `">=1.26"`. Ranges are explained in
    [guide.md](guide.md), "Dependencies and version ranges".)
 
 3. Put `main.lua` next to it:
@@ -159,6 +159,9 @@ right away.
 | `emf.marker(id, spec)` / `emf.remove_marker(id)` / `emf.clear_markers()` | (1.25) a marker over the 3D view and on the map on this game. See "Markers" below |
 | `emf.send_marker(player, id, spec)` / `emf.unsend_marker(player, id)` | (1.25) server: a marker on a player's game (nil: every player's); players need EMF |
 | `emf.world_to_screen(x, y, z)` / `emf.marker_types()` | (1.25) a world point in display pixels (or nil) / the game's map icon types seen in this world |
+| `emf.map_cursor()` / `emf.on_map_click(fn)` | (1.26) the world spot under the mouse on the open map (or nil) / a function for clicks on the map. See "The map" below |
+| `emf.map_action(id, opts, fn)` / `emf.remove_map_action(id)` | (1.26) server: something players do on their map by holding Shift and the left mouse button; players need EMF |
+| `emf.ground_at(world, x, z, fn)` | (1.26) server world: the ground height under a spot, answered a moment later |
 | `emf.on_player_joined(fn)`, `emf.on_player_left(fn)`, `emf.on_player_died(fn)` | (1.20) `fn(world, p)` on the server world, `p` = `{player, account, name, host, killer}` (`killer`: died only, the last hitter within 10 s or 0). All join 1 s after the world data; died needs the call in the first run. False on an older core (reference.md "v28") |
 | `emf.net.channel(name, def)` | (1.19) a message channel `"<mod id>/<name>"`: `def` = `{version, to = "server" \| "players" \| "both", max, per_10s, on_server = fn(world, from, data), on_player = fn(world, from, data)}`; `from` = `{player, account, admin, is_local, version}`. A reload binds the new functions; a new version needs a restart. In process, and to joined players and the server over the chat (reference.md "v27") |
 | `emf.net.send(name, data)`, `.send_to(world, player, name, data)`, `.send_all(world, name, data)`, `.peer(world, player, name)` | (1.19) to the server (true: sent) / to one player's game / to all with the channel (count) / that game's channel version (`peer(nil, 0, name)`: the server's; 0 = none) |
@@ -465,6 +468,36 @@ emf.unsend_marker(player, "pet")
 | `game_icon` | with `game_map`: one of the game's map icons (a type from `emf.marker_types`) instead of the shape |
 | `edge_arrow` | an arrow at the screen's edge when it is behind you or off screen (default false) |
 | `max_distance` | fades out toward it and is hidden beyond (default: no limit; the map shows it anyway) |
+
+## The map (1.26)
+
+Players can act on the game's world map. `emf.map_cursor` and `emf.on_map_click` are for the game your mod runs in. A
+map action is for a server (a game you host or the dedicated server): players hold Shift and the left mouse button on
+their map, and your function gets the spot. Players need EMF on their game, not your mod. Details:
+[reference.md](reference.md), "v34".
+
+```lua
+emf.map_action("height", {label = "Ground height", hold_ms = 800}, function(world, player, x, z, admin)
+  emf.ground_at(world, x, z, function(world, ok, gx, gy, gz, why, hop_y)
+    if ok then
+      emf.tell(world, player, string.format("The ground at %d, %d is %.1f m up.", gx, gz, gy))
+    else
+      emf.log("no ground at", x, z, why)
+    end
+  end)
+end)
+```
+
+| Function | What |
+|---|---|
+| `emf.map_cursor()` | `x, z` in world metres under the mouse while the map is open, else nil |
+| `emf.on_map_click(fn)` | `fn(world, click)` on the client world's next step after a click on the map (Lua never runs on the render thread); `click` = `{button = "left" \| "right", shift, ctrl, alt, x, z}`. true when the core listens |
+| `emf.map_action(id, opts, fn)` | server: adds a map action. `opts` is nil or `{label = text, hold_ms = number}` (an unknown key is an error). `fn(world, player, x, z, admin)` runs on the server world; `player` is their entity, `admin` is true for the host or an admin. The core id is `"<mod id>:<id>"`. true when taken |
+| `emf.remove_map_action(id)` | true when your script had that action |
+| `emf.ground_at(world, x, z, fn)` | server world: the ground under the spot. `fn(world, ok, x, y, z, why, hop_y)` once, a few seconds at most; `hop_y` is a number only when the place is not loaded (nobody is near; teleport a player to that height over it, then ask again), else nil. true when asked |
+
+Only the first action announced to the players is what Shift + hold does. Your map actions go when your script reloads,
+pauses or unloads; your click functions stop then too.
 
 ## Worlds and components
 

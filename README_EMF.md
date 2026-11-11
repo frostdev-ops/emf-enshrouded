@@ -414,6 +414,8 @@ end the game; use `commands.txt` then.)
 | `buffs.list [food\|buff\|debuff\|rested\|terrain] [text]` | the game's buff types with their ids (API v32) |
 | `markers` | the markers this game draws (by mod, and those a server sent), and whether drawing and the game's map list are on (API v33) |
 | `markers.test [text] [game icon]` | a marker 10 m ahead of you, over the world and on the map; `markers.test clear` removes it |
+| `map.where` | the world spot under the mouse on the open map, and whether this game's server offers a map action (API v34); runs anywhere, also on a game you joined |
+| `ground <x> <z>` | the ground's height at that spot (API v34); needs a world you host, the answer follows a moment later |
 | `buffs.of [entity]` | an entity's active buffs (default entity 1) |
 | `buffs.give <entity> <type id> [seconds]` | gives a buff on the server world; answers "queued", the result is logged after the step. Ids are hex (`0xAC13C6C3`) or decimal |
 | `buffs.clear <entity> <type id>` | removes a buff the game's way (a cleanse) |
