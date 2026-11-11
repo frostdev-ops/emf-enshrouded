@@ -472,7 +472,7 @@ local function list(world, player)
   end
 end
 
--- Hear the players' buff changes (a buff given and removed within a quarter second is not seen).
+-- Hear the players' buff changes (compared after every server step).
 emf.on_buff(function(world, ev)
   if ev.kind == "removed" and ev.type == ELIXIR and not ev.cleansed then
     emf.tell(world, ev.target, "The Elixir wore off.", {system = true})

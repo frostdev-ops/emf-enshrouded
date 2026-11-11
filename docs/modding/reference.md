@@ -847,8 +847,9 @@ target), `EMF_BUFF_FOOD_POISON` 0x08, `EMF_BUFF_SHOW_AS_TAG` 0x10 (shown as a ta
 whole time) and `remaining_ns` (the time left); both -1 when not known yet (the step it was given).
 
 `EmfBuffEvent` (`size`, then): `kind` (`EMF_BUFF_APPLIED` 1, `_REFRESHED` 2, `_REMOVED` 3, `_REFUSED` 4), `target` (the
-entity that has or had the buff), `type`, `buff_entity` (0 when refused), `slot`, `cleansed` (REMOVED: 1 when removed by
-a mod, a potion or a spell; 0 when it ended or was replaced), `total_ns` and `remaining_ns` (-1 = not known),
+entity that has or had the buff), `type`, `buff_entity` (0 when refused), `slot`, `cleansed` (REMOVED: 1 when it was
+cleansed: always for a mod's buff_remove, for the game's own cleanses when EMF saw the mark; 0 when it ended or was
+replaced), `total_ns` and `remaining_ns` (-1 = not known),
 `why` (REFUSED: the reason, valid during the callback; else NULL).
 
 **Names.** Mods should store ids, not names. Names repeat ("Burning" is ten types) and change with the language. The
@@ -871,9 +872,9 @@ requests waiting.
 - Giving a type that is already there follows the type's `apply_type`: its timer starts again, a new buff replaces the
   old one, or the request is refused.
 
-**Events.** `on_buff` covers players only. After each server step EMF compares their buffs with the step before, at
-most 4 times a second, so a buff given and removed within a quarter second is not seen. The first sight of a player (a
-new world, a join) says nothing. A buff counts as `REFRESHED` when its end moved later by more than a second (rain
+**Events.** `on_buff` covers players only. After each server step EMF compares their buffs with the step before (the
+player list itself is read at most 4 times a second, so a player who just joined is compared within a quarter second).
+The first sight of a player (a new world, a join) says nothing. A buff counts as `REFRESHED` when its end moved later by more than a second (rain
 gives Wet again every step, so only a move that large counts).
 
 Works on game build 1287369 (game and dedicated server). When the game's buff code cannot be found on a build,

@@ -196,14 +196,18 @@ void buffs_server_step(EmfWorld* w) {
     }
     if (watchers.empty()) return;
     const uint64_t now = s->now_ms ? s->now_ms() : GetTickCount64();
-    if (s->buff_diff_ms && now - s->buff_diff_ms < kBuffDiffMs) return;
-    s->buff_diff_ms = now;
-    std::vector<uint32_t> players;
-    if (s->buff_players) {
-        players = s->buff_players(w);
-    } else {
-        for (const auto& p : read_players(api_table(), w)) players.push_back(p.entity);
+    if (!s->buff_diff_ms || now - s->buff_diff_ms >= kBuffDiffMs) {
+        s->buff_diff_ms = now;
+        std::vector<uint32_t> list;
+        if (s->buff_players) {
+            list = s->buff_players(w);
+        } else {
+            for (const auto& p : read_players(api_table(), w)) list.push_back(p.entity);
+        }
+        s->buff_player_list = std::move(list);
+        s->buff_diff.retain(s->buff_player_list);
     }
+    const std::vector<uint32_t>& players = s->buff_player_list;
     const int64_t ecs_now = api_table()->ecs_time_ns(w);
     std::vector<EmfBuffEvent> events;
     for (uint32_t p : players) {
@@ -214,7 +218,6 @@ void buffs_server_step(EmfWorld* w) {
         }
         for (const auto& e : s->buff_diff.step(p, box, &net_of, w, ecs_now)) events.push_back(e);
     }
-    s->buff_diff.retain(players);
     for (const auto& e : events)
         for (auto& x : watchers) {
             if (!x.on) continue;
@@ -230,6 +233,7 @@ void buffs_server_step(EmfWorld* w) {
 void buffs_new_session() {
     if (CoreState* s = core_state()) {
         s->buff_diff.reset();
+        s->buff_player_list.clear();
         s->buff_diff_ms = 0;
     }
 }

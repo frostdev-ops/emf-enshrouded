@@ -159,6 +159,7 @@ struct CoreState {
     std::mutex buff_watchers_lock;
     std::vector<BuffWatcher> buff_watchers;  // on_buff (at most 16; only appended to)
     BuffDiff buff_diff;                      // the players' containers at the last comparison (server world thread)
+    std::vector<uint32_t> buff_player_list;  // the players compared each step (read again every kBuffDiffMs)
     uint64_t buff_diff_ms = 0;
     std::function<std::vector<uint32_t>(EmfWorld*)> buff_players;  // the server world's players (empty: the roster)
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them
@@ -250,8 +251,8 @@ bool api_on_buff(EmfBuffCallback cb, void* user);
 bool buff_request(BuffRequest r, std::string* why);
 // A buff type's name in the player's language ("" on the dedicated server or for a type without one).
 std::string buff_name(EmfWorld* w, uint32_t id);
-// After each server step: the players' buff changes for on_buff (compared at most every kBuffDiffMs, only while a
-// callback listens).
+// After each server step: the players' buff changes for on_buff (their containers compared every step while a callback
+// listens, so a cleanse is seen for the one step it lasts; the player list read at most every kBuffDiffMs).
 constexpr uint64_t kBuffDiffMs = 250;
 void buffs_server_step(EmfWorld* w);
 void buffs_new_session();  // a new server world: every player is a first sight again

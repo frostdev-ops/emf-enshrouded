@@ -90,9 +90,10 @@ void set_net(uint32_t buff_entity, int64_t life, int64_t end, uint32_t type, uin
 
 struct Seen {
     uint32_t kind, target, type;
+    uint8_t cleansed;
 };
 std::vector<Seen> g_seen;
-void on_buff_cb(EmfWorld*, const EmfBuffEvent* e, void*) { g_seen.push_back({e->kind, e->target, e->type}); }
+void on_buff_cb(EmfWorld*, const EmfBuffEvent* e, void*) { g_seen.push_back({e->kind, e->target, e->type, e->cleansed}); }
 void faulting_cb(EmfWorld*, const EmfBuffEvent*, void*) { *static_cast<volatile int*>(nullptr) = 1; }
 
 struct Fixture {
@@ -195,7 +196,7 @@ TEST_CASE("api v32: buff_apply and buff_remove: the server world only, a known t
     CHECK_FALSE(api->buff_apply(f.w(), 1, kWet, 0, 0, 0, nullptr, nullptr));
 }
 
-TEST_CASE("api v32: on_buff: the first comparison says nothing, then applied, removed; 4 times a second at most") {
+TEST_CASE("api v32: on_buff: the first comparison says nothing, then applied, removed") {
     Fixture f;
     const EmfApi* api = api_table();
     set_buff(1, 0xF0, 0, 900, kWet);
@@ -204,10 +205,7 @@ TEST_CASE("api v32: on_buff: the first comparison says nothing, then applied, re
     buffs_server_step(f.w());
     CHECK(g_seen.empty());
     set_buff(1, 0x30, 0, 901, kElixir);
-    g_now += 100;
-    buffs_server_step(f.w());  // within 250 ms: not compared yet
-    CHECK(g_seen.empty());
-    g_now += 200;
+    g_now += 16;
     buffs_server_step(f.w());
     REQUIRE(g_seen.size() == 1);
     CHECK(g_seen[0].kind == EMF_BUFF_APPLIED);
@@ -262,4 +260,30 @@ TEST_CASE("buff lines: a type and an active buff as the console shows them") {
     b.remaining_ns = b.total_ns = -1;
     b.cleansed = 1;
     CHECK(buff_line(b, "") == "0xAC13C6C3 debuff -: time not known yet (entity 900), being removed");
+}
+
+TEST_CASE("api v32: on_buff compares every step: a cleanse seen for one step is removed with cleansed 1; the player list is read 4 times a second") {
+    Fixture f;
+    static int reads = 0;
+    reads = 0;
+    f.state.buff_players = [](EmfWorld*) {
+        ++reads;
+        return std::vector<uint32_t>{1};
+    };
+    set_buff(1, 0x30, 0, 901, kElixir);
+    REQUIRE(api_table()->on_buff(on_buff_cb, nullptr));
+    buffs_server_step(f.w());  // first sight
+    container(1)[0x30 + 8] = 1;  // cleansed by a mod in this step
+    g_now += 16;
+    buffs_server_step(f.w());
+    set_buff(1, 0x30, 0, 0, 0);  // the game clears the slot the next step
+    g_now += 16;
+    buffs_server_step(f.w());
+    REQUIRE(g_seen.size() == 1);
+    CHECK(g_seen[0].kind == EMF_BUFF_REMOVED);
+    CHECK(g_seen[0].cleansed == 1);
+    CHECK(reads == 1);  // the player list once in these 32 ms
+    g_now += 300;
+    buffs_server_step(f.w());
+    CHECK(reads == 2);
 }

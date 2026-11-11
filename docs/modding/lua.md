@@ -403,7 +403,7 @@ a food buff takes its stats and time from; without it a food buff likely has no 
 | `kind` | `"applied"`, `"refreshed"`, `"removed"` or `"refused"` (results are `"applied"`, `"removed"` or `"refused"`) |
 | `target`, `type`, `name`, `slot` | the entity, the type, its text (nil on a dedicated server) and its slot |
 | `buff_entity` | the buff's own entity (0 when refused) |
-| `cleansed` | `"removed"`: true when a mod, a potion or a spell removed it; false when it ended or was replaced |
+| `cleansed` | `"removed"`: true when it was cleansed (always for `emf.remove_buff`; the game's own cleanses when EMF saw the mark); false when it ended or was replaced |
 | `seconds_left` | the time left; nil when not known |
 | `why` | `"refused"` only: the reason, for example "the target does not have it" |
 
@@ -412,8 +412,8 @@ the target is dead; no free slot of that group; already there and this type cann
 have it (remove); not the server world; giving not available on this game build; 64 requests waiting.
 
 `emf.on_buff(fn)`: `fn(world, ev)` after the server step for every change of a **player's** buffs, whoever made it (a
-mod, a potion, food, rain, the end of the time). It compares after each step, at most 4 times a second, so a buff given
-and removed within a quarter second is not seen. The first sight of a player (a new world, a join) says nothing.
+mod, a potion, food, rain, the end of the time). It compares after each step with the step before (a player who just
+joined is compared within a quarter second). The first sight of a player (a new world, a join) says nothing.
 `"refreshed"`: its end moved later by more than a second. Returns true, or false on an older core.
 
 Recipes: [cookbook.md](cookbook.md), "Buffs".
