@@ -50,6 +50,9 @@ enum class Sig : size_t {
     PanelLayerOpen,
     // buffs (API v32): the game's applyBuffCore, called inside EMF's emf_buffs program (game and dedicated server)
     ApplyBuffCore,
+    // markers (API v33), client only: guards that prove the UI camera block (UiPlayData+0x1d20, the projection at +0x40)
+    // and the game's map marker list and entry layout; the camera and list displacements are read from the match
+    UiCameraBlock, MapMarkerSliceClear, MapMarkerEntryLayout, MapMarkerEntryLabel,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

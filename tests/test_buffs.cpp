@@ -89,7 +89,7 @@ BuffNet net_of(uint32_t e, void*) {
 }  // namespace
 
 TEST_CASE("buff api: v32 layouts") {
-    CHECK(EMF_API_VERSION == 32);
+    CHECK(EMF_API_VERSION >= 32);
     CHECK(sizeof(EmfBuffType) == 40);
     CHECK(offsetof(EmfBuffType, default_ns) == 16);
     CHECK(offsetof(EmfBuffType, name_tag) == 28);

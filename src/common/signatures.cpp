@@ -209,6 +209,18 @@ constexpr SigDef kSignatures[] = {
     // panel_tint_2026-11-11 section 5).
     {Sig::PanelLayerOpen, "PanelLayerOpen", "4C 8B 88 C8 00 00 00 48 8D 44 24 40 48 89 44 24 28 C6 44 24 20 01 4D 8B 89 F8 DB 00 00 E8", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xa3c8b0u, 0u}, false, 0x1d, "4C 8B DC 53 48 81 EC A0 00 00 00 33 C0 48 89 54 24 20"},
     {Sig::ApplyBuffCore, "ApplyBuffCore", "48 8B C4 48 89 58 10 4C 89 48 20 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 B8 FA FF FF 48 81 EC 10 06 00 00 4C 8B A5 70 05 00 00 49 8B F1 0F 29 70 B8 41 8B D8 0F 29", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x3b3540u, 0x15e130u}, false},
+    // Markers (API v33, private research markers_2026-11-11 6.2), client only, checked on 1287369 alone. Guards, not
+    // functions: each match is inside a function, and EMF reads the displacements it needs from the matched bytes.
+    // The in-world waypoint marker's call of worldToUi: `add r8, 0x1d20 (view, masked) ... lea r9, [r8+0x40]
+    // (projection) ... call worldToUi`.
+    {Sig::UiCameraBlock, "UiCameraBlock", "49 81 C0 ?? ?? ?? ?? 89 45 80 48 8D 46 10 49 8B CA 0F 11 4C 24 70 48 89 44 24 20 4D 8D 48 40 E8", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xcf239fu, 0u}, false},
+    // clear_map_markers_for_ui's end: the three map marker lists' counts set to 0 (the main list's count at +0x36ea08 is
+    // the first displacement, masked; its data pointer is 8 bytes before it and its capacity 8 bytes after).
+    {Sig::MapMarkerSliceClear, "MapMarkerSliceClear", "E8 ?? ?? ?? ?? 48 8B 44 24 28 33 C9 48 89 88 ?? ?? ?? ?? 48 89 88 ?? ?? ?? ?? 48 89 88 ?? ?? ?? ?? 48", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x30447fu, 0u}, false},
+    // replicate_map_markers_for_ui filling an entry (0xA0 bytes): label tag at +0x08, position at +0x10, visibility 2 at
+    // +0x34; then the label's pointer and length at +0x50 and its hash at +0x60.
+    {Sig::MapMarkerEntryLayout, "MapMarkerEntryLayout", "89 46 08 0F 10 07 0F 11 46 10 F2 0F 10 4F 10 F2 0F 11 4E 20 C6 46 34 02 4C 8B 54 24", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x316534u, 0u}, false},
+    {Sig::MapMarkerEntryLabel, "MapMarkerEntryLabel", "0F 11 4E 50 F2 0F 11 46 60 48 8B 44 24", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x31684du, 0u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

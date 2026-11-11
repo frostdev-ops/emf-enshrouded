@@ -975,6 +975,9 @@ inline bool remove_hit_rule(uint32_t id) { return has_v31() && api()->hit_rule_r
 // ---- v32: buffs (buff_types, buff_type, buff_text, buffs_of, buff_apply, buff_remove, on_buff through api()) ----
 inline bool has_v32() { return api() && api()->size >= offsetof(EmfApi, on_buff) + sizeof(api()->on_buff); }
 
+// ---- v33: markers (marker_set ... marker_unsend through api()) ----
+inline bool has_v33() { return api() && api()->size >= offsetof(EmfApi, marker_unsend) + sizeof(api()->marker_unsend); }
+
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
 inline bool request_save() { return has_v19() && api()->request_save && api()->request_save(); }
 

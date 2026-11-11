@@ -47,6 +47,7 @@ constexpr uint32_t kApiV29Size = EMF_FIELD_END(EmfApi, game_language);
 constexpr uint32_t kApiV30Size = EMF_FIELD_END(EmfApi, chat_broadcast_ex);
 constexpr uint32_t kApiV31Size = EMF_FIELD_END(EmfApi, hit_rule_remove);
 constexpr uint32_t kApiV32Size = EMF_FIELD_END(EmfApi, on_buff);
+constexpr uint32_t kApiV33Size = EMF_FIELD_END(EmfApi, marker_unsend);
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
@@ -119,8 +120,15 @@ static_assert(offsetof(EmfApi, player_character_name) == kApiV29Size && offsetof
 static_assert(offsetof(EmfApi, on_hit) == kApiV30Size && offsetof(EmfApi, hit_rule_add) == 792 && kApiV31Size == 808,
               "EmfApi layout (v31 appends on_hit, on_hit_before, hit_rule_add, hit_rule_remove)");
 static_assert(offsetof(EmfApi, buff_types) == kApiV31Size && offsetof(EmfApi, buff_apply) == 840 &&
-                  kApiV32Size == 864 && sizeof(EmfApi) == kApiV32Size,
+                  kApiV32Size == 864,
               "EmfApi layout (v32 appends buff_types, buff_type, buff_text, buffs_of, buff_apply, buff_remove, on_buff)");
+static_assert(offsetof(EmfApi, marker_set) == kApiV32Size && kApiV33Size == 920 && sizeof(EmfApi) == kApiV33Size,
+              "EmfApi layout (v33 appends marker_set, marker_remove, marker_clear, marker_types, world_to_screen, "
+              "marker_send, marker_unsend)");
+static_assert(sizeof(EmfMarker) == 80 && offsetof(EmfMarker, text) == 40 && offsetof(EmfMarker, flags) == 64 &&
+                  offsetof(EmfMarker, game_icon) == 72,
+              "EmfMarker layout (v33)");
+static_assert(sizeof(EmfMapMarkerType) == 64 && offsetof(EmfMapMarkerType, name) == 16, "EmfMapMarkerType layout (v33)");
 static_assert(sizeof(EmfBuffType) == 40 && offsetof(EmfBuffType, default_ns) == 16 &&
                   offsetof(EmfBuffType, name_tag) == 28,
               "EmfBuffType layout (v32)");

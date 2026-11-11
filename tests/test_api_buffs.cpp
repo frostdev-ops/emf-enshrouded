@@ -133,9 +133,9 @@ struct Fixture {
 
 TEST_CASE("api v32: version 32, size 864, the seven buff functions set") {
     const EmfApi* api = api_table();
-    CHECK(EMF_API_VERSION == 32);
-    CHECK(api->version == 32u);
-    CHECK(api->size == kApiV32Size);
+    CHECK(EMF_API_VERSION >= 32);
+    CHECK(api->version >= 32u);
+    CHECK(api->size >= kApiV32Size);
     CHECK(kApiV32Size == 864u);
     CHECK(api->buff_types);
     CHECK(api->buff_type);

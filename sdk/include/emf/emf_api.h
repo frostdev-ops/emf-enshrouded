@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 32 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 33 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 32
+#define EMF_API_VERSION 33
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -549,6 +549,42 @@ typedef struct EmfBuffEvent {
     const char* why;          /* REFUSED: why (valid during the callback); else NULL */
 } EmfBuffEvent;
 typedef void (*EmfBuffCallback)(EmfWorld* world, const EmfBuffEvent* ev, void* user);
+
+/* v33 markers: drawn by EMF on a player's game, over the 3D view and on the game's world map; a server sends them to
+ * players' games with marker_send (players need EMF). Positions in world metres: x east, y up, z north. */
+#define EMF_MARKER_WORLD 0x01u      /* EmfMarker.flags: drawn over the 3D view */
+#define EMF_MARKER_GAME_MAP 0x02u   /* an entry on the game's world map, with the game's icon game_icon and the text */
+#define EMF_MARKER_EDGE_ARROW 0x04u /* off screen or behind: an arrow at the screen's edge */
+#define EMF_MARKER_DISTANCE 0x08u   /* the distance under the text ("42 m") */
+#define EMF_MARKER_DIAMOND 0u       /* EmfMarker.shape, drawn when there is no icon */
+#define EMF_MARKER_CIRCLE 1u
+#define EMF_MARKER_SQUARE 2u
+#define EMF_MARKER_NONE 3u          /* text only */
+typedef struct EmfMarker {
+    uint32_t size;      /* sizeof(EmfMarker) */
+    uint32_t entity;    /* follow this entity (its position in the player's game; 0 = the fixed position x, y, z) */
+    const char* id;     /* 1-48 of A-Z a-z 0-9 _ . - : , per mod: set again = update */
+    double x, y, z;     /* the position (with entity: where it is drawn until the game knows the entity) */
+    const char* text;   /* the label, UTF-8, may be NULL; cut at 64 bytes */
+    float height;       /* metres above the position or the entity's origin */
+    float max_distance; /* fades out toward it and is hidden beyond it (metres from the player); 0 = no limit */
+    uint32_t rgba;      /* 0xRRGGBBAA of the shape (the icon's tint); 0 = the HUD's accent colour */
+    uint32_t icon;      /* a picture from image_load (v26) instead of the shape, 0 = the shape; local markers only */
+    uint32_t flags;     /* EMF_MARKER_WORLD ... */
+    uint8_t shape;      /* EMF_MARKER_DIAMOND ... */
+    uint8_t pad[3];
+    uint32_t game_icon; /* EMF_MARKER_GAME_MAP: the game's map marker type (marker_types), 0 = EMF's default */
+    uint32_t pad2;
+} EmfMarker;
+#define EMF_MAP_TYPE_FAST_TRAVEL 0x01u /* EmfMapMarkerType.flags: a fast travel destination (shrines, altars) */
+#define EMF_MAP_TYPE_CUSTOM 0x02u      /* one of the types players place themselves */
+typedef struct EmfMapMarkerType {
+    uint32_t size;   /* sizeof(EmfMapMarkerType) of the core */
+    uint32_t id;     /* for EmfMarker.game_icon */
+    uint32_t flags;  /* EMF_MAP_TYPE_* */
+    uint32_t pad;
+    char name[48];   /* the game's internal name, NUL-terminated */
+} EmfMapMarkerType;
 
 typedef struct EmfHitRule {
     uint32_t size;             /* sizeof(EmfHitRule) */
@@ -1187,6 +1223,26 @@ typedef struct EmfApi {
      * REFRESHED, REMOVED (not REFUSED). From a comparison with the step before (the first sight of a player says
      * nothing). False for a null cb or 16 already. */
     bool (*on_buff)(EmfBuffCallback cb, void* user);
+
+    /* ---- v33: markers (EmfMarker, EmfMapMarkerType) ---- */
+    /* Sets (or updates) the calling mod's marker `m->id` on this game: over the 3D view (EMF_MARKER_WORLD) and/or on
+     * the game's world map (EMF_MARKER_GAME_MAP). Any thread. False (logged once per kind) for a bad id or numbers,
+     * the mod's 257th marker or the game's 1025th, or where no game draws (the dedicated server). */
+    bool (*marker_set)(const EmfMarker* m);
+    bool (*marker_remove)(const char* id);  /* false: the mod has no such marker */
+    uint32_t (*marker_clear)(void);         /* the mod's own markers on this game; how many were removed */
+    /* The game's map marker types for EmfMarker.game_icon: the number there is; fills `out` up to `cap` (may be NULL to
+     * count). 0 before a world is loaded, on the dedicated server, or where the game's list cannot be read. */
+    uint32_t (*marker_types)(EmfMapMarkerType* out, uint32_t cap);
+    /* A world point in display pixels with the camera of the newest frame: false when it is behind the camera or no
+     * frame is known yet (a menu, a loading screen, the dedicated server). Any thread. */
+    bool (*world_to_screen)(double x, double y, double z, float* px, float* py);
+    /* Server (the host's game or the dedicated server): sends markers to one player's game (player = their entity in
+     * the server world) or to every player (0), as if that game's mod had set them; a followed entity's position is
+     * refreshed while it is too far for that game to know. How many players it went to (players without EMF get
+     * nothing). At most 256 per call. */
+    uint32_t (*marker_send)(uint32_t player, const EmfMarker* m, uint32_t count);
+    uint32_t (*marker_unsend)(uint32_t player, const char* id);  /* removes a sent marker from that game (0 = all) */
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */
