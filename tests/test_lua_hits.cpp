@@ -213,3 +213,54 @@ TEST_CASE("lua 1.23: a hit does not wait for a script without emf.on_hit that is
     CHECK(quick);
     CHECK(logged("heard 9"));
 }
+
+// ---- kinds: fall, shroud, cold and drowning ----
+
+TEST_CASE("lua 1.23: hit.kind names; emf.on_hit gets fall, shroud, cold and drowning only when asked") {
+    Rig r(L"on_hit_kinds");
+    add_script(r.dir, "hk",
+               "emf.on_hit(function(w, h) emf.log('plain ' .. h.kind) end)\n"
+               "emf.on_hit(function(w, h) emf.log('all ' .. h.kind) end, {kinds = 'all'})\n"
+               "emf.on_hit(function(w, h) emf.log('wet ' .. h.kind) end, {kinds = {'drowning'}})\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    EmfHit h{};
+    h.size = sizeof h;
+    h.amount = 5;
+    h.health_before = 100;
+    h.health_after = 95;
+    h.kind = EMF_HIT_KIND_FALL;
+    fire_hit(kServer, h);
+    CHECK_FALSE(logged("plain fall"));
+    CHECK(logged("all fall"));
+    CHECK_FALSE(logged("wet fall"));
+    h.kind = EMF_HIT_KIND_DROWNING;
+    fire_hit(kServer, h);
+    CHECK(logged("all drowning"));
+    CHECK(logged("wet drowning"));
+    h.kind = EMF_HIT_KIND_HIT;
+    fire_hit(kServer, h);
+    CHECK(logged("plain hit"));
+    CHECK(logged("all hit"));
+    CHECK_FALSE(logged("wet hit"));
+}
+
+TEST_CASE("lua 1.23: emf.hit_rule kinds: all, a name, a list; an unknown kind is an error") {
+    Rig r(L"hit_rule_kinds");
+    add_script(r.dir, "rk",
+               "emf.hit_rule{kinds = 'all', to = 'players', min_health = 1}\n"
+               "emf.hit_rule{kinds = {'fall', 'drowning'}, cancel = true}\n"
+               "emf.hit_rule{kinds = 'cold', scale = 0.5}\n"
+               "emf.hit_rule{scale = 2}\n"
+               "local ok, err = pcall(emf.hit_rule, {kinds = 'lava', cancel = true})\n"
+               "emf.log('lava ' .. tostring(ok) .. ' ' .. tostring(err))\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    REQUIRE(r.fake.hit_rules_added.size() == 4);
+    CHECK(r.fake.hit_rules_added[0].kinds == EMF_HIT_KINDS_ALL);
+    CHECK(r.fake.hit_rules_added[1].kinds == ((1u << EMF_HIT_KIND_FALL) | (1u << EMF_HIT_KIND_DROWNING)));
+    CHECK(r.fake.hit_rules_added[2].kinds == (1u << EMF_HIT_KIND_COLD));
+    CHECK(r.fake.hit_rules_added[3].kinds == 0);  // hits only, as before
+    CHECK(logged("lava false"));
+    CHECK(logged("lava"));
+}

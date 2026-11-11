@@ -19,6 +19,9 @@ const char* const kTypes[] = {"cut",  "pierce", "blunt", "fire",  "ice",   "shro
                               nullptr, "poison", "wood",  "stone", "metal", "explosion"};
 constexpr int kTypeCount = static_cast<int>(sizeof kTypes / sizeof kTypes[0]);
 const char* const kAttacks[] = {"melee", "ranged", "magic", "tool", "other", "aoe", "skillshot"};
+// EmfHit.kind (EMF_HIT_KIND_*)
+const char* const kKinds[] = {"hit", "fall", "shroud", "cold", "drowning"};
+constexpr int kKindCount = static_cast<int>(sizeof kKinds / sizeof kKinds[0]);
 constexpr int kAttackCount = static_cast<int>(sizeof kAttacks / sizeof kAttacks[0]);
 
 void set_int(lua_State* L, const char* key, lua_Integer v) {
@@ -37,6 +40,8 @@ void set_health(lua_State* L, const char* key, int32_t v) {
 
 void push_hit(lua_State* L, const EmfHit& h) {
     lua_createtable(L, 0, 24);
+    lua_pushstring(L, h.kind < kKindCount ? kKinds[h.kind] : "hit");
+    lua_setfield(L, -2, "kind");
     set_int(L, "attacker", h.attacker);
     set_int(L, "source", h.source);
     set_int(L, "target", h.target);
@@ -93,11 +98,16 @@ void hit_cb_body(EmfWorld* w, const EmfHit* hit, void* user) {
     if (!hit) return;
     for (auto& sp : h->scripts) {
         Script& s = *sp;
-        if (!s.hit_cb_count.load(std::memory_order_acquire)) continue;  // never wait for a script that does not listen
+        // never wait for a script that does not listen to this kind (fall, shroud, cold and drowning come 60 a second)
+        if (!s.hit_cb_count.load(std::memory_order_acquire)) continue;
+        if (!((s.hit_cb_kinds_any.load(std::memory_order_acquire) >> hit->kind) & 1u)) continue;
         std::lock_guard<std::recursive_mutex> l(s.m);
         if (!s.L || s.paused || s.hit_cbs.empty()) continue;
         const std::vector<int> refs = s.hit_cbs;
-        for (int ref : refs) {
+        const std::vector<uint8_t> kinds = s.hit_cb_kinds;
+        for (size_t i = 0; i < refs.size(); ++i) {
+            if (i < kinds.size() && !((kinds[i] >> hit->kind) & 1u)) continue;
+            const int ref = refs[i];
             lua_rawgeti(s.L, LUA_REGISTRYINDEX, ref);
             push_world(s.L, s, w);
             push_hit(s.L, *hit);
@@ -167,6 +177,40 @@ uint32_t names_of(lua_State* L, const char* key, const char* const* names, int c
     return mask;
 }
 
+// `kinds` of the table at `index`: nil -> 0, "all", a kind's name, or a list of names -> a bit per kind
+uint8_t kinds_at(lua_State* L, int index, const char* fn) {
+    lua_getfield(L, index, "kinds");
+    uint8_t mask = 0;
+    auto one = [&](int idx) {
+        if (lua_type(L, idx) != LUA_TSTRING) luaL_error(L, "%s: kinds takes names", fn);
+        const char* t = lua_tostring(L, idx);
+        if (!std::strcmp(t, "all")) {
+            mask = EMF_HIT_KINDS_ALL;
+            return;
+        }
+        for (int i = 0; i < kKindCount; ++i)
+            if (!std::strcmp(kKinds[i], t)) {
+                mask |= static_cast<uint8_t>(1u << i);
+                return;
+            }
+        luaL_error(L, "%s: kinds has no '%s' (hit, fall, shroud, cold, drowning or all)", fn, t);
+    };
+    if (lua_type(L, -1) == LUA_TSTRING) {
+        one(-1);
+    } else if (lua_istable(L, -1)) {
+        const lua_Integer n = luaL_len(L, -1);
+        for (lua_Integer i = 1; i <= n; ++i) {
+            lua_rawgeti(L, -1, i);
+            one(-1);
+            lua_pop(L, 1);
+        }
+    } else if (!lua_isnil(L, -1)) {
+        luaL_error(L, "%s: kinds takes a name, a list of names or \"all\"", fn);
+    }
+    lua_pop(L, 1);
+    return mask;
+}
+
 bool flag_of(lua_State* L, const char* key) {
     lua_getfield(L, 1, key);
     const bool on = lua_toboolean(L, -1) != 0;
@@ -176,7 +220,7 @@ bool flag_of(lua_State* L, const char* key) {
 
 bool known_key(const char* k) {
     static const char* const keys[] = {"from",     "to",    "crit",   "backstab", "weakspot", "types",  "attack",
-                                       "healing",  "scale", "add",    "min_health", "cancel"};
+                                       "healing",  "scale", "add",    "min_health", "cancel", "kinds"};
     for (const char* x : keys)
         if (std::strcmp(x, k) == 0) return true;
     return false;
@@ -201,8 +245,14 @@ int l_on_hit(lua_State* L) {
         lua_pushboolean(L, false);
         return 1;
     }
+    uint8_t kinds = 1u << EMF_HIT_KIND_HIT;  // entity hits only unless asked (env kinds come 60 a second)
+    if (lua_istable(L, 2)) {
+        if (const uint8_t asked = kinds_at(L, 2, "emf.on_hit")) kinds = asked;
+    }
     lua_pushvalue(L, 1);
     s->hit_cbs.push_back(luaL_ref(L, LUA_REGISTRYINDEX));
+    s->hit_cb_kinds.push_back(kinds);
+    s->hit_cb_kinds_any.fetch_or(kinds, std::memory_order_release);
     s->hit_cb_count.store(static_cast<uint32_t>(s->hit_cbs.size()), std::memory_order_release);
     lua_pushboolean(L, true);
     return 1;
@@ -233,6 +283,7 @@ int l_hit_rule(lua_State* L) {
     r.attacks = static_cast<uint8_t>(names_of(L, "attack", kAttacks, kAttackCount, false));
     r.healing = flag_of(L, "healing") ? 1 : 0;
     r.cancel = flag_of(L, "cancel") ? 1 : 0;
+    r.kinds = kinds_at(L, 1, "emf.hit_rule");
     lua_getfield(L, 1, "scale");
     if (!lua_isnil(L, -1)) r.scale = static_cast<float>(luaL_checknumber(L, -1));
     lua_pop(L, 1);

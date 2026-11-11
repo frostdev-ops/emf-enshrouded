@@ -76,6 +76,8 @@ struct Script {
     std::vector<int> player_intro;                     // joined functions registered after players came: told next step
     std::vector<int> ws_cbs;                           // emf.on_world_setting_changed (lua 1.10)
     std::vector<int> hit_cbs;                          // emf.on_hit (lua 1.23)
+    std::vector<uint8_t> hit_cb_kinds;                 // the kinds each on_hit function asked for (bit per kind)
+    std::atomic<uint32_t> hit_cb_kinds_any{0};         // their union, read without m: a hit of another kind skips
     std::atomic<uint32_t> hit_cb_count{0};             // hit_cbs.size(), read without m: a hit skips scripts without
     std::set<uint32_t> hit_rules;                      // its emf.hit_rule ids (lua 1.23): removed on unload and pause
     std::map<std::string, std::vector<BusSubscription>> bus_subs;  // cross-mod message callbacks
