@@ -309,7 +309,7 @@ dedicated server; see [server.md](server.md)).
 | `target`, `part` | the actor hit and the entity hit (the same for most hits) |
 | `amount` | health damage; negative for healing. A blocked or parried hit has 0 |
 | `stamina` | stamina damage of a blocked hit |
-| `crit`, `blocked`, `parried`, `backstab`, `weakspot`, `healing`, `killed` | booleans (`killed`: the killing blow) |
+| `crit`, `blocked`, `parried`, `backstab`, `weakspot`, `healing`, `killed` | booleans (`killed`: the killing blow; for fall, shroud, cold and drowning: it left no health) |
 | `types` | list of damage type names: `"cut"`, `"pierce"`, `"blunt"`, `"fire"`, `"ice"`, `"shroud"`, `"lightning"`, `"poison"`, `"wood"`, `"stone"`, `"metal"`, `"explosion"` |
 | `attack`, `attacks` | the attack's kind: `"melee"`, `"ranged"`, `"magic"`, `"tool"`, `"other"`, `"aoe"` or `"skillshot"` (nil for a `emf.damage` hit); `attacks` lists every kind the hit has (most have one) |
 | `weapon_item`, `weapon_category`, `program`, `impact`, `reaction` | the weapon's item id (0 = none or not known), the game's weapon category hash, the attack's impact program, the swing or projectile (hits of one share it), the hit reaction type |
@@ -321,7 +321,7 @@ dedicated server; see [server.md](server.md)).
 
 A rule takes: `from` and `to` (an entity id, or `"players"`, `"creatures"`, `"objects"`; absent = anyone; an entity id
 as `to` matches the actor hit and the part hit), `crit`, `backstab`, `weakspot` (true = only such hits), `types` (a
-list of type names, any of them), `attack` (a name or a list of names), `healing` (true = healing hits only; without it
+type name or a list of names, any of them), `attack` (a name or a list of names), `healing` (true = healing hits only; without it
 a rule matches damage hits only, so "no PvP" does not stop a friend's heal), then what it does: `cancel` (the hit is
 dropped: no damage, number, reaction, aggro, XP credit or destruction), `scale` (amount times scale; a blocked hit's
 stamina too), `add` (added after the scale), `min_health` (the target keeps at least that much health: 1 = it cannot
@@ -344,7 +344,8 @@ error.
 - Fall is once per landing. Shroud, cold and drowning come every server step (about 60 a second) while the shroud timer is
   out, body heat is 0 while freezing, or oxygen is 0. `scale` is exact there (0.5 halves 1-point ticks: EMF carries the
   fraction). `add` is per event, so about 60 times a second on those three.
-- `min_health` works on every kind. A cancelled hit never reaches `on_hit`. A cancelled fall gives the health back, but the
+- `min_health` works on every kind. A cancelled hit never reaches `on_hit` (entity hits too); a cancel gives back no mana or
+  stamina the attacker spent. `add` on a healing rule makes the heal smaller (a heal's amount is negative). A cancelled fall gives the health back, but the
   game's hard-landing stagger still plays.
 
 What never becomes a hit (no hook sees it): regeneration, direct attribute writes, voxel damage (terrain and walls). A
@@ -373,7 +374,7 @@ ids with the console command `buffs.list` or `emf.buff_types`. Details: [referen
 | `name`, `description` | the game's text in the player's language; nil on a dedicated server |
 | `hidden` | true when the game does not show it |
 | `saved` | true when it stays in the world save (potions, Wet, food) |
-| `ends_on_death` | true when it ends with its target (never given to a dead target) |
+| `ends_on_death` | true when it ends with its target (EMF does not check whether the target is alive when it gives one) |
 | `seconds` | its default time |
 | `apply` | giving it again: `"once"` (refused), `"reset"` (its timer starts again), `"replace"` (a new buff) |
 | `follow_up` | the type given when it ends (0 = none) |
@@ -410,8 +411,8 @@ it a food buff likely has no stats). An unknown option is an error.
 | `why` | `"refused"` only: the reason, for example "the target does not have it" |
 
 Refusal reasons: unknown buff type; the target has no buff container; the type is never given to the target's faction;
-the target is dead; no free slot of that group; already there and this type cannot be given again; the target does not
-have it (remove); not the server world; giving not available on this game build; 64 requests waiting.
+the game did not give it (the target's faction could not be read); no free slot of that group; already there and this type
+cannot be given again; the target does not have it (remove; also when it is already being removed); not the server world; giving not available on this game build; 64 requests waiting.
 
 `emf.on_buff(fn)`: `fn(world, ev)` after the server step for every change of a **player's** buffs, whoever made it (a
 mod, a potion, food, rain, the end of the time). It compares after each step with the step before (a player who just

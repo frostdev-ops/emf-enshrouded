@@ -981,7 +981,3 @@ TEST_CASE("lines_live: the overlay's rect of a place is that part's live rect") 
     reset();
     CHECK_FALSE(hud_live(static_cast<size_t>(lines_element(2))).seen);
 }
-
-
-
-

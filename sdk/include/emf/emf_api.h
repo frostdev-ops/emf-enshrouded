@@ -476,7 +476,7 @@ typedef struct EmfHit {
 #define EMF_HIT_CRIT 0x8u
 #define EMF_HIT_BACKSTAB 0x20u
 #define EMF_HIT_WEAKSPOT 0x40u
-#define EMF_HIT_KILLED 0x2000u   /* after the hit only: the killing blow */
+#define EMF_HIT_KILLED 0x2000u   /* after the hit only: the killing blow (kinds 1-4: it left no health) */
 #define EMF_HIT_HEALING 0x4000u
 #define EMF_HIT_TERRAIN 0x8000u  /* the game's terrain and building hits: never passed to mods */
 #define EMF_HIT_BUILDING 0x10000u
@@ -500,7 +500,7 @@ typedef struct EmfHit {
 #define EMF_BUFF_TERRAIN 4u
 #define EMF_BUFF_HIDDEN 0x01u           /* EmfBuffType.flags: not shown in the game's UI */
 #define EMF_BUFF_SAVED 0x02u            /* kept in the world save (potions, Wet, food); combat buffs are not */
-#define EMF_BUFF_DESPAWN_ON_DEATH 0x04u /* ends when its target dies; never given to a dead target */
+#define EMF_BUFF_DESPAWN_ON_DEATH 0x04u /* ends when its target dies (EMF does not check that a target is alive) */
 #define EMF_BUFF_FOOD_POISON 0x08u
 #define EMF_BUFF_SHOW_AS_TAG 0x10u      /* shown as a tag on an enemy's health bar */
 #define EMF_BUFF_APPLIED 1u             /* EmfBuffEvent.kind */

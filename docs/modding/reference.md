@@ -294,7 +294,7 @@ takes its old path, so a shifted offset can never turn a hit into something else
 | `emf::attribute(w, id, EMF_ATTR_HEALTH)` | `attribute_get(world, entity, attr_id, &out)` | an attribute as the game reads it: `EMF_ATTR_HEALTH` (current health), `EMF_ATTR_MAX_HEALTH` (the maximum, computed by the game), `EMF_ATTR_STAMINA`, `EMF_ATTR_MAX_STAMINA`, `EMF_ATTR_MANA`, `EMF_ATTR_MAX_MANA`, or another id of those components. Nothing / false when the entity has none (a prop, a client world), its component is not set up yet, or the feature is off on this game build (logged once). World callback, like `get_component`. |
 | `emf::health(w, id, &cur, &max)` | — | current and maximum health: the attributes in a world you host, else the replicated `NetworkHealth` (a client of someone else's game, an older core). False when neither is there. |
 | `emf::attribute_add(w, id, attr, delta)` | `attribute_add(world, entity, attr_id, delta)` | adds `delta` through the game's own `attrAdd`, which also updates the values computed from it; the game's death program and `NetworkHealth` (what players see) pick the change up on the next step: health at 0 dies like any death. **Clamped:** damage stops at 0, a heal of current health, stamina or mana at its maximum; a heal of an attribute whose maximum cannot be read (any other id) is refused. **Not a hit:** no kill credit or XP, no hit reaction, no damage numbers, no killing blow (a destructible prop is not destroyed). Inside a world callback on that world it runs at once; anywhere else (another thread, a mod program) it runs after the server world's next step (true = queued, a later refusal is logged). |
-| `emf::damage(w, attacker, target, amount)` | `damage(world, attacker, target, amount)` | `amount` (> 0) of **true damage** (no armour, block, crit or base protection) as a real game hit: EMF queues a pending hit and the game's own `impact_hit_conclusion` applies it on the next step, with a `HitEvent` (damage numbers, **always a light hit reaction**: a parameter for it may come later; aggro toward the attacker), the killing blow, and **kill credit and XP** for the attacker when it is a player (0 = no attacker and no aggro). The target needs `CombatFlags.handleHits` (creatures and players have it) and `Health`; a target with `CombatFlags.immune` is refused. **Placed objects** (v31): an entity with `Destructible` (on it or its template) and no `CombatFlags`, or `CombatFlags` with `handleHits` on, is hit too: the game gives it `Health` on the first hit and removes it at 0; that `Health` is not saved, so a reload heals the object. Inside a world callback the target is checked at once (false when refused); elsewhere at the next step (logged). |
+| `emf::damage(w, attacker, target, amount)` | `damage(world, attacker, target, amount)` | `amount` (> 0) of **true damage** (no armour, block, crit or base protection) as a real game hit: EMF queues a pending hit and the game's own `impact_hit_conclusion` applies it on the next step, with a `HitEvent` (damage numbers, **always a light hit reaction**: a parameter for it may come later; aggro toward the attacker), the killing blow, and **kill credit and XP** for the attacker when it is a player (0 = no attacker and no aggro). The target needs `CombatFlags.handleHits` (creatures and players have it) and `Health`; a target with `CombatFlags.immune` is refused. **Placed objects** (v31): an entity with `Destructible` (on it or its template) and no `CombatFlags`, or `CombatFlags` with `handleHits` on, is hit too (so is any entity with `Health` and no `CombatFlags`): the game gives it `Health` on the first hit and removes it at 0; that `Health` is not saved, so a reload heals the object. Inside a world callback the target is checked at once (false when refused); elsewhere at the next step (logged). |
 | `emf::has_v18()` | — | true when the core has them. |
 
 Notes:
@@ -762,7 +762,7 @@ known), `program` (the attack's impact program), `impact` (the swing or projecti
 `on_hit_before` may change. A blocked or parried hit changes stamina, not health: its `amount` is 0.
 
 Flags: `EMF_HIT_BLOCKED` 0x1, `EMF_HIT_PARRIED` 0x2, `EMF_HIT_CRIT` 0x8, `EMF_HIT_BACKSTAB` 0x20, `EMF_HIT_WEAKSPOT` 0x40,
-`EMF_HIT_KILLED` 0x2000 (after the hit only), `EMF_HIT_HEALING` 0x4000, `EMF_HIT_INSTANT` 0x01000000 (kinds 1 to 4 only: see below). `EMF_HIT_TERRAIN` and `EMF_HIT_BUILDING` are
+`EMF_HIT_KILLED` 0x2000 (after the hit only; also on a fall, shroud, cold or drowning hit that left no health), `EMF_HIT_HEALING` 0x4000, `EMF_HIT_INSTANT` 0x01000000 (kinds 1 to 4 only: see below). `EMF_HIT_TERRAIN` and `EMF_HIT_BUILDING` are
 the game's terrain and building hits: never passed to mods.
 
 `EmfHitRule` (`size`, then): `attacker` and `target` (0 = anyone, an entity id, or a class: `EMF_HIT_PLAYERS`,
@@ -839,8 +839,8 @@ default time in nanoseconds), `follow_up` (the type given when this one ends, So
 `desc_tag` (the game's text tags; `buff_text` reads them).
 
 Type flags: `EMF_BUFF_HIDDEN` 0x01 (not shown in the game's UI), `EMF_BUFF_SAVED` 0x02 (kept in the world save: potions,
-Wet, food; combat buffs are not), `EMF_BUFF_DESPAWN_ON_DEATH` 0x04 (ends when its target dies; never given to a dead
-target), `EMF_BUFF_FOOD_POISON` 0x08, `EMF_BUFF_SHOW_AS_TAG` 0x10 (shown as a tag on an enemy's health bar).
+Wet, food; combat buffs are not), `EMF_BUFF_DESPAWN_ON_DEATH` 0x04 (ends when its target dies; EMF does not check
+whether the target is alive when it gives one), `EMF_BUFF_FOOD_POISON` 0x08, `EMF_BUFF_SHOW_AS_TAG` 0x10 (shown as a tag on an enemy's health bar).
 
 `EmfBuff` (`size`, then): `type`, `entity` (the buff's own entity), `slot`, `index` (its place in that slot group),
 `cleansed` (1: being removed, gone after the next step), `level` (from its source's level, 0 = none), `total_ns` (its
@@ -860,8 +860,8 @@ rested. Some ids: Wet `0xAC13C6C3` (debuff, 900 s, saved; rain gives it again ev
 (buff, 1800 s, saved, ends on death), Rested `0xCDBE9C80`, Poisoned `0x369C3618` (players only).
 
 **Refusal reasons** (`why`): unknown buff type; the target has no buff container; the type is never given to the
-target's faction; the target is dead; no free slot of that group; already there and this type cannot be given again; the
-target does not have it (remove); not the server world; giving not available on this game build (signature); 64
+target's faction; the game did not give it (the target's faction could not be read); no free slot of that group; already there and this type cannot be given again; the
+target does not have it (remove; also when it is already being removed); not the server world; giving not available on this game build (signature); 64
 requests waiting.
 
 **Limits and notes.**

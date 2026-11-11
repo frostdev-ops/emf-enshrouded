@@ -4,7 +4,6 @@
 #include <atomic>
 #include <bit>
 #include <cmath>
-#include <cstdio>
 #include <cstring>
 
 #include "core/hud_editor/layout.h"
@@ -55,7 +54,6 @@ uint64_t pack_colour(UiColour c) {
     return v;
 }
 
-bool same(const UiColour& a, const UiColour& b) { return std::memcmp(&a, &b, sizeof a) == 0; }
 
 }  // namespace
 

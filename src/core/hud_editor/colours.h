@@ -65,7 +65,7 @@ UiColour with_colour(UiColour game, const Colour& c);
 // R, G and B each moved toward 255 by the fraction (0..1, rounded); alpha kept.
 uint32_t lighten(uint32_t rgba, float toward_white);
 // EMF's copy for one bar: fill, empty (the game's range), end, damage and heal from the player's colours where set; the
-// frame is never changed here (the panel is a separate write). The end follows the fill (kEndLighten toward white, the
+// frame is never changed here (the panel's tint is swapped in its own layer call). The end follows the fill (kEndLighten toward white, the
 // game's alpha for the end) when the fill is set and the end is not.
 StyleBlock recoloured(const StyleBlock& game, const BarColours& c);
 // The game's own text form of a colour: "rrggbb", then "-aa" when alpha is not 0xff, then "*i.ii" when the intensity is

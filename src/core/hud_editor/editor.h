@@ -34,7 +34,7 @@ struct HudEditorDeps {
     std::function<ScaleState()> scale_state;              // empty = not available
     std::function<bool()> bars_ready;                     // the bar detour is installed; empty = not available
     std::function<std::optional<StyleBlock>(int bar)> game_colours;  // the game's colour block for a bar, once drawn
-    std::function<PanelStatus()> panel_status;            // whether the panel colour can be written; empty = unknown
+    std::function<PanelStatus()> panel_status;            // whether the panel colour can be drawn; empty = unknown
     std::function<ColourStats()> colour_stats;            // the bar detour's colour counters; empty = none
     std::function<bool(uint32_t vk)> key_down;            // a key held now with the game in front
     std::function<void()> toggle_page;                    // opens (or closes) the console on the HUD page
@@ -63,7 +63,7 @@ struct HudView {
     std::array<std::optional<StyleBlock>, kBarCount> game_colours{};  // the game's own, once the bar was drawn
     bool colours_work = false;   // the bar detour is installed (colours need no transform stack)
     std::string colours_note;    // "" when they work, else the reason
-    bool panel_works = false;    // colours work and the panel's memory is not read-only
+    bool panel_works = false;    // colours work and the panel's tint call was found (its signature)
     std::string panel_note;      // "" when it works, else the reason
     ColourStats colour_stats;
 };

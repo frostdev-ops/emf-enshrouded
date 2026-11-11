@@ -68,7 +68,7 @@ bool special_open(void* scope, uint8_t* node, uint64_t hash, const HudSnapshot* 
         }
         return true;
     }
-    if (hash == kPlayerWidgetHash) {  // its close puts a written panel colour back
+    if (hash == kPlayerWidgetHash) {  // its close disarms the panel tint swap
         if (node && t_tracker.has_room()) t_tracker.opened(OpenScope{scope, node, kTrackWidget, {}});
         return true;
     }
