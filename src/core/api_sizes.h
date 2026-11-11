@@ -145,4 +145,13 @@ static_assert(sizeof(EmfWorldSettingInfo) == 72 && offsetof(EmfWorldSettingInfo,
                   offsetof(EmfWorldSettingInfo, min) == 32 && offsetof(EmfWorldSettingInfo, flags) == 64,
               "EmfWorldSettingInfo layout (v21)");
 
+static_assert(sizeof(EmfHit) == 80 && offsetof(EmfHit, amount) == 20 && offsetof(EmfHit, damage_types) == 32 &&
+                  offsetof(EmfHit, weapon_category) == 36 && offsetof(EmfHit, reaction) == 52 &&
+                  offsetof(EmfHit, health_before) == 56 && offsetof(EmfHit, position) == 64 &&
+                  offsetof(EmfHit, cancel) == 76,
+              "EmfHit layout (v31)");
+static_assert(sizeof(EmfHitRule) == 36 && offsetof(EmfHitRule, damage_types_any) == 16 &&
+                  offsetof(EmfHitRule, scale) == 20 && offsetof(EmfHitRule, healing) == 32,
+              "EmfHitRule layout (v31)");
+
 }  // namespace emf::core

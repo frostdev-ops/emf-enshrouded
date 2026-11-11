@@ -440,6 +440,64 @@ typedef struct EmfPlayerEvent {
 } EmfPlayerEvent;
 typedef void (*EmfPlayerCallback)(EmfWorld* world, const EmfPlayerEvent* e, void* user);
 
+/* v31 hits: one landing hit on an entity, as the server world applies it (the game's applyHitToEntity and HitEvent) */
+typedef struct EmfHit {
+    uint32_t size;            /* sizeof(EmfHit) of the core */
+    uint32_t attacker;        /* the root source: the shooter of an arrow, the caster of a spell; 0 = none */
+    uint32_t source;          /* the direct source: a projectile, a trap, the attacker itself */
+    uint32_t target;          /* the actor hit (the part's owner, else the entity hit) */
+    uint32_t part;            /* the entity hit; == target for most hits */
+    int32_t amount;           /* health damage: > 0 damage, < 0 healing. Before the hit: writable */
+    int32_t stamina;          /* stamina damage of a blocked hit (a blocked or parried hit never changes health: its
+                                 amount is 0). Before the hit: writable */
+    uint32_t flags;           /* the game's hit flags: EMF_HIT_* */
+    uint16_t damage_types;    /* bit per type: 0 cut, 1 pierce, 2 blunt, 3 fire, 4 ice, 5 shroud, 6 lightning, 8 poison,
+                                 9 wood, 10 stone, 11 metal, 12 explosion */
+    uint8_t attack;           /* 0 melee, 1 ranged, 2 magic, 3 tool, 4 other, 5 area, 6 skill shot */
+    uint8_t kind;             /* 0 an entity (the only kind passed in v31) */
+    uint32_t weapon_category; /* the game's WeaponCategoryId hash, 0 = none */
+    uint32_t weapon_item;     /* the weapon's item id, 0 = none or not known */
+    uint32_t program;         /* the impact program (the attack, skill or spell) */
+    uint32_t impact;          /* the swing or projectile: hits of one share it */
+    uint16_t reaction;        /* the game's HitReactionType (0 none, 2 light ...). Before the hit: writable */
+    uint8_t target_faction;
+    uint8_t from_mod;         /* 1 = a damage() hit */
+    int32_t health_before;    /* the target's health before the hit, -1 = not known */
+    int32_t health_after;     /* after the hit: at delivery; before the hit: what it will be as the hit stands; -1 */
+    float position[3];        /* where it hit, metres */
+    uint8_t cancel;           /* before the hit: 1 = drop it silently (no damage, number, reaction, aggro or credit) */
+    uint8_t pad[3];
+} EmfHit;
+#define EMF_HIT_BLOCKED 0x1u
+#define EMF_HIT_PARRIED 0x2u
+#define EMF_HIT_CRIT 0x8u
+#define EMF_HIT_BACKSTAB 0x20u
+#define EMF_HIT_WEAKSPOT 0x40u
+#define EMF_HIT_KILLED 0x2000u   /* after the hit only: the killing blow */
+#define EMF_HIT_HEALING 0x4000u
+#define EMF_HIT_TERRAIN 0x8000u  /* the game's terrain and building hits: never passed to mods */
+#define EMF_HIT_BUILDING 0x10000u
+/* A rule the core applies to every landing hit before the hit callbacks, without calling the mod. */
+#define EMF_HIT_PLAYERS 0xFFFFFFF1u   /* attacker / target: any player */
+#define EMF_HIT_CREATURES 0xFFFFFFF2u /* any creature (not a player, has health) */
+#define EMF_HIT_OBJECTS 0xFFFFFFF3u   /* any placed object (Destructible) */
+typedef struct EmfHitRule {
+    uint32_t size;             /* sizeof(EmfHitRule) */
+    uint32_t attacker;         /* 0 = anyone, an entity, or EMF_HIT_PLAYERS / _CREATURES / _OBJECTS */
+    uint32_t target;           /* the same; an entity matches the actor hit or the part hit */
+    uint32_t flags_all;        /* the hit has all these EMF_HIT_* flags (EMF_HIT_CRIT: crits only) */
+    uint16_t damage_types_any; /* the hit has one of these damage types (EmfHit.damage_types bits); 0 = any */
+    uint8_t attacks;           /* bit per attack kind (1 << EmfHit.attack); 0 = any */
+    uint8_t cancel;            /* 1 = cancel the hit */
+    float scale;               /* amount (and a blocked hit's stamina) *= scale; 1 = unchanged */
+    int32_t add;               /* then amount += add */
+    int32_t min_health;        /* > 0: the target keeps at least this much health (1 = cannot die from hits) */
+    uint8_t healing;           /* 0 = match damage hits only, 1 = healing hits only */
+    uint8_t pad[3];
+} EmfHitRule;
+typedef void (*EmfHitBeforeCallback)(EmfWorld* world, EmfHit* hit, void* user);
+typedef void (*EmfHitCallback)(EmfWorld* world, const EmfHit* hit, void* user);
+
 /* v13 mod_info: what the loader found */
 #define EMF_MOD_LOADED 0u
 #define EMF_MOD_FAILED 1u   /* its DLL did not load, or emf_mod_load returned false or faulted */

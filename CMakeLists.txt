@@ -793,3 +793,7 @@ target_sources(emf_tests PRIVATE tests/test_hud_commands.cpp tests/test_hud_bars
   tests/test_screen_glyphs.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_page.cpp tests/test_hud_colours.cpp tests/test_player_strings.cpp)
 target_sources(emf_tests PRIVATE tests/test_hud_pick.cpp)
+
+# --- Hits (API v31): rules and callbacks before a hit lands, the hits after it landed ---
+target_sources(emf_core_lib PRIVATE src/core/hits.cpp)
+target_sources(emf_tests PRIVATE tests/test_hits.cpp)
