@@ -764,6 +764,10 @@ TEST_CASE("teleports map (live): landing in the deadly shroud: straight back whe
     r.g.deadly.clear();
     r.g.answer(true, {4100, 700, 1300});
     CHECK(r.g.last_tell() == "That place is in the deadly shroud: you are back where you were");
+    bool timed = false;
+    for (const auto& l : r.g.logs)
+        if (l.find("in the deadly shroud (seen 100 ms after the landing)") != std::string::npos) timed = true;
+    CHECK(timed);
     r.t.map_teleport(2, false, 10, 10);  // no cooldown: they never got there
     CHECK(r.g.grounds.size() == 2);
 }

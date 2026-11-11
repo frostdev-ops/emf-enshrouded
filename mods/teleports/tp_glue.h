@@ -42,12 +42,12 @@ inline bool in_shroud(emf::World w, uint32_t player) {
     return !(a && (actor_state(*a) & kInSaveZone));
 }
 
-// In the deadly shroud (fog Death) outside a spawn point's safe zone: a player there dies within seconds.
+// In the deadly shroud (fog Death): a player there dies within seconds. The safe-zone flag is not asked: right after a
+// teleport it may still be set by the arrival (live: the fog was seen only 2.3 s after a landing, too late); landing on
+// an altar's pads inside the deadly shroud just means going back.
 inline bool in_deadly_shroud(emf::World w, uint32_t player) {
     const auto* es = w.get<gen::EnvironmentSensor>(player);
-    if (!es || es->fogType != emf::gen::FogType::Death) return false;
-    const auto* a = w.get<gen::Actor>(player);
-    return !(a && (actor_state(*a) & kInSaveZone));
+    return es && es->fogType == emf::gen::FogType::Death;
 }
 
 // Dead: the health attribute as the game reads it (a player in the server world has Health but no NetworkHealth: the

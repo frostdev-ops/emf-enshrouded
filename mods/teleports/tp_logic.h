@@ -812,6 +812,9 @@ private:
                 continue;
             }
             if (g_.in_deadly_shroud(it->first) && !g_.dead(it->first)) {
+                const uint64_t landed = it->second.until - kDeadlyWatchMs;
+                g_.log("map teleport: player " + std::to_string(it->first) + " is in the deadly shroud (seen " +
+                       std::to_string(now - landed) + " ms after the landing): back");
                 back.push_back(it->second.spot);
                 it = landed_.erase(it);
                 continue;

@@ -425,7 +425,7 @@ TEST_CASE("teleports glue: the waypoint is PlayerWaypoint when enabled; none whe
 }
 
 
-TEST_CASE("teleports glue (live): the deadly shroud = fogType Death outside a safe zone; dangerous shroud is not") {
+TEST_CASE("teleports glue (live): the deadly shroud = fogType Death (also with the safe-zone flag: right after a teleport); dangerous is not") {
     Rig r;
     ApiGame g("teleports");
     g.set_world(emf::World(kW));
@@ -435,6 +435,6 @@ TEST_CASE("teleports glue (live): the deadly shroud = fogType Death outside a sa
     CHECK_FALSE(g.in_deadly_shroud(1));
     es.fogType = emf::gen::FogType::Death;
     CHECK(g.in_deadly_shroud(1));
-    plant<gen::Actor>(1).currentState = kInSaveZone;
-    CHECK_FALSE(g.in_deadly_shroud(1));
+    plant<gen::Actor>(1).currentState = kInSaveZone;  // live: the net saw the fog only 2.3 s after the landing
+    CHECK(g.in_deadly_shroud(1));
 }
