@@ -124,6 +124,17 @@ struct Fake {
     std::vector<BuffAsk> buff_asks;
     bool buff_ok = true;
     std::vector<std::pair<EmfBuffCallback, void*>> buff_cbs;
+    // v33 markers: copies of what marker_set / marker_send were given (id and text kept as strings)
+    struct MarkerCopy {
+        EmfMarker m{};
+        std::string id, text;
+    };
+    std::map<std::string, MarkerCopy> markers;                     // marker_set, by id
+    std::vector<std::string> markers_removed;                      // marker_remove
+    std::vector<std::pair<uint32_t, MarkerCopy>> markers_sent;     // marker_send: player, marker
+    std::vector<std::pair<uint32_t, std::string>> markers_unsent;  // marker_unsend: player, id
+    std::vector<uint32_t> map_types;
+    bool screen_ok = true;
     int saves = 0;
     bool chat_ok = true;  // what chat_tell / chat_broadcast / on_chat / request_save answer
     // v20 teleport: the requests made (answer them with their cb/user as the core would)
@@ -737,6 +748,51 @@ bool f_on_buff(EmfBuffCallback cb, void* user) {
     g->buff_cbs.emplace_back(cb, user);
     return true;
 }
+// v33 markers
+Fake::MarkerCopy copy_marker(const EmfMarker* m) {
+    Fake::MarkerCopy c;
+    c.m = *m;
+    c.id = m->id ? m->id : "";
+    c.text = m->text ? m->text : "";
+    return c;
+}
+bool f_marker_set(const EmfMarker* m) {
+    if (!m || !m->id) return false;
+    g->markers[m->id] = copy_marker(m);
+    return true;
+}
+bool f_marker_remove(const char* id) {
+    g->markers_removed.push_back(id ? id : "");
+    return id && g->markers.erase(id) > 0;
+}
+uint32_t f_marker_clear() {
+    const auto n = static_cast<uint32_t>(g->markers.size());
+    g->markers.clear();
+    return n;
+}
+uint32_t f_marker_types(EmfMapMarkerType* out, uint32_t cap) {
+    const auto n = static_cast<uint32_t>(g->map_types.size());
+    for (uint32_t i = 0; out && i < n && i < cap; ++i) {
+        out[i] = EmfMapMarkerType{};
+        out[i].size = sizeof(EmfMapMarkerType);
+        out[i].id = g->map_types[i];
+    }
+    return n;
+}
+bool f_world_to_screen(double x, double, double z, float* px, float* py) {
+    if (!g->screen_ok) return false;
+    *px = static_cast<float>(x * 2);
+    *py = static_cast<float>(z * 3);
+    return true;
+}
+uint32_t f_marker_send(uint32_t player, const EmfMarker* m, uint32_t count) {
+    for (uint32_t i = 0; i < count; ++i) g->markers_sent.emplace_back(player, copy_marker(&m[i]));
+    return player == 0 ? 2u : 1u;
+}
+uint32_t f_marker_unsend(uint32_t player, const char* id) {
+    g->markers_unsent.emplace_back(player, id ? id : "");
+    return player == 0 ? 2u : 1u;
+}
 // A player's buff change (every on_buff listener hears it).
 void fire_buff(EmfWorld* world, const EmfBuffEvent& e) {
     const auto cbs = g->buff_cbs;
@@ -789,6 +845,13 @@ EmfApi fake_api() {
     a.buff_apply = f_buff_apply;
     a.buff_remove = f_buff_remove;
     a.on_buff = f_on_buff;
+    a.marker_set = f_marker_set;  // v33
+    a.marker_remove = f_marker_remove;
+    a.marker_clear = f_marker_clear;
+    a.marker_types = f_marker_types;
+    a.world_to_screen = f_world_to_screen;
+    a.marker_send = f_marker_send;
+    a.marker_unsend = f_marker_unsend;
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;

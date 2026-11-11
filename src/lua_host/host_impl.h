@@ -82,6 +82,8 @@ struct Script {
     std::atomic<uint32_t> buff_cb_count{0};            // buff_cbs.size(), read without m
     std::atomic<uint32_t> hit_cb_count{0};             // hit_cbs.size(), read without m: a hit skips scripts without
     std::set<uint32_t> hit_rules;                      // its emf.hit_rule ids (lua 1.23): removed on unload and pause
+    std::set<std::string> markers;                     // its emf.marker ids ("<id>:<name>", lua 1.25): removed with it
+    std::set<std::pair<uint32_t, std::string>> sent_markers;  // emf.send_marker: (player or 0, id), unsent with it
     std::map<std::string, std::vector<BusSubscription>> bus_subs;  // cross-mod message callbacks
     uint64_t next_bus_subscription = 0;             // unique callback tokens, even after unsubscribe
     // While a take's callback runs: the taken items not handed on yet (emf.put / emf.give of that item lower it). If the
@@ -243,6 +245,16 @@ int l_buffs(lua_State* L);
 int l_apply_buff(lua_State* L);
 int l_remove_buff(lua_State* L);
 int l_on_buff(lua_State* L);
+// lua 1.25 markers (marker_bindings.cpp): emf.marker, emf.remove_marker, emf.clear_markers, emf.marker_types,
+// emf.world_to_screen, emf.send_marker, emf.unsend_marker; a script's markers leave with it (unload, pause, reload).
+int l_marker(lua_State* L);
+int l_remove_marker(lua_State* L);
+int l_clear_markers(lua_State* L);
+int l_marker_types(lua_State* L);
+int l_world_to_screen(lua_State* L);
+int l_send_marker(lua_State* L);
+int l_unsend_marker(lua_State* L);
+void drop_markers(Host::Impl& h, Script& s);
 // The world argument at `index` (a world value from a callback); an error otherwise.
 EmfWorld* lua_world_arg(lua_State* L, int index);
 
