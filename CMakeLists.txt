@@ -808,5 +808,5 @@ target_sources(emf_tests PRIVATE tests/test_hits.cpp tests/test_hit_hook.cpp tes
 # --- Buffs (API v32): the game's buff types, an entity's buffs, giving and removing through emf_buffs ---
 target_sources(emf_core_lib PRIVATE src/core/buffs.cpp src/core/buff_service.cpp src/core/api_buffs.cpp)
 target_sources(emf_tests PRIVATE tests/test_buffs.cpp tests/test_buff_service.cpp tests/test_api_buffs.cpp tests/test_lua_buffs.cpp)
-target_sources(emf_core_lib PRIVATE src/core/markers.cpp src/core/marker_capture.cpp src/core/marker_map.cpp)
-target_sources(emf_tests PRIVATE tests/test_markers.cpp tests/test_marker_capture.cpp tests/test_marker_map.cpp)
+target_sources(emf_core_lib PRIVATE src/core/markers.cpp src/core/marker_capture.cpp src/core/marker_map.cpp src/core/marker_net.cpp)
+target_sources(emf_tests PRIVATE tests/test_markers.cpp tests/test_marker_capture.cpp tests/test_marker_map.cpp tests/test_marker_net.cpp)
