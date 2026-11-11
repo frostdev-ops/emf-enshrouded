@@ -10,6 +10,8 @@
 
 #include "attributes.h"
 #include "buffs.h"
+#include "ground_service.h"
+#include "map_actions.h"
 #include "marker_map.h"
 #include "marker_net.h"
 #include "markers.h"
@@ -181,6 +183,18 @@ struct CoreState {
         std::mutex log_lock;
         LogLimiter log;                        // refusals: the same line once per 10 s
     } markers;
+    // ---- v34 the map's mouse, map actions, the ground (api_map.cpp) ----
+    struct Map {
+        MapActions actions{nullptr};             // the server end's actions (announced over emf/mapact)
+        MapActionsClient client;                 // what this game's server end announced
+        std::unique_ptr<GroundService> ground;   // ground_at (null: not available on this game build)
+        std::recursive_mutex ground_lock;        // ground_at from any thread; callbacks may ask again
+        std::atomic<uint32_t> host_told{0};      // the host's own game got the list (its local player; 0: not yet)
+        std::string host_msg;                    // what it got (the server world's thread)
+        uint64_t host_ms = 0;
+        std::mutex click_lock;
+        std::vector<std::pair<EmfMapClickCallback, void*>> clicks;  // on_map_click (16 at most)
+    } map;
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them
     std::mutex setting_watchers_lock;
     std::vector<SettingWatcher> setting_watchers;  // v13 on_setting_changed (only appended to)
@@ -256,6 +270,26 @@ void env_pre(void* program_context, uint8_t kind);
 void env_post(void* program_context, uint8_t kind);
 void deliver_env_hits(EmfWorld* w);
 void env_new_session();  // a new server world: the old one's queued env hits and carries are dropped
+
+// ---- v34 the map (api_map.cpp) ----
+bool api_map_cursor(double* x, double* z);
+bool api_on_map_click(EmfMapClickCallback cb, void* user);
+bool api_map_action(const char* id, const char* label, uint32_t hold_ms, EmfMapActionCallback cb, void* user);
+bool api_ground_at(EmfWorld* world, double x, double z, EmfGroundCallback cb, void* user);
+// The server world's thread, after its step: ground searches.
+void map_server_tick(EmfWorld* server);
+// A world of that kind was set up: client: the last server's announced actions go; server: ground searches end.
+void map_world_setup(uint8_t kind);
+// The console: map.where, ground <x> <z>.
+bool add_map_commands(CommandCenter& commands);
+// Start-up, with mod messages: the channel emf/mapact (the server's actions to players' games, a player's finished
+// gesture back) and the gesture's done -> the server. False (why) when the channel could not be added.
+bool map_net_setup(net::NetService* net, std::string* why);
+// Start-up: on_map_click's listeners get the gesture's clicks.
+void map_input_setup();
+// The server: a player's game said hello: it gets the actions (none: an empty list, the gesture off).
+void map_on_hello(uint32_t player);
+bool map_greets();  // the server has map actions: players' games must hear about them
 
 // ---- v33 markers (api_markers.cpp) ----
 bool api_marker_set(const EmfMarker* m);

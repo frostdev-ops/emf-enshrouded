@@ -99,6 +99,8 @@ public:
     uint32_t to_players(const std::string& owner, const std::string& channel, const std::string& data);
     // The channel version `player`'s game has (server side), or the server's (player 0, a player's game); 0 = none.
     uint32_t peer(uint32_t player, const std::string& channel);
+    // This process hosts the server world with a local player (its entity there).
+    bool hosted(uint32_t* local_player) const { return d_.hosted && d_.hosted(local_player); }
 
     // ---- the chat transport ----
     void enable_server(ServerEnv env);

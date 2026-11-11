@@ -53,4 +53,7 @@ enum class InjectedKeyHooks {
 // not, and GetForegroundWindow. `keys` must live for the process.
 InjectedKeyHooks install_injected_keys(InjectedKeys* keys);
 
+// The game window EMF hooked (null until found).
+HWND input_game_window();
+
 }  // namespace emf::core

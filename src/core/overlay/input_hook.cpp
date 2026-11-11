@@ -381,4 +381,6 @@ bool install_input_hooks(InputRouter* router, InputCallbacks callbacks) {
     return hooked;
 }
 
+HWND input_game_window() { return game_window(); }
+
 }  // namespace emf::core

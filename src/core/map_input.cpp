@@ -40,6 +40,19 @@ void MapInput::set_click_listener(std::function<void(const EmfMapClick&)> f) {
     click_ = std::move(f);
 }
 
+void MapInput::set_hold_ms(uint64_t ms) {
+    std::lock_guard<std::mutex> lock(m_);
+    if (!hold_.holding()) hold_.set_hold_ms(ms);
+    else pending_hold_ms_ = ms ? ms : kMapHoldMs;
+}
+
+void MapInput::take_pending_hold() {
+    if (pending_hold_ms_ && !hold_.holding()) {
+        hold_.set_hold_ms(pending_hold_ms_);
+        pending_hold_ms_ = 0;
+    }
+}
+
 MapInputResult MapInput::message(UINT msg, WPARAM wp, LPARAM lp, const MapInputEnv& env) {
     MapInputResult r;
     const float px = static_cast<float>(GET_X_LPARAM(lp)), py = static_cast<float>(GET_Y_LPARAM(lp));
@@ -55,8 +68,16 @@ MapInputResult MapInput::message(UINT msg, WPARAM wp, LPARAM lp, const MapInputE
         std::lock_guard<std::mutex> lock(m_);
         hold_.set_enabled(env.announced && env.map_open);
         switch (msg) {
-            case WM_LBUTTONDOWN: o = hold_.down(shift, on_map, x, z, env.now_ms); click_button = 0; break;
-            case WM_LBUTTONDBLCLK: o = hold_.dblclk(shift, on_map, x, z, env.now_ms); click_button = 0; break;
+            case WM_LBUTTONDOWN:
+                take_pending_hold();
+                o = hold_.down(shift, on_map, x, z, env.now_ms);
+                click_button = 0;
+                break;
+            case WM_LBUTTONDBLCLK:
+                take_pending_hold();
+                o = hold_.dblclk(shift, on_map, x, z, env.now_ms);
+                click_button = 0;
+                break;
             case WM_LBUTTONUP: o = hold_.up(env.now_ms); break;
             case WM_RBUTTONDOWN:
             case WM_RBUTTONDBLCLK:

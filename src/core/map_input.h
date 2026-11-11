@@ -40,16 +40,19 @@ public:
     explicit MapInput(std::function<void(double x, double z)> done = nullptr) : done_(std::move(done)) {}
     void set_done(std::function<void(double x, double z)> f);
     void set_click_listener(std::function<void(const EmfMapClick&)> f);
+    void set_hold_ms(uint64_t ms);  // what the server announced (0: 1 s); a hold under way keeps its time
     MapInputResult message(UINT msg, WPARAM wp, LPARAM lp, const MapInputEnv& env);
     void frame(const MapInputEnv& env);
     MapRing ring(uint64_t now_ms) const;
 
 private:
     void finish(const MapHoldOut& o);
+    void take_pending_hold();  // m_ held
     mutable std::mutex m_;
     MapHold hold_;
     std::function<void(double, double)> done_;
     std::function<void(const EmfMapClick&)> click_;
+    uint64_t pending_hold_ms_ = 0;  // set during a hold: for the next one
     bool right_ours_ = false;  // a right-click swallowed during a hold: its release too
 };
 

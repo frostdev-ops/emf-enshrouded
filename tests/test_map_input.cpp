@@ -105,3 +105,25 @@ TEST_CASE("map input: clicks the game gets on the open map are told to on_map_cl
     in.message(WM_LBUTTONDOWN, MK_LBUTTON, at(5, 5), env(true, false, false));  // off the map: nothing
     CHECK(clicks.size() == 1);
 }
+
+TEST_CASE("map input: the hold time the server announced: not done at 1 s with 1.5 s set, done at 1.5 s") {
+    int done = 0;
+    MapInput in([&](double, double) { ++done; });
+    in.set_hold_ms(1500);
+    MapInputEnv e = env();
+    in.message(WM_LBUTTONDOWN, MK_LBUTTON | MK_SHIFT, at(500, 500), e);
+    e.now_ms = 2000;
+    in.frame(e);
+    CHECK(done == 0);
+    CHECK(in.ring(2000).progress == doctest::Approx(1.0f / 1.5f));
+    e.now_ms = 2500;
+    in.frame(e);
+    CHECK(done == 1);
+    in.set_hold_ms(0);  // 0: the default 1 s
+    e.now_ms = 3000;
+    in.message(WM_LBUTTONUP, 0, at(500, 500), e);
+    in.message(WM_LBUTTONDOWN, MK_LBUTTON | MK_SHIFT, at(500, 500), e);
+    e.now_ms = 4000;
+    in.frame(e);
+    CHECK(done == 2);
+}

@@ -42,6 +42,7 @@
 #include "console.h"
 #include "content_status.h"
 #include "buff_service.h"
+#include "ground_glue.h"
 #include "marker_capture.h"
 #include "inventory.h"
 #include "teleport.h"
@@ -671,6 +672,7 @@ void hk_register_all_programs(void* world) {
             g_state->damage_queue.clear();                // hits for the old session never land
             emf::core::env_new_session();                 // nor its env hits and carries
             emf::core::markers_world_setup(EMF_WORLD_SERVER);  // nothing of the old world is followed or replayed
+            emf::core::map_world_setup(EMF_WORLD_SERVER);      // ground searches for the old world end (not ok)
             ++g_state->server_session;                    // mods notice the new session (API v9)
         }
         // a new client world (a new session): the server the last one talked to is forgotten (its welcome, its lines);
@@ -680,6 +682,7 @@ void hk_register_all_programs(void* world) {
             ++g_state->client_session;
             if (g_state->net) g_state->net->client_reset(/*keep_held_beacon=*/true);
             emf::core::markers_world_setup(EMF_WORLD_CLIENT);  // the last server's markers go
+            emf::core::map_world_setup(EMF_WORLD_CLIENT);      // and its map actions
         }
         g_state->relay.forget_world(world);                  // nothing an earlier world left at this address
         if (g_register_program_addr && !g_state->relay.closed()) {
@@ -1307,6 +1310,30 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             emf::logf("markers: drawing off (%s); marker_send works", mk.world_why.c_str());
         if (!emf::core::add_marker_commands(g_state->commands)) emf::logf("commands: the markers commands could not be added");
     }
+    // v34 the map: ground_at from the game's voxel ray (the world's reset box from a hook on its setter); the map
+    // screen's clicks for on_map_click (private plans/2026-11-11-markers-step2.md)
+    {
+        using emf::Sig;
+        const auto& ray = g_state->sigs[static_cast<size_t>(Sig::VoxelRay)];
+        const auto& box = g_state->sigs[static_cast<size_t>(Sig::ResetBoundsSet)];
+        std::string why;
+        if (!emf::is_usable(ray, known) || !emf::is_usable(box, known))
+            why = "the voxel ray or reset-box signature is not usable on this game build";
+        else if (emf::core::ground_hook_reset_bounds(box.addr, &why))
+            emf::core::ground_set_ray(reinterpret_cast<emf::core::VoxelRayFn>(ray.addr));
+        if (why.empty()) {
+            emf::core::GroundService::Deps d;
+            d.limits = emf::core::ground_limits;
+            d.ray = emf::core::ground_ray;
+            d.now_ms = [] { return GetTickCount64(); };
+            g_state->map.ground = std::make_unique<emf::core::GroundService>(std::move(d));
+            emf::logf("map: ground_at on");
+        } else {
+            emf::logf("map: ground_at off (%s)", why.c_str());
+        }
+        emf::core::map_input_setup();
+        if (!emf::core::add_map_commands(g_state->commands)) emf::logf("commands: the map commands could not be added");
+    }
     // teleport: an internal server program pushes the game's add-Teleport record (docs/engine_parts/re_teleport.md).
     {
         const auto& qp = g_state->sigs[static_cast<size_t>(emf::Sig::QueuePush)];
@@ -1530,8 +1557,10 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         const uint8_t kind = emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind();
         if (kind == EMF_WORLD_CLIENT)
             emf::core::markers_client_tick(w);
-        else if (kind == EMF_WORLD_SERVER)
+        else if (kind == EMF_WORLD_SERVER) {
             emf::core::markers_server_tick(w);
+            emf::core::map_server_tick(w);  // v34 ground_at
+        }
     }, nullptr);
     // v32 buffs: the emf_buffs watchdog and the players' buff events after each server step.
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
@@ -1635,17 +1664,22 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         } else {
             emf::logf("markers: marker_send off (%s)", mwhy.c_str());
         }
+        // v34 map actions: the server's actions to players' games, a player's Shift + hold spot back
+        std::string awhy;
+        if (!emf::core::map_net_setup(net.get(), &awhy)) emf::logf("map: map actions off (%s)", awhy.c_str());
         // a game's new hello (or its leaving) ends the list it sent before: only the new one counts
         net->set_peer_watch([](uint64_t account, bool joined) {
             if (g_mods_check) g_mods_check->forget(account);
             // markers (v33): a game whose hello came gets what a mod sent it (or every player) before its link was up
-            if (joined && g_state->markers.sender) {
+            // map actions (v34): it hears which action Shift + hold does here
+            if (joined && (g_state->markers.sender || emf::core::map_greets())) {
                 auto* acct = new uint64_t(account);
                 g_state->dispatcher.post(EMF_WORLD_SERVER, [](EmfWorld*, void* u) {
                     const uint64_t a = *static_cast<uint64_t*>(u);
                     delete static_cast<uint64_t*>(u);
                     const uint32_t entity = g_state->net_entity_of ? g_state->net_entity_of(a) : 0;
                     if (entity && g_state->markers.sender) g_state->markers.sender->replay(entity);
+                    if (entity && emf::core::map_greets()) emf::core::map_on_hello(entity);
                 }, acct);
             }
         });
@@ -1656,7 +1690,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             const uint64_t now = GetTickCount64();
             if (now - at.load() >= 2000) {
                 yes = g_mods_refuse || (g_mods_check && g_mods_check->has_shared_mods()) ||  // refuse asks every game
-                      (g_state->markers.sender && g_state->markers.sender->any_sent());  // a mod sent markers
+                      (g_state->markers.sender && g_state->markers.sender->any_sent()) ||  // a mod sent markers
+                      emf::core::map_greets();  // a mod has a map action
                 at = now;
             }
             return yes.load();

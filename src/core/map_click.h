@@ -27,6 +27,7 @@ class MapHold {
 public:
     explicit MapHold(uint64_t hold_ms = kMapHoldMs) : hold_ms_(hold_ms) {}
     void set_enabled(bool on) { enabled_ = on; }  // a server end announced a map action
+    void set_hold_ms(uint64_t ms) { hold_ms_ = ms ? ms : kMapHoldMs; }  // the next hold's time (0: the default)
     bool enabled() const { return enabled_; }
     MapHoldOut down(bool shift, bool on_map, double x, double z, uint64_t now_ms);
     MapHoldOut dblclk(bool shift, bool on_map, double x, double z, uint64_t now_ms);
