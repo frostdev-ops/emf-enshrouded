@@ -31,11 +31,12 @@ std::vector<Did> g_did;
 struct Got {
     bool ok;
     double y;
+    uint32_t size;
 };
 std::vector<Got> g_got;
 
 void on_action(EmfWorld*, uint32_t player, const char*, double x, double z, void*) { g_did.push_back({player, x, z}); }
-void on_ground(EmfWorld*, bool ok, double, double y, double, const char*, void*) { g_got.push_back({ok, y}); }
+void on_ground(EmfWorld*, const EmfGround* g, void*) { g_got.push_back({g->status == EMF_GROUND_OK, g->y, g->size}); }
 void on_click(const EmfMapClick*, void*) {}
 
 struct Fixture {
@@ -123,6 +124,7 @@ TEST_CASE("ground_at: the server world only; answered after the steps that agree
     REQUIRE(g_got.size() == 1);
     CHECK(g_got[0].ok);
     CHECK(g_got[0].y == doctest::Approx(321));
+    CHECK(g_got[0].size == sizeof(EmfGround));
 }
 
 TEST_CASE("on_map_click: up to 16 listeners; map_cursor is false with the map closed") {

@@ -593,8 +593,19 @@ typedef struct EmfMapClick {
 typedef void (*EmfMapClickCallback)(const EmfMapClick* click, void* user);
 /* A map action a player did: on the server world's thread; `player` = their entity there; x, z the spot. */
 typedef void (*EmfMapActionCallback)(EmfWorld* world, uint32_t player, const char* action, double x, double z, void* user);
-/* The ground under a spot: ok and x, y, z (y = the ground), or not ok with why. On the server world's thread. */
-typedef void (*EmfGroundCallback)(EmfWorld* world, bool ok, double x, double y, double z, const char* why, void* user);
+#define EMF_GROUND_OK 0u         /* EmfGround.status: y is the ground */
+#define EMF_GROUND_NOT_LOADED 1u /* nobody is near the spot: hop_y is a height over it where a player may be teleported
+                                    (the game loads the place around them); ask again once they are there */
+#define EMF_GROUND_FAILED 2u     /* why says why */
+typedef struct EmfGround {
+    uint32_t size;   /* sizeof(EmfGround) of the core */
+    uint32_t status; /* EMF_GROUND_* */
+    double x, y, z;  /* the spot; y: the ground (EMF_GROUND_OK), else 0 */
+    double hop_y;    /* EMF_GROUND_NOT_LOADED: see above; else 0 */
+    const char* why; /* not OK: why, in plain English ("" when OK); valid during the callback */
+} EmfGround;
+/* The ground under a spot, once: on the server world's thread. */
+typedef void (*EmfGroundCallback)(EmfWorld* world, const EmfGround* ground, void* user);
 typedef struct EmfMapMarkerType {
     uint32_t size;   /* sizeof(EmfMapMarkerType) of the core */
     uint32_t id;     /* for EmfMarker.game_icon */

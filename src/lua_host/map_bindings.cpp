@@ -62,7 +62,7 @@ struct GroundSlot {
     uint64_t load;  // the script's load counter when asked (a reload drops the answer)
 };
 
-void ground_cb_body(EmfWorld* w, bool ok, double x, double y, double z, const char* why, void* user) {
+void ground_cb_body(EmfWorld* w, const EmfGround* g, void* user) {
     auto* slot = static_cast<GroundSlot*>(user);
     Script* s = slot->host->find(slot->id);
     if (s) {
@@ -72,12 +72,15 @@ void ground_cb_body(EmfWorld* w, bool ok, double x, double y, double z, const ch
             if (!s->paused) {
                 lua_rawgeti(s->L, LUA_REGISTRYINDEX, slot->ref);
                 push_world(s->L, *s, w);
+                const bool ok = g && g->status == EMF_GROUND_OK;
                 lua_pushboolean(s->L, ok);
-                lua_pushnumber(s->L, x);
-                lua_pushnumber(s->L, y);
-                lua_pushnumber(s->L, z);
-                lua_pushstring(s->L, why ? why : "");
-                call_lua(*s, 6);
+                lua_pushnumber(s->L, g ? g->x : 0);
+                lua_pushnumber(s->L, ok ? g->y : 0);
+                lua_pushnumber(s->L, g ? g->z : 0);
+                lua_pushstring(s->L, g && g->why ? g->why : "");
+                if (g && g->status == EMF_GROUND_NOT_LOADED) lua_pushnumber(s->L, g->hop_y);
+                else lua_pushnil(s->L);
+                call_lua(*s, 7);
                 ++s->generation;
             }
             if (s->L) luaL_unref(s->L, LUA_REGISTRYINDEX, slot->ref);
@@ -86,9 +89,9 @@ void ground_cb_body(EmfWorld* w, bool ok, double x, double y, double z, const ch
     delete slot;
 }
 
-void ground_cb(EmfWorld* w, bool ok, double x, double y, double z, const char* why, void* user) {
+void ground_cb(EmfWorld* w, const EmfGround* g, void* user) {
     try {
-        ground_cb_body(w, ok, x, y, z, why, user);
+        ground_cb_body(w, g, user);
     } catch (...) {
     }
 }
@@ -218,8 +221,9 @@ int l_remove_map_action(lua_State* L) {
     return 1;
 }
 
-// emf.ground_at(world, x, z, fn(world, ok, x, y, z, why)): the ground under (x, z) of the server world; fn once with the
-// answer (the place may take a few seconds to load). True when asked; false when refused at once.
+// emf.ground_at(world, x, z, fn(world, ok, x, y, z, why, hop_y)): the ground under (x, z) of the server world; fn once
+// with the answer (the place may take a few seconds to load). hop_y: when nobody is near the spot (not ok), a height over
+// it where a player may be teleported so it loads (ask again then); nil otherwise. True when asked; false when refused.
 int l_ground_at(lua_State* L) {
     Script* s = script_of(L);
     EmfWorld* w = lua_world_arg(L, 1);

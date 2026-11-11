@@ -30,40 +30,51 @@ void GroundService::on_server_tick(EmfWorld* world) {
     if (reqs_.empty()) return;
     const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
     std::vector<Req> keep;
-    std::vector<std::pair<Req, GroundSearch::Out>> done;
+    std::vector<std::pair<Req, GroundAnswer>> done;
     for (Req& r : reqs_) {
         if (r.world != world) {
             keep.push_back(std::move(r));
             continue;
         }
         RayResult ray;
-        GroundSearch::Out o;
-        if (!d_.ray || !d_.ray(world, r.search.x(), r.search.z(), r.search.ray_start(), r.search.ray_end(), &ray)) {
-            o.step = GroundSearch::Step::Fail;
-            o.why = "the ground could not be read here";
+        GroundAnswer a;
+        a.x = r.search.x();
+        a.z = r.search.z();
+        if (!d_.ray || !d_.ray(world, a.x, a.z, r.search.ray_start(), r.search.ray_end(), &ray)) {
+            a.why = "the ground could not be read here";
         } else {
-            o = r.search.on_ray(ray, now);
-            if (o.step == GroundSearch::Step::Hop || o.step == GroundSearch::Step::Back) {
-                o.step = GroundSearch::Step::Fail;  // a plain search moves nobody
-                o.why = "that place is not loaded yet (nobody is near it)";
+            const GroundSearch::Out o = r.search.on_ray(ray, now);
+            if (o.step == GroundSearch::Step::Wait) {
+                keep.push_back(std::move(r));
+                continue;
+            }
+            if (o.step == GroundSearch::Step::Accept) {
+                a.status = EMF_GROUND_OK;
+                a.y = o.y;
+            } else if (o.step == GroundSearch::Step::Hop) {  // a plain search moves nobody: the caller may hop
+                a.status = EMF_GROUND_NOT_LOADED;
+                a.hop_y = o.y;
+                a.why = "that place is not loaded yet (nobody is near it)";
+            } else {
+                a.why = o.why.empty() ? "no ground found there" : o.why;
             }
         }
-        if (o.step == GroundSearch::Step::Wait)
-            keep.push_back(std::move(r));
-        else
-            done.emplace_back(std::move(r), o);
+        done.emplace_back(std::move(r), std::move(a));
     }
     reqs_ = std::move(keep);
-    for (auto& [r, o] : done) {
-        const bool ok = o.step == GroundSearch::Step::Accept;
-        r.cb(world, ok, r.search.x(), ok ? o.y : 0.0, r.search.z(), ok ? std::string() : o.why);
-    }
+    for (auto& [r, a] : done) r.cb(world, a);
 }
 
 void GroundService::world_reset() {
     std::vector<Req> old = std::move(reqs_);
     reqs_.clear();
-    for (Req& r : old) r.cb(r.world, false, r.search.x(), 0.0, r.search.z(), "the world changed");
+    for (Req& r : old) {
+        GroundAnswer a;
+        a.x = r.search.x();
+        a.z = r.search.z();
+        a.why = "the world changed";
+        r.cb(r.world, a);
+    }
 }
 
 }  // namespace emf::core

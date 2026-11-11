@@ -16,6 +16,8 @@ struct Answer {
     bool ok;
     double y;
     std::string why;
+    uint32_t status;
+    double hop_y;
 };
 
 struct Rig {
@@ -46,7 +48,9 @@ struct Rig {
         return d;
     }
     GroundService::Callback cb() {
-        return [this](EmfWorld*, bool ok, double, double y, double, const std::string& why) { answers.push_back({ok, y, why}); };
+        return [this](EmfWorld*, const GroundAnswer& a) {
+            answers.push_back({a.status == EMF_GROUND_OK, a.y, a.why, a.status, a.hop_y});
+        };
     }
 };
 
@@ -73,6 +77,7 @@ TEST_CASE("ground service: a loaded spot answers with the ground after two agree
     r.svc.on_server_tick(W());
     REQUIRE(r.answers.size() == 1);
     CHECK(r.answers[0].ok);
+    CHECK(r.answers[0].status == EMF_GROUND_OK);
     CHECK(r.answers[0].y == doctest::Approx(300.2));
     CHECK(r.svc.waiting() == 0u);
 }
@@ -90,6 +95,8 @@ TEST_CASE("ground service: a place that does not load in 5 s is answered 'not lo
     REQUIRE(r.answers.size() == 1);
     CHECK_FALSE(r.answers[0].ok);
     CHECK(r.answers[0].why.find("not loaded") != std::string::npos);
+    CHECK(r.answers[0].status == EMF_GROUND_NOT_LOADED);
+    CHECK(r.answers[0].hop_y == doctest::Approx(1100));  // min(box top 1200 - 8, grid top 1100): a player may wait there
 }
 
 TEST_CASE("ground service: refused at once outside the world, without limits, or 64 waiting; a world reset ends the rest") {
@@ -120,5 +127,6 @@ TEST_CASE("ground service: a ray that cannot be cast ends the request with a rea
     r.svc.on_server_tick(W());
     REQUIRE(r.answers.size() == 1);
     CHECK_FALSE(r.answers[0].ok);
+    CHECK(r.answers[0].status == EMF_GROUND_FAILED);
     CHECK_FALSE(r.answers[0].why.empty());
 }

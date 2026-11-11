@@ -102,8 +102,16 @@ bool api_ground_at(EmfWorld* world, double x, double z, EmfGroundCallback cb, vo
     std::string why;
     return s->map.ground->request(
         world, x, z,
-        [cb, user](EmfWorld* w, bool ok, double gx, double gy, double gz, const std::string& msg) {
-            cb(w, ok, gx, gy, gz, msg.c_str(), user);
+        [cb, user](EmfWorld* w, const GroundAnswer& a) {
+            EmfGround g{};
+            g.size = sizeof g;
+            g.status = a.status;
+            g.x = a.x;
+            g.y = a.y;
+            g.z = a.z;
+            g.hop_y = a.hop_y;
+            g.why = a.why.c_str();
+            cb(w, &g, user);
         },
         &why);
 }
@@ -218,12 +226,15 @@ void cmd_ground(EmfWorld* world, int argc, const char* const* argv, void*) {
             const ReplyFn reply = current_reply();
             queued = s->map.ground->request(
                 world, x, z,
-                [reply](EmfWorld*, bool ok, double gx, double gy, double gz, const std::string& msg) {
-                    char line[200];
-                    if (ok)
-                        std::snprintf(line, sizeof line, "ground: x %.1f, z %.1f: the ground is at y %.2f", gx, gz, gy);
+                [reply](EmfWorld*, const GroundAnswer& a) {
+                    char line[240];
+                    if (a.status == EMF_GROUND_OK)
+                        std::snprintf(line, sizeof line, "ground: x %.1f, z %.1f: the ground is at y %.2f", a.x, a.z, a.y);
+                    else if (a.status == EMF_GROUND_NOT_LOADED)
+                        std::snprintf(line, sizeof line, "ground: x %.1f, z %.1f: %s (a player could wait at y %.0f)", a.x,
+                                      a.z, a.why.c_str(), a.hop_y);
                     else
-                        std::snprintf(line, sizeof line, "ground: x %.1f, z %.1f: %s", gx, gz, msg.c_str());
+                        std::snprintf(line, sizeof line, "ground: x %.1f, z %.1f: %s", a.x, a.z, a.why.c_str());
                     if (reply) reply(line);
                 },
                 &why);

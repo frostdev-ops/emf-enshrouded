@@ -15,9 +15,16 @@ namespace emf::core {
 
 constexpr size_t kGroundRequestsMax = 64;
 
+struct GroundAnswer {
+    uint32_t status = EMF_GROUND_FAILED;  // EMF_GROUND_*
+    double x = 0, y = 0, z = 0;
+    double hop_y = 0;  // EMF_GROUND_NOT_LOADED: a height over the spot where a player may wait for it to load
+    std::string why;
+};
+
 class GroundService {
 public:
-    using Callback = std::function<void(EmfWorld*, bool ok, double x, double y, double z, const std::string& why)>;
+    using Callback = std::function<void(EmfWorld*, const GroundAnswer&)>;
     struct Deps {
         // the world's limits now: false (why) when they cannot be read
         std::function<bool(EmfWorld*, GroundLimits*, std::string* why)> limits;
