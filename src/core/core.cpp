@@ -548,6 +548,24 @@ std::unique_ptr<emf::core::ComponentService> g_components;
 std::unique_ptr<emf::core::OfferService> g_offers;
 
 // offers.list: the offers of the running session (entity, mod, verb, accepts), for tests and mod authors.
+// hits: the v31 hit hooks' state and cost
+void cmd_hits(EmfWorld*, int, const char* const*, void*) {
+    const auto& st = g_state->hit_stats;
+    const uint64_t seen = st.seen.load();
+    char avg[32] = "-";
+    if (seen) std::snprintf(avg, sizeof avg, "%.1f", static_cast<double>(st.ns.load()) / 1000.0 / static_cast<double>(seen));
+    const std::string before = emf::core::hit_hook_on() ? std::string("on") : "off (" + g_state->hit_hook_off_why + ")";
+    char line[512];
+    std::snprintf(line, sizeof line,
+                  "hits: before the hit %s, %zu rules, %zu before and %zu after callbacks; %llu seen, %llu changed, "
+                  "%llu cancelled, %llu faults, %s us each",
+                  before.c_str(), g_state->hit_rules.size(), g_state->hit_callbacks.before_count(),
+                  g_state->hit_callbacks.after_count(), static_cast<unsigned long long>(seen),
+                  static_cast<unsigned long long>(st.changed.load()), static_cast<unsigned long long>(st.cancelled.load()),
+                  static_cast<unsigned long long>(st.faults.load()), avg);
+    emf::core::command_reply_line(line);
+}
+
 void cmd_offers_list(EmfWorld*, int, const char* const*, void*) {
     const EmfApi* api = emf::core::api_table();
     if (!g_offers) {
@@ -1045,7 +1063,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         // shifted offset must never turn damage into something else. Elsewhere the three signatures count as missing
         // (so emf::kill takes its old path).
         if (!emf::core::attribute_layouts_checked(build)) {
-            for (const auto s : {emf::Sig::AttrFind, emf::Sig::AttrAdd, emf::Sig::AllocPendingHit})
+            for (const auto s : {emf::Sig::AttrFind, emf::Sig::AttrAdd, emf::Sig::AllocPendingHit, emf::Sig::ApplyHitToEntity})
                 g_state->sigs[static_cast<size_t>(s)].count = 0;
             emf::logf("attributes: off: attribute_get, attribute_add and damage rely on layouts EMF checked on build 1273043 "
                       "(game and server) only; this build is %s", known ? "one whose exe was not at hand" : "unknown");
@@ -1071,6 +1089,22 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
                   g_state->alloc_pending_hit && g_state->programs
                       ? "on once impact_hit_conclusion's pre-hook is installed (at world setup)"
                       : "off (AllocPendingHit or the program hooks are not available)");
+        // v31 hits before they land: a detour on applyHitToEntity (rules and on_hit_before), only where the HitCandidate
+        // layout and attribute reads were checked (the same builds as damage)
+        g_state->hit_callbacks.set_log([](const std::string& line) { emf::logf("%s", line.c_str()); });
+        const uintptr_t apply_hit = sig(emf::Sig::ApplyHitToEntity);
+        if (!apply_hit)
+            g_state->hit_hook_off_why = "the ApplyHitToEntity signature is not usable on this game build";
+        else if (!g_state->attr_find)
+            g_state->hit_hook_off_why = "attribute reads are off on this game build";
+        else if (!emf::core::install_hit_hook(apply_hit))
+            g_state->hit_hook_off_why = "applyHitToEntity could not be hooked";
+        if (g_state->hit_hook_off_why.empty())
+            emf::logf("hits: before the hit on (applyHitToEntity hooked: rules and on_hit_before)");
+        else
+            emf::logf("hits: before the hit off (%s): rules and on_hit_before are refused", g_state->hit_hook_off_why.c_str());
+        if (!g_state->commands.add("hits", ": the hit hooks' state, rules, callbacks and cost", cmd_hits, nullptr, nullptr))
+            emf::logf("commands: \"hits\" could not be added");
     }
     // v19 request_save: the game's requestServerSave, called with the instance loadSavegameStep last ran for
     {

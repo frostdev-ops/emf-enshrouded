@@ -197,6 +197,11 @@ constexpr SigDef kSignatures[] = {
     // (English while another language is active). Client only: the dedicated server has no text.
     {Sig::LocaPoolLookup, "LocaPoolLookup", "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 30 33 FF 48 8B F2 48 8B D9 45 85 C0 75 ?? 48 89 79 08 48 8B C1 48 89 79 10 89 79 04 C6 01 12 48 8B 5C 24 48 48 8B 74 24 50 48 83 C4 30 5F C3 44 3B 42 18 75 ?? 0F 10 05 ?? ?? ?? ?? 89 79 04 48 8B C3 40 88 39 0F 11 41 08 48 8B 5C 24 48 48 8B 74 24 50 48 83 C4 30 5F C3 48 81 C2 E0 00 00 00 48 89 6C 24 40 48 89 7C 24 20 48 89 7C 24 28 48 39 7A 20 74 ?? 48 8D 4C 24 20 E8 ?? ?? ?? ?? 84 C0 75 ?? 48 8D 6E 40 39 BE D8 00 00 00 75 ?? 48 8B D5 48 8D 4C 24 20 E8 ?? ?? ?? ?? 84 C0 75 ?? 48 8D 96 90 00 00 00", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x12169b0u, 0u}, false},
     {Sig::LocaSlotFind, "LocaSlotFind", "48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 48 8B 42 20 48 8B F1 48 85 C0 0F 84 ?? ?? ?? ?? 44 8B 48 04 45 85 C9 0F 84 ?? ?? ?? ?? 48 63 10", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x1216280u, 0u}, false},
+    // hits before they land (API v31): applyHitToEntity(outPropagate, entity, ctx, hit), the function that applies one
+    // landing hit to one entity, at impact_hit_conclusion's entity call (its stack copy at rbp+0x240, ctx at rbp+0x170,
+    // the propagate byte at rbp+0x3E8); the target must start with the function's own prologue through the "[impact]
+    // Droped Hit" string's lea. Both exes of 1287369 alone (private research hit_hooks_2026-11-11 section 7).
+    {Sig::ApplyHitToEntity, "ApplyHitToEntity", "4C 8D 8D 40 02 00 00 48 8B D0 4C 8D 85 70 01 00 00 4C 8B F0 48 8D 8D E8 03 00 00 E8", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x3efd10u, 0x190fb0u}, false, 0x1B, "4C 89 44 24 18 48 89 54 24 10 55 57 41 54 41 55 41 56 41 57 48 8D AC 24 78 FF FF FF 48 81 EC 88 01 00 00 49 8B 38 4C 8B E1 49 8B 48 38 4D 8B E9 48 89 7C 24 60 4D 8B F8 4C 8B F2 E8 ?? ?? ?? ?? 84 C0 75 ?? 0F 10 05 ?? ?? ?? ?? 45 33 C9 4C 8D 44 24 70 48 8D 15"},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

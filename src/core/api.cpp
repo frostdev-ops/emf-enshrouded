@@ -2251,6 +2251,7 @@ bool install_emf_hook(const char* name, uintptr_t target, void* detour, void** o
 }
 
 void damage_pre_conclusion(void* program_context) {
+    hit_hook_new_step();  // first: this thread's once-per-hit tracker starts over for this run
     if (!g_state) return;
     uint8_t* world = program_context_world(program_context);
     if (!world) return;
@@ -2268,6 +2269,72 @@ void damage_pre_conclusion(void* program_context) {
                                                  g_state->alloc_pending_hit, time_ns, view.tick(), core_log);
     if (!system) log_once("damage: the server world has no impact::ImpactSystem singleton: hits wait, then are dropped");
     (void)n;
+}
+
+// ---- v31 hits: what the detour reads (the impact thread inside the server world's step; the conclusion writes Health
+// and reads CombatFlags and Destructible, so these reads do not race it) ----
+namespace {
+
+EmfWorld* env_world(void* ctx) { return static_cast<EmfWorld*>(ctx); }
+
+const void* destructible_of(EmfWorld* w, uint32_t id) {
+    const ComponentRef r = get_component(g_state->get_component, raw(w), ecs::Destructible::kHash, id);
+    if (r.ptr && r.size >= sizeof(ecs::Destructible)) return r.ptr;
+    if (!g_state->get_template_component) return nullptr;
+    return get_template_component(g_state->get_template_component, raw(w), ecs::Destructible::kHash, id);
+}
+
+HitClass hit_env_classify(uint32_t id, void* ctx) {
+    if (!id) return HitClass::None;
+    if (id <= 0x3FE) return HitClass::Player;  // the game's own player test (ids 1..0x3FE)
+    EmfWorld* w = env_world(ctx);
+    if (destructible_of(w, id)) return HitClass::Object;
+    if (get_component(g_state->get_component, raw(w), ecs::Health::kHash, id).ptr) return HitClass::Creature;
+    return HitClass::None;
+}
+
+bool hit_env_applies(uint32_t id, void* ctx) {
+    const ComponentRef r = get_component(g_state->get_component, raw(env_world(ctx)), ecs::CombatFlags::kHash, id);
+    ecs::CombatFlags cf{};
+    if (!r.ptr || r.size < sizeof cf || !seh_read(r.ptr, &cf, sizeof cf)) return true;  // no CombatFlags: applied
+    return cf.handleHits;
+}
+
+int32_t hit_env_health(uint32_t id, void* ctx) {
+    EmfWorld* w = env_world(ctx);
+    if (g_state->attr_find) {
+        AttrHome home;
+        std::string why;
+        int32_t v = 0;
+        if (attribute_home(w, id, kAttrHealth, &home, &why) == AttrStatus::Ok &&
+            attr_read(g_state->attr_find, home.comp, home.size, home.registry, kAttrHealth, &v) == AttrStatus::Ok)
+            return v;
+    }
+    uint16_t max = 0;  // a placed object not hit yet: the game gives it Health = Destructible.maxHealth on this hit
+    if (const void* d = destructible_of(w, id); d && seh_read(d, &max, sizeof max)) return max;
+    return -1;
+}
+
+uint32_t hit_env_weapon_item(uint32_t pide, void* ctx) {
+    if (!pide) return 0;
+    const ComponentRef r = get_component(g_state->get_component, raw(env_world(ctx)), ecs::ItemState::kHash, pide);
+    uint32_t item = 0;
+    if (!r.ptr || r.size < sizeof(ecs::ItemState) ||
+        !seh_read(static_cast<const uint8_t*>(r.ptr) + offsetof(ecs::ItemState, itemId), &item, sizeof item))
+        return 0;
+    return item;
+}
+
+}  // namespace
+
+void fill_pre_hit_env(EmfWorld* w, PreHitEnv* env) {
+    env->world = w;
+    env->ctx = w;
+    if (!g_state || !w) return;
+    env->classify = &hit_env_classify;
+    env->applies = &hit_env_applies;
+    env->health = &hit_env_health;
+    env->weapon_item = &hit_env_weapon_item;
 }
 
 void note_program_hook(const std::string& program, bool installed) {

@@ -18,6 +18,7 @@
 #include "dispatcher.h"
 #include "event_relay.h"
 #include "player_events.h"
+#include "hit_hook.h"
 #include "hook_table.h"
 #include "mod_registry.h"
 #include "program_registry.h"
@@ -131,6 +132,11 @@ struct CoreState {
     std::atomic<bool> damage_hooked{false};  // impact_hit_conclusion's pre-hook (damage_pre_conclusion) is requested
     DamageQueue damage_queue;                // damage requests waiting for that pre-hook
     HitOrderCheck hit_order;                 // logs once whether it runs after clear_hit_candidates in the same step
+    // ---- v31 hits ----
+    HitRules hit_rules;               // the mods' rules, applied by the detour before the before-callbacks
+    HitCallbacks hit_callbacks;       // on_hit_before (the detour) and on_hit (the server world's HitEvents)
+    HitStats hit_stats;               // the detour's counters and time (the hits command)
+    std::string hit_hook_off_why;     // why the detour is not installed ("" while it is)
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them
     std::mutex setting_watchers_lock;
     std::vector<SettingWatcher> setting_watchers;  // v13 on_setting_changed (only appended to)
@@ -196,5 +202,7 @@ void damage_pre_clear(void* program_context);
 // The program registry's report of one of EMF's own program hooks: a failure is logged; impact_hit_conclusion's
 // installed pre-hook switches damage on.
 void note_program_hook(const std::string& program, bool installed);
+// v31 hits: the game reads the detour needs on the server world `w` (entity classes, CombatFlags, health, a weapon's item).
+void fill_pre_hit_env(EmfWorld* w, PreHitEnv* env);
 
 }  // namespace emf::core

@@ -795,5 +795,5 @@ target_sources(emf_tests PRIVATE tests/test_hud_page.cpp tests/test_hud_colours.
 target_sources(emf_tests PRIVATE tests/test_hud_pick.cpp)
 
 # --- Hits (API v31): rules and callbacks before a hit lands, the hits after it landed ---
-target_sources(emf_core_lib PRIVATE src/core/hits.cpp)
-target_sources(emf_tests PRIVATE tests/test_hits.cpp)
+target_sources(emf_core_lib PRIVATE src/core/hits.cpp src/core/hit_hook.cpp)
+target_sources(emf_tests PRIVATE tests/test_hits.cpp tests/test_hit_hook.cpp)

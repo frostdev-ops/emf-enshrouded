@@ -44,6 +44,8 @@ enum class Sig : size_t {
     PlayerVitalBar,
     // the game's text (item names in the player's language), client only: the pool's lookup and its one-slot search
     LocaPoolLookup, LocaSlotFind,
+    // hits before they land (API v31): the game's applyHitToEntity, server world (game and dedicated server)
+    ApplyHitToEntity,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);
