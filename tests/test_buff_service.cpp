@@ -435,3 +435,18 @@ TEST_CASE("buff service: every singleton slot must be the world's own (polish)")
     REQUIRE(!g_got.empty());
     CHECK(g_got.back().why.find("iterator layout") != std::string::npos);
 }
+
+TEST_CASE("buff service: a remove names the copy it cleansed, not one already being removed (polish review)") {
+    Fixture f;
+    put<uint32_t>(g_box[1].b, 0x30, 6001);  // the old copy of a replace, cleansed this step
+    put<uint32_t>(g_box[1].b, 0x30 + 4, kElixir);
+    g_box[1].b[0x30 + 8] = 1;
+    put<uint32_t>(g_box[1].b, 0x30 + 12, 6002);  // the new copy
+    put<uint32_t>(g_box[1].b, 0x30 + 12 + 4, kElixir);
+    REQUIRE(f.take(1, kElixir));
+    f.tick();
+    REQUIRE(g_got.size() == 1);
+    CHECK(g_got[0].kind == EMF_BUFF_REMOVED);
+    CHECK(g_got[0].buff_entity == 6002);
+    CHECK(g_box[1].b[0x30 + 12 + 8] == 1);
+}

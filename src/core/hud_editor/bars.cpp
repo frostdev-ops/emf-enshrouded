@@ -54,7 +54,6 @@ uint64_t pack_colour(UiColour c) {
     return v;
 }
 
-
 }  // namespace
 
 int bar_index(uintptr_t data, uintptr_t base) {

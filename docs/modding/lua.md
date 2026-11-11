@@ -345,7 +345,7 @@ error.
   out, body heat is 0 while freezing, or oxygen is 0. `scale` is exact there (0.5 halves 1-point ticks: EMF carries the
   fraction). `add` is per event, so about 60 times a second on those three.
 - `min_health` works on every kind. A cancelled hit never reaches `on_hit` (entity hits too); a cancel gives back no mana or
-  stamina the attacker spent. `add` on a healing rule makes the heal smaller (a heal's amount is negative). A cancelled fall gives the health back, but the
+  stamina the attacker spent. `add` on a healing rule is added to a negative amount: a positive `add` makes the heal smaller. A cancelled fall gives the health back, but the
   game's hard-landing stagger still plays.
 
 What never becomes a hit (no hook sees it): regeneration, direct attribute writes, voxel damage (terrain and walls). A

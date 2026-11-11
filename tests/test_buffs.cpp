@@ -354,3 +354,9 @@ TEST_CASE("buff cleanse: an instance already being removed does not count again 
     CHECK(buff_cleanse(k.b, kWet));
     CHECK(k.b[kDebuffs + 4 * 12 + 8] == 1);
 }
+
+TEST_CASE("buff check: a copy being removed is not the one just given (polish review)") {
+    Container k;
+    k.set(kDebuffs, 0, 950, kWet, 1);  // cleansed: gone next step
+    CHECK_FALSE(check_applied(0, k.b, kWet, EMF_BUFF_DEBUFF, 0, 7).applied);
+}

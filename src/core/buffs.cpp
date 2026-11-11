@@ -190,7 +190,8 @@ BuffCheck check_applied(uint8_t err, const uint8_t* c, uint32_t type, uint8_t sl
     for (const Group& g : kGroups) {
         if (g.slot != slot) continue;
         for (uint8_t i = 0; i < g.count; ++i)
-            if (at<uint32_t>(c, g.offset + i * kInstance + 4) == type && at<uint32_t>(c, g.offset + i * kInstance)) {
+            if (at<uint32_t>(c, g.offset + i * kInstance + 4) == type && at<uint32_t>(c, g.offset + i * kInstance) &&
+                !c[g.offset + i * kInstance + 8]) {  // a copy being removed is not the one just given
                 r.applied = true;
                 return r;
             }

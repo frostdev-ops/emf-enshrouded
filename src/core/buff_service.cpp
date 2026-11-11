@@ -69,7 +69,7 @@ uint32_t buff_entity_of(const uint8_t* c, uint32_t type, uint8_t slot) {
     EmfBuff all[40];
     const uint32_t n = (std::min)(read_buffs(c, nullptr, nullptr, 0, all, 40), 40u);
     for (uint32_t i = 0; i < n; ++i)
-        if (all[i].type == type && all[i].slot == slot) return all[i].entity;
+        if (all[i].type == type && all[i].slot == slot && !all[i].cleansed) return all[i].entity;
     return 0;
 }
 
@@ -231,7 +231,7 @@ BuffService::Done BuffService::one(const ProgramCall& call, const Handles& hs, c
     }
     if (r.remove) {
         if (!buff_has(box, r.type)) return refused("the target does not have it");
-        const uint32_t be = buff_entity_of(box, r.type, t.slot);
+        const uint32_t be = buff_entity_of(box, r.type, t.slot);  // the copy buff_cleanse marks (not one being removed)
         void* w = write_other(call, hs.container, "BuffContainer", r.target, deps_.read_other, deps_.write_other,
                               deps_.get_component, &problem)
                       .ptr;
