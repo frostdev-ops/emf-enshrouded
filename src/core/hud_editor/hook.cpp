@@ -8,12 +8,14 @@
 #include <cstring>
 
 #include "common/fnv.h"
+#include "common/seh.h"
 #include "core/api.h"
 #include "core/hud_editor/bars.h"
 #include "core/hud_editor/elements.h"
 #include "core/hud_editor/gate.h"
 #include "core/hud_editor/layout.h"
 #include "core/hud_editor/lines.h"
+#include "core/marker_capture.h"
 
 namespace emf::core::hud {
 
@@ -317,6 +319,12 @@ bool hud_bars_hooked() { return g_bars_hooked.load(std::memory_order_relaxed); }
 // ---- the detours' bodies ----
 void* hud_open_path(void* scope, const NameInfo* ni, OpenFn original, uint64_t now_ms) {
     void* r = original(scope, ni);
+    // markers (API v33): the camera, the world UI and the map seen this frame; also while the editor is off
+    if (ni) {
+        const uint8_t* node = nullptr;
+        if (seh_read(static_cast<const uint8_t*>(scope) + kScopeNode, &node, sizeof node))
+            markers_ui_frame(ni->hash, node, now_ms);
+    }
     if (is_on())
         guarded_after_open(scope, ni, current_snapshot(), now_ms);
     else
