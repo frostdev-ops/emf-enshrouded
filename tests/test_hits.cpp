@@ -3,12 +3,16 @@
 // cancel, scale, add, min_health; damage hits only unless a rule says healing).
 #include <doctest.h>
 
+#include <array>
 #include <cmath>
+#include <cstddef>
+#include <cstring>
 #include <limits>
 #include <string>
 #include <vector>
 
 #include "core/hits.h"
+#include "emf/generated/components.hpp"
 
 using namespace emf::core;
 
@@ -263,4 +267,147 @@ TEST_CASE("HitRules: ids, removal, 64 at most") {
     CHECK(set.add(r, &why) == kMaxHitRules + 2);  // ids are never reused
     EmfHitRule bad = rule();
     CHECK(set.add(bad, &why) == 0);
+}
+
+// ---- Task 2: the game's records and once per hit ----
+
+namespace {
+
+using HC = emf::gen::ecs::HitCandidate;
+
+template <class T>
+void put_at(uint8_t* mem, size_t off, T v) {
+    std::memcpy(mem + off, &v, sizeof v);
+}
+template <class T>
+T get_at(const uint8_t* mem, size_t off) {
+    T v{};
+    std::memcpy(&v, mem + off, sizeof v);
+    return v;
+}
+
+std::array<uint8_t, 0x150> candidate() {
+    std::array<uint8_t, 0x150> b{};
+    uint8_t* m = b.data();
+    put_at<uint32_t>(m, offsetof(HC, rootSourceId), 7);
+    put_at<uint32_t>(m, offsetof(HC, sourceId), 9);
+    put_at<uint32_t>(m, offsetof(HC, targetId), 31);
+    put_at<uint32_t>(m, offsetof(HC, rootTargetId), 30);
+    put_at<int32_t>(m, offsetof(HC, healthChange), -42);
+    put_at<int32_t>(m, offsetof(HC, staminaChange), -5);
+    put_at<uint32_t>(m, offsetof(HC, flags), 0x8);
+    put_at<uint16_t>(m, offsetof(HC, damageTypes), 0x8);
+    put_at<uint8_t>(m, offsetof(HC, attackCategory), 1);
+    put_at<uint32_t>(m, offsetof(HC, impactId), 0x7E5F0003u);
+    put_at<uint16_t>(m, offsetof(HC, hitReaction), 2);
+    put_at<uint32_t>(m, offsetof(HC, weaponCategory), 0xABCDu);
+    put_at<uint32_t>(m, offsetof(HC, programId), 0x1234u);
+    put_at<float>(m, offsetof(HC, position), 1.5f);
+    put_at<uint8_t>(m, offsetof(HC, sendHitEvent), 1);
+    return b;
+}
+
+}  // namespace
+
+TEST_CASE("hit_from_candidate reads the game's fields") {
+    auto b = candidate();
+    EmfHit h{};
+    hit_from_candidate(b.data(), &h);
+    CHECK(h.size == sizeof(EmfHit));
+    CHECK(h.attacker == 7);
+    CHECK(h.source == 9);
+    CHECK(h.target == 30);
+    CHECK(h.part == 31);
+    CHECK(h.amount == 42);
+    CHECK(h.stamina == 5);
+    CHECK(h.flags == 8);
+    CHECK(h.damage_types == 8);
+    CHECK(h.attack == 1);
+    CHECK(h.kind == 0);
+    CHECK(h.impact == 0x7E5F0003u);
+    CHECK(h.from_mod == 1);
+    CHECK(h.reaction == 2);
+    CHECK(h.weapon_category == 0xABCDu);
+    CHECK(h.program == 0x1234u);
+    CHECK(h.position[0] == doctest::Approx(1.5f));
+    CHECK(h.weapon_item == 0);
+    CHECK(h.health_before == -1);
+    CHECK(h.health_after == -1);
+    CHECK(h.cancel == 0);
+    put_at<uint32_t>(b.data(), offsetof(HC, rootTargetId), 0);
+    put_at<uint32_t>(b.data(), offsetof(HC, impactId), 77u);
+    hit_from_candidate(b.data(), &h);
+    CHECK(h.target == 31);
+    CHECK(h.from_mod == 0);
+}
+
+TEST_CASE("hit_to_candidate writes amount, stamina and reaction; cancel silences") {
+    auto b = candidate();
+    const auto orig = b;
+    EmfHit h{};
+    hit_from_candidate(b.data(), &h);
+    h.amount = 10;
+    h.stamina = 3;
+    h.reaction = 0;
+    hit_to_candidate(h, b.data());
+    CHECK(get_at<int32_t>(b.data(), offsetof(HC, healthChange)) == -10);
+    CHECK(get_at<int32_t>(b.data(), offsetof(HC, staminaChange)) == -3);
+    CHECK(get_at<uint16_t>(b.data(), offsetof(HC, hitReaction)) == 0);
+    auto expect = orig;  // nothing else moved
+    put_at<int32_t>(expect.data(), offsetof(HC, healthChange), -10);
+    put_at<int32_t>(expect.data(), offsetof(HC, staminaChange), -3);
+    put_at<uint16_t>(expect.data(), offsetof(HC, hitReaction), 0);
+    CHECK(b == expect);
+    h.cancel = 1;
+    hit_to_candidate(h, b.data());
+    CHECK(get_at<int32_t>(b.data(), offsetof(HC, healthChange)) == 0);
+    CHECK(get_at<int32_t>(b.data(), offsetof(HC, staminaChange)) == 0);
+    CHECK(get_at<uint8_t>(b.data(), offsetof(HC, sendHitEvent)) == 0);
+    auto blocked = candidate();
+    put_at<uint32_t>(blocked.data(), offsetof(HC, flags), EMF_HIT_BLOCKED);
+    put_at<int32_t>(blocked.data(), offsetof(HC, healthChange), -7);  // the game ignores it for a blocked hit
+    EmfHit g{};
+    hit_from_candidate(blocked.data(), &g);
+    g.amount = 10;
+    hit_to_candidate(g, blocked.data());
+    CHECK(get_at<int32_t>(blocked.data(), offsetof(HC, healthChange)) == -7);
+}
+
+TEST_CASE("hit_from_event skips terrain and building hits") {
+    auto b = candidate();  // a HitEvent is the candidate's first 0xF8 bytes
+    EmfHit h{};
+    CHECK(hit_from_event(b.data(), sizeof(emf::gen::ecs::HitEvent), &h));
+    CHECK(h.amount == 42);
+    CHECK(h.target == 30);
+    CHECK_FALSE(hit_from_event(b.data(), 100, &h));
+    put_at<uint32_t>(b.data(), offsetof(HC, flags), EMF_HIT_TERRAIN);
+    CHECK_FALSE(hit_from_event(b.data(), sizeof(emf::gen::ecs::HitEvent), &h));
+    put_at<uint32_t>(b.data(), offsetof(HC, flags), EMF_HIT_BUILDING | EMF_HIT_CRIT);
+    CHECK_FALSE(hit_from_event(b.data(), sizeof(emf::gen::ecs::HitEvent), &h));
+}
+
+TEST_CASE("HitOnce: parent levels of the same hit fire once") {
+    HitOnce once;
+    int p = 0;
+    CHECK(once.should_fire(&p, 5, 31, 0, true));
+    CHECK_FALSE(once.should_fire(&p, 5, 30, 31, true));
+    CHECK_FALSE(once.should_fire(&p, 5, 29, 30, true));
+    CHECK(once.should_fire(&p, 6, 31, 0, true));  // a new hit in the same stack copy
+    CHECK(once.should_fire(&p, 6, 31, 0, true));  // the same swing hitting again later: a new hit
+}
+
+TEST_CASE("HitOnce: a level that does not apply passes the firing up") {
+    HitOnce once;
+    int p = 0;
+    CHECK_FALSE(once.should_fire(&p, 5, 31, 0, false));
+    CHECK(once.should_fire(&p, 5, 30, 31, true));
+    CHECK_FALSE(once.should_fire(&p, 5, 29, 30, true));
+}
+
+TEST_CASE("HitOnce: reset starts over") {
+    HitOnce once;
+    int p = 0;
+    CHECK(once.should_fire(&p, 5, 31, 0, true));
+    once.reset();
+    CHECK(once.should_fire(&p, 5, 30, 31, true));
 }

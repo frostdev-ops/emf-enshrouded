@@ -102,6 +102,9 @@ constexpr size_t kHitCandidateSize = 0x150;
 // HitEvent with a Light reaction and aggro, credit to the attacker.
 void fill_hit_candidate(uint8_t* hc, const HitSpec& s, int64_t time_ns);
 
+// Whether an impact id is one of damage()'s own (DamageQueue::next_impact_id hands out 0x7E5F0000 | n).
+constexpr bool is_mod_impact(uint32_t id) { return (id & 0xFFFF0000u) == 0x7E5F0000u; }
+
 // Hits waiting for the next impact_hit_conclusion of their world. Pushed after a server step, flushed in that program's
 // pre-hook (where the program owns the ImpactSystem). Thread-safe.
 class DamageQueue {

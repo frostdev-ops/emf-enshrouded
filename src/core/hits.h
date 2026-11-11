@@ -44,4 +44,30 @@ private:
     uint32_t next_id_ = 1;
 };
 
+// ---- the game's records ----
+
+// EmfHit from the game's 0x150-byte HitCandidate (a hit about to be applied): amount = -healthChange, stamina =
+// -staminaChange, target = the root target or else the entity hit; weapon_item 0 and health -1 (the caller fills them).
+void hit_from_candidate(const uint8_t* hc, EmfHit* h);
+// Writes amount, stamina and reaction back (a blocked or parried hit's health change is left: the game ignores it); a
+// cancelled hit gets no health or stamina change and no HitEvent (sendHitEvent 0).
+void hit_to_candidate(const EmfHit& h, uint8_t* hc);
+// EmfHit from the game's HitEvent (a hit applied): false when it is too small or a terrain or building hit.
+bool hit_from_event(const uint8_t* ev, uint32_t size, EmfHit* h);
+
+// Fires a hit's rules and callbacks once: the game passes one hit up to five parents of a multi-part target, in the
+// same stack copy, each level with propagatedFromEntityId = the level before. A level that does not apply the hit
+// (CombatFlags.handleHits 0) passes the firing up to its parent. One per impact thread (thread_local in the detour).
+class HitOnce {
+public:
+    bool should_fire(const void* hit, uint32_t impact, uint32_t target, uint32_t propagated_from, bool applies);
+    void reset();
+
+private:
+    const void* hit_ = nullptr;
+    uint32_t impact_ = 0;
+    uint32_t last_target_ = 0;
+    bool fired_ = false;
+};
+
 }  // namespace emf::core

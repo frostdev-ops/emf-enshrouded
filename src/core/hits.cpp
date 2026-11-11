@@ -5,7 +5,11 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <limits>
+
+#include "core/attributes.h"
+#include "emf/generated/components.hpp"
 
 namespace emf::core {
 
@@ -87,6 +91,96 @@ bool apply_hit_rules(std::span<const EmfHitRule> rules, EmfHit& h, HitClassify c
         h.health_after = std::max(0, h.health_before - h.amount);
     return h.amount != before.amount || h.stamina != before.stamina || h.cancel != before.cancel;
 }
+
+// ---- the game's records ----
+
+namespace {
+
+using HC = emf::gen::ecs::HitCandidate;
+using HE = emf::gen::ecs::HitEvent;
+static_assert(sizeof(HC) == 0x150 && offsetof(HC, healthChange) == 0xBC && offsetof(HC, sendHitEvent) == 0x14C,
+              "HitCandidate layout (research hit_hooks_2026-11-11 section 3)");
+static_assert(sizeof(HE) == 0xF8 && offsetof(HE, healthChange) == offsetof(HC, healthChange) &&
+                  offsetof(HE, targetFaction) == offsetof(HC, targetFaction),
+              "a HitEvent is the HitCandidate's first 0xF8 bytes");
+
+template <class T>
+T rd(const uint8_t* p, size_t off) {
+    T v{};
+    std::memcpy(&v, p + off, sizeof v);
+    return v;
+}
+template <class T>
+void wr(uint8_t* p, size_t off, T v) {
+    std::memcpy(p + off, &v, sizeof v);
+}
+
+// The fields a HitEvent shares with the candidate (its first 0xF8 bytes).
+void common_fields(const uint8_t* p, EmfHit* h) {
+    *h = EmfHit{};
+    h->size = sizeof(EmfHit);
+    h->attacker = rd<uint32_t>(p, offsetof(HC, rootSourceId));
+    h->source = rd<uint32_t>(p, offsetof(HC, sourceId));
+    h->part = rd<uint32_t>(p, offsetof(HC, targetId));
+    const uint32_t root = rd<uint32_t>(p, offsetof(HC, rootTargetId));
+    h->target = root ? root : h->part;
+    h->amount = -rd<int32_t>(p, offsetof(HC, healthChange));
+    h->stamina = -rd<int32_t>(p, offsetof(HC, staminaChange));
+    h->flags = rd<uint32_t>(p, offsetof(HC, flags));
+    h->damage_types = rd<uint16_t>(p, offsetof(HC, damageTypes));
+    h->attack = rd<uint8_t>(p, offsetof(HC, attackCategory));
+    h->weapon_category = rd<uint32_t>(p, offsetof(HC, weaponCategory));
+    h->program = rd<uint32_t>(p, offsetof(HC, programId));
+    h->impact = rd<uint32_t>(p, offsetof(HC, impactId));
+    h->reaction = rd<uint16_t>(p, offsetof(HC, hitReaction));
+    h->target_faction = rd<uint8_t>(p, offsetof(HC, targetFaction));
+    h->from_mod = is_mod_impact(h->impact) ? 1 : 0;
+    h->health_before = -1;
+    h->health_after = -1;
+    std::memcpy(h->position, p + offsetof(HC, position), sizeof h->position);
+}
+
+}  // namespace
+
+void hit_from_candidate(const uint8_t* hc, EmfHit* h) {
+    common_fields(hc, h);
+    h->kind = rd<uint8_t>(hc, offsetof(HC, candidateType));
+}
+
+void hit_to_candidate(const EmfHit& h, uint8_t* hc) {
+    if (h.cancel) {
+        wr<int32_t>(hc, offsetof(HC, healthChange), 0);
+        wr<int32_t>(hc, offsetof(HC, staminaChange), 0);
+        wr<uint8_t>(hc, offsetof(HC, sendHitEvent), 0);
+        return;
+    }
+    const uint32_t flags = rd<uint32_t>(hc, offsetof(HC, flags));
+    if (!(flags & (EMF_HIT_BLOCKED | EMF_HIT_PARRIED))) wr<int32_t>(hc, offsetof(HC, healthChange), -h.amount);
+    wr<int32_t>(hc, offsetof(HC, staminaChange), -h.stamina);
+    wr<uint16_t>(hc, offsetof(HC, hitReaction), h.reaction);
+}
+
+bool hit_from_event(const uint8_t* ev, uint32_t size, EmfHit* h) {
+    if (!ev || size < sizeof(HE)) return false;
+    if (rd<uint32_t>(ev, offsetof(HE, flags)) & (EMF_HIT_TERRAIN | EMF_HIT_BUILDING)) return false;
+    common_fields(ev, h);
+    return true;
+}
+
+bool HitOnce::should_fire(const void* hit, uint32_t impact, uint32_t target, uint32_t propagated_from, bool applies) {
+    const bool parent = hit == hit_ && impact == impact_ && propagated_from != 0 && propagated_from == last_target_;
+    if (!parent) {
+        hit_ = hit;
+        impact_ = impact;
+        fired_ = false;
+    }
+    last_target_ = target;
+    if (!applies || fired_) return false;
+    fired_ = true;
+    return true;
+}
+
+void HitOnce::reset() { *this = HitOnce{}; }
 
 uint32_t HitRules::add(const EmfHitRule& r, std::string* why) {
     if (!hit_rule_valid(r, why)) return 0;
