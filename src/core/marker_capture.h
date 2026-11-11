@@ -77,6 +77,9 @@ bool marker_capture_ready();
 // The client world's thread, every tick: its G38UiPlayData (null when there is none) and now.
 void marker_capture_set_uipd(uint8_t* uipd, uint64_t now_ms);
 void marker_capture_set_player(bool known, double x, double y, double z);
+// The local player's rotation (CurrentTransform +0x18, a quaternion), from the same client tick.
+void marker_capture_set_player_rotation(float x, float y, float z, float w);
+bool marker_player_rotation(float out[4]);
 // The UI thread: every scope the game opens (node: the scope's node, may be null).
 void markers_ui_frame(uint64_t hash, const uint8_t* node, uint64_t now_ms);
 

@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 34 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 35 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 34
+#define EMF_API_VERSION 35
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -557,6 +557,7 @@ typedef void (*EmfBuffCallback)(EmfWorld* world, const EmfBuffEvent* ev, void* u
                                        game's own icon of that type instead of the shape) */
 #define EMF_MARKER_EDGE_ARROW 0x04u /* off screen or behind: an arrow at the screen's edge */
 #define EMF_MARKER_DISTANCE 0x08u   /* the distance under the text ("42 m") */
+#define EMF_MARKER_MINIMAP 0x10u    /* v35: a canvas's EMF_CANVAS_MARKERS command draws it (a minimap) */
 #define EMF_MARKER_DIAMOND 0u       /* EmfMarker.shape, drawn when there is no icon */
 #define EMF_MARKER_CIRCLE 1u
 #define EMF_MARKER_SQUARE 2u
@@ -621,6 +622,57 @@ typedef struct EmfMapMarkerType {
     uint32_t pad;
     char name[48];   /* the game's internal name, NUL-terminated */
 } EmfMapMarkerType;
+
+/* v35 a minimap's parts: the player's view, the game's own map markers, canvases (drawing panels a mod owns) */
+#define EMF_VIEW_CAMERA 1u /* EmfPlayerView.flags: camera_yaw_deg is set (a frame of the 3D view was seen) */
+typedef struct EmfPlayerView {
+    uint32_t size;        /* sizeof(EmfPlayerView) of the core */
+    uint32_t flags;       /* EMF_VIEW_CAMERA */
+    double x, y, z;       /* the local player, world metres */
+    float heading_deg;    /* where the player faces: 0 north (+z), 90 east (+x), 0..360 */
+    float camera_yaw_deg; /* where the camera looks, the same way */
+    float world_size;     /* the map's width and height in metres (10240 on Embervale) */
+    float pad;
+} EmfPlayerView;
+#define EMF_GAME_MARKER_SHOWN 1u /* EmfGameMarker.flags: the game's map shows it */
+typedef struct EmfGameMarker {
+    uint32_t size;  /* sizeof(EmfGameMarker) of the core */
+    uint32_t type;  /* the game's map icon type (EmfMarker.game_icon's numbers) */
+    uint32_t flags; /* EMF_GAME_MARKER_SHOWN */
+    uint32_t pad;
+    double x, y, z;
+} EmfGameMarker;
+#define EMF_CANVAS_TOP_LEFT 0u /* EmfCanvas.corner */
+#define EMF_CANVAS_TOP_RIGHT 1u
+#define EMF_CANVAS_BOTTOM_LEFT 2u
+#define EMF_CANVAS_BOTTOM_RIGHT 3u
+#define EMF_CANVAS_RECT 0u /* EmfCanvas.shape */
+#define EMF_CANVAS_CIRCLE 1u
+typedef struct EmfCanvas {
+    uint32_t size;   /* sizeof(EmfCanvas) */
+    uint8_t corner;  /* EMF_CANVAS_TOP_LEFT ...: x, y are measured from it, inward */
+    uint8_t shape;   /* EMF_CANVAS_RECT or EMF_CANVAS_CIRCLE (the drawing is clipped to it) */
+    uint8_t hidden;  /* 1: kept, not drawn */
+    uint8_t pad;
+    float x, y, w, h; /* units of a 1080-pixel-high screen; w, h 8..1080 */
+} EmfCanvas;
+/* A canvas's drawing, in canvas units (0, 0 its top left .. w, h). rgba 0xRRGGBBAA. */
+#define EMF_CANVAS_RECT_CMD 1u /* a[0..3] x, y, w, h; a[4] line width (0 = filled) */
+#define EMF_CANVAS_CIRCLE_CMD 2u /* a[0..2] cx, cy, r; a[3] line width (0 = filled) */
+#define EMF_CANVAS_LINE 3u /* a[0..3] x1, y1, x2, y2; a[4] width */
+#define EMF_CANVAS_TRI 4u /* a[0..5] three points, filled */
+#define EMF_CANVAS_TEXT 5u /* a[0..1] x, y (its centre); a[2] size (units); s the text (UTF-8) */
+#define EMF_CANVAS_IMAGE 6u /* s a picture id (v26 picture_load); a[0..3] x, y, w, h; a[4..7] u0, v0, u1, v1; a[8] turn (degrees) */
+#define EMF_CANVAS_FOG 7u /* the fog of war: a[0..1] the world x, z at the canvas centre, a[2] metres per unit; rgba the unexplored colour */
+#define EMF_CANVAS_MARKERS 8u /* the markers flagged EMF_MARKER_MINIMAP: a[0..1] the world x, z at the centre, a[2] metres per unit */
+#define EMF_CANVAS_MAP 9u /* the game's own map (north up): a[0..1] the world x, z at the centre, a[2] metres per unit */
+typedef struct EmfCanvasCmd {
+    uint8_t kind; /* EMF_CANVAS_RECT_CMD ... */
+    uint8_t pad[3];
+    uint32_t rgba;
+    float a[10];
+    const char* s; /* TEXT: the text; IMAGE: the picture id; else NULL */
+} EmfCanvasCmd;
 
 typedef struct EmfHitRule {
     uint32_t size;             /* sizeof(EmfHitRule) */
@@ -1299,6 +1351,24 @@ typedef struct EmfApi {
      * loading: up to a few seconds); `cb` once with the answer. False when refused at once: not the server world, x, z
      * outside the world, 64 waiting, or not available on this game build. */
     bool (*ground_at)(EmfWorld* world, double x, double z, EmfGroundCallback cb, void* user);
+
+    /* ---- v35: a minimap's parts (EmfPlayerView, EmfGameMarker, EmfCanvas) ---- */
+    /* The local player's position, heading and camera yaw, and the map's size: false on the dedicated server, at the
+     * main menu and before the player is known. Any thread. */
+    bool (*player_view)(EmfPlayerView* out);
+    /* The fog of war at (x, z) on this game's map: 0 unexplored .. 1 explored. False without it (the dedicated server,
+     * before a world). Any thread (a copy refreshed twice a second). */
+    bool (*fog_at)(double x, double z, float* explored);
+    /* The game's own map markers in this game's world (altars, shrines, places found), as its map list had them last:
+     * how many there are; fills `out` up to `cap` (may be NULL to count). At most 512. */
+    uint32_t (*map_markers)(EmfGameMarker* out, uint32_t cap);
+    /* A canvas: a drawing panel of the calling mod, drawn by EMF's overlay over the game's HUD (hidden where the
+     * markers hide: the map, menus, the console). An id again changes it; a NULL c removes it. False: a bad id (1-48 of
+     * A-Z a-z 0-9 _ . - :), bad numbers, or 32 canvases already. */
+    bool (*canvas_set)(const char* id, const EmfCanvas* c);
+    /* Its drawing, replacing the last list (EMF keeps it and draws it every frame). At most 2048 commands (more are
+     * left out); bad numbers leave a command out. False for an unknown canvas. Any thread. */
+    bool (*canvas_draw)(const char* id, const EmfCanvasCmd* cmds, uint32_t count);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */

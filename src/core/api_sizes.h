@@ -49,6 +49,7 @@ constexpr uint32_t kApiV31Size = EMF_FIELD_END(EmfApi, hit_rule_remove);
 constexpr uint32_t kApiV32Size = EMF_FIELD_END(EmfApi, on_buff);
 constexpr uint32_t kApiV33Size = EMF_FIELD_END(EmfApi, marker_unsend);
 constexpr uint32_t kApiV34Size = EMF_FIELD_END(EmfApi, ground_at);
+constexpr uint32_t kApiV35Size = EMF_FIELD_END(EmfApi, canvas_draw);
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
@@ -126,8 +127,15 @@ static_assert(offsetof(EmfApi, buff_types) == kApiV31Size && offsetof(EmfApi, bu
 static_assert(offsetof(EmfApi, marker_set) == kApiV32Size && kApiV33Size == 920,
               "EmfApi layout (v33 appends marker_set, marker_remove, marker_clear, marker_types, world_to_screen, "
               "marker_send, marker_unsend)");
-static_assert(offsetof(EmfApi, map_cursor) == kApiV33Size && kApiV34Size == 952 && sizeof(EmfApi) == kApiV34Size,
+static_assert(offsetof(EmfApi, map_cursor) == kApiV33Size && kApiV34Size == 952,
               "EmfApi layout (v34 appends map_cursor, on_map_click, map_action, ground_at)");
+static_assert(offsetof(EmfApi, player_view) == kApiV34Size && kApiV35Size == 992 && sizeof(EmfApi) == kApiV35Size,
+              "EmfApi layout (v35 appends player_view, fog_at, map_markers, canvas_set, canvas_draw)");
+static_assert(sizeof(EmfPlayerView) == 48 && offsetof(EmfPlayerView, heading_deg) == 32, "EmfPlayerView layout (v35)");
+static_assert(sizeof(EmfGameMarker) == 40 && offsetof(EmfGameMarker, x) == 16, "EmfGameMarker layout (v35)");
+static_assert(sizeof(EmfCanvas) == 24 && offsetof(EmfCanvas, x) == 8, "EmfCanvas layout (v35)");
+static_assert(sizeof(EmfCanvasCmd) == 56 && offsetof(EmfCanvasCmd, a) == 8 && offsetof(EmfCanvasCmd, s) == 48,
+              "EmfCanvasCmd layout (v35)");
 static_assert(sizeof(EmfMapClick) == 32 && offsetof(EmfMapClick, x) == 16, "EmfMapClick layout (v34)");
 static_assert(sizeof(EmfMarker) == 80 && offsetof(EmfMarker, text) == 40 && offsetof(EmfMarker, flags) == 64 &&
                   offsetof(EmfMarker, game_icon) == 72,

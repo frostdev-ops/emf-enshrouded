@@ -25,6 +25,10 @@ std::atomic<uint64_t> g_world_ui_ms{0}, g_map_ms{0};
 std::atomic<uint32_t> g_faults{0};
 SeqBox<CameraSnap> g_camera;
 SeqBox<PlayerPos> g_player;
+struct PlayerRot {
+    float q[4] = {0, 0, 0, 1};
+};
+SeqBox<PlayerRot> g_player_rot;
 SeqBox<UiSize> g_ui;
 SeqBox<MapRects> g_map;
 SeqBox<UiSize> g_display;
@@ -68,6 +72,7 @@ void marker_capture_set_uipd(uint8_t* uipd, uint64_t now_ms) {
 void marker_capture_set_player(bool known, double x, double y, double z) {
     if (!known) {
         g_player.reset();
+        g_player_rot.reset();
         return;
     }
     PlayerPos p;
@@ -114,6 +119,22 @@ bool marker_display(float* w, float* h) {
 
 bool marker_camera(CameraSnap* out) { return out && g_camera.load(out) && out->valid; }
 
+void marker_capture_set_player_rotation(float x, float y, float z, float w) {
+    PlayerRot r;
+    r.q[0] = x;
+    r.q[1] = y;
+    r.q[2] = z;
+    r.q[3] = w;
+    g_player_rot.store(r);
+}
+
+bool marker_player_rotation(float out[4]) {
+    PlayerRot r;
+    if (!out || !g_player_rot.load(&r)) return false;
+    std::memcpy(out, r.q, sizeof r.q);
+    return true;
+}
+
 bool marker_player_pos(double out[3]) {
     PlayerPos p;
     if (!out || !g_player.load(&p)) return false;
@@ -151,6 +172,7 @@ void marker_capture_reset_for_tests() {
     g_faults = 0;
     g_camera.reset();
     g_player.reset();
+    g_player_rot.reset();
     g_ui.reset();
     g_map.reset();
     g_display.reset();

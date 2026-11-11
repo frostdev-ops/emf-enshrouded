@@ -76,8 +76,8 @@ struct Fixture {
 
 TEST_CASE("api v34: version 34, size 952, the four map functions set") {
     const EmfApi* api = api_table();
-    CHECK(api->version == 34u);
-    CHECK(api->size == kApiV34Size);
+    CHECK(api->version >= 34u);
+    CHECK(api->size >= kApiV34Size);
     CHECK(kApiV34Size == 952u);
     CHECK(api->map_cursor);
     CHECK(api->on_map_click);

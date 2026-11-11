@@ -113,7 +113,7 @@ TEST_CASE("map hold: the wheel while holding is swallowed; a quick plain click a
 #include "core/api_sizes.h"
 
 TEST_CASE("map api: v34 layouts") {
-    CHECK(EMF_API_VERSION == 34);
+    CHECK(EMF_API_VERSION >= 34);
     CHECK(sizeof(EmfMapClick) == 32);
     CHECK(offsetof(EmfMapClick, x) == 16);
     CHECK(kApiV34Size == kApiV33Size + 4 * 8);

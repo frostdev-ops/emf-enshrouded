@@ -2260,6 +2260,12 @@ const EmfApi kApi = {
     api_on_map_click,
     api_map_action,
     api_ground_at,
+    // v35 a minimap's parts (api_minimap.cpp)
+    api_player_view,
+    api_fog_at,
+    api_map_markers,
+    api_canvas_set,
+    api_canvas_draw,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

@@ -271,6 +271,13 @@ void env_post(void* program_context, uint8_t kind);
 void deliver_env_hits(EmfWorld* w);
 void env_new_session();  // a new server world: the old one's queued env hits and carries are dropped
 
+// ---- v35 a minimap's parts (api_minimap.cpp) ----
+bool api_player_view(EmfPlayerView* out);
+bool api_fog_at(double x, double z, float* explored);
+uint32_t api_map_markers(EmfGameMarker* out, uint32_t cap);
+bool api_canvas_set(const char* id, const EmfCanvas* c);
+bool api_canvas_draw(const char* id, const EmfCanvasCmd* cmds, uint32_t count);
+
 // ---- v34 the map (api_map.cpp) ----
 bool api_map_cursor(double* x, double* z);
 bool api_on_map_click(EmfMapClickCallback cb, void* user);

@@ -171,10 +171,17 @@ void markers_client_tick(EmfWorld* client) {
     uint32_t me = 0;
     const auto* lpd = static_cast<const uint8_t*>(view.singleton("LocalPlayerData"));
     double p[3];
-    if (lpd && seh_read(lpd + off::kLocalPlayerId, &me, sizeof me) && me && pos_in(client, me, p))
+    if (lpd && seh_read(lpd + off::kLocalPlayerId, &me, sizeof me) && me && pos_in(client, me, p)) {
         marker_capture_set_player(true, p[0], p[1], p[2]);
-    else
+        // v35 player_view: the rotation (a quaternion after the 24-byte position)
+        float q[4];
+        const ComponentRef c = get_component(s->get_component, raw(client), kCurrentTransformHash, me);
+        if (c.ptr && c.size >= 0x28 && seh_read(static_cast<const uint8_t*>(c.ptr) + 0x18, q, sizeof q) &&
+            std::isfinite(q[0]) && std::isfinite(q[1]) && std::isfinite(q[2]) && std::isfinite(q[3]))
+            marker_capture_set_player_rotation(q[0], q[1], q[2], q[3]);
+    } else {
         marker_capture_set_player(false, 0, 0, 0);
+    }
     mk.store.follow([client](uint32_t e, double out[3]) { return pos_in(client, e, out); });
 }
 

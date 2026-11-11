@@ -980,6 +980,8 @@ inline bool has_v33() { return api() && api()->size >= offsetof(EmfApi, marker_u
 
 // ---- v34: the map's mouse, map actions, the ground (map_cursor ... ground_at through api()) ----
 inline bool has_v34() { return api() && api()->size >= offsetof(EmfApi, ground_at) + sizeof(api()->ground_at); }
+// v35: player_view, fog_at, map_markers, canvas_set, canvas_draw (a minimap's parts)
+inline bool has_v35() { return api() && api()->size >= offsetof(EmfApi, canvas_draw) + sizeof(api()->canvas_draw); }
 
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
 inline bool request_save() { return has_v19() && api()->request_save && api()->request_save(); }
