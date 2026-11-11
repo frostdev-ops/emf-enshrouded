@@ -54,12 +54,15 @@ bool hit_rule_valid(const EmfHitRule& r, std::string* why) {
     if (r.add < -1000000 || r.add > 1000000) return no("add must be between -1000000 and 1000000");
     if (r.min_health < 0) return no("min_health must be 0 or more");
     if (r.healing && r.min_health > 0) return no("min_health does nothing on healing hits");
+    if (r.kinds & ~EMF_HIT_KINDS_ALL) return no("kinds has a bit for no kind (EMF_HIT_KINDS_ALL is 0x1F)");
     if (!r.cancel && r.scale == 1.0f && r.add == 0 && r.min_health == 0)
         return no("it does nothing (no cancel, scale 1, add 0, min_health 0)");
     return true;
 }
 
 bool hit_rule_matches(const EmfHitRule& r, const EmfHit& h, HitClassify classify, void* ctx) {
+    const unsigned kinds = r.kinds ? r.kinds : (1u << EMF_HIT_KIND_HIT);  // 0: entity hits only
+    if (h.kind > EMF_HIT_KIND_DROWNING || !((kinds >> h.kind) & 1u)) return false;
     if ((r.healing != 0) != is_heal(h)) return false;
     if (!side_matches(r.attacker, h.attacker, 0, classify, ctx)) return false;
     if (!side_matches(r.target, h.target, h.part, classify, ctx)) return false;
@@ -69,20 +72,35 @@ bool hit_rule_matches(const EmfHitRule& r, const EmfHit& h, HitClassify classify
     return true;
 }
 
-bool apply_hit_rules(std::span<const EmfHitRule> rules, EmfHit& h, HitClassify classify, void* ctx) {
+bool apply_hit_rules(std::span<const EmfHitRule> rules, EmfHit& h, HitClassify classify, void* ctx, HitCarry* carry) {
     const EmfHit before = h;
     const bool heal = is_heal(h);
+    const bool exact = carry && per_step_kind(h.kind);  // per-step env damage: scaled exactly, the fraction carried
+    double amount_exact = h.amount;
+    bool matched = false;
     int32_t floor = 0;
     for (const EmfHitRule& r : rules) {
         if (!hit_rule_matches(r, h, classify, ctx)) continue;
+        matched = true;
         if (r.cancel) h.cancel = 1;
-        const int64_t scaled = static_cast<int64_t>(std::trunc(static_cast<double>(h.amount) * r.scale));
-        int64_t amount = scaled + r.add;
-        amount = heal ? std::min<int64_t>(amount, 0) : std::max<int64_t>(amount, 0);
-        h.amount = clamp_i64(amount);
+        if (exact) {
+            amount_exact = std::max(0.0, amount_exact * r.scale + r.add);
+        } else {
+            const int64_t scaled = static_cast<int64_t>(std::trunc(static_cast<double>(h.amount) * r.scale));
+            int64_t amount = scaled + r.add;
+            amount = heal ? std::min<int64_t>(amount, 0) : std::max<int64_t>(amount, 0);
+            h.amount = clamp_i64(amount);
+        }
         h.stamina = clamp_i64(std::max<int64_t>(
             0, static_cast<int64_t>(std::trunc(static_cast<double>(h.stamina) * r.scale))));
         floor = std::max(floor, r.min_health);
+    }
+    if (exact && matched) {
+        double& left = carry->at(h.target, h.kind);
+        const double total = amount_exact + left;
+        const double whole = std::floor(total);
+        h.amount = clamp_i64(static_cast<int64_t>(whole));
+        left = total - whole;
     }
     if (floor > 0 && !heal && h.health_before >= 0 && h.amount > 0)
         h.amount = std::min(h.amount, std::max(0, h.health_before - floor));
@@ -219,14 +237,14 @@ size_t HitRules::size() const {
     return n;
 }
 
-bool HitRules::apply(EmfHit& h, HitClassify classify, void* ctx) const {
+bool HitRules::apply(EmfHit& h, HitClassify classify, void* ctx, HitCarry* carry) const {
     EmfHitRule local[kMaxHitRules];
     size_t n = 0;
     AcquireSRWLockShared(&lock_);
     for (const auto& e : rules_) local[n++] = e.second;
     ReleaseSRWLockShared(&lock_);
     if (!n) return false;
-    return apply_hit_rules(std::span<const EmfHitRule>(local, n), h, classify, ctx);
+    return apply_hit_rules(std::span<const EmfHitRule>(local, n), h, classify, ctx, carry);
 }
 
 void HitRules::reset() {

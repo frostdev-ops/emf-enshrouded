@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <span>
 #include <string>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -26,10 +27,29 @@ constexpr uint16_t kMaxHitReaction = 10;  // the game's HitReactionType values (
 bool hit_rule_valid(const EmfHitRule& r, std::string* why);
 // Whether the rule is about this hit (attacker, target or part, flags, damage types, attack kind, damage or healing).
 bool hit_rule_matches(const EmfHitRule& r, const EmfHit& h, HitClassify classify, void* ctx);
+// The fraction a scale rule left over from per-step env damage (shroud, cold, drowning: a few points a step), per
+// entity and kind, so 0.5 halves 1-point ticks instead of rounding them all to 0. Not thread-safe: the env programs run
+// one at a time (their Health conflicts), and hits never use it.
+class HitCarry {
+public:
+    double& at(uint32_t entity, uint8_t kind) { return carry_[(static_cast<uint64_t>(entity) << 8) | kind]; }
+    void clear() { carry_.clear(); }
+    size_t size() const { return carry_.size(); }
+
+private:
+    std::unordered_map<uint64_t, double> carry_;
+};
+// Whether a kind is per-step env damage (shroud, cold, drowning).
+constexpr bool per_step_kind(uint8_t kind) {
+    return kind == EMF_HIT_KIND_SHROUD || kind == EMF_HIT_KIND_COLD || kind == EMF_HIT_KIND_DROWNING;
+}
+
 // Applies the matching rules in order: a cancel sets h.cancel; scale and add change the amount (a damage hit stays
 // damage, a heal stays a heal) and scale a blocked hit's stamina; then the largest min_health caps the damage when the
-// target's health is known; health_after follows. True when anything changed.
-bool apply_hit_rules(std::span<const EmfHitRule> rules, EmfHit& h, HitClassify classify, void* ctx);
+// target's health is known; health_after follows. A per-step env kind with `carry` keeps the fraction scale left over.
+// True when anything changed.
+bool apply_hit_rules(std::span<const EmfHitRule> rules, EmfHit& h, HitClassify classify, void* ctx,
+                     HitCarry* carry = nullptr);
 
 // The rules mods added, in id order. Thread-safe: apply takes a shared lock, add and remove an exclusive one.
 class HitRules {
@@ -37,7 +57,7 @@ public:
     uint32_t add(const EmfHitRule& r, std::string* why);  // its id (from 1, never reused), or 0 and *why
     bool remove(uint32_t id);
     size_t size() const;
-    bool apply(EmfHit& h, HitClassify classify, void* ctx) const;
+    bool apply(EmfHit& h, HitClassify classify, void* ctx, HitCarry* carry = nullptr) const;
     void reset();  // tests
 
 private:

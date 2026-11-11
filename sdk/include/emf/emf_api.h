@@ -456,7 +456,8 @@ typedef struct EmfHit {
     uint8_t attacks;          /* the attack's kinds, a bit per kind: 1 melee, 2 ranged, 4 magic, 8 tool, 16 other,
                                  32 area, 64 skill shot (the game's mask: most hits have one bit; 0 = none, as a
                                  damage() hit) */
-    uint8_t kind;             /* 0 an entity (the only kind passed in v31) */
+    uint8_t kind;             /* EMF_HIT_KIND_*: 0 an entity hit; 1 fall, 2 shroud, 3 cold, 4 drowning (no attacker,
+                                 source, flags but EMF_HIT_INSTANT, types or attack kind; target = part) */
     uint32_t weapon_category; /* the game's WeaponCategoryId hash, 0 = none */
     uint32_t weapon_item;     /* the weapon's item id, 0 = none or not known */
     uint32_t program;         /* the impact program (the attack, skill or spell) */
@@ -479,6 +480,14 @@ typedef struct EmfHit {
 #define EMF_HIT_HEALING 0x4000u
 #define EMF_HIT_TERRAIN 0x8000u  /* the game's terrain and building hits: never passed to mods */
 #define EMF_HIT_BUILDING 0x10000u
+#define EMF_HIT_INSTANT 0x01000000u /* kinds 2 and 4: the game set health to 0 at once (deadly shroud; a creature out
+                                       of air) */
+#define EMF_HIT_KIND_HIT 0u      /* a landing entity hit */
+#define EMF_HIT_KIND_FALL 1u     /* fall damage, once per landing */
+#define EMF_HIT_KIND_SHROUD 2u   /* shroud damage, every server step while the shroud timer is out */
+#define EMF_HIT_KIND_COLD 3u     /* cold damage, every server step while body heat is 0 */
+#define EMF_HIT_KIND_DROWNING 4u /* drowning, every server step while oxygen is 0 */
+#define EMF_HIT_KINDS_ALL 0x1Fu  /* EmfHitRule.kinds: a bit per kind (1 << kind) */
 /* A rule the core applies to every landing hit before the hit callbacks, without calling the mod. */
 #define EMF_HIT_PLAYERS 0xFFFFFFF1u   /* attacker / target: any player */
 #define EMF_HIT_CREATURES 0xFFFFFFF2u /* any creature (not a player, has health) */
@@ -495,7 +504,8 @@ typedef struct EmfHitRule {
     int32_t add;               /* then amount += add */
     int32_t min_health;        /* > 0: the target keeps at least this much health (1 = cannot die from hits) */
     uint8_t healing;           /* 0 = match damage hits only, 1 = healing hits only */
-    uint8_t pad[3];
+    uint8_t kinds;             /* the kinds it is about, a bit each (1 << EMF_HIT_KIND_*); 0 = entity hits only */
+    uint8_t pad[2];
 } EmfHitRule;
 typedef void (*EmfHitBeforeCallback)(EmfWorld* world, EmfHit* hit, void* user);
 typedef void (*EmfHitCallback)(EmfWorld* world, const EmfHit* hit, void* user);

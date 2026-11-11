@@ -482,3 +482,77 @@ TEST_CASE("a rule's size is checked against v31's, so a newer SDK's larger rule 
     r.size = kHitRuleV31Size - 4;
     CHECK_FALSE(hit_rule_valid(r, &why));
 }
+
+// ---- kinds: fall, shroud, cold and drowning (env damage, feature 4b) ----
+namespace {
+EmfHit env_hit(uint8_t kind, int32_t amount, uint32_t target = 1) {
+    EmfHit h = hit(amount, 0, target);
+    h.kind = kind;
+    h.source = 0;
+    h.damage_types = 0;
+    return h;
+}
+}  // namespace
+
+TEST_CASE("a rule without kinds is about entity hits only") {
+    EmfHitRule r = rule();
+    r.cancel = 1;
+    CHECK_FALSE(hit_rule_matches(r, env_hit(EMF_HIT_KIND_FALL, 30), &classify, nullptr));
+    CHECK(hit_rule_matches(r, hit(30), &classify, nullptr));
+}
+
+TEST_CASE("kinds ALL matches every kind; a fall rule skips hits and other kinds") {
+    EmfHitRule all = rule();
+    all.cancel = 1;
+    all.kinds = EMF_HIT_KINDS_ALL;
+    for (uint8_t k = 0; k <= EMF_HIT_KIND_DROWNING; ++k) {
+        CAPTURE(k);
+        CHECK(hit_rule_matches(all, k ? env_hit(k, 5) : hit(5), &classify, nullptr));
+    }
+    EmfHitRule f = rule();
+    f.cancel = 1;
+    f.kinds = 1u << EMF_HIT_KIND_FALL;
+    CHECK(hit_rule_matches(f, env_hit(EMF_HIT_KIND_FALL, 5), &classify, nullptr));
+    CHECK_FALSE(hit_rule_matches(f, hit(5), &classify, nullptr));
+    CHECK_FALSE(hit_rule_matches(f, env_hit(EMF_HIT_KIND_SHROUD, 5), &classify, nullptr));
+}
+
+TEST_CASE("an env hit has no attacker: a rule from players does not match it, a rule for players does") {
+    EmfHitRule r = rule();
+    r.cancel = 1;
+    r.kinds = EMF_HIT_KINDS_ALL;
+    r.attacker = EMF_HIT_PLAYERS;
+    CHECK_FALSE(hit_rule_matches(r, env_hit(EMF_HIT_KIND_COLD, 5), &classify, nullptr));
+    r.attacker = 0;
+    r.target = EMF_HIT_PLAYERS;
+    CHECK(hit_rule_matches(r, env_hit(EMF_HIT_KIND_COLD, 5, 3), &classify, nullptr));
+}
+
+TEST_CASE("scale on per-step env damage keeps a carry: half of 1-point ticks is 1 every second tick") {
+    EmfHitRule r = rule();
+    r.scale = 0.5f;
+    r.kinds = EMF_HIT_KINDS_ALL;
+    HitCarry carry;
+    int total = 0;
+    for (int i = 0; i < 10; ++i) {
+        EmfHit h = env_hit(EMF_HIT_KIND_DROWNING, 1);
+        apply_hit_rules(std::span<const EmfHitRule>(&r, 1), h, &classify, nullptr, &carry);
+        total += h.amount;
+    }
+    CHECK(total == 5);
+    EmfHit other = env_hit(EMF_HIT_KIND_DROWNING, 1, 2);  // another entity has its own carry
+    apply_hit_rules(std::span<const EmfHitRule>(&r, 1), other, &classify, nullptr, &carry);
+    CHECK(other.amount == 0);
+    EmfHit fall = env_hit(EMF_HIT_KIND_FALL, 15);  // once per landing: rounded toward zero, no carry
+    apply_hit_rules(std::span<const EmfHitRule>(&r, 1), fall, &classify, nullptr, &carry);
+    CHECK(fall.amount == 7);
+}
+
+TEST_CASE("a rule with an unknown kind bit is refused") {
+    EmfHitRule r = rule();
+    r.cancel = 1;
+    r.kinds = 0x20;
+    std::string why;
+    CHECK_FALSE(hit_rule_valid(r, &why));
+    CHECK_FALSE(why.empty());
+}

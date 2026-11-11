@@ -155,7 +155,8 @@ static_assert(sizeof(EmfHit) == 80 && offsetof(EmfHit, amount) == 20 && offsetof
                   offsetof(EmfHit, cancel) == 76,
               "EmfHit layout (v31)");
 static_assert(sizeof(EmfHitRule) == 36 && offsetof(EmfHitRule, damage_types_any) == 16 &&
-                  offsetof(EmfHitRule, scale) == 20 && offsetof(EmfHitRule, healing) == 32,
+                  offsetof(EmfHitRule, scale) == 20 && offsetof(EmfHitRule, healing) == 32 &&
+                  offsetof(EmfHitRule, kinds) == 33,
               "EmfHitRule layout (v31)");
 
 }  // namespace emf::core
