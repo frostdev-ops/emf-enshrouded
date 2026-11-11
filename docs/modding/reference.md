@@ -754,7 +754,7 @@ none), `source` (the direct source), `target` (the actor hit), `part` (the entit
 `damage_types` (bit per type: 0 cut, 1 pierce, 2 blunt, 3 fire, 4 ice, 5 shroud, 6 lightning, 8 poison, 9 wood, 10
 stone, 11 metal, 12 explosion), `attacks` (the attack's kinds, a bit each: 1 melee, 2 ranged, 4 magic, 8 tool, 16 other, 32 area, 64 skill shot; most
 hits have one, a `damage` hit none), `kind`
-(0 an entity, the only kind passed), `weapon_category` (the game's hash, 0 = none), `weapon_item` (0 = none or not
+(`EMF_HIT_KIND_*`: 0 an entity hit, 1 fall, 2 shroud, 3 cold, 4 drowning: see "Fall, shroud, cold and drowning" below), `weapon_category` (the game's hash, 0 = none), `weapon_item` (0 = none or not
 known), `program` (the attack's impact program), `impact` (the swing or projectile: hits of one share it), `reaction`
 (the game's hit reaction type: 0 none, 2 light), `target_faction`, `from_mod` (1 = a `damage` hit), `health_before` and
 `health_after` (-1 = not known; before the hit `health_after` is what it will be as the hit stands), `position`
@@ -762,7 +762,7 @@ known), `program` (the attack's impact program), `impact` (the swing or projecti
 `on_hit_before` may change. A blocked or parried hit changes stamina, not health: its `amount` is 0.
 
 Flags: `EMF_HIT_BLOCKED` 0x1, `EMF_HIT_PARRIED` 0x2, `EMF_HIT_CRIT` 0x8, `EMF_HIT_BACKSTAB` 0x20, `EMF_HIT_WEAKSPOT` 0x40,
-`EMF_HIT_KILLED` 0x2000 (after the hit only), `EMF_HIT_HEALING` 0x4000. `EMF_HIT_TERRAIN` and `EMF_HIT_BUILDING` are
+`EMF_HIT_KILLED` 0x2000 (after the hit only), `EMF_HIT_HEALING` 0x4000, `EMF_HIT_INSTANT` 0x01000000 (kinds 1 to 4 only: see below). `EMF_HIT_TERRAIN` and `EMF_HIT_BUILDING` are
 the game's terrain and building hits: never passed to mods.
 
 `EmfHitRule` (`size`, then): `attacker` and `target` (0 = anyone, an entity id, or a class: `EMF_HIT_PLAYERS`,
@@ -771,7 +771,8 @@ as `target` matches the actor hit or the part hit), `flags_all` (the hit has all
 only), `damage_types_any` (0 = any), `attacks` (any of these `EmfHit.attacks` bits; 0 = any), `healing` (0 = damage hits
 only, 1 = healing hits only: a "PvP off" rule does not stop a friend's heal), then the effect: `cancel`, `scale`
 (`amount` and a blocked hit's `stamina` times `scale`), `add` (then `amount += add`), `min_health` (> 0: the target
-keeps at least that much health, only when its health is known). Rules apply in id order: a `cancel` wins; for every
+keeps at least that much health, only when its health is known), and `kinds` (a bit per kind, `1 << EMF_HIT_KIND_*`;
+`EMF_HIT_KINDS_ALL` 0x1F; 0 = entity hits only, so a rule made before v31 got kinds keeps its meaning). Rules apply in id order: a `cancel` wins; for every
 matching rule `amount = trunc(amount * scale) + add`, but a damage hit never becomes a heal and a heal never becomes
 damage; then the largest `min_health` caps the damage. A cancelled hit: no damage, no damage number, no reaction, no
 aggro, no XP credit, no destruction.
@@ -780,9 +781,30 @@ EMF detours the game's `applyHitToEntity` (checked on game build 1287369, game a
 used on a build, `hit_rule_add` and `on_hit_before` are refused (logged once) and `on_hit` still works. The console
 command `hits` shows the state ([Console commands](#console-commands-built-in)).
 
-What never becomes a hit, so no hook sees it: fall, shroud, cold and drowning damage, regeneration, direct attribute
-writes (`attribute_add`), and voxel damage (terrain and player walls). These other damage kinds come in a later
-version.
+### Fall, shroud, cold and drowning
+
+These four damage kinds are not game hits (the game writes `Health` directly), but they go through the same rules and
+callbacks. `EmfHit.kind`: `EMF_HIT_KIND_FALL` 1 (once per landing), `EMF_HIT_KIND_SHROUD` 2 (every server step, about 60
+a second, while the shroud timer is out), `EMF_HIT_KIND_COLD` 3 (every step while body heat is 0 and the entity is
+freezing), `EMF_HIT_KIND_DROWNING` 4 (every step while oxygen is 0). For these kinds `attacker` and `source` are 0,
+`target` = `part` = the entity, `flags` is 0 or `EMF_HIT_INSTANT`, there are no `damage_types` or `attacks`, and
+`health_before` and `health_after` are known.
+
+- `EMF_HIT_INSTANT` 0x01000000: the game set health to 0 at once (deadly shroud, a creature out of air). EMF sets it
+  when the drop takes health to 0 or below and is at least a quarter of the maximum health.
+- A rule has `kinds`; without it a rule is for entity hits only. The rule's other fields match as before, but an
+  environment hit has no attacker, flags, types or attack kind, so a rule that asks for them does not match it: `attacker`
+  = `EMF_HIT_PLAYERS` never matches a fall.
+- `scale` on shroud, cold and drowning is exact: EMF carries the fraction per entity and kind, so 0.5 halves a 1-point
+  tick instead of rounding it to 0. `add` counts per event, which for these three is about 60 times a second.
+  `min_health` works on every kind (a lethal fall leaves the health it names).
+- `on_hit_before` and `on_hit` get kinds 1 to 4 too (a C mod checks `hit->kind`). A cancelled hit, of any kind, never
+  reaches `on_hit`. A cancelled fall gives the health back, but the game's hard-landing stagger still plays.
+- Server world only. Works on game build 1287369 (game and dedicated server). The console command `hits` says whether fall,
+  shroud, cold and drowning are on.
+
+What never becomes a hit, so no hook sees it: regeneration, direct attribute writes (`attribute_add`), and voxel damage
+(terrain and player walls).
 
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
 
@@ -806,7 +828,7 @@ Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod
 from the next start), `profile [save <name> [--settings] [--replace] | load <name>]` (mod profiles: the switches of
 every mod under a name, as in EMF.exe; a load applies at the next start), `hud.list`, `hud.move <part> <x> <y>`, `hud.scale <part> <s>`, `hud.hide <part>`, `hud.show <part>`, `hud.reset [part]`,
 `hud.layout [save|load|delete <name>]`, `hud.swap <bar> <bar>`, `hud.order <bar> <bar> <bar>`, `hud.grow up|down`,
-`hits` (v31: one line with the state of the hit hooks: whether `on_hit_before` and the rules work or why not, how many rules and callbacks, hits seen, changed and cancelled, callback faults, the average microseconds per hit), `hud.colour [bar] [part] [colour]` (the HUD editor: offsets in percent of the screen, scale 0.5 to 2, the bars `health`,
+`hits` (v31: one line with the state of the hit hooks: whether `on_hit_before` and the rules work or why not, how many rules and callbacks, hits seen, changed and cancelled, callback faults, the average microseconds per hit; whether fall, shroud, cold and drowning damage are on), `hud.colour [bar] [part] [colour]` (the HUD editor: offsets in percent of the screen, scale 0.5 to 2, the bars `health`,
 `mana`, `stamina` move on their own and take colours, the mods' HUD lines are the parts `lines_top_right`,
 `lines_bottom_right`, `lines_bottom_left`, layouts in `emf\hud`), `items [part]`, `give <item> [n]`, `put <item> [n] [entity] [level] [rarity]`,
 `take <item> [n] [entity]`, `spawn <guid> [n]`, `time <hours>`, `pos`, `perf` (how long each world step took since the last `perf`: the game's own steps, EMF's wait

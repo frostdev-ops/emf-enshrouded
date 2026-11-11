@@ -253,6 +253,24 @@ Emitted only in applyHitToEntity (0x1403e8b40). `impact_system_prepare` (0x1403e
 - Infliction: `hp = max(0, floor(hp - maxHp(0xDC8358BE) * pct))`. It writes the Health slot directly, then calls `attrRecalc` (0x1402318d0). Then it flips the sign of the percentage so it is applied only once.
 - Confidence: High.
 
+### 3.9 Fall, shroud, cold and drowning: four programs that write Health directly
+Build 1287369, game / dedicated server:
+
+| Program | Game | Server | Does |
+|---|---|---|---|
+| `fall_damage_infliction` | 0x1402786d0 | 0x14008a3c0 | the fall damage of 3.8, once per landing |
+| `fog_resistance_update` | 0x1402d5cd0 | 0x1400c1c70 | shroud damage every step while the shroud timer is out |
+| `bodyheat_depletion` | 0x1402d4f50 | 0x1400c0ef0 | cold damage every step while body heat is 0 and the entity is freezing |
+| `oxygen_update` | 0x14023c340 | 0x140059210 | drowning every step while oxygen is 0 |
+
+None of them makes a pending hit or a `HitEvent`: each changes the Health slot itself, so nothing in the hit pipeline sees
+it. EMF hooks them with `hook_program` (pre and post): the pre hook notes the Health of the program's entities, the post
+hook sees each drop, runs the hit rules and `on_hit_before` / `on_hit` callbacks as hits of kind 1 to 4 (`EmfHit.kind`),
+and puts Health right with the attribute code inside the program's own time slot. Every program that touches Health
+conflicts with these four in the scheduler, so no other program sees the uncorrected value. Server world only. A cancelled
+fall restores the health, but the game's hard-landing stagger (the fall sequence) still plays. Confidence: High (live
+checked).
+
 ---
 
 ## 4. Health and the attribute system

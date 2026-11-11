@@ -147,8 +147,8 @@ right away.
 | `emf.wheel(title, labels, key, fn)` | the radial wheel; `key` is held to choose (`"G"`, `""` for click); `fn(world, choice)`, choice 1..n or nil |
 | `emf.wheel_section(group, title, labels, fn)` | (1.9) your part of a wheel shared by several mods: publishes (replaces) your section of `group`; an empty list or nil removes it. `fn(world, index, label)` gets the index into the labels as they were when the wheel opened, and the label shown: if you published another list since, find the item by `label`. A pick from a wheel opened before your mod reloaded is dropped. Publish again when your labels change |
 | `emf.wheel_group(group, title, key)` | (1.9) opens one wheel with every mod's section of `group` (each label as "Section: label" when more than one mod has a section); a pick runs only its owner's `fn`. True when it opened (false: no labels, or more than 64) |
-| `emf.on_hit(fn)` | (1.23) `fn(world, hit)` after the server applied each landing hit on an entity (the game's `HitEvent`), on the server world; see "Hits" below. Joined players' games see none. true / false (false on an older core) |
-| `emf.hit_rule{from, to, crit, backstab, weakspot, types, attack, healing, scale, add, min_health, cancel}` | (1.23) a rule the core applies to every matching hit before it lands: change its amount or cancel it. Returns its id, or nil when refused (the log says why: 64 rules, the hook not usable on this game build). See "Hits" below |
+| `emf.on_hit(fn [, {kinds = ...}])` | (1.23) `fn(world, hit)` after the server applied each landing hit on an entity (the game's `HitEvent`), on the server world; with `kinds` also fall, shroud, cold and drowning damage; see "Hits" below. Joined players' games see none. true / false (false on an older core) |
+| `emf.hit_rule{from, to, crit, backstab, weakspot, types, attack, healing, kinds, scale, add, min_health, cancel}` | (1.23) a rule the core applies to every matching hit before it lands: change its amount or cancel it. Returns its id, or nil when refused (the log says why: 64 rules, the hook not usable on this game build). See "Hits" below |
 | `emf.hit_rule_remove(id)` | (1.23) removes a rule of this script. true only for the script's own rule |
 | `emf.on_player_joined(fn)`, `emf.on_player_left(fn)`, `emf.on_player_died(fn)` | (1.20) `fn(world, p)` on the server world, `p` = `{player, account, name, host, killer}` (`killer`: died only, the last hitter within 10 s or 0). All join 1 s after the world data; died needs the call in the first run. False on an older core (reference.md "v28") |
 | `emf.net.channel(name, def)` | (1.19) a message channel `"<mod id>/<name>"`: `def` = `{version, to = "server" \| "players" \| "both", max, per_10s, on_server = fn(world, from, data), on_player = fn(world, from, data)}`; `from` = `{player, account, admin, is_local, version}`. A reload binds the new functions; a new version needs a restart. In process, and to joined players and the server over the chat (reference.md "v27") |
@@ -308,6 +308,7 @@ dedicated server; see [server.md](server.md)).
 | `attack`, `attacks` | the attack's kind: `"melee"`, `"ranged"`, `"magic"`, `"tool"`, `"other"`, `"aoe"` or `"skillshot"` (nil for a `emf.damage` hit); `attacks` lists every kind the hit has (most have one) |
 | `weapon_item`, `weapon_category`, `program`, `impact`, `reaction` | the weapon's item id (0 = none or not known), the game's weapon category hash, the attack's impact program, the swing or projectile (hits of one share it), the hit reaction type |
 | `health_before`, `health_after` | the target's health around the hit; nil when not known |
+| `kind` | `"hit"` (an entity hit), `"fall"`, `"shroud"`, `"cold"` or `"drowning"`: see "Fall, shroud, cold and drowning" below |
 | `from_mod` | true for a hit made by `emf.damage` |
 | `position` | `{x = , y = , z = }` in metres |
 
@@ -320,9 +321,27 @@ stamina too), `add` (added after the scale), `min_health` (the target keeps at l
 die from hits). A damage hit never becomes a heal and a heal never becomes damage. Rules apply in id order; cancel
 wins. An unknown field or a bad name is an error. A script's rules are removed when it reloads, unloads or pauses.
 
-What never becomes a hit (no hook sees it): fall, shroud, cold and drowning damage, regeneration, direct attribute
-writes, voxel damage (terrain and walls). A blocked or parried hit changes stamina, not health. These other kinds
-come in a later version.
+### Fall, shroud, cold and drowning
+
+`kinds` lets a rule or a callback take part in the damage the game does not make as hits. A kind name is `"hit"`,
+`"fall"`, `"shroud"`, `"cold"` or `"drowning"`; `kinds` is one name, a list of names, or `"all"`. An unknown name is an
+error.
+
+- `emf.hit_rule{kinds = "fall", to = "players", cancel = true}`. Without `kinds` a rule is for entity hits only, so every
+  rule keeps its meaning.
+- `emf.on_hit(fn, {kinds = {"fall", "drowning"}})`. Without the option `fn` gets entity hits only: a damage meter does
+  not get 60 shroud ticks a second unasked.
+- `hit.kind` tells them apart. For these kinds `attacker` and `source` are 0, `target` = `part` = the entity, there are no
+  `types` or `attack`, and `health_before` and `health_after` are known. `from` (a player or creature) never matches
+  them, nor `crit`, `types` or `attack`.
+- Fall is once per landing. Shroud, cold and drowning come every server step (about 60 a second) while the shroud timer is
+  out, body heat is 0 while freezing, or oxygen is 0. `scale` is exact there (0.5 halves 1-point ticks: EMF carries the
+  fraction). `add` is per event, so about 60 times a second on those three.
+- `min_health` works on every kind. A cancelled hit never reaches `on_hit`. A cancelled fall gives the health back, but the
+  game's hard-landing stagger still plays.
+
+What never becomes a hit (no hook sees it): regeneration, direct attribute writes, voxel damage (terrain and walls). A
+blocked or parried hit changes stamina, not health.
 
 `emf.damage` also hits placed objects (an entity with `Destructible` and no `CombatFlags`, or with `handleHits` on): the
 game gives it health on the first hit and removes it at 0. A placed object's health is not saved: a reload heals it.

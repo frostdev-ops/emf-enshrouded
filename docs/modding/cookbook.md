@@ -364,6 +364,15 @@ with no script call per hit; `emf.on_hit` sees hits after they landed. See lua.m
 -- rules of this script go when it reloads or pauses.
 local function god_mode(player) return emf.hit_rule{to = player, min_health = 1} end
 
+-- God mode for all damage: kinds = "all" adds fall, shroud, cold and drowning to the entity hits.
+local function god_mode_all(player) return emf.hit_rule{kinds = "all", to = player, min_health = 1} end
+
+-- No fall damage for players (a cancelled fall gives the health back; the hard-landing stagger still plays).
+emf.hit_rule{kinds = "fall", to = "players", cancel = true}
+
+-- Half shroud damage for everyone: scale is exact on shroud, cold and drowning (1-point ticks are halved over time).
+emf.hit_rule{kinds = "shroud", scale = 0.5}
+
 -- Who is on the server: the player events (the host's own player too). A player's rules go when they leave: the game
 -- gives their entity id to the next player who joins.
 local online, count = {}, 0
