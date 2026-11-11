@@ -156,6 +156,9 @@ right away.
 | `emf.apply_buff(world, target, type [, {seconds, source, item}] [, fn(world, result)])` | (1.24) gives a buff through the game's own buff code in the next step; `fn` gets the result after it. Server world only. true when queued, false when refused at once (logged) |
 | `emf.remove_buff(world, target, type [, fn(world, result)])` | (1.24) removes a buff the game's way (a cleanse: gone after the next step). Server world only. true / false as `emf.apply_buff` |
 | `emf.on_buff(fn)` | (1.24) `fn(world, ev)` after the server step for every change of a player's buffs: applied, refreshed, removed. false on an older core |
+| `emf.marker(id, spec)` / `emf.remove_marker(id)` / `emf.clear_markers()` | (1.25) a marker over the 3D view and on the map on this game. See "Markers" below |
+| `emf.send_marker(player, id, spec)` / `emf.unsend_marker(player, id)` | (1.25) server: a marker on a player's game (nil: every player's); players need EMF |
+| `emf.world_to_screen(x, y, z)` / `emf.marker_types()` | (1.25) a world point in display pixels (or nil) / the game's map icon types seen in this world |
 | `emf.on_player_joined(fn)`, `emf.on_player_left(fn)`, `emf.on_player_died(fn)` | (1.20) `fn(world, p)` on the server world, `p` = `{player, account, name, host, killer}` (`killer`: died only, the last hitter within 10 s or 0). All join 1 s after the world data; died needs the call in the first run. False on an older core (reference.md "v28") |
 | `emf.net.channel(name, def)` | (1.19) a message channel `"<mod id>/<name>"`: `def` = `{version, to = "server" \| "players" \| "both", max, per_10s, on_server = fn(world, from, data), on_player = fn(world, from, data)}`; `from` = `{player, account, admin, is_local, version}`. A reload binds the new functions; a new version needs a restart. In process, and to joined players and the server over the chat (reference.md "v27") |
 | `emf.net.send(name, data)`, `.send_to(world, player, name, data)`, `.send_all(world, name, data)`, `.peer(world, player, name)` | (1.19) to the server (true: sent) / to one player's game / to all with the channel (count) / that game's channel version (`peer(nil, 0, name)`: the server's; 0 = none) |
@@ -420,6 +423,48 @@ joined is compared within a quarter second). The first sight of a player (a new 
 `"refreshed"`: its end moved later by more than a second. Returns true, or false on an older core.
 
 Recipes: [cookbook.md](cookbook.md), "Buffs".
+
+## Markers (1.25)
+
+Markers over the 3D view and on the game's map, drawn by EMF on each player's game in the game's style. `emf.marker` is
+for the game your mod runs in; on a server (a game you host or the dedicated server) `emf.send_marker` puts them on a
+player's game, or on everyone's: players need EMF on their game, not your mod. The ids are your mod's own (EMF keeps
+them apart from other mods'); your markers go when your mod unloads or reloads, also from the players' games you sent
+them to. Details: [reference.md](reference.md), "v33: markers".
+
+```lua
+emf.marker("home", {x = 4120, y = 96, z = 7333, text = "Home", game_map = true})
+emf.send_marker(player, "pet", {entity = pet, height = 2.2, text = "Bjorn", edge_arrow = true, game_map = true})
+emf.send_marker(nil, "raid", {x = 900, y = 40, z = 2100, text = "Raid!", colour = 0xff4040ff, max_distance = 600})
+emf.unsend_marker(player, "pet")
+```
+
+| Function | What |
+|---|---|
+| `emf.marker(id, spec)` | sets or updates a marker on this game: true, false where nothing draws (the dedicated server) or when refused (logged) |
+| `emf.remove_marker(id)` / `emf.clear_markers()` | removes one (true when it was there) / all of yours (how many) |
+| `emf.send_marker(player or nil, id, spec)` | server: on that player's game (their entity), or every player's (nil); how many players it went to |
+| `emf.unsend_marker(player or nil, id)` | takes a sent one off again |
+| `emf.world_to_screen(x, y, z)` | `px, py` in display pixels, or nil (behind the camera, no frame yet) |
+| `emf.marker_types()` | the game's map icon type ids its own map entries used in this world (for `game_icon`) |
+
+`spec` keys (anything else is an error):
+
+| Key | What |
+|---|---|
+| `x`, `y`, `z` | the position in world metres (with `entity`: where it shows until the game knows the entity) |
+| `entity` | follow this entity |
+| `height` | metres above the position |
+| `text` | the label (cut at 64 bytes) |
+| `colour` | `0xRRGGBBAA` (default: the HUD's accent colour) |
+| `shape` | `"diamond"` (default), `"circle"`, `"square"` or `"none"` (text only) |
+| `icon` | a picture from `emf.image` instead of the shape (only with `emf.marker`) |
+| `world` | over the 3D view (default true) |
+| `distance` | the distance under the text (default true) |
+| `game_map` | on the map (default false) |
+| `game_icon` | with `game_map`: one of the game's map icons (a type from `emf.marker_types`) instead of the shape |
+| `edge_arrow` | an arrow at the screen's edge when it is behind you or off screen (default false) |
+| `max_distance` | fades out toward it and is hidden beyond (default: no limit; the map shows it anyway) |
 
 ## Worlds and components
 

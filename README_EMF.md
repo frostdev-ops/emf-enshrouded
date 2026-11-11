@@ -412,6 +412,8 @@ end the game; use `commands.txt` then.)
 | `hud.grow up\|down` | the status effects list grows upward from the food icons' bottom edge, or down as the game draws it |
 | `hits` | the state of the hit hooks (API v31): whether the before-the-hit hook and the hit rules work, or why not; how many rules and callbacks there are; the hits seen, changed and cancelled; callback faults; the average microseconds per hit; whether fall, shroud, cold and drowning damage are on or off |
 | `buffs.list [food\|buff\|debuff\|rested\|terrain] [text]` | the game's buff types with their ids (API v32) |
+| `markers` | the markers this game draws (by mod, and those a server sent), and whether drawing and the game's map list are on (API v33) |
+| `markers.test [text] [game icon]` | a marker 10 m ahead of you, over the world and on the map; `markers.test clear` removes it |
 | `buffs.of [entity]` | an entity's active buffs (default entity 1) |
 | `buffs.give <entity> <type id> [seconds]` | gives a buff on the server world; answers "queued", the result is logged after the step. Ids are hex (`0xAC13C6C3`) or decimal |
 | `buffs.clear <entity> <type id>` | removes a buff the game's way (a cleanse) |

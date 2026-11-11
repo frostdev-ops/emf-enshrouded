@@ -891,6 +891,59 @@ refused ("the target does not have it"); in rain Wet was given again by the game
 
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
 
+## v33: markers
+
+Markers that players see: over the 3D view (a shape or a picture, a text and the distance, an arrow at the screen's edge
+when it is behind or off screen) and on the game's map screen. EMF draws them on each player's game, in the game's
+style (the HUD font and shadow), only while the game shows its own world-space UI (not on the map, in menus or with the
+console open). On the map they show while it is open, with their text.
+
+- `marker_set` is for the game the mod runs in (a single-player or hosted game, or a joined player's game with the
+  mod). The dedicated server draws nothing: there `marker_set` is false and `marker_send` is the way.
+- `marker_send` (server world: the host's game or the dedicated server) puts markers on one player's game, or on every
+  player's: they arrive over EMF's core channel `emf/markers` (mod messages), so a player needs EMF on their game, not
+  the mod. The host's own player gets them in the same process.
+- A marker can follow an entity (`entity`): each game draws it where that entity is in its own world. A server refreshes
+  the position every 2 s while the entity moved more than 4 m (an entity far from a player is not in that player's
+  game, so it is drawn at the last position the server sent).
+- `EMF_MARKER_GAME_MAP` draws the marker on the map screen; with `game_icon` the game draws one of its own map icons
+  there instead of EMF's shape (EMF adds an entry to the game's own map list; `marker_types` gives the icon types the
+  game's own entries used in this world). EMF's entries never take the room the game's own map markers need.
+- Caps: 256 markers per mod and 1024 in all on one game (a server's count apart from the game's own mods); a text is
+  cut at 64 bytes; at most 256 in one `marker_send`.
+
+| C | C++ | What |
+|---|---|---|
+| `marker_set(&m)` | `api()->marker_set(&m)` | sets (or updates) the calling mod's marker `m.id`. Any thread. False (logged once per kind) for a bad id or numbers, the mod's 257th or the game's 1025th marker, or on the dedicated server. |
+| `marker_remove(id)` / `marker_clear()` | | removes one of the mod's markers (false: none) / all of them (how many). |
+| `marker_types(out, cap)` | | the game's map icon types its own map entries used in this world (`EmfMapMarkerType`: `id`, `flags` 0, `name` empty): the number there is; fills `out` up to `cap`. |
+| `world_to_screen(x, y, z, &px, &py)` | | a world point in display pixels with the camera of the newest frame; false when it is behind the camera or no frame is known (a menu, a loading screen, the dedicated server). Any thread. |
+| `marker_send(player, markers, count)` | | server world: markers for player `player`'s game (their entity in the server world), or every player's (0); how many players it went to. |
+| `marker_unsend(player, id)` | | takes a sent marker off that player's game (0: everyone's). |
+| | `emf::has_v33()` | true when the core has these functions. |
+
+`EmfMarker` (`size` = `sizeof(EmfMarker)`, then): `entity` (follow it; 0 = the position), `id` (1-48 of `A-Z a-z 0-9 _
+. - :`), `x`, `y`, `z` (world metres: x east, y up, z north), `text` (may be NULL), `height` (metres above the position
+or the entity), `max_distance` (fades out toward it, hidden beyond; 0 = no limit), `rgba` (`0xRRGGBBAA` of the shape;
+0 = the HUD's accent colour), `icon` (a picture from `image_load`, v26, instead of the shape; not for `marker_send`),
+`flags` (`EMF_MARKER_WORLD` over the 3D view, `_GAME_MAP` on the map, `_EDGE_ARROW`, `_DISTANCE` the distance under the
+text), `shape` (`EMF_MARKER_DIAMOND`, `_CIRCLE`, `_SQUARE`, `_NONE`: text only), `game_icon`.
+
+```cpp
+EmfMarker m{};
+m.size = sizeof m;
+m.id = "bounty";
+m.x = 4120; m.y = 96; m.z = 7333;
+m.height = 2.5f;
+m.text = "Bounty: Fell Brute";
+m.rgba = 0xffcc33ffu;
+m.flags = EMF_MARKER_WORLD | EMF_MARKER_GAME_MAP | EMF_MARKER_EDGE_ARROW | EMF_MARKER_DISTANCE;
+api()->marker_send(0, &m, 1);  // on the server: every player with EMF sees it
+```
+
+Console: `markers` (what is there, whether drawing and the game's map list are on), `markers.test [text] [game icon]`
+(a marker 10 m ahead of you; `markers.test clear` removes it).
+
 ## SDK headers (header-only C++, no ABI)
 
 | Header | What |

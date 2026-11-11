@@ -143,6 +143,12 @@ Hit rules (`hit_rule_add`, Lua `emf.hit_rule`), `on_hit_before` and `on_hit` liv
 or the dedicated server. Players who join need nothing (not EMF, not the mod), and their games see no hits of their own.
 `hits` in the server's console shows how they work.
 
+### Markers (EMF API v33)
+
+A server mod puts markers on players' games with `marker_send` (Lua `emf.send_marker`): over their 3D view and on their
+map. EMF on the player's game draws them, so a player needs EMF (not the mod); players without EMF see nothing. The
+server itself draws nothing. Beastmaster's beast and stable markers (off at the start) work this way.
+
 ### In a game you host
 
 Your own `/commands` already work from your chat (the client side, `[overlay] chat=1`). To let your friends run

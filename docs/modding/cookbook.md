@@ -483,6 +483,45 @@ end)
 C++: `api()->buff_apply(w, target, type, duration_ns, source, item, done, user)` and `buff_remove`, with `emf::has_v32()`
 (reference.md, "v32: buffs").
 
+## Markers: a spot for every player, a marker over a bounty target
+
+*Checked in game: the camera, the projection and the map screen (plans of 2026-11-11); the recipes are the API's own
+use.*
+
+A rally point every player sees, sent from the server (players need EMF on their game, not your mod):
+
+```lua
+emf.command("rally", "set a rally point where you stand (admin)", function(world)
+  local me = emf.sender().entity
+  local x, y, z = world:position(me)
+  emf.send_marker(nil, "rally", {x = x, y = y, z = z, height = 2, text = "Rally", colour = 0x40c0ffff,
+                                 game_map = true, edge_arrow = true})
+end)
+emf.command("rally.clear", "take the rally point away (admin)", function()
+  emf.unsend_marker(nil, "rally")
+end)
+```
+
+A marker that follows a creature, for the player who took the bounty only, gone when it dies:
+
+```lua
+local bounty = {}  -- creature -> player
+function give_bounty(world, player, creature)
+  bounty[creature] = player
+  local x, y, z = world:position(creature)
+  emf.send_marker(player, "bounty." .. creature, {entity = creature, x = x, y = y, z = z, height = 2.5,
+                                                   text = "Bounty", shape = "circle", colour = 0xff4040ff,
+                                                   edge_arrow = true, game_map = true})
+end
+emf.on_hit(function(world, hit)
+  local player = bounty[hit.target]
+  if hit.killed and player then
+    emf.unsend_marker(player, "bounty." .. hit.target)
+    bounty[hit.target] = nil
+  end
+end)
+```
+
 ## Run code before or after one of the game's programs
 
 ```cpp
