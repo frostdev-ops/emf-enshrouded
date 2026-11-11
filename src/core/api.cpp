@@ -1291,18 +1291,27 @@ bool entity_position(EmfWorld* w, uint32_t entity, double out[3], uint8_t* trans
 bool damage_now(EmfWorld* w, uint32_t attacker, uint32_t target, int32_t amount) {
     const std::string what = "damage(" + std::to_string(attacker) + " -> " + std::to_string(target) + ", " +
                              std::to_string(amount) + ")";
+    // An entity without CombatFlags takes hits (the game's applyHitToEntity); with them, only while handleHits is on.
     const ComponentRef flags = get_component(g_state->get_component, raw(w), ecs::CombatFlags::kHash, target);
-    ecs::CombatFlags cf{};
-    if (!flags.ptr || flags.size != sizeof cf || !seh_read(flags.ptr, &cf, sizeof cf) || !cf.handleHits) {
-        refuse_limited(what + " refused: the target takes no hits (no CombatFlags.handleHits)");
-        return false;
+    if (flags.ptr) {
+        ecs::CombatFlags cf{};
+        if (flags.size != sizeof cf || !seh_read(flags.ptr, &cf, sizeof cf) || !cf.handleHits) {
+            refuse_limited(what + " refused: the target takes no hits (CombatFlags.handleHits is off)");
+            return false;
+        }
+        if (cf.immune) {
+            refuse_limited(what + " refused: the target is immune (CombatFlags.immune)");
+            return false;
+        }
     }
-    if (cf.immune) {
-        refuse_limited(what + " refused: the target is immune (CombatFlags.immune)");
-        return false;
-    }
-    if (!get_component(g_state->get_component, raw(w), ecs::Health::kHash, target).ptr) {
-        refuse_limited(what + " refused: the target has no Health");
+    // Health, or a placed object (Destructible, on the entity or its template): the game gives it Health on the first
+    // hit and the destructible program removes it at 0 (private research hit_hooks_2026-11-11 section 5).
+    const bool has_health = get_component(g_state->get_component, raw(w), ecs::Health::kHash, target).ptr != nullptr;
+    const bool placed = get_component(g_state->get_component, raw(w), ecs::Destructible::kHash, target).ptr != nullptr ||
+                        (g_state->get_template_component &&
+                         get_template_component(g_state->get_template_component, raw(w), ecs::Destructible::kHash, target));
+    if (!has_health && !placed) {
+        refuse_limited(what + " refused: the target has no Health and is not a placed object (Destructible)");
         return false;
     }
     HitSpec s;

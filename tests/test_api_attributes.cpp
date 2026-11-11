@@ -758,3 +758,56 @@ TEST_CASE("emf.hpp hit_rule() defaults to scale 1 and the struct's size") {
     CHECK(r.attacker == 0);
     CHECK(r.cancel == 0);
 }
+
+// ---- damage on placed objects (v31) ----
+
+namespace {
+
+ecs::Destructible g_tpl_door{500};
+void* fake_tgc(uint8_t*, uint32_t hash, uint32_t entity) {
+    return hash == ecs::Destructible::kHash && entity == 779 ? &g_tpl_door : nullptr;
+}
+void put_destructible(uint32_t entity, uint16_t max) {
+    ecs::Destructible d{max};
+    g_comps[{ecs::Destructible::kHash, entity}] = std::vector<uint8_t>(reinterpret_cast<uint8_t*>(&d),
+                                                                       reinterpret_cast<uint8_t*>(&d) + sizeof d);
+}
+
+}  // namespace
+
+TEST_CASE("damage hits a placed object: Destructible, no CombatFlags, no Health") {
+    Fixture f;
+    f.state.get_template_component = fake_tgc;
+    put_destructible(777, 500);
+    put_position(777, 3, 0, 0);
+    const EmfApi* api = api_table();
+    bool door = false, tpl_door = false;
+    f.in_callback([&](EmfWorld* w) {
+        door = api->damage(w, 1, 777, 100);
+        tpl_door = api->damage(w, 1, 779, 100);  // Destructible only on its template
+    });
+    CHECK(door);
+    CHECK(tpl_door);
+    CHECK(f.state.damage_queue.waiting() == 2);
+}
+
+TEST_CASE("damage still refuses an entity without Health or Destructible") {
+    Fixture f;
+    const EmfApi* api = api_table();
+    bool none = true;
+    f.in_callback([&](EmfWorld* w) { none = api->damage(w, 1, 778, 100); });
+    CHECK_FALSE(none);
+    CHECK(logged("has no Health and is not a placed object"));
+    CHECK(f.state.damage_queue.waiting() == 0);
+}
+
+TEST_CASE("damage refuses CombatFlags with handleHits off, also on a placed object") {
+    Fixture f;
+    put_destructible(780, 500);
+    put_combat(780, false);
+    const EmfApi* api = api_table();
+    bool off = true;
+    f.in_callback([&](EmfWorld* w) { off = api->damage(w, 1, 780, 100); });
+    CHECK_FALSE(off);
+    CHECK(logged("CombatFlags.handleHits is off"));
+}
