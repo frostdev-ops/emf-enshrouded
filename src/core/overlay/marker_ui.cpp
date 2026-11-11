@@ -1,0 +1,149 @@
+// Markers (API v33) on screen (marker_ui.h).
+#include "core/overlay/marker_ui.h"
+
+#include <algorithm>
+#include <cfloat>
+#include <cmath>
+
+namespace emf::core {
+
+namespace {
+
+// The camera's position from the view (rows 0-2 the axes, row 3 the translation): c = -t * R^T.
+void camera_position(const CameraSnap& c, double out[3]) {
+    const float* V = c.v;
+    out[0] = -(V[12] * V[0] + V[13] * V[1] + V[14] * V[2]);
+    out[1] = -(V[12] * V[4] + V[13] * V[5] + V[14] * V[6]);
+    out[2] = -(V[12] * V[8] + V[13] * V[9] + V[14] * V[10]);
+}
+
+uint32_t with_alpha(uint32_t rgba, float alpha) {
+    const float a = static_cast<float>(rgba & 0xFFu) * std::clamp(alpha, 0.0f, 1.0f);
+    return (rgba & 0xFFFFFF00u) | static_cast<uint32_t>(a + 0.5f);
+}
+
+}  // namespace
+
+std::vector<MarkerLayout> layout_markers(const std::vector<Marker>& markers, const CameraSnap& cam, const double* player,
+                                         ImVec2 display) {
+    std::vector<MarkerLayout> out;
+    if (!cam.valid || !(display.x > 0) || !(display.y > 0)) return out;
+    const float scale = display.y / 1080.0f;
+    const float inset = kMarkerEdgeInset * scale;
+    double from[3];
+    if (player) {
+        from[0] = player[0];
+        from[1] = player[1];
+        from[2] = player[2];
+    } else {
+        camera_position(cam, from);
+    }
+    for (const Marker& m : markers) {
+        if (!(m.flags & EMF_MARKER_WORLD)) continue;
+        const double dx = m.x - from[0], dy = m.y - from[1], dz = m.z - from[2];
+        const double dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+        const float alpha = fade(dist, m.max_distance);
+        if (!(alpha > 0)) continue;
+        const double top = m.y + m.height;
+        MarkerLayout l;
+        const auto s = project(cam, m.x, top, m.z, display.x, display.y);
+        if (s && s->x >= 0 && s->x <= display.x && s->y >= 0 && s->y <= display.y) {
+            l.x = s->x;
+            l.y = s->y;
+        } else if (m.flags & EMF_MARKER_EDGE_ARROW) {
+            const EdgePoint e = edge_point(cam, m.x, top, m.z, display.x, display.y, inset);
+            if (!e.valid) continue;
+            l.x = e.x;
+            l.y = e.y;
+            l.edge = true;
+            l.angle = e.angle;
+        } else {
+            continue;
+        }
+        l.size = kMarkerSize1080 * scale;
+        l.alpha = alpha;
+        l.distance = dist;
+        l.text = m.text;
+        if (m.flags & EMF_MARKER_DISTANCE) l.dist = distance_text(dist);
+        l.rgba = m.rgba;
+        l.shape = m.shape;
+        l.icon = m.icon;
+        out.push_back(std::move(l));
+    }
+    // the nearest get their text; then far ones first, so near ones are drawn on top
+    std::sort(out.begin(), out.end(), [](const MarkerLayout& a, const MarkerLayout& b) { return a.distance < b.distance; });
+    for (size_t i = 0; i < out.size() && i < kMarkerLabels; ++i) out[i].label = true;
+    std::reverse(out.begin(), out.end());
+    return out;
+}
+
+bool show_markers(bool console_open, const MarkerSight& sight, const CameraSnap& cam, uint64_t now_ms) {
+    return !console_open && sight.world_ui && !sight.map_open && cam.valid && now_ms >= cam.frame_ms &&
+           now_ms - cam.frame_ms <= kMarkerFreshMs;
+}
+
+void draw_markers(ImDrawList* dl, const std::vector<MarkerLayout>& layouts, const TextLook& look, const ImageLookup* pictures) {
+    if (!dl) return;
+    const float display_h = ImGui::GetIO().DisplaySize.y;
+    for (const MarkerLayout& l : layouts) {
+        const float s = l.size, r = s * 0.5f, k = s / kMarkerSize1080;
+        const ImVec2 c(l.x, l.y);
+        const ImU32 fill = look_colour(with_alpha(l.rgba ? l.rgba : look.accent, l.alpha));
+        const ImU32 edge = IM_COL32(0, 0, 0, static_cast<int>(170 * l.alpha));
+        bool drew_picture = false;
+        if (l.icon && pictures && *pictures) {
+            if (const auto pic = (*pictures)(l.icon, ImGui::GetTime(), 0)) {
+                const float w = pic->aspect >= 1 ? s : s * pic->aspect, h = pic->aspect >= 1 ? s / pic->aspect : s;
+                dl->AddImage(pic->tex, ImVec2(c.x - w * 0.5f, c.y - h * 0.5f), ImVec2(c.x + w * 0.5f, c.y + h * 0.5f),
+                             pic->uv0, pic->uv1, IM_COL32(255, 255, 255, static_cast<int>(255 * l.alpha)));
+                drew_picture = true;
+            }
+        }
+        if (!drew_picture) {
+            switch (l.shape) {
+                case EMF_MARKER_CIRCLE:
+                    dl->AddCircleFilled(c, r * 0.8f, fill);
+                    dl->AddCircle(c, r * 0.8f, edge, 0, 1.5f * k);
+                    break;
+                case EMF_MARKER_SQUARE:
+                    dl->AddRectFilled(ImVec2(c.x - r * 0.7f, c.y - r * 0.7f), ImVec2(c.x + r * 0.7f, c.y + r * 0.7f), fill);
+                    dl->AddRect(ImVec2(c.x - r * 0.7f, c.y - r * 0.7f), ImVec2(c.x + r * 0.7f, c.y + r * 0.7f), edge, 0, 0, 1.5f * k);
+                    break;
+                case EMF_MARKER_NONE:
+                    break;
+                default: {  // the diamond
+                    const ImVec2 t(c.x, c.y - r), rt(c.x + r * 0.75f, c.y), b(c.x, c.y + r), lt(c.x - r * 0.75f, c.y);
+                    dl->AddQuadFilled(t, rt, b, lt, fill);
+                    dl->AddQuad(t, rt, b, lt, edge, 1.5f * k);
+                }
+            }
+        }
+        if (l.edge) {  // an arrow beyond the shape, pointing out
+            const float ca = std::cos(l.angle), sa = std::sin(l.angle);
+            const ImVec2 tip(c.x + ca * s * 1.05f, c.y + sa * s * 1.05f);
+            const ImVec2 b1(c.x + ca * s * 0.65f - sa * s * 0.3f, c.y + sa * s * 0.65f + ca * s * 0.3f);
+            const ImVec2 b2(c.x + ca * s * 0.65f + sa * s * 0.3f, c.y + sa * s * 0.65f - ca * s * 0.3f);
+            dl->AddTriangleFilled(tip, b1, b2, fill);
+            dl->AddTriangle(tip, b1, b2, edge, 1.0f * k);
+        }
+        if (!l.label || (l.text.empty() && l.dist.empty())) continue;
+        ImFont* font = look.font ? look.font : ImGui::GetFont();
+        const float big = 18.0f * k, small = 15.0f * k;
+        // the text goes under the shape; near the bottom of the screen above it
+        const bool above = l.y > display_h * 0.85f;
+        float y = above ? l.y - r - (l.text.empty() ? 0 : big) - (l.dist.empty() ? 0 : small) - 2 * k : l.y + r + 2 * k;
+        const uint32_t text_rgba = with_alpha(look.colour, l.alpha);
+        if (!l.text.empty()) {
+            const ImVec2 sz = font->CalcTextSizeA(big, FLT_MAX, 0, l.text.c_str());
+            draw_look_text(dl, look, font, big, ImVec2(l.x - sz.x * 0.5f, y), text_rgba, l.text.c_str(), nullptr, 0);
+            y += big;
+        }
+        if (!l.dist.empty()) {
+            const ImVec2 sz = font->CalcTextSizeA(small, FLT_MAX, 0, l.dist.c_str());
+            draw_look_text(dl, look, font, small, ImVec2(l.x - sz.x * 0.5f, y), with_alpha(text_rgba, 0.85f), l.dist.c_str(),
+                           nullptr, 0);
+        }
+    }
+}
+
+}  // namespace emf::core

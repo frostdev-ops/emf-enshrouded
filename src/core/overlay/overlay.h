@@ -24,6 +24,7 @@ namespace emf::core {
 namespace hud {
 class HudEditor;
 }
+class MarkerStore;
 
 struct OverlayConfig {
     bool enabled = true;
@@ -69,6 +70,7 @@ struct OverlayDeps {
     const ModRegistry* mods = nullptr;  // the Mods tab (null: no tab)
     SettingsStore* settings = nullptr;  // mods' settings, changed in the Mods tab
     hud::HudEditor* hud_editor = nullptr;  // the HUD page of the Settings tab (null: the page says it is not available)
+    const MarkerStore* markers = nullptr;  // markers (API v33): drawn over the 3D view and the map (null: none)
 };
 
 bool start_overlay(const OverlayConfig& config, OverlayDeps deps);

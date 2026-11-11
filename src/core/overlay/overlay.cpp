@@ -17,6 +17,7 @@
 #include "core/screen_glyphs.h"
 #include "console_ui.h"
 #include "image_store.h"
+#include "marker_ui.h"
 #include "window_model.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
@@ -448,7 +449,23 @@ std::optional<ImageDraw> window_picture(uint32_t handle, double seconds, uint32_
                      f->aspect};
 }
 
+// Markers (API v33) over the 3D view, under everything else EMF draws.
+void build_markers(ImVec2 display) {
+    if (!g_deps.markers) return;
+    CameraSnap cam;
+    const uint64_t now = GetTickCount64();
+    if (!marker_camera(&cam) || !show_markers(g_router->open() || g_ui.open_fraction > 0.0f, marker_sight(now), cam, now))
+        return;
+    double player[3];
+    const bool has_player = marker_player_pos(player);
+    const auto layouts = layout_markers(g_deps.markers->snapshot(), cam, has_player ? player : nullptr, display);
+    if (layouts.empty()) return;
+    static const ImageLookup pictures = window_picture;
+    draw_markers(ImGui::GetBackgroundDrawList(), layouts, text_look(), &pictures);
+}
+
 void build(ImVec2 display) {
+    build_markers(display);
     if (g_window) {  // under the console: drawn first, and without input while the console is open
         static const ImageLookup pictures = window_picture;
         const auto click = draw_window(*g_window, g_window_ui, !g_router->open(), display, text_look(), &pictures);

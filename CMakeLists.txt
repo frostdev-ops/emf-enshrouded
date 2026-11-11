@@ -188,6 +188,7 @@ add_library(emf_core_lib STATIC
   src/core/overlay/window_gate.cpp
   src/core/overlay/wheel_ui.cpp
   src/core/overlay/window_ui.cpp
+  src/core/overlay/marker_ui.cpp
   src/core/overlay/png_decode.cpp
   src/core/overlay/image_store.cpp
   src/core/net/net_line.cpp
@@ -522,6 +523,7 @@ add_executable(emf_tests
   tests/test_mods_ui.cpp
   tests/test_settings_ui.cpp
   tests/test_window_ui.cpp
+  tests/test_marker_ui.cpp
   tests/test_png_decode.cpp
   tests/test_portraits_plan.cpp
   tests/test_content_portraits.cpp
