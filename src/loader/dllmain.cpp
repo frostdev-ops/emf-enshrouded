@@ -26,6 +26,7 @@
 
 #include <atomic>
 #include <cstdio>
+#include <cstring>
 #include <ctime>
 #include <optional>
 #include <string>
@@ -37,7 +38,9 @@
 #include "core/known_tools.h"
 #include "entry_hold.h"
 #include "file_hooks.h"
+#include "iat_patch.h"
 #include "layer_env.h"
+#include "overlay_path.h"
 #include "loader_id.h"
 #include "play_once.h"
 
@@ -304,12 +307,84 @@ std::string describe_entry(const uint8_t* entry, const char* whose) {
     return emf::loader::entry_not_usual(entry, target, module, whose);
 }
 
+// ---- the overlay's hook path (Wine / Proton, or [overlay] path=hook): the exe's GetProcAddress hands EMF's own
+// vkGetInstanceProcAddr to the game when it asks vulkan-1.dll (overlay_path.h) ----
+emf::loader::GetProcFn g_real_get_proc = nullptr;
+std::atomic<emf::loader::ShimProcFn> g_shim_proc{nullptr};
+
+std::wstring module_file_name(HMODULE m) {
+    wchar_t path[MAX_PATH];
+    const DWORD n = GetModuleFileNameW(m, path, MAX_PATH);
+    return n ? std::wstring(path, n) : std::wstring();
+}
+
+// emf_core.dll's emf_vk_shim_proc, loaded on the first Vulkan ask (the core's own thread may not have loaded it yet;
+// LoadLibraryW then hands both the same module). Null when the core or its export is missing: the game's own functions.
+emf::loader::ShimProcFn shim_proc() {
+    if (const auto f = g_shim_proc.load()) return f;
+    static std::atomic<bool> tried{false};
+    if (tried.exchange(true)) return g_shim_proc.load();
+    const HMODULE core = LoadLibraryW((g_dir + L"\emf\emf_core.dll").c_str());
+    const auto f = core ? reinterpret_cast<emf::loader::ShimProcFn>(g_real_get_proc(core, "emf_vk_shim_proc")) : nullptr;
+    g_shim_proc = f;
+    if (!f) loader_log(g_dir, "overlay: emf_core.dll's emf_vk_shim_proc is missing: the game's Vulkan goes without EMF's hook");
+    return f;
+}
+
+FARPROC WINAPI hook_get_proc_address(HMODULE module, LPCSTR name) {
+    if (emf::loader::is_vk_name(name) && emf::loader::is_vulkan_loader_module(module_file_name(module)))
+        return emf::loader::overlay_get_proc(module, name, g_real_get_proc, &module_file_name, shim_proc());
+    return g_real_get_proc(module, name);
+}
+
+// Points the exe's GetProcAddress import at hook_get_proc_address (the exe's own code asks vulkan-1.dll through it).
+bool hook_exe_get_proc_address() {
+    int patched = 0;
+    emf::loader::for_each_import(GetModuleHandleW(nullptr), [&](const char* dll, const char* name, void** slot) {
+        if (!emf::loader::is_kernel_dll(dll) || std::strcmp(name, "GetProcAddress") != 0) return;
+        void* before = emf::loader::patch_import_slot(slot, reinterpret_cast<void*>(&hook_get_proc_address));
+        if (!before) return;
+        if (!g_real_get_proc) g_real_get_proc = reinterpret_cast<emf::loader::GetProcFn>(before);
+        ++patched;
+    });
+    return patched > 0;
+}
+
+// The overlay's way into the game's Vulkan for this start ([overlay] path = auto | layer | hook; never both).
+void start_overlay_path() {
+    const std::wstring ini = g_dir + L"\emf\emf_core.ini";
+    const bool enabled = GetPrivateProfileIntW(L"overlay", L"enabled", 1, ini.c_str()) != 0;
+    wchar_t setting[16] = {};
+    GetPrivateProfileStringW(L"overlay", L"path", L"auto", setting, 16, ini.c_str());
+    const bool wine = emf::loader::running_under_wine();
+    switch (emf::loader::decide_overlay_path(setting, enabled, wine)) {
+    case emf::loader::OverlayPath::Layer:
+        SetEnvironmentVariableW(L"EMF_OVERLAY_PATH", L"layer");
+        enable_vulkan_layer();
+        break;
+    case emf::loader::OverlayPath::Hook:
+        if (hook_exe_get_proc_address()) {
+            SetEnvironmentVariableW(L"EMF_OVERLAY_PATH", wine ? L"hook-wine" : L"hook");
+            loader_log(g_dir, wine ? "overlay: Wine found: through EMF's Vulkan hook (the exe's GetProcAddress)"
+                                   : "overlay: [overlay] path=hook: through EMF's Vulkan hook (the exe's GetProcAddress)");
+        } else {
+            SetEnvironmentVariableW(L"EMF_OVERLAY_PATH", L"hook-failed");
+            loader_log(g_dir, "overlay: the exe's GetProcAddress import was not found: EMF's Vulkan hook cannot see the "
+                              "game's Vulkan (nothing EMF draws will show)");
+        }
+        break;
+    case emf::loader::OverlayPath::Off:
+        SetEnvironmentVariableW(L"EMF_OVERLAY_PATH", L"off");
+        break;
+    }
+}
+
 // EMF's core as it started before EML content: its Vulkan layer's variables (after the chained DLLs, so EMF's layer
 // comes first), the dedicated server's hold, and the thread that loads emf_core.dll.
 void start_core_today() {
     g_core_ran = true;
-    if (!g_start.core) return;  // no core, and no Vulkan layer either (the layer is emf_core.dll)
-    enable_vulkan_layer();
+    if (!g_start.core) return;  // no core, and no Vulkan layer or hook either (both are emf_core.dll)
+    start_overlay_path();
     uint8_t* entry = nullptr;
     bool want_hold = false;
     if (emf::loader::is_server_exe(g_exe)) {
