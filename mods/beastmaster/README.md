@@ -7,7 +7,7 @@ they fall, and are kept with the world. Their kills are yours: XP and loot. Loya
 one your own (stronger, tougher, faster, a second wind, an ambush, a guard, a menace, a taunt). Monsters split between
 you and your beasts: a tank beast draws half of them.
 
-It needs the `lua` mod 1.19 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
+It needs the `lua` mod 1.25 or newer (in the EMF zip). It is installed **switched off**: switch it on in the Mods tab
 (the key under Esc) or in EMF.exe, then restart the game. The bear, the aurochs and the snake come in the **EMF creature packs**
 download (the **bear pack** and the **beasts pack**, below): install them with EMF.exe ("Install a downloaded file")
 and EMF builds them when the game starts (no EML needed; with EML or ShroudForge installed, the card on EMF.exe's EMF
@@ -281,6 +281,18 @@ so a player could make a prop count as one; a stable only opens the window and h
 testing on a dedicated server, where the console has no player of its own. `open` shows the window on that player's
 game once without a key press; after that, only at a stable or within 5 s after they pressed E or their stable key.
 
+## Markers
+
+With **Beast markers** on, every beast you have out shows its name and how far it is over its head, an arrow at the
+edge of the screen when it is behind you or off screen, and a marker on the map (M). With **Stable markers** on, the
+world's stables show on the map and, within 200 m, in the world. Both are **off** at the start.
+
+- The settings are the world's (the host's or the server's). Each player can choose for themselves:
+  `/beastmaster markers on|off` and `/beastmaster stable_markers on|off` (kept with the world for that player).
+- You see only your own beasts; the stables are everyone's.
+- Players who joined need EMF on their own game (EMF draws the markers there); Beastmaster on their game is not needed.
+- The markers hide while a menu or the map shows its own screen, and while EMF's console is open.
+
 ## Commands
 
 All of these work from the game's chat for every player (`/beastmaster <word>`), and in the console
@@ -298,6 +310,8 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster talents <name or number> reset` | within 10 m of a stable: every talent point back, free |
 | `/beastmaster rename <name or number> <new name>` | rename a beast (1-20 characters, not a name your collection has) |
 | `/beastmaster tame` | tame the beast you look at, else the nearest beaten-down one (under 25 % health, within 8 m) |
+| `/beastmaster markers on\|off` | markers over your beasts, for you (see Markers) |
+| `/beastmaster stable_markers on\|off` | the stables on your map and nearby, for you |
 | `/beastmaster feed` | feed the beast you look at (else the nearest) its bait: 3 times to tame it |
 | `/beastmaster call <name or number>` | call a beast from your collection |
 | `/beastmaster dismiss <name or number>` | send that beast home |
@@ -345,6 +359,8 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | A tank (boar, bear, aurochs) draws, Another beast draws (`tank_share_pct`, `damage_share_pct`) | 50 %, 20 % | of the monsters in a fight, before Menace |
 | All your beasts draw at most (`beasts_share_max_pct`), Of a boss (`boss_share_max_pct`) | 90 %, 35 % | |
 | Rare wild bears, aurochs and snakes (`wild_bears`), About every (`wild_bear_minutes`) | on, 30 min | needs their pack |
+| Markers over your beasts (`beast_markers`) | off | each player can choose: `/beastmaster markers on\|off` |
+| Stables on the map (`stable_markers`) | off | each player can choose: `/beastmaster stable_markers on\|off` |
 
 ## The bear pack (`emf_beastmaster_bear`)
 

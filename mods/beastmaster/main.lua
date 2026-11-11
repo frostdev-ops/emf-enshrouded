@@ -18,6 +18,7 @@ local wire = require("wire")
 local remote_mod = require("remote")
 local client_mod = require("client")
 local beast_line = require("beast_line")
+local markers_mod = require("markers")
 
 emf.emits({ "StartGuardingEvent", "AddThreatTargetEvent" })
 
@@ -86,6 +87,9 @@ local function spawned(world, id, sp, mul)
 	health:watch(world, id, sp, mul)
 end
 
+-- the markers over the players' beasts and on the world's stables (1.16)
+local markers = markers_mod.new({ setting = setting, now = now })
+
 -- the beasts out in the world
 local home  -- the beasts at home in a Large Stable (made below)
 local pack = pack_mod.new({
@@ -127,6 +131,7 @@ emf.on_world_data(function(world, text)
 	if remote then remote:reset() end
 	release_asked = {}
 	pack:reset()
+	markers:reset()
 	home:reset()
 	health:reset()
 	wild:reset()
@@ -472,6 +477,19 @@ command("mode", "[passive, defending or aggressive]: how your beasts fight; noth
 	end
 end)
 
+command("markers", " on|off: a marker over each of your beasts out, for you (the world's setting otherwise)",
+	function(world, args)
+		local _, account = who(world)
+		emf.reply(account and markers:choose(account, "markers", args[1] and args[1]:lower()) or "Your account is not known yet.")
+	end)
+
+command("stable_markers", " on|off: the stables on your map and nearby, for you (the world's setting otherwise)",
+	function(world, args)
+		local _, account = who(world)
+		emf.reply(account and markers:choose(account, "stable_markers", args[1] and args[1]:lower()) or
+			"Your account is not known yet.")
+	end)
+
 command("aside", ": your beasts out step aside (leave for now) or come back; while you build they do it on their own",
 	function(world, args)
 		local player, account = who(world)
@@ -813,6 +831,7 @@ emf.on_tick(function(world)
 	stables:step(world)
 	taming:step(world)
 	pack:step(world)
+	markers:step(world, pack.present, pack.ids, stables.stables)
 	home:step(world)
 	wild:step(world)
 	health:step(world)

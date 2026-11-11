@@ -6319,3 +6319,83 @@ TEST_CASE("beastmaster net: a stables report that comes before the world's data 
     b.seconds(35);
     CHECK(listed(b, "seen by a player's game"));
 }
+
+// ---- 1.16: beast and stable markers (EMF's markers, lua 1.25) ----
+namespace {
+const Fake::MarkerCopy* sent_to(const Fake& f, uint32_t player, const std::string& id) {
+    const Fake::MarkerCopy* last = nullptr;
+    for (const auto& [p, m] : f.markers_sent)
+        if (p == player && m.id == id) last = &m;
+    return last;
+}
+bool unsent_to(const Fake& f, uint32_t player, const std::string& id) {
+    for (const auto& [p, i] : f.markers_unsent)
+        if (p == player && i == id) return true;
+    return false;
+}
+}  // namespace
+
+TEST_CASE("beastmaster 1.16: markers are off by default: a called wolf sends no marker") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.spawnable(1);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(3);
+    CHECK(b.r.fake.markers_sent.empty());
+}
+
+TEST_CASE("beastmaster 1.16: beast markers on: the owner gets a marker over each beast out, with its name; a dismissed one goes") {
+    BeastRig b({{"beast_markers", "1"}});
+    b.reply("beastmaster.give wolf");
+    b.spawnable(1);
+    REQUIRE(b.reply("beastmaster.call Wolf").find("comes") != std::string::npos);
+    b.seconds(2);
+    const auto* m = sent_to(b.r.fake, 1, "beastmaster:beast.1234");
+    REQUIRE(m != nullptr);
+    CHECK(m->text == "Wolf");
+    CHECK(m->m.entity == 1234u);
+    CHECK(m->m.height == doctest::Approx(2.2f));
+    CHECK(m->m.flags == (EMF_MARKER_WORLD | EMF_MARKER_DISTANCE | EMF_MARKER_GAME_MAP | EMF_MARKER_EDGE_ARROW));
+    CHECK(sent_to(b.r.fake, 2, "beastmaster:beast.1234") == nullptr);  // only its owner
+    const size_t n = b.r.fake.markers_sent.size();
+    b.seconds(3);
+    CHECK(b.r.fake.markers_sent.size() == n);  // not sent again while nothing changed
+    b.reply("beastmaster.dismiss Wolf");
+    b.seconds(2);
+    CHECK(unsent_to(b.r.fake, 1, "beastmaster:beast.1234"));
+}
+
+TEST_CASE("beastmaster 1.16: /beastmaster markers on|off is the player's own choice over the setting") {
+    BeastRig b;
+    b.reply("beastmaster.give wolf");
+    b.spawnable(1);
+    b.reply("beastmaster.call Wolf");
+    b.seconds(2);
+    CHECK(b.r.fake.markers_sent.empty());
+    CHECK(b.reply("beastmaster markers on").find("on") != std::string::npos);
+    b.seconds(2);
+    CHECK(sent_to(b.r.fake, 1, "beastmaster:beast.1234") != nullptr);
+    CHECK(b.reply("beastmaster markers off").find("off") != std::string::npos);
+    b.seconds(2);
+    CHECK(unsent_to(b.r.fake, 1, "beastmaster:beast.1234"));
+    CHECK(b.reply("beastmaster markers maybe").find("on|off") != std::string::npos);
+}
+
+TEST_CASE("beastmaster 1.16: stable markers on: the world's stables, square, on the map and in the world within 200 m") {
+    BeastRig b({{"stable_markers", "1"}});
+    flame_altar(b, 900, 0, 0);
+    stable_prop(b, 950, 5, 10, 0);
+    b.seconds(33);
+    const Fake::MarkerCopy* m = nullptr;
+    for (const auto& [p, c] : b.r.fake.markers_sent)
+        if (p == 1 && c.id.rfind("beastmaster:stable.", 0) == 0) m = &c;
+    REQUIRE(m != nullptr);
+    CHECK(m->m.shape == EMF_MARKER_SQUARE);
+    CHECK(m->m.x == doctest::Approx(5));
+    CHECK(m->m.max_distance == doctest::Approx(200.0f));
+    CHECK((m->m.flags & EMF_MARKER_GAME_MAP) != 0u);
+    CHECK(m->text == "Animal bed");
+    bool to_guest = false;
+    for (const auto& [p, c] : b.r.fake.markers_sent) to_guest |= p == 2 && c.id == m->id;
+    CHECK(to_guest);  // the world's stables are everyone's
+}
