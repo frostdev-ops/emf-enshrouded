@@ -48,6 +48,7 @@ constexpr uint32_t kApiV30Size = EMF_FIELD_END(EmfApi, chat_broadcast_ex);
 constexpr uint32_t kApiV31Size = EMF_FIELD_END(EmfApi, hit_rule_remove);
 constexpr uint32_t kApiV32Size = EMF_FIELD_END(EmfApi, on_buff);
 constexpr uint32_t kApiV33Size = EMF_FIELD_END(EmfApi, marker_unsend);
+constexpr uint32_t kApiV34Size = EMF_FIELD_END(EmfApi, ground_at);
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
@@ -122,9 +123,12 @@ static_assert(offsetof(EmfApi, on_hit) == kApiV30Size && offsetof(EmfApi, hit_ru
 static_assert(offsetof(EmfApi, buff_types) == kApiV31Size && offsetof(EmfApi, buff_apply) == 840 &&
                   kApiV32Size == 864,
               "EmfApi layout (v32 appends buff_types, buff_type, buff_text, buffs_of, buff_apply, buff_remove, on_buff)");
-static_assert(offsetof(EmfApi, marker_set) == kApiV32Size && kApiV33Size == 920 && sizeof(EmfApi) == kApiV33Size,
+static_assert(offsetof(EmfApi, marker_set) == kApiV32Size && kApiV33Size == 920,
               "EmfApi layout (v33 appends marker_set, marker_remove, marker_clear, marker_types, world_to_screen, "
               "marker_send, marker_unsend)");
+static_assert(offsetof(EmfApi, map_cursor) == kApiV33Size && kApiV34Size == 952 && sizeof(EmfApi) == kApiV34Size,
+              "EmfApi layout (v34 appends map_cursor, on_map_click, map_action, ground_at)");
+static_assert(sizeof(EmfMapClick) == 32 && offsetof(EmfMapClick, x) == 16, "EmfMapClick layout (v34)");
 static_assert(sizeof(EmfMarker) == 80 && offsetof(EmfMarker, text) == 40 && offsetof(EmfMarker, flags) == 64 &&
                   offsetof(EmfMarker, game_icon) == 72,
               "EmfMarker layout (v33)");

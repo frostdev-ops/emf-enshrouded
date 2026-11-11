@@ -53,6 +53,8 @@ enum class Sig : size_t {
     // markers (API v33), client only: guards that prove the UI camera block (UiPlayData+0x1d20, the projection at +0x40)
     // and the game's map marker list and entry layout; the camera and list displacements are read from the match
     UiCameraBlock, MapMarkerSliceClear, MapMarkerEntryLayout, MapMarkerEntryLabel,
+    // the ground under a map spot (API v34), both exes: the game's voxel ray and the scene's reset-bounds setter
+    VoxelRay, ResetBoundsSet,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

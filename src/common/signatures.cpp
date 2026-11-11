@@ -221,6 +221,11 @@ constexpr SigDef kSignatures[] = {
     // +0x34; then the label's pointer and length at +0x50 and its hash at +0x60.
     {Sig::MapMarkerEntryLayout, "MapMarkerEntryLayout", "89 46 08 0F 10 07 0F 11 46 10 F2 0F 10 4F 10 F2 0F 11 4E 20 C6 46 34 02 4C 8B 54 24", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x316534u, 0u}, false},
     {Sig::MapMarkerEntryLabel, "MapMarkerEntryLabel", "0F 11 4E 50 F2 0F 11 46 60 48 8B 44 24", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x31684du, 0u}, false},
+    // The ground under a map spot (API v34, private research map_click_2026-11-11 3 and 6), checked on 1287369 alone.
+    // The game's voxel ray: (grid, hit out, from, to, options); the realm table's stride 0x3870 is inside it.
+    {Sig::VoxelRay, "VoxelRay", "48 8B C4 48 89 50 10 55 53 57 41 54 48 8D A8 58 FF FF FF 48 81 EC 88 01 00 00 41 0F 28 08 48 8B F9 F2 0F 10 05 ?? ?? ?? ?? 49 8B D9 0F 29 70 A8 4D 8B E0 41 0F 28 31 0F 29 78 98 0F 28 FE 44 0F 29 40 88", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xa0f770u, 0x6ac7e0u}, false},
+    // The scene's reset-bounds setter: the boxes outside which the game sends a player to their altar (manager+0xb0).
+    {Sig::ResetBoundsSet, "ResetBoundsSet", "48 8B C4 48 89 58 18 48 89 68 20 57 48 81 EC A0 00 00 00 48 8D 99 B0 00 00 00 C6 40 E8 00 48 C7 43 08 00 00 00 00 48 8B FA 0F 10 4A 08 48 8B CB C7 40 EC 00 00 00 00 0F 10 42 20 F2 0F 10 52 18", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xeb37f0u, 0x95b460u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

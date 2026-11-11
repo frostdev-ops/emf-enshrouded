@@ -43,7 +43,7 @@ CameraSnap camera_at_origin(float aspect = 16.0f / 9.0f) {
 }  // namespace
 
 TEST_CASE("markers api: v33 layouts") {
-    CHECK(EMF_API_VERSION == 33);
+    CHECK(EMF_API_VERSION >= 33);
     CHECK(sizeof(EmfMarker) == 80);
     CHECK(offsetof(EmfMarker, id) == 8);
     CHECK(offsetof(EmfMarker, x) == 16);

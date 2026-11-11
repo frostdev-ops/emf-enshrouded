@@ -978,6 +978,9 @@ inline bool has_v32() { return api() && api()->size >= offsetof(EmfApi, on_buff)
 // ---- v33: markers (marker_set ... marker_unsend through api()) ----
 inline bool has_v33() { return api() && api()->size >= offsetof(EmfApi, marker_unsend) + sizeof(api()->marker_unsend); }
 
+// ---- v34: the map's mouse, map actions, the ground (map_cursor ... ground_at through api()) ----
+inline bool has_v34() { return api() && api()->size >= offsetof(EmfApi, ground_at) + sizeof(api()->ground_at); }
+
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
 inline bool request_save() { return has_v19() && api()->request_save && api()->request_save(); }
 

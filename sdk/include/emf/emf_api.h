@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 33 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 34 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 33
+#define EMF_API_VERSION 34
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -579,6 +579,22 @@ typedef struct EmfMarker {
 } EmfMarker;
 #define EMF_MAP_TYPE_FAST_TRAVEL 0x01u /* EmfMapMarkerType.flags: a fast travel destination (shrines, altars) */
 #define EMF_MAP_TYPE_CUSTOM 0x02u      /* one of the types players place themselves */
+/* v34 the map screen's mouse, map actions, the ground under a spot */
+#define EMF_MAP_SHIFT 1u /* EmfMapClick.mods */
+#define EMF_MAP_CTRL 2u
+#define EMF_MAP_ALT 4u
+typedef struct EmfMapClick {
+    uint32_t size;   /* sizeof(EmfMapClick) of the core */
+    uint32_t button; /* 0 left, 1 right */
+    uint32_t mods;   /* EMF_MAP_SHIFT ... held with it */
+    uint32_t pad;
+    double x, z;     /* the spot, world metres */
+} EmfMapClick;
+typedef void (*EmfMapClickCallback)(const EmfMapClick* click, void* user);
+/* A map action a player did: on the server world's thread; `player` = their entity there; x, z the spot. */
+typedef void (*EmfMapActionCallback)(EmfWorld* world, uint32_t player, const char* action, double x, double z, void* user);
+/* The ground under a spot: ok and x, y, z (y = the ground), or not ok with why. On the server world's thread. */
+typedef void (*EmfGroundCallback)(EmfWorld* world, bool ok, double x, double y, double z, const char* why, void* user);
 typedef struct EmfMapMarkerType {
     uint32_t size;   /* sizeof(EmfMapMarkerType) of the core */
     uint32_t id;     /* for EmfMarker.game_icon */
@@ -1245,6 +1261,23 @@ typedef struct EmfApi {
      * nothing). At most 256 per call. */
     uint32_t (*marker_send)(uint32_t player, const EmfMarker* m, uint32_t count);
     uint32_t (*marker_unsend)(uint32_t player, const char* id);  /* removes a sent marker from that game (0 = all) */
+
+    /* ---- v34: the map screen's mouse, map actions, the ground (EmfMapClick) ---- */
+    /* The world x, z under the mouse while the game's map is open: false when it is not, or the mouse is off the map. */
+    bool (*map_cursor)(double* x, double* z);
+    /* `cb` for each click on the map screen of this game (the game gets it too), on the render thread. False for a null
+     * cb or 16 already. */
+    bool (*on_map_click)(EmfMapClickCallback cb, void* user);
+    /* Server end (the host's game or the dedicated server): a map action players do by holding Shift and the left mouse
+     * button on their map for hold_ms (0 = 1000; a ring fills at the mouse; the game does not get that click). EMF on
+     * each player's game does the gesture and sends the spot; `cb` gets the player and x, z on the server world's
+     * thread. Players need EMF on their game. An id again replaces it. False: a bad id (1-48 of A-Z a-z 0-9 _ . -), 16
+     * actions already, or no mod messages on this build. */
+    bool (*map_action)(const char* id, const char* label, uint32_t hold_ms, EmfMapActionCallback cb, void* user);
+    /* Server world: the ground under (x, z), found with the game's voxel ray after the next steps (the place may need
+     * loading: up to a few seconds); `cb` once with the answer. False when refused at once: not the server world, x, z
+     * outside the world, 64 waiting, or not available on this game build. */
+    bool (*ground_at)(EmfWorld* world, double x, double z, EmfGroundCallback cb, void* user);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */
