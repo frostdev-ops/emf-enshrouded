@@ -652,3 +652,109 @@ TEST_CASE("damage: on only once impact_hit_conclusion's pre-hook is really insta
     note_program_hook("impact_hit_conclusion", true);
     CHECK(f.state.damage_hooked);
 }
+
+// ---- API v31 hits ----
+
+namespace {
+
+std::vector<EmfHit> g_after;
+void hit_after_cb(EmfWorld*, const EmfHit* h, void*) { g_after.push_back(*h); }
+void hit_before_cb(EmfWorld*, EmfHit*, void*) {}
+
+std::vector<uint8_t> hit_event(uint32_t attacker, uint32_t target, int32_t health_change, uint32_t flags) {
+    std::vector<uint8_t> e(sizeof(ecs::HitEvent), 0);
+    auto put = [&](size_t off, uint32_t v) { std::memcpy(e.data() + off, &v, sizeof v); };
+    put(offsetof(ecs::HitEvent, rootSourceId), attacker);
+    put(offsetof(ecs::HitEvent, sourceId), attacker);
+    put(offsetof(ecs::HitEvent, targetId), target);
+    put(offsetof(ecs::HitEvent, healthChange), static_cast<uint32_t>(health_change));
+    put(offsetof(ecs::HitEvent, flags), flags);
+    return e;
+}
+
+size_t logged_count(const std::string& needle) {
+    size_t n = 0;
+    for (auto& l : g_lines)
+        if (l.find(needle) != std::string::npos) ++n;
+    return n;
+}
+
+}  // namespace
+
+TEST_CASE("api v31: version 31, size 808, the four hit functions set") {
+    const EmfApi* api = api_table();
+    CHECK(EMF_API_VERSION == 31);
+    CHECK(api->version == 31u);
+    CHECK(kApiV31Size == 808u);
+    CHECK(offsetof(EmfApi, on_hit) == kApiV30Size);
+    CHECK(api->size == sizeof(EmfApi));
+    CHECK(api->on_hit);
+    CHECK(api->on_hit_before);
+    CHECK(api->hit_rule_add);
+    CHECK(api->hit_rule_remove);
+}
+
+TEST_CASE("hit_rule_add refuses a bad rule and returns ids for good ones") {
+    Fixture f;
+    f.state.hit_hook_off_why.clear();  // the detour is in
+    const EmfApi* api = api_table();
+    CHECK(api->hit_rule_add(nullptr) == 0);
+    EmfHitRule r{};
+    r.size = sizeof r;
+    r.scale = -1.0f;
+    CHECK(api->hit_rule_add(&r) == 0);
+    CHECK(logged("hit_rule_add refused"));
+    r.scale = 0.5f;
+    CHECK(api->hit_rule_add(&r) == 1);
+    CHECK(api->hit_rule_remove(1));
+    CHECK_FALSE(api->hit_rule_remove(1));
+}
+
+TEST_CASE("hit_rule_add and on_hit_before are refused while the hook is off") {
+    Fixture f;
+    f.state.hit_hook_off_why = "the ApplyHitToEntity signature is not usable on this game build";
+    const EmfApi* api = api_table();
+    EmfHitRule r{};
+    r.size = sizeof r;
+    r.scale = 0.5f;
+    CHECK(api->hit_rule_add(&r) == 0);
+    CHECK_FALSE(api->on_hit_before(hit_before_cb, nullptr));
+    CHECK(logged_count("before the hit is off") == 1);
+    CHECK(logged("ApplyHitToEntity signature"));
+    CHECK(f.state.hit_rules.size() == 0);
+    CHECK(f.state.hit_callbacks.before_count() == 0);
+}
+
+TEST_CASE("on_hit gets each entity HitEvent with the health after, not terrain hits") {
+    Fixture f;
+    g_after.clear();
+    put_health(6808, kHealthRoot, 58, 900);
+    REQUIRE(subscribe_hit_events());
+    const EmfApi* api = api_table();
+    REQUIRE(api->on_hit(hit_after_cb, nullptr));
+    const auto kill = hit_event(1, 6808, -120, EMF_HIT_KILLED | EMF_HIT_CRIT);
+    const auto terrain = hit_event(1, 6808, 0, EMF_HIT_TERRAIN);
+    f.state.relay.capture(f.server.p(), EMF_WORLD_SERVER, "HitEvent", kill.data(), static_cast<uint32_t>(kill.size()));
+    f.state.relay.capture(f.server.p(), EMF_WORLD_SERVER, "HitEvent", terrain.data(),
+                          static_cast<uint32_t>(terrain.size()));
+    f.state.relay.deliver(f.w(), EMF_WORLD_SERVER, [](const std::string&) {});
+    REQUIRE(g_after.size() == 1);
+    CHECK(g_after[0].attacker == 1);
+    CHECK(g_after[0].target == 6808);
+    CHECK(g_after[0].amount == 120);
+    CHECK((g_after[0].flags & EMF_HIT_KILLED) != 0);
+    CHECK(g_after[0].health_after == 58);
+    CHECK(g_after[0].health_before == -1);
+    CHECK_FALSE(api->on_hit(nullptr, nullptr));
+}
+
+TEST_CASE("emf.hpp hit_rule() defaults to scale 1 and the struct's size") {
+    Fixture f;
+    REQUIRE(emf::init(api_table()));
+    CHECK(emf::has_v31());
+    const EmfHitRule r = emf::hit_rule();
+    CHECK(r.size == sizeof(EmfHitRule));
+    CHECK(r.scale == 1.0f);
+    CHECK(r.attacker == 0);
+    CHECK(r.cancel == 0);
+}

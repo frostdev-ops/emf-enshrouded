@@ -495,7 +495,7 @@ TEST_CASE("player_character_name (v30): the name from the server's table; false 
     f.server_ss.plant(f.server, "CustomPlayerStringsSystem", t.sys.data());
     g_chat_on = false;  // players' chat is not needed
     const EmfApi* api = api_table();
-    CHECK(EMF_API_VERSION == 30);
+    CHECK(EMF_API_VERSION >= 30);
     REQUIRE(api->size >= offsetof(EmfApi, player_character_name) + sizeof(api->player_character_name));
     REQUIRE(api->player_character_name);
     char buf[64] = "junk";

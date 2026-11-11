@@ -40,6 +40,12 @@
 #include "emf/generated/components.hpp"
 
 namespace emf::core {
+// v31 hits (defined after the game reads they use, near the damage pre-hook)
+bool api_on_hit(EmfHitCallback cb, void* user);
+bool api_on_hit_before(EmfHitBeforeCallback cb, void* user);
+uint32_t api_hit_rule_add(const EmfHitRule* rule);
+bool api_hit_rule_remove(uint32_t id);
+
 namespace {
 
 CoreState* g_state = nullptr;
@@ -2223,6 +2229,10 @@ const EmfApi kApi = {
     api_player_character_name,
     api_chat_tell_ex,
     api_chat_broadcast_ex,
+    api_on_hit,
+    api_on_hit_before,
+    api_hit_rule_add,
+    api_hit_rule_remove,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {
@@ -2325,7 +2335,70 @@ uint32_t hit_env_weapon_item(uint32_t pide, void* ctx) {
     return item;
 }
 
+// v31 on_hit: one HitEvent of the server world, after its step on its thread
+void hit_event_delivered(EmfWorld* w, const void* event, uint32_t size, void*) {
+    if (!g_state || !g_state->hit_callbacks.after_count()) return;
+    EmfHit h{};
+    if (!hit_from_event(static_cast<const uint8_t*>(event), size, &h)) return;
+    uint32_t pide = 0;
+    std::memcpy(&pide, static_cast<const uint8_t*>(event) + offsetof(ecs::HitEvent, weaponPideId), sizeof pide);
+    h.weapon_item = hit_env_weapon_item(pide, w);
+    h.health_after = hit_env_health(h.part, w);  // the entity the hit was applied to
+    g_state->hit_callbacks.call_after(w, h);
+}
+
+// rules and on_hit_before need the detour (logged once while it is off)
+bool hit_before_ready() {
+    if (g_state->hit_hook_off_why.empty()) return true;
+    log_once("hits: before the hit is off (" + g_state->hit_hook_off_why + "): hit rules and on_hit_before are refused");
+    return false;
+}
+
 }  // namespace
+
+bool subscribe_hit_events() {
+    if (!g_state) return false;
+    std::string why;
+    const bool ok = g_state->relay.subscribe(EMF_WORLD_SERVER, "HitEvent", sizeof(ecs::HitEvent), hit_event_delivered,
+                                             nullptr, &why);
+    g_state->hit_events = ok;
+    if (!ok) g_state->hit_events_off_why = why;
+    return ok;
+}
+
+bool api_on_hit(EmfHitCallback cb, void* user) {
+    if (!g_state || !cb) return false;
+    if (!g_state->hit_events.load()) {
+        log_once("on_hit refused: the server world's HitEvents are not available (" + g_state->hit_events_off_why + ")");
+        return false;
+    }
+    const std::string module = module_name_of(reinterpret_cast<const void*>(cb));
+    if (g_state->hit_callbacks.add_after(cb, user, module)) return true;
+    refuse_limited("on_hit (" + module + ") refused: 16 callbacks already");
+    return false;
+}
+
+bool api_on_hit_before(EmfHitBeforeCallback cb, void* user) {
+    if (!g_state || !cb || !hit_before_ready()) return false;
+    const std::string module = module_name_of(reinterpret_cast<const void*>(cb));
+    if (g_state->hit_callbacks.add_before(cb, user, module)) return true;
+    refuse_limited("on_hit_before (" + module + ") refused: 16 callbacks already");
+    return false;
+}
+
+uint32_t api_hit_rule_add(const EmfHitRule* rule) {
+    if (!g_state || !hit_before_ready()) return 0;
+    if (!rule) {
+        refuse_limited("hit_rule_add refused: no rule");
+        return 0;
+    }
+    std::string why;
+    const uint32_t id = g_state->hit_rules.add(*rule, &why);
+    if (!id) refuse_limited("hit_rule_add refused: " + why);
+    return id;
+}
+
+bool api_hit_rule_remove(uint32_t id) { return g_state && g_state->hit_rules.remove(id); }
 
 void fill_pre_hit_env(EmfWorld* w, PreHitEnv* env) {
     env->world = w;

@@ -1099,10 +1099,18 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             g_state->hit_hook_off_why = "attribute reads are off on this game build";
         else if (!emf::core::install_hit_hook(apply_hit))
             g_state->hit_hook_off_why = "applyHitToEntity could not be hooked";
+        else
+            g_state->hit_hook_off_why.clear();
         if (g_state->hit_hook_off_why.empty())
             emf::logf("hits: before the hit on (applyHitToEntity hooked: rules and on_hit_before)");
         else
             emf::logf("hits: before the hit off (%s): rules and on_hit_before are refused", g_state->hit_hook_off_why.c_str());
+        // v31 on_hit: the server world's HitEvents, asked for now (before the relay closes) so a mod or a Lua script can
+        // ask for hits at any time
+        if (emf::core::subscribe_hit_events())
+            emf::logf("hits: after the hit on (HitEvent on the server world)");
+        else
+            emf::logf("hits: after the hit off (%s): on_hit is refused", g_state->hit_events_off_why.c_str());
         if (!g_state->commands.add("hits", ": the hit hooks' state, rules, callbacks and cost", cmd_hits, nullptr, nullptr))
             emf::logf("commands: \"hits\" could not be added");
     }

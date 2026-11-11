@@ -45,6 +45,7 @@ constexpr uint32_t kApiV27Size = EMF_FIELD_END(EmfApi, net_peer);
 constexpr uint32_t kApiV28Size = EMF_FIELD_END(EmfApi, on_player);
 constexpr uint32_t kApiV29Size = EMF_FIELD_END(EmfApi, game_language);
 constexpr uint32_t kApiV30Size = EMF_FIELD_END(EmfApi, chat_broadcast_ex);
+constexpr uint32_t kApiV31Size = EMF_FIELD_END(EmfApi, hit_rule_remove);
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
@@ -112,8 +113,11 @@ static_assert(offsetof(EmfApi, on_player) == kApiV27Size && kApiV28Size == 736,
 static_assert(offsetof(EmfApi, item_name) == kApiV28Size && kApiV29Size == 752,
               "EmfApi layout (v29 appends item_name and game_language)");
 static_assert(offsetof(EmfApi, player_character_name) == kApiV29Size && offsetof(EmfApi, chat_tell_ex) == 760 &&
-                  kApiV30Size == 776 && sizeof(EmfApi) == kApiV30Size,
+                  kApiV30Size == 776,
               "EmfApi layout (v30 appends player_character_name, chat_tell_ex, chat_broadcast_ex)");
+static_assert(offsetof(EmfApi, on_hit) == kApiV30Size && offsetof(EmfApi, hit_rule_add) == 792 && kApiV31Size == 808 &&
+                  sizeof(EmfApi) == kApiV31Size,
+              "EmfApi layout (v31 appends on_hit, on_hit_before, hit_rule_add, hit_rule_remove)");
 static_assert(sizeof(EmfPlayerEvent) == 96 && offsetof(EmfPlayerEvent, account) == 8 &&
                   offsetof(EmfPlayerEvent, player) == 16 && offsetof(EmfPlayerEvent, host) == 24 &&
                   offsetof(EmfPlayerEvent, name) == 32,

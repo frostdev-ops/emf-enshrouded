@@ -136,7 +136,9 @@ struct CoreState {
     HitRules hit_rules;               // the mods' rules, applied by the detour before the before-callbacks
     HitCallbacks hit_callbacks;       // on_hit_before (the detour) and on_hit (the server world's HitEvents)
     HitStats hit_stats;               // the detour's counters and time (the hits command)
-    std::string hit_hook_off_why;     // why the detour is not installed ("" while it is)
+    std::string hit_hook_off_why = "it is not set up yet";  // why the detour is not installed ("" while it is)
+    std::atomic<bool> hit_events{false};  // on_hit: the server world's HitEvents come through the relay
+    std::string hit_events_off_why;
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them
     std::mutex setting_watchers_lock;
     std::vector<SettingWatcher> setting_watchers;  // v13 on_setting_changed (only appended to)
@@ -204,5 +206,7 @@ void damage_pre_clear(void* program_context);
 void note_program_hook(const std::string& program, bool installed);
 // v31 hits: the game reads the detour needs on the server world `w` (entity classes, CombatFlags, health, a weapon's item).
 void fill_pre_hit_env(EmfWorld* w, PreHitEnv* env);
+// v31 on_hit: asks the event relay for the server world's HitEvents (the core does at start, before the relay closes).
+bool subscribe_hit_events();
 
 }  // namespace emf::core

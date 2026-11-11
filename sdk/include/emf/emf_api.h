@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 30 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 31 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 30
+#define EMF_API_VERSION 31
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -1070,6 +1070,24 @@ typedef struct EmfApi {
     bool (*chat_tell_ex)(EmfWorld* world, uint32_t player, const char* text, uint32_t flags);
     /* chat_broadcast with flags, as chat_tell_ex. */
     bool (*chat_broadcast_ex)(const char* text, uint32_t flags);
+
+    /* ---- v31: hits (EmfHit, EmfHitRule; server world only: the host's game or the dedicated server) ---- */
+    /* `cb` after the server world's step, on its thread, once for each hit the server applied to an entity, from the
+     * game's HitEvent: the final numbers, EMF_HIT_KILLED on the killing blow, health_after = the entity's health then
+     * (health_before -1). Not for terrain or building hits; a joined player's game sees none. Works on any game build
+     * where on_event works. False for a null cb or 16 already (logged). */
+    bool (*on_hit)(EmfHitCallback cb, void* user);
+    /* `cb` inline for each landing entity hit on the server world, after the rules and before the game applies it:
+     * change amount, stamina, reaction or cancel. It runs on the game's impact thread inside the world's step: be fast,
+     * change only the hit, read only the hit's entities (their Health, Stamina, Mana); no spawn, kill or component
+     * writes; damage() only queues. Once per hit, also for a target of several parts. A faulting callback is switched
+     * off. False when the hook is not available on this game build, for a null cb or 16 already (logged). */
+    bool (*on_hit_before)(EmfHitBeforeCallback cb, void* user);
+    /* A rule the core applies to every landing entity hit before the on_hit_before callbacks, in id order, without
+     * calling the mod (EmfHitRule; emf::hit_rule() in C++ fills the defaults). Its id, or 0 when refused (logged: a bad
+     * rule, 64 rules already, the hook not available on this game build). Any thread; it counts from the next hit. */
+    uint32_t (*hit_rule_add)(const EmfHitRule* rule);
+    bool (*hit_rule_remove)(uint32_t id);  /* false: no rule with that id */
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */
