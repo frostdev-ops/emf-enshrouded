@@ -1,5 +1,7 @@
 #include "teleport.h"
 
+#include "ground_glue.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -389,6 +391,7 @@ void TeleportService::disable_locked(const std::string& why, bool push_broken, s
 void TeleportService::run(void* program_context) {
     const ProgramCall* call = current_program_call();
     if (!call || call->ctx != program_context) return;
+    ground_note_realm(program_context);  // the realm the server world's programs run in (ground_at, API v34)
     auto* world = reinterpret_cast<EmfWorld*>(call->world);
     const uint64_t now = deps_.now_ms ? deps_.now_ms() : 0;
     const uint32_t cur = session();
