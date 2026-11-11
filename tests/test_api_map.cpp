@@ -162,3 +162,30 @@ TEST_CASE("map actions: the host's own game hears the list after its world comes
     map_world_setup(EMF_WORLD_CLIENT);
     map_input_set_announced(false);
 }
+
+TEST_CASE("map_send_done: the console's map.act sends the spot like a finished gesture; refused with no action offered") {
+    Fixture f;
+    net::NetDeps d = net_deps(&f.state);
+    d.hosted = [](uint32_t* id) {
+        *id = 7;
+        return true;
+    };
+    net::NetService svc(std::move(d));
+    f.state.net = &svc;
+    std::string why;
+    REQUIRE(map_net_setup(&svc, &why));
+    map_world_setup(EMF_WORLD_CLIENT);
+    CHECK_FALSE(map_send_done(1500, 4740, &why));
+    CHECK(why.find("no map action") != std::string::npos);
+    REQUIRE(api_table()->map_action("teleport", "Teleport here", 0, on_action, nullptr));
+    f.state.dispatcher.run(f.cw(), EMF_WORLD_CLIENT, [](const std::string& s) { g_lines.push_back(s); });
+    REQUIRE(map_input_announced());
+    CHECK_FALSE(map_send_done(-1, 4740, &why));  // outside the world: not sent
+    CHECK(map_send_done(1500, 4740, &why));
+    f.state.dispatcher.run(f.sw(), EMF_WORLD_SERVER, [](const std::string& s) { g_lines.push_back(s); });
+    REQUIRE(g_did.size() == 1);
+    CHECK(g_did[0].player == 7u);
+    CHECK(g_did[0].x == 1500);
+    map_world_setup(EMF_WORLD_CLIENT);
+    map_input_set_announced(false);
+}

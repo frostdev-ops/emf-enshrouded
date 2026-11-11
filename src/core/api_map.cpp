@@ -31,6 +31,11 @@ void log_of(CoreState* s, const std::string& line) {
     if (s && s->log_line) s->log_line(line);
 }
 
+std::string map_input_action_id() {
+    CoreState* s = core_state();
+    return s ? s->map.client.first_id() : std::string();
+}
+
 void announce_all(CoreState* s) {
     if (s && s->net) s->net->to_players("emf", kMapActionsChannel, s->map.actions.announce_message());
 }
@@ -161,12 +166,24 @@ bool map_net_setup(net::NetService* net, std::string* why) {
     };
     if (!net->add_channel("emf", c, why)) return false;
     map_input().set_done([](double x, double z) {
-        CoreState* s = core_state();
-        if (!s || !s->net) return;
-        const std::string m = s->map.client.done(x, z);
         std::string w;
-        if (!m.empty() && !s->net->to_server("emf", kMapActionsChannel, m, &w)) log_of(s, "map action: not sent (" + w + ")");
+        if (!map_send_done(x, z, &w)) log_of(core_state(), "map action: not sent (" + w + ")");
     });
+    return true;
+}
+
+bool map_send_done(double x, double z, std::string* why) {
+    auto fail = [&](const std::string& m) {
+        if (why) *why = m;
+        return false;
+    };
+    CoreState* s = core_state();
+    if (!s || !s->net) return fail("no mod messages on this game build");
+    const std::string m = s->map.client.done(x, z);
+    if (m.empty()) return fail("this game's server offers no map action");
+    std::string w;
+    if (!ground_spot_ok(x, z, &w)) return fail(w);
+    if (!s->net->to_server("emf", kMapActionsChannel, m, &w)) return fail(w.empty() ? "the message could not be sent" : w);
     return true;
 }
 
@@ -207,6 +224,18 @@ void cmd_map_where(EmfWorld*, int, const char* const*, void*) {
     command_reply_line(line);
     command_reply_line(map_input_announced() ? "map.where: this game's server has a map action (Shift + hold)"
                                              : "map.where: no map action from this game's server");
+}
+
+void cmd_map_act(EmfWorld*, int argc, const char* const* argv, void*) {
+    if (argc < 3) {
+        command_reply_line("map.act <x> <z>: this game's server does its map action there (as Shift + hold on the map)");
+        return;
+    }
+    std::string why;
+    if (map_send_done(std::strtod(argv[1], nullptr), std::strtod(argv[2], nullptr), &why))
+        command_reply_line("map.act: sent (" + map_input_action_id() + ")");
+    else
+        command_reply_line("map.act: " + why);
 }
 
 void cmd_ground(EmfWorld* world, int argc, const char* const* argv, void*) {
@@ -260,6 +289,8 @@ bool add_map_commands(CommandCenter& commands) {
                            cmd_map_where, nullptr, nullptr, true);
     ok &= commands.add("ground", " <x> <z>: the ground's height at that spot (the place may need a few seconds to load)",
                        cmd_ground, nullptr, nullptr);
+    ok &= commands.add("map.act", " <x> <z>: this game's server does its map action there (as Shift + hold on the map)",
+                       cmd_map_act, nullptr, nullptr, true);
     return ok;
 }
 

@@ -290,6 +290,9 @@ void map_input_setup();
 // The server: a player's game said hello: it gets the actions (none: an empty list, the gesture off).
 void map_on_hello(uint32_t player);
 bool map_greets();  // the server has map actions: players' games must hear about them
+// This game's server end does its map action at (x, z), as a finished gesture does (the console's map.act too). False
+// (why) when no action is offered here, the spot is outside the world, or the message could not be sent.
+bool map_send_done(double x, double z, std::string* why);
 
 // ---- v33 markers (api_markers.cpp) ----
 bool api_marker_set(const EmfMarker* m);

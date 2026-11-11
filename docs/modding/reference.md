@@ -998,8 +998,9 @@ api()->map_action("ping", "Ping here", 800, on_ping, nullptr);
 ```
 
 Console: `map.where` (runs anywhere, also on a game you joined: the world spot under the mouse on the open map, and whether
-this game's server offers a map action) and `ground <x> <z>` (needs a world you host: the ground's height at that spot;
-the answer follows a moment later). The Teleports mod uses a map action: see `mods/teleports/README.md`, "Teleport by the
+this game's server offers a map action), `map.act <x> <z>` (runs anywhere: the server's map action at that spot, as the
+gesture's end sends it, with the same checks) and `ground <x> <z>` (needs a world you host: the ground's height at that
+spot; the answer follows a moment later). The Teleports mod uses a map action: see `mods/teleports/README.md`, "Teleport by the
 map".
 
 ## SDK headers (header-only C++, no ABI)
