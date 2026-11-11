@@ -105,3 +105,49 @@ TEST_CASE("show markers: only with a fresh camera, the game's world UI shown, no
     c.valid = false;
     CHECK_FALSE(show_markers(false, s, c, 1100));
 }
+
+TEST_CASE("map markers: placed on the map screen from the map's rectangle, clipped to its frame, all with text") {
+    MapView v{};
+    v.rect[0] = -1000;  // the whole 10 240 m map is 10 240 UI units wide here: 1 unit per metre
+    v.rect[1] = -5000;
+    v.rect[2] = 10240;
+    v.rect[3] = 10240;
+    v.clip[0] = 100;
+    v.clip[1] = 50;
+    v.clip[2] = 1800;
+    v.clip[3] = 1000;
+    v.ui_w = 1920;
+    v.ui_h = 1080;
+    v.ms = 1000;
+    Marker in = at("in", 1500, 0, 10240 - 5500, EMF_MARKER_GAME_MAP);  // u = -1000 + 1500 = 500, v = -5000 + 5500 = 500
+    Marker out = at("out", 5000, 0, 5000, EMF_MARKER_GAME_MAP);       // u = 4000: right of the frame
+    Marker world_only = at("w", 1500, 0, 4740, EMF_MARKER_WORLD);
+    const auto l = layout_map_markers({in, out, world_only}, v, ImVec2(1920, 1080));
+    REQUIRE(l.size() == 1);
+    CHECK(l[0].x == doctest::Approx(500));
+    CHECK(l[0].y == doctest::Approx(500));
+    CHECK(l[0].label);
+    CHECK(l[0].text == "in");
+    CHECK(l[0].dist.empty());  // no distance on the map
+    // the display twice the UI's size: pixels double
+    const auto l2 = layout_map_markers({in}, v, ImVec2(3840, 2160));
+    REQUIRE(l2.size() == 1);
+    CHECK(l2[0].x == doctest::Approx(1000));
+    CHECK(l2[0].size == doctest::Approx(36.0f));  // 18 px at 1080 p
+}
+
+TEST_CASE("map markers show only while the map is open, its view is fresh and the console is closed") {
+    MapView v{};
+    v.rect[2] = v.rect[3] = 100;
+    v.ui_w = 1920;
+    v.ui_h = 1080;
+    v.ms = 1000;
+    MarkerSight s;
+    s.map_open = true;
+    CHECK(show_map_markers(false, s, v, 1100));
+    CHECK_FALSE(show_map_markers(true, s, v, 1100));
+    CHECK_FALSE(show_map_markers(false, s, v, 1400));
+    CHECK_FALSE(show_map_markers(false, MarkerSight{}, v, 1100));
+    MapView empty{};
+    CHECK_FALSE(show_map_markers(false, s, empty, 1100));
+}

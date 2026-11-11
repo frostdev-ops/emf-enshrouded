@@ -449,19 +449,26 @@ std::optional<ImageDraw> window_picture(uint32_t handle, double seconds, uint32_
                      f->aspect};
 }
 
-// Markers (API v33) over the 3D view, under everything else EMF draws.
+// Markers (API v33) over the 3D view or the game's map screen, under everything else EMF draws.
 void build_markers(ImVec2 display) {
     if (!g_deps.markers) return;
-    CameraSnap cam;
     const uint64_t now = GetTickCount64();
-    if (!marker_camera(&cam) || !show_markers(g_router->open() || g_ui.open_fraction > 0.0f, marker_sight(now), cam, now))
+    const bool console = g_router->open() || g_ui.open_fraction > 0.0f;
+    const MarkerSight sight = marker_sight(now);
+    static const ImageLookup pictures = window_picture;
+    MapView map;
+    if (sight.map_open) {
+        if (!marker_map_view(&map) || !show_map_markers(console, sight, map, now)) return;
+        const auto layouts = layout_map_markers(g_deps.markers->snapshot(), map, display);
+        if (!layouts.empty()) draw_markers(ImGui::GetBackgroundDrawList(), layouts, text_look(), &pictures);
         return;
+    }
+    CameraSnap cam;
+    if (!marker_camera(&cam) || !show_markers(console, sight, cam, now)) return;
     double player[3];
     const bool has_player = marker_player_pos(player);
     const auto layouts = layout_markers(g_deps.markers->snapshot(), cam, has_player ? player : nullptr, display);
-    if (layouts.empty()) return;
-    static const ImageLookup pictures = window_picture;
-    draw_markers(ImGui::GetBackgroundDrawList(), layouts, text_look(), &pictures);
+    if (!layouts.empty()) draw_markers(ImGui::GetBackgroundDrawList(), layouts, text_look(), &pictures);
 }
 
 void build(ImVec2 display) {

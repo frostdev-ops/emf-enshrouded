@@ -82,6 +82,38 @@ bool show_markers(bool console_open, const MarkerSight& sight, const CameraSnap&
            now_ms - cam.frame_ms <= kMarkerFreshMs;
 }
 
+std::vector<MarkerLayout> layout_map_markers(const std::vector<Marker>& markers, const MapView& v, ImVec2 display) {
+    std::vector<MarkerLayout> out;
+    if (!(v.rect[2] > 0) || !(v.rect[3] > 0) || !(v.ui_w > 0) || !(v.ui_h > 0) || !(display.x > 0) || !(display.y > 0))
+        return out;
+    const float sx = display.x / v.ui_w, sy = display.y / v.ui_h, scale = display.y / 1080.0f;
+    const bool clip = v.clip[2] > 0 && v.clip[3] > 0;
+    const float cx0 = clip ? v.clip[0] * sx : 0, cy0 = clip ? v.clip[1] * sy : 0;
+    const float cx1 = clip ? (v.clip[0] + v.clip[2]) * sx : display.x, cy1 = clip ? (v.clip[1] + v.clip[3]) * sy : display.y;
+    for (const Marker& m : markers) {
+        if (!(m.flags & EMF_MARKER_GAME_MAP)) continue;
+        const double u = v.rect[0] + m.x / kMapWorldSize * v.rect[2];
+        const double w = v.rect[1] + (1.0 - m.z / kMapWorldSize) * v.rect[3];
+        MarkerLayout l;
+        l.x = static_cast<float>(u * sx);
+        l.y = static_cast<float>(w * sy);
+        if (!(l.x >= cx0 && l.x <= cx1 && l.y >= cy0 && l.y <= cy1)) continue;
+        l.size = kMapMarkerSize1080 * scale;
+        l.label = true;
+        l.text = m.text;
+        l.rgba = m.rgba;
+        l.shape = m.game_icon ? static_cast<uint8_t>(EMF_MARKER_NONE) : m.shape;
+        l.icon = m.game_icon ? 0 : m.icon;
+        out.push_back(std::move(l));
+    }
+    return out;
+}
+
+bool show_map_markers(bool console_open, const MarkerSight& sight, const MapView& v, uint64_t now_ms) {
+    return !console_open && sight.map_open && v.rect[2] > 0 && v.rect[3] > 0 && v.ui_w > 0 && v.ui_h > 0 && now_ms >= v.ms &&
+           now_ms - v.ms <= kMarkerFreshMs;
+}
+
 void draw_markers(ImDrawList* dl, const std::vector<MarkerLayout>& layouts, const TextLook& look, const ImageLookup* pictures) {
     if (!dl) return;
     const float display_h = ImGui::GetIO().DisplaySize.y;

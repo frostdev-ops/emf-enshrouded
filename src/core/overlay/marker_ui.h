@@ -39,6 +39,15 @@ std::vector<MarkerLayout> layout_markers(const std::vector<Marker>& markers, con
 // Markers show while the console is closed, the game showed its world-space UI within kMarkerFreshMs, the map is not
 // open and the camera is from a UI frame at most kMarkerFreshMs old.
 bool show_markers(bool console_open, const MarkerSight& sight, const CameraSnap& cam, uint64_t now_ms);
+// The markers with EMF_MARKER_GAME_MAP on the game's map screen: the map's rectangle (mapScaled, UI units) gives the
+// place (the main scene is kMapWorldSize metres square, north up), the display's size over the UI's the pixels;
+// outside MapCenteringFrame they are left out. Every one has its text, no distance; one with a game_icon is the text
+// alone (the game draws its icon from its own list).
+constexpr double kMapWorldSize = 10240.0;
+constexpr float kMapMarkerSize1080 = 18.0f;
+std::vector<MarkerLayout> layout_map_markers(const std::vector<Marker>& markers, const MapView& view, ImVec2 display);
+// While the map is open (seen within kMarkerFreshMs), its view is that fresh and has a size, and the console is closed.
+bool show_map_markers(bool console_open, const MarkerSight& sight, const MapView& view, uint64_t now_ms);
 // Draws them (the render thread, inside an ImGui frame).
 void draw_markers(ImDrawList* dl, const std::vector<MarkerLayout>& layouts, const TextLook& look, const ImageLookup* pictures);
 
