@@ -264,3 +264,23 @@ TEST_CASE("lua 1.23: emf.hit_rule kinds: all, a name, a list; an unknown kind is
     CHECK(logged("lava false"));
     CHECK(logged("lava"));
 }
+
+TEST_CASE("lua 1.23: hit.instant says the game's own damage kills at once (deadly shroud, out of air)") {
+    Rig r(L"on_hit_instant");
+    add_script(r.dir, "hi", "emf.on_hit(function(w, h) emf.log('instant ' .. h.kind .. ' ' .. tostring(h.instant)) end, {kinds = 'all'})\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    EmfHit h{};
+    h.size = sizeof h;
+    h.amount = 400;
+    h.health_before = 400;
+    h.health_after = 0;
+    h.kind = EMF_HIT_KIND_SHROUD;
+    h.flags = EMF_HIT_INSTANT;
+    fire_hit(kServer, h);
+    CHECK(logged("instant shroud true"));
+    h.kind = EMF_HIT_KIND_COLD;
+    h.flags = 0;
+    fire_hit(kServer, h);
+    CHECK(logged("instant cold false"));
+}

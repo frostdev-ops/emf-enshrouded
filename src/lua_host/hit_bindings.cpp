@@ -55,6 +55,7 @@ void push_hit(lua_State* L, const EmfHit& h) {
     set_bool(L, "weakspot", (h.flags & EMF_HIT_WEAKSPOT) != 0);
     set_bool(L, "healing", (h.flags & EMF_HIT_HEALING) != 0 || h.amount < 0);
     set_bool(L, "killed", (h.flags & EMF_HIT_KILLED) != 0);
+    set_bool(L, "instant", (h.flags & EMF_HIT_INSTANT) != 0);
     lua_createtable(L, 4, 0);
     int n = 0;
     for (int b = 0; b < kTypeCount; ++b)
