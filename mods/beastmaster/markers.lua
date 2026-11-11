@@ -10,8 +10,8 @@ local K = {}
 K.__index = K
 
 local STABLE_NEAR_M = 200   -- stables show in the world within this distance (always on the map)
-local HEIGHT = 2.2          -- metres above a beast's position
-local TALL = { bear = 2.8, aurochs = 2.8 }
+local HEIGHT = 1.7          -- metres above a beast's position
+local TALL = { bear = 2.4, aurochs = 2.4 }
 local KEYS = { markers = "beast_markers", stable_markers = "stable_markers" }
 
 function M.new(env)

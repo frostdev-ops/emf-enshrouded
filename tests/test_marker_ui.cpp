@@ -49,7 +49,7 @@ TEST_CASE("marker layout: a marker ahead is on screen, opaque, with its text and
     CHECK(l[0].label);
     CHECK(l[0].text == "a");
     CHECK(l[0].dist == "10 m");
-    CHECK(l[0].size == doctest::Approx(22.0f));
+    CHECK(l[0].size == doctest::Approx(26.0f));
 }
 
 TEST_CASE("marker layout: height lifts the point; no WORLD flag, beyond max distance or behind without an arrow: left out") {
@@ -67,7 +67,8 @@ TEST_CASE("marker layout: height lifts the point; no WORLD flag, beyond max dist
     l = layout_markers({arrow}, cam_origin(), kPlayer, kDisplay);
     REQUIRE(l.size() == 1);
     CHECK(l[0].edge);
-    CHECK(l[0].y > 900);  // straight behind: at the bottom
+    CHECK(l[0].y > 900);  // straight behind: at the bottom,
+    CHECK(l[0].y <= 950.5f);  // above the game's hotbar (130 px at 1080 p)
     // off to the side, ahead, without an arrow: left out; with one: at the right edge
     CHECK(layout_markers({at("s", 100, 0, 10)}, cam_origin(), kPlayer, kDisplay).empty());
     l = layout_markers({at("s", 100, 0, 10, EMF_MARKER_WORLD | EMF_MARKER_EDGE_ARROW)}, cam_origin(), kPlayer, kDisplay);
@@ -133,7 +134,7 @@ TEST_CASE("map markers: placed on the map screen from the map's rectangle, clipp
     const auto l2 = layout_map_markers({in}, v, ImVec2(3840, 2160));
     REQUIRE(l2.size() == 1);
     CHECK(l2[0].x == doctest::Approx(1000));
-    CHECK(l2[0].size == doctest::Approx(36.0f));  // 18 px at 1080 p
+    CHECK(l2[0].size == doctest::Approx(48.0f));  // 24 px at 1080 p
 }
 
 TEST_CASE("map markers show only while the map is open, its view is fresh and the console is closed") {

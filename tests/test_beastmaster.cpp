@@ -6354,7 +6354,7 @@ TEST_CASE("beastmaster 1.16: beast markers on: the owner gets a marker over each
     REQUIRE(m != nullptr);
     CHECK(m->text == "Wolf");
     CHECK(m->m.entity == 1234u);
-    CHECK(m->m.height == doctest::Approx(2.2f));
+    CHECK(m->m.height == doctest::Approx(1.7f));
     CHECK(m->m.flags == (EMF_MARKER_WORLD | EMF_MARKER_DISTANCE | EMF_MARKER_GAME_MAP | EMF_MARKER_EDGE_ARROW));
     CHECK(sent_to(b.r.fake, 2, "beastmaster:beast.1234") == nullptr);  // only its owner
     const size_t n = b.r.fake.markers_sent.size();

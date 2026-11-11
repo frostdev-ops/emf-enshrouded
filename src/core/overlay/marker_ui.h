@@ -15,8 +15,9 @@
 namespace emf::core {
 
 constexpr size_t kMarkerLabels = 64;      // the nearest this many markers show their text
-constexpr float kMarkerSize1080 = 22.0f;  // a marker's shape at 1080 p, pixels
+constexpr float kMarkerSize1080 = 26.0f;  // a marker's shape at 1080 p, pixels
 constexpr float kMarkerEdgeInset = 48.0f;  // the edge arrows' distance from the display's edges at 1080 p
+constexpr float kMarkerEdgeBottom = 130.0f;  // ... and from the bottom, above the game's hotbar
 
 struct MarkerLayout {
     float x = 0, y = 0;  // display pixels: the shape's centre
@@ -44,7 +45,7 @@ bool show_markers(bool console_open, const MarkerSight& sight, const CameraSnap&
 // outside MapCenteringFrame they are left out. Every one has its text, no distance; one with a game_icon is the text
 // alone (the game draws its icon from its own list).
 constexpr double kMapWorldSize = 10240.0;
-constexpr float kMapMarkerSize1080 = 18.0f;
+constexpr float kMapMarkerSize1080 = 24.0f;
 std::vector<MarkerLayout> layout_map_markers(const std::vector<Marker>& markers, const MapView& view, ImVec2 display);
 // While the map is open (seen within kMarkerFreshMs), its view is that fresh and has a size, and the console is closed.
 bool show_map_markers(bool console_open, const MarkerSight& sight, const MapView& view, uint64_t now_ms);

@@ -54,7 +54,7 @@ std::vector<MarkerLayout> layout_markers(const std::vector<Marker>& markers, con
             const EdgePoint e = edge_point(cam, m.x, top, m.z, display.x, display.y, inset);
             if (!e.valid) continue;
             l.x = e.x;
-            l.y = e.y;
+            l.y = std::min(e.y, display.y - kMarkerEdgeBottom * scale);  // never on the game's hotbar
             l.edge = true;
             l.angle = e.angle;
         } else {
@@ -160,7 +160,7 @@ void draw_markers(ImDrawList* dl, const std::vector<MarkerLayout>& layouts, cons
         }
         if (!l.label || (l.text.empty() && l.dist.empty())) continue;
         ImFont* font = look.font ? look.font : ImGui::GetFont();
-        const float big = 18.0f * k, small = 15.0f * k;
+        const float big = 22.0f * k, small = 18.0f * k;
         // the text goes under the shape; near the bottom of the screen above it
         const bool above = l.y > display_h * 0.85f;
         float y = above ? l.y - r - (l.text.empty() ? 0 : big) - (l.dist.empty() ? 0 : small) - 2 * k : l.y + r + 2 * k;
