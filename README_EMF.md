@@ -120,6 +120,23 @@ In the Mods tab's list, green means the mod is on (a DLL mod that loaded, or a L
 pauses it on an error with a note on screen; `lua.status` shows whether it runs), grey that it is switched off and red
 that it did not load (select it to see why); the colours are for this game start, a mod's switch for the next.
 
+### Linux and the Steam Deck (Proton)
+
+Proton loads its own `dinput8.dll` unless told otherwise. In Steam, open the game's **Properties**, and under
+**Launch options** put:
+
+```
+WINEDLLOVERRIDES="dinput8=n,b" %command%
+```
+
+Then EMF starts with the game as on Windows: mods, the console (the ` key), the HUD editor, mod windows and wheels.
+Under Proton EMF draws through its own Vulkan hook instead of its Vulkan layer (Proton's Vulkan never loads layers);
+`emf\emf_loader.log` says which way it took (`overlay: Wine found: through EMF's Vulkan hook`). If nothing EMF draws
+shows up, send `emf\emf_loader.log` and `emf\emf_core.log` with your report. `[overlay] path` in `emf\emf_core.ini`
+picks the way by hand: `auto` (the default: the hook under Proton, the layer on Windows), `layer` or `hook`.
+A dedicated server under Wine needs the same `WINEDLLOVERRIDES`; it has no screen, so only the hook choice differs.
+EMF.exe runs under Wine too, but its **Play** cannot reach Linux's Steam: start the game from Steam.
+
 ## In-game console
 Press the key under Esc (`~` on US keyboards, `§` or `|` on Nordic ones, `^` on German ones) in the game: a console
 drops down over the top half of the screen. Type a command (see the table below) and press Enter; the reply appears
@@ -174,6 +191,7 @@ Settings in `<game>\emf\emf_core.ini`:
 ```
 [overlay]
 enabled=1      ; 0 turns the console off
+path=auto      ; how EMF draws: auto (the hook under Wine / Proton, the layer on Windows), layer or hook
 key=0x29       ; the key's scan code (0x29 = the key under Esc)
 chat=1         ; 0 turns chat commands off (below)
 suggest=1      ; 0: no suggestions as you type (Tab still completes)
