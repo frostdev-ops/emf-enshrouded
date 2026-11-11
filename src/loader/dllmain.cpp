@@ -324,7 +324,7 @@ emf::loader::ShimProcFn shim_proc() {
     if (const auto f = g_shim_proc.load()) return f;
     static std::atomic<bool> tried{false};
     if (tried.exchange(true)) return g_shim_proc.load();
-    const HMODULE core = LoadLibraryW((g_dir + L"\emf\emf_core.dll").c_str());
+    const HMODULE core = LoadLibraryW((g_dir + L"\\emf\\emf_core.dll").c_str());
     const auto f = core ? reinterpret_cast<emf::loader::ShimProcFn>(g_real_get_proc(core, "emf_vk_shim_proc")) : nullptr;
     g_shim_proc = f;
     if (!f) loader_log(g_dir, "overlay: emf_core.dll's emf_vk_shim_proc is missing: the game's Vulkan goes without EMF's hook");
@@ -352,7 +352,7 @@ bool hook_exe_get_proc_address() {
 
 // The overlay's way into the game's Vulkan for this start ([overlay] path = auto | layer | hook; never both).
 void start_overlay_path() {
-    const std::wstring ini = g_dir + L"\emf\emf_core.ini";
+    const std::wstring ini = g_dir + L"\\emf\\emf_core.ini";
     const bool enabled = GetPrivateProfileIntW(L"overlay", L"enabled", 1, ini.c_str()) != 0;
     wchar_t setting[16] = {};
     GetPrivateProfileStringW(L"overlay", L"path", L"auto", setting, 16, ini.c_str());
@@ -361,6 +361,8 @@ void start_overlay_path() {
     case emf::loader::OverlayPath::Layer:
         SetEnvironmentVariableW(L"EMF_OVERLAY_PATH", L"layer");
         enable_vulkan_layer();
+        loader_log(g_dir, ("overlay: through EMF's Vulkan layer ([overlay] path=" + emf::loader::utf8_name(setting) +
+                           (wine ? ", Wine found" : "") + ")").c_str());
         break;
     case emf::loader::OverlayPath::Hook:
         if (hook_exe_get_proc_address()) {
@@ -375,6 +377,7 @@ void start_overlay_path() {
         break;
     case emf::loader::OverlayPath::Off:
         SetEnvironmentVariableW(L"EMF_OVERLAY_PATH", L"off");
+        loader_log(g_dir, "overlay: off ([overlay] enabled=0)");
         break;
     }
 }

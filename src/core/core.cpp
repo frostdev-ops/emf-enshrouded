@@ -76,6 +76,8 @@
 
 // The Vulkan layer entry point lives in emf_core_lib (a static library): keep it in emf_core.dll's exports.
 #pragma comment(linker, "/include:emf_vk_negotiate")
+// the overlay's hook path (Wine / Proton, [overlay] path=hook): the loader asks this export for EMF's vkGetInstanceProcAddr
+#pragma comment(linker, "/include:emf_vk_shim_proc")
 
 namespace {
 emf::core::ModsCheck* g_mods_check = nullptr;  // the mod check on join (core channel emf/mods)
