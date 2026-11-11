@@ -8,7 +8,7 @@ namespace emf::core {
 
 namespace {
 constexpr double kAgreeM = 0.5, kBelowBoxM = 4.0, kBelowStartM = 1.0, kHopBelowBoxM = 8.0;
-constexpr uint64_t kGiveUpMs = 10000;  // ground that never passes the checks
+constexpr uint64_t kGiveUpMs = 20000;  // ground that never passes the checks (past kGroundLoadMs)
 }  // namespace
 
 bool ground_spot_ok(double x, double z, std::string* why) {

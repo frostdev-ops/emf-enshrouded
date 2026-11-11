@@ -82,13 +82,18 @@ TEST_CASE("ground service: a loaded spot answers with the ground after two agree
     CHECK(r.svc.waiting() == 0u);
 }
 
-TEST_CASE("ground service: a place that does not load in 5 s is answered 'not loaded'") {
+TEST_CASE("ground service: a place that does not load in 12 s is answered 'not loaded'") {
     g_now = 1000;
     Rig r;
     r.rays = {RayResult{}};
     std::string why;
     REQUIRE(r.svc.request(W(), 100, 200, r.cb(), &why));
-    for (int i = 0; i < 10; ++i) {
+    for (int i = 0; i < 10; ++i) {  // 6 s: still loading (the game takes about 5 s for a column)
+        g_now += 600;
+        r.svc.on_server_tick(W());
+    }
+    CHECK(r.answers.empty());
+    for (int i = 0; i < 12; ++i) {
         g_now += 600;
         r.svc.on_server_tick(W());
     }

@@ -1,7 +1,7 @@
 #pragma once
 // Markers step 2 (API v34): the ground under a map spot, from the game's voxel ray cast after each server step. Two
 // ticks that agree within 0.5 m, under the reset box's top less 4 m and at least 1 m under the ray's start, are the
-// ground. A spot not loaded within 5 s gets one hop high over it (the game loads the place around a teleported
+// ground. A spot not loaded within 12 s gets one hop high over it (the game loads the place around a teleported
 // player), then the ray again; no ground 2 s after the hop: back. Game-free. Private research map_click_2026-11-11 3.7.
 #include <cstdint>
 #include <string>
@@ -9,7 +9,7 @@
 namespace emf::core {
 
 constexpr double kGroundWorldSize = 10240.0;
-constexpr uint64_t kGroundLoadMs = 5000, kGroundAfterHopMs = 2000;
+constexpr uint64_t kGroundLoadMs = 12000, kGroundAfterHopMs = 2000;  // the game takes about 5 s to load a column (live)
 
 struct GroundLimits {
     double box_top = 0;      // the scene's reset box (box 0) top

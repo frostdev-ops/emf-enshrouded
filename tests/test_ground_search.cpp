@@ -52,24 +52,31 @@ TEST_CASE("ground: a jump between ticks, a hit at the ray's start or above the r
     CHECK(b.on_ray(hit(300), 1100).step == GroundSearch::Step::Wait);
 }
 
-TEST_CASE("ground: not loaded for 5 s -> one hop high over the spot; then the ground, or back after 2 s") {
+TEST_CASE("ground: the game's ~5 s to load a column is waited out; a place still not loaded at 12 s gets a hop") {
+    GroundSearch load(100, 200, limits(), 1000);
+    CHECK(load.on_ray(not_loaded(), 6000).step == GroundSearch::Step::Wait);  // seen live: about 5 s, near or far
+    load.on_ray(hit(500), 6100);
+    CHECK(load.on_ray(hit(500), 6150).step == GroundSearch::Step::Accept);
+}
+
+TEST_CASE("ground: not loaded for 12 s -> one hop high over the spot; then the ground, or back after 2 s") {
     GroundSearch g(100, 200, limits(), 1000);
-    CHECK(g.on_ray(not_loaded(), 3000).step == GroundSearch::Step::Wait);
-    auto o = g.on_ray(not_loaded(), 6000);
+    CHECK(g.on_ray(not_loaded(), 6000).step == GroundSearch::Step::Wait);
+    auto o = g.on_ray(not_loaded(), 13000);
     REQUIRE(o.step == GroundSearch::Step::Hop);
     CHECK(o.y == doctest::Approx(1100));  // min(box top - 8, grid top)
-    CHECK(g.on_ray(not_loaded(), 6100).step == GroundSearch::Step::Wait);  // waits for the hop
-    g.on_hopped(true, 6200);
-    g.on_ray(hit(500), 6300);
-    CHECK(g.on_ray(hit(500.1), 6350).step == GroundSearch::Step::Accept);
+    CHECK(g.on_ray(not_loaded(), 13100).step == GroundSearch::Step::Wait);  // waits for the hop
+    g.on_hopped(true, 13200);
+    g.on_ray(hit(500), 13300);
+    CHECK(g.on_ray(hit(500.1), 13350).step == GroundSearch::Step::Accept);
     GroundSearch back(100, 200, limits(), 1000);
-    back.on_ray(not_loaded(), 6000);
-    back.on_hopped(true, 6100);
-    CHECK(back.on_ray(not_loaded(), 7000).step == GroundSearch::Step::Wait);
-    CHECK(back.on_ray(not_loaded(), 8200).step == GroundSearch::Step::Back);
+    back.on_ray(not_loaded(), 13000);
+    back.on_hopped(true, 13100);
+    CHECK(back.on_ray(not_loaded(), 14000).step == GroundSearch::Step::Wait);
+    CHECK(back.on_ray(not_loaded(), 15200).step == GroundSearch::Step::Back);
     GroundSearch fail(100, 200, limits(), 1000);
-    fail.on_ray(not_loaded(), 6000);
-    const auto f = fail.on_hopped(false, 6100);
+    fail.on_ray(not_loaded(), 13000);
+    const auto f = fail.on_hopped(false, 13100);
     CHECK(f.step == GroundSearch::Step::Fail);
     CHECK_FALSE(f.why.empty());
 }

@@ -1,6 +1,6 @@
 #pragma once
 // Markers step 2 (API v34): ground_at: the ground under a spot, from the game's voxel ray cast after each server step
-// (GroundSearch decides when a reading counts). A place that does not load within 5 s is answered "not loaded" (a
+// (GroundSearch decides when a reading counts). A place that does not load within 12 s is answered "not loaded" (a
 // caller with a player to move may hop there and ask again: the Teleports mod does). The game is reached only through
 // Deps; core.cpp gives the real ones (the voxel grid, the reset box, Sig::VoxelRay). Server world's thread only.
 #include <cstdint>
