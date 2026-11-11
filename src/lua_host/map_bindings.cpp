@@ -1,7 +1,7 @@
 // Lua 1.26 the map (API v34): emf.map_cursor, emf.on_map_click, emf.map_action, emf.remove_map_action, emf.ground_at.
 // A script's actions are "<script id>:<id>" in the core (every Lua script is the core's mod "lua") and leave with it
-// (reload, pause, unload). Clicks come from the core on the render thread: they wait in each listening script's queue
-// and its functions run on the next client world step (Lua never runs on the render thread).
+// (reload, pause, unload). Clicks come from the core on the game window's thread: they wait in each listening script's
+// queue and its functions run on the next client world step (Lua never runs there).
 #include <cstring>
 #include <string>
 #include <vector>

@@ -949,7 +949,7 @@ Console: `markers` (what is there, whether drawing and the game's map list are o
 Players can act on the game's world map, and a server mod can find the ground under a spot.
 
 - `map_cursor` and `on_map_click` are for the game the mod runs in. They work while the game's map screen is open. The
-  game gets the click too. `on_map_click` calls come on the render thread: keep them short and do not call the game.
+  game gets the click too. `on_map_click` calls come on the game window's thread (its window procedure): keep them short and do not call the game.
 - `map_action` is for the server end (the host's game or the dedicated server). A map action is something players do by
   holding Shift and the left mouse button on their map for `hold_ms` (0 = 1000 ms, at most 10000); a ring fills at the
   mouse, and the game does not get that click. EMF on each player's game does the gesture and sends the spot over its

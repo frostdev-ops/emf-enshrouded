@@ -1284,7 +1284,8 @@ typedef struct EmfApi {
     /* ---- v34: the map screen's mouse, map actions, the ground (EmfMapClick) ---- */
     /* The world x, z under the mouse while the game's map is open: false when it is not, or the mouse is off the map. */
     bool (*map_cursor)(double* x, double* z);
-    /* `cb` for each click on the map screen of this game (the game gets it too), on the render thread. False for a null
+    /* `cb` for each click on the map screen of this game (the game gets it too), on the game window's thread (its
+     * window procedure: keep it short, do not call the game). False for a null
      * cb or 16 already. */
     bool (*on_map_click)(EmfMapClickCallback cb, void* user);
     /* Server end (the host's game or the dedicated server): a map action players do by holding Shift and the left mouse

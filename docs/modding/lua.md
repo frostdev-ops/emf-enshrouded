@@ -491,7 +491,7 @@ end)
 | Function | What |
 |---|---|
 | `emf.map_cursor()` | `x, z` in world metres under the mouse while the map is open, else nil |
-| `emf.on_map_click(fn)` | `fn(world, click)` on the client world's next step after a click on the map (Lua never runs on the render thread); `click` = `{button = "left" \| "right", shift, ctrl, alt, x, z}`. true when the core listens |
+| `emf.on_map_click(fn)` | `fn(world, click)` on the client world's next step after a click on the map (Lua never runs on the game window's thread); `click` = `{button = "left" \| "right", shift, ctrl, alt, x, z}`. true when the core listens |
 | `emf.map_action(id, opts, fn)` | server: adds a map action. `opts` is nil or `{label = text, hold_ms = number}` (an unknown key is an error). `fn(world, player, x, z, admin)` runs on the server world; `player` is their entity, `admin` is true for the host or an admin. The core id is `"<mod id>:<id>"`. true when taken |
 | `emf.remove_map_action(id)` | true when your script had that action |
 | `emf.ground_at(world, x, z, fn)` | server world: the ground under the spot. `fn(world, ok, x, y, z, why, hop_y)` once, a few seconds at most; `hop_y` is a number only when the place is not loaded (nobody is near; teleport a player to that height over it, then ask again), else nil. true when asked |
