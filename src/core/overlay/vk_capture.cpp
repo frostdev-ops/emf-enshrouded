@@ -1,4 +1,5 @@
 #include "vk_capture.h"
+#include "overlay_path_text.h"
 
 #include <windows.h>
 
@@ -255,7 +256,7 @@ bool record(RecordArgs* a) {
                 found = true;
             }
     }
-    if (!found) return fail("unavailable", "the presented swapchain was made before EMF's layer saw the device");
+    if (!found) return fail("unavailable", "the presented swapchain was made before EMF saw the device");
     if (!chain.readable)
         return fail("unavailable", "the game's swapchain images cannot be read (made without transfer use; the bridge "
                                    "must be on when the game starts)");
@@ -525,7 +526,7 @@ void capture_set_wanted(bool on) { g_wanted = on ? 1 : 0; }
 
 std::string capture_unavailable() {
     const SrwShared lock(g_lock);
-    if (!g_device) return "no game frames come through EMF's Vulkan layer (the dedicated server has no screen)";
+    if (!g_device) return "no game frames come through EMF (the dedicated server has no screen)";
     if (!g_broken.empty()) return g_broken;
     if (GetTickCount64() - g_last_present_ms.load() > 2000)
         return "the game showed no frame in the last 2 s (is it minimised?)";
@@ -559,7 +560,7 @@ std::string capture_request(const std::wstring& emf_dir, const std::wstring& pat
                              bridge::bytes_per_pixel(f ? *f : bridge::PixelFormat::BGRA8);
                 }
         }
-        if (!device) return refuse("unavailable", "no game frames come through EMF's Vulkan layer");
+        if (!device) return refuse("unavailable", "no game frames come through EMF");
         if (needed) {  // (a swapchain EMF does not know is refused at the present, with the reason)
             const std::string no = ensure_readback(device, needed);
             if (!no.empty()) return refuse("unavailable", no);

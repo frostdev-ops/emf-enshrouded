@@ -1,4 +1,5 @@
 #include "vk_overlay.h"
+#include "overlay_path_text.h"
 
 #include <windows.h>
 
@@ -775,7 +776,7 @@ bool overlay_attach_device(const LayerDevice& d) {
     const bool ok = all && !g_families.empty() && o_create_swapchain && o_destroy_swapchain && o_present;
     g_disabled = !ok;
     g_device_ready.store(true, std::memory_order_release);
-    log(std::string("overlay: the game's Vulkan device came through EMF's layer") +
+    log("overlay: the game's Vulkan device came through " + overlay_way(current_overlay_path()) +
         (ok ? "" : " (some functions are missing; the console is off)") +
         (d.set_loader_data ? "" : " (no loader-data callback)"));
     capture_attach(d);  // the debug bridge's screenshots (nothing happens until one is asked for)
@@ -839,7 +840,7 @@ VkResult overlay_present(VkQueue queue, const VkPresentInfoKHR* info) {
     static bool first = true;
     if (first) {
         first = false;
-        log("overlay: the game's frames pass through EMF's layer");
+        log("overlay: the game's frames pass through " + overlay_way(current_overlay_path()));
     }
     const bool visible = g_hooks_set.load(std::memory_order_acquire) && g_hooks.visible && g_hooks.visible();
     const bool was_disabled = g_disabled.load();
@@ -951,13 +952,10 @@ VulkanFrameStats vulkan_frame_stats() {
 }
 
 const char* vulkan_overlay_ready_reason() {
-    if (g_disabled.load()) return "overlay: the console is off after a failure (see the lines above)";
-    if (!g_device_ready.load())
-        return "overlay: the console cannot be shown: the game's Vulkan device did not come through EMF's layer (is "
-               "emf\\vk\\VkLayer_EMF_console.json there, and was the game started with EMF installed?)";
-    if (GetTickCount64() - g_last_present_ms.load() >= 2000)
-        return "overlay: the console cannot be shown: no game frames passed through EMF's layer in the last 2 s";
-    return "overlay: the console is ready";
+    thread_local std::string text;
+    text = overlay_not_ready_text(current_overlay_path(), g_disabled.load(), g_device_ready.load(),
+                                  GetTickCount64() - g_last_present_ms.load() < 2000);
+    return text.c_str();
 }
 
 }  // namespace emf::core
