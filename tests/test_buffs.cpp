@@ -279,11 +279,11 @@ TEST_CASE("buff diff: the first sight records only; then applied, refreshed and 
     CHECK(ev[0].remaining_ns == -1);
     g_net[971] = BuffNet{500, 700, 0x22, 0, true};  // its data arrives: not a refresh
     CHECK(d.step(1, k.b, &net_of, nullptr, 210).empty());
-    g_net[970] = BuffNet{900, 1300, kWet, 0, true};  // Wet given again: a later end
+    g_net[970] = BuffNet{900, 1000 + 3'000'000'000LL, kWet, 0, true};  // Wet given again: 3 s later
     ev = d.step(1, k.b, &net_of, nullptr, 400);
     REQUIRE(ev.size() == 1);
     CHECK(ev[0].kind == EMF_BUFF_REFRESHED);
-    CHECK(ev[0].remaining_ns == 900);
+    CHECK(ev[0].remaining_ns == 3'000'000'600LL);
     k.set(kDebuffs, 0, 970, kWet, 1);  // cleansed: still there this step
     CHECK(d.step(1, k.b, &net_of, nullptr, 410).empty());
     k.set(kDebuffs, 0, 0, 0);  // gone
@@ -302,4 +302,24 @@ TEST_CASE("buff diff: the first sight records only; then applied, refreshed and 
     CHECK(d.step(1, k.b, &net_of, nullptr, 600).empty());
     d.retain({});
     CHECK(d.size() == 0);
+}
+
+TEST_CASE("buff diff: rain re-applying Wet every step (its end creeping on) is no refresh; a jump of over a second is") {
+    BuffDiff d;
+    Container k;
+    k.set(kDebuffs, 0, 970, kWet);
+    const int64_t s = 1'000'000'000LL;
+    int64_t now = 100 * s;
+    g_net = {{970, BuffNet{900 * s, now + 900 * s, kWet, 0, true}}};
+    CHECK(d.step(1, k.b, &net_of, nullptr, now).empty());
+    for (int i = 0; i < 8; ++i) {  // 250 ms later each time, the end 250 ms later too
+        now += s / 4;
+        g_net[970].end = now + 900 * s;
+        CHECK(d.step(1, k.b, &net_of, nullptr, now).empty());
+    }
+    now += s / 4;
+    g_net[970].end = now + 900 * s + 5 * s;  // given again with more time
+    const auto ev = d.step(1, k.b, &net_of, nullptr, now);
+    REQUIRE(ev.size() == 1);
+    CHECK(ev[0].kind == EMF_BUFF_REFRESHED);
 }

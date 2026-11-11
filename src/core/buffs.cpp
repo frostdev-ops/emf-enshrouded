@@ -245,7 +245,7 @@ std::vector<EmfBuffEvent> BuffDiff::step(uint32_t entity, const uint8_t* c, Buff
             if (o.buff_entity == x.buff_entity) was = &o;
         if (!was)
             ev.push_back(make(EMF_BUFF_APPLIED, x));
-        else if (was->end >= 0 && x.end > was->end)
+        else if (was->end >= 0 && x.end > was->end + kBuffRefreshMinNs)
             ev.push_back(make(EMF_BUFF_REFRESHED, x));
     }
     for (const Inst& o : old) {

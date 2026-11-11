@@ -19,6 +19,8 @@ constexpr size_t kBuffTypeSize = 0xB8;
 constexpr size_t kBuffContainerSize = 472;
 constexpr size_t kApplyBuffCtxSize = 0xE8;
 constexpr uint32_t kBuffMaxTypes = 4096;
+// A buff whose end moved later by more than this is refreshed (rain re-applies Wet every step: its end creeps on).
+constexpr int64_t kBuffRefreshMinNs = 1'000'000'000LL;
 
 // ---- the registry's collection ----
 struct BuffCollection {
