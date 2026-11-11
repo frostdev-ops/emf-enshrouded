@@ -2352,7 +2352,8 @@ void hit_event_delivered(EmfWorld* w, const void* event, uint32_t size, void*) {
     uint32_t pide = 0;
     std::memcpy(&pide, static_cast<const uint8_t*>(event) + offsetof(ecs::HitEvent, weaponPideId), sizeof pide);
     h.weapon_item = hit_env_weapon_item(pide, w);
-    h.health_after = hit_env_health(h.part, w);  // the entity the hit was applied to
+    h.health_after = hit_env_health(h.part, w);  // the entity the hit was applied to, else its actor
+    if (h.health_after < 0 && h.target != h.part) h.health_after = hit_env_health(h.target, w);
     g_state->hit_callbacks.call_after(w, h);
 }
 

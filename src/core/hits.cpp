@@ -47,7 +47,7 @@ bool hit_rule_valid(const EmfHitRule& r, std::string* why) {
         if (why) *why = text;
         return false;
     };
-    if (r.size < sizeof(EmfHitRule)) return no("its size is smaller than EmfHitRule (set size = sizeof(EmfHitRule))");
+    if (r.size < kHitRuleV31Size) return no("its size is smaller than EmfHitRule (set size = sizeof(EmfHitRule))");
     if (!who_ok(r.attacker)) return no("attacker is not 0, an entity or EMF_HIT_PLAYERS / _CREATURES / _OBJECTS");
     if (!who_ok(r.target)) return no("target is not 0, an entity or EMF_HIT_PLAYERS / _CREATURES / _OBJECTS");
     if (!std::isfinite(r.scale) || r.scale < 0.0f || r.scale > 100.0f) return no("scale must be between 0 and 100");
@@ -145,6 +145,7 @@ void common_fields(const uint8_t* p, EmfHit* h) {
 void hit_from_candidate(const uint8_t* hc, EmfHit* h) {
     common_fields(hc, h);
     h->kind = rd<uint8_t>(hc, offsetof(HC, candidateType));
+    if (h->flags & (EMF_HIT_BLOCKED | EMF_HIT_PARRIED)) h->amount = 0;  // the game never applies its health change
 }
 
 void hit_to_candidate(const EmfHit& h, uint8_t* hc) {
@@ -154,10 +155,12 @@ void hit_to_candidate(const EmfHit& h, uint8_t* hc) {
         wr<uint8_t>(hc, offsetof(HC, sendHitEvent), 0);
         return;
     }
+    constexpr int32_t kMax = std::numeric_limits<int32_t>::max();
     const uint32_t flags = rd<uint32_t>(hc, offsetof(HC, flags));
-    if (!(flags & (EMF_HIT_BLOCKED | EMF_HIT_PARRIED))) wr<int32_t>(hc, offsetof(HC, healthChange), -h.amount);
-    wr<int32_t>(hc, offsetof(HC, staminaChange), -h.stamina);
-    wr<uint16_t>(hc, offsetof(HC, hitReaction), h.reaction);
+    if (!(flags & (EMF_HIT_BLOCKED | EMF_HIT_PARRIED)))
+        wr<int32_t>(hc, offsetof(HC, healthChange), -std::clamp(h.amount, -kMax, kMax));
+    wr<int32_t>(hc, offsetof(HC, staminaChange), -std::clamp(h.stamina, -kMax, kMax));
+    if (h.reaction <= kMaxHitReaction) wr<uint16_t>(hc, offsetof(HC, hitReaction), h.reaction);  // else the game's
 }
 
 bool hit_from_event(const uint8_t* ev, uint32_t size, EmfHit* h) {
@@ -168,7 +171,9 @@ bool hit_from_event(const uint8_t* ev, uint32_t size, EmfHit* h) {
 }
 
 bool HitOnce::should_fire(const void* hit, uint32_t impact, uint32_t target, uint32_t propagated_from, bool applies) {
-    const bool parent = hit == hit_ && impact == impact_ && propagated_from != 0 && propagated_from == last_target_;
+    const bool parent = propagate_ && hit == hit_ && impact == impact_ && propagated_from != 0 &&
+                        propagated_from == last_target_;
+    propagate_ = false;  // note_propagate after this call's original says whether the next one continues
     if (!parent) {
         hit_ = hit;
         impact_ = impact;

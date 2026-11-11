@@ -93,6 +93,7 @@ void hit_cb_body(EmfWorld* w, const EmfHit* hit, void* user) {
     if (!hit) return;
     for (auto& sp : h->scripts) {
         Script& s = *sp;
+        if (!s.hit_cb_count.load(std::memory_order_acquire)) continue;  // never wait for a script that does not listen
         std::lock_guard<std::recursive_mutex> l(s.m);
         if (!s.L || s.paused || s.hit_cbs.empty()) continue;
         const std::vector<int> refs = s.hit_cbs;
@@ -202,6 +203,7 @@ int l_on_hit(lua_State* L) {
     }
     lua_pushvalue(L, 1);
     s->hit_cbs.push_back(luaL_ref(L, LUA_REGISTRYINDEX));
+    s->hit_cb_count.store(static_cast<uint32_t>(s->hit_cbs.size()), std::memory_order_release);
     lua_pushboolean(L, true);
     return 1;
 }

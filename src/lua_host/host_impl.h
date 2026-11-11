@@ -76,6 +76,7 @@ struct Script {
     std::vector<int> player_intro;                     // joined functions registered after players came: told next step
     std::vector<int> ws_cbs;                           // emf.on_world_setting_changed (lua 1.10)
     std::vector<int> hit_cbs;                          // emf.on_hit (lua 1.23)
+    std::atomic<uint32_t> hit_cb_count{0};             // hit_cbs.size(), read without m: a hit skips scripts without
     std::set<uint32_t> hit_rules;                      // its emf.hit_rule ids (lua 1.23): removed on unload and pause
     std::map<std::string, std::vector<BusSubscription>> bus_subs;  // cross-mod message callbacks
     uint64_t next_bus_subscription = 0;             // unique callback tokens, even after unsubscribe

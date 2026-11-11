@@ -811,3 +811,21 @@ TEST_CASE("damage refuses CombatFlags with handleHits off, also on a placed obje
     CHECK_FALSE(off);
     CHECK(logged("CombatFlags.handleHits is off"));
 }
+
+TEST_CASE("on_hit: the actor's health after when the part hit has none") {  // review I2
+    Fixture f;
+    g_after.clear();
+    put_health(6808, kHealthRoot, 58, 900);
+    REQUIRE(subscribe_hit_events());
+    const EmfApi* api = api_table();
+    REQUIRE(api->on_hit(hit_after_cb, nullptr));
+    auto ev = hit_event(1, 6809, -12, 0);  // the part 6809 has no Health; its actor 6808 has
+    const uint32_t root = 6808;
+    std::memcpy(ev.data() + offsetof(ecs::HitEvent, rootTargetId), &root, sizeof root);
+    f.state.relay.capture(f.server.p(), EMF_WORLD_SERVER, "HitEvent", ev.data(), static_cast<uint32_t>(ev.size()));
+    f.state.relay.deliver(f.w(), EMF_WORLD_SERVER, [](const std::string&) {});
+    REQUIRE(g_after.size() == 1);
+    CHECK(g_after[0].target == 6808);
+    CHECK(g_after[0].part == 6809);
+    CHECK(g_after[0].health_after == 58);
+}

@@ -164,7 +164,10 @@ bool pre_hit(uint8_t* hc, const PreHitEnv& env, HitOnce& once, const HitRules& r
     EmfHit h{};
     hit_from_candidate(hc, &h);
     if (env.weapon_item) h.weapon_item = env.weapon_item(rd<uint32_t>(hc, offsetof(HC, weaponPideId)), env.ctx);
-    if (env.health) h.health_before = env.health(entity, env.ctx);  // the entity whose health this level changes
+    if (env.health) {
+        h.health_before = env.health(entity, env.ctx);  // the entity whose health this level changes
+        if (h.health_before < 0 && h.target != entity) h.health_before = env.health(h.target, env.ctx);  // a part without
+    }
     h.health_after = h.health_before < 0 ? -1 : std::max(0, h.health_before - h.amount);
     const EmfHit start = h;
     rules.apply(h, env.classify, env.ctx);
@@ -214,9 +217,10 @@ bool guarded_work(CoreState* st, void* ctx, uint8_t* hit) {
 
 void hk_apply_hit(bool* out_propagate, void* entity, void* ctx, uint8_t* hit) {
     CoreState* st = core_state();
-    if (st && ctx && hit && (st->hit_rules.size() || st->hit_callbacks.before_count()))
-        if (!guarded_work(st, ctx, hit)) ++st->hit_stats.faults;
+    const bool active = st && ctx && hit && (st->hit_rules.size() || st->hit_callbacks.before_count());
+    if (active && !guarded_work(st, ctx, hit)) ++st->hit_stats.faults;
     g_o_apply(out_propagate, entity, ctx, hit);
+    if (active) t_once.note_propagate(out_propagate && *out_propagate);  // the conclusion walks up only then
 }
 
 }  // namespace

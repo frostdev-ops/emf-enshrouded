@@ -45,9 +45,13 @@ std::array<uint8_t, 0x150> candidate(int32_t health_change, uint32_t target = 31
 struct Fake {
     int32_t health = 100;
     bool applies = true;
+    uint32_t no_health = 0;  // an entity without Health (a part that passes hits up)
 };
 bool f_applies(uint32_t, void* c) { return static_cast<Fake*>(c)->applies; }
-int32_t f_health(uint32_t, void* c) { return static_cast<Fake*>(c)->health; }
+int32_t f_health(uint32_t e, void* c) {
+    auto* f = static_cast<Fake*>(c);
+    return e == f->no_health ? -1 : f->health;
+}
 uint32_t f_weapon(uint32_t, void*) { return 0; }
 HitClass f_classify(uint32_t id, void*) {
     return id >= 1 && id <= 0x3FE ? HitClass::Player : id ? HitClass::Creature : HitClass::None;
@@ -152,6 +156,7 @@ TEST_CASE("pre_hit fires once over the propagated levels") {
     REQUIRE(r.rules.add(half, &why) == 1);
     auto b = candidate(-40, 31);
     CHECK(r.run(b.data()));
+    r.once.note_propagate(true);  // the game said: pass it up
     put_at<uint32_t>(b.data(), offsetof(HC, targetId), 30);  // the conclusion's next level: the parent
     put_at<uint32_t>(b.data(), offsetof(HC, propagatedFromEntityId), 31);
     CHECK_FALSE(r.run(b.data()));
@@ -216,4 +221,18 @@ TEST_CASE("HitCallbacks: 16 at most each") {
     CHECK_FALSE(cbs.add_before(nullptr, nullptr, "m"));
     CHECK(cbs.before_count() == 16);
     CHECK(cbs.after_count() == 16);
+}
+
+TEST_CASE("pre_hit reads the actor's health when the part hit has none") {  // review I2
+    Rig r;
+    r.fake.health = 30;
+    r.fake.no_health = 31;
+    EmfHitRule keep = rule();
+    keep.min_health = 1;
+    std::string why;
+    REQUIRE(r.rules.add(keep, &why) == 1);
+    auto b = candidate(-50, 31);
+    put_at<uint32_t>(b.data(), offsetof(HC, rootTargetId), 30);
+    CHECK(r.run(b.data()));
+    CHECK(get_at<int32_t>(b.data(), offsetof(HC, healthChange)) == -29);
 }

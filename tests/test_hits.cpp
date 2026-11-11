@@ -402,8 +402,11 @@ TEST_CASE("HitOnce: parent levels of the same hit fire once") {
     HitOnce once;
     int p = 0;
     CHECK(once.should_fire(&p, 5, 31, 0, true));
+    once.note_propagate(true);
     CHECK_FALSE(once.should_fire(&p, 5, 30, 31, true));
+    once.note_propagate(true);
     CHECK_FALSE(once.should_fire(&p, 5, 29, 30, true));
+    once.note_propagate(false);
     CHECK(once.should_fire(&p, 6, 31, 0, true));  // a new hit in the same stack copy
     CHECK(once.should_fire(&p, 6, 31, 0, true));  // the same swing hitting again later: a new hit
 }
@@ -412,7 +415,9 @@ TEST_CASE("HitOnce: a level that does not apply passes the firing up") {
     HitOnce once;
     int p = 0;
     CHECK_FALSE(once.should_fire(&p, 5, 31, 0, false));
+    once.note_propagate(true);  // the game sets the byte before the handleHits return
     CHECK(once.should_fire(&p, 5, 30, 31, true));
+    once.note_propagate(true);
     CHECK_FALSE(once.should_fire(&p, 5, 29, 30, true));
 }
 
@@ -420,6 +425,60 @@ TEST_CASE("HitOnce: reset starts over") {
     HitOnce once;
     int p = 0;
     CHECK(once.should_fire(&p, 5, 31, 0, true));
+    once.note_propagate(true);
     once.reset();
     CHECK(once.should_fire(&p, 5, 30, 31, true));
+}
+
+// ---- the review's fixes ----
+
+TEST_CASE("HitOnce: a hit continues a chain only when the level before asked the game to propagate") {  // review I3
+    HitOnce once;
+    int p = 0;
+    CHECK(once.should_fire(&p, 5, 31, 0, true));
+    once.note_propagate(false);                    // 31 did not pass the hit up
+    CHECK(once.should_fire(&p, 5, 40, 31, true));  // a fresh hit moved from 31 (same swing, same stack copy): fires
+    once.note_propagate(true);
+    CHECK_FALSE(once.should_fire(&p, 5, 41, 40, true));  // a real parent level of that one
+}
+
+TEST_CASE("a blocked or parried hit has amount 0 before it lands (it never changes health)") {  // review I1
+    auto b = candidate();
+    put_at<uint32_t>(b.data(), offsetof(HC, flags), EMF_HIT_BLOCKED);
+    put_at<int32_t>(b.data(), offsetof(HC, healthChange), -7);
+    EmfHit h{};
+    hit_from_candidate(b.data(), &h);
+    CHECK(h.amount == 0);
+    CHECK(h.stamina == 5);
+    put_at<uint32_t>(b.data(), offsetof(HC, flags), EMF_HIT_PARRIED);
+    hit_from_candidate(b.data(), &h);
+    CHECK(h.amount == 0);
+}
+
+TEST_CASE("hit_to_candidate keeps the game's reaction for a value the game has not, and clamps the amount") {  // review M6
+    auto b = candidate();  // reaction 2
+    EmfHit h{};
+    hit_from_candidate(b.data(), &h);
+    h.reaction = 99;
+    hit_to_candidate(h, b.data());
+    CHECK(get_at<uint16_t>(b.data(), offsetof(HC, hitReaction)) == 2);
+    h.reaction = 10;
+    hit_to_candidate(h, b.data());
+    CHECK(get_at<uint16_t>(b.data(), offsetof(HC, hitReaction)) == 10);
+    h.amount = (std::numeric_limits<int32_t>::min)();
+    h.stamina = (std::numeric_limits<int32_t>::min)();
+    hit_to_candidate(h, b.data());
+    CHECK(get_at<int32_t>(b.data(), offsetof(HC, healthChange)) == (std::numeric_limits<int32_t>::max)());
+    CHECK(get_at<int32_t>(b.data(), offsetof(HC, staminaChange)) == (std::numeric_limits<int32_t>::max)());
+}
+
+TEST_CASE("a rule's size is checked against v31's, so a newer SDK's larger rule still works") {  // review M8
+    CHECK(kHitRuleV31Size == 36u);
+    EmfHitRule r = rule();
+    r.scale = 0.5f;
+    r.size = kHitRuleV31Size + 8;
+    std::string why;
+    CHECK(hit_rule_valid(r, &why));
+    r.size = kHitRuleV31Size - 4;
+    CHECK_FALSE(hit_rule_valid(r, &why));
 }

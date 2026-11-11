@@ -19,6 +19,8 @@ enum class HitClass : uint8_t { None, Player, Creature, Object };
 using HitClassify = HitClass (*)(uint32_t entity, void* ctx);
 
 constexpr size_t kMaxHitRules = 64;
+constexpr uint32_t kHitRuleV31Size = 36;  // the smallest rule size taken: a newer SDK's larger rule still works
+constexpr uint16_t kMaxHitReaction = 10;  // the game's HitReactionType values (0 none .. 10)
 
 // Why a rule cannot be used (false and *why), or true.
 bool hit_rule_valid(const EmfHitRule& r, std::string* why);
@@ -61,6 +63,9 @@ bool hit_from_event(const uint8_t* ev, uint32_t size, EmfHit* h);
 class HitOnce {
 public:
     bool should_fire(const void* hit, uint32_t impact, uint32_t target, uint32_t propagated_from, bool applies);
+    // After the game's applyHitToEntity returned: whether it set the caller's propagate byte (the conclusion walks up
+    // to the parent only then). The next call continues this chain only when it did.
+    void note_propagate(bool propagate) { propagate_ = propagate; }
     void reset();
 
 private:
@@ -68,6 +73,7 @@ private:
     uint32_t impact_ = 0;
     uint32_t last_target_ = 0;
     bool fired_ = false;
+    bool propagate_ = false;
 };
 
 }  // namespace emf::core

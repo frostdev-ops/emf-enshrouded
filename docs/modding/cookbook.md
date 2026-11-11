@@ -360,16 +360,22 @@ with no script call per hit; `emf.on_hit` sees hits after they landed. See lua.m
 
 ```lua
 -- God mode for one player: a hit cannot take their last point of health (or use cancel = true to drop every hit).
--- Keep the id and call emf.hit_rule_remove(id) when it ends. All rules of this script go when it reloads or pauses.
+-- Keep the id and call emf.hit_rule_remove(id) when it ends or the player leaves (their entity id is reused). All
+-- rules of this script go when it reloads or pauses.
 local function god_mode(player) return emf.hit_rule{to = player, min_health = 1} end
 
--- Who is on the server: the player events (the host's own player too).
+-- Who is on the server: the player events (the host's own player too). A player's rules go when they leave: the game
+-- gives their entity id to the next player who joins.
 local online, count = {}, 0
+local rules = {}   -- player id -> their PvP-off rule id
 emf.on_player_joined(function(world, p) if not online[p.player] then count = count + 1 end; online[p.player] = true end)
-emf.on_player_left(function(world, p) if online[p.player] then count = count - 1 end; online[p.player] = nil end)
+emf.on_player_left(function(world, p)
+  if online[p.player] then count = count - 1 end
+  online[p.player] = nil
+  if rules[p.player] then emf.hit_rule_remove(rules[p.player]); rules[p.player] = nil end
+end)
 
 -- PvP off inside a zone (a square here): a rule per player while they are inside, removed when they leave it.
-local rules = {}   -- player id -> rule id
 emf.on_tick(function(world)
   if not world:is_server() then return end
   for id in pairs(online) do

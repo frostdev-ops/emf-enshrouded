@@ -4,7 +4,10 @@
 
 #include <doctest.h>
 
+#include <chrono>
+#include <future>
 #include <string>
+#include <thread>
 
 #include "lua_host/host.h"
 #include "lua_test_fake.h"
@@ -176,4 +179,37 @@ TEST_CASE("lua 1.23: on an older core emf.on_hit is false and emf.hit_rule nil")
     Host host2(&old.api, old.dir);
     host2.load_all();
     CHECK(logged("old false nil"));
+}
+
+TEST_CASE("lua 1.23: a hit does not wait for a script without emf.on_hit that is busy in a world step") {  // review M11
+    Rig r(L"on_hit_busy");
+    add_script(r.dir, "listener", "emf.on_hit(function(w, h) emf.log('heard ' .. h.amount) end)\n");
+    add_script(r.dir, "slowpoke", "emf.on_tick(function(w) if w:is_server() then emf.log('hold') end end)\n");
+    Host host(&r.api, r.dir);
+    host.set_clock([] { return uint64_t{1000}; });
+    host.load_all();
+    HANDLE held = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    HANDLE release = CreateEventW(nullptr, TRUE, FALSE, nullptr);
+    r.fake.log_hook = [&](const std::string& line) {
+        if (line.find("hold") == std::string::npos) return;
+        SetEvent(held);
+        WaitForSingleObject(release, 10000);
+    };
+    std::thread server([&] { host.tick(kServer); });  // slowpoke stays inside its server tick
+    REQUIRE(WaitForSingleObject(held, 10000) == WAIT_OBJECT_0);
+    EmfHit h{};
+    h.size = sizeof h;
+    h.amount = 9;
+    h.health_before = -1;
+    h.health_after = -1;
+    auto done = std::async(std::launch::async, [&] { fire_hit(kServer, h); });
+    const bool quick = done.wait_for(std::chrono::milliseconds(2000)) == std::future_status::ready;
+    SetEvent(release);
+    server.join();
+    done.wait();
+    r.fake.log_hook = nullptr;
+    CloseHandle(held);
+    CloseHandle(release);
+    CHECK(quick);
+    CHECK(logged("heard 9"));
 }
