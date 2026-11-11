@@ -43,7 +43,7 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    E prompts (`emf.offer`, `emf.spawn_offer`, `emf.offer_remove`; EMF API v25): depend on `">=1.14"`. 1.15 adds
    pictures in windows (`emf.image`, the `image`, `icon`, `fps` and `height` row fields; EMF API v26): depend on
    `">=1.15"`. 1.17 adds the inter-mod message bus (`emf.bus.subscribe`, `.publish`, `.unsubscribe`): mods using it
-   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. Ranges are explained in
+   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. 1.23 adds hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`; EMF API v31): depend on `">=1.23"`. Ranges are explained in
    [guide.md](guide.md), "Dependencies and version ranges".)
 
 3. Put `main.lua` next to it:
@@ -127,7 +127,7 @@ right away.
 | `emf.health(world, id)` | (1.5) the current and maximum health: `local cur, max = emf.health(w, id)`; the game's attributes in a world you host, else the replicated `NetworkHealth`; nil when neither is there |
 | `emf.attribute(world, id, attr)` | (1.5) an attribute as the game reads it: `attr` is `"health"`, `"max_health"`, `"stamina"`, `"max_stamina"`, `"mana"`, `"max_mana"`, a player's `"xp_pending"`, `"xp"`, `"xp_required"` and `"level"` (1.11, EMF API v22), or an attribute id; nil when the entity has none. Give XP with `emf.attribute_add(w, player, "xp_pending", n)`: the game levels the player up itself (the other three are read-only). Host only |
 | `emf.attribute_add(world, id, attr, delta)` | (1.5) adds `delta` (a whole number) through the game's own attribute code: damage stops at 0, a heal of `"health"`, `"stamina"` or `"mana"` at its maximum (other heals are refused). Not a hit: no kill credit, no hit reaction. Host only. true / false |
-| `emf.damage(world, attacker, target, amount)` | (1.5) `amount` of true damage as a real game hit on the next step: a `HitEvent` (damage numbers, always a light reaction, aggro toward the attacker), the killing blow, kill credit and XP for `attacker` when it is a player (0 = no attacker, no aggro). The target must take hits (creatures and players) and not be immune. Host only. true / false |
+| `emf.damage(world, attacker, target, amount)` | (1.5) `amount` of true damage as a real game hit on the next step: a `HitEvent` (damage numbers, always a light reaction, aggro toward the attacker), the killing blow, kill credit and XP for `attacker` when it is a player (0 = no attacker, no aggro). The target must take hits (creatures and players, and since 1.23 placed objects: see "Hits" below) and not be immune. Host only. true / false |
 | `emf.xp_required(world, level)` | (1.11) the XP `level` needs before the next one (the game's own curve); nil outside 1..cap or when unknown. Host only |
 | `emf.level_cap(world)` | (1.11) the highest level a player can reach; nil when unknown. Host only |
 | `emf.set_level(world, player, level [, xp])` | (1.11) sets a player's level (1..cap) with `xp` (default 0) towards the next one: raises or lowers at once, without level-up events (to level up the game's way, give XP with `emf.attribute_add(w, player, "xp_pending", n)`). The skill points follow the level; after lowering, a skill tree that costs more points than the level gives is reset by the game at the next load. Saved with the character. Host only. true (done or queued) / false |
@@ -147,6 +147,9 @@ right away.
 | `emf.wheel(title, labels, key, fn)` | the radial wheel; `key` is held to choose (`"G"`, `""` for click); `fn(world, choice)`, choice 1..n or nil |
 | `emf.wheel_section(group, title, labels, fn)` | (1.9) your part of a wheel shared by several mods: publishes (replaces) your section of `group`; an empty list or nil removes it. `fn(world, index, label)` gets the index into the labels as they were when the wheel opened, and the label shown: if you published another list since, find the item by `label`. A pick from a wheel opened before your mod reloaded is dropped. Publish again when your labels change |
 | `emf.wheel_group(group, title, key)` | (1.9) opens one wheel with every mod's section of `group` (each label as "Section: label" when more than one mod has a section); a pick runs only its owner's `fn`. True when it opened (false: no labels, or more than 64) |
+| `emf.on_hit(fn)` | (1.23) `fn(world, hit)` after the server applied each landing hit on an entity (the game's `HitEvent`), on the server world; see "Hits" below. Joined players' games see none. true / false (false on an older core) |
+| `emf.hit_rule{from, to, crit, backstab, weakspot, types, attack, healing, scale, add, min_health, cancel}` | (1.23) a rule the core applies to every matching hit before it lands: change its amount or cancel it. Returns its id, or nil when refused (the log says why: 64 rules, the hook not usable on this game build). See "Hits" below |
+| `emf.hit_rule_remove(id)` | (1.23) removes a rule of this script. true only for the script's own rule |
 | `emf.on_player_joined(fn)`, `emf.on_player_left(fn)`, `emf.on_player_died(fn)` | (1.20) `fn(world, p)` on the server world, `p` = `{player, account, name, host, killer}` (`killer`: died only, the last hitter within 10 s or 0). All join 1 s after the world data; died needs the call in the first run. False on an older core (reference.md "v28") |
 | `emf.net.channel(name, def)` | (1.19) a message channel `"<mod id>/<name>"`: `def` = `{version, to = "server" \| "players" \| "both", max, per_10s, on_server = fn(world, from, data), on_player = fn(world, from, data)}`; `from` = `{player, account, admin, is_local, version}`. A reload binds the new functions; a new version needs a restart. In process, and to joined players and the server over the chat (reference.md "v27") |
 | `emf.net.send(name, data)`, `.send_to(world, player, name, data)`, `.send_all(world, name, data)`, `.peer(world, player, name)` | (1.19) to the server (true: sent) / to one player's game / to all with the channel (count) / that game's channel version (`peer(nil, 0, name)`: the server's; 0 = none) |
@@ -284,6 +287,47 @@ The rules (what is refused, waits, NPCs) are those of `teleport` in [reference.m
 
 The settings and their ranges are in [world_settings.md](world_settings.md). A mod that changes them should say so
 in its README: players expect the world to keep the settings they chose.
+
+## Hits (1.23)
+
+`emf.on_hit(fn)` sees each hit the server world applies to an entity, after it landed. `emf.hit_rule{...}` changes
+hits before they land, with no script call in between (a script never runs before a hit lands: the script lock is shared
+by the world threads, and a call per hit would slow fights). Both work on the server world only (a game you host or the
+dedicated server; see [server.md](server.md)).
+
+`fn(world, hit)` gets a table:
+
+| Field | What |
+|---|---|
+| `attacker`, `source` | the root source (the shooter of an arrow, the caster of a spell; 0 = none) and the direct source (a projectile, a trap) |
+| `target`, `part` | the actor hit and the entity hit (the same for most hits) |
+| `amount` | health damage; negative for healing. A blocked or parried hit has 0 |
+| `stamina` | stamina damage of a blocked hit |
+| `crit`, `blocked`, `parried`, `backstab`, `weakspot`, `healing`, `killed` | booleans (`killed`: the killing blow) |
+| `types` | list of damage type names: `"cut"`, `"pierce"`, `"blunt"`, `"fire"`, `"ice"`, `"shroud"`, `"lightning"`, `"poison"`, `"wood"`, `"stone"`, `"metal"`, `"explosion"` |
+| `attack` | `"melee"`, `"ranged"`, `"magic"`, `"tool"`, `"other"`, `"aoe"` or `"skillshot"` |
+| `weapon_item`, `weapon_category`, `program`, `impact`, `reaction` | the weapon's item id (0 = none or not known), the game's weapon category hash, the attack's impact program, the swing or projectile (hits of one share it), the hit reaction type |
+| `health_before`, `health_after` | the target's health around the hit; nil when not known |
+| `from_mod` | true for a hit made by `emf.damage` |
+| `position` | `{x = , y = , z = }` in metres |
+
+A rule takes: `from` and `to` (an entity id, or `"players"`, `"creatures"`, `"objects"`; absent = anyone; an entity id
+as `to` matches the actor hit and the part hit), `crit`, `backstab`, `weakspot` (true = only such hits), `types` (a
+list of type names, any of them), `attack` (a name or a list of names), `healing` (true = healing hits only; without it
+a rule matches damage hits only, so "no PvP" does not stop a friend's heal), then what it does: `cancel` (the hit is
+dropped: no damage, number, reaction, aggro, XP credit or destruction), `scale` (amount times scale; a blocked hit's
+stamina too), `add` (added after the scale), `min_health` (the target keeps at least that much health: 1 = it cannot
+die from hits). A damage hit never becomes a heal and a heal never becomes damage. Rules apply in id order; cancel
+wins. An unknown field or a bad name is an error. A script's rules are removed when it reloads, unloads or pauses.
+
+What never becomes a hit (no hook sees it): fall, shroud, cold and drowning damage, regeneration, direct attribute
+writes, voxel damage (terrain and walls). A blocked or parried hit changes stamina, not health. These other kinds
+come in a later version.
+
+`emf.damage` also hits placed objects (an entity with `Destructible` and no `CombatFlags`, or with `handleHits` on): the
+game gives it health on the first hit and removes it at 0. A placed object's health is not saved: a reload heals it.
+
+Recipes: [cookbook.md](cookbook.md), "Hits".
 
 ## Worlds and components
 

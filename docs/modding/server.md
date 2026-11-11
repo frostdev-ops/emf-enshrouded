@@ -137,6 +137,12 @@ announcements, a restart countdown (`herald.restart 10 nightly` in `emf\commands
 `emf\logs\`, playtime, and an opt-in Discord webhook. **Hand-over** (`mods/handover`, Lua, off by default) lets
 players give items to each other with `/handover`; a player who does not want any types `/handover.block`.
 
+### Hits (EMF API v31)
+
+Hit rules (`hit_rule_add`, Lua `emf.hit_rule`), `on_hit_before` and `on_hit` live on the server world: a game you host
+or the dedicated server. Players who join need nothing (not EMF, not the mod), and their games see no hits of their own.
+`hits` in the server's console shows how they work.
+
 ### In a game you host
 
 Your own `/commands` already work from your chat (the client side, `[overlay] chat=1`). To let your friends run

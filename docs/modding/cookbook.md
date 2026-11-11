@@ -354,6 +354,58 @@ if (const auto p = emf::position(w, emf::local_player()))  // no position while 
 
 The console's `near [radius]` shows the same with tags (player, villager, inventory, animal, plant, health).
 
+## Hits: god mode, PvP off in a zone, a damage meter, scaling by player count
+*Lua 1.23 (EMF API v31); the server world: a game you host or a dedicated server. Rules change hits before they land
+with no script call per hit; `emf.on_hit` sees hits after they landed. See lua.md, "Hits".*
+
+```lua
+-- God mode for one player: a hit cannot take their last point of health (or use cancel = true to drop every hit).
+local god = emf.hit_rule{to = player_id, min_health = 1}
+-- emf.hit_rule_remove(god) when it ends. All rules of this script go when it reloads or pauses.
+
+-- Who is on the server: the player events (the host's own player too).
+local online, count = {}, 0
+emf.on_player_joined(function(world, p) if not online[p.player] then count = count + 1 end; online[p.player] = true end)
+emf.on_player_left(function(world, p) if online[p.player] then count = count - 1 end; online[p.player] = nil end)
+
+-- PvP off inside a zone (a square here): a rule per player while they are inside, removed when they leave it.
+local rules = {}   -- player id -> rule id
+emf.on_tick(function(world)
+  for id in pairs(online) do
+    local x, y, z = world:position(id)
+    local inside = x and math.abs(x - 100) < 50 and math.abs(z - 200) < 50
+    if inside and not rules[id] then
+      rules[id] = emf.hit_rule{from = "players", to = id, cancel = true}
+    elseif not inside and rules[id] then
+      emf.hit_rule_remove(rules[id])
+      rules[id] = nil
+    end
+  end
+end)
+-- A rule matches damage hits only (no healing = true), so a friend's heal still works.
+
+-- A damage meter: who dealt how much (health damage after the hit; blocked hits have amount 0).
+local dealt = {}
+emf.on_hit(function(world, hit)
+  if hit.amount > 0 and hit.attacker ~= 0 then
+    dealt[hit.attacker] = (dealt[hit.attacker] or 0) + hit.amount
+  end
+end)
+
+-- Creatures hit players softer when more players are on the server: replace the rule when the count changes.
+local scale_rule, scaled_for = nil, 0
+emf.on_tick(function(world)
+  if count ~= scaled_for then
+    if scale_rule then emf.hit_rule_remove(scale_rule) end
+    scale_rule = emf.hit_rule{from = "creatures", to = "players", scale = 1 / math.max(count, 1)}
+    scaled_for = count
+  end
+end)
+```
+
+In C++ the same is `emf::add_hit_rule` with an `EmfHitRule` from `emf::hit_rule()`, and `on_hit_before` changes a
+hit inline (be fast; reference.md, "v31").
+
 ## Run code before or after one of the game's programs
 
 ```cpp

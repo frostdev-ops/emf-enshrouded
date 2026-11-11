@@ -1,12 +1,27 @@
 # Combat: factions, damage, health/attributes, buffs
 
-Build 1269579, image base 0x140000000. Static analysis only. Signatures come from `sig.py` (first number = byte length, `??` = wildcard).
+Image base 0x140000000. Static analysis only (since the hit hooks, also checked live on 1287369). Signatures come from `sig.py` (first number = byte length, `??` = wildcard).
+
+**Build note.** Most addresses below were found on build 1269579. For build **1287369** (game and dedicated server) these are checked:
+
+| Function | 1287369 game | 1287369 dedicated server |
+|---|---|---|
+| applyHitToEntity | 0x1403efd10 | 0x140190fb0 |
+| applyDamage (native) | 0x1403dbdc0 | 0x14017cf80 |
+| impact_hit_conclusion | 0x1403f4b60 | 0x140195e00 |
+| clear_hit_candidates | 0x1403f49e0 | 0x140195c80 |
+| impact_simulation | 0x1403f6a10 | 0x140197cb0 |
+| impact_system_prepare | 0x1403f6ca0 | 0x140197f40 |
+| allocPendingHit | 0x1412351a0 | 0x14098c030 |
+| attrAdd | 0x1403ef570 | 0x140190810 |
+
+Where a section gives another address for one of these, it is the 1269579 one. The applyHitToEntity signature for 1287369 is in `src/common/signatures.cpp` (a call site in the conclusion plus the function's own pattern; the short prologue below is unique there but too generic to trust after an update). The applyDamage prologue below no longer matches on 1287369. EMF's hit hooks (`on_hit_before`, hit rules) detour applyHitToEntity: [../modding/reference.md](../modding/reference.md), "v31".
 
 ## Overview: how a hit becomes damage (server world)
 
 1. `impact_simulation` (0x1403ef7a0) runs the data-driven **impact programs** (node graphs from game resources). Graph nodes call C++ **impact natives**. The `ApplyDamage` node calls `applyDamage` (0x1403d4d50).
 2. `applyDamage` works out the final health/stamina change (damage types, armor, susceptibility, crit, block, faction modifiers). It does **not** touch Health. It fills a 0x150-byte **pending hit** record (a `HitEvent` plus extra fields) and queues it in `impact::ImpactSystem` (`allocPendingHit` 0x141216920).
-3. `impact_hit_conclusion` (0x1403ed8f0, flag 0x4) reads all pending hits. It keeps only the strongest hit per (target, impactId), charges the attacker's mana cost, then calls `applyHitToEntity` (0x1403e8b40) for the target and walks up the `ImpactHierarchy` parents (at most 5 levels).
+3. `impact_hit_conclusion` (0x1403ed8f0, flag 0x4) reads all pending hits. It keeps only the strongest hit per (target, impactId), charges the attacker's mana cost, then calls `applyHitToEntity` (0x1403e8b40; 1287369: game 0x1403efd10, server 0x140190fb0) for the target and walks up the `ImpactHierarchy` parents (at most 5 levels). It passes a copy of the hit on its stack, the same copy to the parents.
 4. `applyHitToEntity` changes the Health (and Stamina, if blocked) attributes and sends the real `ecs::HitEvent` (0xF8 B). If health goes from >0 to <=0, it sets `WasKillingBlow` (0x2000).
 5. HitEvent consumers include `destructible`, `healthbar`, `hit_history`, `call_factions_for_help`, `combat_experience_source`, `toggle_on_hit`, `server_player_control_hitevents`, and on the client `client_player_control_hitevents` and `set_low_health_color_gradient_factor`.
 6. `death` (0x140273300) sees Health < 1, sets the actor's dead state and sends `EntityDiedEvent`.
@@ -111,7 +126,7 @@ Combat-related natives (name, then address): getBuffTarget 0x1403de410, getHitTa
   - Handles block: health damage becomes stamina damage and the WasBlocked flag is set.
   - Handles merciless/visceral kills.
   - Fills the pending hit and queues it.
-- **Base protection**: if the target faction is Environment or FarmAnimal and the source lacks permission, it emits `ecs::ProhibitedHit` (0x746D2A02, 0x38 B) instead of a hit.
+- **Base protection**: if the attacker (or its root source) is a **player** (entity id 1..0x3FE) without the build permission, and the target faction is Environment, FarmAnimal or missing, it emits `ecs::ProhibitedHit` (0x746D2A02, 0x38 B) instead of a hit. Monsters are never stopped by it (confirmed on 1287369, code around 0x1403dce6c..0x1403dcfa0).
 - **Confidence**: High for the role and queueing, Medium for the exact meaning of each modifier.
 
 Damage helpers:
@@ -193,7 +208,8 @@ Extra fields after the HitEvent part:
 - Walks the pending-hit list (stride 0x150).
 - Removes duplicates per impactId/target, keeping the largest |healthChange|.
 - Checks the mana cost (+0x140) against the source's Mana and subtracts it.
-- Calls applyHitToEntity for the target and then for each ImpactHierarchy parent while `CombatFlags.propagateHits` allows it (at most 5 levels).
+- Calls applyHitToEntity for the target and then for each ImpactHierarchy parent while `CombatFlags.propagateHits` allows it (at most 5 levels). The hit is copied to a stack local first and that one copy goes to the target and to every parent; before each parent call the conclusion sets `propagatedFromEntityId` (+0x148) to the previous target and `targetId` (+0x94) to the parent. So a detour on applyHitToEntity runs once per entity, not once per hit.
+- Terrain and building hits (candidate type 1 and 2) get their own dedupe and their own calls of applyHitToEntity.
 - Confidence: High.
 
 ### 3.4 applyHitToEntity: **the best hook for changing or logging damage**
@@ -201,12 +217,12 @@ Extra fields after the HitEvent part:
 - **C signature**: `void applyHitToEntity(bool* outPropagate, EntityHandle target, HitConclusionCtx* ctx, PendingHit* hit)`.
 - **What it does**:
   1. Logs "[impact] Droped Hit" if the hit is invalid.
-  2. Reads CombatFlags (+1 propagateHits, +2 handleHits). If `handleHits` is 0 it returns.
-  3. If blocked or parried (flags & 3): applies `hit+0xC0` to the Stamina attribute 0x04B6AA8B. Reaching <= 0 sets WasBlockBroken (4).
+  2. Reads CombatFlags (+1 propagateHits, +2 handleHits). If `handleHits` is 0 it returns. An entity with no CombatFlags at all is processed.
+  3. If blocked or parried (flags & 3): applies `hit+0xC0` to the Stamina attribute 0x04B6AA8B. Reaching <= 0 sets WasBlockBroken (4). A blocked or parried hit **never changes Health** (its HitEvent shows healthChange 0).
   4. Applies `hit+0xBC` to Health attribute 0x8EB84995 through `attrAdd`. Going from >0 to <=0 sets WasKillingBlow (0x2000).
   5. If the entity has no Health but has `Destructible`: adds a Health component (type hash 0xDC101091). Its base max (0x59185EF5) is `Destructible.maxHealth` and current = clamp(max + healthChange).
   6. Emits `NoiseEvent` (0xD079D101) when noiseRange > 0.
-  7. Emits `HitEvent` (0xCC0D57E0, 0xF8 B, copied from the record with the final values).
+  7. Emits `HitEvent` (0xCC0D57E0, 0xF8 B, copied from the record with the final values), only if `sendHitEvent` (+0x14C) is set, and then **clears it**: parents up the hierarchy send no second event. When the event stream is full the event waits in an ImpactSystem queue and `impact_system_prepare` emits it in the next step.
 - **Hooking**: change `hit->healthChange` (+0xBC) and `hit->staminaChange` (+0xC0) before calling the original. Skipping the original cancels the hit. Server world only.
 - **Confidence**: High.
 

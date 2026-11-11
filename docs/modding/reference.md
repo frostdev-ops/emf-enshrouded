@@ -294,7 +294,7 @@ takes its old path, so a shifted offset can never turn a hit into something else
 | `emf::attribute(w, id, EMF_ATTR_HEALTH)` | `attribute_get(world, entity, attr_id, &out)` | an attribute as the game reads it: `EMF_ATTR_HEALTH` (current health), `EMF_ATTR_MAX_HEALTH` (the maximum, computed by the game), `EMF_ATTR_STAMINA`, `EMF_ATTR_MAX_STAMINA`, `EMF_ATTR_MANA`, `EMF_ATTR_MAX_MANA`, or another id of those components. Nothing / false when the entity has none (a prop, a client world), its component is not set up yet, or the feature is off on this game build (logged once). World callback, like `get_component`. |
 | `emf::health(w, id, &cur, &max)` | — | current and maximum health: the attributes in a world you host, else the replicated `NetworkHealth` (a client of someone else's game, an older core). False when neither is there. |
 | `emf::attribute_add(w, id, attr, delta)` | `attribute_add(world, entity, attr_id, delta)` | adds `delta` through the game's own `attrAdd`, which also updates the values computed from it; the game's death program and `NetworkHealth` (what players see) pick the change up on the next step: health at 0 dies like any death. **Clamped:** damage stops at 0, a heal of current health, stamina or mana at its maximum; a heal of an attribute whose maximum cannot be read (any other id) is refused. **Not a hit:** no kill credit or XP, no hit reaction, no damage numbers, no killing blow (a destructible prop is not destroyed). Inside a world callback on that world it runs at once; anywhere else (another thread, a mod program) it runs after the server world's next step (true = queued, a later refusal is logged). |
-| `emf::damage(w, attacker, target, amount)` | `damage(world, attacker, target, amount)` | `amount` (> 0) of **true damage** (no armour, block, crit or base protection) as a real game hit: EMF queues a pending hit and the game's own `impact_hit_conclusion` applies it on the next step, with a `HitEvent` (damage numbers, **always a light hit reaction**: a parameter for it may come later; aggro toward the attacker), the killing blow, and **kill credit and XP** for the attacker when it is a player (0 = no attacker and no aggro). The target needs `CombatFlags.handleHits` (creatures and players have it) and `Health`; a target with `CombatFlags.immune` is refused. Inside a world callback the target is checked at once (false when refused); elsewhere at the next step (logged). |
+| `emf::damage(w, attacker, target, amount)` | `damage(world, attacker, target, amount)` | `amount` (> 0) of **true damage** (no armour, block, crit or base protection) as a real game hit: EMF queues a pending hit and the game's own `impact_hit_conclusion` applies it on the next step, with a `HitEvent` (damage numbers, **always a light hit reaction**: a parameter for it may come later; aggro toward the attacker), the killing blow, and **kill credit and XP** for the attacker when it is a player (0 = no attacker and no aggro). The target needs `CombatFlags.handleHits` (creatures and players have it) and `Health`; a target with `CombatFlags.immune` is refused. **Placed objects** (v31): an entity with `Destructible` (on it or its template) and no `CombatFlags`, or `CombatFlags` with `handleHits` on, is hit too: the game gives it `Health` on the first hit and removes it at 0; that `Health` is not saved, so a reload heals the object. Inside a world callback the target is checked at once (false when refused); elsewhere at the next step (logged). |
 | `emf::has_v18()` | — | true when the core has them. |
 
 Notes:
@@ -734,6 +734,55 @@ settings frees the old one), so a name is never half old, half new; the names ar
 
 EMF's own command replies to players and the mods-check refusal are such lines now (`[EMF] ...` with no name in front).
 
+## v31: hits
+
+The server world applies every hit through the game's `applyHitToEntity`. Mods see each landing hit after it was applied
+(`on_hit`) and change hits before they land (`on_hit_before`, rules). Server world only (a game you host or the
+dedicated server); a joined player's game sees no hits and needs nothing.
+
+| C | C++ | What |
+|---|---|---|
+| `on_hit(cb, user)` | `api()->on_hit(cb, user)` | `cb(world, const EmfHit*, user)` after the server world's step, on its thread, once per hit the server applied to an entity, from the game's `HitEvent`: the final numbers, `EMF_HIT_KILLED` on the killing blow, `health_after` = the target's health then (`health_before` is -1). Not for terrain or building hits. Works on any game build where `on_event` works. False for a null `cb` or 16 callbacks already (logged). |
+| `on_hit_before(cb, user)` | `api()->on_hit_before(cb, user)` | `cb(world, EmfHit*, user)` inline for each landing entity hit, after the rules and before the game applies it: change `amount`, `stamina`, `reaction` or set `cancel`. It runs on the game's impact thread inside the world's step, so: **be fast**, change only the hit, read only the hit's entities (their `Health`, `Stamina`, `Mana`), no spawn, kill or component writes (`damage` only queues). Once per hit, also for a target of several parts. A callback that faults is switched off. False when the hook is not usable on this game build, for a null `cb` or 16 already (logged). |
+| `hit_rule_add(&rule)` | `emf::add_hit_rule(r)` | adds a rule the core applies to every landing entity hit before the `on_hit_before` callbacks, in id order, without calling the mod. Its id, or 0 when refused (logged: a bad rule, 64 rules already, the hook not usable on this game build). Any thread; it counts from the next hit. `emf::hit_rule()` returns a rule with the defaults (`size` set, `scale` 1). |
+| `hit_rule_remove(id)` | `emf::remove_hit_rule(id)` | removes a rule. False: no rule with that id. |
+| | `emf::has_v31()` | true when the core has these functions. |
+
+`EmfHit` (`size` = `sizeof(EmfHit)`): `attacker` (the root source: the shooter of an arrow, the caster of a spell; 0 =
+none), `source` (the direct source), `target` (the actor hit), `part` (the entity hit; the same for most hits), `amount`
+(health damage: > 0 damage, < 0 healing), `stamina` (stamina damage of a blocked hit), `flags` (`EMF_HIT_*`),
+`damage_types` (bit per type: 0 cut, 1 pierce, 2 blunt, 3 fire, 4 ice, 5 shroud, 6 lightning, 8 poison, 9 wood, 10
+stone, 11 metal, 12 explosion), `attack` (0 melee, 1 ranged, 2 magic, 3 tool, 4 other, 5 area, 6 skill shot), `kind`
+(0 an entity, the only kind passed), `weapon_category` (the game's hash, 0 = none), `weapon_item` (0 = none or not
+known), `program` (the attack's impact program), `impact` (the swing or projectile: hits of one share it), `reaction`
+(the game's hit reaction type: 0 none, 2 light), `target_faction`, `from_mod` (1 = a `damage` hit), `health_before` and
+`health_after` (-1 = not known; before the hit `health_after` is what it will be as the hit stands), `position`
+(metres), `cancel` (before the hit: 1 drops it silently). `amount`, `stamina`, `reaction` and `cancel` are the fields
+`on_hit_before` may change. A blocked or parried hit changes stamina, not health: its `amount` is 0.
+
+Flags: `EMF_HIT_BLOCKED` 0x1, `EMF_HIT_PARRIED` 0x2, `EMF_HIT_CRIT` 0x8, `EMF_HIT_BACKSTAB` 0x20, `EMF_HIT_WEAKSPOT` 0x40,
+`EMF_HIT_KILLED` 0x2000 (after the hit only), `EMF_HIT_HEALING` 0x4000. `EMF_HIT_TERRAIN` and `EMF_HIT_BUILDING` are
+the game's terrain and building hits: never passed to mods.
+
+`EmfHitRule` (`size`, then): `attacker` and `target` (0 = anyone, an entity id, or a class: `EMF_HIT_PLAYERS`,
+`EMF_HIT_CREATURES` (not a player, has health), `EMF_HIT_OBJECTS` (a placed object with `Destructible`); an entity id
+as `target` matches the actor hit or the part hit), `flags_all` (the hit has all these flags: `EMF_HIT_CRIT` = crits
+only), `damage_types_any` (0 = any), `attacks` (bit per attack kind, `1 << attack`; 0 = any), `healing` (0 = damage hits
+only, 1 = healing hits only: a "PvP off" rule does not stop a friend's heal), then the effect: `cancel`, `scale`
+(`amount` and a blocked hit's `stamina` times `scale`), `add` (then `amount += add`), `min_health` (> 0: the target
+keeps at least that much health, only when its health is known). Rules apply in id order: a `cancel` wins; for every
+matching rule `amount = trunc(amount * scale) + add`, but a damage hit never becomes a heal and a heal never becomes
+damage; then the largest `min_health` caps the damage. A cancelled hit: no damage, no damage number, no reaction, no
+aggro, no XP credit, no destruction.
+
+EMF detours the game's `applyHitToEntity` (checked on game build 1287369, game and dedicated server). When it cannot be
+used on a build, `hit_rule_add` and `on_hit_before` are refused (logged once) and `on_hit` still works. The console
+command `hits` shows the state ([Console commands](#console-commands-built-in)).
+
+What never becomes a hit, so no hook sees it: fall, shroud, cold and drowning damage, regeneration, direct attribute
+writes (`attribute_add`), and voxel damage (terrain and player walls). These other damage kinds come in a later
+version.
+
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
 
 ## SDK headers (header-only C++, no ABI)
@@ -756,7 +805,7 @@ Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod
 from the next start), `profile [save <name> [--settings] [--replace] | load <name>]` (mod profiles: the switches of
 every mod under a name, as in EMF.exe; a load applies at the next start), `hud.list`, `hud.move <part> <x> <y>`, `hud.scale <part> <s>`, `hud.hide <part>`, `hud.show <part>`, `hud.reset [part]`,
 `hud.layout [save|load|delete <name>]`, `hud.swap <bar> <bar>`, `hud.order <bar> <bar> <bar>`, `hud.grow up|down`,
-`hud.colour [bar] [part] [colour]` (the HUD editor: offsets in percent of the screen, scale 0.5 to 2, the bars `health`,
+`hits` (v31: one line with the state of the hit hooks: whether `on_hit_before` and the rules work or why not, how many rules and callbacks, hits seen, changed and cancelled, callback faults, the average microseconds per hit), `hud.colour [bar] [part] [colour]` (the HUD editor: offsets in percent of the screen, scale 0.5 to 2, the bars `health`,
 `mana`, `stamina` move on their own and take colours, the mods' HUD lines are the parts `lines_top_right`,
 `lines_bottom_right`, `lines_bottom_left`, layouts in `emf\hud`), `items [part]`, `give <item> [n]`, `put <item> [n] [entity] [level] [rarity]`,
 `take <item> [n] [entity]`, `spawn <guid> [n]`, `time <hours>`, `pos`, `perf` (how long each world step took since the last `perf`: the game's own steps, EMF's wait
