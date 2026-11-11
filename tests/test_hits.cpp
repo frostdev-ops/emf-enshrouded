@@ -191,8 +191,20 @@ TEST_CASE("classes, ids, flags, types and attacks match") {
     r.attacks = 1u << 1;
     EmfHit ranged = hit(5);
     CHECK_FALSE(hit_rule_matches(r, ranged, &classify, nullptr));
-    ranged.attack = 1;
+    ranged.attacks = 1u << 1;  // the game's attackCategory is a mask: bit per kind
     CHECK(hit_rule_matches(r, ranged, &classify, nullptr));
+}
+
+TEST_CASE("an attack rule matches any of the hit's attack kinds (both masks)") {
+    EmfHitRule r = rule();
+    r.attacks = (1u << 1) | (1u << 2);  // ranged or magic
+    EmfHit h = hit(5);
+    h.attacks = 1u << 0;  // melee
+    CHECK_FALSE(hit_rule_matches(r, h, &classify, nullptr));
+    h.attacks = (1u << 0) | (1u << 2);  // melee and magic
+    CHECK(hit_rule_matches(r, h, &classify, nullptr));
+    h.attacks = 0;  // no kind (a damage() hit)
+    CHECK_FALSE(hit_rule_matches(r, h, &classify, nullptr));
 }
 
 TEST_CASE("a scaled blocked hit scales stamina, not health") {
@@ -297,7 +309,7 @@ std::array<uint8_t, 0x150> candidate() {
     put_at<int32_t>(m, offsetof(HC, staminaChange), -5);
     put_at<uint32_t>(m, offsetof(HC, flags), 0x8);
     put_at<uint16_t>(m, offsetof(HC, damageTypes), 0x8);
-    put_at<uint8_t>(m, offsetof(HC, attackCategory), 1);
+    put_at<uint8_t>(m, offsetof(HC, attackCategory), 1);  // a mask: melee
     put_at<uint32_t>(m, offsetof(HC, impactId), 0x7E5F0003u);
     put_at<uint16_t>(m, offsetof(HC, hitReaction), 2);
     put_at<uint32_t>(m, offsetof(HC, weaponCategory), 0xABCDu);
@@ -322,7 +334,7 @@ TEST_CASE("hit_from_candidate reads the game's fields") {
     CHECK(h.stamina == 5);
     CHECK(h.flags == 8);
     CHECK(h.damage_types == 8);
-    CHECK(h.attack == 1);
+    CHECK(h.attacks == 1);  // the game's mask, as it is (bit 0: melee; a wolf's bite, seen live)
     CHECK(h.kind == 0);
     CHECK(h.impact == 0x7E5F0003u);
     CHECK(h.from_mod == 1);

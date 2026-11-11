@@ -453,7 +453,9 @@ typedef struct EmfHit {
     uint32_t flags;           /* the game's hit flags: EMF_HIT_* */
     uint16_t damage_types;    /* bit per type: 0 cut, 1 pierce, 2 blunt, 3 fire, 4 ice, 5 shroud, 6 lightning, 8 poison,
                                  9 wood, 10 stone, 11 metal, 12 explosion */
-    uint8_t attack;           /* 0 melee, 1 ranged, 2 magic, 3 tool, 4 other, 5 area, 6 skill shot */
+    uint8_t attacks;          /* the attack's kinds, a bit per kind: 1 melee, 2 ranged, 4 magic, 8 tool, 16 other,
+                                 32 area, 64 skill shot (the game's mask: most hits have one bit; 0 = none, as a
+                                 damage() hit) */
     uint8_t kind;             /* 0 an entity (the only kind passed in v31) */
     uint32_t weapon_category; /* the game's WeaponCategoryId hash, 0 = none */
     uint32_t weapon_item;     /* the weapon's item id, 0 = none or not known */
@@ -487,7 +489,7 @@ typedef struct EmfHitRule {
     uint32_t target;           /* the same; an entity matches the actor hit or the part hit */
     uint32_t flags_all;        /* the hit has all these EMF_HIT_* flags (EMF_HIT_CRIT: crits only) */
     uint16_t damage_types_any; /* the hit has one of these damage types (EmfHit.damage_types bits); 0 = any */
-    uint8_t attacks;           /* bit per attack kind (1 << EmfHit.attack); 0 = any */
+    uint8_t attacks;           /* the hit has one of these attack kinds (EmfHit.attacks bits); 0 = any */
     uint8_t cancel;            /* 1 = cancel the hit */
     float scale;               /* amount (and a blocked hit's stamina) *= scale; 1 = unchanged */
     int32_t add;               /* then amount += add */

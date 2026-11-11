@@ -752,7 +752,8 @@ dedicated server); a joined player's game sees no hits and needs nothing.
 none), `source` (the direct source), `target` (the actor hit), `part` (the entity hit; the same for most hits), `amount`
 (health damage: > 0 damage, < 0 healing), `stamina` (stamina damage of a blocked hit), `flags` (`EMF_HIT_*`),
 `damage_types` (bit per type: 0 cut, 1 pierce, 2 blunt, 3 fire, 4 ice, 5 shroud, 6 lightning, 8 poison, 9 wood, 10
-stone, 11 metal, 12 explosion), `attack` (0 melee, 1 ranged, 2 magic, 3 tool, 4 other, 5 area, 6 skill shot), `kind`
+stone, 11 metal, 12 explosion), `attacks` (the attack's kinds, a bit each: 1 melee, 2 ranged, 4 magic, 8 tool, 16 other, 32 area, 64 skill shot; most
+hits have one, a `damage` hit none), `kind`
 (0 an entity, the only kind passed), `weapon_category` (the game's hash, 0 = none), `weapon_item` (0 = none or not
 known), `program` (the attack's impact program), `impact` (the swing or projectile: hits of one share it), `reaction`
 (the game's hit reaction type: 0 none, 2 light), `target_faction`, `from_mod` (1 = a `damage` hit), `health_before` and
@@ -767,7 +768,7 @@ the game's terrain and building hits: never passed to mods.
 `EmfHitRule` (`size`, then): `attacker` and `target` (0 = anyone, an entity id, or a class: `EMF_HIT_PLAYERS`,
 `EMF_HIT_CREATURES` (not a player, has health), `EMF_HIT_OBJECTS` (a placed object with `Destructible`); an entity id
 as `target` matches the actor hit or the part hit), `flags_all` (the hit has all these flags: `EMF_HIT_CRIT` = crits
-only), `damage_types_any` (0 = any), `attacks` (bit per attack kind, `1 << attack`; 0 = any), `healing` (0 = damage hits
+only), `damage_types_any` (0 = any), `attacks` (any of these `EmfHit.attacks` bits; 0 = any), `healing` (0 = damage hits
 only, 1 = healing hits only: a "PvP off" rule does not stop a friend's heal), then the effect: `cancel`, `scale`
 (`amount` and a blocked hit's `stamina` times `scale`), `add` (then `amount += add`), `min_health` (> 0: the target
 keeps at least that much health, only when its health is known). Rules apply in id order: a `cancel` wins; for every

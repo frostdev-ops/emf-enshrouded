@@ -65,7 +65,7 @@ bool hit_rule_matches(const EmfHitRule& r, const EmfHit& h, HitClassify classify
     if (!side_matches(r.target, h.target, h.part, classify, ctx)) return false;
     if ((h.flags & r.flags_all) != r.flags_all) return false;
     if (r.damage_types_any && !(h.damage_types & r.damage_types_any)) return false;
-    if (r.attacks && (h.attack >= 8 || !(r.attacks & (1u << h.attack)))) return false;
+    if (r.attacks && !(h.attacks & r.attacks)) return false;
     return true;
 }
 
@@ -128,7 +128,7 @@ void common_fields(const uint8_t* p, EmfHit* h) {
     h->stamina = -rd<int32_t>(p, offsetof(HC, staminaChange));
     h->flags = rd<uint32_t>(p, offsetof(HC, flags));
     h->damage_types = rd<uint16_t>(p, offsetof(HC, damageTypes));
-    h->attack = rd<uint8_t>(p, offsetof(HC, attackCategory));
+    h->attacks = rd<uint8_t>(p, offsetof(HC, attackCategory));  // a mask (applyDamage sets and clears bits)
     h->weapon_category = rd<uint32_t>(p, offsetof(HC, weaponCategory));
     h->program = rd<uint32_t>(p, offsetof(HC, programId));
     h->impact = rd<uint32_t>(p, offsetof(HC, impactId));

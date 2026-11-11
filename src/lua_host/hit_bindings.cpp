@@ -58,9 +58,18 @@ void push_hit(lua_State* L, const EmfHit& h) {
             lua_rawseti(L, -2, ++n);
         }
     lua_setfield(L, -2, "types");
-    if (h.attack < kAttackCount) lua_pushstring(L, kAttacks[h.attack]);
-    else lua_pushinteger(L, h.attack);
-    lua_setfield(L, -2, "attack");
+    lua_createtable(L, 1, 0);  // attacks: every kind; attack: the first (most hits have one), nil for none
+    int k = 0;
+    for (int b = 0; b < kAttackCount; ++b)
+        if (h.attacks & (1u << b)) {
+            if (k == 0) {
+                lua_pushstring(L, kAttacks[b]);
+                lua_setfield(L, -3, "attack");
+            }
+            lua_pushstring(L, kAttacks[b]);
+            lua_rawseti(L, -2, ++k);
+        }
+    lua_setfield(L, -2, "attacks");
     set_int(L, "weapon_item", h.weapon_item);
     set_int(L, "weapon_category", h.weapon_category);
     set_int(L, "program", h.program);

@@ -305,7 +305,7 @@ dedicated server; see [server.md](server.md)).
 | `stamina` | stamina damage of a blocked hit |
 | `crit`, `blocked`, `parried`, `backstab`, `weakspot`, `healing`, `killed` | booleans (`killed`: the killing blow) |
 | `types` | list of damage type names: `"cut"`, `"pierce"`, `"blunt"`, `"fire"`, `"ice"`, `"shroud"`, `"lightning"`, `"poison"`, `"wood"`, `"stone"`, `"metal"`, `"explosion"` |
-| `attack` | `"melee"`, `"ranged"`, `"magic"`, `"tool"`, `"other"`, `"aoe"` or `"skillshot"` |
+| `attack`, `attacks` | the attack's kind: `"melee"`, `"ranged"`, `"magic"`, `"tool"`, `"other"`, `"aoe"` or `"skillshot"` (nil for a `emf.damage` hit); `attacks` lists every kind the hit has (most have one) |
 | `weapon_item`, `weapon_category`, `program`, `impact`, `reaction` | the weapon's item id (0 = none or not known), the game's weapon category hash, the attack's impact program, the swing or projectile (hits of one share it), the hit reaction type |
 | `health_before`, `health_after` | the target's health around the hit; nil when not known |
 | `from_mod` | true for a hit made by `emf.damage` |

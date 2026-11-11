@@ -127,7 +127,7 @@ TEST_CASE("lua 1.23: emf.on_hit gets the hit table; one core listener; false on 
                "emf.log('on_hit ' .. tostring(emf.on_hit(function(w, h)\n"
                "  emf.log('hit ' .. h.attacker .. ' ' .. h.target .. ' ' .. h.part .. ' ' .. h.amount .. ' crit ' ..\n"
                "          tostring(h.crit) .. ' blocked ' .. tostring(h.blocked) .. ' ' .. h.types[1] .. ' ' .. #h.types ..\n"
-               "          ' ' .. h.attack .. ' killed ' .. tostring(h.killed) .. ' after ' .. h.health_after ..\n"
+               "          ' ' .. h.attack .. ' ' .. #h.attacks .. ' killed ' .. tostring(h.killed) .. ' after ' .. h.health_after ..\n"
                "          ' mod ' .. tostring(h.from_mod) .. ' weapon ' .. h.weapon_item .. ' x ' .. h.position.x ..\n"
                "          ' server ' .. tostring(w:is_server()))\n"
                "end)))\n");
@@ -144,14 +144,28 @@ TEST_CASE("lua 1.23: emf.on_hit gets the hit table; one core listener; false on 
     h.amount = 120;
     h.flags = EMF_HIT_CRIT | EMF_HIT_KILLED;
     h.damage_types = (1u << 3) | (1u << 0);
-    h.attack = 1;
+    h.attacks = 1u << 1;  // ranged
     h.health_after = 0;
     h.health_before = -1;
     h.weapon_item = 0xABCDu;
     h.position[0] = 2.5f;
     fire_hit(kServer, h);
-    CHECK(logged("hit 1 6808 6809 120 crit true blocked false cut 2 ranged killed true after 0 mod false weapon 43981 x 2.5 server true"));
+    CHECK(logged("hit 1 6808 6809 120 crit true blocked false cut 2 ranged 1 killed true after 0 mod false weapon 43981 x 2.5 server true"));
     CHECK(logged("second 120"));
+}
+
+TEST_CASE("lua 1.23: a hit without an attack kind has attack nil and an empty attacks list") {
+    Rig r(L"on_hit_none");
+    add_script(r.dir, "on", "emf.on_hit(function(w, h) emf.log('kind ' .. tostring(h.attack) .. ' ' .. #h.attacks) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    EmfHit h{};
+    h.size = sizeof h;
+    h.amount = 7;
+    h.health_before = -1;
+    h.health_after = -1;
+    fire_hit(kServer, h);
+    CHECK(logged("kind nil 0"));
 }
 
 TEST_CASE("lua 1.23: on an older core emf.on_hit is false and emf.hit_rule nil") {
