@@ -203,6 +203,7 @@ add_library(emf_core_lib STATIC
   src/core/overlay/vk_capture.cpp
   src/core/overlay/vk_overlay.cpp
   src/core/overlay/vk_layer.cpp
+  src/core/overlay/vk_shim.cpp
   src/core/overlay/overlay.cpp)
 target_include_directories(emf_core_lib PUBLIC src sdk/include)
 target_link_libraries(emf_core_lib PUBLIC emf_common imgui windowscodecs ole32)  # WIC: PNG pictures in mod windows
@@ -604,6 +605,7 @@ add_executable(emf_tests
   tests/test_swapchain_book.cpp
   tests/test_overlay_present.cpp
   tests/test_vk_layer.cpp
+  tests/test_vk_shim.cpp
   tests/test_layer_env.cpp
   tests/test_overlay_path.cpp
   tests/test_chat_commands.cpp
