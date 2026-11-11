@@ -101,6 +101,18 @@ TEST_CASE("hud_bars_ready: the bar signature and the transform functions") {
     CHECK_FALSE(hud_bars_ready(sigs, true, 7));
 }
 
+TEST_CASE("hud_panel_ready: the panel's layer call and the bars") {
+    auto sigs = all_usable();
+    CHECK(hud_panel_ready(sigs, true, 7));
+    CHECK_FALSE(hud_panel_ready(sigs, true, 8));  // the dedicated server
+    sigs[static_cast<size_t>(Sig::PanelLayerOpen)].count = 0;
+    CHECK_FALSE(hud_panel_ready(sigs, true, 7));
+    CHECK(hud_bars_ready(sigs, true, 7));
+    sigs = all_usable();
+    sigs[static_cast<size_t>(Sig::PlayerVitalBar)].count = 0;  // the panel colour needs the bars' frame colour
+    CHECK_FALSE(hud_panel_ready(sigs, true, 7));
+}
+
 TEST_CASE("build_label: the number, or the start of the exe's sha256") {
     CHECK(build_label(1287369, "5d9ef2f140b8ed49aaaa") == "1287369");
     CHECK(build_label(0, "5d9ef2f140b8ed49aaaa") == "sha256 5d9ef2f140b8");

@@ -42,6 +42,8 @@ bool hud_signatures_ready(const std::array<Resolved, kSigCount>& sigs, bool know
 bool hud_scale_ready(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index);
 // The bars (health, mana, stamina) can move on their own: the bar signature, and the transform stack they move through.
 bool hud_bars_ready(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index);
+// The panel colour: the bars (health's frame colour is read there) and the panel's uiLayerOpen call (PanelLayerOpen).
+bool hud_panel_ready(const std::array<Resolved, kSigCount>& sigs, bool known_build, int build_index);
 // "1287369"; without a build number "sha256 <12 hex digits>"; without either "unknown".
 std::string build_label(uint32_t build_number, const std::string& sha256);
 

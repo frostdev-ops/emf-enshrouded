@@ -202,6 +202,12 @@ constexpr SigDef kSignatures[] = {
     // the propagate byte at rbp+0x3E8); the target must start with the function's own prologue through the "[impact]
     // Droped Hit" string's lea. Both exes of 1287369 alone (private research hit_hooks_2026-11-11 section 7).
     {Sig::ApplyHitToEntity, "ApplyHitToEntity", "4C 8D 8D 40 02 00 00 48 8B D0 4C 8D 85 70 01 00 00 4C 8B F0 48 8D 8D E8 03 00 00 E8", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x3efd10u, 0x190fb0u}, false, 0x1B, "4C 89 44 24 18 48 89 54 24 10 55 57 41 54 41 55 41 56 41 57 48 8D AC 24 78 FF FF FF 48 81 EC 88 01 00 00 49 8B 38 4C 8B E1 49 8B 48 38 4D 8B E9 48 89 7C 24 60 4D 8B F8 4C 8B F2 E8 ?? ?? ?? ?? 84 C0 75 ?? 0F 10 05 ?? ?? ?? ?? 45 33 C9 4C 8D 44 24 70 48 8D 15"},
+    // The vitals panel (doPlayerHealthWidget, after vitalBars closes): the widget loads healthColors.frameColor
+    // (bundle+0xdbf8) into r9 and opens an off-screen layer with it as the tint: uiLayerOpen(state, scope, 0, UiColor tint
+    // by value, enable = 1, margins*, rect = null). The function is the call's target; the HUD editor swaps the tint of
+    // this one call (armed at the vitalBars close). Client only; checked on 1287369 alone (private research
+    // panel_tint_2026-11-11 section 5).
+    {Sig::PanelLayerOpen, "PanelLayerOpen", "4C 8B 88 C8 00 00 00 48 8D 44 24 40 48 89 44 24 28 C6 44 24 20 01 4D 8B 89 F8 DB 00 00 E8", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xa3c8b0u, 0u}, false, 0x1d, "4C 8B DC 53 48 81 EC A0 00 00 00 33 C0 48 89 54 24 20"},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

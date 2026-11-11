@@ -110,6 +110,7 @@ TEST_CASE("signature table: build 1283531's RVAs, game and dedicated server, as 
         if (d.id == Sig::HandleAccountAction || d.id == Sig::SessionRequestKick) continue;  // 1287369 alone
         if (d.id == Sig::PlayerVitalBar || d.id == Sig::LocaPoolLookup || d.id == Sig::LocaSlotFind) continue;  // 1287369 alone
         if (d.id == Sig::ApplyHitToEntity) continue;  // 1287369 alone (both exes)
+        if (d.id == Sig::PanelLayerOpen) continue;    // 1287369 alone (client)
         CHECK(d.rva[static_cast<size_t>(client)] != kRvaUnchecked);
         CHECK(d.rva[static_cast<size_t>(server)] != kRvaUnchecked);
     }
@@ -190,7 +191,7 @@ TEST_CASE("signature table: one entry per Sig, in order, unique names, valid pat
                                      (all[i].id >= Sig::UiFrame && all[i].id <= Sig::CharacterSelected) ||
                                      (all[i].id >= Sig::UiScopeOpen && all[i].id <= Sig::UiPopTransform) ||
                                      all[i].id == Sig::PlayerVitalBar || all[i].id == Sig::LocaPoolLookup ||
-                                     all[i].id == Sig::LocaSlotFind;
+                                     all[i].id == Sig::LocaSlotFind || all[i].id == Sig::PanelLayerOpen;
             CHECK((all[i].rva[b] == 0) == (known_builds()[b].server && client_only));
         }
     }
@@ -265,7 +266,7 @@ TEST_CASE("signature table has the inventory transaction and readOther, optional
         CHECK(d->rva[1] == w.rva_1273043);
         CHECK_FALSE(d->required);
     }
-    CHECK(kSigCount == 66);
+    CHECK(kSigCount == 67);
 }
 
 TEST_CASE("signature table has XpRequired and MaxPlayerLevel (API v22 levels), optional, on both exes of 1283531") {
@@ -666,7 +667,7 @@ TEST_CASE("signature table has PlayerVitalBar (the HUD parts): a call site, clie
     CHECK(std::string(d->pattern).find("4C 8D 86 F8 DB 00 00 48 8D 57 18") == 0);
     CHECK(std::string(d->pattern).find("48 8D 97 F0 00 00 00") != std::string::npos);
     CHECK(std::string(d->pattern).find("48 8D 97 C8 01 00 00") != std::string::npos);
-    CHECK(kSigCount == 66);
+    CHECK(kSigCount == 67);
 }
 
 TEST_CASE("signature table has LocaPoolLookup and LocaSlotFind (item names): function starts, client only, 1287369") {
@@ -699,5 +700,21 @@ TEST_CASE("signature table has ApplyHitToEntity (hits): a call site, both exes o
     CHECK(std::string(d->pattern).find("4C 8D 8D 40 02 00 00") == 0);
     REQUIRE(d->call_target_pattern != nullptr);
     CHECK(std::string(d->call_target_pattern).find("4C 89 44 24 18 48 89 54 24 10") == 0);
-    CHECK(kSigCount == 66);
+    CHECK(kSigCount == 67);
+}
+
+TEST_CASE("signature table has PanelLayerOpen (the panel colour): a call site, client only, 1287369's function at 0xa3c8b0") {
+    const SigDef* d = find_signature("PanelLayerOpen");
+    REQUIRE(d != nullptr);
+    CHECK(d->id == Sig::PanelLayerOpen);
+    CHECK_FALSE(d->required);
+    CHECK(d->call_at == 0x1d);  // the panel's uiLayerOpen call: the bundle at +0xc8, enable 1, frameColor at +0xdbf8
+    CHECK(d->rva[7] == 0xa3c8b0u);
+    CHECK(d->rva[8] == 0u);  // the dedicated server has no UI
+    CHECK(absent_on(*d, 8));
+    CHECK(std::string(d->pattern).find("4C 8B 88 C8 00 00 00") == 0);
+    CHECK(std::string(d->pattern).find("4D 8B 89 F8 DB 00 00 E8") != std::string::npos);
+    REQUIRE(d->call_target_pattern != nullptr);
+    CHECK(std::string(d->call_target_pattern).find("4C 8B DC 53 48 81 EC A0 00 00 00") == 0);
+    CHECK(kSigCount == 67);
 }

@@ -46,6 +46,8 @@ enum class Sig : size_t {
     LocaPoolLookup, LocaSlotFind,
     // hits before they land (API v31): the game's applyHitToEntity, server world (game and dedicated server)
     ApplyHitToEntity,
+    // the vitals panel's uiLayerOpen call, client only (the HUD editor's panel colour: the tint argument swapped)
+    PanelLayerOpen,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);
