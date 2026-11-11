@@ -682,10 +682,10 @@ size_t logged_count(const std::string& needle) {
 
 }  // namespace
 
-TEST_CASE("api v31: version 31, size 808, the four hit functions set") {
+TEST_CASE("api v31: size 808, the four hit functions set") {
     const EmfApi* api = api_table();
-    CHECK(EMF_API_VERSION == 31);
-    CHECK(api->version == 31u);
+    CHECK(EMF_API_VERSION >= 31);
+    CHECK(api->version >= 31u);
     CHECK(kApiV31Size == 808u);
     CHECK(offsetof(EmfApi, on_hit) == kApiV30Size);
     CHECK(api->size == sizeof(EmfApi));

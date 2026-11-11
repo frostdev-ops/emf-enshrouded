@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 31 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 32 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 31
+#define EMF_API_VERSION 32
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -492,6 +492,62 @@ typedef struct EmfHit {
 #define EMF_HIT_PLAYERS 0xFFFFFFF1u   /* attacker / target: any player */
 #define EMF_HIT_CREATURES 0xFFFFFFF2u /* any creature (not a player, has health) */
 #define EMF_HIT_OBJECTS 0xFFFFFFF3u   /* any placed object (Destructible) */
+/* v32 buffs: the game's own buffs and debuffs (potions, food, Wet, Poisoned, auras, terrain debuffs) */
+#define EMF_BUFF_FOOD 0u    /* EmfBuffType.slot / EmfBuff.slot: the slot group */
+#define EMF_BUFF_BUFF 1u
+#define EMF_BUFF_DEBUFF 2u
+#define EMF_BUFF_RESTED 3u
+#define EMF_BUFF_TERRAIN 4u
+#define EMF_BUFF_HIDDEN 0x01u           /* EmfBuffType.flags: not shown in the game's UI */
+#define EMF_BUFF_SAVED 0x02u            /* kept in the world save (potions, Wet, food); combat buffs are not */
+#define EMF_BUFF_DESPAWN_ON_DEATH 0x04u /* ends when its target dies; never given to a dead target */
+#define EMF_BUFF_FOOD_POISON 0x08u
+#define EMF_BUFF_SHOW_AS_TAG 0x10u      /* shown as a tag on an enemy's health bar */
+#define EMF_BUFF_APPLIED 1u             /* EmfBuffEvent.kind */
+#define EMF_BUFF_REFRESHED 2u           /* its timer started again (given again, a reset-time type) */
+#define EMF_BUFF_REMOVED 3u             /* cleansed (EmfBuffEvent.cleansed) or ended */
+#define EMF_BUFF_REFUSED 4u             /* a buff_apply / buff_remove that did not happen: EmfBuffEvent.why */
+typedef struct EmfBuffType {
+    uint32_t size;            /* sizeof(EmfBuffType) of the core */
+    uint32_t id;              /* the buff type id (stable: store ids, not indexes) */
+    uint8_t slot;             /* EMF_BUFF_FOOD .. EMF_BUFF_TERRAIN */
+    uint8_t apply_type;       /* given again: 0 refused, 1 its timer starts again, 2 and 3 replaced by a new one */
+    uint16_t faction_exclude; /* a bit per faction the type is never given to (bit 7 = players) */
+    uint32_t flags;           /* EMF_BUFF_HIDDEN ... */
+    int64_t default_ns;       /* its default time, nanoseconds */
+    uint32_t follow_up;       /* the type given when this one ends (Soaked -> Wet), 0 = none */
+    uint32_t name_tag;        /* the game's text tags of its name and description (0 = none): buff_text */
+    uint32_t desc_tag;
+    uint32_t pad;
+} EmfBuffType;
+typedef struct EmfBuff {      /* one active buff of an entity */
+    uint32_t size;            /* sizeof(EmfBuff) of the core */
+    uint32_t type;            /* its type id */
+    uint32_t entity;          /* the buff's own entity */
+    uint8_t slot;             /* EMF_BUFF_FOOD .. EMF_BUFF_TERRAIN */
+    uint8_t index;            /* its place in that slot group */
+    uint8_t cleansed;         /* 1: being removed (gone after the next step) */
+    uint8_t pad;
+    uint32_t level;           /* from its source's level, 0 = none */
+    uint32_t pad2;
+    int64_t total_ns;         /* its whole time, -1 = not known yet (the step it was given) */
+    int64_t remaining_ns;     /* the time left, -1 = not known yet */
+} EmfBuff;
+typedef struct EmfBuffEvent {
+    uint32_t size;            /* sizeof(EmfBuffEvent) of the core */
+    uint32_t kind;            /* EMF_BUFF_APPLIED, _REFRESHED, _REMOVED, _REFUSED */
+    uint32_t target;          /* the entity that has (had) the buff */
+    uint32_t type;
+    uint32_t buff_entity;     /* the buff's own entity, 0 when refused */
+    uint8_t slot;
+    uint8_t cleansed;         /* REMOVED: 1 cleansed (by a mod, a potion, a spell), 0 ended or replaced */
+    uint8_t pad[2];
+    int64_t total_ns;         /* -1 = not known (yet) */
+    int64_t remaining_ns;
+    const char* why;          /* REFUSED: why (valid during the callback); else NULL */
+} EmfBuffEvent;
+typedef void (*EmfBuffCallback)(EmfWorld* world, const EmfBuffEvent* ev, void* user);
+
 typedef struct EmfHitRule {
     uint32_t size;             /* sizeof(EmfHitRule) */
     uint32_t attacker;         /* 0 = anyone, an entity, or EMF_HIT_PLAYERS / _CREATURES / _OBJECTS */
@@ -1100,6 +1156,34 @@ typedef struct EmfApi {
      * rule, 64 rules already, the hook not available on this game build). Any thread; it counts from the next hit. */
     uint32_t (*hit_rule_add)(const EmfHitRule* rule);
     bool (*hit_rule_remove)(uint32_t id);  /* false: no rule with that id */
+
+    /* ---- v32: buffs (EmfBuffType, EmfBuff, EmfBuffEvent) ---- */
+    /* The game's buff types in `world` (any world kind): the number there is; fills `out` up to `cap` (out may be
+     * NULL to count). 0 when the world's buff registry cannot be read. Where no program runs (on_tick, commands). */
+    uint32_t (*buff_types)(EmfWorld* world, EmfBuffType* out, uint32_t cap);
+    bool (*buff_type)(EmfWorld* world, uint32_t id, EmfBuffType* out);  /* false: no such type */
+    /* A type's name (which 0) or description (which 1) in the player's language, NUL-terminated (cut to fit). The
+     * game's text: the game only, not the dedicated server (false there, for no text or a 0 tag). Not on the render
+     * thread. */
+    bool (*buff_text)(uint32_t id, uint32_t which, char* buf, uint32_t cap);
+    /* An entity's active buffs on any world (server or client: they are replicated), in slot order: the number there
+     * is; fills `out` up to `cap`. Where no program runs. */
+    uint32_t (*buffs_of)(EmfWorld* world, uint32_t entity, EmfBuff* out, uint32_t cap);
+    /* Gives `target` a buff on the server world (the host's game or the dedicated server) through the game's own buff
+     * code in the next step: its slot, giving again (timer, replace or refused), faction exclusions, effects, HUD icon,
+     * saving. duration_ns 0 = the type's default; source 0 = the target (damage over time scales from the source's
+     * stats: give a creature as source); item 0 = none (food types take their stats and time from the eaten item).
+     * `done` (may be NULL) after that step on the server world's thread: APPLIED or REFUSED with why. False when
+     * refused at once (logged): not the server world, an unknown type, 64 waiting, not available on this game build. */
+    bool (*buff_apply)(EmfWorld* world, uint32_t target, uint32_t type, int64_t duration_ns, uint32_t source,
+                       uint32_t item, EmfBuffCallback done, void* user);
+    /* Removes `target`'s buff of that type the game's way (cleansed: its effects stop, it is gone after the next
+     * step). `done` as buff_apply: REMOVED, or REFUSED ("not there"). */
+    bool (*buff_remove)(EmfWorld* world, uint32_t target, uint32_t type, EmfBuffCallback done, void* user);
+    /* `cb` after each server step on its thread for every change of a player's buffs, whoever made it: APPLIED,
+     * REFRESHED, REMOVED (not REFUSED). From a comparison with the step before (the first sight of a player says
+     * nothing). False for a null cb or 16 already. */
+    bool (*on_buff)(EmfBuffCallback cb, void* user);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */

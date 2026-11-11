@@ -802,3 +802,7 @@ target_sources(emf_tests PRIVATE tests/test_hud_pick.cpp)
 # --- Hits (API v31): rules and callbacks before a hit lands, the hits after it landed ---
 target_sources(emf_core_lib PRIVATE src/core/hits.cpp src/core/hit_hook.cpp src/core/env_damage.cpp)
 target_sources(emf_tests PRIVATE tests/test_hits.cpp tests/test_hit_hook.cpp tests/test_lua_hits.cpp tests/test_env_damage.cpp)
+
+# --- Buffs (API v32): the game's buff types, an entity's buffs, giving and removing through emf_buffs ---
+target_sources(emf_core_lib PRIVATE src/core/buffs.cpp)
+target_sources(emf_tests PRIVATE tests/test_buffs.cpp)

@@ -48,6 +48,8 @@ enum class Sig : size_t {
     ApplyHitToEntity,
     // the vitals panel's uiLayerOpen call, client only (the HUD editor's panel colour: the tint argument swapped)
     PanelLayerOpen,
+    // buffs (API v32): the game's applyBuffCore, called inside EMF's emf_buffs program (game and dedicated server)
+    ApplyBuffCore,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

@@ -208,6 +208,7 @@ constexpr SigDef kSignatures[] = {
     // this one call (armed at the vitalBars close). Client only; checked on 1287369 alone (private research
     // panel_tint_2026-11-11 section 5).
     {Sig::PanelLayerOpen, "PanelLayerOpen", "4C 8B 88 C8 00 00 00 48 8D 44 24 40 48 89 44 24 28 C6 44 24 20 01 4D 8B 89 F8 DB 00 00 E8", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xa3c8b0u, 0u}, false, 0x1d, "4C 8B DC 53 48 81 EC A0 00 00 00 33 C0 48 89 54 24 20"},
+    {Sig::ApplyBuffCore, "ApplyBuffCore", "48 8B C4 48 89 58 10 4C 89 48 20 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 B8 FA FF FF 48 81 EC 10 06 00 00 4C 8B A5 70 05 00 00 49 8B F1 0F 29 70 B8 41 8B D8 0F 29", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x3b3540u, 0x15e130u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace
