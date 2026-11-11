@@ -908,3 +908,66 @@ TEST_CASE("env hooks: nothing is read while no rule or callback wants hits; off 
     CHECK(f.state.env_queue.size() == 0);
     CHECK(f.state.hit_stats.seen.load() == 0);
 }
+
+// ---- env hooks: the review's fixes ----
+
+TEST_CASE("env hooks: a tick that takes health below 0 is still followed: the keep rule holds it at 1 (review I1)") {
+    Fixture f;
+    f.state.hit_hook_off_why.clear();
+    put_health(1, kHealthRoot, 1, 100);
+    EnvRig e(f, {1});
+    EmfHitRule keep{};
+    keep.size = sizeof keep;
+    keep.scale = 1.0f;
+    keep.kinds = EMF_HIT_KINDS_ALL;
+    keep.min_health = 1;
+    REQUIRE(api_table()->hit_rule_add(&keep) != 0);
+    env_pre(e.ctx.p(), EMF_HIT_KIND_SHROUD);
+    put_health(1, kHealthRoot, -1, 100);  // the program subtracts 2 without a floor
+    env_post(e.ctx.p(), EMF_HIT_KIND_SHROUD);
+    CHECK(health_of(1) == 1);
+}
+
+TEST_CASE("env hooks: a snapshot left by a skipped post is never used later (review I2)") {
+    Fixture f;
+    f.state.hit_hook_off_why.clear();
+    put_health(1, kHealthRoot, 100, 100);
+    EnvRig e(f, {1});
+    EmfHitRule keep{};
+    keep.size = sizeof keep;
+    keep.scale = 1.0f;
+    keep.kinds = EMF_HIT_KINDS_ALL;
+    keep.min_health = 1;
+    const uint32_t id = api_table()->hit_rule_add(&keep);
+    REQUIRE(id != 0);
+    env_pre(e.ctx.p(), EMF_HIT_KIND_COLD);  // health 100 remembered
+    REQUIRE(api_table()->hit_rule_remove(id));
+    env_post(e.ctx.p(), EMF_HIT_KIND_COLD);  // nothing wants hits: skipped
+    env_pre(e.ctx.p(), EMF_HIT_KIND_COLD);   // still nothing: skipped
+    put_health(1, kHealthRoot, 40, 100);     // later, this program's tick
+    EmfHitRule cancel = keep;
+    cancel.min_health = 0;
+    cancel.cancel = 1;
+    REQUIRE(api_table()->hit_rule_add(&cancel) != 0);
+    env_post(e.ctx.p(), EMF_HIT_KIND_COLD);  // the old snapshot (100) must not be used
+    CHECK(health_of(1) == 40);
+}
+
+TEST_CASE("env hooks: a new world drops the old world's queued env hits and carries (review I4)") {
+    Fixture f;
+    g_after.clear();
+    put_health(1, kHealthRoot, 100, 100);
+    EnvRig e(f, {1});
+    REQUIRE(subscribe_hit_events());
+    REQUIRE(api_table()->on_hit(hit_after_cb, nullptr));
+    env_pre(e.ctx.p(), EMF_HIT_KIND_FALL);
+    put_health(1, kHealthRoot, 60, 100);
+    env_post(e.ctx.p(), EMF_HIT_KIND_FALL);
+    REQUIRE(f.state.env_queue.size() == 1);
+    f.state.hit_carry.take_whole(1, EMF_HIT_KIND_COLD, 0.5);
+    env_new_session();
+    CHECK(f.state.env_queue.size() == 0);
+    CHECK(f.state.hit_carry.size() == 0);
+    deliver_env_hits(f.w());
+    CHECK(g_after.empty());
+}

@@ -72,6 +72,25 @@ bool hit_rule_matches(const EmfHitRule& r, const EmfHit& h, HitClassify classify
     return true;
 }
 
+int64_t HitCarry::take_whole(uint32_t entity, uint8_t kind, double exact) {
+    std::lock_guard<std::mutex> l(m_);
+    double& left = carry_[(static_cast<uint64_t>(entity) << 8) | kind];
+    const double total = exact + left;
+    const double whole = std::floor(total);
+    left = total - whole;
+    return static_cast<int64_t>(std::clamp(whole, -9.0e18, 9.0e18));
+}
+
+void HitCarry::clear() {
+    std::lock_guard<std::mutex> l(m_);
+    carry_.clear();
+}
+
+size_t HitCarry::size() const {
+    std::lock_guard<std::mutex> l(m_);
+    return carry_.size();
+}
+
 bool apply_hit_rules(std::span<const EmfHitRule> rules, EmfHit& h, HitClassify classify, void* ctx, HitCarry* carry) {
     const EmfHit before = h;
     const bool heal = is_heal(h);
@@ -95,13 +114,7 @@ bool apply_hit_rules(std::span<const EmfHitRule> rules, EmfHit& h, HitClassify c
             0, static_cast<int64_t>(std::trunc(static_cast<double>(h.stamina) * r.scale))));
         floor = std::max(floor, r.min_health);
     }
-    if (exact && matched) {
-        double& left = carry->at(h.target, h.kind);
-        const double total = amount_exact + left;
-        const double whole = std::floor(total);
-        h.amount = clamp_i64(static_cast<int64_t>(whole));
-        left = total - whole;
-    }
+    if (exact && matched) h.amount = clamp_i64(carry->take_whole(h.target, h.kind, amount_exact));
     if (floor > 0 && !heal && h.health_before >= 0 && h.amount > 0)
         h.amount = std::min(h.amount, std::max(0, h.health_before - floor));
     if (h.health_before < 0) h.health_after = -1;

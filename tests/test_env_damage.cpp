@@ -6,6 +6,7 @@
 #include <cstring>
 #include <map>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "core/env_damage.h"
@@ -20,16 +21,21 @@ std::vector<std::pair<uint32_t, int32_t>> g_adds;
 
 int32_t f_health(uint32_t e, void*) {
     const auto it = g_health.find(e);
-    return it == g_health.end() ? -1 : it->second;
+    return it == g_health.end() ? kEnvNoHealth : it->second;
 }
-int32_t f_max(uint32_t e, void*) {
-    const auto it = g_max.find(e);
-    return it == g_max.end() ? -1 : it->second;
+std::vector<uint32_t> g_deadly;  // entities standing in deadly shroud (EnvironmentSensor.fogType 3)
+bool f_deadly(uint32_t e, void*) {
+    for (uint32_t d : g_deadly)
+        if (d == e) return true;
+    return false;
 }
-int32_t f_add(uint32_t e, int32_t delta, void*) {
+bool g_add_fails = false;
+bool f_add(uint32_t e, int32_t delta, void*, int32_t* now) {
+    if (g_add_fails) return false;
     g_adds.emplace_back(e, delta);
     g_health[e] += delta;
-    return g_health[e];
+    *now = g_health[e];
+    return true;
 }
 HitClass f_classify(uint32_t id, void*) { return id >= 1 && id <= 0x3FE ? HitClass::Player : HitClass::Creature; }
 
@@ -43,9 +49,11 @@ struct Rig {
         g_health.clear();
         g_max.clear();
         g_adds.clear();
+        g_deadly.clear();
+        g_add_fails = false;
         env.classify = &f_classify;
         env.add_health = &f_add;
-        env.max_health = &f_max;
+        env.deadly_fog = &f_deadly;
     }
     bool apply(uint8_t kind, uint32_t entity, int32_t before, int32_t after, EmfHit* out) {
         g_health[entity] = after;
@@ -178,14 +186,20 @@ TEST_CASE("env apply: half of 1-point drowning ticks is 1 every second tick") {
     CHECK(health == 95);
 }
 
-TEST_CASE("env apply: instant when deadly shroud or a creature out of air takes a quarter of max health or more at once") {
+TEST_CASE("env apply: instant is deadly shroud (fog type 3) or a creature out of air, whatever health it had (review I3)") {
     Rig r;
     g_max[3] = 100;
+    g_max[5] = 100;
     g_max[2000] = 100;
+    g_deadly = {3};
     EmfHit h{};
-    r.apply(EMF_HIT_KIND_SHROUD, 3, 80, 0, &h);
+    r.apply(EMF_HIT_KIND_SHROUD, 3, 20, 0, &h);  // already hurt, then deadly shroud
     CHECK((h.flags & EMF_HIT_INSTANT) != 0);
-    r.apply(EMF_HIT_KIND_DROWNING, 2000, 1, -1, &h);  // the last tick of drowning: not instant
+    r.apply(EMF_HIT_KIND_SHROUD, 5, 30, 0, &h);  // a long step's killing tick in dangerous shroud
+    CHECK((h.flags & EMF_HIT_INSTANT) == 0);
+    r.apply(EMF_HIT_KIND_DROWNING, 2000, 10, 0, &h);  // a creature out of air dies at once
+    CHECK((h.flags & EMF_HIT_INSTANT) != 0);
+    r.apply(EMF_HIT_KIND_DROWNING, 5, 30, 0, &h);  // a player drowns tick by tick
     CHECK((h.flags & EMF_HIT_INSTANT) == 0);
     r.apply(EMF_HIT_KIND_FALL, 3, 80, 0, &h);  // a fall is never instant
     CHECK((h.flags & EMF_HIT_INSTANT) == 0);
@@ -205,3 +219,86 @@ TEST_CASE("env queue: pushed on a worker, taken after the step, capped") {
     CHECK(q.size() == EnvQueue::kMax);
     CHECK(q.dropped() == 10);
 }
+
+TEST_CASE("env carry: two programs on two threads keep exact carries for their own entities (review I10)") {
+    HitRules rules;
+    EmfHitRule half = rule();
+    half.scale = 0.5f;
+    std::string why;
+    REQUIRE(rules.add(half, &why) != 0);
+    HitCarry carry;
+    auto run = [&](uint32_t first, int64_t* total) {
+        for (int round = 0; round < 40; ++round)
+            for (uint32_t e = first; e < first + 3000; ++e) {
+                EmfHit h{};
+                h.size = sizeof h;
+                h.kind = EMF_HIT_KIND_COLD;
+                h.target = e;
+                h.amount = 1;
+                h.health_before = 100;
+                rules.apply(h, &f_classify, nullptr, &carry);
+                *total += h.amount;
+            }
+    };
+    int64_t a = 0, b = 0;
+    std::thread t1(run, 0x1000u, &a), t2(run, 0x100000u, &b);
+    t1.join();
+    t2.join();
+    CHECK(a == 3000 * 40 / 2);
+    CHECK(b == 3000 * 40 / 2);
+    CHECK(carry.size() == 6000);
+}
+
+// ---- the review's fixes ----
+
+TEST_CASE("env snapshot: a health below 0 after the program is a drop: shroud, cold and drowning subtract without a floor (review I1)") {
+    g_health = {{5, 1}, {6, 40}};
+    uint8_t list[3 * 16] = {};
+    const uint32_t ids[3] = {5, 6, 7};  // 7 has no health
+    for (int i = 0; i < 3; ++i) std::memcpy(list + i * 16, &ids[i], 4);
+    const EnvSlice s{list, 3};
+    int job = 0;
+    EnvSnapshot snap;
+    snap.pre(&job, s, &f_health, nullptr);
+    g_health[5] = -1;  // a 2-point tick on 1 health
+    g_health[6] = -3;
+    const auto drops = snap.post(&job, s, &f_health, nullptr);
+    REQUIRE(drops.size() == 2);
+    CHECK(drops[0].entity == 5);
+    CHECK(drops[0].before == 1);
+    CHECK(drops[0].after == -1);
+    CHECK(drops[1].after == -3);
+}
+
+TEST_CASE("env apply: min_health holds a tick that went below 0 at 1 (review I1)") {
+    Rig r;
+    g_max[5] = 100;
+    EmfHitRule keep = rule();
+    keep.min_health = 1;
+    std::string why;
+    REQUIRE(r.rules.add(keep, &why) != 0);
+    EmfHit h{};
+    CHECK(r.apply(EMF_HIT_KIND_COLD, 5, 1, -1, &h));
+    CHECK(g_health[5] == 1);
+    CHECK(h.amount == 0);
+    CHECK(h.health_after == 1);
+}
+
+TEST_CASE("env apply: a correction that fails is reported as what happened, not as done (review I7)") {
+    Rig r;
+    g_max[5] = 100;
+    EmfHitRule cancel = rule();
+    cancel.cancel = 1;
+    std::string why;
+    REQUIRE(r.rules.add(cancel, &why) != 0);
+    g_add_fails = true;
+    EmfHit h{};
+    CHECK(r.apply(EMF_HIT_KIND_FALL, 5, 100, 60, &h));  // the damage landed: on_hit gets it
+    CHECK(h.cancel == 0);
+    CHECK(h.amount == 40);
+    CHECK(h.health_after == 60);
+    CHECK(r.st.changed.load() == 0);
+    CHECK(r.st.cancelled.load() == 0);
+    CHECK(r.st.faults.load() == 1);
+}
+

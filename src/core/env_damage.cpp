@@ -21,8 +21,8 @@ void EnvSnapshot::pre(const void* job_ctx, const EnvSlice& s, HealthFn health, v
     for (uint64_t i = 0; i < s.count; ++i) {
         const uint32_t e = env_slice_entity(s, i);
         if (!e) continue;
-        const int32_t h = health ? health(e, hctx) : -1;
-        if (h >= 0) before_.emplace_back(e, h);  // an entity without known health cannot be followed
+        const int32_t h = health ? health(e, hctx) : kEnvNoHealth;
+        if (h != kEnvNoHealth) before_.emplace_back(e, h);  // an entity without known health cannot be followed
     }
 }
 
@@ -31,7 +31,7 @@ std::vector<EnvDrop> EnvSnapshot::post(const void* job_ctx, const EnvSlice&, Hea
     if (job_ctx != ctx_ || !health) return drops;
     for (const auto& [e, before] : before_) {
         const int32_t after = health(e, hctx);
-        if (after != -1 && after < before) drops.push_back(EnvDrop{e, before, after});
+        if (after != kEnvNoHealth && after < before) drops.push_back(EnvDrop{e, before, after});
     }
     ctx_ = nullptr;
     before_.clear();
@@ -48,22 +48,31 @@ bool env_apply(uint8_t kind, const EnvDrop& d, const EnvEnv& env, const HitRules
     h.amount = d.before - d.after;
     h.health_before = d.before;
     h.health_after = std::max(0, d.after);
-    if ((kind == EMF_HIT_KIND_SHROUD || kind == EMF_HIT_KIND_DROWNING) && d.after <= 0 && env.max_health) {
-        const int32_t max = env.max_health(d.entity, env.ctx);
-        if (max > 0 && static_cast<int64_t>(h.amount) * 4 >= max) h.flags |= EMF_HIT_INSTANT;  // not a per-step tick
-    }
+    // instant: the game's own signals (deadly shroud is fog type 3; only players drown tick by tick, a creature out of
+    // air gets Health 0 at once)
+    if (d.after <= 0 && kind == EMF_HIT_KIND_SHROUD && env.deadly_fog && env.deadly_fog(d.entity, env.ctx))
+        h.flags |= EMF_HIT_INSTANT;
+    if (d.after <= 0 && kind == EMF_HIT_KIND_DROWNING && env.classify &&
+        env.classify(d.entity, env.ctx) != HitClass::Player)
+        h.flags |= EMF_HIT_INSTANT;
     ++st.seen;
     const int32_t dropped = h.amount;
     rules.apply(h, env.classify, env.ctx, &carry);
     cbs.call_before(env.world, h, st);
     const int32_t final_amount = h.cancel ? 0 : h.amount;
     const int32_t restore = dropped - final_amount;
-    if (restore != 0 && env.add_health) {
-        const int32_t now = env.add_health(d.entity, restore, env.ctx);
-        h.health_after = now >= 0 ? now : std::max(0, d.before - final_amount);
+    if (restore != 0) {
+        int32_t now = 0;
+        if (!env.add_health || !env.add_health(d.entity, restore, env.ctx, &now)) {
+            ++st.faults;  // Health could not be put right: the drop stands, delivered as it happened
+            h.cancel = 0;
+            h.amount = dropped;
+            h.health_after = std::max(0, d.after);
+            if (out) *out = h;
+            return true;
+        }
+        h.health_after = std::max(0, now);
         ++st.changed;
-    } else if (restore != 0) {
-        h.health_after = std::max(0, d.before - final_amount);
     }
     h.amount = final_amount;
     if (h.cancel) ++st.cancelled;

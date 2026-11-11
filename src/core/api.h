@@ -220,5 +220,6 @@ bool subscribe_hit_events();
 void env_pre(void* program_context, uint8_t kind);
 void env_post(void* program_context, uint8_t kind);
 void deliver_env_hits(EmfWorld* w);
+void env_new_session();  // a new server world: the old one's queued env hits and carries are dropped
 
 }  // namespace emf::core

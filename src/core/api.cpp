@@ -2384,17 +2384,35 @@ int32_t env_max_health(uint32_t id, void* ctx) {
     return v;
 }
 
-int32_t env_add_health(uint32_t id, int32_t delta, void* ctx) {
-    if (!g_state->attr_find || !g_state->attr_add) return -1;
+bool env_add_health(uint32_t id, int32_t delta, void* ctx, int32_t* now) {
+    if (!g_state->attr_find || !g_state->attr_add) return false;
     AttrHome home;
     std::string why;
-    if (attribute_home(env_world(ctx), id, kAttrHealth, &home, &why) != AttrStatus::Ok) return -1;
+    if (attribute_home(env_world(ctx), id, kAttrHealth, &home, &why) != AttrStatus::Ok) return false;
     const int32_t max = env_max_health(id, ctx);
-    int32_t applied = 0, now = -1;
-    if (attr_add(g_state->attr_find, g_state->attr_add, home.comp, home.size, home.registry, kAttrHealth, delta,
-                 max > 0 ? std::optional<int32_t>(max) : std::nullopt, &applied, &now) != AttrStatus::Ok)
-        return -1;
-    return now;
+    int32_t applied = 0;
+    return attr_add(g_state->attr_find, g_state->attr_add, home.comp, home.size, home.registry, kAttrHealth, delta,
+                    max > 0 ? std::optional<int32_t>(max) : std::nullopt, &applied, now) == AttrStatus::Ok;
+}
+
+// Health inside the program: the attribute only (a real value may be below 0); no Destructible read here: it may race
+int32_t env_health(uint32_t id, void* ctx) {
+    if (!g_state->attr_find) return kEnvNoHealth;
+    AttrHome home;
+    std::string why;
+    int32_t v = 0;
+    if (attribute_home(env_world(ctx), id, kAttrHealth, &home, &why) != AttrStatus::Ok ||
+        attr_read(g_state->attr_find, home.comp, home.size, home.registry, kAttrHealth, &v) != AttrStatus::Ok)
+        return kEnvNoHealth;
+    return v;
+}
+
+// EnvironmentSensor (+0 fogType: 0 none, 1 none for now, 2 dangerous, 3 deadly); fog_resistance_update reads it too
+constexpr uint32_t kEnvironmentSensorHash = 0x556C976Eu;
+bool env_deadly_fog(uint32_t id, void* ctx) {
+    const ComponentRef r = get_component(g_state->get_component, raw(env_world(ctx)), kEnvironmentSensorHash, id);
+    uint8_t fog = 0;
+    return r.ptr && r.size >= 1 && seh_read(r.ptr, &fog, sizeof fog) && fog == 3;
 }
 
 // The slice of the program's job: J = *ctx, its entity list and count at the offsets read from code.
@@ -2424,24 +2442,28 @@ uint8_t* env_server_world(void* ctx) {
 }
 
 void env_pre_work(void* ctx, uint8_t) {
+    t_env.clear();  // only this run's snapshot is ever used
     uint8_t* world = env_server_world(ctx);
     EnvSlice s;
     if (!world || !read_env_slice(ctx, &s)) return;
-    t_env.pre(ctx, s, &hit_env_health, world);
+    t_env.pre(ctx, s, &env_health, world);
 }
 
 void env_post_work(void* ctx, uint8_t kind) {
     uint8_t* world = env_server_world(ctx);
     EnvSlice s;
-    if (!world || !read_env_slice(ctx, &s)) return;
-    const std::vector<EnvDrop> drops = t_env.post(ctx, s, &hit_env_health, world);
+    if (!world || !read_env_slice(ctx, &s)) {
+        t_env.clear();
+        return;
+    }
+    const std::vector<EnvDrop> drops = t_env.post(ctx, s, &env_health, world);
     if (drops.empty()) return;
     EnvEnv env;
     env.world = reinterpret_cast<EmfWorld*>(world);
     env.ctx = world;
     env.classify = &env_classify;
     env.add_health = &env_add_health;
-    env.max_health = &env_max_health;
+    env.deadly_fog = &env_deadly_fog;
     for (const EnvDrop& d : drops) {
         EmfHit out{};
         if (env_apply(kind, d, env, g_state->hit_rules, g_state->hit_callbacks, g_state->hit_stats, g_state->hit_carry,
@@ -2462,13 +2484,26 @@ bool guarded_env(void (*work)(void*, uint8_t), void* ctx, uint8_t kind) {
 }  // namespace
 
 void env_pre(void* program_context, uint8_t kind) {
-    if (!env_wanted()) return;
+    if (!env_wanted()) {
+        t_env.clear();  // a post later in this run finds no snapshot (review I2)
+        return;
+    }
     if (!guarded_env(&env_pre_work, program_context, kind)) ++g_state->hit_stats.faults;
 }
 
+// by the snapshot alone: a rule added or removed between pre and post neither skips nor invents a drop
 void env_post(void* program_context, uint8_t kind) {
-    if (!env_wanted()) return;
-    if (!guarded_env(&env_post_work, program_context, kind)) ++g_state->hit_stats.faults;
+    if (!g_state || !t_env.holds(program_context)) return;
+    if (!guarded_env(&env_post_work, program_context, kind)) {
+        ++g_state->hit_stats.faults;
+        t_env.clear();
+    }
+}
+
+void env_new_session() {
+    if (!g_state) return;
+    g_state->hit_carry.clear();
+    (void)g_state->env_queue.take();  // the old world's entities: never delivered to the new one
 }
 
 void deliver_env_hits(EmfWorld* w) {

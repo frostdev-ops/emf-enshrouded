@@ -664,6 +664,7 @@ void hk_register_all_programs(void* world) {
             if (g_teleport) g_teleport->world_reset();
             if (g_components) g_components->world_reset();  // component changes under way end (FAILED)    // teleports under way end (FAILED)
             g_state->damage_queue.clear();                // hits for the old session never land
+            emf::core::env_new_session();                 // nor its env hits and carries
             ++g_state->server_session;                    // mods notice the new session (API v9)
         }
         // a new client world (a new session): the server the last one talked to is forgotten (its welcome, its lines);

@@ -309,6 +309,7 @@ dedicated server; see [server.md](server.md)).
 | `weapon_item`, `weapon_category`, `program`, `impact`, `reaction` | the weapon's item id (0 = none or not known), the game's weapon category hash, the attack's impact program, the swing or projectile (hits of one share it), the hit reaction type |
 | `health_before`, `health_after` | the target's health around the hit; nil when not known |
 | `kind` | `"hit"` (an entity hit), `"fall"`, `"shroud"`, `"cold"` or `"drowning"`: see "Fall, shroud, cold and drowning" below |
+| `instant` | true when the game set health to 0 at once: deadly shroud, or a creature (not a player) out of air |
 | `from_mod` | true for a hit made by `emf.damage` |
 | `position` | `{x = , y = , z = }` in metres |
 

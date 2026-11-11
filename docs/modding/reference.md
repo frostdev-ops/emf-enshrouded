@@ -791,7 +791,8 @@ freezing), `EMF_HIT_KIND_DROWNING` 4 (every step while oxygen is 0). For these k
 `health_before` and `health_after` are known.
 
 - `EMF_HIT_INSTANT` 0x01000000: the game set health to 0 at once (deadly shroud, a creature out of air). EMF sets it
-  when the drop takes health to 0 or below and is at least a quarter of the maximum health.
+  from the game's own signals: shroud while the entity stands in deadly shroud (its `EnvironmentSensor` fog type 3),
+  drowning for a creature (only players drown tick by tick).
 - A rule has `kinds`; without it a rule is for entity hits only. The rule's other fields match as before, but an
   environment hit has no attacker, flags, types or attack kind, so a rule that asks for them does not match it: `attacker`
   = `EMF_HIT_PLAYERS` never matches a fall.

@@ -25,6 +25,9 @@ struct EnvSlice {
 };
 uint32_t env_slice_entity(const EnvSlice& s, uint64_t i);  // 0 past the end
 
+// HealthFn's "not known". A real Health may be below 0: shroud, cold and drowning subtract without a floor.
+constexpr int32_t kEnvNoHealth = INT32_MIN;
+
 struct EnvDrop {
     uint32_t entity = 0;
     int32_t before = 0;
@@ -35,9 +38,14 @@ struct EnvDrop {
 // (thread-local in the hooks: a program's slices run one after another, so pre and post never interleave).
 class EnvSnapshot {
 public:
-    using HealthFn = int32_t (*)(uint32_t entity, void* ctx);  // -1: not known
+    using HealthFn = int32_t (*)(uint32_t entity, void* ctx);  // kEnvNoHealth: not known
     void pre(const void* job_ctx, const EnvSlice& s, HealthFn health, void* hctx);
     std::vector<EnvDrop> post(const void* job_ctx, const EnvSlice& s, HealthFn health, void* hctx);
+    bool holds(const void* job_ctx) const { return ctx_ && ctx_ == job_ctx; }
+    void clear() {
+        ctx_ = nullptr;
+        before_.clear();
+    }
 
 private:
     const void* ctx_ = nullptr;
@@ -49,13 +57,14 @@ struct EnvEnv {
     EmfWorld* world = nullptr;
     void* ctx = nullptr;
     HitClassify classify = nullptr;
-    int32_t (*add_health)(uint32_t entity, int32_t delta, void* ctx) = nullptr;  // the health after, -1 on failure
-    int32_t (*max_health)(uint32_t entity, void* ctx) = nullptr;                 // -1: not known
+    bool (*add_health)(uint32_t entity, int32_t delta, void* ctx, int32_t* now) = nullptr;  // false: not done
+    bool (*deadly_fog)(uint32_t entity, void* ctx) = nullptr;  // in deadly shroud (EnvironmentSensor.fogType 3)
 };
 
 // One drop as an env hit: the rules (with the carry for per-step kinds) and the before-callbacks run; Health is put
 // right by the difference between the drop and the final amount. True when it is to be delivered to on_hit (a
-// cancelled one is not, as a cancelled entity hit sends no HitEvent); *out is the final hit.
+// cancelled one is not, as a cancelled entity hit sends no HitEvent); *out is the final hit. When Health cannot be put
+// right, the drop stands: a fault, delivered as it happened.
 bool env_apply(uint8_t kind, const EnvDrop& d, const EnvEnv& env, const HitRules& rules, HitCallbacks& cbs,
                HitStats& st, HitCarry& carry, EmfHit* out);
 

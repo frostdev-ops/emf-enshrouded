@@ -6,6 +6,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <mutex>
 #include <span>
 #include <string>
 #include <unordered_map>
@@ -32,11 +33,14 @@ bool hit_rule_matches(const EmfHitRule& r, const EmfHit& h, HitClassify classify
 // one at a time (their Health conflicts), and hits never use it.
 class HitCarry {
 public:
-    double& at(uint32_t entity, uint8_t kind) { return carry_[(static_cast<uint64_t>(entity) << 8) | kind]; }
-    void clear() { carry_.clear(); }
-    size_t size() const { return carry_.size(); }
+    // The whole part of `exact` plus what this entity's kind carried; the fraction is kept. Locked: two env programs
+    // may run at once on two worker threads (on different entities).
+    int64_t take_whole(uint32_t entity, uint8_t kind, double exact);
+    void clear();
+    size_t size() const;
 
 private:
+    mutable std::mutex m_;
     std::unordered_map<uint64_t, double> carry_;
 };
 // Whether a kind is per-step env damage (shroud, cold, drowning).

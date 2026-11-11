@@ -268,8 +268,9 @@ it. EMF hooks them with `hook_program` (pre and post): the pre hook notes the He
 hook sees each drop, runs the hit rules and `on_hit_before` / `on_hit` callbacks as hits of kind 1 to 4 (`EmfHit.kind`),
 and puts Health right with the attribute code inside the program's own time slot. Every program that touches Health
 conflicts with these four in the scheduler, so no other program sees the uncorrected value. Server world only. A cancelled
-fall restores the health, but the game's hard-landing stagger (the fall sequence) still plays. Confidence: High (live
-checked).
+fall restores the health, but the game's hard-landing stagger (the fall sequence) still plays. Shroud, cold and drowning
+subtract without a floor (Health may go below 0 until the death program runs). Confidence: High for fall (live checked
+2026-11-11: amounts, keep and cancel); Medium for shroud, cold and drowning (from the code, not yet seen live).
 
 ---
 
