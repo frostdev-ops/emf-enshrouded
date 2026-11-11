@@ -24,7 +24,8 @@ class MapActions {
 public:
     using LogFn = std::function<void(const std::string&)>;
     explicit MapActions(LogFn log) : log_(std::move(log)) {}
-    // false: a bad id (1-48 of A-Z a-z 0-9 _ . -), no callback, or 16 already (the same id again replaces it)
+    // false: a bad id (1-48 of A-Z a-z 0-9 _ . - :) or 16 already (the same id again replaces it). A null cb removes the
+    // owner's action with that id (false: it had none).
     bool add(const std::string& owner, const char* id, const char* label, uint32_t hold_ms, EmfMapActionCallback cb, void* user);
     bool remove(const std::string& owner, const char* id);
     size_t remove_owner(const std::string& owner);

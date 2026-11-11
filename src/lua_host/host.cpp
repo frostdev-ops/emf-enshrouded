@@ -885,6 +885,7 @@ void Host::Impl::pause(Script& s, const std::string& why) {
     drop_sections(s.id);  // a paused mod's wheel section is not shown (its state stays: the refs go with it later)
     drop_hit_rules(*this, s);  // its hit rules stop too: they come back when the fixed file loads
     drop_markers(*this, s);    // its markers go too (here and in the players' games)
+    drop_map(*this, s);        // and its map actions; its click functions stop
     s.paused = true;
     s.error = why;
     api->log(s.id.c_str(), "%s (the mod is paused until one of its files changes)", why.c_str());
@@ -1007,6 +1008,7 @@ void Host::Impl::unload(Script& s) {
     queue_script_offers(*this, s);  // its offers come off on the next server step (only a world call may)
     drop_hit_rules(*this, s);       // its hit rules leave the core
     drop_markers(*this, s);         // and its markers, here and in the players' games
+    drop_map(*this, s);             // and its map actions and click functions
     drop_bus(s.id);                 // also drops messages published from on_unload
     drop_sections(s.id);  // before the state (and its pick functions) goes
     lua_close(s.L);
@@ -1246,6 +1248,10 @@ void Host::tick_body(EmfWorld* world) {
             if (bus_stopped) break;
         }
         if (bus_stopped || !s->L || s->paused) continue;
+        if (kind == EMF_WORLD_CLIENT && s->map_click_count.load(std::memory_order_acquire)) {  // lua 1.26
+            deliver_map_clicks(h, *s, world);
+            if (!s->L || s->paused) continue;
+        }
 
         // emf.on_key: every step of any world looks at the keys; a press goes to the world it is meant for
         bool stopped = false;

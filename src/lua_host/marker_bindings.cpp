@@ -95,7 +95,9 @@ Spec read_spec(lua_State* L, Script* s, const char* id, int t, const char* fn) {
 }
 
 // The script's own id for `id`; raises when the full id is not a valid marker id.
-std::string full_id(lua_State* L, Script* s, const char* id, const char* fn) {
+}  // namespace
+
+std::string scoped_id(lua_State* L, Script* s, const char* id, const char* fn) {
     std::string f = s->id + ":" + id;
     bool ok = !f.empty() && f.size() <= 48 && id && *id;
     for (char c : f)
@@ -106,6 +108,10 @@ std::string full_id(lua_State* L, Script* s, const char* id, const char* fn) {
                         static_cast<int>(47 - s->id.size()));
     return f;
 }
+
+namespace {
+
+std::string full_id(lua_State* L, Script* s, const char* id, const char* fn) { return scoped_id(L, s, id, fn); }
 
 uint32_t player_arg(lua_State* L, int i) { return lua_isnoneornil(L, i) ? 0u : static_cast<uint32_t>(luaL_checkinteger(L, i)); }
 

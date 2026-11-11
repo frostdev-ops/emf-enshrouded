@@ -86,3 +86,16 @@ TEST_CASE("map actions client: an empty list switches the gesture off; done send
     c.reset();
     CHECK_FALSE(c.announced());
 }
+
+TEST_CASE("map actions: an id with its mod's prefix (a Lua script's 'mod:id'); a null callback removes the owner's action") {
+    MapActions a(nullptr);
+    CHECK(a.add("lua", "teleports:teleport", "Teleport here", 0, on_action, nullptr));
+    MapActionsClient c;
+    REQUIRE(c.on_announce(a.announce_message()));
+    CHECK(c.first_id() == "teleports:teleport");
+    CHECK_FALSE(a.add("other", "teleports:teleport", nullptr, 0, nullptr, nullptr));  // not its owner's
+    CHECK_FALSE(a.empty());
+    CHECK(a.add("lua", "teleports:teleport", nullptr, 0, nullptr, nullptr));
+    CHECK(a.empty());
+    CHECK_FALSE(a.add("lua", "teleports:teleport", nullptr, 0, nullptr, nullptr));  // nothing to remove
+}

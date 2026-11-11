@@ -1271,8 +1271,9 @@ typedef struct EmfApi {
     /* Server end (the host's game or the dedicated server): a map action players do by holding Shift and the left mouse
      * button on their map for hold_ms (0 = 1000; a ring fills at the mouse; the game does not get that click). EMF on
      * each player's game does the gesture and sends the spot; `cb` gets the player and x, z on the server world's
-     * thread. Players need EMF on their game. An id again replaces it. False: a bad id (1-48 of A-Z a-z 0-9 _ . -), 16
-     * actions already, or no mod messages on this build. */
+     * thread. Players need EMF on their game. An id again replaces it; a null cb removes the caller's action with that id
+     * (false: it had none). False: a bad id (1-48 of A-Z a-z 0-9 _ . - :), 16 actions already, or no mod messages on
+     * this build. */
     bool (*map_action)(const char* id, const char* label, uint32_t hold_ms, EmfMapActionCallback cb, void* user);
     /* Server world: the ground under (x, z), found with the game's voxel ray after the next steps (the place may need
      * loading: up to a few seconds); `cb` once with the answer. False when refused at once: not the server world, x, z

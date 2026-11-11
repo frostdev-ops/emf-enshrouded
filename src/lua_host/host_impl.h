@@ -84,6 +84,10 @@ struct Script {
     std::set<uint32_t> hit_rules;                      // its emf.hit_rule ids (lua 1.23): removed on unload and pause
     std::set<std::string> markers;                     // its emf.marker ids ("<id>:<name>", lua 1.25): removed with it
     std::set<std::pair<uint32_t, std::string>> sent_markers;  // emf.send_marker: (player or 0, id), unsent with it
+    std::map<std::string, int> map_actions;            // emf.map_action (lua 1.26): "<id>:<name>" -> function; removed with it
+    std::vector<int> map_click_cbs;                    // emf.on_map_click (lua 1.26)
+    std::atomic<uint32_t> map_click_count{0};          // map_click_cbs.size(), read without m (the render thread)
+    std::deque<EmfMapClick> map_clicks;                // clicks for the next client world step (Host::Impl::map_m)
     std::map<std::string, std::vector<BusSubscription>> bus_subs;  // cross-mod message callbacks
     uint64_t next_bus_subscription = 0;             // unique callback tokens, even after unsubscribe
     // While a take's callback runs: the taken items not handed on yet (emf.put / emf.give of that item lower it). If the
@@ -150,6 +154,13 @@ struct WheelSection {
     int pick = LUA_NOREF;
 };
 
+// The user pointer of a script's map action in the core: one per "<id>:<name>", kept until the host goes (the core may
+// still hold it while the action is removed); the function is looked up in the script when the action is done.
+struct MapActionSlot {
+    Host::Impl* host = nullptr;
+    std::string script, full;
+};
+
 struct Host::Impl {
     const EmfApi* api = nullptr;
     std::wstring mods_dir;
@@ -183,6 +194,9 @@ struct Host::Impl {
     std::atomic<int> player_hooked{0};                   // the core's on_player (lua 1.20): 0 not asked, 1 on, -1 refused
     std::atomic<int> buff_hooked{0};                     // the core's on_buff (lua 1.24): 0 not asked, 1 on, -1 refused
     std::atomic<int> hit_hooked{0};                      // the core's on_hit (lua 1.23): 0 not asked, 1 on, -1 refused
+    std::atomic<int> click_hooked{0};                    // the core's on_map_click (lua 1.26): 0 not asked, 1 on, -1 refused
+    std::mutex map_m;                                    // map_action_slots and every script's map_clicks
+    std::map<std::string, std::unique_ptr<MapActionSlot>> map_action_slots;
     struct PresentPlayer {
         uint32_t player = 0;
         std::string name;
@@ -255,6 +269,17 @@ int l_world_to_screen(lua_State* L);
 int l_send_marker(lua_State* L);
 int l_unsend_marker(lua_State* L);
 void drop_markers(Host::Impl& h, Script& s);
+// "<script id>:<id>" for a script's own markers and map actions; raises on a bad id (A-Z a-z 0-9 _ . - :, 48 in all).
+std::string scoped_id(lua_State* L, Script* s, const char* id, const char* fn);
+// lua 1.26 the map (map_bindings.cpp): emf.map_cursor, emf.on_map_click, emf.map_action, emf.remove_map_action,
+// emf.ground_at; a script's actions leave with it (unload, pause, reload), its clicks come on client world steps.
+int l_map_cursor(lua_State* L);
+int l_on_map_click(lua_State* L);
+int l_map_action(lua_State* L);
+int l_remove_map_action(lua_State* L);
+int l_ground_at(lua_State* L);
+void deliver_map_clicks(Host::Impl& h, Script& s, EmfWorld* world);  // s.m held
+void drop_map(Host::Impl& h, Script& s);
 // The world argument at `index` (a world value from a callback); an error otherwise.
 EmfWorld* lua_world_arg(lua_State* L, int index);
 

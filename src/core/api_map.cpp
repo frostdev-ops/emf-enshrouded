@@ -87,7 +87,7 @@ bool api_map_action(const char* id, const char* label, uint32_t hold_ms, EmfMapA
         return false;
     }
     if (!s->map.actions.add(owner, id, label, hold_ms, cb, user)) {
-        log_of(s, "map_action refused (" + owner + "): a bad id (1-48 of A-Z a-z 0-9 _ . -), no callback, or 16 already");
+        if (cb) log_of(s, "map_action refused (" + owner + "): a bad id (1-48 of A-Z a-z 0-9 _ . - :) or 16 already");
         return false;
     }
     announce_all(s);

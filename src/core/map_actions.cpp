@@ -22,7 +22,7 @@ bool id_ok(const char* id) {
     for (size_t i = 0; i < n; ++i) {
         const char c = id[i];
         if (!((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_' || c == '.' ||
-              c == '-'))
+              c == '-' || c == ':'))
             return false;
     }
     return true;
@@ -41,7 +41,8 @@ void MapActions::log_once(const std::string& kind, const std::string& line) {
 
 bool MapActions::add(const std::string& owner, const char* id, const char* label, uint32_t hold_ms,
                      EmfMapActionCallback cb, void* user) {
-    if (!id_ok(id) || !cb) return false;
+    if (!id_ok(id)) return false;
+    if (!cb) return remove(owner, id);
     std::lock_guard<std::mutex> lock(m_);
     Action a{owner, id, label ? label : id, hold_ms ? std::min<uint32_t>(hold_ms, 10000) : 1000, cb, user};
     for (Action& x : actions_)

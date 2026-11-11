@@ -135,6 +135,26 @@ struct Fake {
     std::vector<std::pair<uint32_t, std::string>> markers_unsent;  // marker_unsend: player, id
     std::vector<uint32_t> map_types;
     bool screen_ok = true;
+    // v34 the map
+    bool cursor_ok = false;
+    double cursor_x = 0, cursor_z = 0;
+    std::vector<std::pair<EmfMapClickCallback, void*>> click_cbs;  // on_map_click
+    struct MapAction {
+        std::string label;
+        uint32_t hold_ms = 0;
+        EmfMapActionCallback cb = nullptr;
+        void* user = nullptr;
+    };
+    std::map<std::string, MapAction> map_actions;  // map_action, by id
+    std::vector<std::string> map_actions_removed;  // map_action with a null cb
+    struct GroundAsk {
+        EmfWorld* world;
+        double x, z;
+        EmfGroundCallback cb;
+        void* user;
+    };
+    std::vector<GroundAsk> ground_asks;  // ground_at (answer them with their cb/user as the core would)
+    bool ground_ok = true;
     int saves = 0;
     bool chat_ok = true;  // what chat_tell / chat_broadcast / on_chat / request_save answer
     // v20 teleport: the requests made (answer them with their cb/user as the core would)
@@ -793,6 +813,48 @@ uint32_t f_marker_unsend(uint32_t player, const char* id) {
     g->markers_unsent.emplace_back(player, id ? id : "");
     return player == 0 ? 2u : 1u;
 }
+// v34 the map
+bool f_map_cursor(double* x, double* z) {
+    if (!g->cursor_ok) return false;
+    *x = g->cursor_x;
+    *z = g->cursor_z;
+    return true;
+}
+bool f_on_map_click(EmfMapClickCallback cb, void* user) {
+    if (!cb) return false;
+    g->click_cbs.emplace_back(cb, user);
+    return true;
+}
+bool f_map_action(const char* id, const char* label, uint32_t hold_ms, EmfMapActionCallback cb, void* user) {
+    if (!id) return false;
+    if (!cb) {
+        g->map_actions_removed.push_back(id);
+        return g->map_actions.erase(id) > 0;
+    }
+    g->map_actions[id] = Fake::MapAction{label ? label : "", hold_ms, cb, user};
+    return true;
+}
+bool f_ground_at(EmfWorld* w, double x, double z, EmfGroundCallback cb, void* user) {
+    if (!g->ground_ok || !cb) return false;
+    g->ground_asks.push_back({w, x, z, cb, user});
+    return true;
+}
+// A click on the map screen (the render thread in the game).
+void fire_map_click(uint32_t button, uint32_t mods, double x, double z) {
+    EmfMapClick c{};
+    c.size = sizeof c;
+    c.button = button;
+    c.mods = mods;
+    c.x = x;
+    c.z = z;
+    const auto cbs = g->click_cbs;
+    for (auto& [cb, user] : cbs) cb(&c, user);
+}
+// A player finished the map gesture for action `id` (the server world's thread in the game).
+void fire_map_action(EmfWorld* world, const std::string& id, uint32_t player, double x, double z) {
+    const auto it = g->map_actions.find(id);
+    if (it != g->map_actions.end()) it->second.cb(world, player, id.c_str(), x, z, it->second.user);
+}
 // A player's buff change (every on_buff listener hears it).
 void fire_buff(EmfWorld* world, const EmfBuffEvent& e) {
     const auto cbs = g->buff_cbs;
@@ -852,6 +914,10 @@ EmfApi fake_api() {
     a.world_to_screen = f_world_to_screen;
     a.marker_send = f_marker_send;
     a.marker_unsend = f_marker_unsend;
+    a.map_cursor = f_map_cursor;  // v34
+    a.on_map_click = f_on_map_click;
+    a.map_action = f_map_action;
+    a.ground_at = f_ground_at;
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;

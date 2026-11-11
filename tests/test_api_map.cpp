@@ -106,6 +106,10 @@ TEST_CASE("map_action: a mod's action is announced and a player's finished gestu
     REQUIRE(g_did.size() == 1);
     CHECK(g_did[0].player == 3u);
     CHECK(g_did[0].x == 1500);
+    CHECK(api_table()->map_action("teleport", nullptr, 0, nullptr, nullptr));  // a null cb removes it
+    CHECK(f.state.map.actions.empty());
+    REQUIRE(c.on_announce(f.state.map.actions.announce_message()));
+    CHECK_FALSE(c.announced());
 }
 
 TEST_CASE("ground_at: the server world only; answered after the steps that agree") {
