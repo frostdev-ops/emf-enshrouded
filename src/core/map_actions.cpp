@@ -85,7 +85,7 @@ std::string MapActions::announce_message() const {
     return bridge::JsonObj().raw("a", bridge::json_list(items)).text();
 }
 
-bool MapActions::on_done(EmfWorld* world, uint32_t player, const std::string& data, uint64_t now_ms) {
+bool MapActions::on_done(EmfWorld* world, uint32_t player, bool admin, const std::string& data, uint64_t now_ms) {
     const json::ParseResult r = json::parse(data);
     const json::Value* id = r.value ? r.value->get("i") : nullptr;
     const json::Value* x = r.value ? r.value->get("x") : nullptr;
@@ -117,7 +117,14 @@ bool MapActions::on_done(EmfWorld* world, uint32_t player, const std::string& da
         log_once("unknown", "map actions: a player asked for an action this server does not have (" + id->s + ")");
         return false;
     }
-    cb(world, player, id->s.c_str(), x->n, z->n, user);
+    EmfMapDone d{};
+    d.size = sizeof d;
+    d.player = player;
+    d.admin = admin ? 1 : 0;
+    d.x = x->n;
+    d.z = z->n;
+    d.action = id->s.c_str();
+    cb(world, &d, user);
     return true;
 }
 

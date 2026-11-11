@@ -851,9 +851,17 @@ void fire_map_click(uint32_t button, uint32_t mods, double x, double z) {
     for (auto& [cb, user] : cbs) cb(&c, user);
 }
 // A player finished the map gesture for action `id` (the server world's thread in the game).
-void fire_map_action(EmfWorld* world, const std::string& id, uint32_t player, double x, double z) {
+void fire_map_action(EmfWorld* world, const std::string& id, uint32_t player, double x, double z, bool admin = false) {
     const auto it = g->map_actions.find(id);
-    if (it != g->map_actions.end()) it->second.cb(world, player, id.c_str(), x, z, it->second.user);
+    if (it == g->map_actions.end()) return;
+    EmfMapDone d{};
+    d.size = sizeof d;
+    d.player = player;
+    d.admin = admin ? 1 : 0;
+    d.x = x;
+    d.z = z;
+    d.action = id.c_str();
+    it->second.cb(world, &d, it->second.user);
 }
 // A player's buff change (every on_buff listener hears it).
 void fire_buff(EmfWorld* world, const EmfBuffEvent& e) {

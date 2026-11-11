@@ -591,8 +591,16 @@ typedef struct EmfMapClick {
     double x, z;     /* the spot, world metres */
 } EmfMapClick;
 typedef void (*EmfMapClickCallback)(const EmfMapClick* click, void* user);
-/* A map action a player did: on the server world's thread; `player` = their entity there; x, z the spot. */
-typedef void (*EmfMapActionCallback)(EmfWorld* world, uint32_t player, const char* action, double x, double z, void* user);
+/* A map action a player did (on the server world's thread). */
+typedef struct EmfMapDone {
+    uint32_t size;      /* sizeof(EmfMapDone) of the core */
+    uint32_t player;    /* their entity in the server world */
+    uint8_t admin;      /* 1 = the host's own game, or an account in [chat] admins (everyone=1 too) */
+    uint8_t pad[7];
+    double x, z;        /* the spot, world metres, inside the world */
+    const char* action; /* the action's id; valid during the callback */
+} EmfMapDone;
+typedef void (*EmfMapActionCallback)(EmfWorld* world, const EmfMapDone* done, void* user);
 #define EMF_GROUND_OK 0u         /* EmfGround.status: y is the ground */
 #define EMF_GROUND_NOT_LOADED 1u /* nobody is near the spot: hop_y is a height over it where a player may be teleported
                                     (the game loads the place around them); ask again once they are there */

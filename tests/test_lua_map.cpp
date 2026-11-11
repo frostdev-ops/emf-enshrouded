@@ -34,8 +34,8 @@ TEST_CASE("lua 1.26: emf.map_action registers '<mod>:<id>' with its label and ho
     Rig r(L"map_action");
     add_script(r.dir, "tp",
                "emf.log('add ' .. tostring(emf.map_action('teleport', {label = 'Teleport here', hold_ms = 1500},\n"
-               "  function(world, player, x, z) emf.log('did ' .. player .. ' ' .. x .. ' ' .. z .. ' ' ..\n"
-               "    tostring(world ~= nil)) end)))\n"
+               "  function(world, player, x, z, admin) emf.log('did ' .. player .. ' ' .. x .. ' ' .. z .. ' ' ..\n"
+               "    tostring(world ~= nil) .. ' ' .. tostring(admin)) end)))\n"
                "emf.map_action('ping', nil, function() end)\n");
     Host host(&r.api, r.dir);
     host.load_all();
@@ -46,7 +46,9 @@ TEST_CASE("lua 1.26: emf.map_action registers '<mod>:<id>' with its label and ho
     REQUIRE(r.fake.map_actions.count("tp:ping") == 1);
     CHECK(r.fake.map_actions["tp:ping"].label == "ping");  // no label: the id
     fire_map_action(kServer, "tp:teleport", 7, 1500, 4740);
-    CHECK(logged("did 7 1500.0 4740.0 true"));
+    CHECK(logged("did 7 1500.0 4740.0 true false"));
+    fire_map_action(kServer, "tp:teleport", 1, 10, 20, true);
+    CHECK(logged("did 1 10.0 20.0 true true"));
 }
 
 TEST_CASE("lua 1.26: emf.map_action raises on an unknown option, a bad id or no function; remove_map_action") {

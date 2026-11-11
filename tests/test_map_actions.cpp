@@ -16,9 +16,10 @@ struct Did {
     uint32_t player;
     std::string id;
     double x, z;
+    bool admin;
 };
 std::vector<Did> g_did;
-void on_action(EmfWorld*, uint32_t player, const char* id, double x, double z, void*) { g_did.push_back({player, id, x, z}); }
+void on_action(EmfWorld*, const EmfMapDone* d, void*) { g_did.push_back({d->player, d->action, d->x, d->z, d->admin != 0}); }
 
 std::string done_msg(const char* id, double x, double z) { return MapActionsClient::done_message(id, x, z); }
 
@@ -44,12 +45,16 @@ TEST_CASE("map actions: a player's done reaches the mod with the player and the 
     g_did.clear();
     MapActions a(nullptr);
     a.add("lua", "teleport", "Teleport here", 0, on_action, nullptr);
-    CHECK(a.on_done(nullptr, 7, done_msg("teleport", 1500, 4740), 1000));
+    CHECK(a.on_done(nullptr, 7, false, done_msg("teleport", 1500, 4740), 1000));
     REQUIRE(g_did.size() == 1);
     CHECK(g_did[0].player == 7u);
     CHECK(g_did[0].id == "teleport");
     CHECK(g_did[0].x == 1500);
     CHECK(g_did[0].z == 4740);
+    CHECK_FALSE(g_did[0].admin);
+    CHECK(a.on_done(nullptr, 1, true, done_msg("teleport", 1, 2), 1000));  // the host's own game, or a [chat] admin
+    REQUIRE(g_did.size() == 2);
+    CHECK(g_did[1].admin);
 }
 
 TEST_CASE("map actions: an unknown action, a spot outside the world, junk or a flood never reach the mod") {
@@ -57,15 +62,15 @@ TEST_CASE("map actions: an unknown action, a spot outside the world, junk or a f
     std::vector<std::string> logs;
     MapActions a([&](const std::string& l) { logs.push_back(l); });
     a.add("lua", "teleport", "Teleport here", 0, on_action, nullptr);
-    CHECK_FALSE(a.on_done(nullptr, 7, done_msg("nope", 1, 1), 1000));
-    CHECK_FALSE(a.on_done(nullptr, 7, R"({"i": "teleport", "x": "nan", "z": 1})", 1000));  // JSON has no NaN
-    CHECK_FALSE(a.on_done(nullptr, 7, done_msg("teleport", 1, 20000), 1000));
-    CHECK_FALSE(a.on_done(nullptr, 7, "{broken", 1000));
+    CHECK_FALSE(a.on_done(nullptr, 7, false, done_msg("nope", 1, 1), 1000));
+    CHECK_FALSE(a.on_done(nullptr, 7, false, R"({"i": "teleport", "x": "nan", "z": 1})", 1000));  // JSON has no NaN
+    CHECK_FALSE(a.on_done(nullptr, 7, false, done_msg("teleport", 1, 20000), 1000));
+    CHECK_FALSE(a.on_done(nullptr, 7, false, "{broken", 1000));
     CHECK(g_did.empty());
     CHECK_FALSE(logs.empty());
-    for (int i = 0; i < 20; ++i) CHECK(a.on_done(nullptr, 8, done_msg("teleport", 1, 1), 2000));
-    CHECK_FALSE(a.on_done(nullptr, 8, done_msg("teleport", 1, 1), 2000));  // 20 in 10 s
-    CHECK(a.on_done(nullptr, 8, done_msg("teleport", 1, 1), 13000));      // later again
+    for (int i = 0; i < 20; ++i) CHECK(a.on_done(nullptr, 8, false, done_msg("teleport", 1, 1), 2000));
+    CHECK_FALSE(a.on_done(nullptr, 8, false, done_msg("teleport", 1, 1), 2000));  // 20 in 10 s
+    CHECK(a.on_done(nullptr, 8, false, done_msg("teleport", 1, 1), 13000));      // later again
 }
 
 TEST_CASE("map actions client: an empty list switches the gesture off; done sends the first action and the spot") {

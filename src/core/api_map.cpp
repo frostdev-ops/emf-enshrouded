@@ -151,7 +151,7 @@ bool map_net_setup(net::NetService* net, std::string* why) {
     c.per_10s = 30;  // MapActions keeps its own 20 per 10 s per player
     c.on_server = [](EmfWorld* w, const net::NetFrom& f, const std::string& d) {
         CoreState* s = core_state();
-        if (s && f.player) s->map.actions.on_done(w, f.player, d, now_of(s));
+        if (s && f.player) s->map.actions.on_done(w, f.player, f.admin, d, now_of(s));
     };
     c.on_player = [](EmfWorld*, const net::NetFrom&, const std::string& d) {
         CoreState* s = core_state();

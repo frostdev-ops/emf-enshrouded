@@ -31,8 +31,9 @@ public:
     size_t remove_owner(const std::string& owner);
     bool empty() const;
     std::string announce_message() const;
-    // A player's finished gesture (the server world's thread): true when it reached a mod.
-    bool on_done(EmfWorld* world, uint32_t player, const std::string& data, uint64_t now_ms);
+    // A player's finished gesture (the server world's thread): true when it reached a mod. `admin`: the server's own
+    // view of the sender (the host's own game or a [chat] admin), never from the message.
+    bool on_done(EmfWorld* world, uint32_t player, bool admin, const std::string& data, uint64_t now_ms);
     void forget(uint32_t player);
 
 private:

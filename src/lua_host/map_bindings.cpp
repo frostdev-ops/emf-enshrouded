@@ -19,7 +19,7 @@ bool has_v34(const EmfApi* a) {
 }
 
 // ---- map actions ----
-void map_action_cb_body(EmfWorld* w, uint32_t player, double x, double z, void* user) {
+void map_action_cb_body(EmfWorld* w, const EmfMapDone& d, void* user) {
     auto* slot = static_cast<MapActionSlot*>(user);
     Script* s = slot->host->find(slot->script);
     if (!s) return;
@@ -29,17 +29,18 @@ void map_action_cb_body(EmfWorld* w, uint32_t player, double x, double z, void* 
     if (it == s->map_actions.end()) return;  // removed while the player held
     lua_rawgeti(s->L, LUA_REGISTRYINDEX, it->second);
     push_world(s->L, *s, w);
-    lua_pushinteger(s->L, player);
-    lua_pushnumber(s->L, x);
-    lua_pushnumber(s->L, z);
-    call_lua(*s, 4);
+    lua_pushinteger(s->L, d.player);
+    lua_pushnumber(s->L, d.x);
+    lua_pushnumber(s->L, d.z);
+    lua_pushboolean(s->L, d.admin != 0);
+    call_lua(*s, 5);
     ++s->generation;
 }
 
 // Called by EMF: nothing may escape into the game (a Lua error is a C++ exception).
-void map_action_cb(EmfWorld* w, uint32_t player, const char*, double x, double z, void* user) {
+void map_action_cb(EmfWorld* w, const EmfMapDone* d, void* user) {
     try {
-        map_action_cb_body(w, player, x, z, user);
+        if (d) map_action_cb_body(w, *d, user);
     } catch (...) {
     }
 }
@@ -158,8 +159,9 @@ int l_on_map_click(lua_State* L) {
     return 1;
 }
 
-// emf.map_action(id, opts, fn(world, player, x, z)): a map action players do with Shift + hold on their map (the server
-// end: the host's game or the dedicated server). opts (or nil): label, hold_ms. True when the core took it.
+// emf.map_action(id, opts, fn(world, player, x, z, admin)): a map action players do with Shift + hold on their map (the
+// server end: the host's game or the dedicated server). admin: the host's own game or a [chat] admin. opts (or nil):
+// label, hold_ms. True when the core took it.
 int l_map_action(lua_State* L) {
     Script* s = script_of(L);
     const char* id = luaL_checkstring(L, 1);

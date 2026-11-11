@@ -35,7 +35,7 @@ struct Got {
 };
 std::vector<Got> g_got;
 
-void on_action(EmfWorld*, uint32_t player, const char*, double x, double z, void*) { g_did.push_back({player, x, z}); }
+void on_action(EmfWorld*, const EmfMapDone* d, void*) { g_did.push_back({d->player, d->x, d->z}); }
 void on_ground(EmfWorld*, const EmfGround* g, void*) { g_got.push_back({g->status == EMF_GROUND_OK, g->y, g->size}); }
 void on_click(const EmfMapClick*, void*) {}
 
@@ -103,7 +103,7 @@ TEST_CASE("map_action: a mod's action is announced and a player's finished gestu
     MapActionsClient c;
     REQUIRE(c.on_announce(f.state.map.actions.announce_message()));
     CHECK(c.first_id() == "teleport");
-    CHECK(f.state.map.actions.on_done(f.sw(), 3, c.done(1500, 4740), g_now));
+    CHECK(f.state.map.actions.on_done(f.sw(), 3, false, c.done(1500, 4740), g_now));
     REQUIRE(g_did.size() == 1);
     CHECK(g_did[0].player == 3u);
     CHECK(g_did[0].x == 1500);
