@@ -132,7 +132,7 @@ void before_close_body(void* scope, const HudSnapshot* snap, ScopeTracker::Close
     for (int i = 0; i < c->dropped_count; ++i) {
         scale_lost(c->dropped[i].push);
         if (c->dropped[i].element == kTrackVitals) bars_vitals_close(nullptr);
-        if (c->dropped[i].element == kTrackWidget) panel_restore();
+        if (c->dropped[i].element == kTrackWidget) panel_disarm();
     }
     if (!c->found) return;
     const int e = c->scope.element;
@@ -141,7 +141,7 @@ void before_close_body(void* scope, const HudSnapshot* snap, ScopeTracker::Close
         return;
     }
     if (e == kTrackWidget) {
-        panel_restore();
+        panel_disarm();
         return;
     }
     if (e < 0 || static_cast<size_t>(e) >= kHudElementCount || !node) return;
@@ -203,12 +203,26 @@ void guarded_bar_after(const BarCall* c, void* result) {
     }
 }
 
-void guarded_panel_restore() {
+// the panel's tint swap (the layer detour): thread-local state only, guarded all the same
+bool guarded_panel_tint(uint64_t* tint, uint64_t unused, uint64_t enable, const void* rect) {
     __try {
-        panel_restore();
+        return panel_tint(tint, unused, enable, rect);
     } __except (EXCEPTION_EXECUTE_HANDLER) {
         fault(GetExceptionCode());
+        panel_disarm();
+        return false;
     }
+}
+
+// uiLayerOpen(state, scope, unused, UiColor tint by value, enable, margins*, rect*): every argument as a raw 64-bit
+// slot, passed on bit for bit (the caller writes only the low byte of the enable slot)
+using LayerFn = void* (*)(void* state, void* scope, uint64_t unused, uint64_t tint, uint64_t enable, const void* margins,
+                          const void* rect);
+LayerFn g_o_layer = nullptr;
+void* hk_layer(void* state, void* scope, uint64_t unused, uint64_t tint, uint64_t enable, const void* margins,
+               const void* rect) {
+    guarded_panel_tint(&tint, unused, enable, rect);
+    return g_o_layer(state, scope, unused, tint, enable, margins, rect);
 }
 
 void* hk_bar(void* out, void* data, void* style) {
@@ -223,23 +237,6 @@ void* hk_open(void* scope, const NameInfo* ni) { return hud_open_path(scope, ni,
 void hk_close(void* scope) { hud_close_path(scope, g_o_close); }
 
 }  // namespace
-
-bool memory_writable(const void* p, size_t n, uint32_t* type, uint32_t* protect) {
-    if (type) *type = 0;
-    if (protect) *protect = 0;
-    MEMORY_BASIC_INFORMATION mbi{};
-    if (!p || VirtualQuery(p, &mbi, sizeof mbi) != sizeof mbi) return false;
-    if (type) *type = mbi.Type;
-    if (protect) *protect = mbi.Protect;
-    if (mbi.State != MEM_COMMIT || mbi.Type != MEM_PRIVATE || (mbi.Protect & (PAGE_GUARD | PAGE_NOACCESS))) return false;
-    if (!(mbi.Protect & (PAGE_READWRITE | PAGE_EXECUTE_READWRITE))) return false;
-    const uintptr_t at = reinterpret_cast<uintptr_t>(p);
-    const uintptr_t end = reinterpret_cast<uintptr_t>(mbi.BaseAddress) + mbi.RegionSize;
-    if (at + n > end) return false;
-    ULONG_PTR lo = 0, hi = 0;
-    GetCurrentThreadStackLimits(&lo, &hi);
-    return !(at + n > lo && at < hi);
-}
 
 // ---- ScopeTracker ----
 void ScopeTracker::opened(const OpenScope& s) {
@@ -323,7 +320,7 @@ void* hud_open_path(void* scope, const NameInfo* ni, OpenFn original, uint64_t n
     if (is_on())
         guarded_after_open(scope, ni, current_snapshot(), now_ms);
     else
-        guarded_panel_restore();  // the editor turned off with the panel colour written
+        panel_disarm();  // the editor turned off with a panel swap armed
     return r;
 }
 
@@ -379,13 +376,17 @@ bool install_hud_hooks(const std::array<Resolved, kSigCount>& sigs, bool known_b
                           reinterpret_cast<void*>(&hk_open), reinterpret_cast<void**>(&g_o_open)))
         return fail("the UI scope open could not be hooked");
     g_box.store(box, std::memory_order_release);
-    set_panel_writable_check(&memory_writable);
     g_on.store(true, std::memory_order_relaxed);
     // The bars (optional): without them the rest of the editor works.
     if (hud_bars_ready(sigs, known_build, build_index))
         g_bars_hooked.store(install_emf_hook("PlayerVitalBar (HUD editor)", sigs[static_cast<size_t>(Sig::PlayerVitalBar)].addr,
                                              reinterpret_cast<void*>(&hk_bar), reinterpret_cast<void**>(&g_o_bar)),
                             std::memory_order_relaxed);
+    // the panel colour (optional): the panel's layer call, only with the bars (health's frame colour)
+    const bool panel = g_bars_hooked.load(std::memory_order_relaxed) && hud_panel_ready(sigs, known_build, build_index) &&
+                       install_emf_hook("PanelLayerOpen (HUD editor)", sigs[static_cast<size_t>(Sig::PanelLayerOpen)].addr,
+                                        reinterpret_cast<void*>(&hk_layer), reinterpret_cast<void**>(&g_o_layer));
+    set_panel_available(panel);
     return true;
 }
 

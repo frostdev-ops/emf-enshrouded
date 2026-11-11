@@ -800,19 +800,19 @@ TEST_CASE("the game's colours are recorded per bar; stamina not seen stays empty
     CHECK_FALSE(bar_game_colours(3).has_value());
 }
 
-// ---- the panel colour: a scoped write into health's frame colour ----
+// ---- the panel colour: the tint of the panel's uiLayerOpen call is swapped, armed at the vitalBars close; nothing
+// in the game's memory is written ----
 namespace {
-
-bool g_writable = true;
-bool test_writable(const void*, size_t, uint32_t* type, uint32_t* protect) {
-    if (type) *type = 0x20000;  // MEM_PRIVATE
-    if (protect) *protect = g_writable ? 0x04u : 0x02u;
-    return g_writable;
-}
 
 void open_widget(Node& n) {
     const NameInfo ni{"doPlayerHealthWidget()", 22, kPlayerWidgetHash};
     hud_open_path(n.scope, &ni, no_open, 1000);
+}
+
+uint64_t pack(UiColour c) {
+    uint64_t v = 0;
+    std::memcpy(&v, &c, sizeof v);
+    return v;
 }
 
 struct PanelRig {
@@ -820,12 +820,7 @@ struct PanelRig {
     StyleBlock health = test_block(0x4FD17CFF);
     UiColour frame{};
     Node widget;
-    explicit PanelRig(const HudSnapshot& s, bool writable = true) : bars(s) {
-        g_writable = writable;
-        set_panel_writable_check(&test_writable);
-        frame = health[kFrame];
-    }
-    ~PanelRig() { set_panel_writable_check(nullptr); }
+    explicit PanelRig(const HudSnapshot& s) : bars(s) { frame = health[kFrame]; }
     // the widget opens, vitalBars opens, health is drawn, vitalBars closes (the widget stays open)
     void draw_bars() {
         open_widget(widget);
@@ -834,14 +829,21 @@ struct PanelRig {
         call_bar_style(0, &health, bars.snap(), o);
         close(bars.vitals);
     }
+    // the widget's panel call: uiLayerOpen(state, scope, 0, tint, enable 1, margins, null); the tint it passes on
+    uint64_t call(uint64_t tint, uint64_t unused = 0, uint64_t enable = 1, const void* rect = nullptr) {
+        uint64_t t = tint;
+        panel_tint(&t, unused, enable, rect);
+        return t;
+    }
+    uint64_t game() const { return pack(frame); }
     bool frame_is_game() const {
         return health[kFrame].value == frame.value && health[kFrame].intensity == frame.intensity;
     }
 };
 
-HudSnapshot with_panel() {
+HudSnapshot with_panel(const char* colour = "#20208080") {
     HudSnapshot s = active();
-    s.panel = *parse_colour("#20208080").colour;
+    s.panel = *parse_colour(colour).colour;
     return s;
 }
 
@@ -851,59 +853,60 @@ TEST_CASE("kPlayerWidgetHash is the hash of doPlayerHealthWidget()") {
     CHECK(emf::fnv1a64("doPlayerHealthWidget()") == kPlayerWidgetHash);
 }
 
-TEST_CASE("panel: written when vitalBars closes, put back when the player widget closes") {
+TEST_CASE("panel: the panel call gets EMF's colour with the game's intensity; nothing is written") {
     PanelRig p(with_panel());
     p.draw_bars();
-    CHECK(p.health[kFrame].value == rgba_to_game(0x20208080));
-    CHECK(p.health[kFrame].intensity == p.frame.intensity);  // the game's intensity
+    UiColour got{};
+    const uint64_t t = p.call(p.game());
+    std::memcpy(&got, &t, sizeof got);
+    CHECK(got.value == rgba_to_game(0x20208080));
+    CHECK(got.intensity == p.frame.intensity);
+    CHECK(p.frame_is_game());  // the game's block is untouched
+    CHECK(colour_stats().panel_swaps == 1);
+    CHECK(colour_stats().panel_misses == 0);
     close(p.widget);
-    CHECK(p.frame_is_game());
-    CHECK(colour_stats().panel_writes == 1);
-    CHECK(colour_stats().panel_restores == 1);
-    CHECK(panel_status() == PanelStatus::Writable);
 }
 
-TEST_CASE("panel: put back at the next vitalBars open when the widget close was missed") {  // Review Focus 2
+TEST_CASE("panel: only the first call after the close is swapped") {  // Review Focus 1
     PanelRig p(with_panel());
     p.draw_bars();
-    CHECK_FALSE(p.frame_is_game());
-    open(p.bars.vitals, "vitalBars");  // the next frame; the widget's close was never seen
-    CHECK(p.frame_is_game());
-    close(p.bars.vitals);
+    CHECK(p.call(p.game()) != p.game());
+    CHECK(p.call(p.game()) == p.game());  // the rested bar, the bars' fill layers: the game's colour
+    CHECK(colour_stats().panel_swaps == 1);
+    close(p.widget);
 }
 
-TEST_CASE("panel: put back when the editor turned off before the widget closed") {  // Review Focus 2
+TEST_CASE("panel: no swap when the tint is not health's frame colour, rect is set, enable is 0 or unused is not 0") {
+    PanelRig p(with_panel());
+    const int rect = 0;
+    p.draw_bars();
+    CHECK(p.call(p.game() ^ 1) == (p.game() ^ 1));
+    p.draw_bars();
+    CHECK(p.call(p.game(), 0, 1, &rect) == p.game());
+    p.draw_bars();
+    CHECK(p.call(p.game(), 0, 0) == p.game());
+    p.draw_bars();
+    CHECK(p.call(p.game(), 5) == p.game());
+    p.draw_bars();
+    CHECK(p.call(p.game(), 0, 0xAB01) != p.game());  // only the low byte of the enable slot is the caller's
+    CHECK(colour_stats().panel_misses == 4);
+    CHECK(colour_stats().panel_swaps == 1);
+    close(p.widget);
+}
+
+TEST_CASE("panel: no arm without health drawn this frame, without a panel colour, or with the editor inactive") {  // Review Focus 2
     {
         PanelRig p(with_panel());
-        p.draw_bars();
-        hud_set_for_tests(&p.bars.box, false);
+        open_widget(p.widget);
+        open(p.bars.vitals, "vitalBars");
+        close(p.bars.vitals);  // no bar call this frame
+        CHECK(p.call(p.game()) == p.game());
         close(p.widget);
-        CHECK(p.frame_is_game());
     }
-    {
-        PanelRig p(with_panel());
-        p.draw_bars();
-        hud_set_for_tests(&p.bars.box, false);
-        Node other;
-        open(other, "somethingElse");  // any scope opened while off puts it back
-        CHECK(p.frame_is_game());
-    }
-}
-
-TEST_CASE("panel: not written when the memory is not writable") {
-    PanelRig p(with_panel(), false);
-    p.draw_bars();
-    CHECK(p.frame_is_game());
-    CHECK(panel_status() == PanelStatus::ReadOnly);
-    CHECK(colour_stats().panel_writes == 0);
-    close(p.widget);
-}
-
-TEST_CASE("panel: nothing written without a panel colour or with the editor off") {
     {
         PanelRig p(active());
         p.draw_bars();
-        CHECK(p.frame_is_game());
+        CHECK(p.call(p.game()) == p.game());
         close(p.widget);
     }
     {
@@ -911,10 +914,53 @@ TEST_CASE("panel: nothing written without a panel colour or with the editor off"
         s.active = false;
         PanelRig p(s);
         p.draw_bars();
-        CHECK(p.frame_is_game());
+        CHECK(p.call(p.game()) == p.game());
         close(p.widget);
     }
-    CHECK(colour_stats().panel_writes == 0);
+    CHECK(colour_stats().panel_swaps == 0);
+    CHECK(colour_stats().panel_misses == 0);
+}
+
+TEST_CASE("panel: disarm clears a pending swap") {  // Review Focus 5
+    {
+        PanelRig p(with_panel());
+        p.draw_bars();
+        close(p.widget);  // the widget closed before its panel call
+        CHECK(p.call(p.game()) == p.game());
+    }
+    {
+        PanelRig p(with_panel());
+        p.draw_bars();
+        open(p.bars.vitals, "vitalBars");  // the next frame
+        CHECK(p.call(p.game()) == p.game());
+        close(p.bars.vitals);
+    }
+    {
+        PanelRig p(with_panel());
+        p.draw_bars();
+        hud_set_for_tests(&p.bars.box, false);
+        Node other;
+        open(other, "somethingElse");  // any scope opened while the editor is off
+        CHECK(p.call(p.game()) == p.game());
+    }
+    CHECK(colour_stats().panel_swaps == 0);
+}
+
+TEST_CASE("panel: alpha 0 is passed as is (the game then skips the panel's draw)") {
+    PanelRig p(with_panel("#20208000"));
+    p.draw_bars();
+    UiColour got{};
+    const uint64_t t = p.call(p.game());
+    std::memcpy(&got, &t, sizeof got);
+    CHECK(got.value == rgba_to_game(0x20208000));
+    close(p.widget);
+}
+
+TEST_CASE("panel: available or not by the hook") {
+    set_panel_available(true);
+    CHECK(panel_status() == PanelStatus::Available);
+    set_panel_available(false);
+    CHECK(panel_status() == PanelStatus::Unavailable);
 }
 
 TEST_CASE("lines_live: the overlay's rect of a place is that part's live rect") {
@@ -936,59 +982,6 @@ TEST_CASE("lines_live: the overlay's rect of a place is that part's live rect") 
     CHECK_FALSE(hud_live(static_cast<size_t>(lines_element(2))).seen);
 }
 
-TEST_CASE("panel: not written when the bytes there are not health's frame colour from this frame") {  // review Important 1
-    PanelRig p(with_panel());
-    open_widget(p.widget);
-    open(p.bars.vitals, "vitalBars");
-    float o[4];
-    call_bar_style(0, &p.health, p.bars.snap(), o);
-    p.health[kFrame].value = rgba_to_game(0x12345678);  // changed since the bar read it (a copy that died, reused memory)
-    close(p.bars.vitals);
-    CHECK(p.health[kFrame].value == rgba_to_game(0x12345678));
-    CHECK(colour_stats().panel_writes == 0);
-    close(p.widget);
-}
 
-TEST_CASE("panel: not put back when the bytes changed after the write") {  // review Important 1
-    PanelRig p(with_panel());
-    p.draw_bars();
-    REQUIRE(colour_stats().panel_writes == 1);
-    p.health[kFrame].value = rgba_to_game(0x11223344);  // something else wrote there since
-    close(p.widget);
-    CHECK(p.health[kFrame].value == rgba_to_game(0x11223344));
-    CHECK(colour_stats().panel_restores == 0);
-}
 
-TEST_CASE("panel: the refused memory's type and protection are kept for the log") {
-    PanelRig p(with_panel(), false);
-    p.draw_bars();
-    CHECK(panel_status() == PanelStatus::ReadOnly);
-    CHECK(panel_memory_text() == "memory type 0x20000, protection 0x2");
-    close(p.widget);
-}
 
-TEST_CASE("memory_writable: private read-write memory only, never this thread's stack or a shared view") {
-    uint32_t type = 0, protect = 0;
-    void* rw = VirtualAlloc(nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-    REQUIRE(rw);
-    CHECK(memory_writable(rw, 8, &type, &protect));
-    CHECK(type == MEM_PRIVATE);
-    CHECK(protect == PAGE_READWRITE);
-    CHECK_FALSE(memory_writable(static_cast<uint8_t*>(rw) + 4092, 8, &type, &protect));  // past the region's end
-    DWORD old = 0;
-    REQUIRE(VirtualProtect(rw, 4096, PAGE_READONLY, &old));
-    CHECK_FALSE(memory_writable(rw, 8, &type, &protect));
-    CHECK(protect == PAGE_READONLY);
-    VirtualFree(rw, 0, MEM_RELEASE);
-    uint64_t on_stack = 0;
-    CHECK_FALSE(memory_writable(&on_stack, 8, &type, &protect));
-    HANDLE m = CreateFileMappingW(INVALID_HANDLE_VALUE, nullptr, PAGE_READWRITE, 0, 4096, nullptr);
-    REQUIRE(m);
-    void* view = MapViewOfFile(m, FILE_MAP_WRITE, 0, 0, 4096);
-    REQUIRE(view);
-    CHECK_FALSE(memory_writable(view, 8, &type, &protect));
-    CHECK(type == MEM_MAPPED);
-    UnmapViewOfFile(view);
-    CloseHandle(m);
-    CHECK_FALSE(memory_writable(nullptr, 8, &type, &protect));
-}

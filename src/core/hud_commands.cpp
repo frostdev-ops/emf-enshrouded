@@ -170,9 +170,9 @@ std::vector<std::string> list_lines(HudEditor& editor) {
     if (v.buffs_up) out.push_back("hud: status effects grow upward");
     if (const std::string colours = colours_summary(v); !colours.empty()) {
         out.push_back("hud: colours: " + colours);
-        out.push_back("hud: colour calls " + std::to_string(v.colour_stats.recoloured) + ", panel writes " +
-                      std::to_string(v.colour_stats.panel_writes) + ", panel restores " +
-                      std::to_string(v.colour_stats.panel_restores));
+        out.push_back("hud: colour calls " + std::to_string(v.colour_stats.recoloured) + ", panel swaps " +
+                      std::to_string(v.colour_stats.panel_swaps) + ", panel misses " +
+                      std::to_string(v.colour_stats.panel_misses));
     }
     const auto parts = hud_elements();
     for (size_t i = 0; i < kHudElementCount; ++i) {

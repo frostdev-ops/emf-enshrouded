@@ -247,11 +247,10 @@ void HudEditor::tick() {
                        ui_colour_text(s[kHeal]));
         }
     }
-    if (deps_.panel_status && !panel_refusal_logged_ && deps_.panel_status() == PanelStatus::ReadOnly) {
+    if (deps_.panel_status && !panel_refusal_logged_ && deps_.panel_status() == PanelStatus::Unavailable) {
         panel_refusal_logged_ = true;
-        const std::string detail = deps_.panel_memory ? deps_.panel_memory() : std::string();
-        log_locked("HUD editor: the panel colour cannot be written on this game build (" +
-                   (detail.empty() ? std::string("memory not checked") : detail) + "); the panel keeps the game's colour");
+        log_locked("HUD editor: the panel colour is not available on this game build (its signature is not usable); the "
+                   "panel keeps the game's colour");
     }
     if (deps_.scale_state && !scale_off_logged_ && deps_.scale_state().off) {
         scale_off_logged_ = true;
@@ -306,11 +305,11 @@ HudView HudEditor::view() const {
     v.colours_work = bars_hooked;
     if (!v.colours_work) v.colours_note = "Bar colours are not available on this game build.";
     const PanelStatus panel = deps_.panel_status ? deps_.panel_status() : PanelStatus::Unknown;
-    v.panel_works = v.colours_work && panel != PanelStatus::ReadOnly;
+    v.panel_works = v.colours_work && panel != PanelStatus::Unavailable;
     if (!v.colours_work)
         v.panel_note = v.colours_note;
-    else if (panel == PanelStatus::ReadOnly)
-        v.panel_note = "The panel colour is not available on this game build (the game's data there is read-only).";
+    else if (panel == PanelStatus::Unavailable)
+        v.panel_note = "The panel colour is not available on this game build.";
     if (deps_.colour_stats) v.colour_stats = deps_.colour_stats();
     v.grow_works = v.scale_works;
     if (!v.scale.available)

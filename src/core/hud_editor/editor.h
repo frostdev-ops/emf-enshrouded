@@ -35,7 +35,6 @@ struct HudEditorDeps {
     std::function<bool()> bars_ready;                     // the bar detour is installed; empty = not available
     std::function<std::optional<StyleBlock>(int bar)> game_colours;  // the game's colour block for a bar, once drawn
     std::function<PanelStatus()> panel_status;            // whether the panel colour can be written; empty = unknown
-    std::function<std::string()> panel_memory;            // the checked memory's type and protection, for the log
     std::function<ColourStats()> colour_stats;            // the bar detour's colour counters; empty = none
     std::function<bool(uint32_t vk)> key_down;            // a key held now with the game in front
     std::function<void()> toggle_page;                    // opens (or closes) the console on the HUD page

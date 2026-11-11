@@ -324,12 +324,12 @@ TEST_CASE("hud.colour: says when a colour does not show now") {
           Lines{"hud: health fill #ff0000 (layout \"Default\")", "hud: not shown now: Bar colours are not available on this game build."});
     HudRig r2;
     HudEditorDeps d = r2.deps();
-    d.panel_status = [] { return PanelStatus::ReadOnly; };
+    d.panel_status = [] { return PanelStatus::Unavailable; };
     r2.editor = std::make_unique<HudEditor>(d);
     r2.editor->start();
     CHECK(run(*r2.editor, {"hud.colour", "panel", "#000000"}) ==
           Lines{"hud: panel #000000 (layout \"Default\")",
-                "hud: not shown now: The panel colour is not available on this game build (the game's data there is read-only)."});
+                "hud: not shown now: The panel colour is not available on this game build."});
     HudRig r3;
     r3.gate.build_known = false;
     HudEditor& e3 = r3.make();
@@ -350,11 +350,11 @@ TEST_CASE("hud.list: the colours and their counters when set") {
             if (s == line) return true;
         return false;
     };
-    CHECK_FALSE(has(run(e, {"hud.list"}), "hud: colour calls 5, panel writes 2, panel restores 2"));
+    CHECK_FALSE(has(run(e, {"hud.list"}), "hud: colour calls 5, panel swaps 2, panel misses 2"));
     run(e, {"hud.colour", "health", "#ff4040"});
     const Lines l = run(e, {"hud.list"});
     CHECK(has(l, "hud: colours: health fill #ff4040"));
-    CHECK(has(l, "hud: colour calls 5, panel writes 2, panel restores 2"));
+    CHECK(has(l, "hud: colour calls 5, panel swaps 2, panel misses 2"));
 }
 
 TEST_CASE("hud.scale on a mod lines part needs no transform stack") {

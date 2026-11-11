@@ -62,22 +62,22 @@ void bar_after(const BarCall& c, void* result, uint64_t now_ms);
 // bar_before, the original, bar_after: the tests' entry (no SEH).
 void* bar_call_path(void* out, void* data, void* style, BarFn original, const HudSnapshot* snap, UiSpace ui,
                     uint64_t now_ms);
-// vitalBars opened / closed on this thread (hook.cpp): at open, this frame's game rects become last frame's (and a panel
-// colour still written is put back); at close, the panel colour is written when the snapshot has one (null: not).
+// vitalBars opened / closed on this thread (hook.cpp): at open, this frame's game rects become last frame's (and a
+// panel swap still armed is dropped); at close, the panel's tint swap is armed when the snapshot has a panel colour and
+// health's bar ran this frame (null: not).
 void bars_vitals_open(uint8_t* node);
 void bars_vitals_close(const HudSnapshot* snap);
 
-// ---- the panel colour: a scoped write into health's frame colour (the widget tints the panel behind the bars with it,
-// after vitalBars closed and before its inner "doPlayerHealthWidget()" scope closes) ----
+// ---- the panel colour: the widget tints the panel behind the bars with health's frame colour, passed by value to
+// uiLayerOpen right after vitalBars closes (private research panel_tint_2026-11-11). EMF swaps that one argument;
+// nothing in the game's memory is written ----
 constexpr uint64_t kPlayerWidgetHash = 0x9442c26a6a17b7a0ull;  // fnv1a64("doPlayerHealthWidget()")
-// Whether n bytes at p may be written as they are (hook.cpp's memory_writable; EMF never changes page protection), with
-// the memory's type and protection for the log. Null: never written.
-using WritableFn = bool (*)(const void* p, size_t n, uint32_t* type, uint32_t* protect);
-void set_panel_writable_check(WritableFn f);
-// The last checked memory's type and protection, "memory type 0x20000, protection 0x4" ("" before any check).
-std::string panel_memory_text();
-// Puts the saved frame colour back when it was written (the widget closed, the next vitalBars opened, the editor is off).
-void panel_restore();
+// The layer detour's work (hook.cpp): disarms first, then swaps *tint for EMF's colour when it is armed and the call is
+// the panel's (the tint is exactly health's frame colour of this frame, unused 0, no rect, enable 1). True when swapped.
+bool panel_tint(uint64_t* tint, uint64_t unused, uint64_t enable, const void* rect);
+// Drops an armed swap (the widget closed, the next vitalBars opened, the editor is off).
+void panel_disarm();
+void set_panel_available(bool available);
 PanelStatus panel_status();
 LiveInfo bar_live(int bar);
 // The game's own colour block of a bar, as last drawn inside vitalBars; empty until then (stamina while full).

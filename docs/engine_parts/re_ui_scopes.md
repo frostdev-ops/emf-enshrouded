@@ -57,8 +57,9 @@ Build 1287369, static and live (private research `hud_parts_2026-11-10`).
   bright end of the fill and the "restored" pulse), damage (while the value falls), heal (while it rises). The bar
   function reads the block by value and keeps no pointer, and only changes alpha and intensity (blinks, fades), never the
   hue. The HUD editor passes it a copy with the player's colours (`hud.colour`); nothing in the game is written. The dark
-  panel is tinted by health's frame colour, read by the widget after `vitalBars` closes: the panel colour is a short write
-  there, put back when the inner `doPlayerHealthWidget()` scope closes. The red "not enough" flash and the ticks are
+  panel is tinted by health's frame colour, read by the widget after `vitalBars` closes and passed by value (r9) to
+  `uiLayerOpen` (0x140a3c8b0 on 1287369; `Sig::PanelLayerOpen` is the call at 0x140c69817): the HUD editor swaps that one
+  argument for its colour, armed at the `vitalBars` close (the UI bundle is read-only memory: nothing is written). The red "not enough" flash and the ticks are
   hard-coded.
 - Moving `resourceBarRange`/`resourceBarFill` by their position does not work: the game clips them to their old slot and
   the panel stays. What works (the HUD editor's bars): a translation pushed on the layer's transform stack around the

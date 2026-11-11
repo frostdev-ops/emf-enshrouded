@@ -70,20 +70,18 @@ struct LiveInfo {
     uint64_t last_seen_ms = 0;
     float rect[4] = {};  // UI units, as last laid out
 };
-// Whether the panel colour can be written (health's frame colour in the game's UI data): not checked yet, writable as it
-// is, or read-only (EMF never changes page protection).
-enum class PanelStatus : uint8_t { Unknown, Writable, ReadOnly };
-// How often the bar detour passed EMF's colour copy, and the panel colour was written and put back (hud.list).
+// Whether the panel colour can be shown: the panel's uiLayerOpen call is hooked (Available) or its signature is not
+// usable on this game build (Unavailable); Unknown before the editor's hooks are set up.
+enum class PanelStatus : uint8_t { Unknown, Available, Unavailable };
+// How often the bar detour passed EMF's colour copy, the panel call got EMF's colour, and an armed panel call did not
+// match (its tint was not health's frame colour of this frame, a rect or another enable: hud.list).
 struct ColourStats {
-    uint64_t recoloured = 0, panel_writes = 0, panel_restores = 0;
+    uint64_t recoloured = 0, panel_swaps = 0, panel_misses = 0;
 };
 struct UiSpace {
     float w = 1920.0f, h = 1080.0f;
     bool measured = false;
 };
-// The panel colour's write check: committed private memory, readable and writable as it is (EMF never changes
-// protection), not this thread's stack, all n bytes inside one region. *type and *protect get what VirtualQuery says.
-bool memory_writable(const void* p, size_t n, uint32_t* type, uint32_t* protect);
 LiveInfo hud_live(size_t element);
 UiSpace hud_ui_space();
 uint32_t hud_fault_code();  // the exception code of a fault in a detour, 0 for none

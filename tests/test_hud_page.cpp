@@ -264,7 +264,7 @@ TEST_CASE("hud page: the colour controls draw in every state") {
             p.e->set_colour(kBarHealth, BarPart::Heal, red, Save::Now);
             p.e->set_panel(red, Save::Now);
         }
-        if (state == 2) status = PanelStatus::ReadOnly;
+        if (state == 2) status = PanelStatus::Unavailable;
         if (state == 3) p.rig.bars = false;
         for (size_t part : {size_t{0}, static_cast<size_t>(bar_element(kBarHealth)),
                             static_cast<size_t>(bar_element(kBarMana)), static_cast<size_t>(bar_element(kBarStamina))}) {

@@ -744,9 +744,12 @@ TEST_CASE("editor: colours work without scale; the panel follows its status") {
     CHECK(e.view().colours_work);
     CHECK(e.view().colours_note.empty());
     CHECK(e.view().panel_works);
-    status = PanelStatus::ReadOnly;
+    status = PanelStatus::Available;
+    CHECK(e.view().panel_works);
+    CHECK(e.view().panel_note.empty());
+    status = PanelStatus::Unavailable;
     CHECK_FALSE(e.view().panel_works);
-    CHECK(e.view().panel_note == "The panel colour is not available on this game build (the game's data there is read-only).");
+    CHECK(e.view().panel_note == "The panel colour is not available on this game build.");
     r.bars = false;
     CHECK_FALSE(e.view().colours_work);
     CHECK(e.view().colours_note == "Bar colours are not available on this game build.");
@@ -779,19 +782,20 @@ TEST_CASE("editor: the game's colours are logged once per bar") {
     CHECK_FALSE(r.editor->view().game_colours[kBarMana].has_value());
 }
 
-TEST_CASE("editor: a panel colour that cannot be written is logged once, with the memory's detail") {
+TEST_CASE("editor: a panel colour that is not available on this game build is logged once") {
     HudRig r;
     PanelStatus status = PanelStatus::Unknown;
     HudEditorDeps d = r.deps();
     d.panel_status = [&status] { return status; };
-    d.panel_memory = [] { return std::string("memory type 0x40000, protection 0x2"); };
     r.editor = std::make_unique<HudEditor>(d);
     r.editor->start();
     r.editor->tick();
-    CHECK_FALSE(r.logged("panel colour cannot be written"));
-    status = PanelStatus::ReadOnly;
+    status = PanelStatus::Available;
+    r.editor->tick();
+    CHECK_FALSE(r.logged("panel colour is not available"));
+    status = PanelStatus::Unavailable;
     r.editor->tick();
     r.editor->tick();
-    CHECK(r.count_logged("HUD editor: the panel colour cannot be written on this game build (memory type 0x40000, "
-                         "protection 0x2); the panel keeps the game's colour") == 1);
+    CHECK(r.count_logged("HUD editor: the panel colour is not available on this game build (its signature is not "
+                         "usable); the panel keeps the game's colour") == 1);
 }

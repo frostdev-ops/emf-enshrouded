@@ -27,7 +27,7 @@ struct BarGame {
     std::atomic<uint64_t> field[6]{};
 };
 BarGame g_bar_game[kBarCount];
-std::atomic<uint64_t> g_recoloured{0}, g_panel_writes{0}, g_panel_restores{0};
+std::atomic<uint64_t> g_recoloured{0}, g_panel_swaps{0}, g_panel_misses{0};
 
 uint64_t pack2(float a, float b) { return std::bit_cast<uint64_t>(std::array<float, 2>{a, b}); }
 std::array<float, 2> unpack2(uint64_t v) { return std::bit_cast<std::array<float, 2>>(v); }
@@ -38,23 +38,22 @@ thread_local int t_calls = 0;
 thread_local uintptr_t t_base = 0;
 thread_local std::array<BarRect, kBarCount> t_cur{}, t_last{};
 
-// the panel colour: health's style (the game's block: its first field is the frame colour) and that frame colour as the bar
-// read it this frame, and what was written: the panel is written only over those same bytes, and put back only over what
-// was written (another copy of the block that died, memory reused or reloaded: left alone)
+// the panel colour: health's style and its frame colour as the bar read it this frame, and the armed swap: the panel's
+// uiLayerOpen call gets `emf` instead of `game` (the same 8 bytes the widget loads from the bundle)
 thread_local const void* t_health_style = nullptr;
 thread_local UiColour t_health_frame{};
-struct PanelWrite {
-    uint8_t* addr = nullptr;
-    UiColour saved{}, wrote{};
-    bool written = false;
+struct PanelArm {
+    bool armed = false;
+    uint64_t game = 0, emf = 0;
 };
-thread_local PanelWrite t_panel;
-thread_local const void* t_checked = nullptr;  // the address last checked, and whether it was writable
-thread_local bool t_checked_ok = false;
-std::atomic<WritableFn> g_writable{nullptr};
+thread_local PanelArm t_arm;
 std::atomic<uint8_t> g_panel_status{static_cast<uint8_t>(PanelStatus::Unknown)};
-std::atomic<uint32_t> g_panel_type{0}, g_panel_protect{0};
-std::atomic<bool> g_panel_checked{false};
+
+uint64_t pack_colour(UiColour c) {
+    uint64_t v = 0;
+    std::memcpy(&v, &c, sizeof v);
+    return v;
+}
 
 bool same(const UiColour& a, const UiColour& b) { return std::memcmp(&a, &b, sizeof a) == 0; }
 
@@ -111,7 +110,7 @@ float grow_up_dy(float list_y, float list_h, float column_h, const Xform& top, f
 }
 
 void bars_vitals_open(uint8_t* node) {
-    panel_restore();  // the widget's close was not seen last frame
+    panel_disarm();  // the widget's panel call was not seen last frame
     t_health_style = nullptr;
     // a bar the game did not draw in the frame that ended (stamina while full): no area left for the HUD page to pick
     for (size_t b = 0; b < kBarCount; ++b)
@@ -125,50 +124,29 @@ void bars_vitals_open(uint8_t* node) {
 
 void bars_vitals_close(const HudSnapshot* snap) {
     t_vitals = nullptr;
-    if (!snap || !snap->active || !snap->panel.set || !t_health_style || t_panel.written) return;
-    uint8_t* addr = static_cast<uint8_t*>(const_cast<void*>(t_health_style)) + kFrame * sizeof(UiColour);
-    if (addr != t_checked) {
-        const WritableFn f = g_writable.load(std::memory_order_relaxed);
-        uint32_t type = 0, protect = 0;
-        t_checked_ok = f && f(addr, sizeof(UiColour), &type, &protect);
-        t_checked = addr;
-        g_panel_type.store(type, std::memory_order_relaxed);
-        g_panel_protect.store(protect, std::memory_order_relaxed);
-        g_panel_checked.store(true, std::memory_order_relaxed);
-        g_panel_status.store(static_cast<uint8_t>(t_checked_ok ? PanelStatus::Writable : PanelStatus::ReadOnly),
-                             std::memory_order_relaxed);
+    t_arm = PanelArm{};
+    if (!snap || !snap->active || !snap->panel.set || !t_health_style) return;  // health's bar ran this frame
+    t_arm = PanelArm{true, pack_colour(t_health_frame), pack_colour(with_colour(t_health_frame, snap->panel))};
+}
+
+bool panel_tint(uint64_t* tint, uint64_t unused, uint64_t enable, const void* rect) {
+    if (!t_arm.armed) return false;
+    const PanelArm a = t_arm;
+    t_arm.armed = false;  // first: only the first layer call after the close can be the panel's
+    if (*tint != a.game || unused != 0 || rect != nullptr || (enable & 0xff) != 1) {
+        g_panel_misses.fetch_add(1, std::memory_order_relaxed);
+        return false;
     }
-    if (!t_checked_ok) return;
-    UiColour saved;
-    std::memcpy(&saved, addr, sizeof saved);  // the caller guards the write and the read
-    if (!same(saved, t_health_frame)) return;  // not the block the bar read this frame
-    const UiColour now = with_colour(saved, snap->panel);
-    std::memcpy(addr, &now, sizeof now);
-    t_panel = PanelWrite{addr, saved, now, true};
-    g_panel_writes.fetch_add(1, std::memory_order_relaxed);
+    *tint = a.emf;
+    g_panel_swaps.fetch_add(1, std::memory_order_relaxed);
+    return true;
 }
 
-void panel_restore() {
-    if (!t_panel.written) return;
-    t_panel.written = false;  // first: a fault in the copy must not make every later call fault again
-    UiColour there;
-    std::memcpy(&there, t_panel.addr, sizeof there);
-    if (!same(there, t_panel.wrote)) return;  // something else wrote there since: not ours to change
-    std::memcpy(t_panel.addr, &t_panel.saved, sizeof t_panel.saved);
-    g_panel_restores.fetch_add(1, std::memory_order_relaxed);
-}
+void panel_disarm() { t_arm.armed = false; }
 
-void set_panel_writable_check(WritableFn f) {
-    g_writable.store(f, std::memory_order_relaxed);
-    t_checked = nullptr;
-}
-
-std::string panel_memory_text() {
-    if (!g_panel_checked.load(std::memory_order_relaxed)) return "";
-    char buf[64];
-    std::snprintf(buf, sizeof buf, "memory type 0x%x, protection 0x%x", g_panel_type.load(std::memory_order_relaxed),
-                  g_panel_protect.load(std::memory_order_relaxed));
-    return buf;
+void set_panel_available(bool available) {
+    g_panel_status.store(static_cast<uint8_t>(available ? PanelStatus::Available : PanelStatus::Unavailable),
+                         std::memory_order_relaxed);
 }
 
 PanelStatus panel_status() { return static_cast<PanelStatus>(g_panel_status.load(std::memory_order_relaxed)); }
@@ -268,8 +246,8 @@ std::optional<StyleBlock> bar_game_colours(int bar) {
 ColourStats colour_stats() {
     ColourStats s;
     s.recoloured = g_recoloured.load(std::memory_order_relaxed);
-    s.panel_writes = g_panel_writes.load(std::memory_order_relaxed);
-    s.panel_restores = g_panel_restores.load(std::memory_order_relaxed);
+    s.panel_swaps = g_panel_swaps.load(std::memory_order_relaxed);
+    s.panel_misses = g_panel_misses.load(std::memory_order_relaxed);
     return s;
 }
 
@@ -290,17 +268,12 @@ void bars_reset_for_tests() {
         for (auto& f : g.field) f = 0;
     }
     g_recoloured = 0;
-    g_panel_writes = 0;
-    g_panel_restores = 0;
+    g_panel_swaps = 0;
+    g_panel_misses = 0;
     t_health_style = nullptr;
     t_health_frame = UiColour{};
-    t_panel = PanelWrite{};
-    t_checked = nullptr;
-    t_checked_ok = false;
+    t_arm = PanelArm{};
     g_panel_status = static_cast<uint8_t>(PanelStatus::Unknown);
-    g_panel_type = 0;
-    g_panel_protect = 0;
-    g_panel_checked = false;
 }
 
 }  // namespace emf::core::hud
