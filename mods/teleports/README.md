@@ -53,9 +53,10 @@ Let go early, right-click or close the map to cancel; the click does not reach t
   terrain ray, then the game's ground search settles you on it. A place nobody is near is not loaded yet: you wait high
   over it for a moment while it loads, then go down to the ground. If there is still no ground, you are put back where
   you stood. Unexplored spots are allowed (the server cannot see a player's map fog).
-- **The deadly shroud** (the red areas): the server cannot tell before you are there. If you land in it, you are sent
-  straight back where you stood, and no cooldown is spent. The ordinary shroud is allowed (its timer runs, as when you
-  walk in).
+- **The deadly shroud** (the red areas of the map): the server cannot tell before you are there. If you land in it, you
+  are sent back where you stood and no cooldown is spent, but the game lets nobody be moved again for about 2 seconds
+  after a teleport, and with a **low Flame level the deadly shroud kills you sooner**. Do not teleport into red areas
+  your Flame cannot handle. The ordinary shroud is allowed (its timer runs, as when you walk in).
 - Letting go early, right-clicking, closing the map or switching to another window cancels the hold.
 - **`/tp.mark`**: to your map waypoint (right-click a spot on the map, Set Waypoint), with the same rules. Admins:
   `tp.mark #k` sends player k to their own waypoint.
