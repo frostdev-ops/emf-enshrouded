@@ -392,8 +392,9 @@ ids with the console command `buffs.list` or `emf.buff_types`. Details: [referen
 `emf.apply_buff(world, target, type [, opts] [, fn])` and `emf.remove_buff(world, target, type [, fn])` return true when
 queued, false when refused at once (the log says why: not the server world, an unknown type, 64 requests waiting, not
 available on this game build). `opts`: `seconds` (0 or absent = the type's default), `source` (the entity the buff comes
-from, default the target; damage over time scales from the source's stats, so give a creature), `item` (the item entity
-a food buff takes its stats and time from; without it a food buff likely has no stats). An unknown option is an error.
+from, default the target; damage over time scales from the source's stats, so give a creature), `item` (the item type
+id a food buff takes its stats and time from, as `emf.item` gives: not an item entity; an unknown id is refused; without
+it a food buff likely has no stats). An unknown option is an error.
 `fn(world, result)` is called after the step with a result table. At most 16 requests are handled per step.
 
 `result` (and the table `emf.on_buff` gets):
@@ -404,6 +405,7 @@ a food buff takes its stats and time from; without it a food buff likely has no 
 | `target`, `type`, `name`, `slot` | the entity, the type, its text (nil on a dedicated server) and its slot |
 | `buff_entity` | the buff's own entity (0 when refused) |
 | `cleansed` | `"removed"`: true when it was cleansed (always for `emf.remove_buff`; the game's own cleanses when EMF saw the mark); false when it ended or was replaced |
+| `replaced` | `"removed"`: true when a new buff of the same type took its place (given again, a replace type); that `"applied"` comes right after |
 | `seconds_left` | the time left; nil when not known |
 | `why` | `"refused"` only: the reason, for example "the target does not have it" |
 

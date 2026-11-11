@@ -474,7 +474,7 @@ end
 
 -- Hear the players' buff changes (compared after every server step).
 emf.on_buff(function(world, ev)
-  if ev.kind == "removed" and ev.type == ELIXIR and not ev.cleansed then
+  if ev.kind == "removed" and ev.type == ELIXIR and not ev.cleansed and not ev.replaced then
     emf.tell(world, ev.target, "The Elixir wore off.", {system = true})
   end
 end)

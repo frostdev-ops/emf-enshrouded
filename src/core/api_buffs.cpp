@@ -12,6 +12,7 @@
 #include "core/api.h"
 #include "core/buff_service.h"
 #include "core/game_text.h"
+#include "common/log_limiter.h"
 #include "common/seh.h"
 #include "emf/generated/components.hpp"
 
@@ -24,6 +25,18 @@ namespace ecs = emf::gen::ecs;
 uint8_t* raw(EmfWorld* w) { return reinterpret_cast<uint8_t*>(w); }
 void say(const std::string& line) {
     if (CoreState* s = core_state(); s && s->log_line) s->log_line(line);
+}
+// A mod calling every tick must not flood the log: the same line at most once in 10 s (then with a count).
+void say_limited(const std::string& line) {
+    CoreState* s = core_state();
+    if (!s) return;
+    const uint64_t now = s->now_ms ? s->now_ms() : GetTickCount64();
+    std::string out;
+    {
+        std::lock_guard<std::mutex> l(s->buff_log_lock);
+        out = s->buff_log.pass(line, now);
+    }
+    if (!out.empty()) say(out);
 }
 std::string hex(uint32_t v) {
     char b[16];
@@ -139,6 +152,12 @@ bool buff_request(BuffRequest r, std::string* why) {
     BuffCollection c;
     if (buff_collection(buff_registry(r.world), &c) && !buff_record(c, r.type))
         return refuse("unknown buff type " + hex(r.type));
+    if (!r.remove && r.item) {  // the game's buff code looks the item's durations up: never a wrong id
+        EmfItemInfo info{};
+        info.size = sizeof info;
+        if (!api_table()->item_info(r.world, r.item, &info))
+            return refuse("unknown item id " + std::to_string(r.item) + " (an item type id, as emf.item gives)");
+    }
     return s->buffs->request(std::move(r), why);
 }
 
@@ -155,7 +174,7 @@ bool api_buff_apply(EmfWorld* w, uint32_t target, uint32_t type, int64_t duratio
     r.user = user;
     std::string why;
     if (buff_request(std::move(r), &why)) return true;
-    say("buff_apply refused: " + why);
+    say_limited("buff_apply refused: " + why);
     return false;
 }
 
@@ -169,7 +188,7 @@ bool api_buff_remove(EmfWorld* w, uint32_t target, uint32_t type, EmfBuffCallbac
     r.user = user;
     std::string why;
     if (buff_request(std::move(r), &why)) return true;
-    say("buff_remove refused: " + why);
+    say_limited("buff_remove refused: " + why);
     return false;
 }
 

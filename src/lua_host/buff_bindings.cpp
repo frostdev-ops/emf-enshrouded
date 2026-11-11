@@ -87,6 +87,8 @@ void push_event(lua_State* L, const EmfApi* a, const EmfBuffEvent& e) {
     lua_setfield(L, -2, "buff_entity");
     lua_pushboolean(L, e.cleansed != 0);
     lua_setfield(L, -2, "cleansed");
+    lua_pushboolean(L, e.replaced != 0);
+    lua_setfield(L, -2, "replaced");
     push_seconds(L, e.remaining_ns, "seconds_left");
     if (e.why) {
         lua_pushstring(L, e.why);

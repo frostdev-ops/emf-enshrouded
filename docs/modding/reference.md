@@ -827,7 +827,7 @@ read an entity's active buffs, give a buff, remove a buff, and hear the players'
 | `buff_type(world, id, &out)` | `api()->buff_type(w, id, &out)` | one type; false: no such type. |
 | `buff_text(id, which, buf, cap)` | `api()->buff_text(id, which, buf, cap)` | a type's name (`which` 0) or description (1) in the player's language, NUL-terminated (cut to fit). A game client only: false on the dedicated server, for no text or a 0 tag. Not on the render thread. |
 | `buffs_of(world, entity, out, cap)` | `api()->buffs_of(w, entity, out, cap)` | an entity's active buffs on any world, in slot order: the number there is; fills `out` up to `cap`. Where no program runs. |
-| `buff_apply(world, target, type, duration_ns, source, item, done, user)` | `api()->buff_apply(...)` | gives `target` a buff on the server world. `duration_ns` 0 = the type's default; `source` 0 = the target; `item` 0 = none. `done` (may be NULL) is called after the step, on the server world's thread: `EMF_BUFF_APPLIED` or `EMF_BUFF_REFUSED` with `why`. False when refused at once (logged): not the server world, an unknown type, 64 requests waiting, not available on this game build. |
+| `buff_apply(world, target, type, duration_ns, source, item, done, user)` | `api()->buff_apply(...)` | gives `target` a buff on the server world. `duration_ns` 0 = the type's default; `source` 0 = the target; `item` an item type id (`find_item`, `item_info`), 0 = none; an unknown item id is refused. `done` (may be NULL) is called after the step, on the server world's thread: `EMF_BUFF_APPLIED` or `EMF_BUFF_REFUSED` with `why`. False when refused at once (logged): not the server world, an unknown type, 64 requests waiting, not available on this game build. |
 | `buff_remove(world, target, type, done, user)` | `api()->buff_remove(...)` | removes `target`'s buff of that type the game's way. `done` as for `buff_apply`: `EMF_BUFF_REMOVED`, or `EMF_BUFF_REFUSED` ("the target does not have it"). |
 | `on_buff(cb, user)` | `api()->on_buff(cb, user)` | `cb(world, const EmfBuffEvent*, user)` after each server step, on its thread, for every change of a **player's** buffs, whoever made it: `EMF_BUFF_APPLIED`, `_REFRESHED`, `_REMOVED` (never `_REFUSED`). False for a null `cb` or 16 callbacks already. |
 | | `emf::has_v32()` | true when the core has these functions. |
@@ -849,7 +849,8 @@ whole time) and `remaining_ns` (the time left); both -1 when not known yet (the 
 `EmfBuffEvent` (`size`, then): `kind` (`EMF_BUFF_APPLIED` 1, `_REFRESHED` 2, `_REMOVED` 3, `_REFUSED` 4), `target` (the
 entity that has or had the buff), `type`, `buff_entity` (0 when refused), `slot`, `cleansed` (REMOVED: 1 when it was
 cleansed: always for a mod's buff_remove, for the game's own cleanses when EMF saw the mark; 0 when it ended or was
-replaced), `total_ns` and `remaining_ns` (-1 = not known),
+replaced), `replaced` (REMOVED: 1 when a new buff of the same type took its place in the same step, given again with a
+replace type; its APPLIED comes right after), `total_ns` and `remaining_ns` (-1 = not known),
 `why` (REFUSED: the reason, valid during the callback; else NULL).
 
 **Names.** Mods should store ids, not names. Names repeat ("Burning" is ten types) and change with the language. The

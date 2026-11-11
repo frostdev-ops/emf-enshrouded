@@ -287,3 +287,23 @@ TEST_CASE("api v32: on_buff compares every step: a cleanse seen for one step is 
     buffs_server_step(f.w());
     CHECK(reads == 2);
 }
+
+TEST_CASE("api v32: buff_apply refuses an item id the world does not know (review I2)") {
+    Fixture f;
+    const EmfApi* api = api_table();
+    CHECK_FALSE(api->buff_apply(f.w(), 1, kWet, 0, 0, 0x1234, nullptr, nullptr));
+    CHECK(f.service.pending() == 0);
+    bool said = false;
+    for (const auto& l : g_lines) said |= l.find("unknown item") != std::string::npos;
+    CHECK(said);
+    CHECK(api->buff_apply(f.w(), 1, kWet, 0, 0, 0, nullptr, nullptr));  // no item: fine
+}
+
+TEST_CASE("api v32: the same refusal within 10 s is logged once (review M3: a mod calling every tick)") {
+    Fixture f;
+    const EmfApi* api = api_table();
+    for (int i = 0; i < 5; ++i) CHECK_FALSE(api->buff_apply(f.cw(), 1, kWet, 0, 0, 0, nullptr, nullptr));
+    int lines = 0;
+    for (const auto& l : g_lines) lines += l.find("server world only") != std::string::npos ? 1 : 0;
+    CHECK(lines == 1);
+}

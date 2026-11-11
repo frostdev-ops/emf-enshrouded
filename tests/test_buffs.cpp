@@ -323,3 +323,23 @@ TEST_CASE("buff diff: rain re-applying Wet every step (its end creeping on) is n
     REQUIRE(ev.size() == 1);
     CHECK(ev[0].kind == EMF_BUFF_REFRESHED);
 }
+
+TEST_CASE("buff diff: a replace says removed (replaced) before applied (review I1)") {
+    BuffDiff d;
+    Container k;
+    k.set(kBuffs, 0, 970, 0x22);
+    CHECK(d.step(1, k.b, &net_of, nullptr, 100).empty());
+    k.set(kBuffs, 0, 971, 0x22);  // given again: a Replace type gets a new buff entity in the slot
+    const auto ev = d.step(1, k.b, &net_of, nullptr, 200);
+    REQUIRE(ev.size() == 2);
+    CHECK(ev[0].kind == EMF_BUFF_REMOVED);
+    CHECK(ev[0].buff_entity == 970);
+    CHECK(ev[0].replaced == 1);
+    CHECK(ev[1].kind == EMF_BUFF_APPLIED);
+    CHECK(ev[1].buff_entity == 971);
+    CHECK(ev[1].replaced == 0);
+    k.set(kBuffs, 0, 0, 0);
+    const auto gone = d.step(1, k.b, &net_of, nullptr, 300);
+    REQUIRE(gone.size() == 1);
+    CHECK(gone[0].replaced == 0);  // it ended: nothing took its place
+}

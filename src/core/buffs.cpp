@@ -239,25 +239,27 @@ std::vector<EmfBuffEvent> BuffDiff::step(uint32_t entity, const uint8_t* c, Buff
         return e;
     };
     const std::vector<Inst>& old = it->second;
+    auto in = [](const std::vector<Inst>& list, uint32_t buff_entity) {
+        for (const Inst& i : list)
+            if (i.buff_entity == buff_entity) return &i;
+        return static_cast<const Inst*>(nullptr);
+    };
+    // removals first: a buff given again that the game replaced reads "removed (replaced)", then "applied"
+    for (const Inst& o : old) {
+        if (in(cur, o.buff_entity)) continue;
+        EmfBuffEvent e = make(EMF_BUFF_REMOVED, o);
+        e.total_ns = -1;
+        e.remaining_ns = 0;
+        for (const Inst& x : cur)
+            if (x.type == o.type && !in(old, x.buff_entity)) e.replaced = 1;
+        ev.push_back(e);
+    }
     for (const Inst& x : cur) {
-        const Inst* was = nullptr;
-        for (const Inst& o : old)
-            if (o.buff_entity == x.buff_entity) was = &o;
+        const Inst* was = in(old, x.buff_entity);
         if (!was)
             ev.push_back(make(EMF_BUFF_APPLIED, x));
         else if (was->end >= 0 && x.end > was->end + kBuffRefreshMinNs)
             ev.push_back(make(EMF_BUFF_REFRESHED, x));
-    }
-    for (const Inst& o : old) {
-        bool still = false;
-        for (const Inst& x : cur)
-            if (x.buff_entity == o.buff_entity) still = true;
-        if (!still) {
-            EmfBuffEvent e = make(EMF_BUFF_REMOVED, o);
-            e.total_ns = e.remaining_ns = -1;
-            e.remaining_ns = 0;
-            ev.push_back(e);
-        }
     }
     it->second = std::move(cur);
     return ev;

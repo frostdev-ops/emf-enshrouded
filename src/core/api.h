@@ -160,6 +160,8 @@ struct CoreState {
     std::vector<BuffWatcher> buff_watchers;  // on_buff (at most 16; only appended to)
     BuffDiff buff_diff;                      // the players' containers at the last comparison (server world thread)
     std::vector<uint32_t> buff_player_list;  // the players compared each step (read again every kBuffDiffMs)
+    std::mutex buff_log_lock;
+    LogLimiter buff_log;                     // buff_apply / buff_remove refusals: the same line once per 10 s
     uint64_t buff_diff_ms = 0;
     std::function<std::vector<uint32_t>(EmfWorld*)> buff_players;  // the server world's players (empty: the roster)
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them

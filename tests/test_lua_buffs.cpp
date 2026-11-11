@@ -181,3 +181,20 @@ TEST_CASE("lua 1.24: on an older core the buff functions answer false or nil") {
     CHECK(logged("old false false"));
     CHECK(r.fake.buff_cbs.empty());
 }
+
+TEST_CASE("lua 1.24: a removed event says replaced when a new buff of the type took its place (review I1)") {
+    Rig r(L"buff_replaced");
+    types(r);
+    add_script(r.dir, "rp", "emf.on_buff(function(w, e) emf.log('rp ' .. e.kind .. ' replaced ' .. tostring(e.replaced)) end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    EmfBuffEvent e{};
+    e.size = sizeof e;
+    e.kind = EMF_BUFF_REMOVED;
+    e.target = 1;
+    e.type = kElixir;
+    e.replaced = 1;
+    e.total_ns = e.remaining_ns = -1;
+    fire_buff(kServer, e);
+    CHECK(logged("rp removed replaced true"));
+}

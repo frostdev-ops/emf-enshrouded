@@ -540,8 +540,10 @@ typedef struct EmfBuffEvent {
     uint32_t type;
     uint32_t buff_entity;     /* the buff's own entity, 0 when refused */
     uint8_t slot;
-    uint8_t cleansed;         /* REMOVED: 1 cleansed (by a mod, a potion, a spell), 0 ended or replaced */
-    uint8_t pad[2];
+    uint8_t cleansed;         /* REMOVED: 1 cleansed (always for buff_remove; the game's own cleanses when seen) */
+    uint8_t replaced;         /* REMOVED: 1 when a new buff of this type took its place in the same step (given
+                                 again: a replace type); it comes before that APPLIED */
+    uint8_t pad;
     int64_t total_ns;         /* -1 = not known (yet) */
     int64_t remaining_ns;
     const char* why;          /* REFUSED: why (valid during the callback); else NULL */
@@ -1172,7 +1174,8 @@ typedef struct EmfApi {
     /* Gives `target` a buff on the server world (the host's game or the dedicated server) through the game's own buff
      * code in the next step: its slot, giving again (timer, replace or refused), faction exclusions, effects, HUD icon,
      * saving. duration_ns 0 = the type's default; source 0 = the target (damage over time scales from the source's
-     * stats: give a creature as source); item 0 = none (food types take their stats and time from the eaten item).
+     * stats: give a creature as source); item: an item type id (find_item; not an item entity), 0 = none (food types
+     * take their stats and time from the eaten item); an unknown item id is refused.
      * `done` (may be NULL) after that step on the server world's thread: APPLIED or REFUSED with why. False when
      * refused at once (logged): not the server world, an unknown type, 64 waiting, not available on this game build. */
     bool (*buff_apply)(EmfWorld* world, uint32_t target, uint32_t type, int64_t duration_ns, uint32_t source,
