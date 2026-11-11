@@ -10,6 +10,7 @@
 
 #include "attributes.h"
 #include "buffs.h"
+#include "fog_grid.h"
 #include "ground_service.h"
 #include "map_actions.h"
 #include "marker_map.h"
@@ -195,6 +196,10 @@ struct CoreState {
         std::mutex click_lock;
         std::vector<std::pair<EmfMapClickCallback, void*>> clicks;  // on_map_click (16 at most)
     } map;
+    // v35 a minimap's parts
+    struct Minimap {
+        FogStore fog;  // the client's fog of war, copied twice a second
+    } minimap;
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them
     std::mutex setting_watchers_lock;
     std::vector<SettingWatcher> setting_watchers;  // v13 on_setting_changed (only appended to)
@@ -277,6 +282,8 @@ bool api_fog_at(double x, double z, float* explored);
 uint32_t api_map_markers(EmfGameMarker* out, uint32_t cap);
 bool api_canvas_set(const char* id, const EmfCanvas* c);
 bool api_canvas_draw(const char* id, const EmfCanvasCmd* cmds, uint32_t count);
+// The client world's thread, every tick: the fog of war copied (twice a second).
+void minimap_client_tick(EmfWorld* client, uint64_t now_ms);
 
 // ---- v34 the map (api_map.cpp) ----
 bool api_map_cursor(double* x, double* z);

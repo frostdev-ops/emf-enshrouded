@@ -5,6 +5,10 @@
 
 #include <cstring>
 
+#include <vector>
+
+#include "common/seh.h"
+#include "common/world_view.h"
 #include "core/api.h"
 #include "core/marker_capture.h"
 #include "core/player_view.h"
@@ -31,14 +35,41 @@ bool api_player_view(EmfPlayerView* out) {
         v.camera_yaw_deg = yaw_from_view(cam.v);
         v.flags |= EMF_VIEW_CAMERA;
     }
-    v.world_size = kDefaultWorldSize;
+    const CoreState* s = core_state();
+    const float known = s ? s->minimap.fog.world_size() : 0.0f;
+    v.world_size = known > 0 ? known : kDefaultWorldSize;
     const uint32_t n = out->size && out->size < sizeof v ? out->size : static_cast<uint32_t>(sizeof v);
     std::memcpy(out, &v, n);
     out->size = n;
     return true;
 }
 
-bool api_fog_at(double, double, float*) { return false; }
+bool api_fog_at(double x, double z, float* explored) {
+    CoreState* s = core_state();
+    return s && explored && s->minimap.fog.explored(x, z, explored);
+}
+
+void minimap_client_tick(EmfWorld* client, uint64_t now_ms) {
+    CoreState* s = core_state();
+    if (!s || !client || !s->minimap.fog.due(now_ms)) return;
+    auto* grid = static_cast<const uint8_t*>(WorldView(reinterpret_cast<uint8_t*>(client)).singleton("FogOfWar"));
+    FogHeader h;
+    const uint8_t* data = nullptr;
+    if (!grid || !seh_read(grid, &h.w, 4) || !seh_read(grid + 4, &h.h, 4) || !seh_read(grid + 8, &h.cols, 4) ||
+        !seh_read(grid + 12, &h.rows, 4) || !seh_read(grid + 0x18, &data, 8) || !seh_read(grid + 0x20, &h.blocks, 8)) {
+        s->minimap.fog.clear();
+        return;
+    }
+    h.data = data;  // checked before anything is read through it
+    if (!fog_header_ok(h)) {
+        s->minimap.fog.clear();
+        return;
+    }
+    std::vector<uint8_t> copy(static_cast<size_t>(h.blocks) * kFogBlockSide * kFogBlockSide);
+    if (!seh_read(data, copy.data(), copy.size())) return;  // a world going away: the next tick tries again
+    h.data = copy.data();
+    s->minimap.fog.update(h, now_ms);
+}
 uint32_t api_map_markers(EmfGameMarker*, uint32_t) { return 0; }
 bool api_canvas_set(const char*, const EmfCanvas*) { return false; }
 bool api_canvas_draw(const char*, const EmfCanvasCmd*, uint32_t) { return false; }

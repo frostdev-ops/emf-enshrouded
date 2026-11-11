@@ -1556,8 +1556,10 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     // v33 markers: the client world's UiPlayData, local player and followed entities; the server's followed positions.
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
         const uint8_t kind = emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind();
-        if (kind == EMF_WORLD_CLIENT)
+        if (kind == EMF_WORLD_CLIENT) {
             emf::core::markers_client_tick(w);
+            emf::core::minimap_client_tick(w, GetTickCount64());  // v35 the fog of war
+        }
         else if (kind == EMF_WORLD_SERVER) {
             emf::core::markers_server_tick(w);
             emf::core::map_server_tick(w);  // v34 ground_at
