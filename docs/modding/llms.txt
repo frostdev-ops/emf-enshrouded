@@ -304,7 +304,7 @@ field names (sdk/include/emf/generated/components.hpp); assigning a field writes
 - `world:get(component, id)`: the entity's component, or nil
 - `world:template(component, id)`: (1.8) the entity's template half of a component: the data every entity of its template shares (for example `world:template("ModelResource", id).model`, the model GUID as text). Read-only: writing a field is an error. nil when the entity has none
 - `world:name(id)`: (1.6) a player's name, the one the game's chat shows (their platform name, not the character's), or nil (then say `"player #" .. id`); where players' chat is on, server world only
-- `world:character_name(id)`: (1.22) the player's character name (the Social tab's), or nil until their game sent it (a few seconds after joining: ask again later, not in `on_player_joined`). Text the player chose, not an identity: key data by `p.account`. Server world only; players' chat need not be on
+- `world:character_name(id)`: (1.22) the player's character name (the Social tab's), or nil when not known: it may already be there in `on_player_joined` or come a few seconds later, and it can change during a session, so read it when you need it and never keep it. Text a player's game set, not an identity: key data by `p.account`. Server world only; players' chat need not be on
 - `world:account(id)`: a player entity's account as text ("0x" + 16 hex digits, as `emf.sender()` gives it), or nil: a key that stays the same for that player across sessions (entity ids do not); server world only
 
 ## mod.json (docs/modding/reference.md)

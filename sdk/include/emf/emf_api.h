@@ -1000,10 +1000,11 @@ typedef struct EmfApi {
 
     /* ---- v30: character names and chat lines without a speaker ---- */
     /* The player's character name (the one the game's Social tab shows), UTF-8, cut to size-1 bytes and NUL-terminated.
-     * Each player's game sends it a few seconds after joining, so it is not known at the join itself. It is display text
-     * the player's game chose, not an identity: key data by the account. False (buf = "") when it is not known yet, for
-     * something that is not a player, or on a client world. Server world (a game you host or the dedicated server; players'
-     * chat need not be on); same thread rules as get_component. */
+     * It may already be there at the join (from the character's last visit to this world) or come when the player's game
+     * sends it, a few seconds later, and it can change during a session: read it when you need it, never cache it. It is
+     * display text a player's game set, not an identity: key data by the account. A player's grave carries the name too.
+     * False (buf = "") when it is not known, for an entity without one, or on a client world. Server world (a game you
+     * host or the dedicated server; players' chat need not be on); same thread rules as get_component. */
     bool (*player_character_name)(EmfWorld* world, uint32_t player, char* buf, uint32_t size);
     /* chat_tell with flags: EMF_CHAT_SYSTEM shows the line without a speaker's name (the game's session-info line, as for
      * a player joining), still only to that player, also on a server with text chat off; a prefix in the text ("[Raid] ")

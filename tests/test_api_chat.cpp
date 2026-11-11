@@ -550,3 +550,30 @@ TEST_CASE("chat_broadcast_ex (v30): EMF_CHAT_SYSTEM for every player; unknown fl
     CHECK_FALSE(g_everyone_system[1]);
     CHECK(logged("chat_broadcast_ex refused: unknown flags 0x80"));
 }
+
+TEST_CASE("emf.hpp v30 helpers: tell and broadcast with system, character_name, has_v30") {  // review Important 2
+    Fixture f;
+    f.player(1, 0x40, 0xA1);
+    REQUIRE(emf::init(api_table()));
+    CHECK(emf::has_v30());
+    f.in_callback([](EmfWorld* w) {
+        CHECK(emf::tell(emf::World(w), 1, "system", true));
+        CHECK(emf::tell(emf::World(w), 1, "plain"));
+    });
+    REQUIRE(g_tell_system.size() == 2);
+    CHECK(g_tell_system[0]);
+    CHECK_FALSE(g_tell_system[1]);
+    CHECK(emf::broadcast("all system", true));
+    CHECK(emf::broadcast("all plain"));
+    REQUIRE(g_everyone_system.size() == 2);
+    CHECK(g_everyone_system[0]);
+    CHECK_FALSE(g_everyone_system[1]);
+    CHECK_FALSE(emf::character_name(emf::World(f.w()), 1).has_value());  // no name table in this world
+    f.state.get_component = fake_gc_name;
+    NameTable t("Character 2");
+    g_name_id = emf::fnv1a64("Character 2");
+    f.server_ss.plant(f.server, "CustomPlayerStringsSystem", t.sys.data());
+    const auto name = emf::character_name(emf::World(f.w()), 2);
+    REQUIRE(name.has_value());
+    CHECK(*name == "Character 2");
+}

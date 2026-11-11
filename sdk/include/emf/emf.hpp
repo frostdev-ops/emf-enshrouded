@@ -851,13 +851,18 @@ inline bool command_sender(EmfCommandSender* out) {
 
 // ---- v19: chat lines and saves on a server (see emf_api.h) ----
 inline bool has_v19() { return api() && api()->size >= offsetof(EmfApi, request_save) + sizeof(api()->request_save); }
-// A chat line only `player` sees (their game shows it under their own name); the host of a game you host gets a notify.
-// tell takes no format: pass text from players as it is. False when refused (logged) or on an older core.
-inline bool tell(World w, uint32_t player, const std::string& text) {
+inline bool has_v30();
+// A chat line only `player` sees (their game shows it under their own name; system (v30): with no name in front, as the
+// game shows a player joining); the host of a game you host gets a notify. tell takes no format: pass text from players
+// as it is. False when refused (logged) or on an older core.
+inline bool tell(World w, uint32_t player, const std::string& text, bool system = false) {
+    if (system && has_v30() && api()->chat_tell_ex)
+        return api()->chat_tell_ex(w.raw(), player, text.c_str(), EMF_CHAT_SYSTEM);
     return has_v19() && api()->chat_tell && api()->chat_tell(w.raw(), player, text.c_str());
 }
 // The same line for every connected player.
-inline bool broadcast(const std::string& text) {
+inline bool broadcast(const std::string& text, bool system = false) {
+    if (system && has_v30() && api()->chat_broadcast_ex) return api()->chat_broadcast_ex(text.c_str(), EMF_CHAT_SYSTEM);
     return has_v19() && api()->chat_broadcast && api()->chat_broadcast(text.c_str());
 }
 // The player's name as the game knows it; nothing when not known (then say "player #<id>").
@@ -935,6 +940,21 @@ inline std::string game_language() {
     if (!has_v29() || !api()->game_language) return {};
     char code[16];
     return api()->game_language(code, sizeof code) ? std::string(code) : std::string();
+}
+
+// ---- v30: character names and lines without a speaker (tell / broadcast above take `system`) ----
+inline bool has_v30() {
+    return api() && api()->size >= offsetof(EmfApi, chat_broadcast_ex) + sizeof(api()->chat_broadcast_ex);
+}
+// The player's character name (the Social tab's), server world only: may already be there at the join or come a few
+// seconds later, and may change; read it when you need it, never cache it, key data by the account. Nothing when not
+// known or on an older core.
+inline std::optional<std::string> character_name(World w, uint32_t player) {
+    char buf[260] = {};
+    if (!has_v30() || !api()->player_character_name || !api()->player_character_name(w.raw(), player, buf, sizeof buf) ||
+        !buf[0])
+        return std::nullopt;
+    return std::string(buf);
 }
 
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
