@@ -2242,6 +2242,13 @@ const EmfApi kApi = {
     api_on_hit_before,
     api_hit_rule_add,
     api_hit_rule_remove,
+    api_buff_types,
+    api_buff_type,
+    api_buff_text,
+    api_buffs_of,
+    api_buff_apply,
+    api_buff_remove,
+    api_on_buff,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

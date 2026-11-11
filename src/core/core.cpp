@@ -41,6 +41,7 @@
 #include "server_chat.h"
 #include "console.h"
 #include "content_status.h"
+#include "buff_service.h"
 #include "inventory.h"
 #include "teleport.h"
 #include "component_service.h"
@@ -542,6 +543,7 @@ uint32_t g_save2_slot_offset = 0;
 uint32_t g_inst_slot_flag_offset = 0;
 // put_items: the emf_inventory program and its request queue (null when the inventory signatures are not usable).
 std::unique_ptr<emf::core::InventoryService> g_inventory;
+std::unique_ptr<emf::core::BuffService> g_buffs;  // v32 buffs: emf_buffs
 // teleport: the emf_teleport program and its requests (null when off on this game build).
 std::unique_ptr<emf::core::TeleportService> g_teleport;
 // v23 change_component: the emf_components program and its requests (null when off on this game build).
@@ -661,6 +663,8 @@ void hk_register_all_programs(void* world) {
             g_state->relay.new_session();  // and an event overflow is logged again
             emf::core::bridge::note_session_start();  // the bridge forgets the last world's save slot
             if (g_inventory) g_inventory->world_reset();  // requests for the old world end with 0
+            if (g_buffs) g_buffs->world_reset();          // buff requests for the old world are refused
+            emf::core::buffs_new_session();               // every player's buffs are a first sight again
             if (g_teleport) g_teleport->world_reset();
             if (g_components) g_components->world_reset();  // component changes under way end (FAILED)    // teleports under way end (FAILED)
             g_state->damage_queue.clear();                // hits for the old session never land
@@ -1208,6 +1212,48 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             }
         }
     }
+    // v32 buffs: an internal server program calls the game's applyBuffCore and cleanses slots (private research
+    // buffs_2026-11-11); listing and reading need no program.
+    {
+        using emf::Sig;
+        auto sig = [&](Sig s) -> uintptr_t {
+            const auto& r = g_state->sigs[static_cast<size_t>(s)];
+            return emf::is_usable(r, known) ? r.addr : 0;
+        };
+        emf::core::BuffService::Deps deps;
+        deps.apply = reinterpret_cast<emf::core::ApplyBuffCoreFn>(sig(Sig::ApplyBuffCore));  // optional: removing works
+        deps.read_other = reinterpret_cast<emf::core::ReadOtherFn>(sig(Sig::ReadOther));
+        deps.write_other = reinterpret_cast<emf::core::WriteOtherFn>(sig(Sig::WriteOther));
+        deps.get_component = g_state->get_component;
+        deps.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
+        deps.now_ms = [] { return GetTickCount64(); };
+        deps.after_step = [](std::function<void(EmfWorld*)> fn) {
+            auto* job = new std::function<void(EmfWorld*)>(std::move(fn));
+            g_state->dispatcher.post(EMF_WORLD_SERVER, [](EmfWorld* w, void* u) {
+                auto* f = static_cast<std::function<void(EmfWorld*)>*>(u);
+                (*f)(w);
+                delete f;
+            }, job);
+        };
+        const bool giving = deps.apply != nullptr;
+        if (!deps.read_other || !deps.write_other || !sig(Sig::IterBegin)) {
+            emf::logf("buffs: giving and removing off (the ReadOther, WriteOther or IterBegin signatures are not usable); "
+                      "listing and reading work");
+        } else if (g_state->system_programs.registration_closed()) {
+            emf::logf("buffs: giving and removing off (mod programs are unavailable)");
+        } else {
+            g_buffs = std::make_unique<emf::core::BuffService>(std::move(deps));
+            if (g_state->system_programs.add(g_buffs->spec(), true)) {
+                g_state->buffs = g_buffs.get();
+                emf::logf("buffs: on (program %s in the server world%s)", emf::core::kBuffsProgramName,
+                          giving ? "" : "; giving off: the ApplyBuffCore signature is not usable, removing works");
+            } else {
+                emf::logf("buffs: giving and removing off (the %s program could not be added)", emf::core::kBuffsProgramName);
+                g_buffs.reset();
+            }
+        }
+        if (!emf::core::add_buff_commands(g_state->commands)) emf::logf("commands: the buffs.* commands could not be added");
+    }
     // teleport: an internal server program pushes the game's add-Teleport record (docs/engine_parts/re_teleport.md).
     {
         const auto& qp = g_state->sigs[static_cast<size_t>(emf::Sig::QueuePush)];
@@ -1425,6 +1471,12 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
         if (g_inventory && emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER)
             g_inventory->on_server_tick(w);
+    }, nullptr);
+    // v32 buffs: the emf_buffs watchdog and the players' buff events after each server step.
+    g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
+        if (emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() != EMF_WORLD_SERVER) return;
+        if (g_buffs) g_buffs->on_server_tick(w);
+        emf::core::buffs_server_step(w);
     }, nullptr);
     // teleport: the state checks, the watch and the callbacks after each server step.
     g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {

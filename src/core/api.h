@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "attributes.h"
+#include "buffs.h"
 #include "overlay/hud_model.h"
 #include "common/log_limiter.h"
 #include "common/pe_image.h"
@@ -35,6 +36,8 @@
 namespace emf::core {
 
 class InventoryService;
+class BuffService;
+struct BuffRequest;
 class TeleportService;
 class ComponentService;
 class OfferService;
@@ -146,6 +149,18 @@ struct CoreState {
     EnvQueue env_queue;
     HitCarry hit_carry;
     std::string env_off_why = "it is not set up yet";
+    // ---- v32 buffs ----
+    BuffService* buffs = nullptr;  // emf_buffs (null when its program could not be added)
+    struct BuffWatcher {
+        EmfBuffCallback cb = nullptr;
+        void* user = nullptr;
+        bool on = true;
+    };
+    std::mutex buff_watchers_lock;
+    std::vector<BuffWatcher> buff_watchers;  // on_buff (at most 16; only appended to)
+    BuffDiff buff_diff;                      // the players' containers at the last comparison (server world thread)
+    uint64_t buff_diff_ms = 0;
+    std::function<std::vector<uint32_t>(EmfWorld*)> buff_players;  // the server world's players (empty: the roster)
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them
     std::mutex setting_watchers_lock;
     std::vector<SettingWatcher> setting_watchers;  // v13 on_setting_changed (only appended to)
@@ -221,5 +236,28 @@ void env_pre(void* program_context, uint8_t kind);
 void env_post(void* program_context, uint8_t kind);
 void deliver_env_hits(EmfWorld* w);
 void env_new_session();  // a new server world: the old one's queued env hits and carries are dropped
+
+// ---- v32 buffs (api_buffs.cpp) ----
+uint32_t api_buff_types(EmfWorld* w, EmfBuffType* out, uint32_t cap);
+bool api_buff_type(EmfWorld* w, uint32_t id, EmfBuffType* out);
+bool api_buff_text(uint32_t id, uint32_t which, char* buf, uint32_t cap);
+uint32_t api_buffs_of(EmfWorld* w, uint32_t entity, EmfBuff* out, uint32_t cap);
+bool api_buff_apply(EmfWorld* w, uint32_t target, uint32_t type, int64_t duration_ns, uint32_t source, uint32_t item,
+                    EmfBuffCallback done, void* user);
+bool api_buff_remove(EmfWorld* w, uint32_t target, uint32_t type, EmfBuffCallback done, void* user);
+bool api_on_buff(EmfBuffCallback cb, void* user);
+// A give or remove for EMF's own callers (console, Lua): the server world, a known type, then BuffService.
+bool buff_request(BuffRequest r, std::string* why);
+// A buff type's name in the player's language ("" on the dedicated server or for a type without one).
+std::string buff_name(EmfWorld* w, uint32_t id);
+// After each server step: the players' buff changes for on_buff (compared at most every kBuffDiffMs, only while a
+// callback listens).
+constexpr uint64_t kBuffDiffMs = 250;
+void buffs_server_step(EmfWorld* w);
+void buffs_new_session();  // a new server world: every player is a first sight again
+// The console's buffs.list / buffs.of / buffs.give / buffs.clear.
+bool add_buff_commands(CommandCenter& commands);
+std::string buff_type_line(const EmfBuffType& t, const std::string& name);
+std::string buff_line(const EmfBuff& b, const std::string& name);
 
 }  // namespace emf::core

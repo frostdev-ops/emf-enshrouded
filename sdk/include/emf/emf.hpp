@@ -972,6 +972,9 @@ inline EmfHitRule hit_rule() {
 inline uint32_t add_hit_rule(const EmfHitRule& r) { return has_v31() && api()->hit_rule_add ? api()->hit_rule_add(&r) : 0; }
 inline bool remove_hit_rule(uint32_t id) { return has_v31() && api()->hit_rule_remove && api()->hit_rule_remove(id); }
 
+// ---- v32: buffs (buff_types, buff_type, buff_text, buffs_of, buff_apply, buff_remove, on_buff through api()) ----
+inline bool has_v32() { return api() && api()->size >= offsetof(EmfApi, on_buff) + sizeof(api()->on_buff); }
+
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
 inline bool request_save() { return has_v19() && api()->request_save && api()->request_save(); }
 
