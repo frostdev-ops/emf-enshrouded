@@ -47,15 +47,29 @@ void MapMarkers::pre(const MapList* list) {
     game_last_ = list->count > appended_ ? list->count - appended_ : 0;
     // the game's memory read guarded (a fault here must not leave seen_m_ held), the lock taken only to insert
     std::vector<uint32_t> types;
-    for (uint64_t i = appended_; i < list->count && types.size() < kMapSeenTypesMax; ++i) {
+    std::vector<GameMarker> game;
+    for (uint64_t i = appended_; i < list->count && game.size() < kMapGameMarkersMax; ++i) {
         const uint8_t* e = list->data + i * kMapEntryBytes;
         uint32_t entity = 0, type = 0;
-        if (!seh_read(e, &entity, 4) || !seh_read(e + 0x30, &type, 4)) break;
-        if (entity && type) types.push_back(type);
+        int64_t pos[3];
+        uint8_t shown = 0;
+        if (!seh_read(e, &entity, 4) || !seh_read(e + 0x30, &type, 4) || !seh_read(e + 0x10, pos, sizeof pos) ||
+            !seh_read(e + 0x34, &shown, 1))
+            break;
+        if (!entity || !type) continue;
+        if (types.size() < kMapSeenTypesMax) types.push_back(type);
+        GameMarker g;
+        g.type = type;
+        g.shown = shown >= 2;
+        g.x = static_cast<double>(pos[0]) / 4294967296.0;
+        g.y = static_cast<double>(pos[1]) / 4294967296.0;
+        g.z = static_cast<double>(pos[2]) / 4294967296.0;
+        game.push_back(g);
     }
     std::lock_guard<std::mutex> lock(seen_m_);
     for (uint32_t t : types)
         if (seen_.size() < kMapSeenTypesMax) seen_.insert(t);
+    game_ = std::move(game);
 }
 
 uint32_t MapMarkers::post(MapList* list, const std::vector<Marker>& markers, const double* player) {
@@ -85,6 +99,11 @@ uint32_t MapMarkers::post(MapList* list, const std::vector<Marker>& markers, con
     return appended_;
 }
 
+std::vector<GameMarker> MapMarkers::game_markers() const {
+    std::lock_guard<std::mutex> lock(seen_m_);
+    return game_;
+}
+
 std::vector<uint32_t> MapMarkers::seen_types() const {
     std::lock_guard<std::mutex> lock(seen_m_);
     return std::vector<uint32_t>(seen_.begin(), seen_.end());
@@ -97,6 +116,7 @@ void MapMarkers::reset() {
     game_last_ = 0;
     std::lock_guard<std::mutex> lock(seen_m_);
     seen_.clear();
+    game_.clear();
 }
 
 }  // namespace emf::core

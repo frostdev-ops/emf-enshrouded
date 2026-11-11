@@ -28,10 +28,14 @@ struct FakeList {
         list.count = 0;
         list.capacity = cap;
     }
-    void add_game(uint32_t entity, uint32_t type) {
+    void add_game(uint32_t entity, uint32_t type, double x = 0, double y = 0, double z = 0, uint8_t shown = 2) {
         uint8_t* e = entries.data() + list.count * kMapEntryBytes;
         std::memcpy(e, &entity, 4);
+        const int64_t pos[3] = {static_cast<int64_t>(x * 4294967296.0), static_cast<int64_t>(y * 4294967296.0),
+                                static_cast<int64_t>(z * 4294967296.0)};
+        std::memcpy(e + 0x10, pos, sizeof pos);
         std::memcpy(e + 0x30, &type, 4);
+        e[0x34] = shown;
         ++list.count;
     }
 };
@@ -158,4 +162,30 @@ TEST_CASE("map list: entries that cannot be read are skipped without a fault; th
     CHECK(mm.seen_types().empty());
     mm.reset();
     CHECK(mm.seen_types().empty());
+}
+
+TEST_CASE("map list (v35): the game's own entries are kept for map_markers: position, type, shown; never EMF's") {
+    FakeList l(64);
+    MapMarkers mm;
+    l.add_game(1500, 0x11, 1500.5, 320, 4740.25);
+    l.add_game(1501, 0x22, 10, 0, 20, 0);
+    mm.pre(&l.list);
+    auto g = mm.game_markers();
+    REQUIRE(g.size() == 2u);
+    CHECK(g[0].type == 0x11u);
+    CHECK(g[0].x == doctest::Approx(1500.5));
+    CHECK(g[0].z == doctest::Approx(4740.25));
+    CHECK(g[0].shown);
+    CHECK_FALSE(g[1].shown);
+    // EMF's own entries (first in the list after its post) are not the game's
+    l.list.count = 0;
+    std::vector<Marker> mine{icon_marker("a", 1, 2, 0x33)};
+    REQUIRE(mm.post(&l.list, mine, nullptr) == 1u);
+    l.add_game(1502, 0x44, 7, 0, 8);
+    mm.pre(&l.list);
+    g = mm.game_markers();
+    REQUIRE(g.size() == 1u);
+    CHECK(g[0].type == 0x44u);
+    mm.reset();
+    CHECK(mm.game_markers().empty());
 }

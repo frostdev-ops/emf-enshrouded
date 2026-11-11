@@ -70,7 +70,22 @@ void minimap_client_tick(EmfWorld* client, uint64_t now_ms) {
     h.data = copy.data();
     s->minimap.fog.update(h, now_ms);
 }
-uint32_t api_map_markers(EmfGameMarker*, uint32_t) { return 0; }
+uint32_t api_map_markers(EmfGameMarker* out, uint32_t cap) {
+    CoreState* s = core_state();
+    if (!s) return 0;
+    const auto all = s->markers.map.game_markers();
+    for (uint32_t i = 0; out && i < cap && i < all.size(); ++i) {
+        EmfGameMarker g{};
+        g.size = sizeof g;
+        g.type = all[i].type;
+        g.flags = all[i].shown ? EMF_GAME_MARKER_SHOWN : 0u;
+        g.x = all[i].x;
+        g.y = all[i].y;
+        g.z = all[i].z;
+        out[i] = g;
+    }
+    return static_cast<uint32_t>(all.size());
+}
 bool api_canvas_set(const char*, const EmfCanvas*) { return false; }
 bool api_canvas_draw(const char*, const EmfCanvasCmd*, uint32_t) { return false; }
 

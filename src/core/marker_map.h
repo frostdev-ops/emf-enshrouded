@@ -23,6 +23,13 @@ constexpr uint32_t kMapShareMax = 128;     // EMF's entries at most
 constexpr uint32_t kMapGameReserve = 16;   // kept free beyond the game's own count of the step before
 constexpr uint64_t kMapCapacityMax = 0x4000;  // a capacity beyond this means the list was not read right
 constexpr size_t kMapSeenTypesMax = 256;
+constexpr size_t kMapGameMarkersMax = 512;  // v35 map_markers
+
+struct GameMarker {
+    uint32_t type = 0;
+    bool shown = false;
+    double x = 0, y = 0, z = 0;
+};
 
 struct MapList {
     uint8_t* data = nullptr;
@@ -45,6 +52,7 @@ public:
     uint32_t post(MapList* list, const std::vector<Marker>& markers, const double* player);
     uint64_t game_last() const { return game_last_; }
     std::vector<uint32_t> seen_types() const;  // ascending; any thread
+    std::vector<GameMarker> game_markers() const;  // the game's own entries as pre() last saw them; any thread
     void reset();                              // a new world
     void set_appended_for_tests(uint32_t n) { appended_ = n; }
 
@@ -56,6 +64,7 @@ private:
     uint64_t game_last_ = 0;
     mutable std::mutex seen_m_;
     std::set<uint32_t> seen_;
+    std::vector<GameMarker> game_;
 };
 
 }  // namespace emf::core

@@ -5,10 +5,13 @@
 #include <doctest.h>
 
 #include <cmath>
+#include <cstring>
+#include <vector>
 
 #include "core/api.h"
 #include "core/api_sizes.h"
 #include "core/marker_capture.h"
+#include "core/marker_map.h"
 #include "core/player_view.h"
 
 using namespace emf::core;
@@ -65,5 +68,34 @@ TEST_CASE("player_view: false without a local player; with one: the position, th
     CHECK((v.flags & EMF_VIEW_CAMERA) == 0u);  // no camera captured yet
     CHECK_FALSE(api_table()->player_view(nullptr));
     marker_capture_reset_for_tests();
+    set_core_state(nullptr);
+}
+
+TEST_CASE("api map_markers: the game's own entries from the map list; counts with a null buffer; at most cap filled") {
+    CoreState state;
+    set_core_state(&state);
+    CHECK(api_table()->map_markers(nullptr, 0) == 0u);
+    std::vector<uint8_t> entries(8 * kMapEntryBytes, 0);
+    MapList l;
+    l.data = entries.data();
+    l.capacity = 8;
+    for (uint32_t i = 0; i < 3; ++i) {
+        uint8_t* e = entries.data() + i * kMapEntryBytes;
+        const uint32_t entity = 1500 + i, type = 0x10 + i;
+        const int64_t pos[3] = {static_cast<int64_t>((100.0 + i) * 4294967296.0), 0, static_cast<int64_t>(200.0 * 4294967296.0)};
+        std::memcpy(e, &entity, 4);
+        std::memcpy(e + 0x10, pos, sizeof pos);
+        std::memcpy(e + 0x30, &type, 4);
+        e[0x34] = 2;
+        ++l.count;
+    }
+    state.markers.map.pre(&l);
+    CHECK(api_table()->map_markers(nullptr, 0) == 3u);
+    EmfGameMarker out[2]{};
+    CHECK(api_table()->map_markers(out, 2) == 3u);
+    CHECK(out[0].size == sizeof(EmfGameMarker));
+    CHECK(out[0].type == 0x10u);
+    CHECK(out[1].x == doctest::Approx(101));
+    CHECK(out[1].flags == EMF_GAME_MARKER_SHOWN);
     set_core_state(nullptr);
 }
