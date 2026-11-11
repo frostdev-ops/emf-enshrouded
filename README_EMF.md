@@ -25,7 +25,7 @@ game and EMF work, a cookbook of tested recipes, the full API reference, and wha
 | `src/saves/` | save backups: the engine shared by EMF.exe's Saves tab and the core's automatic backups and `saves.*` commands, and `save-info.json` ([docs/saves.md](docs/saves.md)) |
 | `src/content/` | `emf_content.dll` (Rust, built by CMake with cargo): a C ABI around EML's mod loader that builds the content of a game folder's EML mods; nothing in EMF loads it yet ([src/content/README.md](src/content/README.md)) |
 | `third_party/eml/` | the pinned copy of EML's library crates (v0.2.0) that `emf_content.dll` is built from, with EMF's patches listed in `EMF_PATCHES.md` |
-| `sdk/include/emf/` | mod SDK: `emf_api.h` (C API v31), `emf.hpp` (C++ helpers), `generated/components.hpp` (661 components, 65 dynamic halves, 129 events) |
+| `sdk/include/emf/` | mod SDK: `emf_api.h` (C API v32), `emf.hpp` (C++ helpers), `generated/components.hpp` (661 components, 65 dynamic halves, 129 events) |
 | `mods/sample_mod/` | example EMF mod (see below) |
 | `mods/companion/` | F6: a companion that follows you, fights at your side, takes orders (stay, attack) and wears gear you give it; saved per world (see below) |
 | `mods/clock/` | the time of day on screen (read-only, on by default) |
@@ -405,6 +405,10 @@ end the game; use `commands.txt` then.)
 | `hud.order <bar> <bar> <bar>` | the vitals' bars from the top (e.g. `hud.order mana health stamina`) |
 | `hud.grow up\|down` | the status effects list grows upward from the food icons' bottom edge, or down as the game draws it |
 | `hits` | the state of the hit hooks (API v31): whether the before-the-hit hook and the hit rules work, or why not; how many rules and callbacks there are; the hits seen, changed and cancelled; callback faults; the average microseconds per hit; whether fall, shroud, cold and drowning damage are on or off |
+| `buffs.list [food\|buff\|debuff\|rested\|terrain] [text]` | the game's buff types with their ids (API v32) |
+| `buffs.of [entity]` | an entity's active buffs (default entity 1) |
+| `buffs.give <entity> <type id> [seconds]` | gives a buff on the server world; answers "queued", the result is logged after the step. Ids are hex (`0xAC13C6C3`) or decimal |
+| `buffs.clear <entity> <type id>` | removes a buff the game's way (a cleanse) |
 | `hud.colour [bar] [part] [colour]` | the vitals' bar colours: `hud.colour health #ff4040` (the fill), `hud.colour mana empty #00000000` (a part: `fill`, `empty`, `end`, `damage`, `heal`), `hud.colour panel #20208080`, `game` for the game's colour again (`hud.colour health all game`: every colour of a bar); `hud.colour health` shows a bar's colours, `hud.colour` every colour you set |
 | `saves.backup [label]` | backs up every save file now, Steam Cloud and Local, into `%LOCALAPPDATA%\EMF\save-backups` ([docs/saves.md](docs/saves.md)); only at the main menu: while a world runs it says why not (the game writes its saves every 30 seconds) |
 | `saves.list` | the save backups, newest first, with what each holds and where they are; restoring needs the game closed (EMF.exe's Saves tab, or by hand: [docs/saves.md](docs/saves.md)) |

@@ -352,30 +352,36 @@ Known attribute ids (HashKey32; the names are not recovered):
   - +0 buffTypeId, +4 slot (BuffSlotType: Food, Buff, Debuff, Rested, TerrainDebuff), +5 applyType (Invalid, ResetTime, ReplaceAtEnd, Replace), +8 defaultLifeTime
   - +0x49 despawnOnDeath, +0x4A isSaved, +0x4C impact (ImpactProgramReference), +0x5C factionExcludeMask, +0x60 impactValues
   - +0x78 onCreate, +0x80 whileApplied, +0x88 onTimeout
-- **AppliedBuffEvent** (24 B, hash 0x690CBB0B): +8 targetEntityId, +0xC slotType, +0x10 slotTypeCount.
+- **AppliedBuffEvent** (24 B, hash 0x690CBB0B): +8 targetEntityId (never filled: stays 0), +0xC slotType, +0x10 slotTypeCount.
 - `actor::ApplyBuffEvent` (192 B, actor sequence event): +0x60 buffTypeOverride, +0x70 consume, +0x84 damageDistribution. `actor::CleanseBuffEvent`.
 - `impact_nodes::ApplyBuff` (96 B): buffInput, targetEntityId, damageSetup, usedItem, durationInput.
 
 ### 5.2 Functions
 **applyBuff (impact native)**
 - Address 0x1403d4920, `4C 89 44 24 18 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 80 48 81 EC`.
-- Argument slots: [0] buff ref (16 B guid), [1] targetEntityId, [2] damageSetup, [3] source override, [4] duration.
+- Argument slots: [0] buff ref (16 B guid), [1] targetEntityId, [2] damageSetup, [3] used item (older notes said source override: wrong), [4] duration.
 - Resolves the BuffType through **getBuffType(id, BuffRegistry)** (0x140e729d0, `48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 20 57 85 C9 74 73`; BuffRegistry at impact ctx[6]+0x80). If that fails it logs "[apply buff] Unknown Buff '%k'".
 - Then calls the core function below. Confidence: High.
 
-**applyBuffCore: the central "apply a buff" function**
-- Address **0x1403acd70**, `48 8B C4 48 89 58 10 4C 89 48 20 48`.
+**applyBuffCore: the central "apply a buff" function** (build 1287369)
+- Address game **0x1403b3540**, dedicated server **0x14015e130** (the older 0x1403acd70 is from an earlier build). EMF finds it by signature.
 - C signature: `u8* applyBuffCore(u8* outErr, u32 targetId, u32 sourceId, const BuffType* type, ApplyBuffCtx* ctx)`.
+- `ApplyBuffCtx` is **0xE8 bytes** (not "about 0x90"). In the impact native, argument slot [3] is the **used item** (it gives a food buff its stats and time), not a source override; the source is the caster.
 - Steps:
-  1. Returns 0 without doing anything if the target is dead and `despawnOnDeath` is set.
-  2. Gets the target's BuffContainer. Skips if the target's Faction bit is in `type->factionExcludeMask`.
-  3. Finds the slot (0x1403b0020).
+  1. Returns "ok" without doing anything if the target is dead and `despawnOnDeath` is set.
+  2. Gets the target's BuffContainer. Skips (also "ok") if the target's Faction bit is in `type->factionExcludeMask`.
+  3. Finds the slot (0x1403b0020 on the older build).
   4. Handles the reapply type: ResetTime updates the lifetime of the existing buff; Replace/ReplaceAtEnd destroy the old buff entity.
-  5. Spawns the buff entity (0x140953770) with BuffComponent, LifeTime and so on, and stores it in the BuffInstance.
-  6. Sends AppliedBuffEvent (**0x1403b7430**, `48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 48 8B B9 E0`) and the buff init (0x1403ac580). Emits `NotifyEvent`s for UI/VFX.
-- Error codes: 0 ok, 0x11 not allowed, 0x12 no target/type, 0x14 no slot, 0x15 missing entity.
+  5. Spawns the buff entity with BuffComponent, LifeTime and so on, and stores it in the BuffInstance.
+  6. Sends AppliedBuffEvent and the buff init. Emits `NotifyEvent`s for UI/VFX.
+- Error codes: 0 ok, **0x11** the buff is there already and the type cannot be given again, **0x12** no type or no BuffContainer, **0x14** no free slot, **0x15** a missing entity.
+- Three **silent "ok"** cases, where nothing is given and no error comes back: an excluded faction, a dead target with despawn-on-death, and resimulation (a replayed step). A caller that wants to know compares the target's buffs before and after, as EMF does.
+- `AppliedBuffEvent` never fills `targetEntityId` (it stays 0): do not read the target from it.
+- `HasBuff` skips the Rested slot.
 - Callers: programs `actor_apply_buff`, `update_buffcontainer`, `thirst_and_hunger`, `daytime_temp`, `actor_wet_soaked_apply`, `movement_collider`, and the impact native.
-- Confidence: High for the role, Medium for the error-code meanings.
+- Confidence: High.
+
+**EMF's API.** Since API v32 (Lua 1.24) a mod lists the types, reads an entity's buffs, gives and removes buffs, and hears players' buff changes without touching these addresses: EMF's server program `emf_buffs` calls applyBuffCore (and the game's cleanse) in the next step. See [modding/reference.md](../modding/reference.md), "v32: buffs", and [modding/lua.md](../modding/lua.md), "Buffs".
 
 `CreateBuffRegistry` is only a job-name string (getter at 0x14083e830, next to "CreateAttributeSystem" and "WaitAttributeSystemResource"). The registry itself is the ECS singleton `BuffRegistry`. No code refs to the getter were found.
 

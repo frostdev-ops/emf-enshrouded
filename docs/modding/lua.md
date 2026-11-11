@@ -43,7 +43,7 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    E prompts (`emf.offer`, `emf.spawn_offer`, `emf.offer_remove`; EMF API v25): depend on `">=1.14"`. 1.15 adds
    pictures in windows (`emf.image`, the `image`, `icon`, `fps` and `height` row fields; EMF API v26): depend on
    `">=1.15"`. 1.17 adds the inter-mod message bus (`emf.bus.subscribe`, `.publish`, `.unsubscribe`): mods using it
-   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. 1.23 adds hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`; EMF API v31): depend on `">=1.23"`. Ranges are explained in
+   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. 1.23 adds hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`; EMF API v31): depend on `">=1.23"`. 1.24 adds buffs (`emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff`; EMF API v32): depend on `">=1.24"`. Ranges are explained in
    [guide.md](guide.md), "Dependencies and version ranges".)
 
 3. Put `main.lua` next to it:
@@ -150,6 +150,12 @@ right away.
 | `emf.on_hit(fn [, {kinds = ...}])` | (1.23) `fn(world, hit)` after the server applied each landing hit on an entity (the game's `HitEvent`), on the server world; with `kinds` also fall, shroud, cold and drowning damage; see "Hits" below. Joined players' games see none. true / false (false on an older core) |
 | `emf.hit_rule{from, to, crit, backstab, weakspot, types, attack, healing, kinds, scale, add, min_health, cancel}` | (1.23) a rule the core applies to every matching hit before it lands: change its amount or cancel it. Returns its id, or nil when refused (the log says why: 64 rules, the hook not usable on this game build). See "Hits" below |
 | `emf.hit_rule_remove(id)` | (1.23) removes a rule of this script. true only for the script's own rule |
+| `emf.buff_types(world [, slot])` | (1.24) the game's buff types as a list of type tables; `slot` is `"food"`, `"buff"`, `"debuff"`, `"rested"` or `"terrain"`. Any world. See "Buffs" below |
+| `emf.buff_type(world, id)` | (1.24) one type table, or nil |
+| `emf.buffs(world, entity)` | (1.24) the entity's active buffs as a list of tables, in slot order. Any world |
+| `emf.apply_buff(world, target, type [, {seconds, source, item}] [, fn(world, result)])` | (1.24) gives a buff through the game's own buff code in the next step; `fn` gets the result after it. Server world only. true when queued, false when refused at once (logged) |
+| `emf.remove_buff(world, target, type [, fn(world, result)])` | (1.24) removes a buff the game's way (a cleanse: gone after the next step). Server world only. true / false as `emf.apply_buff` |
+| `emf.on_buff(fn)` | (1.24) `fn(world, ev)` after the server step for every change of a player's buffs: applied, refreshed, removed. false on an older core |
 | `emf.on_player_joined(fn)`, `emf.on_player_left(fn)`, `emf.on_player_died(fn)` | (1.20) `fn(world, p)` on the server world, `p` = `{player, account, name, host, killer}` (`killer`: died only, the last hitter within 10 s or 0). All join 1 s after the world data; died needs the call in the first run. False on an older core (reference.md "v28") |
 | `emf.net.channel(name, def)` | (1.19) a message channel `"<mod id>/<name>"`: `def` = `{version, to = "server" \| "players" \| "both", max, per_10s, on_server = fn(world, from, data), on_player = fn(world, from, data)}`; `from` = `{player, account, admin, is_local, version}`. A reload binds the new functions; a new version needs a restart. In process, and to joined players and the server over the chat (reference.md "v27") |
 | `emf.net.send(name, data)`, `.send_to(world, player, name, data)`, `.send_all(world, name, data)`, `.peer(world, player, name)` | (1.19) to the server (true: sent) / to one player's game / to all with the channel (count) / that game's channel version (`peer(nil, 0, name)`: the server's; 0 = none) |
@@ -348,6 +354,69 @@ blocked or parried hit changes stamina, not health.
 game gives it health on the first hit and removes it at 0. A placed object's health is not saved: a reload heals it.
 
 Recipes: [cookbook.md](cookbook.md), "Hits".
+
+## Buffs (1.24)
+
+The game's buffs and debuffs (potions, food, Wet, Poisoned, auras). Listing and reading work on any world. Giving and
+removing work on the server world only (a game you host or the dedicated server): EMF asks the game's own buff code in
+the next step, so every game rule runs (slots, giving again, faction exclusions, the food time factor, effects, the HUD
+icon, saving). The answer comes after that step. A joined player's game cannot give or remove. Store type ids, not
+names: names repeat ("Burning" is ten types) and change with the language, and the dedicated server has no names. Find
+ids with the console command `buffs.list` or `emf.buff_types`. Details: [reference.md](reference.md), "v32: buffs".
+
+`emf.buff_types(world [, slot])` and `emf.buff_type(world, id)` give type tables:
+
+| Field | What |
+|---|---|
+| `id` | the buff type id |
+| `slot` | `"food"`, `"buff"`, `"debuff"`, `"rested"` or `"terrain"` |
+| `name`, `description` | the game's text in the player's language; nil on a dedicated server |
+| `hidden` | true when the game does not show it |
+| `saved` | true when it stays in the world save (potions, Wet, food) |
+| `ends_on_death` | true when it ends with its target (never given to a dead target) |
+| `seconds` | its default time |
+| `apply` | giving it again: `"once"` (refused), `"reset"` (its timer starts again), `"replace"` (a new buff) |
+| `follow_up` | the type given when it ends (0 = none) |
+
+`emf.buffs(world, entity)` gives a list of the entity's active buffs, in slot order (at most 40):
+
+| Field | What |
+|---|---|
+| `type`, `name`, `slot` | as above |
+| `entity` | the buff's own entity |
+| `level` | from its source's level, 0 = none |
+| `seconds` | its whole time; nil when not known yet |
+| `seconds_left` | the time left; nil when not known yet (the step it was given) |
+| `cleansed` | true while it is being removed |
+
+`emf.apply_buff(world, target, type [, opts] [, fn])` and `emf.remove_buff(world, target, type [, fn])` return true when
+queued, false when refused at once (the log says why: not the server world, an unknown type, 64 requests waiting, not
+available on this game build). `opts`: `seconds` (0 or absent = the type's default), `source` (the entity the buff comes
+from, default the target; damage over time scales from the source's stats, so give a creature), `item` (the item entity
+a food buff takes its stats and time from; without it a food buff likely has no stats). An unknown option is an error.
+`fn(world, result)` is called after the step with a result table. At most 16 requests are handled per step.
+
+`result` (and the table `emf.on_buff` gets):
+
+| Field | What |
+|---|---|
+| `kind` | `"applied"`, `"refreshed"`, `"removed"` or `"refused"` (results are `"applied"`, `"removed"` or `"refused"`) |
+| `target`, `type`, `name`, `slot` | the entity, the type, its text (nil on a dedicated server) and its slot |
+| `buff_entity` | the buff's own entity (0 when refused) |
+| `cleansed` | `"removed"`: true when a mod, a potion or a spell removed it; false when it ended or was replaced |
+| `seconds_left` | the time left; nil when not known |
+| `why` | `"refused"` only: the reason, for example "the target does not have it" |
+
+Refusal reasons: unknown buff type; the target has no buff container; the type is never given to the target's faction;
+the target is dead; no free slot of that group; already there and this type cannot be given again; the target does not
+have it (remove); not the server world; giving not available on this game build; 64 requests waiting.
+
+`emf.on_buff(fn)`: `fn(world, ev)` after the server step for every change of a **player's** buffs, whoever made it (a
+mod, a potion, food, rain, the end of the time). It compares after each step, at most 4 times a second, so a buff given
+and removed within a quarter second is not seen. The first sight of a player (a new world, a join) says nothing.
+`"refreshed"`: its end moved later by more than a second. Returns true, or false on an older core.
+
+Recipes: [cookbook.md](cookbook.md), "Buffs".
 
 ## Worlds and components
 

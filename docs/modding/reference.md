@@ -807,6 +807,86 @@ freezing), `EMF_HIT_KIND_DROWNING` 4 (every step while oxygen is 0). For these k
 What never becomes a hit, so no hook sees it: regeneration, direct attribute writes (`attribute_add`), and voxel damage
 (terrain and player walls).
 
+## v32: buffs
+
+The game's own buffs and debuffs: potions, food, Wet, Poisoned, auras, terrain debuffs. A mod can list the buff types,
+read an entity's active buffs, give a buff, remove a buff, and hear the players' buff changes.
+
+- Listing and reading work on any world, server or client (buffs are replicated).
+- Giving and removing happen on the **server world only** (the host's game or the dedicated server). EMF queues the
+  request for its own server program `emf_buffs`, which calls the game's own buff code in the next step. So every game
+  rule runs: slot groups, giving again (timer starts again, replace, or refused), faction exclusions, the food time
+  factor, effects, the HUD icon, saving. The result comes after that step: applied, or refused with a reason.
+- Removing is the game's own cleanse: the buff's effects stop and it is gone after the next step.
+- A joined player's game cannot give or remove (it has no server world). Players without EMF see the buffs EMF gives:
+  the game replicates them.
+
+| C | C++ | What |
+|---|---|---|
+| `buff_types(world, out, cap)` | `api()->buff_types(w, out, cap)` | the game's buff types in `world`: the number there is; fills `out` up to `cap` (`out` may be NULL to count). 0 when the world's buff registry cannot be read. Where no program runs (`on_tick`, commands). |
+| `buff_type(world, id, &out)` | `api()->buff_type(w, id, &out)` | one type; false: no such type. |
+| `buff_text(id, which, buf, cap)` | `api()->buff_text(id, which, buf, cap)` | a type's name (`which` 0) or description (1) in the player's language, NUL-terminated (cut to fit). A game client only: false on the dedicated server, for no text or a 0 tag. Not on the render thread. |
+| `buffs_of(world, entity, out, cap)` | `api()->buffs_of(w, entity, out, cap)` | an entity's active buffs on any world, in slot order: the number there is; fills `out` up to `cap`. Where no program runs. |
+| `buff_apply(world, target, type, duration_ns, source, item, done, user)` | `api()->buff_apply(...)` | gives `target` a buff on the server world. `duration_ns` 0 = the type's default; `source` 0 = the target; `item` 0 = none. `done` (may be NULL) is called after the step, on the server world's thread: `EMF_BUFF_APPLIED` or `EMF_BUFF_REFUSED` with `why`. False when refused at once (logged): not the server world, an unknown type, 64 requests waiting, not available on this game build. |
+| `buff_remove(world, target, type, done, user)` | `api()->buff_remove(...)` | removes `target`'s buff of that type the game's way. `done` as for `buff_apply`: `EMF_BUFF_REMOVED`, or `EMF_BUFF_REFUSED` ("the target does not have it"). |
+| `on_buff(cb, user)` | `api()->on_buff(cb, user)` | `cb(world, const EmfBuffEvent*, user)` after each server step, on its thread, for every change of a **player's** buffs, whoever made it: `EMF_BUFF_APPLIED`, `_REFRESHED`, `_REMOVED` (never `_REFUSED`). False for a null `cb` or 16 callbacks already. |
+| | `emf::has_v32()` | true when the core has these functions. |
+
+`EmfBuffType` (`size`, then): `id` (stable: store ids, not indexes), `slot` (`EMF_BUFF_FOOD` 0, `_BUFF` 1, `_DEBUFF` 2,
+`_RESTED` 3, `_TERRAIN` 4), `apply_type` (giving again: 0 refused, 1 its timer starts again, 2 and 3 replaced by a new
+buff), `faction_exclude` (a bit per faction the type is never given to; bit 7 = players), `flags`, `default_ns` (its
+default time in nanoseconds), `follow_up` (the type given when this one ends, Soaked then Wet; 0 = none), `name_tag` and
+`desc_tag` (the game's text tags; `buff_text` reads them).
+
+Type flags: `EMF_BUFF_HIDDEN` 0x01 (not shown in the game's UI), `EMF_BUFF_SAVED` 0x02 (kept in the world save: potions,
+Wet, food; combat buffs are not), `EMF_BUFF_DESPAWN_ON_DEATH` 0x04 (ends when its target dies; never given to a dead
+target), `EMF_BUFF_FOOD_POISON` 0x08, `EMF_BUFF_SHOW_AS_TAG` 0x10 (shown as a tag on an enemy's health bar).
+
+`EmfBuff` (`size`, then): `type`, `entity` (the buff's own entity), `slot`, `index` (its place in that slot group),
+`cleansed` (1: being removed, gone after the next step), `level` (from its source's level, 0 = none), `total_ns` (its
+whole time) and `remaining_ns` (the time left); both -1 when not known yet (the step it was given).
+
+`EmfBuffEvent` (`size`, then): `kind` (`EMF_BUFF_APPLIED` 1, `_REFRESHED` 2, `_REMOVED` 3, `_REFUSED` 4), `target` (the
+entity that has or had the buff), `type`, `buff_entity` (0 when refused), `slot`, `cleansed` (REMOVED: 1 when removed by
+a mod, a potion or a spell; 0 when it ended or was replaced), `total_ns` and `remaining_ns` (-1 = not known),
+`why` (REFUSED: the reason, valid during the callback; else NULL).
+
+**Names.** Mods should store ids, not names. Names repeat ("Burning" is ten types) and change with the language. The
+game's text is there on a game client only; the dedicated server has ids. Find ids with the console command
+`buffs.list` or `buff_types`. On game build 1287369 there are 274 types: 127 buff, 118 debuff, 17 food, 11 terrain, 1
+rested. Some ids: Wet `0xAC13C6C3` (debuff, 900 s, saved; rain gives it again every step), Elixir Buff `0xFF24634F`
+(buff, 1800 s, saved, ends on death), Rested `0xCDBE9C80`, Poisoned `0x369C3618` (players only).
+
+**Refusal reasons** (`why`): unknown buff type; the target has no buff container; the type is never given to the
+target's faction; the target is dead; no free slot of that group; already there and this type cannot be given again; the
+target does not have it (remove); not the server world; giving not available on this game build (signature); 64
+requests waiting.
+
+**Limits and notes.**
+- 16 requests are handled per step; 64 may wait.
+- Food types are categories: without an item a food buff likely has no stats. Pass the eaten item.
+- Damage over time scales from the source's stats: give a creature as `source`. With `source` = target a
+  damage-over-time buff may do nothing.
+- Long saved buffs stay in the world save, like the game's own.
+- Giving a type that is already there follows the type's `apply_type`: its timer starts again, a new buff replaces the
+  old one, or the request is refused.
+
+**Events.** `on_buff` covers players only. After each server step EMF compares their buffs with the step before, at
+most 4 times a second, so a buff given and removed within a quarter second is not seen. The first sight of a player (a
+new world, a join) says nothing. A buff counts as `REFRESHED` when its end moved later by more than a second (rain
+gives Wet again every step, so only a move that large counts).
+
+Works on game build 1287369 (game and dedicated server). When the game's buff code cannot be found on a build,
+`buff_apply` is refused (logged) and listing and reading still work.
+
+Console commands (on the host; [Console commands](#console-commands-built-in)): `buffs.list [food|buff|debuff|rested|terrain] [text]`,
+`buffs.of [entity]` (default 1), `buffs.give <entity> <type id> [seconds]`, `buffs.clear <entity> <type id>`. Ids are hex
+(`0xAC13C6C3`) or decimal. `give` and `clear` answer "queued" and log the result after the step.
+
+Live-checked 2026-11-11 (hosted game): the Elixir Buff given for 60 s showed on the game's HUD as "Elixir Buff 0:47" and
+counted down; given again for 120 s it got a new buff (the Replace type); a clear removed it and a second clear was
+refused ("the target does not have it"); in rain Wet was given again by the game right after a clear.
+
 Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod, built on this API).
 
 ## SDK headers (header-only C++, no ABI)
@@ -829,7 +909,7 @@ Lua mods use the `emf` table described in [lua.md](lua.md) (run by the `lua` mod
 from the next start), `profile [save <name> [--settings] [--replace] | load <name>]` (mod profiles: the switches of
 every mod under a name, as in EMF.exe; a load applies at the next start), `hud.list`, `hud.move <part> <x> <y>`, `hud.scale <part> <s>`, `hud.hide <part>`, `hud.show <part>`, `hud.reset [part]`,
 `hud.layout [save|load|delete <name>]`, `hud.swap <bar> <bar>`, `hud.order <bar> <bar> <bar>`, `hud.grow up|down`,
-`hits` (v31: one line with the state of the hit hooks: whether `on_hit_before` and the rules work or why not, how many rules and callbacks, hits seen, changed and cancelled, callback faults, the average microseconds per hit; whether fall, shroud, cold and drowning damage are on), `hud.colour [bar] [part] [colour]` (the HUD editor: offsets in percent of the screen, scale 0.5 to 2, the bars `health`,
+`buffs.list`, `buffs.of`, `buffs.give`, `buffs.clear` (v32: the game's buffs, see "v32: buffs"), `hits` (v31: one line with the state of the hit hooks: whether `on_hit_before` and the rules work or why not, how many rules and callbacks, hits seen, changed and cancelled, callback faults, the average microseconds per hit; whether fall, shroud, cold and drowning damage are on), `hud.colour [bar] [part] [colour]` (the HUD editor: offsets in percent of the screen, scale 0.5 to 2, the bars `health`,
 `mana`, `stamina` move on their own and take colours, the mods' HUD lines are the parts `lines_top_right`,
 `lines_bottom_right`, `lines_bottom_left`, layouts in `emf\hud`), `items [part]`, `give <item> [n]`, `put <item> [n] [entity] [level] [rarity]`,
 `take <item> [n] [entity]`, `spawn <guid> [n]`, `time <hours>`, `pos`, `perf` (how long each world step took since the last `perf`: the game's own steps, EMF's wait

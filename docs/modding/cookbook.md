@@ -424,6 +424,65 @@ end)
 In C++ the same is `emf::add_hit_rule` with an `EmfHitRule` from `emf::hit_rule()`, and `on_hit_before` changes a
 hit inline (be fast; reference.md, "v31").
 
+## Buffs: a shrine that gives the Elixir Buff, a cleanse command
+*Lua 1.24 (EMF API v32); giving and removing work on the server world: a game you host or a dedicated server. The result
+comes after the next step. See lua.md, "Buffs".*
+
+```lua
+-- Store ids, not names: names change with the language. Find ids with the console command buffs.list.
+local ELIXIR   = 0xFF24634F   -- Elixir Buff (buff, 30 minutes by default)
+local POISONED = 0x369C3618
+local WET      = 0xAC13C6C3   -- the game gives Wet again at once in rain
+
+-- A shrine: E on an entity you name gives the player the Elixir Buff for 10 minutes. Offer again after a load.
+local function shrine(world, entity)
+  emf.offer(world, entity, {verb = "Touch"}, function(world, player, entity)
+    emf.apply_buff(world, player, ELIXIR, {seconds = 600}, function(world, r)
+      if r.kind == "applied" then
+        emf.tell(world, player, "The shrine gives you the Elixir Buff for 10 minutes.", {system = true})
+      else
+        emf.tell(world, player, "The shrine does nothing: " .. r.why, {system = true})   -- the game refused it
+      end
+    end)
+  end)
+end
+emf.command("shrine", "<entity id>: make an entity a shrine", function(world, args)
+  if not world:is_server() then emf.reply("run this on the server world"); return end
+  shrine(world, tonumber(args[2]))
+end)
+
+-- /cleanse: removes Poisoned and Wet from whoever types it. A remove that finds nothing is refused ("the target does
+-- not have it"): that is normal, so only the ones that worked say anything.
+emf.command("cleanse", ": remove Poisoned and Wet from you", function(world, args)
+  local me = emf.sender().entity
+  if not me or me == 0 then emf.reply("no player"); return end
+  for _, type in ipairs({POISONED, WET}) do
+    emf.remove_buff(world, me, type, function(world, r)
+      if r.kind == "removed" then
+        emf.tell(world, me, "Cleansed.", {system = true})
+      end
+    end)
+  end
+end, {players = true})
+
+-- What does a player have? (any world; seconds_left is nil in the step a buff is given)
+local function list(world, player)
+  for _, b in ipairs(emf.buffs(world, player)) do
+    emf.log(string.format("0x%08X %s %s left", b.type, b.slot, b.seconds_left and ("%.0f s"):format(b.seconds_left) or "?"))
+  end
+end
+
+-- Hear the players' buff changes (a buff given and removed within a quarter second is not seen).
+emf.on_buff(function(world, ev)
+  if ev.kind == "removed" and ev.type == ELIXIR and not ev.cleansed then
+    emf.tell(world, ev.target, "The Elixir wore off.", {system = true})
+  end
+end)
+```
+
+C++: `api()->buff_apply(w, target, type, duration_ns, source, item, done, user)` and `buff_remove`, with `emf::has_v32()`
+(reference.md, "v32: buffs").
+
 ## Run code before or after one of the game's programs
 
 ```cpp
