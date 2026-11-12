@@ -1233,6 +1233,7 @@ void cmd_remove(EmfWorld* w, int argc, const char* const* argv, void* u) {
                        : r.refund == EMF_REFUND_DROP     ? fmt("removed entity %u; the item came back as a drop", r.entity)
                                                          : fmt("removed entity %u; the item came back to player %u (a drop "
                                                                "at the object if it did not fit)", r.entity, r.player));
+    if (r.flags & EMF_REMOVE_FORCE) command_reply_line("anything it held lies on the ground where it stood");
 }
 
 }  // namespace
@@ -1279,7 +1280,8 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         {"path", "<x> <y> <z> [jumps] [closest] [nodes]: a path from you on the game's path grid (it moves nothing; host)",
          cmd_path},
         {"remove", "<entity> [me|drop|<player>] [force]: take a placed object away like a pick-up, its item back to you, as a "
-                   "drop or to a player; refused for a chest with items unless force, and for a Flame Altar (host)", cmd_remove},
+                   "drop or to a player; refused for a chest with items unless force (they drop on the ground), and for a Flame "
+                   "Altar (host)", cmd_remove},
         {"destroy", "<entity>: remove an entity from the world, never a player (host)", cmd_destroy},
     };
     bool ok = true;

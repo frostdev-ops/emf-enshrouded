@@ -890,6 +890,29 @@ bool drop_refund(EmfWorld* w, uint32_t item, const double pos[3]) {
     core_log("remove_building: the item could not be dropped (" + why + ")");
     return false;
 }
+// force: what it held drops at its spot, a pickup per stack side by side (item, count, level, rarity; the owner saw a
+// forced chest's items lost). False when a stack could not be dropped (logged).
+bool drop_contents(EmfWorld* w, const RemoveFacts& f) {
+    auto fn = reinterpret_cast<SpawnWrapperFn>(api_resolve("SpawnWrapper"));
+    const uint8_t* reg = item_registry(w);
+    size_t dropped = 0;
+    for (size_t i = 0; i < f.contents.size(); ++i) {
+        const ContentStack& c = f.contents[i];
+        const auto rec = fn ? item_by_id(reg, c.item) : std::nullopt;
+        const double a = 2.39996 * static_cast<double>(i);  // the golden angle: stacks spread round the spot
+        const double r = 0.3 + 0.15 * std::sqrt(static_cast<double>(i));
+        const uint32_t count = (std::min)((std::max)(c.count, 1u), 65535u);
+        std::string why = fn ? "unknown item" : "the SpawnWrapper signature is not usable on this game build";
+        if (rec && give_pickup(fn, raw(w), *rec, count, f.pos[0] + r * std::cos(a), f.pos[1] + 0.5, f.pos[2] + r * std::sin(a),
+                               &why, c.level, c.rarity))
+            ++dropped;
+        else
+            core_log("remove_building: a stack of item " + std::to_string(c.item) + " could not be dropped (" + why + ")");
+    }
+    core_log("remove_building: dropped " + std::to_string(dropped) + " of " + std::to_string(f.contents.size()) +
+             " stack(s) it held");
+    return dropped == f.contents.size();
+}
 void refund_put_done(EmfWorld* w, uint32_t, uint32_t item, uint32_t, uint32_t added, void* user) {
     std::unique_ptr<RefundLater> r(static_cast<RefundLater*>(user));
     if (added) return;
@@ -946,9 +969,14 @@ bool api_remove_building(EmfWorld* w, EmfRemoveBuilding* req) {
         return refuse("it was removed already");
     if (plan.refund_item && (!api_resolve("SpawnWrapper") || !item_by_id(reg, plan.refund_item)))
         return refuse("its item cannot be given back on this game build");  // never removed without its item
+    if (req->flags & EMF_REMOVE_FORCE)  // never removed with what it holds lost
+        for (const ContentStack& c : facts.contents)
+            if (!api_resolve("SpawnWrapper") || !item_by_id(reg, c.item))
+                return refuse("what it holds cannot be dropped on this game build (item " + std::to_string(c.item) + ")");
     if (!destroy_entity(fn, raw(w), req->entity)) return refuse("the game's destroy call failed (see the log)");
     removed.ids.push_back(req->entity);
     if (g_state && g_state->offers) g_state->offers->forget(req->entity);
+    if ((req->flags & EMF_REMOVE_FORCE) && !facts.contents.empty()) drop_contents(w, facts);
     if (!plan.refund_item) return true;
     req->refunded = plan.refund_item;
     if (req->refund == EMF_REFUND_PLAYER) {

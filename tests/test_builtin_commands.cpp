@@ -1046,13 +1046,14 @@ TEST_CASE("builtin commands: stack's reply names the item as the game shows it")
 
 namespace {
 // v36 remove: 60 a placed object (item 0x11), 61 a placed chest holding items, 62 a world object (no UsedItem),
-// 63 placed, for a refund to a player; 50 another player, 42 the local player.
+// 63 placed, for a refund to a player; 64 placed, holding an item the registry does not know; 50 another player, 42
+// the local player.
 int64_t g_rm_xf[7] = {int64_t(100) << 32, int64_t(900) << 32, int64_t(200) << 32, 0, 0, 0, 0};
 void* rm_gc(void* out, void* w, uint32_t hash, uint32_t entity) {
     namespace gen = emf::gen::ecs;
     b_gc(out, w, hash, entity);
     auto o = static_cast<uint64_t*>(out);
-    const bool ours = entity >= 60 && entity <= 63;
+    const bool ours = entity >= 60 && entity <= 64;
     if (hash == off::kHashCurrentTransform && ours) {
         o[0] = reinterpret_cast<uint64_t>(g_rm_xf);
         o[1] = 56;
@@ -1065,9 +1066,17 @@ void* rm_gc(void* out, void* w, uint32_t hash, uint32_t entity) {
     }
     static gen::Inventory inv{};
     inv.slots[2].id.value = 0x22;
+    inv.slots[2].data.count = 7;
     if (hash == gen::Inventory::kHash && entity == 61) {
         o[0] = reinterpret_cast<uint64_t>(&inv);
         o[1] = sizeof(inv);
+    }
+    static gen::Inventory odd{};
+    odd.slots[0].id.value = 0xdead;
+    odd.slots[0].data.count = 1;
+    if (hash == gen::Inventory::kHash && entity == 64) {
+        o[0] = reinterpret_cast<uint64_t>(&odd);
+        o[1] = sizeof(odd);
     }
     return out;
 }
@@ -1086,10 +1095,11 @@ TEST_CASE("builtin commands (v36): remove takes a placed object away like a pick
     REQUIRE(logs);
     logs[off::kItemInfoPlacementConsume] = 1;  // placing it used it up: the game refunds it
     MapStore ents;
-    emf::test::plant_entities(iw.w, ents, {42, 50, 60, 61, 62, 63});
+    emf::test::plant_entities(iw.w, ents, {42, 50, 60, 61, 62, 63, 64});
     f.center.enqueue("remove 60 drop");
     f.center.enqueue("remove 61");        // holds items
-    f.center.enqueue("remove 61 force");  // with them
+    f.center.enqueue("remove 61 force");  // with them: they drop
+    f.center.enqueue("remove 64 force");  // an item that cannot be dropped: never lost
     f.center.enqueue("remove 62");        // no player placed it
     f.center.enqueue("remove 50");        // a player
     f.center.enqueue("remove 63 50");     // to player 50: no inventory transaction in this fake, so a drop
@@ -1101,11 +1111,13 @@ TEST_CASE("builtin commands (v36): remove takes a placed object away like a pick
     CHECK(bsaid("removed entity 60; the item came back as a drop"));
     CHECK(bsaid("entity 61 not removed: it holds items (1 stacks)"));
     CHECK(bsaid("removed entity 61"));
+    CHECK(bsaid("anything it held lies on the ground where it stood"));
+    CHECK(bsaid("entity 64 not removed: what it holds cannot be dropped"));
     CHECK(bsaid("entity 62 not removed: not something a player placed"));
     CHECK(bsaid("entity 50 not removed: that is a player"));
     CHECK(bsaid("removed entity 63; the item came back to player 50"));
     CHECK(bsaid("entity 63 not removed: the refund's player is not a player"));
-    CHECK(g_pickup_amounts == std::vector<uint32_t>{1, 1});  // 60's drop and 63's (the player's inventory was not there)
+    CHECK(g_pickup_amounts == std::vector<uint32_t>{1, 7, 1});  // 60's drop, 61's 7 items, 63's (no player inventory)
     CHECK(bsaid("usage: remove <entity> [me|drop|<player>] [force]"));
 }
 

@@ -189,6 +189,19 @@ TEST_CASE("give_pickup spawns the generic pickup with a PickupItem of the item a
     CHECK(amount == 300);
 }
 
+TEST_CASE("give_pickup carries a level and a rarity (a chest's gear dropped by remove_building force)") {
+    ItemRecord item;
+    item.id = 0x51u;
+    std::string why;
+    REQUIRE(give_pickup(capture_spawn, server_world().p(), item, 1, 0, 0, 0, &why, 23, 3) == 7001u);
+    REQUIRE(g_comps.size() == 2);
+    const auto& b = g_comps[1].bytes;
+    uint32_t level = 0;
+    std::memcpy(&level, b.data() + 20, 4);
+    CHECK(level == 23u);
+    CHECK(b[24] == 3);
+}
+
 TEST_CASE("give_pickup refuses count 0, more than 65535 and an item without id") {
     ItemRecord item;
     item.id = 7;

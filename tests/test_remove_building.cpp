@@ -152,6 +152,33 @@ TEST_CASE("remove: items in its own or a linked inventory refuse it unless force
     CHECK(f.facts().stacks == 2);
 }
 
+// The owner: "remove drop force": the chest went and its item with it. Force now drops what it holds; the facts list it.
+TEST_CASE("remove: the facts list each stack it holds: item, count, and a gear item's level and rarity") {
+    Fake f = placed();
+    auto& own = f.add<gen::Inventory>(kChest);
+    own.slots[1].id.value = 0x55;
+    own.slots[1].data.count = 40;
+    f.add<gen::InventorySetup>(kChest).linksEntities[0].id = kLinked;
+    auto& linked = f.add<gen::Inventory>(kLinked);
+    linked.slots[0].id.value = 0x66;
+    linked.slots[0].data.count = 1;
+    linked.slots[0].data.pide.id = 900;  // a gear item: its data entity
+    auto& state = f.add<gen::ItemState>(900);
+    state.itemLevelUi = 17;
+    state.itemRarityUi = static_cast<emf::gen::ItemRarity>(2);
+    const RemoveFacts facts = f.facts();
+    CHECK(facts.stacks == 2);
+    REQUIRE(facts.contents.size() == 2u);
+    CHECK(facts.contents[0].item == 0x55u);
+    CHECK(facts.contents[0].count == 40u);
+    CHECK(facts.contents[0].level == 0u);
+    CHECK(facts.contents[0].rarity == 0u);
+    CHECK(facts.contents[1].item == 0x66u);
+    CHECK(facts.contents[1].count == 1u);
+    CHECK(facts.contents[1].level == 17u);
+    CHECK(facts.contents[1].rarity == 2u);
+}
+
 TEST_CASE("remove: a component of the wrong size is not trusted (a game update changed it)") {
     Fake f = placed();
     f.comps[{gen::UsedItem::kHash, kChest}].resize(8);

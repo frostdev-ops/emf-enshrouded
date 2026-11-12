@@ -5,6 +5,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace emf::core {
 
@@ -12,6 +13,14 @@ namespace emf::core {
 using ComponentGetter = std::function<const void*(uint32_t hash, uint32_t entity, uint64_t* size)>;
 // The game's ItemInfo blob for an item id (off::kItemInfoSize bytes), or null.
 using ItemInfoGetter = std::function<const uint8_t*(uint32_t item)>;
+
+// A stack the object holds: dropped at its spot when it is removed with force.
+struct ContentStack {
+    uint32_t item = 0;
+    uint32_t count = 0;
+    uint32_t level = 0;  // a gear item's level (ItemState of its data entity; 0: none)
+    uint8_t rarity = 0;  // and its rarity
+};
 
 // What the core reads about an entity before removing it.
 struct RemoveFacts {
@@ -24,6 +33,7 @@ struct RemoveFacts {
     bool consume = false;      // and placing it used it up (the game refunds only then)
     uint32_t stacks = 0;       // item stacks in its own and linked inventories (InventorySetup.linksEntities)
     bool stacks_unknown = false;  // an inventory of an unexpected size: cannot tell whether it is empty
+    std::vector<ContentStack> contents;  // those stacks
 };
 
 RemoveFacts remove_facts(uint32_t entity, const ComponentGetter& get, const ItemInfoGetter& item_info);

@@ -103,7 +103,7 @@ uint32_t spawn_entity_ex(SpawnWrapperFn fn, uint8_t* world, const uint8_t guid[1
 }
 
 uint32_t give_pickup(SpawnWrapperFn fn, uint8_t* world, const ItemRecord& item, uint32_t count, double x, double y,
-                     double z, std::string* why) {
+                     double z, std::string* why, uint32_t level, uint8_t rarity) {
     if (!item.id) {
         set_why(why, "unknown item");
         return 0;
@@ -116,6 +116,8 @@ uint32_t give_pickup(SpawnWrapperFn fn, uint8_t* world, const ItemRecord& item, 
     pickup.item_id = item.id;
     std::memcpy(pickup.item_guid, item.guid, 16);
     pickup.amount = static_cast<uint16_t>(count);
+    pickup.level = level;
+    pickup.rarity = rarity;
     const SpawnComponent comp{kHashPickupItem, 0, &pickup, sizeof(pickup)};
     return spawn_entity_ex(fn, world, kGenericPickupGuid, x, y, z, &comp, 1, why);
 }

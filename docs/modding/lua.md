@@ -570,7 +570,7 @@ too old (remove_building needs API v36)"`. `item_id` is nil when nothing went ba
 | `opts` field | What |
 |---|---|
 | `refund` | `false` (default): nothing back. `"drop"`: a loose pickup at the object. A player's entity id: into that player's inventory (a drop at the object when it does not fit). Any other value is an error. |
-| `force` | `true`: remove it even when it holds items (they are lost). Default false. |
+| `force` | `true`: remove it even when it holds items: they drop at its spot as loose pickups (item, count, level and rarity; 0.6.8). Default false. |
 
 Any other key is an error, so a typo cannot quietly lose the item.
 

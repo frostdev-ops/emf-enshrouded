@@ -56,8 +56,19 @@ RemoveFacts remove_facts(uint32_t entity, const ComponentGetter& get, const Item
             if (link.id && link.id != entity) invs.push_back(link.id);
     for (uint32_t id : invs)
         if (const auto* inv = comp<gen::Inventory>(get, id, &odd))
-            for (const auto& st : inv->slots)
-                if (st.id.value) ++f.stacks;
+            for (const auto& st : inv->slots) {
+                if (!st.id.value) continue;
+                ++f.stacks;
+                ContentStack c;
+                c.item = st.id.value;
+                c.count = st.data.count;
+                if (st.data.pide.id)
+                    if (const auto* is = comp<gen::ItemState>(get, st.data.pide.id)) {
+                        c.level = is->itemLevelUi;
+                        c.rarity = static_cast<uint8_t>(is->itemRarityUi);
+                    }
+                f.contents.push_back(c);
+            }
     f.stacks_unknown = odd;
     return f;
 }

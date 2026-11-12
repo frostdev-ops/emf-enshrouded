@@ -690,7 +690,7 @@ typedef struct EmfCanvasCmd {
 #define EMF_REFUND_NONE 0u      /* nothing back */
 #define EMF_REFUND_DROP 1u      /* the item as a loose pickup at the object */
 #define EMF_REFUND_PLAYER 2u    /* into `player`'s inventory; a drop at the object when it does not fit */
-#define EMF_REMOVE_FORCE 0x01u  /* remove it even when it holds items (they are lost); never a Flame Altar */
+#define EMF_REMOVE_FORCE 0x01u  /* remove it even when it holds items (they drop at its spot); never a Flame Altar */
 typedef struct EmfRemoveBuilding {
     uint32_t size;     /* sizeof(EmfRemoveBuilding) */
     uint32_t entity;
@@ -1454,7 +1454,7 @@ typedef struct EmfApi {
      * req->refund: EMF_REFUND_NONE, _DROP (a loose pickup at the object) or _PLAYER (put_items to req->player; when
      * nothing fit, a drop at the object). Refused, nothing changed, req->why says why (and the log): a player, a Flame
      * Altar (even with force: use destroy if you mean it), an object no player placed (use destroy), one holding
-     * items in its own or linked inventories unless EMF_REMOVE_FORCE (the items are lost), a refund player who is not
+     * items in its own or linked inventories unless EMF_REMOVE_FORCE (the items drop at its spot), a refund player who is not
      * a player, unknown refund or flags. Like destroy it plays no pick-up sound and sends no BuildingPickUpEvent.
      * req->refunded gets the item id given back (0: none; with _PLAYER the inventory's answer comes after the step).
      * Same calling rules as destroy (SERVER world, inside a world callback on it). */

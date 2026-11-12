@@ -61,8 +61,9 @@ constexpr uint8_t kGenericPickupGuid[16] = {0x77, 0x27, 0x6d, 0xa5, 0xf1, 0xda, 
 
 struct ItemRecord;
 // Spawns a loose pickup of `count` (1..65535) x item at (x,y,z) meters; the game's loot code gives it to whoever
-// picks it up. Returns the pickup entity id, or 0 (*why) when refused.
+// picks it up. `level` and `rarity` go into the pickup (0: the item's own). Returns the pickup entity id, or 0 (*why)
+// when refused.
 uint32_t give_pickup(SpawnWrapperFn fn, uint8_t* world, const ItemRecord& item, uint32_t count, double x, double y,
-                     double z, std::string* why);
+                     double z, std::string* why, uint32_t level = 0, uint8_t rarity = 0);
 
 }  // namespace emf::core

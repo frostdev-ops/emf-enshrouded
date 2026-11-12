@@ -1092,7 +1092,7 @@ Set `size` to `sizeof(EmfRemoveBuilding)`. Fields:
 | `entity` | the object to remove |
 | `refund` | `EMF_REFUND_NONE` (0): nothing back. `EMF_REFUND_DROP` (1): a loose pickup at the object, 0.5 m up. `EMF_REFUND_PLAYER` (2): put into `player`'s inventory through the game's transaction; when nothing fit, dropped at the object instead. |
 | `player` | with `EMF_REFUND_PLAYER`: who gets the item |
-| `flags` | `EMF_REMOVE_FORCE` (0x01): remove it even when it holds items (they are lost). Never works on a Flame Altar. |
+| `flags` | `EMF_REMOVE_FORCE` (0x01): remove it even when it holds items: they drop at its spot as loose pickups, a stack each, with their item, count, level and rarity (other per-item state, such as wear, is not kept; 0.6.7 lost them). Never works on a Flame Altar. |
 | `refunded` | out: the item id given back (0: none). With `_PLAYER` the inventory's answer comes after the step, and a full inventory means a drop at the object. |
 | `why` | out: why it was refused (`""` when removed); also written to the log |
 
@@ -1102,7 +1102,7 @@ Refused, with nothing changed:
 - a Flame Altar, even with `EMF_REMOVE_FORCE` (use `destroy` if you really mean it: destroying an altar loses the whole
   base at the next save);
 - an object no player placed (no `UsedItem`): use `destroy`;
-- an object holding items in its own or linked inventories, unless `EMF_REMOVE_FORCE` (then the items are lost);
+- an object holding items in its own or linked inventories, unless `EMF_REMOVE_FORCE` (then the items drop at its spot; refused when one of them cannot be dropped);
 - a refund player who is not a player;
 - an unknown `refund` or `flags`;
 - a call outside a world callback, or not on the server world.
