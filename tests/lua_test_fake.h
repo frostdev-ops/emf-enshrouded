@@ -65,6 +65,8 @@ struct Fake {
     std::vector<PathAsk> paths;  // v37
     std::vector<uint32_t> path_cancels;
     bool path_ok = true;
+    std::map<uint32_t, uint32_t> door_states;  // v38: entity -> EMF_DOOR_*
+    std::vector<std::string> door_calls;
     bool remove_ok = true;
     uint32_t remove_refunded = 0;
     uint32_t tick = 0;  // what world_tick answers (60 per second of game time)
@@ -370,6 +372,18 @@ uint32_t f_path_find(EmfWorld*, const EmfPathQuery* q, EmfPathCallback cb, void*
     if (!g->path_ok) return 0;
     g->paths.push_back({*q, cb, user});
     return static_cast<uint32_t>(g->paths.size());
+}
+uint32_t f_door_state(EmfWorld*, uint32_t e) {
+    auto it = g->door_states.find(e);
+    return it == g->door_states.end() ? EMF_DOOR_NONE : it->second;
+}
+bool f_door_set(EmfWorld*, uint32_t e, uint32_t open, uint32_t side) {
+    g->door_calls.push_back("set " + std::to_string(e) + " " + std::to_string(open) + " " + std::to_string(side));
+    return g->door_states.count(e) != 0;
+}
+bool f_door_lock(EmfWorld*, uint32_t e, uint32_t locked) {
+    g->door_calls.push_back("lock " + std::to_string(e) + " " + std::to_string(locked));
+    return g->door_states.count(e) != 0;
 }
 bool f_path_cancel(uint32_t id) {
     g->path_cancels.push_back(id);
@@ -1007,6 +1021,9 @@ EmfApi fake_api() {
     a.remove_building = f_remove_building;  // v36
     a.path_find = f_path_find;  // v37
     a.path_cancel = f_path_cancel;
+    a.door_state = f_door_state;  // v38
+    a.door_set = f_door_set;
+    a.door_lock = f_door_lock;
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;

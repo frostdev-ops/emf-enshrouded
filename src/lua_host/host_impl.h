@@ -287,6 +287,11 @@ int l_player_view(lua_State* L);
 // lua 1.29 paths (path_bindings.cpp): emf.path_find, emf.path_cancel
 int l_path_find(lua_State* L);
 int l_path_cancel(lua_State* L);
+// lua 1.30 doors (door_bindings.cpp)
+int l_door(lua_State* L);
+int l_door_open(lua_State* L);
+int l_door_close(lua_State* L);
+int l_door_lock(lua_State* L);
 int l_fog_at(lua_State* L);
 int l_map_markers(lua_State* L);
 int l_canvas(lua_State* L);

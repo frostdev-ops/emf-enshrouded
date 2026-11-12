@@ -3178,7 +3178,7 @@ int l_net_peer(lua_State* L) {
 void open_bindings(lua_State* L, Script&) {
     static const luaL_Reg fns[] = {{"item", l_item},       {"item_info", l_item_info}, {"item_name", l_item_name}, {"language", l_language}, {"give", l_give},
                                    {"put", l_put},         {"take", l_take},           {"move", l_move},           {"spawn", l_spawn},
-                                   {"destroy", l_destroy}, {"remove_building", l_remove_building}, {"path_find", l_path_find}, {"path_cancel", l_path_cancel}, {"kill", l_kill},           {"time_of_day", l_time_of_day},
+                                   {"destroy", l_destroy}, {"remove_building", l_remove_building}, {"path_find", l_path_find}, {"path_cancel", l_path_cancel}, {"door", l_door}, {"door_open", l_door_open}, {"door_close", l_door_close}, {"door_lock", l_door_lock}, {"kill", l_kill},           {"time_of_day", l_time_of_day},
                                    {"health", l_health},   {"attribute", l_attribute}, {"attribute_add", l_attribute_add},
                                    {"damage", l_damage},
                                    {"xp_required", l_xp_required}, {"level_cap", l_level_cap}, {"set_level", l_set_level},
