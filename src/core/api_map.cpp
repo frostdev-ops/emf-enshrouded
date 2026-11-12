@@ -116,6 +116,8 @@ bool api_ground_at(EmfWorld* world, double x, double z, EmfGroundCallback cb, vo
             g.z = a.z;
             g.hop_y = a.hop_y;
             g.why = a.why.c_str();
+            g.fog = a.fog;
+            g.deadly = a.deadly;
             cb(w, &g, user);
         },
         &why);
@@ -257,8 +259,10 @@ void cmd_ground(EmfWorld* world, int argc, const char* const* argv, void*) {
                 world, x, z,
                 [reply](EmfWorld*, const GroundAnswer& a) {
                     char line[240];
+                    static const char* const kFog[] = {"no shroud", "removed shroud", "shroud", "deadly shroud"};
                     if (a.status == EMF_GROUND_OK)
-                        std::snprintf(line, sizeof line, "ground: x %.1f, z %.1f: the ground is at y %.2f", a.x, a.z, a.y);
+                        std::snprintf(line, sizeof line, "ground: x %.1f, z %.1f: the ground is at y %.2f (%s, deadly %.2f)",
+                                      a.x, a.z, a.y, a.fog <= 3 ? kFog[a.fog] : "shroud not known", a.deadly);
                     else if (a.status == EMF_GROUND_NOT_LOADED)
                         std::snprintf(line, sizeof line, "ground: x %.1f, z %.1f: %s (a player could wait at y %.0f)", a.x,
                                       a.z, a.why.c_str(), a.hop_y);
@@ -278,6 +282,8 @@ void cmd_ground(EmfWorld* world, int argc, const char* const* argv, void*) {
     command_reply_line("ground: looking (the answer follows)");
     const std::string d = ground_describe();
     if (!d.empty()) command_reply_line("ground: " + d);
+    const std::string f = ground_fog_describe();
+    if (!f.empty()) command_reply_line("ground: " + f);
 }
 
 }  // namespace

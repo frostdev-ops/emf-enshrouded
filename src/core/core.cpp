@@ -1326,6 +1326,14 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             d.limits = emf::core::ground_limits;
             d.ray = emf::core::ground_ray;
             d.now_ms = [] { return GetTickCount64(); };
+            // the shroud at a landing (EmfGround.fog): the game's fog sampler, when this build has it
+            const auto& fog = g_state->sigs[static_cast<size_t>(Sig::FogSample)];
+            if (emf::is_usable(fog, known)) {
+                emf::core::ground_set_fog(reinterpret_cast<emf::core::FogSampleFn>(fog.addr));
+                d.fog = emf::core::ground_fog;
+            } else {
+                emf::logf("map: the shroud at a landing is not read on this game build (the fog stays unknown)");
+            }
             g_state->map.ground = std::make_unique<emf::core::GroundService>(std::move(d));
             emf::logf("map: ground_at on");
         } else {

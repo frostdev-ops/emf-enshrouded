@@ -226,6 +226,9 @@ constexpr SigDef kSignatures[] = {
     {Sig::VoxelRay, "VoxelRay", "48 8B C4 48 89 50 10 55 53 57 41 54 48 8D A8 58 FF FF FF 48 81 EC 88 01 00 00 41 0F 28 08 48 8B F9 F2 0F 10 05 ?? ?? ?? ?? 49 8B D9 0F 29 70 A8 4D 8B E0 41 0F 28 31 0F 29 78 98 0F 28 FE 44 0F 29 40 88", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xa0f770u, 0x6ac7e0u}, false},
     // The scene's reset-bounds setter: the boxes outside which the game sends a player to their altar (manager+0xb0).
     {Sig::ResetBoundsSet, "ResetBoundsSet", "48 8B C4 48 89 58 18 48 89 68 20 57 48 81 EC A0 00 00 00 48 8D 99 B0 00 00 00 C6 40 E8 00 48 C7 43 08 00 00 00 00 48 8B FA 0F 10 4A 08 48 8B CB C7 40 EC 00 00 00 00 0F 10 42 20 F2 0F 10 52 18", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xeb37f0u, 0x95b460u}, false},
+    // The game's fog sampler: FogSample(out 0x50 B, FogQuery*, WorldPosition*) -> not_loaded at +0, float w[18] at +8
+    // (private docs/research/fog_query_2026-11-12.md).
+    {Sig::FogSample, "FogSample", "40 55 56 41 56 48 8D 6C 24 A0 48 81 EC 60 01 00 00 4D 8B 08 4C 8B F2 4D 8B 50 08 48 8B F1 49 8B 40 10 49 81 C1 00 00 00 80", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x1222180u, 0xa484b0u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

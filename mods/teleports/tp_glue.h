@@ -211,6 +211,9 @@ private:
             out.y = g->y;
             out.hop_y = g->hop_y;
             out.why = g->why ? g->why : "";
+            // the fog check (an older EMF's EmfGround has no fog: then nothing is known)
+            out.deadly_shroud = g->status == EMF_GROUND_OK && g->size >= offsetof(EmfGround, deadly) + sizeof(float) &&
+                                g->fog == EMF_FOG_DEATH;
         }
         slot->done(out);
         delete slot;

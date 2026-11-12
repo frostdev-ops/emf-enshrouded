@@ -606,12 +606,19 @@ typedef void (*EmfMapActionCallback)(EmfWorld* world, const EmfMapDone* done, vo
 #define EMF_GROUND_NOT_LOADED 1u /* nobody is near the spot: hop_y is a height over it where a player may be teleported
                                     (the game loads the place around them); ask again once they are there */
 #define EMF_GROUND_FAILED 2u     /* why says why */
+#define EMF_FOG_NONE 0u          /* EmfGround.fog: the shroud a player standing there would be in */
+#define EMF_FOG_TEMPORARY 1u     /* shroud the players removed */
+#define EMF_FOG_DANGEROUS 2u     /* the shroud: its timer runs */
+#define EMF_FOG_DEATH 3u         /* deeper shroud than this world's progress allows: a player there dies */
+#define EMF_FOG_UNKNOWN 255u     /* not read (this game build, or it did not load in time) */
 typedef struct EmfGround {
     uint32_t size;   /* sizeof(EmfGround) of the core */
     uint32_t status; /* EMF_GROUND_* */
     double x, y, z;  /* the spot; y: the ground (EMF_GROUND_OK), else 0 */
     double hop_y;    /* EMF_GROUND_NOT_LOADED: see above; else 0 */
     const char* why; /* not OK: why, in plain English ("" when OK); valid during the callback */
+    uint32_t fog;    /* OK: EMF_FOG_* at the spot (1 and 2 m over the ground, and 3 m around): the worst */
+    float deadly;    /* OK: the share of deadly shroud there, 0..1 (EMF_FOG_DEATH from 0.25) */
 } EmfGround;
 /* The ground under a spot, once: on the server world's thread. */
 typedef void (*EmfGroundCallback)(EmfWorld* world, const EmfGround* ground, void* user);

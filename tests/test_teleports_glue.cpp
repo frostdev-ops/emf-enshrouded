@@ -391,6 +391,7 @@ TEST_CASE("teleports glue: ground_at asks EMF's ground_at and maps its answer (o
     a.y = 321;
     a.z = 4740;
     a.why = "";
+    a.fog = EMF_FOG_DEATH;
     r.fake.grounds[0].cb(kW, &a, r.fake.grounds[0].user);
     EmfGround b{};
     b.size = sizeof b;
@@ -401,6 +402,8 @@ TEST_CASE("teleports glue: ground_at asks EMF's ground_at and maps its answer (o
     REQUIRE(got.size() == 2);
     CHECK(got[0].status == GroundStatus::Ok);
     CHECK(got[0].y == 321);
+    CHECK(got[0].deadly_shroud);
+    CHECK_FALSE(got[1].deadly_shroud);
     CHECK(got[1].status == GroundStatus::NotLoaded);
     CHECK(got[1].hop_y == 1100);
     CHECK(got[1].why == "not loaded");

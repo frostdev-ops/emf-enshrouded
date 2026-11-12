@@ -40,6 +40,13 @@ void GroundService::on_server_tick(EmfWorld* world) {
         GroundAnswer a;
         a.x = r.search.x();
         a.z = r.search.z();
+        if (r.fog_phase) {
+            if (fog_step(r, now, &a))
+                done.emplace_back(std::move(r), std::move(a));
+            else
+                keep.push_back(std::move(r));
+            continue;
+        }
         if (!d_.ray || !d_.ray(world, a.x, a.z, r.search.ray_start(), r.search.ray_end(), &ray)) {
             a.why = "the ground could not be read here";
         } else {
@@ -49,8 +56,17 @@ void GroundService::on_server_tick(EmfWorld* world) {
                 continue;
             }
             if (o.step == GroundSearch::Step::Accept) {
-                a.status = EMF_GROUND_OK;
-                a.y = o.y;
+                // the ground is known: the shroud there next (same tick)
+                r.fog_phase = true;
+                r.ground_y = o.y;
+                r.fog_start = now;
+                r.points = fog_points(a.x, o.y, a.z);
+                r.verdicts.assign(r.points.size(), FogVerdict{});
+                if (fog_step(r, now, &a))
+                    done.emplace_back(std::move(r), std::move(a));
+                else
+                    keep.push_back(std::move(r));
+                continue;
             } else if (o.step == GroundSearch::Step::Hop) {  // a plain search moves nobody: the caller may hop
                 a.status = EMF_GROUND_NOT_LOADED;
                 a.hop_y = o.y;
@@ -63,6 +79,29 @@ void GroundService::on_server_tick(EmfWorld* world) {
     }
     reqs_ = std::move(keep);
     for (auto& [r, a] : done) r.cb(world, a);
+}
+
+bool GroundService::fog_step(Req& r, uint64_t now, GroundAnswer* a) {
+    a->status = EMF_GROUND_OK;
+    a->y = r.ground_y;
+    a->fog = EMF_FOG_UNKNOWN;
+    bool all = true;
+    for (size_t i = 0; i < r.points.size(); ++i) {
+        if (r.verdicts[i].type != EMF_FOG_UNKNOWN) continue;
+        FogReading f;
+        if (!d_.fog || !d_.fog(r.world, r.points[i][0], r.points[i][1], r.points[i][2], &f)) return true;  // not on this build
+        if (!f.loaded) {
+            all = false;
+            continue;
+        }
+        r.verdicts[i] = fog_classify(f);
+    }
+    if (!all && now - r.fog_start < kFogLoadMs) return false;
+    const FogVerdict w = fog_worst(r.verdicts);
+    a->deadly = w.deadly;
+    // out of time with points still unknown: deadly if what was read says so, else unknown
+    a->fog = all || w.type == EMF_FOG_DEATH ? w.type : EMF_FOG_UNKNOWN;
+    return true;
 }
 
 void GroundService::world_reset() {

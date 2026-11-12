@@ -75,9 +75,9 @@ TEST_CASE("lua 1.26: emf.ground_at answers fn(world, ok, x, y, z, why, hop_y) on
     Rig r(L"ground_at");
     add_script(r.dir, "gr",
                "emf.command('go', '', function(world)\n"
-               "  emf.log('asked ' .. tostring(emf.ground_at(world, 100, 200, function(w, ok, x, y, z, why, hop_y)\n"
+               "  emf.log('asked ' .. tostring(emf.ground_at(world, 100, 200, function(w, ok, x, y, z, why, hop_y, fog)\n"
                "    emf.log('ground ' .. tostring(ok) .. ' ' .. x .. ' ' .. y .. ' ' .. z .. ' [' .. why .. '] ' ..\n"
-               "      tostring(hop_y)) end)))\n"
+               "      tostring(hop_y) .. ' ' .. tostring(fog)) end)))\n"
                "end)\n");
     Host host(&r.api, r.dir);
     host.load_all();
@@ -93,16 +93,18 @@ TEST_CASE("lua 1.26: emf.ground_at answers fn(world, ok, x, y, z, why, hop_y) on
     g.y = 321.5;
     g.z = 200;
     g.why = "";
+    g.fog = EMF_FOG_DEATH;
     ask.cb(kServer, &g, ask.user);
-    CHECK(logged("ground true 100.0 321.5 200.0 [] nil"));
+    CHECK(logged("ground true 100.0 321.5 200.0 [] nil deadly"));
     r.run_command("gr.go");
     const auto away = r.fake.ground_asks.back();
     g.status = EMF_GROUND_NOT_LOADED;
     g.y = 0;
     g.hop_y = 1100;
     g.why = "not loaded";
+    g.fog = EMF_FOG_UNKNOWN;
     away.cb(kServer, &g, away.user);
-    CHECK(logged("ground false 100.0 0.0 200.0 [not loaded] 1100.0"));
+    CHECK(logged("ground false 100.0 0.0 200.0 [not loaded] 1100.0 unknown"));
     r.fake.ground_ok = false;
     r.run_command("gr.go");
     CHECK(logged("asked false"));

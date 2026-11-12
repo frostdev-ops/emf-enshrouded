@@ -81,7 +81,10 @@ void ground_cb_body(EmfWorld* w, const EmfGround* g, void* user) {
                 lua_pushstring(s->L, g && g->why ? g->why : "");
                 if (g && g->status == EMF_GROUND_NOT_LOADED) lua_pushnumber(s->L, g->hop_y);
                 else lua_pushnil(s->L);
-                call_lua(*s, 7);
+                static const char* const kFog[] = {"none", "removed", "shroud", "deadly"};
+                const uint32_t fog = g && g->size >= offsetof(EmfGround, deadly) + sizeof(float) ? g->fog : EMF_FOG_UNKNOWN;
+                lua_pushstring(s->L, fog <= EMF_FOG_DEATH ? kFog[fog] : "unknown");
+                call_lua(*s, 8);
                 ++s->generation;
             }
             if (s->L) luaL_unref(s->L, LUA_REGISTRYINDEX, slot->ref);
@@ -223,9 +226,10 @@ int l_remove_map_action(lua_State* L) {
     return 1;
 }
 
-// emf.ground_at(world, x, z, fn(world, ok, x, y, z, why, hop_y)): the ground under (x, z) of the server world; fn once
-// with the answer (the place may take a few seconds to load). hop_y: when nobody is near the spot (not ok), a height over
-// it where a player may be teleported so it loads (ask again then); nil otherwise. True when asked; false when refused.
+// emf.ground_at(world, x, z, fn(world, ok, x, y, z, why, hop_y, fog)): the ground under (x, z) of the server world; fn
+// once with the answer (the place may take a few seconds to load). hop_y: when nobody is near the spot (not ok), a
+// height over it where a player may be teleported so it loads (ask again then); nil otherwise. fog: the shroud a player
+// standing there would be in: "none", "removed", "shroud", "deadly" or "unknown". True when asked; false when refused.
 int l_ground_at(lua_State* L) {
     Script* s = script_of(L);
     EmfWorld* w = lua_world_arg(L, 1);

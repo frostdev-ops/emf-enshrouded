@@ -103,7 +103,7 @@ struct FakeGame : Game {
         return it->second;
     }
     // the last ground_at is answered
-    void ground(GroundStatus st, double y = 0, double hop_y = 0, const std::string& why = "") {
+    void ground(GroundStatus st, double y = 0, double hop_y = 0, const std::string& why = "", bool deadly = false) {
         REQUIRE(!grounds.empty());
         GroundAsk a = grounds.back();
         Ground gr;
@@ -111,6 +111,7 @@ struct FakeGame : Game {
         gr.y = y;
         gr.hop_y = hop_y;
         gr.why = why;
+        gr.deadly_shroud = deadly;
         a.done(gr);
     }
     void log(const std::string& t) override { logs.push_back(t); }
@@ -782,4 +783,30 @@ TEST_CASE("teleports map (live): the deadly-shroud watch ends 3 s after the land
     r.g.deadly.insert(1);    // later: the player walked into it themselves
     r.wait(500);
     CHECK(r.g.tps.size() == 1);
+}
+
+
+TEST_CASE("teleports map (fog check): a landing in the deadly shroud is refused before the teleport; no cooldown") {
+    Rig r;
+    Settings s;
+    s.map_teleport = MapWho::Everyone;
+    r.t.set(s);
+    r.t.map_teleport(2, false, 9000, 9500);
+    r.g.ground(GroundStatus::Ok, 568, 0, "", true);
+    CHECK(r.g.tps.empty());
+    CHECK(r.g.last_tell() == "That place is in the deadly shroud: no map teleport there");
+    r.t.map_teleport(2, false, 10, 10);  // no cooldown, nothing under way
+    CHECK(r.g.grounds.size() == 2);
+}
+
+TEST_CASE("teleports map (fog check): after a hop, a deadly landing sends the player back where they stood") {
+    Rig r;
+    r.t.map_teleport(1, true, 9000, 9000);
+    r.g.ground(GroundStatus::NotLoaded, 0, 1100, "not loaded");
+    r.g.answer(true, {9000, 1100, 9000});
+    r.g.ground(GroundStatus::Ok, 400, 0, "", true);
+    REQUIRE(r.g.tps.size() == 2);
+    CHECK(r.g.tps[1].ask.to.x == 4000);  // back
+    r.g.answer(true, {4000, 700, 1200});
+    CHECK(r.g.last_tell() == "That place is in the deadly shroud: you are back where you were");
 }

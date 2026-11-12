@@ -7,6 +7,7 @@
 #include <cstdint>
 #include <string>
 
+#include "core/fog_check.h"
 #include "core/ground_search.h"
 #include "emf/emf_api.h"
 
@@ -25,5 +26,14 @@ bool ground_limits(EmfWorld* world, GroundLimits* out, std::string* why);
 bool ground_ray(EmfWorld* world, double x, double z, double from_y, double to_y, RayResult* out);
 // For the log and the console: what the last limits read found ("" before any).
 std::string ground_describe();
+
+// The shroud at a point (private research fog_query_2026-11-12): the game's FogSample with the server world's
+// "FogQuery" singleton (checked first: its fog world, its mapping = "FogVoxelMapping", the fog world's level table) and
+// the world's progress level ("ecs::ServerProgressSystem" +0x14). False when it cannot be read (this build, a world
+// without fog data, a fault).
+using FogSampleFn = void* (*)(void* out, const void* fog_query, const int64_t* world_pos);
+void ground_set_fog(FogSampleFn fn);
+bool ground_fog(EmfWorld* world, double x, double y, double z, FogReading* out);
+std::string ground_fog_describe();  // what the first fog read found (for the log)
 
 }  // namespace emf::core

@@ -55,6 +55,8 @@ enum class Sig : size_t {
     UiCameraBlock, MapMarkerSliceClear, MapMarkerEntryLayout, MapMarkerEntryLabel,
     // the ground under a map spot (API v34), both exes: the game's voxel ray and the scene's reset-bounds setter
     VoxelRay, ResetBoundsSet,
+    // the shroud at a spot on the server (the map teleport's landing): the game's fog sampler (FogSample)
+    FogSample,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

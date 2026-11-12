@@ -233,6 +233,7 @@ struct Ground {
     GroundStatus status = GroundStatus::Failed;
     double y = 0, hop_y = 0;
     std::string why;
+    bool deadly_shroud = false;  // Ok: a player standing there would be in the deadly shroud (EMF reads it)
 };
 constexpr double kAboveGround = 0.5;
 constexpr uint64_t kDeadlyWatchMs = 3000;  // after a map teleport: landed in the deadly shroud -> back  // the teleport lands this far above the ground found (the game's search settles it)
@@ -724,6 +725,16 @@ private:
 
     void on_ground(Spot s, const Ground& gr) {
         if (s.epoch != epoch_) return;  // another session: the player and the world mean nothing now
+        if (gr.status == GroundStatus::Ok && gr.deadly_shroud) {
+            if (s.hopped) {
+                go_back(s, "That place is in the deadly shroud: you are back where you were");
+                return;
+            }
+            moving_.erase(s.who);
+            tell_both(s, "That place is in the deadly shroud: no map teleport there",
+                      std::string(kind_name(s.kind)) + ": that place is in the deadly shroud: refused");
+            return;
+        }
         if (gr.status == GroundStatus::Ok) {
             land(s, gr.y);
             return;
@@ -786,8 +797,8 @@ private:
         }
     }
 
-    void go_back(const Spot& s) {
-        const bool ok = g_.teleport(s.who, {s.from, false, 0}, [this, s](const Outcome& o) {
+    void go_back(const Spot& s, const std::string& why_back = "No ground found there: you are back where you were") {
+        const bool ok = g_.teleport(s.who, {s.from, false, 0}, [this, s, why_back](const Outcome& o) {
             if (s.epoch != epoch_ || o.session_ended) return;
             moving_.erase(s.who);
             if (!o.moved) {
@@ -796,8 +807,8 @@ private:
                               " could not be moved back: " + o.reason);
                 return;
             }
-            tell_both(s, "No ground found there: you are back where you were",
-                      std::string(kind_name(s.kind)) + ": no ground there; player " + std::to_string(s.who) + " is back");
+            tell_both(s, why_back,
+                      std::string(kind_name(s.kind)) + ": player " + std::to_string(s.who) + " is back (" + why_back + ")");
         });
         if (!ok) refused(s);
     }

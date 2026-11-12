@@ -19,6 +19,8 @@ namespace {
 
 constexpr double kFixed = 4294967296.0;
 std::atomic<VoxelRayFn> g_ray{nullptr};
+std::atomic<FogSampleFn> g_fog{nullptr};
+std::string g_fog_desc;  // g_desc_m
 std::atomic<uint32_t> g_realm{0};
 std::atomic<bool> g_box_known{false};
 std::atomic<double> g_box_top{0};
@@ -100,7 +102,56 @@ bool call_ray(VoxelRayFn fn, void* hit, void* terrain, const float* from, const 
     }
 }
 
+bool call_fog(FogSampleFn fn, void* out, const void* fq, const int64_t* pos) {
+    __try {
+        fn(out, fq, pos);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
 }  // namespace
+
+void ground_set_fog(FogSampleFn fn) { g_fog.store(fn, std::memory_order_release); }
+
+bool ground_fog(EmfWorld* world, double x, double y, double z, FogReading* out) {
+    FogSampleFn fn = g_fog.load(std::memory_order_acquire);
+    if (!fn || !world || !out || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
+    WorldView v(reinterpret_cast<uint8_t*>(world));
+    const auto* fq = static_cast<const uint8_t*>(v.singleton("FogQuery"));
+    const auto* mapping = static_cast<const uint8_t*>(v.singleton("FogVoxelMapping"));
+    const auto* sps = static_cast<const uint8_t*>(v.singleton("ecs::ServerProgressSystem"));
+    const uint8_t* fw = nullptr;
+    const uint8_t* fq_mapping = nullptr;
+    const uint8_t* handles = nullptr;
+    uint32_t res = 0, tile_x = 0, tile_z = 0, count_x = 0, count_z = 0, progress = 0;
+    if (!fq || !mapping || !sps || !seh_read(fq + 8, &fw, 8) || !fw || !seh_read(fq + 0x10, &fq_mapping, 8) ||
+        fq_mapping != mapping || !seh_read(fw + 0x14, &res, 4) || !res || !seh_read(fw + 0x108, &tile_x, 4) ||
+        !seh_read(fw + 0x10C, &tile_z, 4) || !tile_x || !tile_z || !seh_read(fw + 0x110, &count_x, 4) ||
+        !seh_read(fw + 0x114, &count_z, 4) || !count_x || !count_z || !seh_read(fw + 0x118, &handles, 8) || !handles ||
+        !seh_read(sps + 0x14, &progress, 4))
+        return false;
+    const int64_t pos[3] = {std::llround(x * kFixed), std::llround(y * kFixed), std::llround(z * kFixed)};
+    alignas(16) uint8_t buf[0x50] = {};
+    if (!call_fog(fn, buf, fq, pos)) return false;
+    out->loaded = buf[0] == 0;
+    out->progress = progress;
+    std::memcpy(out->w, buf + 8, sizeof out->w);
+    std::lock_guard<std::mutex> lock(g_desc_m);
+    if (g_fog_desc.empty()) {
+        char line[200];
+        std::snprintf(line, sizeof line, "fog: progress level %u, fog world tiles %ux%u of %ux%u, resource %u", progress,
+                      count_x, count_z, tile_x, tile_z, res);
+        g_fog_desc = line;
+    }
+    return true;
+}
+
+std::string ground_fog_describe() {
+    std::lock_guard<std::mutex> lock(g_desc_m);
+    return g_fog_desc;
+}
 
 void ground_set_ray(VoxelRayFn fn) { g_ray.store(fn, std::memory_order_release); }
 bool ground_ray_ready() { return g_ray.load(std::memory_order_acquire) != nullptr; }
