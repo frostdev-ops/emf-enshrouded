@@ -251,3 +251,50 @@ TEST_CASE("api table (v38): version 38, the three door functions at the end") {
     CHECK(api->door_set != nullptr);
     CHECK(api->door_lock != nullptr);
 }
+
+TEST_CASE("doors (review I1): a locked door that a toggle already under way flips is put back; EMF's own order moves it") {
+    Rig r;
+    REQUIRE(r.order(kDoor, DoorOrderKind::Lock));
+    r.step();
+    g_doors[kDoor].toggle.state = true;  // a player's toggle that was under way lands after the lock
+    g_doors[kDoor].side.state = static_cast<decltype(g_doors[kDoor].side.state)>(2);
+    r.step();
+    CHECK_FALSE(g_doors[kDoor].toggle.state);
+    CHECK(static_cast<int>(g_doors[kDoor].side.state) == 0);
+    REQUIRE(r.order(kDoor, DoorOrderKind::Open));  // EMF opens the locked door: that is the state now held
+    r.step();
+    CHECK(g_doors[kDoor].toggle.state);
+    r.step();
+    CHECK(g_doors[kDoor].toggle.state);
+}
+
+TEST_CASE("doors (review M2): open then close in one callback: both are taken, the door ends closed") {
+    Rig r;
+    REQUIRE(r.order(kDoor, DoorOrderKind::Open));
+    REQUIRE(r.order(kDoor, DoorOrderKind::Close));
+    CHECK_FALSE(r.order(kDoor, DoorOrderKind::Close));  // already closed by the waiting order
+    r.step();
+    CHECK_FALSE(g_doors[kDoor].toggle.state);
+}
+
+TEST_CASE("doors (review M4): a locked door that a switch drives now can still be unlocked") {
+    Rig r;
+    add_door(kGone);
+    REQUIRE(r.order(kGone, DoorOrderKind::Lock));
+    r.step();
+    g_doors[kGone].logic.writerGraphId.id.value = 9;
+    g_by_hash[{emf::gen::ecs::LogicGraphNodeConnected::kHash, kGone}] = &g_doors[kGone].logic;
+    CHECK(r.order(kGone, DoorOrderKind::Unlock));
+    r.step();
+    CHECK(r.service.locked_count() == 0u);
+}
+
+TEST_CASE("doors (review M6): a failed read does not count as a gone door; the lock stays") {
+    Rig r;
+    REQUIRE(r.order(kDoor, DoorOrderKind::Lock));
+    r.step();
+    for (auto& [a, h] : g_acc_hash)
+        if (h == emf::gen::ecs::InteractionOfferRuntime::kHash) h = 0;  // the accessor reads nothing now
+    r.step();
+    CHECK(r.service.locked_count() == 1u);
+}

@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <functional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -52,14 +53,20 @@ private:
         DoorOrderKind kind = DoorOrderKind::Open;
         uint8_t side = 0;
     };
+    struct Locked {
+        uint32_t entity = 0;
+        int8_t held = -1;  // the state it holds: -1 not read yet, 0 closed, 1 open
+        uint8_t side = 0;  // the swing it holds
+    };
+    Locked* find_locked(uint32_t entity);  // under lock_
     bool is_locked(uint32_t entity) const;
     void say(const std::string& line);
 
     Deps deps_;
     mutable SRWLOCK lock_ = SRWLOCK_INIT;
     std::vector<Order> orders_;
-    std::vector<uint32_t> locked_;
-    bool said_ = false;
+    std::vector<Locked> locked_;
+    std::set<std::string> said_;  // problem lines logged in this world
 };
 
 }  // namespace emf::core

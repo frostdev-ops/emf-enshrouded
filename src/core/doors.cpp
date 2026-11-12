@@ -61,40 +61,44 @@ bool DoorService::request(uint8_t* world, uint32_t entity, DoorOrderKind kind, u
     };
     if (!world || WorldView(world).kind() != EMF_WORLD_SERVER) return refuse("not a server world (host only)");
     if (side > 2) return refuse("side is 0 (the default: back), 1 (front) or 2 (back)");
-    const uint32_t st = state(world, entity);
-    if (!(st & (EMF_DOOR_OPEN | EMF_DOOR_CLOSED))) return refuse("not a door (no ServerToggleState and DirectionalInteraction)");
-    if (st & EMF_DOOR_LOGIC) return refuse("a switch drives this door (the logic system owns its state)");
-    const bool open = (st & EMF_DOOR_OPEN) != 0;
-    if (kind == DoorOrderKind::Open && open) return refuse("it is already open");
-    if (kind == DoorOrderKind::Close && !open) return refuse("it is already closed");
+    const uint32_t st = state(world, entity);  // (takes the lock itself: before ours)
+    const bool unlocking_ours = kind == DoorOrderKind::Unlock && (st & EMF_DOOR_LOCKED);
+    if (!unlocking_ours) {  // a door EMF locked can always be unlocked, even if a switch drives it now
+        if (!(st & (EMF_DOOR_OPEN | EMF_DOOR_CLOSED)))
+            return refuse("not a door (no ServerToggleState and DirectionalInteraction)");
+        if (st & EMF_DOOR_LOGIC) return refuse("a switch drives this door (the logic system owns its state)");
+    }
     AcquireSRWLockExclusive(&lock_);
-    if (orders_.size() >= kMaxDoorOrders) {
-        ReleaseSRWLockExclusive(&lock_);
-        return refuse("256 door orders are waiting already");
-    }
-    if (kind == DoorOrderKind::Lock && locked_.size() >= kMaxLockedDoors &&
-        std::find(locked_.begin(), locked_.end(), entity) == locked_.end()) {
-        ReleaseSRWLockExclusive(&lock_);
-        return refuse("1024 doors are locked already");
-    }
-    orders_.push_back({world, entity, kind, side});
+    bool open = (st & EMF_DOOR_OPEN) != 0;
+    for (const Order& o : orders_)  // an order still waiting decides what "already" means
+        if (o.entity == entity && o.world == world && (o.kind == DoorOrderKind::Open || o.kind == DoorOrderKind::Close))
+            open = o.kind == DoorOrderKind::Open;
+    const char* no = nullptr;
+    if (kind == DoorOrderKind::Open && open) no = "it is already open";
+    else if (kind == DoorOrderKind::Close && !open) no = "it is already closed";
+    else if (orders_.size() >= kMaxDoorOrders) no = "256 door orders are waiting already";
+    else if (kind == DoorOrderKind::Lock && locked_.size() >= kMaxLockedDoors && !find_locked(entity))
+        no = "1024 doors are locked already";
+    if (!no) orders_.push_back({world, entity, kind, side});
     ReleaseSRWLockExclusive(&lock_);
-    return true;
+    return no ? refuse(no) : true;
 }
 
 void DoorService::run(void* program_context) {
     const ProgramCall* call = current_program_call();
     if (!call || call->ctx != program_context || !call->iter) return;
     std::vector<Order> work;
-    std::vector<uint32_t> locked;
+    std::vector<Locked> locked;
     AcquireSRWLockExclusive(&lock_);
     work.swap(orders_);
     // locks change first, so this step's lock pass sees them
     for (const Order& o : work) {
         if (o.world != call->world) continue;
-        auto it = std::find(locked_.begin(), locked_.end(), o.entity);
-        if (o.kind == DoorOrderKind::Lock && it == locked_.end()) locked_.push_back(o.entity);
-        if (o.kind == DoorOrderKind::Unlock && it != locked_.end()) locked_.erase(it);
+        Locked* l = find_locked(o.entity);
+        if (o.kind == DoorOrderKind::Lock && !l) locked_.push_back({o.entity, -1, 0});
+        if (o.kind == DoorOrderKind::Unlock && l)
+            locked_.erase(std::remove_if(locked_.begin(), locked_.end(), [&](const Locked& x) { return x.entity == o.entity; }),
+                          locked_.end());
     }
     locked = locked_;
     ReleaseSRWLockExclusive(&lock_);
@@ -123,6 +127,23 @@ void DoorService::run(void* program_context) {
     if (seh_read(call->ctx, &job, 8) && job && seh_read(job + off::kJobTick, &tick, 8) &&
         seh_read(job + off::kJobTickLength, &tick_len, 4) && tick > 0 && tick_len > 0)
         now_ns = tick * static_cast<int64_t>(tick_len);
+    // writes the door's two states (open: swung to `side`, 0 = back)
+    auto set_door = [&](uint32_t entity, bool open, uint8_t side) {
+        auto* t = static_cast<gen::ServerToggleState*>(write(*toggle_acc, "ServerToggleState", entity));
+        if (!t) return false;
+        t->state = open;
+        if (now_ns) t->lastChange.value = now_ns;
+        auto* d = static_cast<gen::DirectionalInteraction*>(write(*side_acc, "DirectionalInteraction", entity));
+        if (!d) return false;
+        const uint8_t s = open ? (side ? side : 2) : 0;
+        std::memcpy(&d->state, &s, 1);
+        return true;
+    };
+    auto held_of = [&](uint32_t entity) -> Locked* {
+        for (Locked& l : locked)
+            if (l.entity == entity) return &l;
+        return nullptr;
+    };
 
     for (const Order& o : work) {
         if (o.world != call->world) continue;
@@ -133,39 +154,57 @@ void DoorService::run(void* program_context) {
         }
         if (o.kind != DoorOrderKind::Open && o.kind != DoorOrderKind::Close) continue;
         const bool open = o.kind == DoorOrderKind::Open;
-        auto* t = static_cast<gen::ServerToggleState*>(write(*toggle_acc, "ServerToggleState", o.entity));
-        auto* d = static_cast<gen::DirectionalInteraction*>(write(*side_acc, "DirectionalInteraction", o.entity));
-        if (!t || !d) continue;  // gone since it was asked
-        t->state = open;
-        if (now_ns) t->lastChange.value = now_ns;
-        const uint8_t side = open ? (o.side ? o.side : 2) : 0;
-        std::memcpy(&d->state, &side, 1);
+        if (!set_door(o.entity, open, o.side)) continue;  // gone since it was asked
+        if (Locked* l = held_of(o.entity)) {  // EMF's own order on a locked door: that is the state it holds now
+            l->held = open ? 1 : 0;
+            l->side = open ? (o.side ? o.side : 2) : 0;
+        }
     }
-    // locks: isDisabled kept set (the game clears it for its own reasons); a door that is gone loses its lock
+    // locks: isDisabled kept set (the game clears it for its own reasons) and the held state put back (a toggle that
+    // was already under way when the lock came may still flip the door); a door that is gone loses its lock
     std::vector<uint32_t> gone;
-    for (uint32_t e : locked) {
-        const auto* cur = static_cast<const gen::InteractionOfferRuntime*>(read(*offer_acc, "InteractionOfferRuntime", e));
-        if (!cur) {
-            gone.push_back(e);
+    for (Locked& l : locked) {
+        if (!comp(deps_.get_component, call->world, gen::ServerToggleState::kHash, l.entity, sizeof(gen::ServerToggleState))) {
+            gone.push_back(l.entity);
             continue;
         }
-        bool disabled = false;
-        if (seh_read(&cur->isDisabled, &disabled, 1) && disabled) continue;
-        if (auto* r = static_cast<gen::InteractionOfferRuntime*>(write(*offer_acc, "InteractionOfferRuntime", e)))
-            r->isDisabled = true;
+        if (const auto* cur =
+                static_cast<const gen::InteractionOfferRuntime*>(read(*offer_acc, "InteractionOfferRuntime", l.entity))) {
+            bool disabled = false;
+            if (seh_read(&cur->isDisabled, &disabled, 1) && !disabled)
+                if (auto* r = static_cast<gen::InteractionOfferRuntime*>(write(*offer_acc, "InteractionOfferRuntime", l.entity)))
+                    r->isDisabled = true;
+        }
+        const auto* t = static_cast<const gen::ServerToggleState*>(read(*toggle_acc, "ServerToggleState", l.entity));
+        const auto* d = static_cast<const gen::DirectionalInteraction*>(read(*side_acc, "DirectionalInteraction", l.entity));
+        bool open = false;
+        uint8_t side = 0;
+        if (!t || !d || !seh_read(&t->state, &open, 1) || !seh_read(&d->state, &side, 1)) continue;
+        if (l.held < 0) {  // the first step of the lock: what it holds
+            l.held = open ? 1 : 0;
+            l.side = side;
+        } else if (open != (l.held == 1)) {
+            set_door(l.entity, l.held == 1, l.side);
+        }
     }
     if (!problem.empty()) say("doors: " + problem);
-    if (!gone.empty()) {
-        AcquireSRWLockExclusive(&lock_);
-        for (uint32_t e : gone) locked_.erase(std::remove(locked_.begin(), locked_.end(), e), locked_.end());
-        ReleaseSRWLockExclusive(&lock_);
-    }
+    AcquireSRWLockExclusive(&lock_);
+    for (const Locked& l : locked)  // what each lock holds now (a lock removed meanwhile stays removed)
+        if (Locked* live = find_locked(l.entity)) {
+            live->held = l.held;
+            live->side = l.side;
+        }
+    for (uint32_t e : gone)
+        locked_.erase(std::remove_if(locked_.begin(), locked_.end(), [&](const Locked& x) { return x.entity == e; }),
+                      locked_.end());
+    ReleaseSRWLockExclusive(&lock_);
 }
 
 void DoorService::world_reset() {
     AcquireSRWLockExclusive(&lock_);
     orders_.clear();
     locked_.clear();
+    said_.clear();
     ReleaseSRWLockExclusive(&lock_);
 }
 
@@ -176,17 +215,25 @@ size_t DoorService::locked_count() const {
     return n;
 }
 
+DoorService::Locked* DoorService::find_locked(uint32_t entity) {
+    for (Locked& l : locked_)
+        if (l.entity == entity) return &l;
+    return nullptr;
+}
+
 bool DoorService::is_locked(uint32_t entity) const {
     AcquireSRWLockShared(&lock_);
-    const bool l = std::find(locked_.begin(), locked_.end(), entity) != locked_.end();
+    bool l = false;
+    for (const Locked& x : locked_) l = l || x.entity == entity;
     ReleaseSRWLockShared(&lock_);
     return l;
 }
 
 void DoorService::say(const std::string& line) {
-    if (said_ || !deps_.log) return;
-    said_ = true;
-    deps_.log(line);
+    AcquireSRWLockExclusive(&lock_);
+    const bool fresh = said_.insert(line).second;  // each problem once per world
+    ReleaseSRWLockExclusive(&lock_);
+    if (fresh && deps_.log) deps_.log(line);
 }
 
 }  // namespace emf::core

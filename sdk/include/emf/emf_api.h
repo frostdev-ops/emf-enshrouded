@@ -1487,7 +1487,9 @@ typedef struct EmfApi {
      * rule as door_state. */
     bool (*door_set)(EmfWorld* world, uint32_t entity, uint32_t open, uint32_t side);
     /* Locks (1) or unlocks (0) it from the next step: no E prompt for any player while locked (EMF keeps it so each
-     * step). A lock is not saved: it lasts until the world closes. door_set still works on a locked door. Same rules. */
+     * step), and the door keeps its state (a player's toggle already under way when the lock came is undone). A lock
+     * is not saved: it lasts until the world closes. door_set still works on a locked door and changes the state it
+     * keeps. Same rules. */
     bool (*door_lock)(EmfWorld* world, uint32_t entity, uint32_t locked);
 } EmfApi;
 
