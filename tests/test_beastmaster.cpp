@@ -6499,3 +6499,31 @@ TEST_CASE("beastmaster: a beast teleported back from far away drops its chase an
     b.seconds(2);
     CHECK_FALSE(still_fighting(b, 1234));  // kept calm for a moment after the move
 }
+
+// Seen live (enemy01 state read every second): a tamed wolf, calmed, stayed in Combat (6) with no target and no aggro
+// and stood 15 m from its owner; set to Idle (2) it came to them at once.
+TEST_CASE("beastmaster: a calmed beast left in the game's Combat state goes back to Idle (so it follows); one that follows is left alone") {
+    using S = emf::gen::enemy01::State;
+    BeastRig b;
+    b.look(1, 0, 10.5, 0, 0);
+    b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);
+    fighting(b, 50, 1);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 50).state = S::Combat;
+    REQUIRE(b.reply("beastmaster.tame").find("Taming") != std::string::npos);
+    b.seconds(4);
+    REQUIRE(b.noted("You tamed a wolf: Wolf"));
+    CHECK(now_of<ecs::DynamicEnemy01BehaviorState>(b, 50).state == S::Idle);
+    live_of<ecs::DynamicEnemy01BehaviorState>(b, 50).state = S::Guard;  // it follows its owner
+    b.seconds(1);  // still in its protection: calmed every step
+    CHECK(now_of<ecs::DynamicEnemy01BehaviorState>(b, 50).state == S::Guard);
+
+    BeastRig chase;  // brought back from a far chase, in Combat
+    wolf_out(chase);
+    chase.seconds(1);
+    fighting(chase, 1234, 777);
+    component<ecs::DynamicEnemy01BehaviorState>(chase.r.fake, 1234).state = S::Combat;
+    place(chase.r.fake, 1234, 130, 10, 0);
+    chase.seconds(1);
+    REQUIRE(teleports_of(chase.r.fake, 1234) >= 1);
+    CHECK(now_of<ecs::DynamicEnemy01BehaviorState>(chase, 1234).state == S::Idle);
+}

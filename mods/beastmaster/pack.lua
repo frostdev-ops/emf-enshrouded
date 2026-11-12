@@ -21,6 +21,7 @@ local P = {}
 P.__index = P
 
 local PLAYER_ALLY = 11
+local AI_IDLE, AI_COMBAT = 2, 6  -- enemy01 states (DynamicEnemy01BehaviorState.state)
 local PLAYER_SIDE = { [7] = true, [8] = true, [PLAYER_ALLY] = true }  -- Player, AutomatedPlayer, PlayerAlly
 -- The factions aggressive beasts go after: Fogger, Vukah, Scavenger, WildBeast, Skeleton, Cyclops, Drak, Ancients (never
 -- wildlife or farm animals: goats and hares, a player's animals)
@@ -145,6 +146,10 @@ local function calm(world, id)
 			end
 		end
 	end
+	-- a beast left in the game's Combat state with nothing to fight stands there (seen: a tamed wolf stood 15 m from
+	-- its owner); from Idle the game has it guard its owner again (seen: it came at once)
+	local ai = world:get("DynamicEnemy01BehaviorState", id)
+	if ai and ai.state == AI_COMBAT then ai.state = AI_IDLE end
 end
 
 M.calm = calm
