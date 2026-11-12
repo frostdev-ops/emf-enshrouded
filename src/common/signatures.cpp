@@ -232,10 +232,25 @@ constexpr SigDef kSignatures[] = {
     // The game's world-map canvas: MapCanvasDraw(UiScope*, const MapView*) draws the whole map over the scope's node
     // rect (+0x114) at view+0x10 UI units per metre (base zoom view+0x58); its pattern covers the frame context
     // (+0x1e: mov r8, [rip]), +0xd0 and +0x38 (private docs/research/minimap_renderer_2026-11-12.md).
-    {Sig::MapCanvasDraw, "MapCanvasDraw", "40 55 53 56 57 41 55 41 56 48 8D AC 24 28 E9 FF FF B8 D8 17 00 00 E8 ?? ?? ?? ?? 48 2B E0 4C 8B 05 ?? ?? ?? ?? 45 33 ED 48 8B D9 48 8B FA 45 8B F5 49 8B 80 D0 00 00 00 48 8B 08 48 85 C9 74 ?? 4C 8B 71 38", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xd7c690u, kRvaUnchecked}, false},
+    {Sig::MapCanvasDraw, "MapCanvasDraw", "40 55 53 56 57 41 55 41 56 48 8D AC 24 28 E9 FF FF B8 D8 17 00 00 E8 ?? ?? ?? ?? 48 2B E0 4C 8B 05 ?? ?? ?? ?? 45 33 ED 48 8B D9 48 8B FA 45 8B F5 49 8B 80 D0 00 00 00 48 8B 08 48 85 C9 74 ?? 4C 8B 71 38", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0xd7c690u, 0u}, false},
     // UiPushClip(layer, const float rect[4], char intersect) and UiPopClip(layer): the UI's clip stack (strictly paired).
-    {Sig::UiPushClip, "UiPushClip", "48 89 5C 24 10 57 48 83 EC 60 0F 29 74 24 50 48 8B F9 48 8B 89 10 42 00 00", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x11c3a30u, kRvaUnchecked}, false},
-    {Sig::UiPopClip, "UiPopClip", "83 7F 14 02 75 14 48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B C8 E8", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x11c2610u, kRvaUnchecked}, false, 0x15, "48 FF 89 B0 01 00 00 83 79 08 04"},
+    {Sig::UiPushClip, "UiPushClip", "48 89 5C 24 10 57 48 83 EC 60 0F 29 74 24 50 48 8B F9 48 8B 89 10 42 00 00", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x11c3a30u, 0u}, false},
+    {Sig::UiPopClip, "UiPopClip", "83 7F 14 02 75 14 48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B C8 E8", {kRvaUnchecked, kRvaUnchecked, 0u, kRvaUnchecked, 0u, kRvaUnchecked, 0u, 0x11c2610u, 0u}, false, 0x15, "48 FF 89 B0 01 00 00 83 79 08 04"},
+    // Path queries (API v37, private research path_query_impl_2026-11-12), server world (game and dedicated server),
+    // 1287369 alone. u32* createPathQuery(CmdBuf* cb, u32* outId, const PathQuery* q /* 0x110 B */): a kind-5 record
+    // (0x128 B) through QueuePush; id = ++*(u32*)(*(cb+0x38)+4), 0 when the buffer is full (the bytes through the id
+    // store: kind 5, size 0x128, the counter at cb+0x38).
+    {Sig::CreatePathQuery, "CreatePathQuery", "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30 41 8B 00 49 8B D8 48 8B FA 89 44 24 20 48 8D 51 10 41 B0 05 41 B9 28 01 00 00 48 8B F1 E8 ?? ?? ?? ?? 48 8B D0 48 85 C0 75 ?? 89 07 48 8B C7 48 8B 5C 24 40 48 8B 74 24 48 48 83 C4 30 5F C3 48 8B 4E 38 B8 01 00 00 00 F0 0F C1 41 04 FF C0 48 8D 4A 10 89 42 0C", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x95fa00u, 0x5fb550u}, false},
+    // bool destroyPathQuery(CmdBuf* cb, u32 entity, u32 queryId): a kind-8 record (0x10 B); the flush removes the
+    // query (the entity is only logged). NOT the kind-7 twin (ResetPathQueryResults, 0x960470): only the kind byte differs.
+    {Sig::DestroyPathQuery, "DestroyPathQuery", "40 53 48 83 EC 30 8B C2 41 8B D8 48 8D 51 10 89 44 24 20 41 B0 08 41 B9 10 00 00 00 E8 ?? ?? ?? ?? 48 85 C0 75 ?? 48 83 C4 30 5B C3 89 58 0C B0 01 48 83 C4 30 5B C3", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x960310u, 0x5fbe60u}, false},
+    // bool getPathQueryResult(ProgramContext* ctx, Result* out /* 0x28 B */, u32 queryId, bool acceptDirty): the path
+    // grid at *(job+0x28), records of 0x1A0 B, state +0x120 (3, or 4 with points when acceptDirty); the pattern covers
+    // the copy into out (points +0x128/+0x130, second array +0x150/+0x158, counter +0x178, result +0x191).
+    {Sig::GetPathQueryResult, "GetPathQueryResult", "48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B 01 41 0F B6 F1 48 8B FA 44 89 44 24 40 48 8B 58 28 48 85 DB 0F 84 ?? ?? ?? ?? 48 8D 54 24 40 48 8D 8B 38 01 00 00 E8 ?? ?? ?? ?? 48 3B 83 48 01 00 00 0F 83 ?? ?? ?? ?? 48 8B 93 78 01 00 00 48 69 C8 A0 01 00 00 48 03 D1 74 ?? 0F B6 82 20 01 00 00 3C 03 74 ?? 40 84 F6 74 ?? 3C 04 75 ?? 48 83 BA 30 01 00 00 00 74 ?? 48 8B 82 28 01 00 00 48 89 07 48 8B 82 30 01 00 00 48 89 47 08 48 8B 82 50 01 00 00 48 89 47 10 48 8B 82 58 01 00 00 48 89 47 18 8B 82 78 01 00 00 89 47 20 0F B6 82 91 01 00 00 88 47 24 B0 01", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x9b7530u, 0x6533c0u}, false},
+    // PathQuery* pathQueryDefaults(PathQuery* q): the game's defaults for all 0x110 bytes but the owner (+0); the
+    // pattern holds the radii (+0xF0..+0x10C) and the 20 node costs (+0x6C..+0xBB) it writes.
+    {Sig::PathQueryDefaults, "PathQueryDefaults", "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 66 0F 6F 05 ?? ?? ?? ?? 33 C0 C7 83 F0 00 00 00 02 00 00 00 C7 83 F4 00 00 00 02 00 00 00 C7 83 F8 00 00 00 04 00 00 00 48 C7 83 FC 00 00 00 02 00 00 00 48 89 83 04 01 00 00 89 83 0C 01 00 00 48 8B C3 0F 11 43 6C 0F 11 43 7C 0F 11 83 8C 00 00 00 0F 11 83 9C 00 00 00 0F 11 83 AC 00 00 00 48 83 C4 20 5B C3", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x982890u, 0x61e720u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

@@ -59,6 +59,8 @@ enum class Sig : size_t {
     FogSample,
     // a minimap (client): the game's map canvas MapCanvasDraw(scope, view) and the UI clip push and pop around it
     MapCanvasDraw, UiPushClip, UiPopClip,
+    // path queries (API v37), both exes: create, destroy, read a result, the game's query defaults
+    CreatePathQuery, DestroyPathQuery, GetPathQueryResult, PathQueryDefaults,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);
