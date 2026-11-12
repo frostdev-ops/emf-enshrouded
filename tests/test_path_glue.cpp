@@ -163,10 +163,10 @@ TEST_CASE("api path_find (v37): queued on a server world; refused on a client wo
     set_core_state(nullptr);
 }
 
-TEST_CASE("api table (v37): version 37, path_find and path_cancel at the end") {
+TEST_CASE("api table (v37): path_find and path_cancel are there") {
     const EmfApi* api = api_table();
-    CHECK(api->version == 37u);
-    CHECK(api->size == kApiV37Size);
+    CHECK(api->version >= 37u);  // the newest version is checked by its own test (test_doors.cpp: v38)
+    CHECK(api->size >= kApiV37Size);
     CHECK(api->path_find != nullptr);
     CHECK(api->path_cancel != nullptr);
 }

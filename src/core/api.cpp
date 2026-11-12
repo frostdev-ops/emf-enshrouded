@@ -29,6 +29,7 @@
 #include "inventory.h"
 #include "items.h"
 #include "program_access.h"
+#include "doors.h"
 #include "path_glue.h"
 #include "remove_building.h"
 #include "spawn.h"
@@ -998,6 +999,40 @@ uint32_t api_path_find(EmfWorld* w, const EmfPathQuery* q, EmfPathCallback cb, v
 bool api_path_cancel(uint32_t id) {
     PathService* paths = path_service();
     return paths && paths->cancel(id);
+}
+
+// v38: doors (doors.h).
+bool door_refused(const std::string& what, const std::string& why) {
+    std::string line = what + " refused: " + why;
+    if (g_state) {  // a mod retrying every step: the same line once per 10 s
+        std::lock_guard<std::mutex> l(g_state->put_refusals_lock);
+        line = g_state->put_refusals.pass(line, now());
+    }
+    if (!line.empty()) core_log(line);
+    return false;
+}
+
+uint32_t api_door_state(EmfWorld* w, uint32_t entity) {
+    DoorService* d = g_state ? g_state->doors : nullptr;
+    return d && w ? d->state(raw(w), entity) : EMF_DOOR_NONE;
+}
+
+bool api_door_set(EmfWorld* w, uint32_t entity, uint32_t open, uint32_t side) {
+    DoorService* d = g_state ? g_state->doors : nullptr;
+    if (!d) return door_refused("door_set", "doors are off on this game build (see the log)");
+    if (side > 2) return door_refused("door_set", "side is 0, 1 (front) or 2 (back)");
+    std::string why;
+    if (d->request(raw(w), entity, open ? DoorOrderKind::Open : DoorOrderKind::Close, static_cast<uint8_t>(side), &why))
+        return true;
+    return door_refused("door_set (entity " + std::to_string(entity) + ")", why);
+}
+
+bool api_door_lock(EmfWorld* w, uint32_t entity, uint32_t locked) {
+    DoorService* d = g_state ? g_state->doors : nullptr;
+    if (!d) return door_refused("door_lock", "doors are off on this game build (see the log)");
+    std::string why;
+    if (d->request(raw(w), entity, locked ? DoorOrderKind::Lock : DoorOrderKind::Unlock, 0, &why)) return true;
+    return door_refused("door_lock (entity " + std::to_string(entity) + ")", why);
 }
 
 void api_on_save(EmfSaveCallback cb, void* user) {
@@ -2397,6 +2432,9 @@ const EmfApi kApi = {
     api_remove_building,  // v36
     api_path_find,        // v37
     api_path_cancel,
+    api_door_state,  // v38
+    api_door_set,
+    api_door_lock,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

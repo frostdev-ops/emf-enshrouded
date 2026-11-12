@@ -68,6 +68,7 @@ struct CoreState {
     // put_items refusals: the same line at most every 10 s.
     std::mutex put_refusals_lock;
     LogLimiter put_refusals;
+    class DoorService* doors = nullptr;  // v38 (null when off on this game build)
     struct {  // v36 remove_building: the objects removed in this server step (the server world's thread only)
         uint32_t session = 0;
         uint64_t step = 0;

@@ -46,6 +46,7 @@
 #include "marker_capture.h"
 #include "minimap_draw.h"
 #include "inventory.h"
+#include "doors.h"
 #include "path_glue.h"
 #include "teleport.h"
 #include "component_service.h"
@@ -550,6 +551,8 @@ std::unique_ptr<emf::core::InventoryService> g_inventory;
 std::unique_ptr<emf::core::BuffService> g_buffs;  // v32 buffs: emf_buffs
 // teleport: the emf_teleport program and its requests (null when off on this game build).
 std::unique_ptr<emf::core::TeleportService> g_teleport;
+// v38 doors: the emf_doors program and its orders and locks (null when off on this game build).
+std::unique_ptr<emf::core::DoorService> g_doors;
 // v23 change_component: the emf_components program and its requests (null when off on this game build).
 std::unique_ptr<emf::core::ComponentService> g_components;
 // v25 E prompts: on top of the component service (null when that is off).
@@ -671,6 +674,7 @@ void hk_register_all_programs(void* world) {
             emf::core::buffs_new_session();               // every player's buffs are a first sight again
             if (g_teleport) g_teleport->world_reset();
             emf::core::path_world_reset();                // path queries of the old world end (cancelled)
+            if (g_doors) g_doors->world_reset();          // door orders and locks of the old world go
             if (g_components) g_components->world_reset();  // component changes under way end (FAILED)    // teleports under way end (FAILED)
             g_state->damage_queue.clear();                // hits for the old session never land
             emf::core::env_new_session();                 // nor its env hits and carries
@@ -1262,6 +1266,34 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             }
         }
         if (!emf::core::add_buff_commands(g_state->commands)) emf::logf("commands: the buffs.* commands could not be added");
+    }
+    // v38 doors: an internal server program writes the door components through the game's writeOther (private research
+    // doors_2026-11-12); reading needs no program.
+    {
+        using emf::Sig;
+        auto sig = [&](Sig s) -> uintptr_t {
+            const auto& r = g_state->sigs[static_cast<size_t>(s)];
+            return emf::is_usable(r, known) ? r.addr : 0;
+        };
+        emf::core::DoorService::Deps deps;
+        deps.read_other = reinterpret_cast<emf::core::ReadOtherFn>(sig(Sig::ReadOther));
+        deps.write_other = reinterpret_cast<emf::core::WriteOtherFn>(sig(Sig::WriteOther));
+        deps.get_component = g_state->get_component;
+        deps.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
+        if (!deps.read_other || !deps.write_other || !sig(Sig::IterBegin)) {
+            emf::logf("doors: off (the ReadOther, WriteOther or IterBegin signatures are not usable)");
+        } else if (g_state->system_programs.registration_closed()) {
+            emf::logf("doors: off (mod programs are unavailable)");
+        } else {
+            g_doors = std::make_unique<emf::core::DoorService>(std::move(deps));
+            if (g_state->system_programs.add(g_doors->spec(), true)) {
+                g_state->doors = g_doors.get();
+                emf::logf("doors: on (program %s in the server world)", emf::core::kDoorsProgramName);
+            } else {
+                emf::logf("doors: off (the %s program could not be added)", emf::core::kDoorsProgramName);
+                g_doors.reset();
+            }
+        }
     }
     // v33 markers (client only): the camera block's offset and the game's map list from the guards' matched code
     // (private plans/2026-11-11-markers-step1.ledger.md, Task 1)

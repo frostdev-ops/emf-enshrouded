@@ -7,6 +7,8 @@
 #include <vector>
 
 #include "common/offsets.h"
+#include "core/api.h"
+#include "core/api_sizes.h"
 #include "core/doors.h"
 #include "core/system_programs.h"
 #include "emf/generated/components.hpp"
@@ -215,4 +217,37 @@ TEST_CASE("doors: a door that is gone loses its lock; a new world drops orders a
     r.step();
     CHECK_FALSE(g_doors[kDoor].toggle.state);
     CHECK_FALSE(g_doors[kDoor].offer.isDisabled);
+}
+
+TEST_CASE("api doors (v38): door_state reads; door_set and door_lock queue for the next step; refusals say no") {
+    Rig r;
+    CoreState state;
+    state.log_line = [](const std::string&) {};
+    state.doors = &r.service;
+    set_core_state(&state);
+    EmfWorld* w = reinterpret_cast<EmfWorld*>(r.world());
+    const EmfApi* api = api_table();
+    CHECK(api->version >= 38u);
+    CHECK(api->door_state(w, kDoor) == EMF_DOOR_CLOSED);
+    CHECK(api->door_state(w, kChest) == EMF_DOOR_NONE);
+    CHECK(api->door_set(w, kDoor, 1, 0));
+    CHECK_FALSE(api->door_set(w, kChest, 1, 0));
+    CHECK_FALSE(api->door_set(w, kDoor, 1, 7));  // a bad side
+    CHECK(api->door_lock(w, kDoor, 1));
+    r.step();
+    CHECK(api->door_state(w, kDoor) == (EMF_DOOR_OPEN | EMF_DOOR_LOCKED));
+    CHECK(g_doors[kDoor].offer.isDisabled);
+    state.doors = nullptr;  // the feature off on this build
+    CHECK(api->door_state(w, kDoor) == EMF_DOOR_NONE);
+    CHECK_FALSE(api->door_set(w, kDoor, 0, 0));
+    set_core_state(nullptr);
+}
+
+TEST_CASE("api table (v38): version 38, the three door functions at the end") {
+    const EmfApi* api = api_table();
+    CHECK(api->version == 38u);
+    CHECK(api->size == kApiV38Size);
+    CHECK(api->door_state != nullptr);
+    CHECK(api->door_set != nullptr);
+    CHECK(api->door_lock != nullptr);
 }

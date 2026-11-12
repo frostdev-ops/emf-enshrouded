@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 37 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 38 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 37
+#define EMF_API_VERSION 38
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -1474,6 +1474,21 @@ typedef struct EmfApi {
     uint32_t (*path_find)(EmfWorld* world, const EmfPathQuery* q, EmfPathCallback cb, void* user);
     /* Ends a query: its callback still comes, with EMF_PATH_CANCELLED. False for an unknown or answered id. */
     bool (*path_cancel)(uint32_t id);
+
+    /* ---- v38: doors and gates ---- */
+    /* A door's state: EMF_DOOR_NONE (not a door, or not the server world), _CLOSED or _OPEN, with the flags
+     * EMF_DOOR_LOCKED and EMF_DOOR_LOGIC. A door is an entity with ServerToggleState and DirectionalInteraction (player
+     * doors and gates). Inside a world callback on the server world (host or dedicated server). */
+    uint32_t (*door_state)(EmfWorld* world, uint32_t entity);
+    /* Opens (open 1) or closes (open 0) it at the next server step: players see it swing, the game's collider and path
+     * grid follow (enemies' paths change). side: 0 = the game's default (back), 1 front, 2 back. False (logged) when
+     * refused: not the server world, not a door, a switch drives it (EMF_DOOR_LOGIC: the logic system owns it), it is
+     * already so, a bad side, or the feature is off on this game build. No open/close sound is played. Same calling
+     * rule as door_state. */
+    bool (*door_set)(EmfWorld* world, uint32_t entity, uint32_t open, uint32_t side);
+    /* Locks (1) or unlocks (0) it from the next step: no E prompt for any player while locked (EMF keeps it so each
+     * step). A lock is not saved: it lasts until the world closes. door_set still works on a locked door. Same rules. */
+    bool (*door_lock)(EmfWorld* world, uint32_t entity, uint32_t locked);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */
