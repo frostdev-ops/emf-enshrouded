@@ -389,3 +389,26 @@ TEST_CASE("move orders: a calm creature (roaming, at home, patrolling) is put in
     o.step(W());
     CHECK(ai.state == emf::gen::enemy01::State::Combat);
 }
+
+// Live 2026-11-12: a Vukah fighting the player was moved peacefully: its fight was cleared but it stayed in Combat with
+// nothing picked and stood there.
+TEST_CASE("move orders: peaceful: a creature left in Combat with nothing to fight goes to Idle (then takes the guard)") {
+    Fake f = world();
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
+    ai.state = emf::gen::enemy01::State::Combat;
+    f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id = kPlayer;
+    REQUIRE(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, EMF_MOVE_PEACEFUL, cb(d), &why) != 0u);
+    CHECK(ai.state == emf::gen::enemy01::State::Idle);
+    ai.state = emf::gen::enemy01::State::Combat;  // the game started the fight again
+    f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id = kPlayer;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Idle);
+    ai.state = emf::gen::enemy01::State::Combat;  // a fight with a monster stays
+    f.add<gen::Faction>(71).faction = static_cast<emf::gen::FactionType>(10);
+    f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id = 71;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Combat);
+}

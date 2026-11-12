@@ -155,6 +155,9 @@ void MoveOrders::calm_players(EmfWorld* w, uint32_t enemy) const {
             pick.targetEntityId.id = 0;
             pick.targetRootEntityId.id = 0;
         }
+        // in Combat with nothing to fight it stands there (seen live): Idle, where it takes the guard order
+        auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, w, enemy);
+        if (ai && ai->state == State::Combat && pick.targetEntityId.id == 0) ai->state = State::Idle;
     }
 }
 
