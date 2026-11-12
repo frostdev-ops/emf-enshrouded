@@ -6399,3 +6399,64 @@ TEST_CASE("beastmaster 1.16: stable markers on: the world's stables, square, on 
     for (const auto& [p, c] : b.r.fake.markers_sent) to_guest |= p == 2 && c.id == m->id;
     CHECK(to_guest);  // the world's stables are everyone's
 }
+
+TEST_CASE("beastmaster: beastmaster.spawn puts a wild beast of a species in front of you, to try taming") {
+    BeastRig b;
+    const std::string r = b.reply("beastmaster.spawn wolf");
+    CHECK(r.find("a wild Wolf") != std::string::npos);
+    REQUIRE(b.r.fake.spawns.size() == 1);
+    CHECK(guid_text(b.r.fake.spawns[0].guid) == kWolfTemplate);
+    const double d = std::sqrt(b.r.fake.spawns[0].x * b.r.fake.spawns[0].x + b.r.fake.spawns[0].z * b.r.fake.spawns[0].z);
+    CHECK(d == doctest::Approx(5.0).epsilon(0.05));  // 5 m out (the player stands at the origin)
+    CHECK(b.reply("beastmaster.spawn dragon").find("no species dragon") != std::string::npos);
+    CHECK(b.r.fake.spawns.size() == 1);
+}
+
+TEST_CASE("beastmaster: a beast being tamed stops fighting you, and a tamed one loses its debuffs (a bleed no longer kills it)") {
+    BeastRig b;
+    b.look(1, 0, 10.5, 0, 0);
+    b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);
+    fighting(b, 50, 1);  // it fights you
+    EmfBuff bleed{};
+    bleed.size = sizeof bleed;
+    bleed.type = 0x777;
+    bleed.entity = 900;
+    bleed.slot = EMF_BUFF_DEBUFF;
+    EmfBuff food{};
+    food.size = sizeof food;
+    food.type = 0x111;
+    food.entity = 901;
+    food.slot = EMF_BUFF_FOOD;
+    b.r.fake.buffs[50] = {bleed, food};
+    CHECK(b.reply("beastmaster.tame").find("Taming") != std::string::npos);
+    CHECK_FALSE(still_fighting(b, 50));  // calm from the channel's start
+    fighting(b, 50, 1);                  // its aggro list still had you
+    b.seconds(4);
+    CHECK(b.noted("You tamed a wolf: Wolf"));
+    CHECK_FALSE(still_fighting(b, 50));  // calm at the tame, and through its protection
+    bool bleed_removed = false, food_removed = false;
+    for (const auto& a : b.r.fake.buff_asks) {
+        bleed_removed |= a.remove && a.target == 50 && a.type == 0x777;
+        food_removed |= a.remove && a.target == 50 && a.type == 0x111;
+    }
+    CHECK(bleed_removed);
+    CHECK_FALSE(food_removed);  // only debuffs
+}
+
+TEST_CASE("beastmaster: a beast teleported back from far away drops its chase and guards its owner again (it follows)") {
+    BeastRig b;
+    wolf_out(b);
+    b.seconds(1);
+    const size_t guards_before = b.guards().size();
+    fighting(b, 1234, 777);              // it chased a hare far away
+    place(b.r.fake, 1234, 130, 10, 0);   // too far at once: it is brought back
+    b.seconds(1);
+    REQUIRE(teleports_of(b.r.fake, 1234) >= 1);
+    CHECK_FALSE(still_fighting(b, 1234));  // the chase is dropped
+    const auto g = b.guards();
+    REQUIRE(g.size() > guards_before);
+    CHECK(g.back() == std::make_pair(1234u, 1u));  // guarding its owner again
+    fighting(b, 1234, 777);              // the game still had the hare
+    b.seconds(2);
+    CHECK_FALSE(still_fighting(b, 1234));  // kept calm for a moment after the move
+}

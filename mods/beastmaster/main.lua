@@ -310,6 +310,7 @@ emf.command("species", "<animation graph guid> <faction number> [scale]: which b
 -- ---- taming ----
 taming = tame_mod.new({
 	setting = setting,
+	calm = pack_mod.calm,
 	now = now,
 	tell = tell,
 	on_tamed = function(world, player, id, sp)
@@ -952,6 +953,34 @@ local function give_command(world, args)
 	emf.reply(string.format("added %s (%s) to your collection", b.name, s.id))
 end
 emf.command("give", "<species>: add a beast to your collection (admin)", give_command)
+
+-- Admin: a wild beast of a species 5 m in front of you, to try taming (console only, not from the chat).
+emf.command("spawn", "<species>: a wild beast 5 m in front of you, to try taming (admin)", function(world, args)
+	local sender = emf.sender()
+	if sender and sender.chat then
+		emf.reply("beastmaster.spawn is for the host's console")
+		return
+	end
+	local s = species.by_id(args[1])
+	if not s then
+		local ids = {}
+		for _, sp in ipairs(species.list) do ids[#ids + 1] = sp.id end
+		emf.reply("no species " .. tostring(args[1]) .. " (" .. table.concat(ids, ", ") .. ")")
+		return
+	end
+	local me = emf.local_player()
+	local x, y, z = world:position(me or 0)
+	if not x then emf.reply("your position is not known yet") return end
+	local v = emf.player_view and emf.player_view()
+	local yaw = math.rad((v and (v.camera_yaw or v.heading)) or 0)
+	local id = emf.spawn(world, s.template, x + math.sin(yaw) * 5, y, z + math.cos(yaw) * 5)
+	if not id then
+		emf.reply("not spawned" .. (s.pack and (" (it needs " .. s.pack .. ")") or " (see the log)"))
+		return
+	end
+	emf.reply(string.format("a wild %s (entity %d) in front of you: beat it under 25 %% health, then Tame (hold F3)",
+		s.name, id))
+end)
 
 -- ---- beastmaster.as: a player's word run as that player from the host's or the server's console (tests on a
 -- dedicated server, where the console has no player of its own) ----

@@ -128,6 +128,15 @@ function T:succeed(world, player, ch)
 	local f = world:get("Faction", ch.id)
 	if not f then return end
 	f.faction = PLAYER_ALLY
+	-- it stops fighting: the game keeps an aggro entry when its owner turns friendly (seen: a tamed wolf went on
+	-- biting the player), so its aggro and chosen targets are cleared, and kept clear while it is guarded below
+	if self.env.calm then self.env.calm(world, ch.id) end
+	-- debuffs on it end (seen: the player's bleed went on and killed the tamed wolf once its guard was over)
+	if emf.buffs and emf.remove_buff then
+		for _, b in ipairs(emf.buffs(world, ch.id) or {}) do
+			if b.slot == "debuff" and not b.cleansed then emf.remove_buff(world, ch.id, b.type) end
+		end
+	end
 	emf.emit("server", "StartGuardingEvent", { guardingEntityId = ch.id, guardedEntityId = player })
 	local cur, max = emf.health(world, ch.id)
 	if cur and max and cur < max / 2 then emf.attribute_add(world, ch.id, "health", math.floor(max / 2 - cur)) end
@@ -151,8 +160,9 @@ local function guard(self, world, now)
 		elseif now >= g.until_s then
 			h.dataStorage[2] = g.old
 			self.guarded[id] = nil
-		elseif h.dataStorage[2] ~= g.floor then
-			h.dataStorage[2] = g.floor
+		else
+			if h.dataStorage[2] ~= g.floor then h.dataStorage[2] = g.floor end
+			if self.env.calm then self.env.calm(world, id) end  -- no fight against its new side while guarded
 		end
 	end
 end
@@ -198,6 +208,7 @@ function T:tame(world, player)
 	if f then
 		ch.wild_faction = f.faction
 		f.faction = PLAYER_ALLY
+		if self.env.calm then self.env.calm(world, id) end  -- it stops biting the player for the channel
 		emf.emit("server", "StartGuardingEvent", { guardingEntityId = id, guardedEntityId = player })
 	end
 	self.channels[player] = ch

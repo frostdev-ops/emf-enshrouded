@@ -601,6 +601,11 @@ function P:leash(world, owner, b, now)
 	if now - (self.moved[b.entity] or -math.huge) < 3 then return end  -- a teleport takes a moment: no repeats
 	self.moved[b.entity] = now
 	self.far[b.entity] = nil
+	-- it drops its chase and guards its owner again (seen: a wolf brought back from a far hare chase stood still);
+	-- the recall window keeps it calm while it lands
+	self.recall[b.entity] = now + RECALL_S
+	calm(world, b.entity)
+	emf.emit("server", "StartGuardingEvent", { guardingEntityId = b.entity, guardedEntityId = owner })
 	if not emf.teleport(world, b.entity, ox + 2, oy + 0.5, oz, { ground = true }) then
 		local account
 		for id, e in pairs(self.ids) do
