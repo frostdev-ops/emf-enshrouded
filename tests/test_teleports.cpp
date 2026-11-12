@@ -625,12 +625,14 @@ TEST_CASE("teleports map: an admin's spot: the ground, then a teleport just abov
 }
 
 // The owner: "I teleported there and was under water" (a lake's bed was the landing).
-TEST_CASE("teleports map: over a lake the player lands on the water surface, without the ground search (it would take the bed)") {
+// Seen live (a lake 2.3 m deep): landed at the surface the player fell in, dived and sank to the bed; 1 m under it they
+// hung still, drowning; 0.5 m under it they settled treading water, head above it.
+TEST_CASE("teleports map: over a lake the player lands half a metre under the surface, without the ground search (it would take the bed)") {
     Rig r;
     r.t.map_teleport(1, true, 1500, 4740);
     r.g.ground(GroundStatus::Ok, 300, 0, "", false, 304.25);
     REQUIRE(r.g.tps.size() == 1);
-    CHECK(r.g.tps[0].ask.to.y == doctest::Approx(304.25));
+    CHECK(r.g.tps[0].ask.to.y == doctest::Approx(303.75));
     CHECK_FALSE(r.g.tps[0].ask.ground);
     r.g.answer(true, {1500, 304.25, 4740}, true);
     CHECK(r.g.last_tell().find("You are at (1500, 304, 4740)") == 0);
