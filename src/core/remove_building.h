@@ -13,8 +13,6 @@ using ComponentGetter = std::function<const void*(uint32_t hash, uint32_t entity
 // The game's ItemInfo blob for an item id (off::kItemInfoSize bytes), or null.
 using ItemInfoGetter = std::function<const uint8_t*(uint32_t item)>;
 
-constexpr uint32_t kItemInfoPlacementConsume = 0x43C;  // ItemInfo.placementConsume (bool): the item is used up when placed
-
 // What the core reads about an entity before removing it.
 struct RemoveFacts {
     bool has_pos = false;

@@ -9,6 +9,7 @@
 
 #include "core/api.h"
 #include "core/api_sizes.h"
+#include "common/offsets.h"
 #include "core/remove_building.h"
 #include "emf/emf_api.h"
 #include "emf/generated/components.hpp"
@@ -19,7 +20,7 @@ namespace {
 namespace gen = emf::gen::ecs;
 
 constexpr uint32_t kChest = 500, kLinked = 501, kPlayer = 1, kItem = 0x1234abcd;
-constexpr size_t kInfoSize = 0x828, kConsumeAt = 0x43C;
+constexpr size_t kInfoSize = 0x828, kConsumeAt = emf::off::kItemInfoPlacementConsume;
 
 struct Fake {
     std::map<std::pair<uint32_t, uint32_t>, std::vector<uint8_t>> comps;

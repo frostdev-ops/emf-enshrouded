@@ -520,10 +520,20 @@ void cmd_items(EmfWorld* w, int argc, const char* const* argv, void* u) {
     }
     for (size_t k = 0; k < found.size() && k < 50; ++k) {
         const NamedItem& it = l.named[found[k]];
+        // the template a placeable item puts down (spawn takes it)
+        std::string places;
+        uint64_t size = 0;
+        const auto* info = c.api->item_data ? static_cast<const uint8_t*>(c.api->item_data(w, it.id, &size)) : nullptr;
+        uint8_t tpl[16] = {};
+        if (info && size >= off::kItemInfoPlacedEntity + 16) std::memcpy(tpl, info + off::kItemInfoPlacedEntity, 16);
+        if (std::any_of(std::begin(tpl), std::end(tpl), [](uint8_t b) { return b != 0; }))
+            places = ", places " + emf::guid_to_text(tpl);
         if (!it.shown.empty())
-            command_reply_line(fmt("%s: %s (0x%08x, stack %u)", it.shown.c_str(), it.name.c_str(), it.id, unsigned(l.stack[found[k]])));
+            command_reply_line(fmt("%s: %s (0x%08x, stack %u%s)", it.shown.c_str(), it.name.c_str(), it.id,
+                                   unsigned(l.stack[found[k]]), places.c_str()));
         else
-            command_reply_line(fmt("%s (0x%08x, stack %u)", it.name.c_str(), it.id, unsigned(l.stack[found[k]])));
+            command_reply_line(fmt("%s (0x%08x, stack %u%s)", it.name.c_str(), it.id, unsigned(l.stack[found[k]]),
+                                   places.c_str()));
     }
     command_reply_line(
         fmt("%zu of %zu items%s", found.size(), l.named.size(), found.size() > 50 ? " (first 50 shown)" : ""));

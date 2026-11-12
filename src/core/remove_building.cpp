@@ -5,6 +5,7 @@
 #include <cstring>
 #include <vector>
 
+#include "common/offsets.h"
 #include "emf/emf_api.h"
 #include "emf/generated/components.hpp"
 
@@ -44,7 +45,7 @@ RemoveFacts remove_facts(uint32_t entity, const ComponentGetter& get, const Item
     if (f.used_item && item_info) {
         if (const uint8_t* info = item_info(f.used_item)) {
             f.item_known = true;
-            f.consume = info[kItemInfoPlacementConsume] != 0;
+            f.consume = info[off::kItemInfoPlacementConsume] != 0;
         }
     }
     // The stacks in its own inventory and the ones it links (a chest's slots may live in linked entities).

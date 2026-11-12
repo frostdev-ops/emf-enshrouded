@@ -1083,7 +1083,7 @@ TEST_CASE("builtin commands (v36): remove takes a placed object away like a pick
         if (id == 0x11) logs = b.get();
     }
     REQUIRE(logs);
-    logs[kItemInfoPlacementConsume] = 1;  // placing it used it up: the game refunds it
+    logs[off::kItemInfoPlacementConsume] = 1;  // placing it used it up: the game refunds it
     MapStore ents;
     emf::test::plant_entities(iw.w, ents, {42, 50, 60, 61, 62, 63});
     f.center.enqueue("remove 60 drop");
@@ -1121,4 +1121,23 @@ TEST_CASE("api remove_building (v36): no request, a small size field, or a call 
     CHECK_FALSE(api_table()->remove_building(nullptr, &r));
     CHECK(std::string(r.why).find("world callback") != std::string::npos);
     CHECK(r.refunded == 0);
+}
+
+TEST_CASE("builtin commands: items shows the template an item places (spawn takes it), none for other items") {
+    BFixture f;
+    ItemsWorld iw;
+    uint8_t* logs = nullptr;
+    for (auto& b : iw.reg.infos) {
+        uint32_t id = 0;
+        std::memcpy(&id, b.get() + off::kItemInfoId, 4);
+        if (id == 0x11) logs = b.get();
+    }
+    REQUIRE(logs);
+    const uint8_t tpl[16] = {0x91, 0x9d, 0xf8, 0x54, 0x9c, 0xd5, 0xd8, 0x4f,  // 54f89d91-d59c-4fd8-b39c-ee30632bf57f
+                             0xb3, 0x9c, 0xee, 0x30, 0x63, 0x2b, 0xf5, 0x7f};  // as the game stores it
+    std::memcpy(logs + off::kItemInfoPlacedEntity, tpl, 16);
+    f.center.enqueue("items");
+    f.run(iw.w);
+    CHECK(bsaid("Material_T1_Wood_Logs (0x00000011, stack 250, places 54f89d91-d59c-4fd8-b39c-ee30632bf57f)"));
+    CHECK(bsaid("Torch (0x00000022, stack 1)"));
 }
