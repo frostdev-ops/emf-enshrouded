@@ -555,6 +555,34 @@ end)
 When the ground is not found, the marker is placed at height 0 here; you could skip it instead. `emf.ground_at` is
 described in lua.md, "The map (1.26)".
 
+## A minimap of your own
+
+A canvas in a corner, the game's own map in it centred on the player, and an arrow turned by the heading. Lua 1.27, on
+the client only. The sample `mods/minimap` adds zoom keys, settings, the game's map markers and a round frame.
+
+```lua
+local S = 200  -- canvas size, in units of a 1080-pixel-high screen
+emf.canvas("mini", {corner = "top_right", x = 16, y = 16, w = S, h = S})
+
+emf.on_tick(function(world)
+  if not world:is_client() then return end
+  local v = emf.player_view()
+  if not v then return end
+  local c, a = S / 2, math.rad(v.heading)
+  local fx, fy = math.sin(a), -math.cos(a)  -- forward on the canvas (0 = north = up)
+  emf.canvas_draw("mini", {
+    {"rect", 0, 0, S, S, colour = 0x14181ce6},  -- under the map: seen only when the game cannot draw it
+    {"map", v.x, v.z, 2},                       -- 2 metres per canvas unit, north up
+    {"tri", c + fx * 9, c + fy * 9, c - fx * 6 - fy * 6, c - fy * 6 + fx * 6, c - fx * 6 + fy * 6, c - fy * 6 - fx * 6,
+     colour = 0xffe08aff},
+    {"rect", 0, 0, S, S, width = 3, colour = 0x0a0a0aff},  -- a frame
+  })
+end)
+```
+
+The map is north up, so only the arrow turns. `emf.fog_at(x, z)` and `emf.map_markers()` give the explored share and the
+game's own markers; see lua.md, "Canvases and the minimap (1.27)".
+
 ## Run code before or after one of the game's programs
 
 ```cpp

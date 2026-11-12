@@ -961,6 +961,9 @@ Players can act on the game's world map, and a server mod can find the ground un
 - `ground_at` (server world only) finds the ground under a spot with the game's voxel ray after the next server steps
   (two readings that agree), so an answer may take a few seconds. The callback runs once on the server world's thread.
 - Caps: 16 `on_map_click` listeners, 16 map actions, 64 `ground_at` requests waiting. Ids are 1-48 of `A-Z a-z 0-9 _ . - :`.
+- The answer also says which shroud a player standing at the found spot would be in: `fog` and `deadly`. EMF reads it
+  1 m and 2 m over the ground and 3 m around, and waits for the shroud data to load (5 s at most). `fog` is the worst
+  reading found; `EMF_FOG_UNKNOWN` when it could not be read (this game build, or it did not load in time).
 
 | C | C++ | What |
 |---|---|---|
@@ -977,10 +980,13 @@ Players can act on the game's world map, and a server mod can find the ground un
 in `[chat] admins`; also 1 for everyone when `everyone=1`; it is the server's own view, never taken from the message),
 `x`, `z` (inside the world), `action` (the id; valid during the callback).
 
-`EmfGround` (`size`, then): `status`, `x`, `y`, `z`, `hop_y`, `why` (valid during the callback). `status` is
+`EmfGround` (`size`, then): `status`, `x`, `y`, `z`, `hop_y`, `why` (valid during the callback), `fog`, `deadly`. `status` is
 `EMF_GROUND_OK` (0: `y` is the ground), `EMF_GROUND_NOT_LOADED` (1: nobody is near the spot; `hop_y` is a height over it
 where a player may be teleported so the game loads the place; ask again once they are there) or `EMF_GROUND_FAILED` (2:
-`why` says why).
+`why` says why). When `status` is OK, `fog` is `EMF_FOG_NONE` (0), `EMF_FOG_TEMPORARY` (1: shroud the players removed),
+`EMF_FOG_DANGEROUS` (2: the shroud, its timer runs), `EMF_FOG_DEATH` (3: deeper shroud than this world's progress allows;
+a player there dies) or `EMF_FOG_UNKNOWN` (255). `deadly` (0..1) is the share of deadly shroud there; `EMF_FOG_DEATH`
+starts at 0.25.
 
 ```cpp
 static void on_ground(EmfWorld*, const EmfGround* g, void* user) {
@@ -1002,6 +1008,71 @@ this game's server offers a map action), `map.act <x> <z>` (runs anywhere: the s
 gesture's end sends it, with the same checks) and `ground <x> <z>` (needs a world you host: the ground's height at that
 spot; the answer follows a moment later). The Teleports mod uses a map action: see `mods/teleports/README.md`, "Teleport by the
 map".
+
+## v35: a minimap's parts
+
+The parts a minimap is made of: where the player is and faces, how much of the map is explored, the game's own map
+markers, and canvases: drawing panels a mod owns, which EMF draws over the HUD. Client only: the dedicated server draws
+nothing, and these functions answer false or 0 there. The sample minimap (`mods/minimap`) is built from them.
+
+- `player_view` gives the local player's position, heading (0 north = +z, 90 east = +x) and camera yaw (the same way;
+  set when a frame of the 3D view was seen, `EMF_VIEW_CAMERA`), and the map's size in metres (10240 on Embervale).
+  False at the main menu and before the player is known.
+- `fog_at` gives the fog of war at a point: 0 unexplored .. 1 explored. It reads a copy that is refreshed twice a second.
+- `map_markers` gives the game's own map markers (altars, shrines, places found) as its map list had them last: at
+  most 512. `EMF_GAME_MARKER_SHOWN` is set when the game's map shows one.
+- `canvas_set` makes, changes or removes a canvas. `corner`, `x`, `y` (measured from the corner, inward) and `w`, `h`
+  are in units of a 1080-pixel-high screen; `w` and `h` are 8..1080. `shape` is `EMF_CANVAS_RECT` or
+  `EMF_CANVAS_CIRCLE`. A canvas belongs to the mod that made it (another mod cannot change it). 32 canvases at most.
+  Lua ids are `"<mod>:<id>"` in the core. Ids are 1-48 of `A-Z a-z 0-9 _ . - :`.
+- `canvas_draw` replaces the canvas's drawing with a list of commands (2048 at most; more are left out, and a command
+  with bad numbers is left out). EMF keeps the list and draws it every frame, so call it only when the picture changes.
+- Commands (`EmfCanvasCmd`, positions in canvas units, 0, 0 is the top left): `EMF_CANVAS_RECT_CMD`,
+  `EMF_CANVAS_CIRCLE_CMD`, `EMF_CANVAS_LINE`, `EMF_CANVAS_TRI`, `EMF_CANVAS_TEXT`, `EMF_CANVAS_IMAGE` (a picture from
+  `image_load`), `EMF_CANVAS_FOG` (the fog of war drawn as cells), `EMF_CANVAS_MARKERS` (the markers flagged
+  `EMF_MARKER_MINIMAP`) and `EMF_CANVAS_MAP` (the game's own world map). The numbers each kind takes are in the header
+  next to the define. FOG, MARKERS and MAP take `a[0..1]` = the world x, z at the canvas centre and `a[2]` = metres
+  per canvas unit.
+- The MAP command is drawn by the game's own map renderer, so it looks like the world map (relief, shroud, fog of war).
+  It is north up: a mod turns its own arrow and icons.
+- Draw order: the game draws the MAP command before EMF draws anything else. What a list puts BEFORE its last MAP
+  command is under the map, and EMF draws it only when the game cannot draw the map. Put a background first, then the
+  map, then what goes on top.
+- The game clips its map to the canvas's rectangle, also for a round canvas. A mod that wants a round look draws a ring
+  over the corners.
+- EMF hides canvases where it hides markers: on the map screen, in menus and in the console.
+
+| C | What |
+|---|---|
+| `player_view(&view)` | fills `EmfPlayerView`: `x, y, z`, `heading_deg`, `camera_yaw_deg`, `world_size`. False without a player. Any thread. |
+| `fog_at(x, z, &explored)` | 0..1 at that point. False without a map (the dedicated server, before a world). Any thread. |
+| `map_markers(out, cap)` | how many there are; fills `out` (`EmfGameMarker`: `type`, `flags`, `x, y, z`) up to `cap`; `out` may be NULL to count. Any thread. |
+| `canvas_set(id, &canvas)` | a canvas; a NULL canvas removes it. False: a bad id, bad numbers or 32 canvases already. |
+| `canvas_draw(id, cmds, count)` | the drawing. False for an unknown canvas. Any thread. |
+
+`EMF_MARKER_MINIMAP` (0x10) is a marker flag: a marker with it is drawn by a canvas's MARKERS command.
+
+```cpp
+// A square minimap at the bottom right: the game's map around the player, 2 m per unit.
+EmfCanvas c{};
+c.size = sizeof c;
+c.corner = EMF_CANVAS_BOTTOM_RIGHT;
+c.shape = EMF_CANVAS_RECT;
+c.x = 16; c.y = 64; c.w = 220; c.h = 220;
+api()->canvas_set("map", &c);
+
+// every client step:
+EmfPlayerView v{};
+v.size = sizeof v;
+if (api()->player_view(&v)) {
+    EmfCanvasCmd cmds[1] = {};
+    cmds[0].kind = EMF_CANVAS_MAP;
+    cmds[0].a[0] = (float)v.x;
+    cmds[0].a[1] = (float)v.z;
+    cmds[0].a[2] = 2.0f;  // metres per canvas unit
+    api()->canvas_draw("map", cmds, 1);
+}
+```
 
 ## SDK headers (header-only C++, no ABI)
 
