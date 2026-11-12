@@ -105,11 +105,27 @@ bool MoveOrders::place_waypoint(Move& m, uint64_t now) {
     const uint32_t w = d_.spawn ? d_.spawn(m.world, p[0], p[1], p[2]) : 0;
     if (!w) return false;
     m.waypoint = w;
-    if (d_.guard) d_.guard(m.enemy, w);
+    send_guard(m.world, m.enemy, w);
     m.last_guard = now;
     m.since = now;
     m.best = distance(m.world, m.enemy, p);
     return true;
+}
+
+void MoveOrders::send_guard(EmfWorld* w, uint32_t enemy, uint32_t waypoint) {
+    if (d_.guard) d_.guard(enemy, waypoint);
+    // a calm creature takes the guard order only from Idle (seen live: a roaming one walked on to its roam spot first)
+    if (auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, w, enemy)) {
+        switch (ai->state) {
+        case State::Roaming: case State::ReturnHome: case State::WaitAtHome: case State::Patrol:
+        case State::TurnAfterPatrol: case State::WaitAfterPatrol: case State::Investigate: case State::ReactToNoise:
+        case State::Sleep: case State::MoveToMarker:
+            ai->state = State::Idle;
+            break;
+        default:
+            break;
+        }
+    }
 }
 
 double MoveOrders::distance(EmfWorld* w, uint32_t enemy, const Point& p) const {
@@ -189,7 +205,7 @@ int MoveOrders::tick(Move& m, uint64_t now) {
     const auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, m.world, m.enemy);
     const bool guarding = ai && ai->state == State::Guard && ai->guardEntityId.id == m.waypoint;
     if (!guarding && now - m.last_guard >= kMoveResendMs) {
-        if (d_.guard) d_.guard(m.enemy, m.waypoint);
+        send_guard(m.world, m.enemy, m.waypoint);
         m.last_guard = now;
     }
     return -1;

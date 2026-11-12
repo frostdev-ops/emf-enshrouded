@@ -94,6 +94,7 @@ private:
     int tick(Move& m, uint64_t now);
     void finish(Move& m, uint32_t status);  // its waypoint goes; its guard and home as the header says
     bool place_waypoint(Move& m, uint64_t now);  // spawns the waypoint at its point and sends the guard order
+    void send_guard(EmfWorld* w, uint32_t enemy, uint32_t waypoint);  // and a calm creature is put in Idle
     bool fighting(EmfWorld* w, uint32_t enemy) const;
     void calm_players(EmfWorld* w, uint32_t enemy) const;  // EMF_MOVE_PEACEFUL
     bool gone(EmfWorld* w, const Move& m) const;

@@ -368,3 +368,24 @@ TEST_CASE("move orders: a point counts as reached within the creature's guard di
     o.step(W());
     CHECK(d.status == EMF_MOVE_ARRIVED);
 }
+
+// Live 2026-11-12: a roaming Vukah given the guard order walked on to its roam spot (7 s the wrong way) and took the
+// guard only once it was Idle; in Idle it took it at once.
+TEST_CASE("move orders: a calm creature (roaming, at home, patrolling) is put in Idle with the guard order; a fight stays") {
+    Fake f = world();
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
+    ai.state = emf::gen::enemy01::State::Roaming;
+    REQUIRE(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, 0, cb(d), &why) != 0u);
+    CHECK(ai.state == emf::gen::enemy01::State::Idle);
+    ai.state = emf::gen::enemy01::State::WaitAtHome;
+    f.now += 3500;
+    o.step(W());  // the guard order again: Idle again
+    CHECK(ai.state == emf::gen::enemy01::State::Idle);
+    ai.state = emf::gen::enemy01::State::Combat;
+    f.now += 3500;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Combat);
+}
