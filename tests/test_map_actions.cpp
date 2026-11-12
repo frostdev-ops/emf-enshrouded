@@ -120,3 +120,14 @@ TEST_CASE("map actions (review M1): a logger set later hears junk and a flood (o
     REQUIRE(logs.size() == 2);
     CHECK(logs[1].find("player 9") != std::string::npos);
 }
+
+
+TEST_CASE("map actions (review M10): an id another mod registered is refused, not taken over") {
+    MapActions a(nullptr);
+    REQUIRE(a.add("lua", "teleport", "Teleport here", 0, on_action, nullptr));
+    CHECK_FALSE(a.add("other", "teleport", "Mine now", 0, on_action, nullptr));
+    MapActionsClient c;
+    REQUIRE(c.on_announce(a.announce_message()));
+    CHECK(c.first_id() == "teleport");
+    CHECK(a.remove("lua", "teleport"));  // the owner still can
+}

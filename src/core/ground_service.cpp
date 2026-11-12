@@ -22,6 +22,10 @@ bool GroundService::request(EmfWorld* world, double x, double z, Callback cb, st
         if (why) *why = w.empty() ? "the world's limits cannot be read" : w;
         return false;
     }
+    if (lim.has_sides && (x < lim.box_min_x || x > lim.box_max_x || z < lim.box_min_z || z > lim.box_max_z)) {
+        if (why) *why = "that spot is outside the playable area";  // the game would send a player there to their altar
+        return false;
+    }
     reqs_.push_back(Req{world, GroundSearch(x, z, lim, d_.now_ms ? d_.now_ms() : 0), std::move(cb)});
     return true;
 }

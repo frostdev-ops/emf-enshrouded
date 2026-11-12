@@ -15,6 +15,9 @@ struct GroundLimits {
     double box_top = 0;      // the scene's reset box (box 0) top
     double grid_top = 0;     // the voxel grid's top and bottom (world y)
     double grid_bottom = 0;
+    // the reset box's sides (box 0, x and z): a player outside them is sent to their altar by the game
+    bool has_sides = false;
+    double box_min_x = 0, box_min_z = 0, box_max_x = 0, box_max_z = 0;
 };
 
 struct RayResult {

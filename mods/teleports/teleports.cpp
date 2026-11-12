@@ -73,12 +73,15 @@ void update_map_action(const tp::Settings& s) {
     if (!emf::has_v34() || !emf::api()->map_action) return;
     static std::atomic<int> offered{-1};
     const int want = !g_switched_off && s.map_teleport != tp::MapWho::Off ? 1 : 0;
-    if (offered.exchange(want) == want) return;
+    if (offered.load() == want) return;
     if (want) {
-        if (!emf::api()->map_action("teleport", "Teleport here", 0, on_map_done, nullptr))
+        if (emf::api()->map_action("teleport", "Teleport here", 0, on_map_done, nullptr))
+            offered = 1;  // latched only once the core took it: a refusal is tried again on the next change
+        else
             EMF_LOG(kMod, "the map teleport could not be offered (see the core log)");
     } else {
         emf::api()->map_action("teleport", nullptr, 0, nullptr, nullptr);
+        offered = 0;
     }
 }
 

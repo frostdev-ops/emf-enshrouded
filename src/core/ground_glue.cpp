@@ -24,6 +24,8 @@ std::string g_fog_desc;  // g_desc_m
 std::atomic<uint32_t> g_realm{0};
 std::atomic<bool> g_box_known{false};
 std::atomic<double> g_box_top{0};
+std::atomic<double> g_box_min_x{0}, g_box_min_z{0}, g_box_max_x{0}, g_box_max_z{0};
+std::atomic<bool> g_box_sides{false};
 using SetterFn = void* (*)(void*, void*, void*, void*);
 SetterFn g_o_setter = nullptr;
 std::mutex g_desc_m;
@@ -40,6 +42,21 @@ void read_box(const uint8_t* manager) {
     const double y = static_cast<double>(top) / kFixed;
     if (!std::isfinite(y) || y < -10000 || y > 100000) return;
     g_box_top.store(y, std::memory_order_relaxed);
+    // its sides: min x +0x00, min z +0x10, max x +0x18, max z +0x28 (32.32 each)
+    int64_t side[4];
+    if (seh_read(data, &side[0], 8) && seh_read(data + 0x10, &side[1], 8) && seh_read(data + 0x18, &side[2], 8) &&
+        seh_read(data + 0x28, &side[3], 8)) {
+        const double mnx = side[0] / kFixed, mnz = side[1] / kFixed, mxx = side[2] / kFixed, mxz = side[3] / kFixed;
+        const bool sane = std::isfinite(mnx) && std::isfinite(mnz) && std::isfinite(mxx) && std::isfinite(mxz) &&
+                          mxx - mnx > 100 && mxz - mnz > 100 && mxx - mnx < 100000 && mxz - mnz < 100000;
+        if (sane) {
+            g_box_min_x.store(mnx, std::memory_order_relaxed);
+            g_box_min_z.store(mnz, std::memory_order_relaxed);
+            g_box_max_x.store(mxx, std::memory_order_relaxed);
+            g_box_max_z.store(mxz, std::memory_order_relaxed);
+        }
+        g_box_sides.store(sane, std::memory_order_relaxed);
+    }
     g_box_known.store(true, std::memory_order_release);
 }
 
@@ -198,12 +215,18 @@ bool ground_limits(EmfWorld* world, GroundLimits* out, std::string* why) {
     Grid g;
     if (!read_grid(world, &g, why)) return false;
     out->box_top = g_box_top.load(std::memory_order_relaxed);
+    out->has_sides = g_box_sides.load(std::memory_order_relaxed);
+    out->box_min_x = g_box_min_x.load(std::memory_order_relaxed);
+    out->box_min_z = g_box_min_z.load(std::memory_order_relaxed);
+    out->box_max_x = g_box_max_x.load(std::memory_order_relaxed);
+    out->box_max_z = g_box_max_z.load(std::memory_order_relaxed);
     out->grid_bottom = g.oy;
     out->grid_top = g.oy + g.ny * g.size;
     char line[256];
     std::snprintf(line, sizeof line,
-                  "realm %u, grid %ux%u cells of %.0f m from (%.1f, %.1f, %.1f), top %.1f, reset box top %.1f", g.realm,
-                  g.nx, g.ny, g.size, g.ox, g.oy, g.oz, out->grid_top, out->box_top);
+                  "realm %u, grid %ux%u cells of %.0f m from (%.1f, %.1f, %.1f), top %.1f, reset box top %.1f, sides "
+                  "x %.0f..%.0f z %.0f..%.0f", g.realm, g.nx, g.ny, g.size, g.ox, g.oy, g.oz, out->grid_top,
+                  out->box_top, out->box_min_x, out->box_max_x, out->box_min_z, out->box_max_z);
     std::lock_guard<std::mutex> lock(g_desc_m);
     g_desc = line;
     return true;
@@ -216,7 +239,7 @@ bool ground_ray(EmfWorld* world, double x, double z, double from_y, double to_y,
     if (x < g.ox || z < g.oz || x >= g.ox + g.nx * g.size || z >= g.oz + g.nx * g.size) return false;  // off the grid
     alignas(16) float from[4] = {static_cast<float>(x), static_cast<float>(from_y), static_cast<float>(z), 0};
     alignas(16) float to[4] = {static_cast<float>(x), static_cast<float>(to_y), static_cast<float>(z), 0};
-    alignas(16) uint8_t hit[64] = {};
+    alignas(16) uint8_t hit[256] = {};  // its size is not known: fields up to +0x13 are read
     const uint8_t options[4] = {g.realm, 0, 1, 1};  // stop at an unavailable cell (it is queued for loading)
     if (!call_ray(fn, hit, g.terrain, from, to, options)) return false;
     out->loaded = hit[0x12] != 0;

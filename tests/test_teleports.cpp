@@ -73,7 +73,11 @@ struct FakeGame : Game {
         if (it == pos.end()) return std::nullopt;
         return it->second;
     }
-    uint64_t account(uint32_t p) override { return 0xACC0 + p; }
+    std::map<uint32_t, uint64_t> account_of;  // set: that player's account changed (the entity id was reused)
+    uint64_t account(uint32_t p) override {
+        auto it = account_of.find(p);
+        return it == account_of.end() ? 0xACC0 + p : it->second;
+    }
     bool dead(uint32_t p) override { return dead_ones.count(p) != 0; }
     bool in_shroud(uint32_t p) override { return shrouded.count(p) != 0; }
     bool in_deadly_shroud(uint32_t p) override { return deadly.count(p) != 0; }
@@ -809,4 +813,14 @@ TEST_CASE("teleports map (fog check): after a hop, a deadly landing sends the pl
     CHECK(r.g.tps[1].ask.to.x == 4000);  // back
     r.g.answer(true, {4000, 700, 1200});
     CHECK(r.g.last_tell() == "That place is in the deadly shroud: you are back where you were");
+}
+
+
+TEST_CASE("teleports map (review M8): the player left and the entity id is someone else now: nobody is moved") {
+    Rig r;
+    r.t.map_teleport(2, true, 1500, 4740);
+    r.g.account_of[2] = 0xBEEF;  // player 2 left; a new player got entity 2
+    r.g.ground(GroundStatus::Ok, 300);
+    CHECK(r.g.tps.empty());
+    CHECK_FALSE(r.t.moving(2));
 }

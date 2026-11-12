@@ -28,7 +28,8 @@ struct MapInputEnv {
 
 struct MapInputResult {
     bool swallow = false;
-    bool rewrite_down = false;
+    bool rewrite_down = false;        // pass this left double-click on as a plain press
+    bool rewrite_right_down = false;  // the same for the right button
 };
 
 struct MapRing {
@@ -56,7 +57,8 @@ private:
     std::function<void(double, double)> done_;
     std::function<void(const EmfMapClick&)> click_;
     uint64_t pending_hold_ms_ = 0;  // set during a hold: for the next one
-    bool right_ours_ = false;  // a right-click swallowed during a hold: its release too
+    bool right_ours_ = false;
+    bool right_rewrite_ = false;  // the last right-click was swallowed: a double-click now is the game's first press  // a right-click swallowed during a hold: its release too
 };
 
 // The game's one gesture (the window procedure, the overlay and the core share it).

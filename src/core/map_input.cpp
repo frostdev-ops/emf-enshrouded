@@ -94,6 +94,8 @@ MapInputResult MapInput::message(UINT msg, WPARAM wp, LPARAM lp, const MapInputE
                 o = hold_.right();
                 right_ours_ = o.swallow;
                 click_button = 1;
+                if (msg == WM_RBUTTONDBLCLK && !o.swallow && right_rewrite_) r.rewrite_right_down = true;
+                right_rewrite_ = o.swallow;
                 break;
             case WM_RBUTTONUP:
                 o.swallow = right_ours_;

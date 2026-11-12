@@ -274,6 +274,8 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 return 0;
             } else if (r.rewrite_down) {
                 return CallWindowProcW(g_original, hwnd, WM_LBUTTONDOWN, wp, lp);
+            } else if (r.rewrite_right_down) {
+                return CallWindowProcW(g_original, hwnd, WM_RBUTTONDOWN, wp, lp);
             }
             break;
         case WM_MOUSEMOVE:

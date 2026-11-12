@@ -24,6 +24,7 @@ struct Rig {
     std::vector<RayResult> rays;  // what the ray answers, one per tick (the last repeats)
     size_t next = 0;
     bool limits_ok = true;
+    bool sides = false;
     std::vector<Answer> answers;
     GroundService svc{deps()};
     GroundService::Deps deps() {
@@ -36,6 +37,9 @@ struct Rig {
             l->box_top = 1200;
             l->grid_top = 1100;
             l->grid_bottom = -100;
+            l->has_sides = sides;
+            l->box_min_x = l->box_min_z = 64;
+            l->box_max_x = l->box_max_z = 10176;
             return true;
         };
         d.ray = [this](EmfWorld*, double, double, double, double, RayResult* out) {
@@ -134,4 +138,16 @@ TEST_CASE("ground service: a ray that cannot be cast ends the request with a rea
     CHECK_FALSE(r.answers[0].ok);
     CHECK(r.answers[0].status == EMF_GROUND_FAILED);
     CHECK_FALSE(r.answers[0].why.empty());
+}
+
+
+TEST_CASE("ground service (review M2): a spot outside the reset box's sides is refused (the game would send a player home)") {
+    g_now = 1000;
+    Rig r;
+    r.sides = true;
+    std::string why;
+    CHECK_FALSE(r.svc.request(W(), 40, 200, r.cb(), &why));
+    CHECK(why.find("outside") != std::string::npos);
+    CHECK_FALSE(r.svc.request(W(), 5000, 10200, r.cb(), &why));
+    CHECK(r.svc.request(W(), 5000, 5000, r.cb(), &why));
 }

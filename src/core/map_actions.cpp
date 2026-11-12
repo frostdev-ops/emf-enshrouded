@@ -54,6 +54,7 @@ bool MapActions::add(const std::string& owner, const char* id, const char* label
     Action a{owner, id, label ? label : id, hold_ms ? std::min<uint32_t>(hold_ms, 10000) : 1000, cb, user};
     for (Action& x : actions_)
         if (x.id == a.id) {
+            if (x.owner != a.owner) return false;  // another mod's action is not taken over
             x = std::move(a);
             return true;
         }

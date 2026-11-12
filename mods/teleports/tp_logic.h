@@ -723,8 +723,16 @@ private:
         return asked;
     }
 
+    // The player is still there (an entity id taken by someone who joined after they left is not them).
+    bool same_player(const Spot& s) {
+        if (s.acct && g_.account(s.who) == s.acct) return true;
+        moving_.erase(s.who);
+        return false;
+    }
+
     void on_ground(Spot s, const Ground& gr) {
         if (s.epoch != epoch_) return;  // another session: the player and the world mean nothing now
+        if (!same_player(s)) return;
         if (gr.status == GroundStatus::Ok && gr.deadly_shroud) {
             if (s.hopped) {
                 go_back(s, "That place is in the deadly shroud: you are back where you were");
@@ -763,6 +771,7 @@ private:
                 return;
             }
             s.hopped = true;
+            if (!same_player(s)) return;
             if (!spot_ground(s)) go_back(s);
         });
         if (!ok) refused(s);

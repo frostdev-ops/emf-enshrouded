@@ -176,3 +176,17 @@ TEST_CASE("map view (review I1): the open map counts only while its layout is at
     v.ms = 0;
     CHECK_FALSE(map_view_fresh(v, 10000));
 }
+
+
+TEST_CASE("map input (review M12): a quick right-click after a swallowed one: its double-click becomes a press for the game") {
+    MapInput in([](double, double) {});
+    MapInputEnv e = env();
+    in.message(WM_LBUTTONDOWN, MK_LBUTTON | MK_SHIFT, at(500, 500), e);
+    CHECK(in.message(WM_RBUTTONDOWN, MK_RBUTTON, at(500, 500), e).swallow);  // cancels the hold
+    CHECK(in.message(WM_RBUTTONUP, 0, at(500, 500), e).swallow);
+    in.message(WM_LBUTTONUP, 0, at(500, 500), e);
+    const MapInputResult r = in.message(WM_RBUTTONDBLCLK, MK_RBUTTON, at(500, 500), e);
+    CHECK_FALSE(r.swallow);
+    CHECK(r.rewrite_right_down);  // the game never saw the first press
+    CHECK_FALSE(in.message(WM_RBUTTONDBLCLK, MK_RBUTTON, at(500, 500), e).rewrite_right_down);  // only once
+}
