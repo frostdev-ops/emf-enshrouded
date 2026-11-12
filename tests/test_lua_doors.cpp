@@ -93,3 +93,72 @@ TEST_CASE("lua 1.30: emf.door reads the state; door_open, door_close and door_lo
     CHECK(r.fake.door_calls[2] == "lock 500 0");
     CHECK(r.fake.door_calls[3] == "set 9 1 0");
 }
+
+TEST_CASE("lua 1.33: emf.enemy_move walks an enemy through points (one point or a list; arrive, seconds, peaceful, allies)") {
+    Rig r(L"lua_moves");
+    r.fake.moving[70] = 1;
+    add_script(r.dir, "mv",
+               "emf.command('go', '', function(w)\n"
+               "  emf.log('id ' .. tostring(emf.enemy_move(w, 70, {10, 20, 30}, function(world, id, status)\n"
+               "    emf.log('done ' .. id .. ' ' .. status .. ' ' .. tostring(world ~= nil))\n"
+               "  end)))\n"
+               "  emf.log('id2 ' .. tostring(emf.enemy_move(w, 71, {{x = 1, y = 2, z = 3}, {4, 5, 6}},\n"
+               "    {arrive = 3, seconds = 40, peaceful = true, allies = true})))\n"
+               "  local id, why = emf.enemy_move(w, 13, {1, 2, 3})\n"
+               "  emf.log('no ' .. tostring(id) .. ' ' .. tostring(why))\n"
+               "  emf.log('bad ' .. tostring(pcall(emf.enemy_move, w, 70, {1, 2})))\n"
+               "  emf.log('bad2 ' .. tostring(pcall(emf.enemy_move, w, 70, {1, 2, 3}, {arrive = 'near'})))\n"
+               "  emf.log('moving ' .. tostring(emf.enemy_moving(w, 70)) .. ' ' .. tostring(emf.enemy_moving(w, 71)))\n"
+               "  emf.log('cancel ' .. tostring(emf.enemy_move_cancel(2)) .. ' ' .. tostring(emf.enemy_move_cancel(9)))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("mv.go");
+    CHECK(logged("id 1"));
+    CHECK(logged("id2 2"));
+    CHECK(logged("no nil it has no enemy AI to move"));
+    CHECK(logged("bad false"));
+    CHECK(logged("bad2 false"));
+    CHECK(logged("moving 1 nil"));
+    CHECK(logged("cancel true false"));
+    REQUIRE(r.fake.moves.size() == 2u);
+    const auto& a = r.fake.moves[0];
+    CHECK(a.o.size == sizeof(EmfMoveOrder));
+    CHECK(a.o.enemy == 70u);
+    CHECK(a.o.flags == 0u);
+    CHECK(a.o.arrive == 0.0f);
+    CHECK(a.o.seconds == 0.0f);
+    REQUIRE(a.points.size() == 1u);
+    CHECK(a.points[0].x == 10.0f);
+    CHECK(a.points[0].z == 30.0f);
+    const auto& b = r.fake.moves[1];
+    REQUIRE(b.points.size() == 2u);
+    CHECK(b.points[0].y == 2.0f);
+    CHECK(b.points[1].x == 4.0f);
+    CHECK(b.o.arrive == 3.0f);
+    CHECK(b.o.seconds == 40.0f);
+    CHECK(b.o.flags == (EMF_MOVE_PEACEFUL | EMF_MOVE_ALLIES));
+    REQUIRE(a.cb != nullptr);
+    a.cb(kServer, 1, EMF_MOVE_ARRIVED, a.user);  // after a server step
+    CHECK(logged("done 1 arrived true"));
+    b.cb(nullptr, 2, EMF_MOVE_CANCELLED, b.user);  // the world closed: no function given, nothing called
+}
+
+TEST_CASE("lua 1.33: a reload or a pause cancels the script's moves; their functions are not called") {
+    Rig r(L"lua_moves_drop");
+    add_script(r.dir, "md",
+               "emf.command('go', '', function(w)\n"
+               "  emf.enemy_move(w, 70, {1, 2, 3}, function() emf.log('called') end)\n"
+               "  emf.enemy_move(w, 71, {1, 2, 3})\n"
+               "end)\n"
+               "emf.command('boom', '', function() error('boom') end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("md.go");
+    REQUIRE(r.fake.moves.size() == 2u);
+    r.run_command("md.boom");
+    REQUIRE(host.status("md").rfind("paused", 0) == 0);
+    CHECK(r.fake.move_cancels.size() == 2u);
+    r.fake.moves[0].cb(kServer, 1, EMF_MOVE_CANCELLED, r.fake.moves[0].user);
+    CHECK_FALSE(logged("called"));
+}

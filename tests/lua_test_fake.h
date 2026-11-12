@@ -70,6 +70,15 @@ struct Fake {
     std::vector<EmfEnemyOrder> orders;  // v39
     std::vector<uint32_t> order_cancels;
     std::map<uint32_t, uint32_t> enemy_targets;
+    struct Move {  // v40
+        EmfMoveOrder o;
+        std::vector<EmfPathPoint> points;
+        EmfMoveCallback cb;
+        void* user;
+    };
+    std::vector<Move> moves;
+    std::vector<uint32_t> move_cancels;
+    std::map<uint32_t, uint32_t> moving;
     bool remove_ok = true;
     uint32_t remove_refunded = 0;
     uint32_t tick = 0;  // what world_tick answers (60 per second of game time)
@@ -399,6 +408,22 @@ uint32_t f_enemy_order(EmfWorld*, EmfEnemyOrder* o) {
 bool f_enemy_order_cancel(uint32_t id) {
     g->order_cancels.push_back(id);
     return id >= 1 && id <= g->orders.size();
+}
+uint32_t f_enemy_move(EmfWorld*, EmfMoveOrder* o, EmfMoveCallback cb, void* user) {
+    if (o->enemy == 13) {  // the fake refuses this one
+        std::snprintf(o->why, sizeof o->why, "it has no enemy AI to move");
+        return 0;
+    }
+    g->moves.push_back({*o, {o->points, o->points + o->count}, cb, user});
+    return static_cast<uint32_t>(g->moves.size());
+}
+bool f_enemy_move_cancel(uint32_t id) {
+    g->move_cancels.push_back(id);
+    return id >= 1 && id <= g->moves.size();
+}
+uint32_t f_enemy_moving(EmfWorld*, uint32_t e) {
+    auto it = g->moving.find(e);
+    return it == g->moving.end() ? 0 : it->second;
 }
 uint32_t f_enemy_target(EmfWorld*, uint32_t e) {
     auto it = g->enemy_targets.find(e);
@@ -1046,6 +1071,9 @@ EmfApi fake_api() {
     a.enemy_order = f_enemy_order;
     a.enemy_order_cancel = f_enemy_order_cancel;
     a.enemy_target = f_enemy_target;
+    a.enemy_move = f_enemy_move;
+    a.enemy_move_cancel = f_enemy_move_cancel;
+    a.enemy_moving = f_enemy_moving;
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;
