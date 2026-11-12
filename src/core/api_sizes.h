@@ -134,7 +134,8 @@ static_assert(offsetof(EmfApi, player_view) == kApiV34Size && kApiV35Size == 992
 static_assert(sizeof(EmfPlayerView) == 48 && offsetof(EmfPlayerView, heading_deg) == 32, "EmfPlayerView layout (v35)");
 static_assert(sizeof(EmfGameMarker) == 40 && offsetof(EmfGameMarker, x) == 16, "EmfGameMarker layout (v35)");
 static_assert(sizeof(EmfCanvas) == 24 && offsetof(EmfCanvas, x) == 8, "EmfCanvas layout (v35)");
-static_assert(sizeof(EmfCanvasCmd) == 56 && offsetof(EmfCanvasCmd, a) == 8 && offsetof(EmfCanvasCmd, s) == 48,
+static_assert(sizeof(EmfCanvasCmd) == 64 && offsetof(EmfCanvasCmd, image) == 8 && offsetof(EmfCanvasCmd, a) == 16 &&
+                  offsetof(EmfCanvasCmd, s) == 56,
               "EmfCanvasCmd layout (v35)");
 static_assert(sizeof(EmfMapClick) == 32 && offsetof(EmfMapClick, x) == 16, "EmfMapClick layout (v34)");
 static_assert(sizeof(EmfMarker) == 80 && offsetof(EmfMarker, text) == 40 && offsetof(EmfMarker, flags) == 64 &&

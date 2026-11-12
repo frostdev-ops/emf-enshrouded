@@ -1933,6 +1933,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             deps.settings = g_state->settings.get();
             deps.hud_editor = g_hud_editor.get();
             deps.markers = &g_state->markers.store;
+            deps.canvases = &g_state->minimap.canvases;  // v35
+            deps.fog = &g_state->minimap.fog;
             if (emf::core::start_overlay(cfg, std::move(deps))) {
                 g_state->open_wheel = [](const emf::core::WheelRequest& r) {
                     const bool ok = emf::core::overlay_open_wheel(r);

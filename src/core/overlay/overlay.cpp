@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cfloat>
+#include <cmath>
 #include <atomic>
 #include <cstring>
 #include <cwchar>
@@ -18,6 +19,8 @@
 #include "console_ui.h"
 #include "image_store.h"
 #include "marker_ui.h"
+#include "core/canvas.h"
+#include "core/fog_grid.h"
 #include "core/map_input.h"
 #include "window_model.h"
 #include "cursor_model.h"
@@ -493,8 +496,127 @@ void build_markers(ImVec2 display) {
     if (!layouts.empty()) draw_markers(ImGui::GetBackgroundDrawList(), layouts, text_look(), &pictures);
 }
 
+// Canvases (API v35): mods' drawing panels over the HUD, hidden where the markers hide (the map, menus, the console).
+ImU32 rgba_col(uint32_t rgba) {
+    return IM_COL32((rgba >> 24) & 0xff, (rgba >> 16) & 0xff, (rgba >> 8) & 0xff, rgba & 0xff);
+}
+
+void draw_canvas_markers(ImDrawList* dl, const float r[4], float units_w, const float* a, bool circle) {
+    if (!g_deps.markers) return;
+    const ImVec2 centre(r[0] + r[2] * 0.5f, r[1] + r[3] * 0.5f);
+    const float radius = (std::min)(r[2], r[3]) * 0.5f, s = 7.0f * r[3] / 220.0f;  // a dot's size follows the canvas
+    for (const Marker& m : g_deps.markers->snapshot()) {
+        if (!(m.flags & EMF_MARKER_MINIMAP)) continue;
+        float px, py;
+        canvas_world_to(r, units_w, a[0], a[1], a[2], m.x, m.z, &px, &py);
+        const float dx = px - centre.x, dy = py - centre.y;
+        if (circle ? dx * dx + dy * dy > radius * radius : (px < r[0] || py < r[1] || px > r[0] + r[2] || py > r[1] + r[3]))
+            continue;
+        const ImU32 fill = m.rgba ? rgba_col(m.rgba) : look_colour(text_look().accent), edge = IM_COL32(0, 0, 0, 180);
+        const ImVec2 c(px, py);
+        if (m.shape == EMF_MARKER_SQUARE) {
+            dl->AddRectFilled(ImVec2(px - s, py - s), ImVec2(px + s, py + s), fill);
+            dl->AddRect(ImVec2(px - s, py - s), ImVec2(px + s, py + s), edge, 0, 0, 1.5f);
+        } else if (m.shape == EMF_MARKER_CIRCLE || m.shape == EMF_MARKER_NONE) {
+            dl->AddCircleFilled(c, s, fill, 16);
+            dl->AddCircle(c, s, edge, 16, 1.5f);
+        } else {
+            const ImVec2 q[4] = {ImVec2(px, py - s * 1.3f), ImVec2(px + s, py), ImVec2(px, py + s * 1.3f), ImVec2(px - s, py)};
+            dl->AddConvexPolyFilled(q, 4, fill);
+            dl->AddPolyline(q, 4, edge, ImDrawFlags_Closed, 1.5f);
+        }
+    }
+}
+
+void draw_canvases(ImVec2 display) {
+    if (!g_deps.canvases) return;
+    const auto view = g_deps.canvases->view();
+    if (!view || view->empty()) return;
+    const uint64_t now = GetTickCount64();
+    const MarkerSight sight = marker_sight(now);
+    const bool console = g_router->open() || g_ui.open_fraction > 0.0f;
+    if (console || !sight.world_ui || sight.map_open || !world_live()) return;
+    ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    for (const Canvas& c : *view) {
+        if (c.spec.hidden) continue;
+        float r[4];
+        canvas_layout(c.spec, display.x, display.y, r);
+        const float k = r[2] / c.spec.w;  // pixels per unit
+        const bool circle = c.spec.shape == EMF_CANVAS_CIRCLE;
+        const ImVec2 o(r[0], r[1]), centre(r[0] + r[2] * 0.5f, r[1] + r[3] * 0.5f);
+        const float radius = (std::min)(r[2], r[3]) * 0.5f;
+        auto at = [&](float x, float y) { return ImVec2(o.x + x * k, o.y + y * k); };
+        dl->PushClipRect(o, ImVec2(r[0] + r[2], r[1] + r[3]), true);
+        for (const CanvasCmd& m : c.cmds) {
+            const ImU32 col = rgba_col(m.rgba);
+            const float* a = m.a;
+            switch (m.kind) {
+                case EMF_CANVAS_RECT_CMD:
+                    if (a[4] > 0) dl->AddRect(at(a[0], a[1]), at(a[0] + a[2], a[1] + a[3]), col, 0, 0, a[4] * k);
+                    else dl->AddRectFilled(at(a[0], a[1]), at(a[0] + a[2], a[1] + a[3]), col);
+                    break;
+                case EMF_CANVAS_CIRCLE_CMD:
+                    if (a[3] > 0) dl->AddCircle(at(a[0], a[1]), a[2] * k, col, 48, a[3] * k);
+                    else dl->AddCircleFilled(at(a[0], a[1]), a[2] * k, col, 48);
+                    break;
+                case EMF_CANVAS_LINE: dl->AddLine(at(a[0], a[1]), at(a[2], a[3]), col, (std::max)(1.0f, a[4] * k)); break;
+                case EMF_CANVAS_TRI: dl->AddTriangleFilled(at(a[0], a[1]), at(a[2], a[3]), at(a[4], a[5]), col); break;
+                case EMF_CANVAS_TEXT: {
+                    ImFont* f = g_fonts.hud ? g_fonts.hud : ImGui::GetFont();
+                    const float size = a[2] * k;
+                    const ImVec2 ts = f->CalcTextSizeA(size, FLT_MAX, 0, m.s.c_str());
+                    const ImVec2 p = at(a[0], a[1]);
+                    dl->AddText(f, size, ImVec2(p.x - ts.x * 0.5f + 1, p.y - ts.y * 0.5f + 1), IM_COL32(0, 0, 0, (m.rgba & 0xff) * 3 / 4),
+                                m.s.c_str());
+                    dl->AddText(f, size, ImVec2(p.x - ts.x * 0.5f, p.y - ts.y * 0.5f), col, m.s.c_str());
+                    break;
+                }
+                case EMF_CANVAS_IMAGE: {
+                    const auto img = window_picture(m.image, 0, 0);
+                    if (!img) break;
+                    const ImVec2 p0 = at(a[0], a[1]), p1 = at(a[0] + a[2], a[1] + a[3]);
+                    const bool whole = a[4] == 0 && a[5] == 0 && a[6] == 0 && a[7] == 0;
+                    const ImVec2 u0 = whole ? img->uv0 : ImVec2(img->uv0.x + (img->uv1.x - img->uv0.x) * a[4], img->uv0.y + (img->uv1.y - img->uv0.y) * a[5]);
+                    const ImVec2 u1 = whole ? img->uv1 : ImVec2(img->uv0.x + (img->uv1.x - img->uv0.x) * a[6], img->uv0.y + (img->uv1.y - img->uv0.y) * a[7]);
+                    if (a[8] == 0) {
+                        dl->AddImage(img->tex, p0, p1, u0, u1, col);
+                    } else {  // turned about its centre
+                        const ImVec2 cc((p0.x + p1.x) * 0.5f, (p0.y + p1.y) * 0.5f);
+                        const float hw = (p1.x - p0.x) * 0.5f, hh = (p1.y - p0.y) * 0.5f, t = a[8] * 0.017453293f;
+                        const float cs = std::cos(t), sn = std::sin(t);
+                        auto rot = [&](float x, float y) { return ImVec2(cc.x + x * cs - y * sn, cc.y + x * sn + y * cs); };
+                        dl->AddImageQuad(img->tex, rot(-hw, -hh), rot(hw, -hh), rot(hw, hh), rot(-hw, hh), u0,
+                                         ImVec2(u1.x, u0.y), u1, ImVec2(u0.x, u1.y), col);
+                    }
+                    break;
+                }
+                case EMF_CANVAS_FOG: {
+                    if (!g_deps.fog) break;
+                    const auto cells = fog_cells(r, c.spec.w, a[0], a[1], a[2], [](double x, double z) {
+                        float e = 1.0f;
+                        return g_deps.fog->explored(x, z, &e) ? e : 1.0f;
+                    });
+                    for (const FogCell& f : cells) {
+                        if (circle) {
+                            const float dx = f.x + f.w * 0.5f - centre.x, dy = f.y + f.h * 0.5f - centre.y;
+                            if (dx * dx + dy * dy > (radius + f.w) * (radius + f.w)) continue;
+                        }
+                        const uint32_t alpha = static_cast<uint32_t>((m.rgba & 0xff) * f.alpha);
+                        dl->AddRectFilled(ImVec2(f.x, f.y), ImVec2(f.x + f.w, f.y + f.h), rgba_col((m.rgba & 0xffffff00u) | alpha));
+                    }
+                    break;
+                }
+                case EMF_CANVAS_MARKERS: draw_canvas_markers(dl, r, c.spec.w, a, circle); break;
+                default: break;  // MAP: the game draws it (part 3b)
+            }
+        }
+        dl->PopClipRect();
+    }
+}
+
 void build(ImVec2 display) {
     build_markers(display);
+    draw_canvases(display);
     if (g_window) {  // under the console: drawn first, and without input while the console is open
         static const ImageLookup pictures = window_picture;
         const auto click = draw_window(*g_window, g_window_ui, !g_router->open(), display, text_look(), &pictures);

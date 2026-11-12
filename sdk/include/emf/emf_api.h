@@ -669,7 +669,7 @@ typedef struct EmfCanvas {
 #define EMF_CANVAS_LINE 3u /* a[0..3] x1, y1, x2, y2; a[4] width */
 #define EMF_CANVAS_TRI 4u /* a[0..5] three points, filled */
 #define EMF_CANVAS_TEXT 5u /* a[0..1] x, y (its centre); a[2] size (units); s the text (UTF-8) */
-#define EMF_CANVAS_IMAGE 6u /* s a picture id (v26 picture_load); a[0..3] x, y, w, h; a[4..7] u0, v0, u1, v1; a[8] turn (degrees) */
+#define EMF_CANVAS_IMAGE 6u /* `image` a picture from image_load (v26); a[0..3] x, y, w, h; a[4..7] u0, v0, u1, v1; a[8] turn (degrees); rgba the tint */
 #define EMF_CANVAS_FOG 7u /* the fog of war: a[0..1] the world x, z at the canvas centre, a[2] metres per unit; rgba the unexplored colour */
 #define EMF_CANVAS_MARKERS 8u /* the markers flagged EMF_MARKER_MINIMAP: a[0..1] the world x, z at the centre, a[2] metres per unit */
 #define EMF_CANVAS_MAP 9u /* the game's own map (north up): a[0..1] the world x, z at the centre, a[2] metres per unit */
@@ -677,8 +677,10 @@ typedef struct EmfCanvasCmd {
     uint8_t kind; /* EMF_CANVAS_RECT_CMD ... */
     uint8_t pad[3];
     uint32_t rgba;
+    uint32_t image; /* IMAGE: a picture from image_load (v26); else 0 */
+    uint32_t pad2;
     float a[10];
-    const char* s; /* TEXT: the text; IMAGE: the picture id; else NULL */
+    const char* s; /* TEXT: the text; else NULL */
 } EmfCanvasCmd;
 
 typedef struct EmfHitRule {

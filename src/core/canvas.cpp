@@ -10,7 +10,7 @@ namespace emf::core {
 namespace {
 
 constexpr float kMaxUnits = 4096.0f;
-constexpr size_t kTextMax = 256, kPictureIdMax = 64;
+constexpr size_t kTextMax = 256;
 
 bool id_ok(const char* id) {
     if (!id) return false;
@@ -66,7 +66,7 @@ bool canvas_cmd_ok(const EmfCanvasCmd& c) {
         case EMF_CANVAS_CIRCLE_CMD: return c.a[2] >= 0 && c.a[3] >= 0;
         case EMF_CANVAS_LINE: return c.a[4] >= 0;
         case EMF_CANVAS_TEXT: return c.s && *c.s && c.a[2] > 0 && c.a[2] <= 200;
-        case EMF_CANVAS_IMAGE: return c.s && *c.s && c.a[2] >= 0 && c.a[3] >= 0;
+        case EMF_CANVAS_IMAGE: return c.image != 0 && c.a[2] >= 0 && c.a[3] >= 0;
         default: return true;
     }
 }
@@ -112,11 +112,9 @@ bool CanvasStore::draw(const std::string& owner, const char* id, const EmfCanvas
         CanvasCmd c;
         c.kind = cmds[i].kind;
         c.rgba = cmds[i].rgba;
+        c.image = c.kind == EMF_CANVAS_IMAGE ? cmds[i].image : 0;
         std::memcpy(c.a, cmds[i].a, sizeof c.a);
-        if (cmds[i].s) {
-            const size_t cap = c.kind == EMF_CANVAS_IMAGE ? kPictureIdMax : kTextMax;
-            c.s.assign(cmds[i].s, strnlen(cmds[i].s, cap));
-        }
+        if (cmds[i].s && c.kind == EMF_CANVAS_TEXT) c.s.assign(cmds[i].s, strnlen(cmds[i].s, kTextMax));
         list.push_back(std::move(c));
     }
     std::lock_guard<std::mutex> lock(m_);
@@ -152,6 +150,42 @@ void canvas_layout(const EmfCanvas& c, float display_w, float display_h, float o
     out[1] = top ? c.y * k : display_h - c.y * k - h;
     out[2] = w;
     out[3] = h;
+}
+
+void canvas_world_to(const float rect[4], float units_w, double cx, double cz, double mpu, double x, double z, float* px,
+                     float* py) {
+    const double k = units_w > 0 ? rect[2] / units_w : 1.0;  // pixels per canvas unit
+    const double m = mpu > 0 ? mpu : 1.0;
+    *px = static_cast<float>(rect[0] + rect[2] * 0.5 + (x - cx) / m * k);
+    *py = static_cast<float>(rect[1] + rect[3] * 0.5 - (z - cz) / m * k);  // north up
+}
+
+std::vector<FogCell> fog_cells(const float rect[4], float units_w, double cx, double cz, double mpu,
+                               const std::function<float(double, double)>& explored) {
+    std::vector<FogCell> out;
+    if (!explored || !(rect[2] > 0) || !(rect[3] > 0) || !(units_w > 0) || !(mpu > 0)) return out;
+    const double k = rect[2] / units_w;          // pixels per unit
+    const double ppm = k / mpu;                   // pixels per metre
+    const double span = std::max(rect[2], rect[3]) / ppm;  // metres across
+    constexpr int kMaxCells = 72;
+    double cell = 8.0;                            // whole fog pixels
+    while (span / cell > kMaxCells) cell += 8.0;
+    const double left = cx - rect[2] * 0.5 / ppm, top = cz + rect[3] * 0.5 / ppm;  // the canvas's north-west corner
+    const double x0 = std::floor(left / cell) * cell, z0 = std::ceil(top / cell) * cell;
+    for (double z = z0; z > top - rect[3] / ppm - cell; z -= cell)
+        for (double x = x0; x < left + rect[2] / ppm + cell; x += cell) {
+            const float a = 1.0f - std::clamp(explored(x + cell * 0.5, z - cell * 0.5), 0.0f, 1.0f);
+            if (a <= 0.01f) continue;
+            float sx, sy;
+            canvas_world_to(rect, units_w, cx, cz, mpu, x, z, &sx, &sy);
+            const float w = static_cast<float>(cell * ppm);
+            // clipped to the rect (the overlay clips too; this keeps cells off the frame)
+            const float x1 = std::max(sx, rect[0]), y1 = std::max(sy, rect[1]);
+            const float x2 = std::min(sx + w, rect[0] + rect[2]), y2 = std::min(sy + w, rect[1] + rect[3]);
+            if (x2 <= x1 || y2 <= y1) continue;
+            out.push_back({x1, y1, x2 - x1, y2 - y1, a});
+        }
+    return out;
 }
 
 }  // namespace emf::core

@@ -151,3 +151,51 @@ TEST_CASE("api canvas_set / canvas_draw: the calling mod's canvas in the core's 
     CHECK(state.minimap.canvases.view()->empty());
     set_core_state(nullptr);
 }
+
+TEST_CASE("canvas world map: the centre at the rect's centre, north up, metres per unit times the scale") {
+    const float rect[4] = {100, 50, 440, 440};  // a 220-unit canvas at twice the size: 2 px per unit
+    float px = 0, py = 0;
+    canvas_world_to(rect, 220, 1500, 4740, 2.0, 1500, 4740, &px, &py);
+    CHECK(px == doctest::Approx(320));
+    CHECK(py == doctest::Approx(270));
+    canvas_world_to(rect, 220, 1500, 4740, 2.0, 1520, 4760, &px, &py);  // 20 m east, 20 m north
+    CHECK(px == doctest::Approx(340));  // 20 m / 2 m per unit = 10 units = 20 px
+    CHECK(py == doctest::Approx(250));  // north is up
+}
+
+TEST_CASE("canvas fog cells: at most 72 across, cells of whole fog pixels, alpha where unexplored") {
+    const float rect[4] = {0, 0, 220, 220};
+    // explored east of x = 1500, unexplored west
+    auto cells = fog_cells(rect, 220, 1500, 4740, 1.0, [](double x, double) { return x >= 1500 ? 1.0f : 0.0f; });
+    REQUIRE_FALSE(cells.empty());
+    CHECK(cells.size() <= 72u * 72u);
+    bool west = false, east = false;
+    for (const auto& c : cells) {
+        CHECK(c.alpha >= 0.0f);
+        CHECK(c.alpha <= 1.0f);
+        if (c.x + c.w <= 100 && c.alpha == doctest::Approx(1.0f)) west = true;
+        if (c.x >= 120) east = east || c.alpha > 0;
+    }
+    CHECK(west);
+    CHECK_FALSE(east);  // explored cells are not drawn
+    auto wide = fog_cells(rect, 220, 5000, 5000, 50.0, [](double, double) { return 0.0f; });  // 11 km across
+    CHECK(wide.size() <= 72u * 72u);
+}
+
+TEST_CASE("canvas: an IMAGE command carries a picture handle (image_load); none: left out") {
+    CanvasStore s;
+    EmfCanvas c = spec(0, 0, 200, 200);
+    REQUIRE(s.set("m", "map", &c) == CanvasStore::SetResult::Ok);
+    EmfCanvasCmd img{};
+    img.kind = EMF_CANVAS_IMAGE;
+    img.rgba = 0xffffffffu;
+    img.a[2] = img.a[3] = 32;
+    img.a[6] = img.a[7] = 1;
+    EmfCanvasCmd with = img;
+    with.image = 3;
+    const EmfCanvasCmd cmds[] = {img, with};
+    uint32_t kept = 0;
+    REQUIRE(s.draw("m", "map", cmds, 2, &kept));
+    CHECK(kept == 1u);
+    CHECK(s.view()->at(0).cmds[0].image == 3u);
+}

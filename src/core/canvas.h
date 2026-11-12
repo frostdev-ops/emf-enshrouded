@@ -4,6 +4,7 @@
 // immutable view rebuilt on every change. Numbers are checked; a bad command is left out; lists past 2048 are cut.
 // canvas_layout turns a canvas's corner, offset and size (1080-pixel units) into display pixels. Game-free.
 #include <cstdint>
+#include <functional>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -19,6 +20,7 @@ constexpr size_t kCanvasCmdsMax = 2048;
 struct CanvasCmd {
     uint8_t kind = 0;
     uint32_t rgba = 0;
+    uint32_t image = 0;  // IMAGE: the picture's handle
     float a[10] = {};
     std::string s;
 };
@@ -48,5 +50,16 @@ private:
 bool canvas_cmd_ok(const EmfCanvasCmd& c);
 // The canvas's rect in display pixels: x, y, w, h.
 void canvas_layout(const EmfCanvas& c, float display_w, float display_h, float out[4]);
+// A world point in display pixels for a map command centred on (cx, cz) at `mpu` metres per canvas unit, in a canvas
+// `units_w` units wide drawn at `rect` (north up).
+void canvas_world_to(const float rect[4], float units_w, double cx, double cz, double mpu, double x, double z, float* px,
+                     float* py);
+// The fog of war over a canvas: cells of whole 8 m fog pixels, at most 72 across, each with the unexplored share as its
+// alpha (explored cells are left out). `explored(x, z)` answers 0..1.
+struct FogCell {
+    float x, y, w, h, alpha;
+};
+std::vector<FogCell> fog_cells(const float rect[4], float units_w, double cx, double cz, double mpu,
+                               const std::function<float(double, double)>& explored);
 
 }  // namespace emf::core
