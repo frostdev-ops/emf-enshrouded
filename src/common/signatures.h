@@ -57,6 +57,8 @@ enum class Sig : size_t {
     VoxelRay, ResetBoundsSet,
     // the shroud at a spot on the server (the map teleport's landing): the game's fog sampler (FogSample)
     FogSample,
+    // a minimap (client): the game's map canvas MapCanvasDraw(scope, view) and the UI clip push and pop around it
+    MapCanvasDraw, UiPushClip, UiPopClip,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

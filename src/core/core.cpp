@@ -44,6 +44,7 @@
 #include "buff_service.h"
 #include "ground_glue.h"
 #include "marker_capture.h"
+#include "minimap_draw.h"
 #include "inventory.h"
 #include "teleport.h"
 #include "component_service.h"
@@ -1278,10 +1279,22 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             // the camera comes through the UI scope detours: hooked here in pass-through, so markers work also when
             // the HUD editor is switched off (its own install reuses them)
             std::string why;
-            if (emf::core::hud::install_scope_hooks(g_state->sigs, known, build, &why))
+            if (emf::core::hud::install_scope_hooks(g_state->sigs, known, build, &why)) {
                 emf::core::marker_capture_set_layout(view_off);
-            else
+                // v35 the minimap: the game's own map drawn into the canvases' MAP commands
+                auto usable = [&](Sig s) -> uintptr_t {
+                    const auto& r = g_state->sigs[static_cast<size_t>(s)];
+                    return emf::is_usable(r, known) ? r.addr : 0;
+                };
+                emf::core::minimap_draw_setup(
+                    reinterpret_cast<emf::core::MapCanvasFn>(usable(Sig::MapCanvasDraw)),
+                    reinterpret_cast<emf::core::UiPushClipFn>(usable(Sig::UiPushClip)),
+                    reinterpret_cast<emf::core::UiPopClipFn>(usable(Sig::UiPopClip)), emf::core::hud::scope_open_original(),
+                    emf::core::hud::scope_close_original());
+                emf::logf("minimap: the game's map in canvases %s", emf::core::minimap_draw_status().c_str());
+            } else {
                 mk.world_why = "the UI scope hooks: " + why;
+            }
         }
         const auto& clr = g_state->sigs[static_cast<size_t>(Sig::MapMarkerSliceClear)];
         uint32_t count_off = 0;

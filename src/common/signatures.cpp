@@ -229,6 +229,13 @@ constexpr SigDef kSignatures[] = {
     // The game's fog sampler: FogSample(out 0x50 B, FogQuery*, WorldPosition*) -> not_loaded at +0, float w[18] at +8
     // (private docs/research/fog_query_2026-11-12.md).
     {Sig::FogSample, "FogSample", "40 55 56 41 56 48 8D 6C 24 A0 48 81 EC 60 01 00 00 4D 8B 08 4C 8B F2 4D 8B 50 08 48 8B F1 49 8B 40 10 49 81 C1 00 00 00 80", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x1222180u, 0xa484b0u}, false},
+    // The game's world-map canvas: MapCanvasDraw(UiScope*, const MapView*) draws the whole map over the scope's node
+    // rect (+0x114) at view+0x10 UI units per metre (base zoom view+0x58); its pattern covers the frame context
+    // (+0x1e: mov r8, [rip]), +0xd0 and +0x38 (private docs/research/minimap_renderer_2026-11-12.md).
+    {Sig::MapCanvasDraw, "MapCanvasDraw", "40 55 53 56 57 41 55 41 56 48 8D AC 24 28 E9 FF FF B8 D8 17 00 00 E8 ?? ?? ?? ?? 48 2B E0 4C 8B 05 ?? ?? ?? ?? 45 33 ED 48 8B D9 48 8B FA 45 8B F5 49 8B 80 D0 00 00 00 48 8B 08 48 85 C9 74 ?? 4C 8B 71 38", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0xd7c690u, kRvaUnchecked}, false},
+    // UiPushClip(layer, const float rect[4], char intersect) and UiPopClip(layer): the UI's clip stack (strictly paired).
+    {Sig::UiPushClip, "UiPushClip", "48 89 5C 24 10 57 48 83 EC 60 0F 29 74 24 50 48 8B F9 48 8B 89 10 42 00 00", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x11c3a30u, kRvaUnchecked}, false},
+    {Sig::UiPopClip, "UiPopClip", "83 7F 14 02 75 14 48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 48 8B C8 E8", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x11c2610u, kRvaUnchecked}, false, 0x15, "48 FF 89 B0 01 00 00 83 79 08 04"},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

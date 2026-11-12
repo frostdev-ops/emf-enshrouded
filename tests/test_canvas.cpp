@@ -199,3 +199,20 @@ TEST_CASE("canvas: an IMAGE command carries a picture handle (image_load); none:
     CHECK(kept == 1u);
     CHECK(s.view()->at(0).cmds[0].image == 3u);
 }
+
+TEST_CASE("map draw plan: the canvas in UI units, the whole world's rect so (cx, cz) lands at its centre, north up") {
+    EmfCanvas c = spec(16, 16, 220, 220, EMF_CANVAS_TOP_LEFT);
+    // the UI space is 1920 x 1080 units here; 2 m per canvas unit
+    const MapDrawPlan p = plan_map_draw(c, 1920, 1080, 1500, 4740, 2.0, 10240, 10240);
+    CHECK(p.ok);
+    CHECK(p.vp[0] == doctest::Approx(16));
+    CHECK(p.vp[2] == doctest::Approx(220));
+    CHECK(p.s == doctest::Approx(0.5f));  // 1 unit per canvas unit / 2 m
+    const float centre_x = 16 + 110, centre_y = 16 + 110;
+    CHECK(p.cv[0] == doctest::Approx(centre_x - 0.5f * 1500));
+    CHECK(p.cv[1] == doctest::Approx(centre_y - 0.5f * (10240 - 4740)));
+    CHECK(p.cv[2] == doctest::Approx(0.5f * 10240));
+    CHECK(p.base == doctest::Approx(0.2f));  // 2048 / 10240, as the game's map
+    CHECK_FALSE(plan_map_draw(c, 1920, 1080, 1500, 4740, 2.0, 1, 1).ok);       // the world size not set yet
+    CHECK_FALSE(plan_map_draw(c, 0, 1080, 1500, 4740, 2.0, 10240, 10240).ok);  // no UI space
+}

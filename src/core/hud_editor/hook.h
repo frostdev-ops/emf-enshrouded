@@ -84,6 +84,9 @@ struct UiSpace {
 };
 LiveInfo hud_live(size_t element);
 UiSpace hud_ui_space();
+// The scope open and close as the game has them (the trampolines; null before install_scope_hooks).
+OpenFn scope_open_original();
+CloseFn scope_close_original();
 uint32_t hud_fault_code();  // the exception code of a fault in a detour, 0 for none
 bool hud_bars_hooked();     // the bar detour is installed (the bars can move on their own)
 

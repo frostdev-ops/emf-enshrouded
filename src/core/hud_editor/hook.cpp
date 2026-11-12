@@ -1,4 +1,5 @@
 #include "core/hud_editor/hook.h"
+#include "core/minimap_draw.h"
 
 #include <windows.h>
 
@@ -50,6 +51,7 @@ std::atomic<bool> g_bars_hooked{false};
 
 OpenFn g_o_open = nullptr;
 CloseFn g_o_close = nullptr;
+thread_local void* t_play_scope = nullptr;  // doPlayStateUi()'s scope while it is open (the minimap draws before its close)
 
 uint64_t pack2(float a, float b) { return std::bit_cast<uint64_t>(std::array<float, 2>{a, b}); }
 std::array<float, 2> unpack2(uint64_t v) { return std::bit_cast<std::array<float, 2>>(v); }
@@ -318,8 +320,12 @@ uint32_t hud_fault_code() { return g_fault.load(std::memory_order_relaxed); }
 bool hud_bars_hooked() { return g_bars_hooked.load(std::memory_order_relaxed); }
 
 // ---- the detours' bodies ----
+OpenFn scope_open_original() { return g_o_open; }
+CloseFn scope_close_original() { return g_o_close; }
+
 void* hud_open_path(void* scope, const NameInfo* ni, OpenFn original, uint64_t now_ms) {
     void* r = original(scope, ni);
+    if (ni && ni->hash == kUiSpaceHash) t_play_scope = scope;  // v35 minimap: the map is drawn before its close
     // markers (API v33): the camera, the world UI and the map seen this frame; also while the editor is off
     if (ni) {
         const uint8_t* node = nullptr;
@@ -334,6 +340,10 @@ void* hud_open_path(void* scope, const NameInfo* ni, OpenFn original, uint64_t n
 }
 
 void hud_close_path(void* scope, CloseFn original) {
+    if (scope && scope == t_play_scope) {
+        t_play_scope = nullptr;
+        minimap_draw_in_play_ui();  // the game's map in the canvases' MAP commands, inside doPlayStateUi()
+    }
     ScopeTracker::Closed c;
     if (t_tracker.depth() > 0)  // also while off: a pushed transform is still popped
         guarded_before_close(scope, is_on() ? current_snapshot() : nullptr, &c);

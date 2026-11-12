@@ -152,6 +152,25 @@ void canvas_layout(const EmfCanvas& c, float display_w, float display_h, float o
     out[3] = h;
 }
 
+MapDrawPlan plan_map_draw(const EmfCanvas& c, float ui_w, float ui_h, double cx, double cz, double mpu, float world_w,
+                          float world_h) {
+    MapDrawPlan p;
+    if (!(ui_w > 0) || !(ui_h > 0) || !(world_w > 100) || !(world_h > 100) || !(world_w < 1e6f) || !(world_h < 1e6f) ||
+        !(mpu > 0) || !std::isfinite(cx) || !std::isfinite(cz))
+        return p;
+    canvas_layout(c, ui_w, ui_h, p.vp);
+    const double k = p.vp[2] / c.w;  // UI units per canvas unit
+    p.s = static_cast<float>(k / mpu);
+    const double mx = p.vp[0] + p.vp[2] * 0.5, my = p.vp[1] + p.vp[3] * 0.5;
+    p.cv[0] = static_cast<float>(mx - p.s * cx);
+    p.cv[1] = static_cast<float>(my - p.s * (world_h - cz));
+    p.cv[2] = p.s * world_w;
+    p.cv[3] = p.s * world_h;
+    p.base = 2048.0f / (world_w < world_h ? world_w : world_h);
+    p.ok = std::isfinite(p.s) && p.s > 0 && std::isfinite(p.cv[0]) && std::isfinite(p.cv[1]);
+    return p;
+}
+
 void canvas_world_to(const float rect[4], float units_w, double cx, double cz, double mpu, double x, double z, float* px,
                      float* py) {
     const double k = units_w > 0 ? rect[2] / units_w : 1.0;  // pixels per canvas unit

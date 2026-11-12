@@ -54,6 +54,16 @@ void canvas_layout(const EmfCanvas& c, float display_w, float display_h, float o
 // `units_w` units wide drawn at `rect` (north up).
 void canvas_world_to(const float rect[4], float units_w, double cx, double cz, double mpu, double x, double z, float* px,
                      float* py);
+// The game's map in a canvas (the MAP command, part 3b): in the UI space (ui_w x ui_h units), the canvas's rect (the
+// clip), the rect of the whole W x H world so that (cx, cz) lands at the canvas's centre (north up), the zoom s (UI units
+// per metre) and the game's base zoom (2048 / min(W, H)). Not ok for a world size not set yet or no UI space.
+struct MapDrawPlan {
+    bool ok = false;
+    float vp[4] = {}, cv[4] = {};
+    float s = 0, base = 0;
+};
+MapDrawPlan plan_map_draw(const EmfCanvas& c, float ui_w, float ui_h, double cx, double cz, double mpu, float world_w,
+                          float world_h);
 // The fog of war over a canvas: cells of whole 8 m fog pixels, at most 72 across, each with the unexplored share as its
 // alpha (explored cells are left out). `explored(x, z)` answers 0..1.
 struct FogCell {
