@@ -10,6 +10,7 @@
 
 #include "attributes.h"
 #include "buffs.h"
+#include "canvas.h"
 #include "fog_grid.h"
 #include "ground_service.h"
 #include "map_actions.h"
@@ -199,6 +200,7 @@ struct CoreState {
     // v35 a minimap's parts
     struct Minimap {
         FogStore fog;  // the client's fog of war, copied twice a second
+        CanvasStore canvases;
     } minimap;
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them
     std::mutex setting_watchers_lock;

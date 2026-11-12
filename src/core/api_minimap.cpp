@@ -3,6 +3,8 @@
 // 2026-11-11-markers-design part 4, plan 2026-11-12-markers-step3.
 #include <windows.h>
 
+#include <intrin.h>
+
 #include <cstring>
 
 #include <vector>
@@ -10,6 +12,7 @@
 #include "common/seh.h"
 #include "common/world_view.h"
 #include "core/api.h"
+#include "core/fault_report.h"
 #include "core/marker_capture.h"
 #include "core/player_view.h"
 
@@ -86,7 +89,33 @@ uint32_t api_map_markers(EmfGameMarker* out, uint32_t cap) {
     }
     return static_cast<uint32_t>(all.size());
 }
-bool api_canvas_set(const char*, const EmfCanvas*) { return false; }
-bool api_canvas_draw(const char*, const EmfCanvasCmd*, uint32_t) { return false; }
+bool api_canvas_set(const char* id, const EmfCanvas* c) {
+    CoreState* s = core_state();
+    if (!s) return false;
+    const std::string owner = module_name_of(_ReturnAddress());
+    const auto r = s->minimap.canvases.set(owner, id, c);
+    switch (r) {
+        case CanvasStore::SetResult::Ok:
+        case CanvasStore::SetResult::Replaced:
+        case CanvasStore::SetResult::Removed: return true;
+        case CanvasStore::SetResult::NotFound: return false;
+        default: break;
+    }
+    if (s->log_line) {
+        const char* why = r == CanvasStore::SetResult::BadId    ? "a bad id (1-48 of A-Z a-z 0-9 _ . - :)"
+                          : r == CanvasStore::SetResult::Full    ? "32 canvases already"
+                          : r == CanvasStore::SetResult::Taken   ? "the id is another mod's"
+                                                                 : "bad numbers (corner 0-3, shape 0-1, w and h 8-1080)";
+        s->log_line("canvas_set refused (" + owner + "): " + why);
+    }
+    return false;
+}
+
+bool api_canvas_draw(const char* id, const EmfCanvasCmd* cmds, uint32_t count) {
+    CoreState* s = core_state();
+    if (!s) return false;
+    uint32_t kept = 0;
+    return s->minimap.canvases.draw(module_name_of(_ReturnAddress()), id, cmds, count, &kept);
+}
 
 }  // namespace emf::core
