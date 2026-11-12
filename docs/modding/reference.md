@@ -1,7 +1,7 @@
 # EMF API reference
 
 The C API is one table of function pointers, `EmfApi`, declared in `sdk/include/emf/emf_api.h` and passed to your
-`emf_mod_load`. It only grows: each version appends functions at the end (`EMF_API_VERSION` 20 today), so a mod built
+`emf_mod_load`. It only grows: each version appends functions at the end (`EMF_API_VERSION` 36 today), so a mod built
 for an older version works with a newer core. `sdk/include/emf/emf.hpp` wraps it in C++; prefer the wrappers.
 
 **Threads.** "World callback" below means: inside `on_tick`, `run_on_world`, `on_event`, a command, a put/take result
@@ -132,7 +132,7 @@ value that moves is reported to the mod as a change.
 | — | `hook_program(name, pre, post, user)` | wrap a game ECS program's update by name (`docs/ecs_programs.md`): `pre` before, `post` after, on game worker threads. Programs sharing one function all trigger it. |
 | — | `register_program(name, kind, fn, user)` | your own per-tick system program (iterates no entities). Register in `emf_mod_load`; at most 16 mod programs. In C++ use `emf::add_program` (v3, below), which also declares events. |
 | `emf::api()->spawn(w.raw(), guid, x, y, z)` | `spawn(w, guid, x, y, z)` | spawn a template (16-byte GUID as stored; `emf::parse_guid("xxxxxxxx-...")`) at metres; returns the entity id or 0. Server world, world callback. **Not saved** by the game, except villagers and props (template family Prop) spawned inside a base's build zone, which the game saves like placed objects (seen on build 1285601). |
-| — | `destroy(w, id)` | remove an entity (never a player). Same rules as spawn. |
+| — | `destroy(w, id)` | remove an entity (never a player). Same rules as spawn. On a placed object it removes it the way the game removes any object: the same engine call, its attached parts go with it, players see it vanish and the next save no longer has it. It does not give the item back, drop loot, play the pick-up sound or tell the game a player picked it up. A container's contents are deleted with it (the game itself refuses to pick up a non-empty chest). Never destroy a Flame Altar: it is the base, and every object of that base would be lost at the next save. To have a raid break an object the way enemies do (loot, fade-out), use `damage` on an object with `Destructible`. For a pick-up-style removal that gives the item back, use `remove_building` (v36). |
 | `api()->on_save(cb, user)` | `on_save` | `cb(slot)` after the host wrote a world save (save thread). |
 | `api()->on_load(cb, user)` | `on_load` | `cb(slot)` after the host loaded a world save, before the world starts. |
 
@@ -1074,6 +1074,53 @@ if (api()->player_view(&v)) {
 }
 ```
 
+## v36: removing a placed object
+
+`remove_building(world, &req)` removes an object a player placed (it has a `UsedItem` component) the way a pick-up does:
+the same engine call as `destroy`, and the item goes back to a player or to the ground. Same calling rules as `destroy`:
+the SERVER world, inside a world callback on it (`on_tick`, `run_on_world`, `on_event`). C++: `emf::has_v36()` in
+`emf.hpp`.
+
+| C | Rules |
+|---|---|
+| `remove_building(world, &EmfRemoveBuilding)` | Removes `req->entity`. Gives `{the UsedItem's item, 1}` back, and only when placing that item used it up (`ItemInfo.placementConsume`). Returns true when it was removed. |
+
+Set `size` to `sizeof(EmfRemoveBuilding)`. Fields:
+
+| Field | What |
+|---|---|
+| `entity` | the object to remove |
+| `refund` | `EMF_REFUND_NONE` (0): nothing back. `EMF_REFUND_DROP` (1): a loose pickup at the object, 0.5 m up. `EMF_REFUND_PLAYER` (2): put into `player`'s inventory through the game's transaction; when nothing fit, dropped at the object instead. |
+| `player` | with `EMF_REFUND_PLAYER`: who gets the item |
+| `flags` | `EMF_REMOVE_FORCE` (0x01): remove it even when it holds items (they are lost). Never works on a Flame Altar. |
+| `refunded` | out: the item id given back (0: none). With `_PLAYER` the inventory's answer comes after the step, and a full inventory means a drop at the object. |
+| `why` | out: why it was refused (`""` when removed); also written to the log |
+
+Refused, with nothing changed:
+
+- a player;
+- a Flame Altar, even with `EMF_REMOVE_FORCE` (use `destroy` if you really mean it: destroying an altar loses the whole
+  base at the next save);
+- an object no player placed (no `UsedItem`): use `destroy`;
+- an object holding items in its own or linked inventories, unless `EMF_REMOVE_FORCE` (then the items are lost);
+- a refund player who is not a player;
+- an unknown `refund` or `flags`;
+- a call outside a world callback, or not on the server world.
+
+Like `destroy`, it plays no pick-up sound and sends no `BuildingPickUpEvent` (nothing in the game needs it for player
+objects).
+
+```cpp
+EmfRemoveBuilding req{};
+req.size = sizeof req;
+req.entity = object;
+req.refund = EMF_REFUND_PLAYER;
+req.player = player;
+if (!api()->remove_building(world, &req)) {
+    // req.why says why, e.g. a chest that is not empty
+}
+```
+
 ## SDK headers (header-only C++, no ABI)
 
 | Header | What |
@@ -1101,7 +1148,7 @@ every mod under a name, as in EMF.exe; a load applies at the next start), `hud.l
 for the server world's jobs and each mod), `goto [#k] <x> <y> <z> [ground]` / `goto [#k] <entity> [ground]`
 (v20: teleports you, or the k-th player, there or beside that entity; the result follows a few steps later), `entities`, `near [radius]`, `inv <entity>`,
 `inspect <entity>`, `tpl <entity> <component> [bytes] [offset]`, `tplset <entity> <component> <offset> <type> <value>`,
-`stack <item> <max>`, `destroy <entity>`, `chat.players` (v19: the players of the world you host or of the
+`stack <item> <max>`, `destroy <entity>`, `remove <entity> [drop|<player>] [force]` (v36: removes a placed object like a pick-up; `drop` leaves its item on the ground, a player number puts it in that player's inventory, `force` also removes a non-empty container), `chat.players` (v19: the players of the world you host or of the
 dedicated server, with their account hashes for `[chat] admins`, their connection and name), `world.get [setting]`,
 `world.set <setting> <value> [persist]`, `world.reset [setting|all] [persist]`, `world.list`, `world.export` (v21: the
 running world's settings, [world_settings.md](world_settings.md)). Commands go into the in-game console (the key under Esc), the optional

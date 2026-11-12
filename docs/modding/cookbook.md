@@ -583,6 +583,30 @@ end)
 The map is north up, so only the arrow turns. `emf.fog_at(x, z)` and `emf.map_markers()` give the explored share and the
 game's own markers; see lua.md, "Canvases and the minimap (1.27)".
 
+## Removing placed objects (a raid that takes buildings apart)
+
+Three ways to take an object a player placed out of the world. Pick by what the players should see.
+
+- `emf.damage` on an object with `Destructible`: the game breaks it the way enemies do, with loot and fade-out. Use it
+  for the raid's own attacks.
+- `emf.remove_building` (Lua 1.28): the object goes the way a pick-up does and its item comes back, to a player or to
+  the ground. Use it to clean up after a raid or to move a base. It refuses a Flame Altar and a chest that holds items
+  (unless `force = true`, which loses the items).
+- `emf.destroy`: the object just vanishes, with no item back and no loot. A container's contents go with it. Never use
+  it on a Flame Altar: it is the base, and every object of it would be lost at the next save.
+
+```lua
+-- a raid's cleanup: take the objects a mod listed down, their items dropped for the owners to pick up
+local function take_down(world, ids)
+  local n = 0
+  for _, id in ipairs(ids) do
+    local ok, why = emf.remove_building(world, id, {refund = "drop"})
+    if ok then n = n + 1 else emf.log("skipped", id, why) end  -- players, altars and full chests are refused
+  end
+  return n
+end
+```
+
 ## Run code before or after one of the game's programs
 
 ```cpp
