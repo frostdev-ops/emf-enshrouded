@@ -112,7 +112,7 @@ E or Esc closes the window. **Players who joined** with Beastmaster switched on 
 (see Playing on a server). The others get the stable's commands in the chat when they press E at its prompt, and use
 them within 10 m of a stable: `/beastmaster active <name or
 number>`, `/beastmaster store <name or number>` and `/beastmaster release <name or number>` (the same command again
-within 10 s lets the beast go). `/beastmaster list` shows which beasts are active.
+within 10 s lets the beast go). `/beastmaster list` shows which beasts are active. Rename a beast with `/beastmaster rename <name or number> <new name>`.
 
 **Your beasts' strength.** A beast out is always at your level (also when you level up while it is out), with the
 health and damage a wild one of its kind has at that level, changed by its role:
@@ -323,6 +323,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `beastmaster.threat` | **console:** the monsters held on you or your beasts now, and for how long |
 | `beastmaster.idle` | **console:** what your beasts do while you stand still now (their scenes), or how long you have stood still |
 | `beastmaster.home` | **console:** where your beasts at home are (in a Large Stable) and whether they stroll or rest |
+| `beastmaster.spawn <species>` | **console, admin:** puts a wild beast of that species 5 m in front of you, to try taming it. Since 1.16.1 a beast being tamed stops fighting you, a tamed beast loses its debuffs (a bleed no longer kills it after taming), and a beast brought back from far away drops its chase and follows you again |
 | `beastmaster.loyalty <name or number> <1-10>` | **host console only:** set a beast's loyalty (tests); the reply says its talent points |
 | `beastmaster.give <species>` | **host console only:** add a beast to your collection without taming it (wolf, boar, sabretooth, hound, bear, aurochs, snake, crimson_snake, golden_snake, albino_snake) |
 | `beastmaster.as <#k or player entity> <word> [...]` | **host or server console only:** run a word as that player (#2: the second player, lowest entity id first): `give`, `loyalty`, `open [name]` (their Beasts window, on that beast's tab), or any `/beastmaster` word; for tests on a dedicated server |

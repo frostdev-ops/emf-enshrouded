@@ -49,6 +49,7 @@ Let go early, right-click or close the map to cancel; the click does not reach t
   (`home_combat_seconds`), not while dead, once a minute (`map_cooldown_seconds`), no cost. Admins have no cooldown.
 - **Players need EMF on their game** (to do the gesture and send the spot), not this mod: it runs where the world runs.
   A player without EMF can use `/tp.mark`.
+- **On your way**: as soon as the ground search starts, you see "On your way: finding the ground there".
 - **The landing**: the map gives the spot, not its height. The server finds the ground there with the game's own
   terrain ray, then the game's ground search settles you on it. A place nobody is near is not loaded yet: you wait high
   over it for a moment while it loads, then go down to the ground. If there is still no ground, you are put back where
@@ -74,7 +75,7 @@ works too (as the chat shows it); when two players share it, use `#k`. No countd
 | `tp <#k\|name>` | you to player k (beside them) |
 | `tp <#k\|name> <#m\|name>` | player k to player m (works from a dedicated server's console) |
 | `bring <#k\|name>` | player k to you |
-| `tp.pos [#k] <x> <y> <z> [ground]` | you (or player k) to a position; `ground`: the game's ground search there |
+| `tp.pos [#k] <x> <y> <z> [ground]` | you (or player k) to a position; `ground`: the game's ground search there. The position can be written any way (`3 4 5`, `(3, 4, 5)`, `3;4;5`, or a pasted `pos` line) |
 | `tp.back [#k]` | you (or player k) back to where you stood before your last teleport by this mod (this session) |
 | `tp.list` | the players, their `#k` and where they are |
 | `tp.mark #k` | player k to their own map waypoint |

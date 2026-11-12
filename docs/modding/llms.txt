@@ -462,7 +462,7 @@ help, mods, settings, set, hooks, pattern, hud.list, hud.move, hud.scale, hud.hi
 - stack <item name> <max 1-65535>: change an item's stack size until the game restarts (host)
 - door <entity> [open|close|lock|unlock] [front|back]: a door's state, or open, close or lock it (host)
 - path <x> <y> <z> [jumps] [closest] [nodes]: a path from you on the game's path grid (it moves nothing; host)
-- remove <entity> [drop|<player>] [force]: take a placed object away like a pick-up, its item back as a drop or to a player; refused for a chest with items unless force, and for a Flame Altar (host)
+- remove <entity> [me|drop|<player>] [force]: take a placed object away like a pick-up, its item back to you, as a drop or to a player; refused for a chest with items unless force, and for a Flame Altar (host)
 - destroy <entity>: remove an entity from the world, never a player (host)
 - hud.list: the HUD editor's state, every HUD part with its offset, scale and whether it is hidden, and the layouts
 - hud.move <part> <x> <y>: move a HUD part, in percent of the screen from where the game draws it (e.g. hud.move vitals 5 -2.5)
@@ -566,6 +566,7 @@ From the mods in the EMF zip (only while that mod runs):
 - beastmaster.idle: what your beasts do while you stand still now [beastmaster]
 - beastmaster.loyalty <name or number> <1-10>: set a beast's loyalty (admin) [beastmaster]
 - beastmaster.give <species>: add a beast to your collection (admin) [beastmaster]
+- beastmaster.spawn <species>: a wild beast 5 m in front of you, to try taming (admin) [beastmaster]
 - beastmaster.as <#k or player entity> <word> [...]: run a player's word as that player: give, loyalty, open [name], or any /beastmaster word (console only; for tests on a dedicated server) [beastmaster]
 Lua mods add <id>.<name> commands with emf.command.
 
