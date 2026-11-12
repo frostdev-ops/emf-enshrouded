@@ -1212,6 +1212,9 @@ void cmd_remove(EmfWorld* w, int argc, const char* const* argv, void* u) {
             r.flags |= EMF_REMOVE_FORCE;
         } else if (a == "drop" && r.refund == EMF_REFUND_NONE) {
             r.refund = EMF_REFUND_DROP;
+        } else if ((lower(a) == "me" || lower(a) == "player") && r.refund == EMF_REFUND_NONE && c.player && c.player()) {
+            r.refund = EMF_REFUND_PLAYER;  // whoever typed it
+            r.player = c.player();
         } else if (r.refund == EMF_REFUND_NONE && parse_uint(a.c_str(), 0xffffffffu, &r.player) && r.player) {
             r.refund = EMF_REFUND_PLAYER;
         } else {
@@ -1219,7 +1222,7 @@ void cmd_remove(EmfWorld* w, int argc, const char* const* argv, void* u) {
         }
     }
     if (!ok) {
-        command_reply_line("usage: remove <entity> [drop|<player>] [force]");
+        command_reply_line("usage: remove <entity> [me|drop|<player>] [force]");
         return;
     }
     if (!c.api->remove_building(w, &r)) {
@@ -1275,8 +1278,8 @@ bool add_builtin_commands(BuiltinContext& ctx) {
          cmd_door},
         {"path", "<x> <y> <z> [jumps] [closest] [nodes]: a path from you on the game's path grid (it moves nothing; host)",
          cmd_path},
-        {"remove", "<entity> [drop|<player>] [force]: take a placed object away like a pick-up, its item back as a drop or "
-                   "to a player; refused for a chest with items unless force, and for a Flame Altar (host)", cmd_remove},
+        {"remove", "<entity> [me|drop|<player>] [force]: take a placed object away like a pick-up, its item back to you, as a "
+                   "drop or to a player; refused for a chest with items unless force, and for a Flame Altar (host)", cmd_remove},
         {"destroy", "<entity>: remove an entity from the world, never a player (host)", cmd_destroy},
     };
     bool ok = true;

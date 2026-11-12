@@ -1106,7 +1106,7 @@ TEST_CASE("builtin commands (v36): remove takes a placed object away like a pick
     CHECK(bsaid("removed entity 63; the item came back to player 50"));
     CHECK(bsaid("entity 63 not removed: the refund's player is not a player"));
     CHECK(g_pickup_amounts == std::vector<uint32_t>{1, 1});  // 60's drop and 63's (the player's inventory was not there)
-    CHECK(bsaid("usage: remove <entity> [drop|<player>] [force]"));
+    CHECK(bsaid("usage: remove <entity> [me|drop|<player>] [force]"));
 }
 
 TEST_CASE("api remove_building (v36): no request, a small size field, or a call outside a world callback is refused") {
@@ -1271,4 +1271,17 @@ TEST_CASE("builtin commands: goto and path read coordinates written with commas 
     for (const auto& l : g_bout) refused += l.find("path not asked") != std::string::npos;
     CHECK(refused == 3u);  // read fine; asked (and refused here: path_find is off in this fake)
     CHECK_FALSE(bsaid("usage: path"));
+}
+
+TEST_CASE("builtin commands (v36): remove <id> me (or player) gives the item back to whoever typed it") {
+    BFixture f;
+    f.state.get_component = rm_gc;
+    RemoveWorld rw;
+    f.center.enqueue("remove 60 me");
+    f.center.enqueue("remove 63 player");
+    f.run(rw.iw.w);
+    // the typing player is 42 in this fake, who has no PlayerState: refused for that reason, not as a usage error
+    CHECK_FALSE(bsaid("usage: remove"));
+    CHECK(bsaid("entity 60 not removed: the refund's player is not a player"));
+    CHECK(bsaid("entity 63 not removed: the refund's player is not a player"));
 }
