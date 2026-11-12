@@ -957,8 +957,10 @@ try {
                          "mods/villager_jobs/villager_jobs.cpp", "game/emf/mods/beastmaster/main.lua",
                          "game/emf/mods/beastmaster/mod.json", "game/emf/mods/beastmaster/README.md",
                          "game/emf/mods/necromancer/main.lua", "game/emf/mods/necromancer/mod.json",
-                         "game/emf/mods/necromancer/README.md") | Where-Object { $z.n -notcontains "$($z.p)/$_" })
-            Check ($missing.Count -eq 0) "$($z.p).zip has Villager Jobs, Night Raids, Beastmaster and Necromancer (missing: $($missing -join ', '))"
+                         "game/emf/mods/necromancer/README.md", "game/emf/mods/minimap/main.lua",
+                         "game/emf/mods/minimap/mod.json", "game/emf/mods/minimap/README.md") |
+                         Where-Object { $z.n -notcontains "$($z.p)/$_" })
+            Check ($missing.Count -eq 0) "$($z.p).zip has Villager Jobs, Night Raids, Beastmaster, Necromancer and the sample minimap (missing: $($missing -join ', '))"
         }
         # the example mods are in both downloads under examples\, and never installed
         # every folder in examples\lua and examples\cpp, read from the repository (a new example cannot be left out)
@@ -1053,6 +1055,7 @@ try {
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\raids\mod.json") -Raw) -match '"enabled": false') "Night Raids is off by default"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\beastmaster\mod.json") -Raw) -match '"enabled": false') "Beastmaster is off by default"
         Check ((Get-Content (Join-Path $pkg "game\emf\mods\necromancer\mod.json") -Raw) -match '"enabled": false') "Necromancer is off by default"
+        Check ((Get-Content (Join-Path $pkg "game\emf\mods\minimap\mod.json") -Raw) -match '"enabled": false') "the sample minimap is off by default"
 
         # build the template inside the unzipped package (path with spaces), with only the packaged SDK, the way its README
         # says: with the preset it ships (cmake --preset release, then cmake --build --preset release, in its folder)
