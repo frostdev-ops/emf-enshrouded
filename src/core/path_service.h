@@ -45,6 +45,13 @@ struct PathDone {
     std::vector<EmfPathPoint> points;
 };
 
+// The game's 0x110-byte path query (private research path_query_impl_2026-11-12.md 3.2).
+constexpr size_t kPathQueryBytes = 0x110;
+// Writes EMF's fields over the game's defaults (PathQueryDefaults filled `q` first): owner, start, target, targetType
+// (2 = closest node as fallback), maxIterations, moveTypes (walk always), jump heights, the vertical search radii
+// (4 half metres, as the game's own callers), the room the unit needs (half metres, rounded up), the time-slice flag.
+void fill_path_query(uint8_t q[kPathQueryBytes], const EmfPathQuery& in, uint32_t owner);
+
 // The game's PathfindingResult and the number of points -> EMF_PATH_*.
 uint32_t path_status(uint32_t game_result, size_t points);
 // "" when the query can be sent, else why not.

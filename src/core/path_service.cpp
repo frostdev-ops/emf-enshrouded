@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 
 namespace emf::core {
 
@@ -21,6 +22,25 @@ float dist(const float a[3], const float b[3]) {
 constexpr uint16_t kKnownMoves = EMF_PATH_WALK | EMF_PATH_JUMP_UP | EMF_PATH_JUMP_DOWN | EMF_PATH_JUMP_ACROSS |
                                  EMF_PATH_OPEN_DOOR | EMF_PATH_SWIM;
 }  // namespace
+
+void fill_path_query(uint8_t q[kPathQueryBytes], const EmfPathQuery& in, uint32_t owner) {
+    auto put = [&](size_t off, const void* v, size_t n) { std::memcpy(q + off, v, n); };
+    auto put_u32 = [&](size_t off, uint32_t v) { put(off, &v, 4); };
+    put_u32(0x00, owner);
+    put(0x10, in.from, 12);
+    put(0x1c, in.to, 12);
+    q[0x36] = in.closest ? 2 : 0;
+    put_u32(0x48, in.max_nodes ? in.max_nodes : kPathDefaultNodes);
+    const uint16_t moves = static_cast<uint16_t>(in.moves | EMF_PATH_WALK);
+    put(0x54, &moves, 2);
+    q[0x56] = in.max_jump_up;
+    q[0x57] = in.max_jump_down;
+    q[0xca] = 1;
+    put_u32(0xf4, 4);
+    put_u32(0xfc, 4);
+    put_u32(0x100, in.width > 0 ? static_cast<uint32_t>(std::ceil(in.width * 2.0f)) : 0u);
+    put_u32(0x104, in.height > 0 ? static_cast<uint32_t>(std::ceil(in.height * 2.0f)) : 0u);
+}
 
 uint32_t path_status(uint32_t game_result, size_t points) {
     switch (game_result) {

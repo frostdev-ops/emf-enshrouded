@@ -2,6 +2,7 @@
 #include <doctest.h>
 
 #include <cmath>
+#include <cstring>
 #include <limits>
 #include <map>
 #include <string>
@@ -228,4 +229,47 @@ TEST_CASE("path service: at most 512 points are kept; the count says how many we
     CHECK(done[0].result.count == kMaxPathPoints);
     CHECK(done[0].points.size() == kMaxPathPoints);
     CHECK(done[0].result.reaches == 1);  // judged on the game's last point, not the last kept one
+}
+
+TEST_CASE("path query bytes: EMF's fields over the game's defaults, at the offsets the game reads") {
+    uint8_t b[kPathQueryBytes];
+    for (auto& x : b) x = 0xAB;  // stands in for the game's defaults: what EMF does not set stays
+    EmfPathQuery q = query(10, 4);
+    q.from[1] = 51.5f;
+    q.moves = EMF_PATH_JUMP_UP | EMF_PATH_JUMP_DOWN;  // walk is added
+    q.max_jump_up = 4;
+    q.max_jump_down = 6;
+    q.width = 1.2f;   // 3 half metres (rounded up)
+    q.height = 2.0f;  // 4
+    q.closest = 1;
+    q.max_nodes = 0;  // EMF's default
+    fill_path_query(b, q, 77);
+    auto u32 = [&](size_t o) { uint32_t v; std::memcpy(&v, b + o, 4); return v; };
+    auto f32 = [&](size_t o) { float v; std::memcpy(&v, b + o, 4); return v; };
+    auto u16 = [&](size_t o) { uint16_t v; std::memcpy(&v, b + o, 2); return v; };
+    CHECK(u32(0x00) == 77u);
+    CHECK(f32(0x10) == 0.0f);
+    CHECK(f32(0x14) == 51.5f);
+    CHECK(f32(0x1c) == 10.0f);
+    CHECK(f32(0x24) == 4.0f);
+    CHECK(b[0x36] == 2);  // UseClosestTargetNodeAsFallback
+    CHECK(u32(0x48) == kPathDefaultNodes);
+    CHECK(u16(0x54) == (EMF_PATH_WALK | EMF_PATH_JUMP_UP | EMF_PATH_JUMP_DOWN));
+    CHECK(b[0x56] == 4);
+    CHECK(b[0x57] == 6);
+    CHECK(b[0xca] == 1);         // the time-slice flag
+    CHECK(u32(0xf4) == 4u);      // start search radius vertical (half metres), as the game's own callers
+    CHECK(u32(0xfc) == 4u);      // search radius vertical
+    CHECK(u32(0x100) == 3u);     // min horizontal space
+    CHECK(u32(0x104) == 4u);     // min vertical space
+    CHECK(b[0x28] == 0xAB);      // priority: the game's default kept
+    CHECK(b[0x2a] == 0xAB);      // unknown bytes kept
+    CHECK(f32(0x6c) != 0.0f);    // the costs kept (0xABABABAB here)
+    q.closest = 0;
+    q.max_nodes = 9000;
+    q.width = 0;
+    fill_path_query(b, q, 77);
+    CHECK(b[0x36] == 0);
+    CHECK(u32(0x48) == 9000u);
+    CHECK(u32(0x100) == 0u);
 }
