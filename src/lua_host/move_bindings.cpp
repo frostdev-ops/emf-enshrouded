@@ -120,6 +120,7 @@ int l_enemy_move(lua_State* L) {
     o.size = sizeof o;
     o.enemy = enemy;
     int fn_index = 4;
+    if (lua_isnil(L, 4) && lua_gettop(L) >= 5) fn_index = 5;  // emf.enemy_move(w, e, p, nil, fn)
     if (lua_istable(L, 4)) {
         fn_index = 5;
         o.arrive = static_cast<float>(opt_number(L, 4, "arrive"));

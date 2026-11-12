@@ -235,7 +235,7 @@ appended (check api->size before using a later one). Refusals return NULL/0/fals
 
 ### v40
 - uint32_t enemy_move(EmfWorld* world, EmfMoveOrder* order, EmfMoveCallback cb, void* user): Walks order->enemy to its points (see EMF_MOVE_*).
-- bool enemy_move_cancel(uint32_t id): Ends a move now (its callback gets EMF_MOVE_CANCELLED).
+- bool enemy_move_cancel(uint32_t id): Ends a move (its callback gets EMF_MOVE_CANCELLED): at once inside a world callback on the server world, else at the next step.
 - uint32_t enemy_moving(EmfWorld* world, uint32_t enemy): The id of `enemy`'s move, 0 = it is not moving.
 
 ### Constants

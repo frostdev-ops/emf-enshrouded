@@ -787,9 +787,11 @@ typedef struct EmfMoveOrder {
     uint32_t enemy;              /* the creature (it has DynamicEnemy01BehaviorState); never a player or a boss */
     uint32_t flags;              /* EMF_MOVE_* */
     uint32_t count;              /* points: 1..16 */
-    const EmfPathPoint* points;  /* walked in order; x, y, z are read (move is ignored); path_find's points fit */
-    float arrive;                /* a point is reached within this many metres across (and that + 2 up or down);
-                                    0 = 2; 0.5..50 */
+    const EmfPathPoint* points;  /* walked in order; x, y, z are read (move is ignored); path_find's points fit
+                                    (thin a longer path to 16) */
+    float arrive;                /* a point is reached within this many metres across (and that + 2 up or down), or
+                                    within the creature's guard distance + 1 m once it guards the waypoint (it stops
+                                    about 3 m short); 0 = 2; 0.5..50 */
     float seconds;               /* 0 = no time limit (it still ends stuck); at most 3600 */
     char why[96];                /* refused: why (NUL-terminated) */
 } EmfMoveOrder;
@@ -1553,12 +1555,13 @@ typedef struct EmfApi {
     /* Walks order->enemy to its points (see EMF_MOVE_*). Returns the move's id (from 1), or 0 with order->why: not a
      * server world or not inside a world callback on it, not a creature with the enemy AI, a player, a boss, a player's
      * ally without EMF_MOVE_ALLIES, bad points or numbers, more than 256 moves, no waypoint (spawning is off on this
-     * game build). A move or enemy order already on the creature ends (cancelled). cb (may be NULL) is called once when
-     * the move ends, on the server world's thread (inside enemy_move_cancel for a cancel), after the move is gone: it
-     * may start another. */
+     * game build). Once it holds, a move or enemy order already on the creature ends (cancelled). cb (may be NULL) is
+     * called once when the move ends, after the move is gone (it may start another): after a server step on the server
+     * world's thread; inside enemy_move_cancel, or inside the enemy_move or enemy_order that replaced it; or with
+     * world NULL when the world closes. */
     uint32_t (*enemy_move)(EmfWorld* world, EmfMoveOrder* order, EmfMoveCallback cb, void* user);
-    /* Ends a move now (its callback gets EMF_MOVE_CANCELLED). Inside a world callback on the server world. False: no
-     * such move. */
+    /* Ends a move (its callback gets EMF_MOVE_CANCELLED): at once inside a world callback on the server world, else
+     * at the next step. False: no such move. */
     bool (*enemy_move_cancel)(uint32_t id);
     /* The id of `enemy`'s move, 0 = it is not moving. */
     uint32_t (*enemy_moving)(EmfWorld* world, uint32_t enemy);

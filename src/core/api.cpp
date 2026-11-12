@@ -1084,10 +1084,11 @@ uint32_t api_enemy_order(EmfWorld* w, EmfEnemyOrder* req) {
     if (WorldView(raw(w)).kind() != EMF_WORLD_SERVER) return refuse("not a server world (host only)");
     EnemyOrders* o = g_state->orders;
     if (!o) return refuse("enemy orders are off");
-    if (g_state->moves) g_state->moves->cancel_enemy(w, req->enemy);  // a move on it ends (v40)
     std::string why;
     const uint32_t id = o->add(w, req->enemy, req->target, req->seconds, req->damage, req->flags, &why);
-    return id ? id : refuse(why);
+    if (!id) return refuse(why);
+    if (g_state->moves) g_state->moves->cancel_enemy(w, req->enemy);  // a move on it ends (v40), once the order holds
+    return id;
 }
 
 bool api_enemy_order_cancel(uint32_t id) {
@@ -1139,7 +1140,6 @@ uint32_t api_enemy_move(EmfWorld* w, EmfMoveOrder* req, EmfMoveCallback cb, void
     for (uint32_t i = 0; i < req->count; ++i)
         points.push_back({req->points[i].x, req->points[i].y, req->points[i].z});
     const double arrive = req->arrive == 0.0f ? 2.0 : req->arrive;
-    if (g_state->orders) g_state->orders->cancel_enemy(w, req->enemy);  // an enemy order on it ends (v39)
     MoveOrders::Callback done;
     if (cb)
         done = [cb, user](EmfWorld* world, uint32_t id, uint32_t status) {
@@ -1148,7 +1148,9 @@ uint32_t api_enemy_move(EmfWorld* w, EmfMoveOrder* req, EmfMoveCallback cb, void
         };
     std::string why;
     const uint32_t id = m->add(w, req->enemy, points, arrive, req->seconds, req->flags, std::move(done), &why);
-    return id ? id : refuse(why);
+    if (!id) return refuse(why);
+    if (g_state->orders) g_state->orders->cancel_enemy(w, req->enemy);  // an enemy order on it ends (v39), once the move holds
+    return id;
 }
 
 bool api_enemy_move_cancel(uint32_t id) {

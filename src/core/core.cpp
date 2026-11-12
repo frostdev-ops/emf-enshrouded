@@ -611,12 +611,18 @@ void moves_program(void* ctx, void*) {
         std::lock_guard<std::mutex> l(g_guard_lock);
         work.swap(g_guard_queue);
     }
-    for (const auto& [guarding, guarded] : work) {
+    size_t sent = 0;
+    for (; sent < work.size(); ++sent) {
         auto* ev = static_cast<emf::gen::ecs::StartGuardingEvent*>(emf::core::api_table()->emit_event(
             ctx, "StartGuardingEvent", emf::gen::ecs::StartGuardingEvent::kSize));
-        if (!ev) break;  // logged once by emit_event; a move sends its guard order again
-        ev->guardingEntityId.id = guarding;
-        ev->guardedEntityId.id = guarded;
+        if (!ev) break;  // logged once by emit_event; the rest waits for the next step
+        ev->guardingEntityId.id = work[sent].first;
+        ev->guardedEntityId.id = work[sent].second;
+    }
+    if (sent < work.size()) {
+        std::lock_guard<std::mutex> l(g_guard_lock);
+        g_guard_queue.insert(g_guard_queue.begin(), work.begin() + static_cast<std::ptrdiff_t>(sent), work.end());
+        if (g_guard_queue.size() > kGuardQueueMax) g_guard_queue.resize(kGuardQueueMax);
     }
 }
 // v23 change_component: the emf_components program and its requests (null when off on this game build).
@@ -1379,6 +1385,12 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         d.guard = [](uint32_t guarding, uint32_t guarded) {
             std::lock_guard<std::mutex> l(g_guard_lock);
             if (g_guard_queue.size() < kGuardQueueMax) g_guard_queue.emplace_back(guarding, guarded);
+        };
+        d.unguard = [](uint32_t guarding) {
+            std::lock_guard<std::mutex> l(g_guard_lock);
+            g_guard_queue.erase(std::remove_if(g_guard_queue.begin(), g_guard_queue.end(),
+                                               [guarding](const auto& g) { return g.first == guarding; }),
+                                g_guard_queue.end());
         };
         d.dead = [](EmfWorld* w, uint32_t entity) {
             int32_t cur = 0;

@@ -2,6 +2,7 @@
 // Live spike 2026-11-12: a guard order on an entity 25 m away walked a Vukah straight there (Guard state, ~5 m/s).
 #include <doctest.h>
 
+#include <algorithm>
 #include <array>
 #include <cmath>
 #include <cstring>
@@ -11,10 +12,14 @@
 #include <vector>
 
 #include "core/api.h"
+#include "common/offsets.h"
 #include "core/api_sizes.h"
+#include "core/dispatcher.h"
+#include "core/enemy_orders.h"
 #include "core/move_orders.h"
 #include "emf/emf_api.h"
 #include "emf/generated/components.hpp"
+#include "fake_world.h"
 
 using namespace emf::core;
 
@@ -29,7 +34,8 @@ struct Fake {
     uint32_t next_spawn = 5000;
     std::vector<std::array<double, 3>> spawned;  // waypoints, in order
     std::vector<uint32_t> destroyed;
-    std::vector<std::pair<uint32_t, uint32_t>> guards;  // (guarding, guarded)
+    std::vector<std::pair<uint32_t, uint32_t>> guards;   // (guarding, guarded): every guard order queued
+    std::vector<std::pair<uint32_t, uint32_t>> pending;  // the queue the emf_moves program sends at the next step
     std::map<uint32_t, bool> dead;
     bool spawn_ok = true;
 
@@ -69,7 +75,14 @@ struct Fake {
             destroyed.push_back(e);
             comps.erase({gen::CurrentTransform::kHash, e});
         };
-        d.guard = [this](uint32_t a, uint32_t b) { guards.push_back({a, b}); };
+        d.guard = [this](uint32_t a, uint32_t b) {
+            guards.push_back({a, b});
+            pending.push_back({a, b});
+        };
+        d.unguard = [this](uint32_t a) {
+            pending.erase(std::remove_if(pending.begin(), pending.end(), [a](const auto& g) { return g.first == a; }),
+                          pending.end());
+        };
         d.dead = [this](EmfWorld*, uint32_t e) { return dead.count(e) && dead[e]; };
         return d;
     }
@@ -361,6 +374,7 @@ TEST_CASE("move orders: a point counts as reached within the creature's guard di
     REQUIRE(o.add(W(), kEnemy, pts({{20, 10, 0}}), 2.0, 60, 0, cb(d), &why) != 0u);
     auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
     ai.currentGuardTargetDistance = 3.0f;
+    ai.guardEntityId.id = 5000;  // it guards the waypoint (the game took the order)
     f.place(kEnemy, 15.5, 10, 0);  // 4.5 m: not yet
     o.step(W());
     CHECK(d.calls == 0);
@@ -411,4 +425,236 @@ TEST_CASE("move orders: peaceful: a creature left in Combat with nothing to figh
     f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id = 71;
     o.step(W());
     CHECK(ai.state == emf::gen::enemy01::State::Combat);
+}
+
+// ---- review (2026-11-12) ----
+
+TEST_CASE("move orders (review I1): a move that ends before its guard order went out takes the order back") {
+    Fake f = world();
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    const uint32_t id = o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, 0, cb(d), &why);
+    REQUIRE(f.pending.size() == 1u);
+    CHECK(o.cancel(id));
+    CHECK(f.pending.empty());  // no guard on the destroyed waypoint (its id may soon be another entity's)
+    // already there when asked: it arrives at the first step, before the program ran
+    REQUIRE(o.add(W(), kEnemy, pts({{0.5, 10, 0}}), 2.0, 60, 0, cb(d), &why) != 0u);
+    o.step(W());
+    CHECK(d.status == EMF_MOVE_ARRIVED);
+    CHECK(f.pending.empty());
+}
+
+TEST_CASE("move orders (review I2): a move started from the last one's callback keeps the beast's owner") {
+    Fake f = world();
+    auto& ai = f.add<gen::DynamicEnemy01BehaviorState>(kBeast);
+    ai.guardEntityId.id = kPlayer;
+    f.add<gen::DynamicAggro>(kBeast);
+    f.add<gen::SelectedTargets>(kBeast);
+    f.add<gen::Faction>(kBeast).faction = static_cast<emf::gen::FactionType>(11);
+    f.place(kBeast, 0, 10, 0);
+    MoveOrders o(f.deps());
+    std::string why;
+    uint32_t second_status = 99;
+    auto second = [&](EmfWorld*, uint32_t, uint32_t status) { second_status = status; };
+    auto first = [&](EmfWorld* w, uint32_t, uint32_t status) {
+        if (status == EMF_MOVE_ARRIVED) o.add(w, kBeast, pts({{20, 10, 0}}), 2.0, 60, EMF_MOVE_ALLIES, second, &why);
+    };
+    REQUIRE(o.add(W(), kBeast, pts({{10, 10, 0}}), 2.0, 60, EMF_MOVE_ALLIES, first, &why) != 0u);
+    ai.guardEntityId.id = 5000;  // the game took the guard order
+    f.place(kBeast, 9.5, 10, 0);
+    o.step(W());  // arrived; the callback starts the second move
+    REQUIRE(o.count() == 1u);
+    ai.guardEntityId.id = 5001;
+    f.place(kBeast, 19.5, 10, 0);
+    o.step(W());
+    CHECK(second_status == EMF_MOVE_ARRIVED);
+    CHECK(f.pending.back() == std::make_pair(kBeast, kPlayer));  // back to its owner, not a dead waypoint
+    CHECK(ai.guardEntityId.id == kPlayer);
+    CHECK(ai.homeZonePosition.x == doctest::Approx(0));  // a beast with an owner does not move home
+}
+
+TEST_CASE("move orders (review I2): a guard on an entity that is gone is not given back") {
+    Fake f = world();
+    auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
+    ai.guardEntityId.id = 4321;  // stale: nothing there
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, pts({{10, 10, 0}}), 2.0, 60, 0, cb(d), &why) != 0u);
+    ai.guardEntityId.id = 5000;
+    f.place(kEnemy, 9.5, 10, 0);
+    o.step(W());
+    CHECK(d.status == EMF_MOVE_ARRIVED);
+    for (const auto& g : f.guards) CHECK(g.second != 4321u);
+    CHECK(ai.guardEntityId.id == 0u);
+    CHECK(ai.homeZonePosition.x == doctest::Approx(10));
+}
+
+TEST_CASE("move orders (review I3): the guard distance counts only once it guards the waypoint, and only up to 8 m") {
+    Fake f = world();
+    auto& ai = f.add<gen::DynamicEnemy01BehaviorState>(kBeast);
+    ai.guardEntityId.id = kPlayer;
+    ai.currentGuardTargetDistance = 5.0f;  // its distance to its owner
+    f.add<gen::Faction>(kBeast).faction = static_cast<emf::gen::FactionType>(11);
+    f.place(kBeast, 0, 10, 0);
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kBeast, pts({{6, 10, 0}}), 2.0, 60, EMF_MOVE_ALLIES, cb(d), &why) != 0u);
+    o.step(W());
+    CHECK(d.calls == 0);  // 6 m away: not there yet
+    ai.guardEntityId.id = 5000;
+    ai.currentGuardTargetDistance = 15.0f;  // not believed
+    o.step(W());
+    CHECK(d.calls == 0);
+    ai.currentGuardTargetDistance = 5.0f;
+    o.step(W());
+    CHECK(d.status == EMF_MOVE_ARRIVED);
+}
+
+TEST_CASE("move orders (review I4): in a fight (an attack, a hit, circling) no guard order is sent and the stuck clock waits") {
+    Fake f = world();
+    f.add<gen::Faction>(71).faction = static_cast<emf::gen::FactionType>(10);
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, 0, cb(d), &why) != 0u);
+    auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
+    f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id = 71;
+    const size_t sent = f.guards.size();
+    const emf::gen::enemy01::State fight[] = {emf::gen::enemy01::State::Combat, emf::gen::enemy01::State::Hit,
+                                             emf::gen::enemy01::State::ControlledByAttack,
+                                             emf::gen::enemy01::State::Circling};
+    for (int i = 0; i < 20; ++i) {  // 20 s of fighting where it stands
+        ai.state = fight[i % 4];
+        f.now += 1000;
+        o.step(W());
+    }
+    CHECK(f.guards.size() == sent);
+    CHECK(d.calls == 0);
+    ai.state = emf::gen::enemy01::State::Idle;  // the fight is over: the guard order again 3 s after it
+    f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id = 0;
+    f.now += 1000;
+    o.step(W());
+    CHECK(f.guards.size() == sent);
+    f.now += 2500;
+    o.step(W());
+    CHECK(f.guards.size() == sent + 1);
+}
+
+TEST_CASE("move orders (review I5): a waypoint that vanished is placed again (not destroyed twice, the clock not reset)") {
+    Fake f = world();
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 0, 0, cb(d), &why) != 0u);
+    f.place(kEnemy, 5, 10, 0);  // progress
+    f.now += 1000;
+    o.step(W());
+    f.comps.erase({gen::CurrentTransform::kHash, 5000});  // something removed the waypoint
+    f.now += 3000;
+    o.step(W());
+    REQUIRE(f.spawned.size() == 2u);
+    CHECK(f.destroyed.empty());
+    f.place(5000, 900, 10, 900);  // the game gave id 5000 to another entity: not ours
+    for (int i = 0; i < 4; ++i) {  // it vanishes again and again
+        f.comps.erase({gen::CurrentTransform::kHash, f.next_spawn - 1});
+        f.now += 3000;
+        o.step(W());
+    }
+    CHECK(d.status == EMF_MOVE_STUCK);  // placed again at most 3 times
+    CHECK(std::find(f.destroyed.begin(), f.destroyed.end(), 5000u) == f.destroyed.end());
+}
+
+TEST_CASE("move orders (review I5): a vanishing waypoint does not hold off stuck") {
+    Fake f = world();
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 0, 0, cb(d), &why) != 0u);
+    f.now += 4000;
+    o.step(W());
+    f.comps.erase({gen::CurrentTransform::kHash, 5000});
+    f.now += 4000;
+    o.step(W());  // placed again at 9 s; no progress since 1 s
+    f.now += 8000;
+    o.step(W());  // 17 s
+    CHECK(d.status == EMF_MOVE_STUCK);
+}
+
+TEST_CASE("move orders (review M2): a refused move (no waypoint) sends no guard order") {
+    Fake f = world();
+    f.get<gen::DynamicEnemy01BehaviorState>(kEnemy).guardEntityId.id = kPlayer;
+    f.spawn_ok = false;
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    CHECK(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, 0, cb(d), &why) == 0u);
+    CHECK(f.pending.empty());
+}
+
+namespace {
+struct ApiRig {
+    Fake f = world();
+    emf::test::FakeWorld fw;
+    CoreState state;
+    std::unique_ptr<EnemyOrders> orders;
+    std::unique_ptr<MoveOrders> moves;
+    Dispatcher disp;
+    ApiRig() {
+        fw.put<uint8_t>(emf::off::kKind, 0);  // a server world
+        f.add<gen::DynamicAggro>(kEnemy);
+        f.add<gen::SelectedTargets>(kEnemy);
+        f.place(900, 30, 10, 0);  // a gate
+        state.log_line = [](const std::string&) {};
+        EnemyOrders::Deps od;
+        od.get = f.deps().get;
+        od.now_ms = [this] { return f.now; };
+        od.dead = [](EmfWorld*, uint32_t) { return false; };
+        orders = std::make_unique<EnemyOrders>(od);
+        moves = std::make_unique<MoveOrders>(f.deps());
+        state.orders = orders.get();
+        state.moves = moves.get();
+        set_core_state(&state);
+    }
+    ~ApiRig() { set_core_state(nullptr); }
+    EmfWorld* w() { return reinterpret_cast<EmfWorld*>(fw.p()); }
+    template <class Fn>
+    void in_world(Fn fn) {  // a server world callback, as a mod's on_tick would be
+        static Fn* held;
+        held = &fn;
+        disp.post(EMF_WORLD_SERVER, [](EmfWorld* world, void*) { (*held)(world); }, nullptr);
+        disp.run(w(), EMF_WORLD_SERVER, [](const std::string&) {});
+    }
+};
+}  // namespace
+
+TEST_CASE("api (review I6): a refused enemy order leaves the creature's move; an accepted one ends it, and back") {
+    ApiRig r;
+    std::string why;
+    REQUIRE(r.moves->add(r.w(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, 0, nullptr, &why) != 0u);
+    r.in_world([&](EmfWorld* world) {
+        EmfEnemyOrder o{};
+        o.size = sizeof o;
+        o.enemy = kEnemy;
+        o.target = 4444;  // no such target: refused
+        CHECK(api_table()->enemy_order(world, &o) == 0u);
+        CHECK(r.moves->moving(world, kEnemy) != 0u);  // the move goes on
+        o.target = 900;
+        CHECK(api_table()->enemy_order(world, &o) != 0u);
+        CHECK(r.moves->moving(world, kEnemy) == 0u);  // the order ended it
+        EmfPathPoint p{40, 10, 0, 0};
+        EmfMoveOrder m{};
+        m.size = sizeof m;
+        m.enemy = kEnemy;
+        m.count = 1;
+        m.points = &p;
+        m.arrive = 0.1f;  // refused
+        CHECK(api_table()->enemy_move(world, &m, nullptr, nullptr) == 0u);
+        CHECK(r.orders->order_of(world, kEnemy) != 0u);  // the order goes on
+        m.arrive = 0;
+        CHECK(api_table()->enemy_move(world, &m, nullptr, nullptr) != 0u);
+        CHECK(r.orders->order_of(world, kEnemy) == 0u);  // the move ended it
+    });
 }

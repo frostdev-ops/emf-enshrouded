@@ -691,7 +691,7 @@ if not id then emf.log("no order: " .. why) end
 
 `emf.enemy_move(world, enemy, points [, {arrive = m, seconds = n, peaceful = true, allies = true}] [, fn])` walks a
 creature with the enemy AI (an enemy, or a tamed beast with `allies = true`) to a point `{x, y, z}` or through a list of
-up to 16 of them (the points `emf.path_find` gives fit). It walks the game's own way: EMF puts a hidden waypoint at each
+up to 16 of them (the points `emf.path_find` gives fit; thin a longer path to 16). It walks the game's own way: EMF puts a hidden waypoint at each
 point in turn and gives the creature the game's guard order on it, so it finds its path and jumps where its kind can. Seen
 in game: a Vukah walked 36 m in 10 s. A creature stops about 3 m short of a guarded spot (its guard distance), so a point
 counts as reached within that distance + 1 m, or within `arrive` if that is larger.
@@ -704,7 +704,8 @@ counts as reached within that distance + 1 m, or within `arrive` if that is larg
 
 `fn(world, id, status)` comes once when the move ends; `status` is `"arrived"`, `"stuck"` (no metre closer for 15 s
 while not fighting: a wall, no path, a point it cannot reach), `"timeout"`, `"gone"` (it died or went) or `"cancelled"`
-(`emf.enemy_move_cancel`, a new move or enemy order on it; `world` is nil when the world closed). It returns the move's
+(`emf.enemy_move_cancel`, a new move or enemy order on it; `world` is nil when the world closed). A cancel from a
+server callback ends it at once, else at the next step. It returns the move's
 id, or nil and why (not the server world, no enemy AI, a player, a boss, a tamed beast without `allies`, bad points or
 numbers, more than 256 moves). Afterwards a creature that guarded someone guards them again (a tamed beast: its owner);
 any other one that arrived lives there (its home is the last point, it roams around it). A move ends when your script

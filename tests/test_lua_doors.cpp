@@ -162,3 +162,18 @@ TEST_CASE("lua 1.33: a reload or a pause cancels the script's moves; their funct
     r.fake.moves[0].cb(kServer, 1, EMF_MOVE_CANCELLED, r.fake.moves[0].user);
     CHECK_FALSE(logged("called"));
 }
+
+TEST_CASE("lua 1.33 (review M4): emf.enemy_move with nil options still takes the function after them") {
+    Rig r(L"lua_moves_nil");
+    add_script(r.dir, "mn",
+               "emf.command('go', '', function(w)\n"
+               "  emf.enemy_move(w, 70, {1, 2, 3}, nil, function(world, id, status) emf.log('end ' .. status) end)\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("mn.go");
+    REQUIRE(r.fake.moves.size() == 1u);
+    REQUIRE(r.fake.moves[0].cb != nullptr);
+    r.fake.moves[0].cb(kServer, 1, EMF_MOVE_STUCK, r.fake.moves[0].user);
+    CHECK(logged("end stuck"));
+}
