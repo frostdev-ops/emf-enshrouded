@@ -1020,7 +1020,10 @@ inline bool has_v36() { return api() && api()->size >= offsetof(EmfApi, remove_b
 inline bool has_v37() { return api() && api()->size >= offsetof(EmfApi, path_cancel) + sizeof(api()->path_cancel); }
 // v38: door_state, door_set, door_lock
 inline bool has_v38() { return api() && api()->size >= offsetof(EmfApi, door_lock) + sizeof(api()->door_lock); }
+// v39: enemy_order, enemy_order_cancel, enemy_target
 inline bool has_v39() { return api() && api()->size >= offsetof(EmfApi, enemy_target) + sizeof(api()->enemy_target); }
+// v40: enemy_move, enemy_move_cancel, enemy_moving (move orders)
+inline bool has_v40() { return api() && api()->size >= offsetof(EmfApi, enemy_moving) + sizeof(api()->enemy_moving); }
 
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
 inline bool request_save() { return has_v19() && api()->request_save && api()->request_save(); }

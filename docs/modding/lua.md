@@ -43,7 +43,7 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    E prompts (`emf.offer`, `emf.spawn_offer`, `emf.offer_remove`; EMF API v25): depend on `">=1.14"`. 1.15 adds
    pictures in windows (`emf.image`, the `image`, `icon`, `fps` and `height` row fields; EMF API v26): depend on
    `">=1.15"`. 1.17 adds the inter-mod message bus (`emf.bus.subscribe`, `.publish`, `.unsubscribe`): mods using it
-   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. 1.23 adds hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`; EMF API v31): depend on `">=1.23"`. 1.24 adds buffs (`emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff`; EMF API v32): depend on `">=1.24"`. 1.25 adds markers (`emf.marker`, `emf.send_marker` and more; EMF API v33): depend on `">=1.25"`. 1.26 adds the map (`emf.map_cursor`, `emf.on_map_click`, `emf.map_action`, `emf.remove_map_action`, `emf.ground_at`; EMF API v34): depend on `">=1.26"`. 1.27 adds canvases and a minimap's parts (`emf.player_view`, `emf.fog_at`, `emf.map_markers`, `emf.canvas`, `emf.canvas_draw`, the marker key `minimap`, and a `fog` argument for `emf.ground_at`; EMF API v35): depend on `">=1.27"`. 1.28 adds `emf.remove_building` (EMF API v36): depend on `">=1.28"`. 1.29 adds `emf.path_find` and `emf.path_cancel` (EMF API v37): depend on `">=1.29"`. 1.30 adds `emf.door`, `emf.door_open`, `emf.door_close` and `emf.door_lock` (EMF API v38): depend on `">=1.30"`. 1.31 adds a `water_y` argument for `emf.ground_at` (EMF 0.6.8): depend on `">=1.31"`. 1.32 adds enemy orders (`emf.enemy_order`, `emf.enemy_order_cancel`, `emf.enemy_target`; EMF API v39): depend on `">=1.32"`. Ranges are explained in
+   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. 1.23 adds hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`; EMF API v31): depend on `">=1.23"`. 1.24 adds buffs (`emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff`; EMF API v32): depend on `">=1.24"`. 1.25 adds markers (`emf.marker`, `emf.send_marker` and more; EMF API v33): depend on `">=1.25"`. 1.26 adds the map (`emf.map_cursor`, `emf.on_map_click`, `emf.map_action`, `emf.remove_map_action`, `emf.ground_at`; EMF API v34): depend on `">=1.26"`. 1.27 adds canvases and a minimap's parts (`emf.player_view`, `emf.fog_at`, `emf.map_markers`, `emf.canvas`, `emf.canvas_draw`, the marker key `minimap`, and a `fog` argument for `emf.ground_at`; EMF API v35): depend on `">=1.27"`. 1.28 adds `emf.remove_building` (EMF API v36): depend on `">=1.28"`. 1.29 adds `emf.path_find` and `emf.path_cancel` (EMF API v37): depend on `">=1.29"`. 1.30 adds `emf.door`, `emf.door_open`, `emf.door_close` and `emf.door_lock` (EMF API v38): depend on `">=1.30"`. 1.31 adds a `water_y` argument for `emf.ground_at` (EMF 0.6.8): depend on `">=1.31"`. 1.32 adds enemy orders (`emf.enemy_order`, `emf.enemy_order_cancel`, `emf.enemy_target`; EMF API v39): depend on `">=1.32"`. 1.33 adds move orders (`emf.enemy_move`, `emf.enemy_move_cancel`, `emf.enemy_moving`; EMF API v40): depend on `">=1.33"`. Ranges are explained in
    [guide.md](guide.md), "Dependencies and version ranges".)
 
 3. Put `main.lua` next to it:
@@ -131,6 +131,8 @@ right away.
 | `emf.door_lock(world, id, locked)` | 1.30: no E prompt on the door while locked (kept with the world from EMF 0.6.8); true / false |
 | `emf.enemy_order(world, enemy, target [, opts])` | 1.32: the enemy goes for the target (a door, a gate, a creature, a player); the order's id, or nil and why (see "Enemy orders" below) |
 | `emf.enemy_order_cancel(id)` / `emf.enemy_target(world, enemy)` | 1.32: end an order / what the enemy goes for now (or nil) |
+| `emf.enemy_move(world, enemy, points [, opts] [, fn])` | 1.33: the creature walks to a point or through a list of points; the move's id, or nil and why (see "Move orders" below) |
+| `emf.enemy_move_cancel(id)` / `emf.enemy_moving(world, enemy)` | 1.33: end a move / its move's id now (or nil) |
 | `emf.kill(world, id)` | (1.4) kills a creature without a hit: its current health becomes 0 (1.5: through the game's attribute code) and the game's death program sends `EntityDiedEvent` the next step; the corpse keeps its loot. No attacker, no kill credit (`emf.damage` gives one); never a player; host only. true / false |
 | `emf.health(world, id)` | (1.5) the current and maximum health: `local cur, max = emf.health(w, id)`; the game's attributes in a world you host, else the replicated `NetworkHealth`; nil when neither is there |
 | `emf.attribute(world, id, attr)` | (1.5) an attribute as the game reads it: `attr` is `"health"`, `"max_health"`, `"stamina"`, `"max_stamina"`, `"mana"`, `"max_mana"`, a player's `"xp_pending"`, `"xp"`, `"xp_required"` and `"level"` (1.11, EMF API v22), or an attribute id; nil when the entity has none. Give XP with `emf.attribute_add(w, player, "xp_pending", n)`: the game levels the player up itself (the other three are read-only). Host only |
@@ -683,6 +685,37 @@ it goes for now (its pick), or nil. Host only, like `emf.spawn`. On a core older
 -- a raid: the raider breaks the gate, then the game takes over
 local id, why = emf.enemy_order(world, raider, gate, {seconds = 60, damage = 40})
 if not id then emf.log("no order: " .. why) end
+```
+
+## Move orders (1.33)
+
+`emf.enemy_move(world, enemy, points [, {arrive = m, seconds = n, peaceful = true, allies = true}] [, fn])` walks a
+creature with the enemy AI (an enemy, or a tamed beast with `allies = true`) to a point `{x, y, z}` or through a list of
+up to 16 of them (the points `emf.path_find` gives fit). It walks the game's own way: EMF puts a hidden waypoint at each
+point in turn and gives the creature the game's guard order on it, so it finds its path and jumps where its kind can. Seen
+in game: a Vukah walked 36 m in 10 s. A creature stops about 3 m short of a guarded spot (its guard distance), so a point
+counts as reached within that distance + 1 m, or within `arrive` if that is larger.
+
+- `arrive`: metres (0.5 to 50, default 2).
+- `seconds`: a time limit (default 0: none; at most 3600).
+- `peaceful = true`: it ignores players on the way (its fights with players are cleared each step). Without it, it may
+  fight on the way (the game's way) and goes on afterwards.
+- `allies = true`: the creature may be a player's ally (a tamed beast).
+
+`fn(world, id, status)` comes once when the move ends; `status` is `"arrived"`, `"stuck"` (no metre closer for 15 s
+while not fighting: a wall, no path, a point it cannot reach), `"timeout"`, `"gone"` (it died or went) or `"cancelled"`
+(`emf.enemy_move_cancel`, a new move or enemy order on it; `world` is nil when the world closed). It returns the move's
+id, or nil and why (not the server world, no enemy AI, a player, a boss, a tamed beast without `allies`, bad points or
+numbers, more than 256 moves). Afterwards a creature that guarded someone guards them again (a tamed beast: its owner);
+any other one that arrived lives there (its home is the last point, it roams around it). A move ends when your script
+reloads or pauses (`fn` is not called then). A move and an enemy order on the same creature end each other. Nothing is
+saved. `emf.enemy_moving(world, enemy)` is its move's id, or nil. Host only. On a core older than API v40: nil and a reason.
+
+```lua
+-- walk a raider to the gap next to the gate, then break the gate
+emf.enemy_move(world, raider, {gap}, {peaceful = true}, function(w, id, status)
+  if status == "arrived" then emf.enemy_order(w, raider, gate, {seconds = 60, damage = 40}) end
+end)
 ```
 
 ## Worlds and components

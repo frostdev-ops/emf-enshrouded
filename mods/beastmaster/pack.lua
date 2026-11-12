@@ -798,6 +798,10 @@ function P:step(world)
 				else
 					local ai = world:get("DynamicEnemy01BehaviorState", b.entity)
 					local guard = ai and ai.guardEntityId or 0
+					-- another mod walks it somewhere (EMF move orders, Lua 1.33): it guards the move's waypoint meanwhile; it is
+					-- not taken for another creature, not leashed and not sent back (EMF gives it back to its owner after)
+					local moving = emf.enemy_moving ~= nil and emf.enemy_moving(world, b.entity) ~= nil
+					if moving then guard = owner end
 					if guard ~= 0 and guard ~= owner then
 						-- it guards someone else: after STRAY_CHECKS in a row, the id names another entity now
 						self.strays[b.entity] = (self.strays[b.entity] or 0) + 1
@@ -811,7 +815,7 @@ function P:step(world)
 						b.out = false
 						self.env.save()
 					else
-						self:leash(world, owner, b, now)
+						if not moving then self:leash(world, owner, b, now) end
 						if b.entity then self:keep_order(world, b.entity, now) end
 						-- its level follows its owner's (a level up while it is out); the leash may have let it go
 						local lvl, mine = b.entity and world:get("Level", b.entity), level_of(world, owner)

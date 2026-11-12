@@ -2017,6 +2017,25 @@ TEST_CASE("beastmaster: a remembered id that now guards someone else is not ours
     CHECK(!contains(b.r.fake.destroyed, 1235));
 }
 
+// EMF 0.6.8 move orders: another mod may walk a beast somewhere (it guards a hidden waypoint meanwhile): Beastmaster
+// neither takes it for another creature nor sends it back to its owner while it moves.
+TEST_CASE("beastmaster: a beast on another mod's move order is left alone (not dropped, not sent back to its owner)") {
+    BeastRig b;
+    wolf_out(b);
+    b.seconds(1);
+    b.r.fake.moving[1234] = 7;
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 1234).guardEntityId.id = 999;  // the move's waypoint
+    const size_t before = b.guards().size();
+    b.seconds(5);
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, loyalty 1, out") != std::string::npos);
+    const auto g = b.guards();
+    for (size_t i = before; i < g.size(); ++i) CHECK(g[i].first != 1234u);
+    b.r.fake.moving.erase(1234);  // the move ended: it guards its owner again (EMF does that); a stray look starts over
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 1234).guardEntityId.id = 1;
+    b.seconds(2);
+    CHECK(b.reply("beastmaster.list").find("Wolf - wolf, loyalty 1, out") != std::string::npos);
+}
+
 TEST_CASE("beastmaster: an unknown bait name gives a note and the mod keeps running") {
     BeastRig b({{"bait_wolf", "No_Such_Item"}});
     b.look(1, 0, 10.5, 0, 0);
