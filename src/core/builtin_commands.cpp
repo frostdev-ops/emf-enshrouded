@@ -382,6 +382,84 @@ void cmd_order_stop(EmfWorld*, int argc, const char* const* argv, void* u) {
     command_reply_line(ok ? fmt("order %u ended", id) : fmt("no order %u", id));
 }
 
+// move <enemy> <x> <y> <z> [peaceful] | move <enemy> <entity | me> [peaceful] (API v40): the enemy walks there; how
+// its move ended comes later, to the reply the command had. Never a tamed beast (Beastmaster keeps its beasts).
+bool parse_coord(const char* s, double* out);  // goto's, below
+struct LateMove {
+    ReplyFn reply;
+    uint32_t enemy = 0;
+};
+void move_done(EmfWorld*, uint32_t id, uint32_t status, void* user) {
+    const std::unique_ptr<LateMove> late(static_cast<LateMove*>(user));  // each accepted move ends exactly once
+    if (!late->reply) return;
+    const char* how = status == EMF_MOVE_ARRIVED   ? "arrived"
+                      : status == EMF_MOVE_STUCK   ? "is stuck (no way on for 15 s)"
+                      : status == EMF_MOVE_TIMEOUT ? "ran out of time"
+                      : status == EMF_MOVE_GONE    ? "is gone (died or went)"
+                                                   : "was stopped";
+    late->reply(fmt("move %u: entity %u %s", id, late->enemy, how));
+}
+
+void cmd_move(EmfWorld* w, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    std::vector<std::string> words = emf::coordinate_words({argv + 1, argv + argc});
+    bool peaceful = false;
+    if (!words.empty() && lower(words.back()) == "peaceful") {
+        peaceful = true;
+        words.pop_back();
+    }
+    uint32_t enemy = 0;
+    double p[3] = {};
+    bool ok = (words.size() == 2 || words.size() == 4) && parse_uint(words[0].c_str(), 0xffffffffu, &enemy);
+    if (ok && words.size() == 4) {
+        for (int i = 0; ok && i < 3; ++i) ok = parse_coord(words[1 + i].c_str(), &p[i]);
+    } else if (ok) {  // to where an entity (or the player who typed it) stands now
+        uint32_t to = 0;
+        if (lower(words[1]) == "me") to = c.player ? c.player() : 0;
+        else ok = parse_uint(words[1].c_str(), 0xffffffffu, &to);
+        if (ok && (!to || !player_pos(c, w, to, p))) {
+            command_reply_line(fmt("move: entity %s has no position", words[1].c_str()));
+            return;
+        }
+    }
+    if (!ok) {
+        command_reply_line("usage: move <enemy> <x> <y> <z> [peaceful] | move <enemy> <entity | me> [peaceful]");
+        return;
+    }
+    if (c.api->size < offsetof(EmfApi, enemy_moving) + sizeof(c.api->enemy_moving) || !c.api->enemy_move) {
+        command_reply_line("move: this core has no move orders");
+        return;
+    }
+    EmfPathPoint pt{static_cast<float>(p[0]), static_cast<float>(p[1]), static_cast<float>(p[2]), 0};
+    EmfMoveOrder o{};
+    o.size = sizeof o;
+    o.enemy = enemy;
+    o.flags = peaceful ? EMF_MOVE_PEACEFUL : 0;
+    o.count = 1;
+    o.points = &pt;
+    auto* late = new LateMove{current_reply(), enemy};  // freed by the end callback, or below when refused
+    const uint32_t id = c.api->enemy_move(w, &o, move_done, late);
+    if (!id) {
+        delete late;  // a refused move never calls back
+        command_reply_line(fmt("entity %u not moved: %s", enemy, o.why[0] ? o.why : "move orders are off"));
+        return;
+    }
+    command_reply_line(fmt("move %u: entity %u walks to (%.1f, %.1f, %.1f)%s (move.stop %u)", id, enemy, pt.x, pt.y, pt.z,
+                           peaceful ? ", ignoring players" : "", id));
+}
+
+void cmd_move_stop(EmfWorld*, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    uint32_t id = 0;
+    if (argc != 2 || !parse_uint(argv[1], 0xffffffffu, &id)) {
+        command_reply_line("usage: move.stop <id>");
+        return;
+    }
+    const bool ok = c.api->size >= offsetof(EmfApi, enemy_moving) + sizeof(c.api->enemy_moving) &&
+                    c.api->enemy_move_cancel && c.api->enemy_move_cancel(id);
+    command_reply_line(ok ? fmt("move %u ended", id) : fmt("no move %u", id));
+}
+
 // hud <id> [place 0-2] [text]: a line kept on screen (API v12), to try a layout; no text removes it.
 void cmd_hud(EmfWorld*, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
@@ -1394,6 +1472,9 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         {"order", "<enemy> <target> [seconds] [damage]: the enemy goes for the target (a door, a gate, a creature, a "
                   "player); damage is added to each of its hits on it (host)", cmd_order},
         {"order.stop", "<id>: end an order (host)", cmd_order_stop},
+        {"move", "<enemy> <x> <y> <z> [peaceful] | <enemy> <entity | me> [peaceful]: the enemy walks there (its own way, "
+                 "jumps if its kind can); peaceful: it ignores players (host)", cmd_move},
+        {"move.stop", "<id>: end a move (host)", cmd_move_stop},
         {"entities", ": count the entities in the server world", cmd_entities},
         {"inspect", "<entity>: list the entity's components (template ones marked)", cmd_inspect},
         {"tpl", "<entity> <component> [bytes 1-256] [offset]: hex dump of the entity's template data", cmd_tpl},

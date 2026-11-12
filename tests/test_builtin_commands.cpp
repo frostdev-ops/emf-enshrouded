@@ -1262,6 +1262,66 @@ TEST_CASE("builtin commands: order sends an enemy at an entity (seconds, damage)
     CHECK(g_orders[1].flags == 0u);  // never a tamed beast (the spec), also from the console
 }
 
+namespace {
+struct SeenMove {
+    EmfMoveOrder o;
+    std::vector<EmfPathPoint> pts;
+    EmfMoveCallback cb;
+    void* user;
+};
+std::vector<SeenMove> g_moves;
+std::vector<uint32_t> g_move_cancels;
+uint32_t fake_move(EmfWorld*, EmfMoveOrder* o, EmfMoveCallback cb, void* user) {
+    if (o->enemy == 13) {
+        std::snprintf(o->why, sizeof o->why, "it has no enemy AI to move");
+        return 0;
+    }
+    g_moves.push_back({*o, {o->points, o->points + o->count}, cb, user});
+    return 60 + static_cast<uint32_t>(g_moves.size());
+}
+bool fake_move_cancel(uint32_t id) {
+    g_move_cancels.push_back(id);
+    return id == 61;
+}
+}  // namespace
+
+TEST_CASE("builtin commands: move walks an enemy to a point or to an entity (peaceful); its end is said; move.stop") {
+    BFixture f;
+    EmfApi api = *api_table();
+    api.enemy_move = fake_move;
+    api.enemy_move_cancel = fake_move_cancel;
+    f.ctx.api = &api;
+    g_moves.clear();
+    g_move_cancels.clear();
+    ItemsWorld iw;
+    MapStore ents;
+    emf::test::plant_entities(iw.w, ents, {42, 70, 900});
+    f.center.enqueue("move 70 100 20 -30.5");
+    f.center.enqueue("move 70 100 20 -30.5 peaceful");
+    f.center.enqueue("move 13 1 2 3");
+    f.center.enqueue("move 70");
+    f.center.enqueue("move 70 1 2");
+    f.center.enqueue("move.stop 61");
+    f.center.enqueue("move.stop 7");
+    f.run(iw.w);
+    CHECK(bsaid("move 61: entity 70 walks to (100.0, 20.0, -30.5) (move.stop 61)"));
+    CHECK(bsaid("move 62: entity 70 walks to (100.0, 20.0, -30.5), ignoring players (move.stop 62)"));
+    CHECK(bsaid("entity 13 not moved: it has no enemy AI to move"));
+    CHECK(bsaid("usage: move <enemy> <x> <y> <z> [peaceful] | move <enemy> <entity | me> [peaceful]"));
+    CHECK(bsaid("move 61 ended"));
+    CHECK(bsaid("no move 7"));
+    REQUIRE(g_moves.size() == 2u);
+    CHECK(g_moves[0].o.flags == 0u);  // never a tamed beast from the console (Beastmaster keeps its beasts)
+    CHECK(g_moves[1].o.flags == EMF_MOVE_PEACEFUL);
+    REQUIRE(g_moves[0].pts.size() == 1u);
+    CHECK(g_moves[0].pts[0].z == doctest::Approx(-30.5f));
+    REQUIRE(g_moves[0].cb != nullptr);
+    g_moves[0].cb(nullptr, 61, EMF_MOVE_ARRIVED, g_moves[0].user);  // later, after a server step
+    CHECK(bsaid("move 61: entity 70 arrived"));
+    g_moves[1].cb(nullptr, 62, EMF_MOVE_STUCK, g_moves[1].user);
+    CHECK(bsaid("move 62: entity 70 is stuck (no way on for 15 s)"));
+}
+
 TEST_CASE("api remove_building (v36): no request, a small size field, or a call outside a world callback is refused") {
     BFixture f;
     CHECK_FALSE(api_table()->remove_building(nullptr, nullptr));
