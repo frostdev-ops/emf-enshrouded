@@ -729,8 +729,9 @@ typedef struct EmfRemoveBuilding {
 #define EMF_DOOR_LOGIC 0x20u  /* flag: a switch drives it (the logic system owns its state): EMF does not touch it */
 /* v39 enemy orders: a creature with an enemy AI sent at any entity for a while (a player, a creature, a door, a gate,
  * a placed object). While it holds, the target is its pick with its target switches off and an alarmed entry in its
- * aggro list: it walks up and attacks (seen: a Vukah walked 15 m to a door and swung at it). The game's hits on a
- * placed door do 0: `damage` adds to each of the enemy's hits on the target (a hit rule). Nothing is saved. */
+ * aggro list, and an enemy at rest is put in its fight state: it walks up and attacks (seen: a Vukah walked 30 m to a
+ * door). The game's hits on a placed door do 0: `damage` adds to each of the enemy's hits on the target (a hit rule;
+ * seen: one hit with 200 broke a wooden door). Nothing is saved. */
 #define EMF_ORDER_ALLIES 0x1u /* the creature may be a player's ally (a tamed beast, faction PlayerAlly) */
 typedef struct EmfEnemyOrder {
     uint32_t size;    /* sizeof(EmfEnemyOrder) */

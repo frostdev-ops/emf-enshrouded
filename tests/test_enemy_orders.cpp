@@ -244,3 +244,32 @@ TEST_CASE("enemy orders: refused: no enemy AI, a player, an ally without EMF_ORD
     CHECK(o.add(W(), kEnemy, kDoor, 30, 0, 0x80, &why) == 0u);  // unknown flags
     CHECK_FALSE(held(f));
 }
+
+// Seen live: an ordered Vukah that was Idle/Roaming did not move (pick and alarmed entry written); set to Combat it
+// walked 30 m to the door and one hit (with 200 damage added) broke it.
+TEST_CASE("enemy orders: an idle or roaming enemy is put in its Combat state; one in an attack, hit or falling is left as it is") {
+    using S = emf::gen::enemy01::State;
+    const S calm[] = {S::Idle, S::Roaming, S::ReturnHome, S::Investigate, S::ReactToNoise, S::Patrol, S::Guard, S::Sleep};
+    for (S st : calm) {
+        CAPTURE(static_cast<int>(st));
+        Fake f = world();
+        f.add<gen::DynamicEnemy01BehaviorState>(kEnemy).state = st;
+        EnemyOrders o(f.deps());
+        std::string why;
+        REQUIRE(o.add(W(), kEnemy, kDoor, 30, 0, 0, &why) != 0u);
+        CHECK(f.get<gen::DynamicEnemy01BehaviorState>(kEnemy).state == S::Combat);
+        f.get<gen::DynamicEnemy01BehaviorState>(kEnemy).state = S::Roaming;  // the game drops it again
+        o.step(W());
+        CHECK(f.get<gen::DynamicEnemy01BehaviorState>(kEnemy).state == S::Combat);
+    }
+    const S busy[] = {S::ControlledByAttack, S::Hit, S::Falling, S::Dead, S::Stunned, S::Spawning};
+    for (S st : busy) {
+        CAPTURE(static_cast<int>(st));
+        Fake f = world();
+        f.add<gen::DynamicEnemy01BehaviorState>(kEnemy).state = st;
+        EnemyOrders o(f.deps());
+        std::string why;
+        REQUIRE(o.add(W(), kEnemy, kDoor, 30, 0, 0, &why) != 0u);
+        CHECK(f.get<gen::DynamicEnemy01BehaviorState>(kEnemy).state == st);
+    }
+}

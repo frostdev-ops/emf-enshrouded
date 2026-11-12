@@ -1227,8 +1227,10 @@ if (st != EMF_DOOR_NONE && !(st & EMF_DOOR_LOGIC)) {
 A creature with an enemy AI (`DynamicAggro`, `SelectedTargets`) sent at any entity with a position for a while. While
 the order holds, EMF writes the target as its pick (`SelectedTargets` slot 0, target and root) with its target switches
 off (`DynamicAggro.allowTargetSwitches`) and gives the target an alarmed entry (aggro 100) in its aggro list, at once and
-after every server step. Seen in game: with the pick alone a Vukah did not move; with the entry too it walked 15 m to a
-door and swung at it. The game's hits on a placed door did 0. C++: `emf::has_v39()`.
+after every server step; an enemy at rest (Idle, Roaming, ReturnHome, Guard, Sleep and the like) is put in its `Combat`
+state (one in an attack, a hit, a fall, spawning or dead is left as it is). Seen in game: with the pick alone a Vukah did
+not move; an idle one with the entry did not move either; in Combat it walked 30 m to a door, and one hit with 200
+damage added broke it. The game's own hits on a placed door did 0. C++: `emf::has_v39()`.
 
 | C | Rules |
 |---|---|

@@ -662,8 +662,9 @@ end
 
 `emf.enemy_order(world, enemy, target [, {seconds = n, damage = n, allies = true}])` sends a creature with an enemy AI
 at any entity with a position: a player, a creature, a door, a gate, a placed object. While the order holds, EMF writes
-the target as its pick and puts it in its aggro list, at once and after every server step, so it walks up and attacks.
-Seen in game: a Vukah walked 15 m to a door and swung at it.
+the target as its pick and puts it in its aggro list, at once and after every server step, and puts an enemy at rest
+(idle, roaming, at home, asleep) in its fight state, so it walks up and attacks. Seen in game: a Vukah walked 30 m to a
+door, and one hit with `damage = 200` broke it.
 
 - `seconds`: how long (default 0: until the target is gone or dead, the enemy is gone, or you cancel it).
 - `damage`: the game's own hits on a placed door do 0 (seen); `damage` is added to each of the enemy's hits on the

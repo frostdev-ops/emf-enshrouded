@@ -86,6 +86,21 @@ bool EnemyOrders::write(EmfWorld* w, const Order& o) {
     if (slot->entityId.id != o.target) slot->entityId.id = o.target;
     if (slot->state != gen::AggroTargetState::Alarmed) slot->state = gen::AggroTargetState::Alarmed;
     if (slot->aggro < kOrderAggro) slot->aggro = kOrderAggro;
+    // an enemy at rest is put in its Combat state: the game does not start a fight from what is written (seen live: an
+    // idle or roaming Vukah stayed put; in Combat it walked to the door and broke it). One in an attack, hit, fall,
+    // spawn or death is left as it is.
+    if (auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, w, o.enemy)) {
+        using S = emf::gen::enemy01::State;
+        switch (ai->state) {
+        case S::Idle: case S::Investigate: case S::ReturnHome: case S::FleeHome: case S::WaitAtHome: case S::ReactToNoise:
+        case S::Patrol: case S::TurnAfterPatrol: case S::WaitAfterPatrol: case S::Roaming: case S::Flee:
+        case S::WaitAfterFlee: case S::Guard: case S::Sleep: case S::MoveToMarker:
+            ai->state = S::Combat;
+            break;
+        default:
+            break;
+        }
+    }
     return true;
 }
 

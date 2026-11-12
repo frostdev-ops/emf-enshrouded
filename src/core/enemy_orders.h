@@ -2,8 +2,8 @@
 // Enemy orders (API v39): a creature with an enemy AI sent at any entity for a while, a door or a gate included
 // (private spec enemy-targets 2026-11-12, live check). While an order holds, its target is the enemy's pick
 // (SelectedTargets slot 0, target and root) with its target switches off (DynamicAggro.allowTargetSwitches), and the
-// target has an alarmed aggro entry (aggro kOrderAggro): seen live, a Vukah walked 15 m to a door and swung at it (the
-// pick alone did not move it). Written at once and after every server step. An order ends after its time, when its
+// target has an alarmed aggro entry (aggro kOrderAggro), and an enemy at rest is put in its Combat state: seen live, a
+// Vukah walked to a door and swung at it (the pick alone did not move it; an idle one moved only once in Combat). Written at once and after every server step. An order ends after its time, when its
 // target is gone or dead, when the enemy is gone, on cancel, with a new order on the same enemy, or with the world: the
 // switches go back on and its entry (and the pick, if still the target) are cleared. Damage: a hit rule adds it to each
 // of the enemy's hits on the target (the game's hits on a placed door do 0, seen). Game-free: the world is reached
