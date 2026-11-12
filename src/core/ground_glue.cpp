@@ -130,8 +130,17 @@ bool ground_fog(EmfWorld* world, double x, double y, double z, FogReading* out) 
         fq_mapping != mapping || !seh_read(fw + 0x14, &res, 4) || !res || !seh_read(fw + 0x108, &tile_x, 4) ||
         !seh_read(fw + 0x10C, &tile_z, 4) || !tile_x || !tile_z || !seh_read(fw + 0x110, &count_x, 4) ||
         !seh_read(fw + 0x114, &count_z, 4) || !count_x || !count_z || !seh_read(fw + 0x118, &handles, 8) || !handles ||
-        !seh_read(sps + 0x14, &progress, 4))
+        !seh_read(sps + 0x14, &progress, 4)) {
+        // once per server world: the map teleport's shroud check is off here (the fog stays unknown)
+        static std::atomic<EmfWorld*> told{nullptr};
+        if (told.exchange(world) != world) {
+            CoreState* s = core_state();
+            if (s && s->log_line)
+                s->log_line("map: the shroud cannot be read in this world (ground_at answers the fog unknown; the map "
+                            "teleport's shroud check is off here)");
+        }
         return false;
+    }
     const int64_t pos[3] = {std::llround(x * kFixed), std::llround(y * kFixed), std::llround(z * kFixed)};
     alignas(16) uint8_t buf[0x50] = {};
     if (!call_fog(fn, buf, fq, pos)) return false;

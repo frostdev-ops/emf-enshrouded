@@ -113,3 +113,17 @@ TEST_CASE("lua 1.27: the marker key minimap; a reload takes the script's canvase
     CHECK(logged("reloaded without the canvas"));
     CHECK(r.fake.canvases.empty());
 }
+
+
+TEST_CASE("lua 1.27 (review M9): a colour that is not a number, or a list whose length is negative, is an error") {
+    Rig r(L"lua_canvas_bad");
+    add_script(r.dir, "mb",
+               "emf.canvas('map', {w = 50, h = 50})\n"
+               "local ok1 = pcall(emf.canvas_draw, 'map', {{'circle', 1, 1, 1, colour = 'red'}})\n"
+               "local ok2 = pcall(emf.canvas_draw, 'map', {{'circle', 1, 1, 1, colour = 0/0}})\n"
+               "local ok3 = pcall(emf.canvas_draw, 'map', setmetatable({}, {__len = function() return -5 end}))\n"
+               "emf.log('bad ' .. tostring(ok1) .. tostring(ok2) .. tostring(ok3))\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    CHECK(logged("bad falsefalsefalse"));
+}

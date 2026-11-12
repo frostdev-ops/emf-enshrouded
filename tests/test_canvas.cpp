@@ -302,3 +302,16 @@ TEST_CASE("fog store (review I3): a snapshot answers without the lock and outliv
     REQUIRE(st.update(h, 2000));  // a new copy
     CHECK(fog_explored(snap->header, 4, 508) == doctest::Approx(1.0f));  // the old snapshot is unchanged
 }
+
+
+TEST_CASE("api canvas_set (review M8): the same refusal is logged once, not every frame a mod retries") {
+    CoreState state;
+    std::vector<std::string> lines;
+    state.log_line = [&](const std::string& l) { lines.push_back(l); };
+    state.now_ms = [] { return uint64_t(5000); };
+    set_core_state(&state);
+    EmfCanvas c = spec(16, 16, 220, 220);
+    for (int i = 0; i < 5; ++i) CHECK_FALSE(api_table()->canvas_set("bad id", &c));
+    CHECK(lines.size() == 1u);
+    set_core_state(nullptr);
+}

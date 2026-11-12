@@ -201,6 +201,7 @@ struct CoreState {
     struct Minimap {
         FogStore fog;  // the client's fog of war, copied twice a second
         CanvasStore canvases;
+        std::atomic<uint64_t> fog_asked_ms{0}, markers_asked_ms{0};  // the last fog_at / map_markers (minimap_wanted)
     } minimap;
     std::vector<std::string> reserved_programs;  // programs EMF's core hooks itself: hook_program refuses them
     std::mutex setting_watchers_lock;

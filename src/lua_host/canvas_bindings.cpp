@@ -156,7 +156,7 @@ int l_canvas_draw(lua_State* L) {
     const std::string full = scoped_id(L, s, luaL_checkstring(L, 1), "emf.canvas_draw");
     luaL_checktype(L, 2, LUA_TTABLE);
     const lua_Integer n = luaL_len(L, 2);
-    if (n > 2048) return luaL_error(L, "emf.canvas_draw: more than 2048 items");
+    if (n < 0 || n > 2048) return luaL_error(L, "emf.canvas_draw: 0 to 2048 items");
     std::vector<EmfCanvasCmd> cmds;
     std::vector<std::string> texts;
     cmds.reserve(static_cast<size_t>(n));
@@ -207,7 +207,12 @@ int l_canvas_draw(lua_State* L) {
         if (k->kind == EMF_CANVAS_CIRCLE_CMD) c.a[3] = width;
         if (k->kind == EMF_CANVAS_LINE && width <= 0) c.a[4] = 1;
         lua_getfield(L, t, "colour");
-        if (!lua_isnil(L, -1)) c.rgba = static_cast<uint32_t>(static_cast<int64_t>(lua_tonumber(L, -1)));
+        if (!lua_isnil(L, -1)) {
+            const lua_Number v = lua_isnumber(L, -1) ? lua_tonumber(L, -1) : -1;
+            if (!(v >= 0 && v <= 4294967295.0))
+                return luaL_error(L, "emf.canvas_draw: item %d: colour must be a number 0xRRGGBBAA", static_cast<int>(i));
+            c.rgba = static_cast<uint32_t>(v);
+        }
         lua_pop(L, 1);
         lua_pop(L, 1);  // the item
         cmds.push_back(c);

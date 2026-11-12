@@ -89,25 +89,6 @@ TEST_CASE("fog store: copies the grid at most twice a second; answers from its c
     CHECK_FALSE(s.explored(100, 100, &e));
 }
 
-TEST_CASE("fog store: a picture at a quarter of the pixels (each picture pixel the mean of 2 x 2)") {
-    Grid g;
-    g.set(0, 0, 255);
-    g.set(1, 0, 255);
-    g.set(0, 1, 255);
-    g.set(1, 1, 255);
-    g.set(2, 0, 128);
-    FogStore s;
-    s.update(g.h(), 1000);
-    std::vector<uint8_t> pic;
-    uint32_t side = 0;
-    REQUIRE(s.picture(&pic, &side));
-    CHECK(side == 32u);
-    CHECK(pic.size() == 32u * 32u);
-    CHECK(pic[0] == 255);
-    CHECK(pic[1] == 32);  // (128 + 0 + 0 + 0) / 4
-    CHECK(pic[32] == 0);
-}
-
 TEST_CASE("api fog_at: answers from the core's copy; false before one; player_view's world size from it") {
     CoreState state;
     set_core_state(&state);
@@ -126,5 +107,31 @@ TEST_CASE("api fog_at: answers from the core's copy; false before one; player_vi
     REQUIRE(api_table()->player_view(&v));
     CHECK(v.world_size == doctest::Approx(512));
     marker_capture_reset_for_tests();
+    set_core_state(nullptr);
+}
+
+
+TEST_CASE("minimap use (review M4): wanted with a canvas, or for 10 s after a mod asked; not for players without one") {
+    CHECK_FALSE(minimap_wanted(false, 0, 50000));
+    CHECK(minimap_wanted(true, 0, 50000));
+    CHECK(minimap_wanted(false, 45000, 50000));
+    CHECK(minimap_wanted(false, 40001, 50000));
+    CHECK_FALSE(minimap_wanted(false, 40000, 50000));  // 10 s since the last ask
+}
+
+TEST_CASE("api fog_at / map_markers (review M4): an ask is noted; a new client world clears the fog copy (review M3)") {
+    CoreState state;
+    set_core_state(&state);
+    state.now_ms = [] { return uint64_t(77000); };
+    float e = 0;
+    api_table()->fog_at(1, 1, &e);
+    CHECK(state.minimap.fog_asked_ms.load() == 77000u);
+    api_table()->map_markers(nullptr, 0);
+    CHECK(state.minimap.markers_asked_ms.load() == 77000u);
+    Grid g;
+    state.minimap.fog.update(g.h(), 1000);
+    REQUIRE(api_table()->fog_at(100, 100, &e));
+    markers_world_setup(EMF_WORLD_CLIENT);
+    CHECK_FALSE(api_table()->fog_at(100, 100, &e));  // the last world's fog is gone
     set_core_state(nullptr);
 }

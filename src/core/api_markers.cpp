@@ -207,6 +207,7 @@ void markers_world_setup(uint8_t kind) {
         marker_capture_set_uipd(nullptr, 0);
         marker_capture_set_player(false, 0, 0, 0);
         s->markers.client = nullptr;
+        s->minimap.fog.clear();  // v35: the last world's fog of war goes with it
     } else if (kind == EMF_WORLD_SERVER) {
         if (s->markers.sender) s->markers.sender->reset();
         s->markers.server = nullptr;
@@ -218,7 +219,10 @@ void markers_map_pre(void* ctx) {
     uint8_t* u = list_owner(ctx, &off);
     MapList l;
     if (!u || !read_list(u, off, &l)) return;
-    core_state()->markers.map.pre(&l);
+    CoreState* s = core_state();
+    const auto canvases = s->minimap.canvases.view();
+    s->markers.map.pre(&l, minimap_wanted(canvases && !canvases->empty(),
+                                          s->minimap.markers_asked_ms.load(std::memory_order_relaxed), now_ms(s)));
 }
 
 void markers_map_post(void* ctx) {

@@ -40,7 +40,7 @@ uint32_t emf_share(uint64_t capacity, uint64_t game_last) {
     return static_cast<uint32_t>(std::min<uint64_t>(kMapShareMax, capacity - game_last - kMapGameReserve));
 }
 
-void MapMarkers::pre(const MapList* list) {
+void MapMarkers::pre(const MapList* list, bool keep_game) {
     step_ = (step_ + 1) % kArenas;
     arenas_[step_].clear();  // this arena's labels were put three steps ago
     if (!list_ok(list)) return;
@@ -58,6 +58,7 @@ void MapMarkers::pre(const MapList* list) {
             break;
         if (!entity || !type) continue;
         if (types.size() < kMapSeenTypesMax) types.push_back(type);
+        if (!keep_game) continue;
         GameMarker g;
         g.type = type;
         g.shown = shown >= 2;

@@ -169,7 +169,7 @@ TEST_CASE("map list (v35): the game's own entries are kept for map_markers: posi
     MapMarkers mm;
     l.add_game(1500, 0x11, 1500.5, 320, 4740.25);
     l.add_game(1501, 0x22, 10, 0, 20, 0);
-    mm.pre(&l.list);
+    mm.pre(&l.list, true);
     auto g = mm.game_markers();
     REQUIRE(g.size() == 2u);
     CHECK(g[0].type == 0x11u);
@@ -182,10 +182,22 @@ TEST_CASE("map list (v35): the game's own entries are kept for map_markers: posi
     std::vector<Marker> mine{icon_marker("a", 1, 2, 0x33)};
     REQUIRE(mm.post(&l.list, mine, nullptr) == 1u);
     l.add_game(1502, 0x44, 7, 0, 8);
-    mm.pre(&l.list);
+    mm.pre(&l.list, true);
     g = mm.game_markers();
     REQUIRE(g.size() == 1u);
     CHECK(g[0].type == 0x44u);
     mm.reset();
     CHECK(mm.game_markers().empty());
+}
+
+
+TEST_CASE("map list (review M4): without a mod asking, the game's entries are not copied (the types still are)") {
+    FakeList l(16);
+    MapMarkers mm;
+    l.add_game(1500, 0x11, 1, 0, 2);
+    mm.pre(&l.list, false);
+    CHECK(mm.game_markers().empty());
+    CHECK(mm.seen_types().size() == 1u);
+    mm.pre(&l.list, true);
+    CHECK(mm.game_markers().size() == 1u);
 }

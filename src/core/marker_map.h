@@ -46,7 +46,8 @@ uint32_t emf_share(uint64_t capacity, uint64_t game_last);
 class MapMarkers {
 public:
     // Before the game empties the list: the count its own entries reached last step, the types they use.
-    void pre(const MapList* list);
+    // keep_game false: the game's own entries are not copied for map_markers (no mod asked: minimap_wanted)
+    void pre(const MapList* list, bool keep_game = true);
     // After it emptied it: EMF's entries with a game_icon, nearest to `player` first (null: in id order), within the
     // share and the capacity; how many were put (list->count grows by that).
     uint32_t post(MapList* list, const std::vector<Marker>& markers, const double* player);

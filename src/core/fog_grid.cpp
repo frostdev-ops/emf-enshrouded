@@ -111,20 +111,8 @@ uint32_t FogStore::version() const {
     return version_;
 }
 
-bool FogStore::picture(std::vector<uint8_t>* out, uint32_t* side) const {
-    std::lock_guard<std::mutex> lock(m_);
-    if (!have_ || !out || !side) return false;
-    const uint32_t px = static_cast<uint32_t>(std::ceil(h_.w / kFogPixelMetres));
-    const uint32_t s = (px + 1) / 2;
-    out->assign(static_cast<size_t>(s) * s, 0);
-    for (uint32_t y = 0; y < s; ++y)
-        for (uint32_t x = 0; x < s; ++x) {
-            const uint32_t sum = fog_pixel(h_, 2 * x, 2 * y) + fog_pixel(h_, 2 * x + 1, 2 * y) +
-                                 fog_pixel(h_, 2 * x, 2 * y + 1) + fog_pixel(h_, 2 * x + 1, 2 * y + 1);
-            (*out)[static_cast<size_t>(y) * s + x] = static_cast<uint8_t>(sum / 4);
-        }
-    *side = s;
-    return true;
+bool minimap_wanted(bool has_canvas, uint64_t asked_ms, uint64_t now_ms) {
+    return has_canvas || (asked_ms != 0 && now_ms >= asked_ms && now_ms - asked_ms < kMinimapAskedMs);
 }
 
 }  // namespace emf::core

@@ -13,6 +13,11 @@ namespace emf::core {
 constexpr double kFogPixelMetres = 8.0;
 constexpr uint32_t kFogBlockSide = 32;
 constexpr uint64_t kFogRefreshMs = 500;
+constexpr uint64_t kMinimapAskedMs = 10000;  // a mod that asked for the fog or the map markers keeps them read this long
+
+// Whether EMF reads the fog of war and the game's map list for mods: while a canvas exists, or a mod asked within
+// kMinimapAskedMs (players without a minimap mod pay nothing).
+bool minimap_wanted(bool has_canvas, uint64_t asked_ms, uint64_t now_ms);
 
 struct FogHeader {
     float w = 0, h = 0;          // world size, metres
@@ -41,8 +46,6 @@ public:
     bool explored(double x, double z, float* out) const;
     float world_size() const;
     uint32_t version() const;  // changes with every new copy
-    // A picture with half the pixels on each side (each the mean of 2 x 2), row 0 north: false without a grid.
-    bool picture(std::vector<uint8_t>* out, uint32_t* side) const;
 
 private:
     mutable std::mutex m_;

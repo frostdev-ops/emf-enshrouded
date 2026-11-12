@@ -89,7 +89,7 @@ TEST_CASE("api map_markers: the game's own entries from the map list; counts wit
         e[0x34] = 2;
         ++l.count;
     }
-    state.markers.map.pre(&l);
+    state.markers.map.pre(&l, true);
     CHECK(api_table()->map_markers(nullptr, 0) == 3u);
     EmfGameMarker out[2]{};
     CHECK(api_table()->map_markers(out, 2) == 3u);

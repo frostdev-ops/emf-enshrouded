@@ -630,7 +630,9 @@ typedef struct EmfMapMarkerType {
     char name[48];   /* the game's internal name, NUL-terminated */
 } EmfMapMarkerType;
 
-/* v35 a minimap's parts: the player's view, the game's own map markers, canvases (drawing panels a mod owns) */
+/* v35 a minimap's parts: the player's view, the game's own map markers, canvases (drawing panels a mod owns). These
+ * four structs keep their layout in later versions (arrays of them are passed without an element size): what grows
+ * comes as new functions. */
 #define EMF_VIEW_CAMERA 1u /* EmfPlayerView.flags: camera_yaw_deg is set (a frame of the 3D view was seen) */
 typedef struct EmfPlayerView {
     uint32_t size;        /* sizeof(EmfPlayerView) of the core */
@@ -1364,10 +1366,11 @@ typedef struct EmfApi {
 
     /* ---- v35: a minimap's parts (EmfPlayerView, EmfGameMarker, EmfCanvas) ---- */
     /* The local player's position, heading and camera yaw, and the map's size: false on the dedicated server, at the
-     * main menu and before the player is known. Any thread. */
+     * main menu and before the player is known. Set out->size to sizeof(EmfPlayerView) first. Any thread. */
     bool (*player_view)(EmfPlayerView* out);
     /* The fog of war at (x, z) on this game's map: 0 unexplored .. 1 explored. False without it (the dedicated server,
-     * before a world). Any thread (a copy refreshed twice a second). */
+     * before a world, or the first moment after a mod asks: EMF reads it while a canvas exists or a mod asked in the
+     * last 10 s). Any thread (a copy refreshed twice a second). */
     bool (*fog_at)(double x, double z, float* explored);
     /* The game's own map markers in this game's world (altars, shrines, places found), as its map list had them last:
      * how many there are; fills `out` up to `cap` (may be NULL to count). At most 512. */

@@ -20,6 +20,7 @@ namespace emf::core {
 
 namespace {
 constexpr float kDefaultWorldSize = 10240.0f;
+uint64_t now_of(const CoreState* s) { return s && s->now_ms ? s->now_ms() : GetTickCount64(); }
 }  // namespace
 
 bool api_player_view(EmfPlayerView* out) {
@@ -49,12 +50,17 @@ bool api_player_view(EmfPlayerView* out) {
 
 bool api_fog_at(double x, double z, float* explored) {
     CoreState* s = core_state();
-    return s && explored && s->minimap.fog.explored(x, z, explored);
+    if (!s) return false;
+    s->minimap.fog_asked_ms.store(now_of(s), std::memory_order_relaxed);  // keeps the fog read (minimap_wanted)
+    return explored && s->minimap.fog.explored(x, z, explored);
 }
 
 void minimap_client_tick(EmfWorld* client, uint64_t now_ms) {
     CoreState* s = core_state();
     if (!s || !client || !s->minimap.fog.due(now_ms)) return;
+    const auto canvases = s->minimap.canvases.view();
+    if (!minimap_wanted(canvases && !canvases->empty(), s->minimap.fog_asked_ms.load(std::memory_order_relaxed), now_ms))
+        return;  // no mod uses the fog of war: nothing is copied
     auto* grid = static_cast<const uint8_t*>(WorldView(reinterpret_cast<uint8_t*>(client)).singleton("FogOfWar"));
     FogHeader h;
     const uint8_t* data = nullptr;
@@ -76,6 +82,7 @@ void minimap_client_tick(EmfWorld* client, uint64_t now_ms) {
 uint32_t api_map_markers(EmfGameMarker* out, uint32_t cap) {
     CoreState* s = core_state();
     if (!s) return 0;
+    s->minimap.markers_asked_ms.store(now_of(s), std::memory_order_relaxed);  // keeps the map list copied
     const auto all = s->markers.map.game_markers();
     for (uint32_t i = 0; out && i < cap && i < all.size(); ++i) {
         EmfGameMarker g{};
@@ -106,7 +113,12 @@ bool api_canvas_set(const char* id, const EmfCanvas* c) {
                           : r == CanvasStore::SetResult::Full    ? "32 canvases already"
                           : r == CanvasStore::SetResult::Taken   ? "the id is another mod's"
                                                                  : "bad numbers (corner 0-3, shape 0-1, w and h 8-1080)";
-        s->log_line("canvas_set refused (" + owner + "): " + why);
+        std::string out;
+        {
+            std::lock_guard<std::mutex> l(s->markers.log_lock);  // a mod retrying every frame: once per 10 s
+            out = s->markers.log.pass("canvas_set refused (" + owner + "): " + why, now_of(s));
+        }
+        if (!out.empty()) s->log_line(out);
     }
     return false;
 }
