@@ -420,3 +420,65 @@ TEST_CASE("InputRouter window: opened while its close key is down after the game
     CHECK(r.key(up(kB, 'B')) == Route::Both);  // the game saw it go down
     CHECK(r.key(down(kB, 'B')) == Route::CloseWindow);  // so the next press closes it
 }
+
+TEST_CASE("CharSource: raw keys only (no key messages): characters come from raw input at once") {
+    CharSource s;
+    CHECK(s.from_raw());
+    CHECK(s.raw_down(0x1E, L"a") == L"a");
+    CHECK(s.raw_up(0x1E).empty());
+}
+
+TEST_CASE("CharSource: key messages with character messages (Windows): raw characters are never typed") {
+    CharSource s;
+    s.legacy_seen();
+    CHECK_FALSE(s.from_raw());
+    for (int i = 0; i < 6; ++i) {
+        CHECK(s.raw_down(0x1E, L"a").empty());
+        s.wm_char();  // the game's TranslateMessage made one
+        CHECK(s.raw_up(0x1E).empty());
+    }
+    CHECK_FALSE(s.from_raw());
+}
+
+TEST_CASE("CharSource: key messages but no character messages (Wine): after 3 presses raw input types, the held ones too") {
+    CharSource s;
+    s.legacy_seen();
+    CHECK(s.raw_down(0x23, L"h").empty());
+    CHECK(s.raw_up(0x23).empty());
+    CHECK(s.raw_down(0x12, L"e").empty());
+    CHECK(s.raw_up(0x12).empty());
+    CHECK(s.raw_down(0x26, L"l").empty());
+    CHECK(s.raw_up(0x26) == L"hel");  // the third press without a character message: switch, and type what was held
+    CHECK(s.from_raw());
+    CHECK(s.raw_down(0x19, L"p") == L"p");
+    s.wm_char();  // a late one changes nothing now
+    CHECK(s.from_raw());
+}
+
+TEST_CASE("CharSource: one fast tap whose character message came late does not switch; a character message resets") {
+    CharSource s;
+    s.legacy_seen();
+    CHECK(s.raw_down(0x1E, L"a").empty());
+    CHECK(s.raw_up(0x1E).empty());  // its character message comes after the release
+    s.wm_char();
+    for (int i = 0; i < 2; ++i) {
+        CHECK(s.raw_down(0x30, L"b").empty());
+        CHECK(s.raw_up(0x30).empty());
+    }
+    CHECK_FALSE(s.from_raw());  // 2 misses after the reset, not 3
+    s.wm_char();
+    CHECK_FALSE(s.from_raw());
+}
+
+TEST_CASE("CharSource: keys without characters (Enter, arrows) do not count; key-up of another key does nothing") {
+    CharSource s;
+    s.legacy_seen();
+    for (int i = 0; i < 5; ++i) {
+        CHECK(s.raw_down(0x1C, L"").empty());
+        CHECK(s.raw_up(0x1C).empty());
+    }
+    CHECK_FALSE(s.from_raw());
+    CHECK(s.raw_down(0x1E, L"a").empty());
+    CHECK(s.raw_up(0x30).empty());  // another key's release
+    CHECK_FALSE(s.from_raw());
+}

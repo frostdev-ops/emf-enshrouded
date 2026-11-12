@@ -5,6 +5,8 @@
 
 #include <windows.h>
 
+#include <string>
+
 #include <intrin.h>
 
 #include <atomic>
@@ -27,6 +29,7 @@ std::atomic<bool> g_raw_mouse{false};
 std::atomic<bool> g_absolute_mouse{false};  // raw mouse input with MOUSE_MOVE_ABSOLUTE (remote desktop, a VM)
 std::atomic<bool> g_legacy_keys{false};   // the window also gets WM_KEYDOWN/WM_CHAR: characters come from WM_CHAR
 HeldKeys g_keys;  // key state as seen through raw input (window thread only), for ToUnicodeEx
+CharSource g_chars;  // where the console's characters come from (window thread only)
 
 SRWLOCK g_ranges_lock = SRWLOCK_INIT;
 std::vector<std::pair<uintptr_t, uintptr_t>> g_ranges;
@@ -109,7 +112,24 @@ void track_key(const KeyEvent& e) {
     g_keys.track(vk, e);
 }
 
-// Characters for a raw key press (keyboards whose legacy WM_CHAR messages are suppressed by the game's raw input).
+// Types characters into the console (those the router gives to it).
+void type_chars(const std::wstring& chars) {
+    for (wchar_t ch : chars)
+        if (ch >= 0x20 && g_router->character(ch) == Route::Console && g_cb.console_char) g_cb.console_char(ch);
+}
+
+// A raw key's release: under Wine it may decide that characters come from raw input (CharSource).
+void raw_release(const KeyEvent& e) {
+    if (e.down) return;
+    const bool was = g_chars.from_raw();
+    type_chars(g_chars.raw_up(e.scan));
+    if (!was && g_chars.from_raw())
+        emf::logf("overlay: the keys came without character messages (as under Wine): the console's characters come "
+                  "from raw input now");
+}
+
+// Characters for a raw key press: typed now when they come from raw input, else held until the window's own character
+// message shows up (CharSource).
 void raw_characters(const KeyEvent& e) {
     if (!e.down || !g_cb.console_char) return;
     UINT vk = e.vkey;
@@ -121,8 +141,7 @@ void raw_characters(const KeyEvent& e) {
     wchar_t buf[8] = {};
     const int n = ToUnicodeEx(vk, e.scan | (e.extended ? 0xE000 : 0), state, buf, 8, 0x4 /* keep dead-key state */,
                               GetKeyboardLayout(0));
-    for (int i = 0; i < n; ++i)
-        if (buf[i] >= 0x20 && g_router->character(buf[i]) == Route::Console) g_cb.console_char(buf[i]);
+    type_chars(g_chars.raw_down(e.scan, n > 0 ? std::wstring(buf, static_cast<size_t>(n)) : std::wstring()));
 }
 
 // Applies a key route. Returns true if the message is handled here (not passed to the game).
@@ -135,7 +154,7 @@ bool apply_key(const KeyEvent& e, Route r, bool raw) {
             return true;
         case Route::Console:
             if (g_cb.console_key) g_cb.console_key(e);
-            if (raw && !g_legacy_keys) raw_characters(e);  // only when no WM_CHAR will follow
+            if (raw) raw_characters(e);  // typed now, or held until the WM_CHAR that should follow
             return true;
         case Route::Both:
             if (g_cb.console_key) g_cb.console_key(e);
@@ -172,6 +191,7 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 KeyEvent e;
                 if (!decode_raw_keyboard(ri->data.keyboard, &e)) break;
                 track_key(e);
+                raw_release(e);
                 if (apply_key(e, g_router->key(e), true)) return DefWindowProcW(hwnd, msg, wp, lp);
             } else if (ri->header.dwType == RIM_TYPEMOUSE && g_router->capturing()) {
                 g_raw_mouse = true;
@@ -205,6 +225,7 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             const KeyEvent e{static_cast<uint16_t>((lp >> 16) & 0xFF), static_cast<uint16_t>(wp),
                              msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN, ((lp >> 24) & 1) != 0};
             if (!g_legacy_keys.exchange(true)) emf::logf("overlay: the game window also gets key messages (WM_KEYDOWN)");
+            g_chars.legacy_seen();
             // Raw input already decided this key; its key message copies that decision (no deciding twice).
             const Route r = g_raw_keyboard ? g_router->legacy_key(e) : g_router->key(e);
             // A dead toggle key (German ^) was stored by the game's TranslateMessage just now: clear it.
@@ -219,7 +240,7 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_DEADCHAR:
         case WM_SYSDEADCHAR: {
-            if (g_raw_keyboard && !g_legacy_keys) {
+            if (g_raw_keyboard && g_chars.from_raw()) {
                 if (g_router->capturing()) return 0;
                 break;
             }
@@ -238,12 +259,13 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             break;
         case WM_CHAR:
         case WM_SYSCHAR: {
-            if (g_raw_keyboard && !g_legacy_keys) {  // characters come from raw input
+            if (g_raw_keyboard && g_chars.from_raw()) {  // characters come from raw input
                 if (g_router->capturing()) return 0;
                 break;
             }
             const Route r = g_router->character(static_cast<wchar_t>(wp));
             if (r == Route::Console) {
+                g_chars.wm_char();  // the window makes characters: nothing raw is held for them
                 if (g_cb.console_char && wp >= 0x20) g_cb.console_char(static_cast<wchar_t>(wp));
                 return 0;
             }

@@ -3,6 +3,8 @@
 // hook in input_hook.cpp applies it.
 #include <windows.h>
 
+#include <string>
+
 #include <atomic>
 #include <cstdint>
 #include <utility>
@@ -105,6 +107,52 @@ public:
 
 private:
     BYTE keys_[256] = {};
+};
+
+// Where the console's characters come from. With raw keys only, from raw input (ToUnicodeEx). Once the window also gets
+// key messages, from its character messages (WM_CHAR, made by the game's TranslateMessage), as on Windows. Under Wine the
+// key messages come but the character messages may not: after kMisses console key presses in a row whose characters
+// came only from raw input, raw input types them from then on, the ones held while deciding included. Window thread only.
+class CharSource {
+public:
+    static constexpr int kMisses = 3;
+    void legacy_seen() {  // a key message (WM_KEYDOWN) arrived
+        if (!switched_) from_raw_ = false;
+    }
+    bool from_raw() const { return from_raw_; }
+    // A raw key press for the console and the characters ToUnicodeEx gives for it: what to type now.
+    std::wstring raw_down(uint16_t scan, const std::wstring& chars) {
+        if (from_raw_) return chars;
+        if (chars.empty()) return {};
+        pending_scan_ = scan;
+        pending_ = chars;
+        has_pending_ = true;
+        return {};
+    }
+    // A character message for the console arrived: the window makes them, nothing raw is held.
+    void wm_char() {
+        if (from_raw_) return;
+        has_pending_ = false;
+        misses_ = 0;
+        held_.clear();
+    }
+    // The raw release of a key: what to type now (the held characters, when this press decides for raw input).
+    std::wstring raw_up(uint16_t scan) {
+        if (from_raw_ || !has_pending_ || scan != pending_scan_) return {};
+        has_pending_ = false;
+        held_ += pending_;
+        if (++misses_ < kMisses) return {};
+        from_raw_ = switched_ = true;
+        std::wstring out;
+        out.swap(held_);
+        return out;
+    }
+
+private:
+    bool from_raw_ = true, switched_ = false, has_pending_ = false;
+    uint16_t pending_scan_ = 0;
+    std::wstring pending_, held_;
+    int misses_ = 0;
 };
 
 // The toggle key may be a dead key (German ^, US-International `): the game's TranslateMessage then keeps it pending,
