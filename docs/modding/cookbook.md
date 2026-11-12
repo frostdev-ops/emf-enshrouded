@@ -632,6 +632,25 @@ local function try_raider(world, raider, raider_pos, altar_pos)
 end
 ```
 
+## A gate that opens for a raid (doors)
+
+A raid mod can open a gate when the attack starts and keep the treasure room shut (Lua 1.30, host or dedicated server).
+
+- `emf.door(world, id)` first: nil means it is not a door, and `logic = true` means a switch drives it (EMF leaves it alone).
+- `emf.door_open` and `emf.door_close` swing the door at the next step, and the game's path grid follows, so enemies'
+  paths change. `emf.door_lock` takes away the E prompt; it is not saved, so lock again after a world restart.
+- They return false when refused: check the result, the reason is in the log.
+
+```lua
+local function open_gate(world, gate, vault_door)
+  local state, flags = emf.door(world, gate)
+  if state == "closed" and not flags.logic then
+    emf.door_open(world, gate, "front")
+  end
+  emf.door_lock(world, vault_door, true)   -- players cannot open the treasure room with E
+end
+```
+
 ## Run code before or after one of the game's programs
 
 ```cpp

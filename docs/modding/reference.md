@@ -1,7 +1,7 @@
 # EMF API reference
 
 The C API is one table of function pointers, `EmfApi`, declared in `sdk/include/emf/emf_api.h` and passed to your
-`emf_mod_load`. It only grows: each version appends functions at the end (`EMF_API_VERSION` 37 today), so a mod built
+`emf_mod_load`. It only grows: each version appends functions at the end (`EMF_API_VERSION` 38 today), so a mod built
 for an older version works with a newer core. `sdk/include/emf/emf.hpp` wraps it in C++; prefer the wrappers.
 
 **Threads.** "World callback" below means: inside `on_tick`, `run_on_world`, `on_event`, a command, a put/take result
@@ -1190,6 +1190,32 @@ uint32_t id = api()->path_find(world, &q, [](EmfWorld*, uint32_t, const EmfPathR
 }, nullptr);
 ```
 
+## v38: doors and gates
+
+A door is an entity with `ServerToggleState` and `DirectionalInteraction` (player doors and gates). Use these on the
+server world: the host, or the dedicated server. C++: `emf::has_v38()` in `emf.hpp`.
+
+| C | Rules |
+|---|---|
+| `uint32_t door_state(world, entity)` | `EMF_DOOR_NONE` (not a door, or not the server world), `EMF_DOOR_CLOSED` or `EMF_DOOR_OPEN`, plus the flags `EMF_DOOR_LOCKED` (0x10: EMF holds it locked) and `EMF_DOOR_LOGIC` (0x20: a switch drives it; EMF does not touch it) |
+| `bool door_set(world, entity, uint32_t open, uint32_t side)` | Opens (1) or closes (0) the door at the next server step. Players see it swing, and the game's collider and path grid follow it, so enemies' paths change. `side`: 0 = the game's default (back), 1 front, 2 back |
+| `bool door_lock(world, entity, uint32_t locked)` | While locked, no player gets the E prompt on it (EMF keeps it so each step, from the next step on). Not saved: it lasts until the world closes. `door_set` still works on a locked door |
+
+`door_set` is refused (false, logged once per 10 s) when: it is not the server world, the entity is not a door, a
+switch drives it, it is already so, `side` is bad, or the feature is off on this build. No open or close sound plays.
+
+Seen live on the host: a spawned Wooden Door opened and closed by `door_set` (it swings); locking removed the "E Open"
+prompt and unlocking brought it back. Not seen yet: a joined player's view, enemies walking through an opened door, and
+what a locked door does to villagers or enemies that want to open it.
+
+```cpp
+uint32_t st = api()->door_state(world, gate);
+if (st != EMF_DOOR_NONE && !(st & EMF_DOOR_LOGIC)) {
+    api()->door_set(world, gate, 1, 0);   // open it at the next step
+    api()->door_lock(world, vault, 1);    // nobody opens the vault door with E
+}
+```
+
 ## SDK headers (header-only C++, no ABI)
 
 | Header | What |
@@ -1217,7 +1243,7 @@ every mod under a name, as in EMF.exe; a load applies at the next start), `hud.l
 for the server world's jobs and each mod), `goto [#k] <x> <y> <z> [ground]` / `goto [#k] <entity> [ground]`
 (v20: teleports you, or the k-th player, there or beside that entity; the result follows a few steps later), `entities`, `near [radius]`, `inv <entity>`,
 `inspect <entity>`, `tpl <entity> <component> [bytes] [offset]`, `tplset <entity> <component> <offset> <type> <value>`,
-`stack <item> <max>`, `destroy <entity>`, `remove <entity> [drop|<player>] [force]` (v36: removes a placed object like a pick-up; `drop` leaves its item on the ground, a player number puts it in that player's inventory, `force` also removes a non-empty container), `path <x> <y> <z> [jumps] [closest] [nodes 1-20000]` (v37: a path from you to that spot on the game's path grid; prints `path N: asked ...`, then the answer: found or why not, whether it reaches or stops short, the points, the metres, where it ends, and the jumps and doors), `chat.players` (v19: the players of the world you host or of the
+`stack <item> <max>`, `destroy <entity>`, `remove <entity> [drop|<player>] [force]` (v36: removes a placed object like a pick-up; `drop` leaves its item on the ground, a player number puts it in that player's inventory, `force` also removes a non-empty container), `path <x> <y> <z> [jumps] [closest] [nodes 1-20000]` (v37: a path from you to that spot on the game's path grid; prints `path N: asked ...`, then the answer: found or why not, whether it reaches or stops short, the points, the metres, where it ends, and the jumps and doors), `door <entity> [open|close|lock|unlock] [front|back]` (v38: without a word it prints the state: "closed", "open, locked", "driven by a switch" or "not a door"; `items door` lists door items and `spawn <guid>` puts one down for a test), `chat.players` (v19: the players of the world you host or of the
 dedicated server, with their account hashes for `[chat] admins`, their connection and name), `world.get [setting]`,
 `world.set <setting> <value> [persist]`, `world.reset [setting|all] [persist]`, `world.list`, `world.export` (v21: the
 running world's settings, [world_settings.md](world_settings.md)). Commands go into the in-game console (the key under Esc), the optional
