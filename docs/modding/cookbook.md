@@ -247,8 +247,11 @@ emf::add_program("mymod_guard", EMF_WORLD_SERVER, {}, {"StartGuardingEvent"}, my
 ```
 
 The NPC follows its guarded entity and fights what threatens it. Its faction decides whom it attacks: the companion
-writes `Faction` 11 (PlayerAlly) right after spawning an enemy body. `AddThreatTargetEvent {attackerId, targetId,
-threatValue}` makes it attack something (send it again every few seconds).
+writes `Faction` 11 (PlayerAlly) right after spawning an enemy body. To send it at something now, write its pick every
+server step: `SelectedTargets.targets[0]` (`targetEntityId` and `targetRootEntityId`) = the target, and
+`DynamicAggro.allowTargetSwitches` = false; give the switches back (true) when the order ends. Beastmaster's Attack does
+this: the beast is in Combat with that target the same step. `AddThreatTargetEvent` does not pick a target: the game
+adds its value to the target's `Threat` attribute, which only players have.
 
 ## Walk a villager somewhere
 *Tested in game (villager_jobs).*

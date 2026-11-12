@@ -92,7 +92,8 @@ Two ways to use events:
    programs see it on the next tick.
 
 Events that worked from a mod program in game: `StartGuardingEvent` / `StopGuardingEvent` (make an NPC guard an
-entity), `AddThreatTargetEvent` (make an NPC attack), `NpcCommandEvent` (walk a villager / move its home),
+entity), `AddThreatTargetEvent` (adds to a player's threat; it does not make an NPC attack: write the NPC's pick
+instead, see the cookbook), `NpcCommandEvent` (walk a villager / move its home),
 `CraftRecipeEvent` (craft at a station into a chest), `LootInteractionEvent` with `bypassInteraction` (harvest a crop
 or collect from an animal into a chest). See the cookbook for each.
 
