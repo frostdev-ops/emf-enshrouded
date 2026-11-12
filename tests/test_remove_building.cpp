@@ -188,6 +188,10 @@ TEST_CASE("remove: a component of the wrong size is not trusted (a game update c
     f.comps[{gen::Inventory::kHash, kChest}].resize(40);
     CHECK(f.facts().stacks_unknown);
     CHECK_FALSE(plan_remove(f.facts(), EMF_REFUND_NONE, false, 0).ok);  // cannot tell: treated as holding items
+    // force cannot drop what it cannot read: refused, never lost (review)
+    const RemovePlan forced = plan_remove(f.facts(), EMF_REFUND_NONE, false, EMF_REMOVE_FORCE);
+    CHECK_FALSE(forced.ok);
+    CHECK(forced.why.find("cannot be read") != std::string::npos);
 }
 
 TEST_CASE("api table (v36): remove_building is there") {

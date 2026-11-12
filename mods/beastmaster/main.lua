@@ -436,12 +436,7 @@ end
 
 function actions.attack(world, player, account)
 	if not account then return "Your account is not known yet." end
-	local function foe(id)
-		if world:get("PlayerState", id) then return false end
-		local f = world:get("Faction", id)
-		local cur = emf.health(world, id)
-		return f ~= nil and f.faction ~= 11 and cur ~= nil and cur > 0
-	end
+	local function foe(id) return pack_mod.fightable(world, id) end
 	-- the creature under the crosshair (an animal too); else the nearest monster where you look; else what hit you
 	local target = aim.pick(world, player, ATTACK_RANGE_M, foe)
 	if not target then
@@ -493,6 +488,7 @@ function actions.mode(world, player, account)
 	if not account then return "Your account is not known yet." end
 	local m = NEXT_MODE[beasts:mode(account)]
 	beasts:set_mode(account, m)
+	pack:end_orders(world, account)
 	save()
 	return MODE_SAYS[m]
 end
@@ -509,6 +505,7 @@ command("mode", "[passive, defending or aggressive]: how your beasts fight; noth
 	elseif not beasts:set_mode(account, word) then
 		emf.reply("A mode is passive, defending or aggressive.")
 	else
+		pack:end_orders(world, account)
 		save()
 		emf.reply(MODE_SAYS[word])
 	end

@@ -1066,7 +1066,9 @@ void* rm_gc(void* out, void* w, uint32_t hash, uint32_t entity) {
     }
     static gen::Inventory inv{};
     inv.slots[2].id.value = 0x22;
-    inv.slots[2].data.count = 7;
+    inv.slots[2].data.count = 70000;  // a stack-size mod's stack: more than one pickup holds
+    inv.slots[4].id.value = 0x22;
+    inv.slots[4].data.count = 0;      // nothing: no pickup made from it
     if (hash == gen::Inventory::kHash && entity == 61) {
         o[0] = reinterpret_cast<uint64_t>(&inv);
         o[1] = sizeof(inv);
@@ -1109,7 +1111,7 @@ TEST_CASE("builtin commands (v36): remove takes a placed object away like a pick
     f.run(iw.w);
     CHECK(g_destroyed == std::vector<uint32_t>{60, 61, 63});
     CHECK(bsaid("removed entity 60; the item came back as a drop"));
-    CHECK(bsaid("entity 61 not removed: it holds items (1 stacks)"));
+    CHECK(bsaid("entity 61 not removed: it holds items (2 stacks)"));
     CHECK(bsaid("removed entity 61"));
     CHECK(bsaid("anything it held lies on the ground where it stood"));
     CHECK(bsaid("entity 64 not removed: what it holds cannot be dropped"));
@@ -1117,7 +1119,7 @@ TEST_CASE("builtin commands (v36): remove takes a placed object away like a pick
     CHECK(bsaid("entity 50 not removed: that is a player"));
     CHECK(bsaid("removed entity 63; the item came back to player 50"));
     CHECK(bsaid("entity 63 not removed: the refund's player is not a player"));
-    CHECK(g_pickup_amounts == std::vector<uint32_t>{1, 7, 1});  // 60's drop, 61's 7 items, 63's (no player inventory)
+    CHECK(g_pickup_amounts == std::vector<uint32_t>{1, 65535, 4465, 1});  // 60's drop, 61's 70000, 63's (no inventory)
     CHECK(bsaid("usage: remove <entity> [me|drop|<player>] [force]"));
 }
 

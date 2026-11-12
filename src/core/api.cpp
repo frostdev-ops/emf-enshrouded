@@ -901,10 +901,15 @@ bool drop_contents(EmfWorld* w, const RemoveFacts& f) {
         const auto rec = fn ? item_by_id(reg, c.item) : std::nullopt;
         const double a = 2.39996 * static_cast<double>(i);  // the golden angle: stacks spread round the spot
         const double r = 0.3 + 0.15 * std::sqrt(static_cast<double>(i));
-        const uint32_t count = (std::min)((std::max)(c.count, 1u), 65535u);
         std::string why = fn ? "unknown item" : "the SpawnWrapper signature is not usable on this game build";
-        if (rec && give_pickup(fn, raw(w), *rec, count, f.pos[0] + r * std::cos(a), f.pos[1] + 0.5, f.pos[2] + r * std::sin(a),
-                               &why, c.level, c.rarity))
+        bool ok = rec.has_value();
+        for (uint32_t left = c.count; ok && left > 0;) {  // a pickup holds at most 65535 (a stack-size mod's stacks)
+            const uint32_t n = (std::min)(left, 65535u);
+            ok = give_pickup(fn, raw(w), *rec, n, f.pos[0] + r * std::cos(a), f.pos[1] + 0.5, f.pos[2] + r * std::sin(a), &why,
+                             c.level, c.rarity) != 0;
+            left -= ok ? n : 0;
+        }
+        if (ok)
             ++dropped;
         else
             core_log("remove_building: a stack of item " + std::to_string(c.item) + " could not be dropped (" + why + ")");

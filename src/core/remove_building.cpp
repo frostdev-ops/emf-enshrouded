@@ -103,8 +103,12 @@ RemovePlan plan_remove(const RemoveFacts& f, uint32_t refund, bool player_ok, ui
         p.why = "not something a player placed (no UsedItem): use destroy to remove it";
         return p;
     }
+    if (f.stacks_unknown && (flags & EMF_REMOVE_FORCE)) {  // force would lose what it cannot read
+        p.why = "its inventory cannot be read (a game update?): empty it by hand first";
+        return p;
+    }
     if ((f.stacks || f.stacks_unknown) && !(flags & EMF_REMOVE_FORCE)) {
-        p.why = f.stacks_unknown ? "it holds items, or its inventory cannot be read: pass force to remove it anyway"
+        p.why = f.stacks_unknown ? "it holds items, or its inventory cannot be read: empty it by hand first"
                                  : "it holds items (" + std::to_string(f.stacks) +
                                        " stacks): empty it, or pass force to remove it with them";
         return p;

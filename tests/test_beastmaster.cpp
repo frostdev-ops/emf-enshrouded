@@ -451,6 +451,53 @@ TEST_CASE("beastmaster: attack with nothing under the crosshair goes for the nea
     CHECK(b.reply("beastmaster.attack") == "No monster where you look (within 40 m): look at the creature to attack.");
 }
 
+// Review: an order now really forces the attack, so the crosshair must not send beasts at a player's side.
+TEST_CASE("beastmaster: attack never sends beasts at a farm animal, an automated player or an ally under the crosshair") {
+    BeastRig b;
+    wolf_out(b);
+    armed(b, 1234);
+    b.look(1, 0, 10.5, 0, 0);
+    for (int faction : {12 /* FarmAnimal */, 8 /* AutomatedPlayer */, 11 /* PlayerAlly */}) {
+        b.beast(65, "00000000-0000-0000-0000-000000000099", 0, 6, faction, 100, 100);
+        CAPTURE(faction);
+        CHECK(b.reply("beastmaster.attack").find("No monster where you look") == 0);
+        CHECK(ordered(b, 1234) == 0u);
+    }
+}
+
+// Review: a target that turns friendly (taming starts on it: faction 11) is no longer fought.
+TEST_CASE("beastmaster: an Attack order ends when its target turns friendly") {
+    BeastRig b;
+    wolf_out(b);
+    armed(b, 1234);
+    b.look(1, 0, 10.5, 0, 0);
+    b.beast(60, "00000000-0000-0000-0000-000000000099", 0, 6, 4 /* Scavenger */, 100, 100);
+    REQUIRE(b.reply("beastmaster.attack") == "Your beasts attack (1).");
+    REQUIRE(held(b, 1234));
+    component<ecs::Faction>(b.r.fake, 60).faction = static_cast<emf::gen::FactionType>(11);
+    b.seconds(1);
+    CHECK_FALSE(held(b, 1234));
+    unpick(b, 1234);
+    b.seconds(1);
+    CHECK(ordered(b, 1234) == 0u);
+}
+
+// Review: aggressive mode called Attack's order on the nearest foe every second, over the player's own Attack.
+TEST_CASE("beastmaster: aggressive mode keeps a live Attack order (it hunts only beasts without one); a mode change ends orders") {
+    BeastRig b;
+    wolf_out(b);
+    armed(b, 1234);
+    b.reply("beastmaster.mode aggressive");
+    b.beast(70, "00000000-0000-0000-0000-000000000099", 0, 20, 4 /* Scavenger */, 100, 100);  // looked at
+    b.beast(71, "00000000-0000-0000-0000-000000000099", 8, 4, 4, 100, 100);                    // nearer the owner
+    b.look(1, 0, 10.5, 0, 0);
+    REQUIRE(b.reply("beastmaster.attack") == "Your beasts attack (1).");
+    b.seconds(3);
+    CHECK(ordered(b, 1234) == 70u);  // not the nearest
+    b.reply("beastmaster.mode passive");
+    CHECK_FALSE(held(b, 1234));      // the order ended with the mode
+}
+
 TEST_CASE("beastmaster: our beast's hit that leaves a foe at 20 % hands the killing blow to its owner, once") {
     BeastRig b;
     wolf_out(b);

@@ -113,6 +113,17 @@ end
 local INSTALL = "Install them with EMF.exe (Install a downloaded file) and restart the game; EMF.exe's EML content " ..
 	"card says whether they were built."
 
+-- What Attack may send beasts at: a living creature, never a player, an automated player, an ally (a beast) or a farm
+-- animal (a player's), nor one with no side; a wild animal is fine (when the player looks right at it).
+local NEVER_FOUGHT = { [0] = true, [7] = true, [8] = true, [11] = true, [12] = true }
+function M.fightable(world, id)
+	if not world:position(id) or world:get("PlayerState", id) then return false end
+	local f = world:get("Faction", id)
+	if not f or NEVER_FOUGHT[f.faction] then return false end
+	local cur = emf.health(world, id)
+	return cur ~= nil and cur > 0
+end
+
 -- A living hostile creature (HOSTILE), never a player.
 function M.hostile(world, id)
 	local f = world:get("Faction", id)
@@ -485,12 +496,13 @@ function P:end_order(world, id)
 end
 
 -- beastmaster.attack: every beast of `account` that is out goes for `target` at once, for SENT_S or until it dies.
-function P:attack(world, account, target)
+-- `hunting` (aggressive mode): a beast with an order keeps it (the player's Attack, or the foe it hunts already).
+function P:attack(world, account, target, hunting)
 	local n = 0
 	local now = self.env.now(world)
 	self.idle:stop(world, account)  -- every beast of theirs gets up
 	for _, b in ipairs(self.env.beasts():list(account)) do
-		if b.out and b.entity and ours(world, b.entity) then
+		if b.out and b.entity and ours(world, b.entity) and not (hunting and self.orders[b.entity]) then
 			self.sent[b.entity] = now + SENT_S
 			self.orders[b.entity] = target
 			order(world, b.entity, target)
@@ -500,12 +512,12 @@ function P:attack(world, account, target)
 	return n
 end
 
--- Each step: an order holds while its time runs and its target lives.
+-- Each check: an order holds while its time runs and its target may be fought (alive, and not turned friendly: a
+-- creature being tamed becomes an ally at once).
 function P:keep_order(world, id, now)
 	local target = self.orders[id]
 	if not target then return end
-	local cur = world:position(target) and emf.health(world, target)
-	if now >= (self.sent[id] or 0) or not cur or cur <= 0 then
+	if now >= (self.sent[id] or 0) or not M.fightable(world, target) then
 		self:end_order(world, id)
 	else
 		order(world, id, target)
@@ -536,7 +548,17 @@ end
 -- Aggressive beasts: every beast of `account` that is out goes at the nearest hostile creature near its owner.
 function P:hunt(world, account, owner)
 	local foe = nearest_foe(world, owner, self.env.setting("aggro_m"))
-	if foe then self:attack(world, account, foe) end
+	if foe then self:attack(world, account, foe, true) end
+end
+
+-- Every order of `account`'s beasts ends (their mode changed: passive ones stop at once).
+function P:end_orders(world, account)
+	for _, b in ipairs(self.env.beasts():list(account)) do
+		if b.entity and self.orders[b.entity] then
+			self:end_order(world, b.entity)
+			self.sent[b.entity] = nil
+		end
+	end
 end
 
 -- XP credit: when our beast's hit leaves a foe at or under 25 % health, its owner lands the killing blow (a real game

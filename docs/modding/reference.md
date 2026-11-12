@@ -1102,7 +1102,7 @@ Refused, with nothing changed:
 - a Flame Altar, even with `EMF_REMOVE_FORCE` (use `destroy` if you really mean it: destroying an altar loses the whole
   base at the next save);
 - an object no player placed (no `UsedItem`): use `destroy`;
-- an object holding items in its own or linked inventories, unless `EMF_REMOVE_FORCE` (then the items drop at its spot; refused when one of them cannot be dropped);
+- an object holding items in its own or linked inventories, unless `EMF_REMOVE_FORCE` (then the items drop at its spot; refused when one of them cannot be dropped, or an inventory cannot be read);
 - a refund player who is not a player;
 - an unknown `refund` or `flags`;
 - a call outside a world callback, or not on the server world.
