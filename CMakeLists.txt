@@ -154,6 +154,7 @@ add_library(emf_core_lib STATIC
   src/core/path_service.cpp
   src/core/path_glue.cpp
   src/core/doors.cpp
+  src/core/enemy_orders.cpp
   src/core/save_events.cpp
   src/core/fault_report.cpp
   src/core/world_jobs.cpp
@@ -481,6 +482,7 @@ add_executable(emf_tests
   tests/test_path_service.cpp
   tests/test_path_glue.cpp
   tests/test_doors.cpp
+  tests/test_enemy_orders.cpp
   tests/test_teleport.cpp
   tests/test_api_teleport.cpp
   tests/test_wheel_model.cpp
