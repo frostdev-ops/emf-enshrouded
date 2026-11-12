@@ -377,7 +377,8 @@ public:
             g_.tell(player, no);
             return;
         }
-        spot_start(Spot{player, player, admin, Kind::MapTp, x, z});
+        // the ground search takes a second or more: said at once (the owner's hand test: nothing seemed to happen)
+        if (spot_start(Spot{player, player, admin, Kind::MapTp, x, z})) g_.tell(player, "On your way: finding the ground there");
     }
 
     // /tp.mark: the sender to their own waypoint, with the map teleport's rules; admins: tp.mark #k moves player k to

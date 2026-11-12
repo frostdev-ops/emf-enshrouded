@@ -837,3 +837,11 @@ TEST_CASE("teleports tp.pos: coordinates written with commas, brackets or as a p
     CHECK(p.who.index == 2);
     CHECK(p.ground);
 }
+
+TEST_CASE("teleports map (owner's hand test): the player is told at once they are on their way (the ground search takes seconds)") {
+    Rig r;
+    r.t.map_teleport(1, true, 1500, 4740);
+    REQUIRE(r.g.grounds.size() == 1);
+    CHECK(r.g.last_tell().find("On your way") == 0);  // before any ground answer
+    CHECK(r.g.tps.empty());
+}
