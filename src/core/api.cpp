@@ -29,6 +29,7 @@
 #include "inventory.h"
 #include "items.h"
 #include "program_access.h"
+#include "path_glue.h"
 #include "remove_building.h"
 #include "spawn.h"
 #include "teleport.h"
@@ -958,6 +959,39 @@ bool api_remove_building(EmfWorld* w, EmfRemoveBuilding* req) {
     }
     if (!drop_refund(w, plan.refund_item, facts.pos)) req->refunded = 0;
     return true;
+}
+
+// v37: paths on the game's path grid (path_service.h / path_glue.h).
+uint32_t api_path_find(EmfWorld* w, const EmfPathQuery* q, EmfPathCallback cb, void* user) {
+    auto refuse = [](const std::string& why) {
+        std::string line = "path_find refused: " + why;
+        if (g_state) {  // a mod retrying every step: the same line once per 10 s
+            std::lock_guard<std::mutex> l(g_state->put_refusals_lock);
+            line = g_state->put_refusals.pass(line, now());
+        }
+        if (!line.empty()) core_log(line);
+        return 0u;
+    };
+    PathService* paths = path_service();
+    if (!paths) return refuse("not available on this game build (its signatures are not usable, or a game call faulted)");
+    if (!q || q->size < kPathQueryV37Size) return refuse("no query, or its size field is not sizeof(EmfPathQuery)");
+    if (!w || WorldView(raw(w)).kind() != EMF_WORLD_SERVER)
+        return refuse("not a server world (a joined game has no path grid: ask on the host or the dedicated server)");
+    uint32_t owner = q->owner;
+    if (!owner)
+        for (const auto& p : read_players(api_table(), w))
+            if (p.entity) {
+                owner = p.entity;
+                break;
+            }
+    std::string why;
+    const uint32_t id = paths->request(*q, owner, cb, user, now(), &why);
+    return id ? id : refuse(why);
+}
+
+bool api_path_cancel(uint32_t id) {
+    PathService* paths = path_service();
+    return paths && paths->cancel(id);
 }
 
 void api_on_save(EmfSaveCallback cb, void* user) {
@@ -2355,6 +2389,8 @@ const EmfApi kApi = {
     api_canvas_set,
     api_canvas_draw,
     api_remove_building,  // v36
+    api_path_find,        // v37
+    api_path_cancel,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

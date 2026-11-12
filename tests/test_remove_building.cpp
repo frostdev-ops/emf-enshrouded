@@ -163,9 +163,9 @@ TEST_CASE("remove: a component of the wrong size is not trusted (a game update c
     CHECK_FALSE(plan_remove(f.facts(), EMF_REFUND_NONE, false, 0).ok);  // cannot tell: treated as holding items
 }
 
-TEST_CASE("api table (v36): version 36, remove_building at the end") {
+TEST_CASE("api table (v36): remove_building is there") {
     const EmfApi* api = emf::core::api_table();
-    CHECK(api->version == 36u);
-    CHECK(api->size == kApiV36Size);
+    CHECK(api->version >= 36u);  // the newest version is checked by its own test (test_path_glue.cpp: v37)
+    CHECK(api->size >= kApiV36Size);
     CHECK(api->remove_building != nullptr);
 }

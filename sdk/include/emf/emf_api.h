@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 36 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 37 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 36
+#define EMF_API_VERSION 37
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -1453,6 +1453,21 @@ typedef struct EmfApi {
      * req->refunded gets the item id given back (0: none; with _PLAYER the inventory's answer comes after the step).
      * Same calling rules as destroy (SERVER world, inside a world callback on it). */
     bool (*remove_building)(EmfWorld* world, EmfRemoveBuilding* req);
+
+    /* ---- v37: paths on the game's own path grid ---- */
+    /* Asks the game for a path from q->from to q->to (it moves nothing). The answer comes once, after a server step
+     * or more: cb(world, id, result, points, user) on the server world's thread (components, spawn allowed there);
+     * points is valid during the call only. Check result->reaches: with q->closest the game also answers FOUND for a
+     * path that ends at the nearest reachable point (its own march does that and stops at walls). Returns the query
+     * id, or 0 (logged) when refused: not the server world (joined games have no path grid), bad numbers, from and to
+     * more than 200 m apart (the game does not search farther), no owner (q->owner 0 and no player), 32 queries of
+     * EMF already open, or the feature is off on this game build. The grid exists where the world is loaded (near
+     * players); a query elsewhere ends NO_START, NO_TARGET or OTHER (no answer in 10 s). Each query is a search in the
+     * game's own jobs, shared with every walking creature: do not ask again every step (the game's own enemies ask
+     * at most every 0.5 s). Any thread. */
+    uint32_t (*path_find)(EmfWorld* world, const EmfPathQuery* q, EmfPathCallback cb, void* user);
+    /* Ends a query: its callback still comes, with EMF_PATH_CANCELLED. False for an unknown or answered id. */
+    bool (*path_cancel)(uint32_t id);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */

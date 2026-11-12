@@ -46,6 +46,7 @@
 #include "marker_capture.h"
 #include "minimap_draw.h"
 #include "inventory.h"
+#include "path_glue.h"
 #include "teleport.h"
 #include "component_service.h"
 #include "offers.h"
@@ -669,6 +670,7 @@ void hk_register_all_programs(void* world) {
             if (g_buffs) g_buffs->world_reset();          // buff requests for the old world are refused
             emf::core::buffs_new_session();               // every player's buffs are a first sight again
             if (g_teleport) g_teleport->world_reset();
+            emf::core::path_world_reset();                // path queries of the old world end (cancelled)
             if (g_components) g_components->world_reset();  // component changes under way end (FAILED)    // teleports under way end (FAILED)
             g_state->damage_queue.clear();                // hits for the old session never land
             emf::core::env_new_session();                 // nor its env hits and carries
@@ -1404,6 +1406,50 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             g_state->teleport_off = off;
             emf::logf("teleport: off (%s)", off.c_str());
         }
+    }
+    // v37 path_find: the internal emf_path program asks the game's path grid (private research path_query_impl).
+    {
+        auto addr = [&](emf::Sig s) -> uintptr_t {
+            const auto& r = g_state->sigs[static_cast<size_t>(s)];
+            return emf::is_usable(r, known) ? r.addr : 0;
+        };
+        std::string off;
+        if (!addr(emf::Sig::CreatePathQuery) || !addr(emf::Sig::DestroyPathQuery) ||
+            !addr(emf::Sig::GetPathQueryResult) || !addr(emf::Sig::PathQueryDefaults))
+            off = "its signatures are not usable on this game build";
+        else if (g_state->system_programs.registration_closed())
+            off = "mod programs are unavailable";
+        if (off.empty()) {
+            emf::core::PathGlueDeps deps;
+            deps.fns.create = reinterpret_cast<decltype(deps.fns.create)>(addr(emf::Sig::CreatePathQuery));
+            deps.fns.destroy = reinterpret_cast<decltype(deps.fns.destroy)>(addr(emf::Sig::DestroyPathQuery));
+            deps.fns.get = reinterpret_cast<decltype(deps.fns.get)>(addr(emf::Sig::GetPathQueryResult));
+            deps.fns.defaults = reinterpret_cast<decltype(deps.fns.defaults)>(addr(emf::Sig::PathQueryDefaults));
+            deps.component = [](uint8_t* world, uint32_t hash, uint32_t entity) -> const void* {
+                return emf::core::api_table()->get_component(reinterpret_cast<EmfWorld*>(world), hash, entity, nullptr);
+            };
+            deps.after_step = [](std::function<void(EmfWorld*)> fn) {
+                auto* job = new std::function<void(EmfWorld*)>(std::move(fn));
+                g_state->dispatcher.post(EMF_WORLD_SERVER, [](EmfWorld* w, void* u) {
+                    auto* f = static_cast<std::function<void(EmfWorld*)>*>(u);
+                    (*f)(w);
+                    delete f;
+                }, job);
+            };
+            deps.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
+            deps.now_ms = [] { return GetTickCount64(); };
+            if (g_state->system_programs.add(emf::core::path_setup(std::move(deps)), true)) {
+                emf::logf("path_find: on (program %s in the server world)", emf::core::kPathProgramName);
+                g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
+                    if (emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER)
+                        emf::core::path_server_tick(GetTickCount64());
+                }, nullptr);
+            } else {
+                emf::core::path_stop();
+                off = std::string("the ") + emf::core::kPathProgramName + " program could not be added";
+            }
+        }
+        if (!off.empty()) emf::logf("path_find: off (%s)", off.c_str());
     }
     // v23 change_component: the same record path (kind 3 / kind 4), in a program of its own.
     {

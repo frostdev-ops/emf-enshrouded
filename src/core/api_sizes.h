@@ -52,6 +52,8 @@ constexpr uint32_t kApiV34Size = EMF_FIELD_END(EmfApi, ground_at);
 constexpr uint32_t kApiV35Size = EMF_FIELD_END(EmfApi, canvas_draw);
 constexpr uint32_t kApiV36Size = EMF_FIELD_END(EmfApi, remove_building);
 constexpr uint32_t kRemoveBuildingV36Size = EMF_FIELD_END(EmfRemoveBuilding, why);
+constexpr uint32_t kApiV37Size = EMF_FIELD_END(EmfApi, path_cancel);
+constexpr uint32_t kPathQueryV37Size = EMF_FIELD_END(EmfPathQuery, max_nodes);
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
@@ -133,8 +135,15 @@ static_assert(offsetof(EmfApi, map_cursor) == kApiV33Size && kApiV34Size == 952,
               "EmfApi layout (v34 appends map_cursor, on_map_click, map_action, ground_at)");
 static_assert(offsetof(EmfApi, player_view) == kApiV34Size && kApiV35Size == 992,
               "EmfApi layout (v35 appends player_view, fog_at, map_markers, canvas_set, canvas_draw)");
-static_assert(offsetof(EmfApi, remove_building) == kApiV35Size && kApiV36Size == 1000 && sizeof(EmfApi) == kApiV36Size,
+static_assert(offsetof(EmfApi, remove_building) == kApiV35Size && kApiV36Size == 1000,
               "EmfApi layout (v36 appends remove_building)");
+static_assert(offsetof(EmfApi, path_find) == kApiV36Size && kApiV37Size == 1016 && sizeof(EmfApi) == kApiV37Size,
+              "EmfApi layout (v37 appends path_find, path_cancel)");
+static_assert(kPathQueryV37Size == 52 && sizeof(EmfPathQuery) == 52 && offsetof(EmfPathQuery, moves) == 32 &&
+                  offsetof(EmfPathQuery, width) == 36 && offsetof(EmfPathQuery, max_nodes) == 48,
+              "EmfPathQuery layout (v37)");
+static_assert(sizeof(EmfPathPoint) == 16 && sizeof(EmfPathResult) == 20 && offsetof(EmfPathResult, count) == 12,
+              "EmfPathPoint / EmfPathResult layout (v37)");
 static_assert(kRemoveBuildingV36Size == 144 && sizeof(EmfRemoveBuilding) == 144 && offsetof(EmfRemoveBuilding, refunded) == 20 &&
                   offsetof(EmfRemoveBuilding, why) == 24,
               "EmfRemoveBuilding layout (v36)");

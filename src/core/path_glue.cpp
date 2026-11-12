@@ -1,0 +1,187 @@
+// path_find (path_glue.h).
+#include "core/path_glue.h"
+
+#include <windows.h>
+
+#include <algorithm>
+#include <atomic>
+#include <cstring>
+#include <memory>
+#include <vector>
+
+#include "common/offsets.h"
+#include "common/seh.h"
+
+namespace emf::core {
+
+namespace {
+constexpr size_t kJobCmdBuffer = 0x08;    // ProgramContext -> job; cmdbuf = *(job + 8)
+constexpr size_t kResultBytes = 0x28;     // getPathQueryResult's out: points +0, count +8, result +0x24
+constexpr size_t kGamePointBytes = 0x10;  // float x, y, z, u8 move at +0xC
+constexpr size_t kMaxGamePoints = 4096;   // read at most (the service keeps 512)
+
+std::unique_ptr<PathService> g_service;
+PathGlueDeps g_deps;
+std::atomic<bool> g_on{false};
+std::atomic<uint64_t> g_last_run_ms{0};   // when emf_path last ran
+std::atomic<uint64_t> g_waiting_since{0};  // when the watchdog first saw open queries with no run since
+std::atomic<bool> g_watchdog_said{false};
+
+// ---- the game calls under SEH (a fault turns the feature off) ----
+bool call_defaults(void* (*fn)(void*), uint8_t* q) {
+    __try {
+        fn(q);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool call_create(uint32_t* (*fn)(void*, uint32_t*, const void*), void* cb, const uint8_t* q, uint32_t* id) {
+    __try {
+        fn(cb, id, q);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool call_destroy(bool (*fn)(void*, uint32_t, uint32_t), void* cb, uint32_t entity, uint32_t id, bool* ok) {
+    __try {
+        *ok = fn(cb, entity, id);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+bool call_get(bool (*fn)(void*, void*, uint32_t, bool), void* ctx, uint8_t* out, uint32_t id, bool* ok) {
+    __try {
+        *ok = fn(ctx, out, id, false);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+void fault(const char* what) {
+    if (g_on.exchange(false) && g_deps.log)
+        g_deps.log(std::string("path_find: off (the game's ") + what + " faulted; queries are refused until a restart)");
+}
+
+uint8_t* command_buffer(void* ctx) {
+    uint8_t* job = nullptr;
+    uint8_t* cb = nullptr;
+    if (!seh_read(ctx, &job, 8) || !job || !seh_read(job + kJobCmdBuffer, &cb, 8)) return nullptr;
+    return cb;
+}
+
+void deliver(std::vector<PathDone> done) {
+    if (done.empty() || !g_deps.after_step) return;
+    auto shared = std::make_shared<std::vector<PathDone>>(std::move(done));
+    g_deps.after_step([shared](EmfWorld* w) {
+        for (const PathDone& d : *shared)
+            if (d.cb) d.cb(w, d.id, &d.result, d.points.empty() ? nullptr : d.points.data(), d.user);
+    });
+}
+
+void path_program(void* ctx, void*) {
+    if (!g_on.load() || !g_service) return;
+    g_last_run_ms = g_deps.now_ms ? g_deps.now_ms() : GetTickCount64();
+    uint8_t* world = program_context_world(ctx);
+    uint8_t* cb = command_buffer(ctx);
+    if (!world || !cb) return;
+    const PathFns& f = g_deps.fns;
+    PathEngine e;
+    e.create = [&](const EmfPathQuery& q, uint32_t owner) -> uint64_t {
+        alignas(16) uint8_t bytes[kPathQueryBytes] = {};
+        if (!call_defaults(f.defaults, bytes)) {
+            fault("query defaults");
+            return 0;
+        }
+        fill_path_query(bytes, q, owner);
+        uint32_t id = 0;
+        if (!call_create(f.create, cb, bytes, &id)) {
+            fault("create path query");
+            return 0;
+        }
+        return id;
+    };
+    e.poll = [&](uint64_t id) {
+        PathAnswer a;
+        alignas(8) uint8_t out[kResultBytes] = {};
+        bool ok = false;
+        if (!call_get(f.get, ctx, out, static_cast<uint32_t>(id), &ok)) {
+            fault("path query result");
+            return a;
+        }
+        if (!ok) return a;
+        a.done = true;
+        a.game_result = out[0x24];
+        const uint8_t* pts = nullptr;
+        uint64_t count = 0;
+        std::memcpy(&pts, out, 8);
+        std::memcpy(&count, out + 8, 8);
+        if (!pts || !count) return a;
+        const size_t n = static_cast<size_t>(count > kMaxGamePoints ? kMaxGamePoints : count);
+        std::vector<uint8_t> raw(n * kGamePointBytes);
+        if (!seh_read(pts, raw.data(), raw.size())) return a;  // no points: the answer stands, empty
+        a.points.resize(n);
+        for (size_t i = 0; i < n; ++i) {
+            const uint8_t* p = raw.data() + i * kGamePointBytes;
+            std::memcpy(&a.points[i].x, p, 12);
+            a.points[i].move = p[0xC];
+        }
+        return a;
+    };
+    e.destroy = [&](uint64_t id, uint32_t owner) {
+        bool ok = false;
+        if (!call_destroy(f.destroy, cb, owner, static_cast<uint32_t>(id), &ok)) fault("destroy path query");
+        // a full command buffer (ok false) leaves the record until the world goes: rare, and harmless
+    };
+    e.exists = [&](uint32_t entity) {
+        return g_deps.component && g_deps.component(world, off::kHashCurrentTransform, entity) != nullptr;
+    };
+    deliver(g_service->step(e, g_deps.now_ms ? g_deps.now_ms() : GetTickCount64()));
+}
+}  // namespace
+
+ProgramSpec path_setup(PathGlueDeps deps) {
+    g_deps = std::move(deps);
+    g_service = std::make_unique<PathService>();
+    g_on = g_deps.fns.create && g_deps.fns.destroy && g_deps.fns.get && g_deps.fns.defaults;
+    g_last_run_ms = 0;
+    g_waiting_since = 0;
+    g_watchdog_said = false;
+    ProgramSpec s;
+    s.name = kPathProgramName;
+    s.world_kind = EMF_WORLD_SERVER;
+    s.fn = path_program;
+    s.user = nullptr;
+    return s;
+}
+
+PathService* path_service() { return g_on.load() ? g_service.get() : nullptr; }
+
+void path_world_reset() {
+    g_watchdog_said = false;
+    g_waiting_since = 0;
+    if (g_service) deliver(g_service->world_reset());
+}
+
+void path_server_tick(uint64_t now_ms) {
+    if (!g_service || !g_service->open()) {
+        g_waiting_since = 0;
+        return;
+    }
+    if (!g_waiting_since.load()) g_waiting_since = now_ms;  // the first step that sees open queries
+    const uint64_t last = g_last_run_ms.load();
+    const uint64_t since = (std::max)(last, g_waiting_since.load());
+    if (now_ms < since || now_ms - since < kPathWatchdogMs) return;
+    if (!g_watchdog_said.exchange(true) && g_deps.log)
+        g_deps.log(std::string("path_find: the ") + kPathProgramName +
+                   " program is not running in this world; open queries end as cancelled");
+    g_waiting_since = 0;
+    deliver(g_service->world_reset());
+}
+
+void path_stop() { g_on = false; }
+
+}  // namespace emf::core

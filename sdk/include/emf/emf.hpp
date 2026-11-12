@@ -984,6 +984,8 @@ inline bool has_v34() { return api() && api()->size >= offsetof(EmfApi, ground_a
 inline bool has_v35() { return api() && api()->size >= offsetof(EmfApi, canvas_draw) + sizeof(api()->canvas_draw); }
 // v36: remove_building (a placed object removed like a pick-up)
 inline bool has_v36() { return api() && api()->size >= offsetof(EmfApi, remove_building) + sizeof(api()->remove_building); }
+// v37: path_find, path_cancel (paths on the game's own path grid)
+inline bool has_v37() { return api() && api()->size >= offsetof(EmfApi, path_cancel) + sizeof(api()->path_cancel); }
 
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
 inline bool request_save() { return has_v19() && api()->request_save && api()->request_save(); }
