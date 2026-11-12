@@ -701,6 +701,50 @@ typedef struct EmfRemoveBuilding {
     char why[120];     /* out: why it was refused ("" when removed) */
 } EmfRemoveBuilding;
 
+/* v37 path_find: a path on the game's own path grid (it knows terrain, buildings, placed objects and doors) */
+#define EMF_PATH_WALK 0x0001u        /* the game's PathMoveType bits */
+#define EMF_PATH_JUMP_UP 0x0004u
+#define EMF_PATH_JUMP_DOWN 0x0008u
+#define EMF_PATH_JUMP_ACROSS 0x0010u
+#define EMF_PATH_OPEN_DOOR 0x0020u
+#define EMF_PATH_SWIM 0x0040u
+#define EMF_PATH_FOUND 1u     /* a path: see `reaches` (with `closest` it may end at the nearest reachable point) */
+#define EMF_PATH_NO_PATH 2u
+#define EMF_PATH_TOO_LONG 3u  /* the search ran out of nodes (raise max_nodes, or ask for a nearer point) */
+#define EMF_PATH_NO_START 4u  /* no path grid at `from` (not loaded: too far from players, or inside something) */
+#define EMF_PATH_NO_TARGET 5u
+#define EMF_PATH_NO_MEMORY 6u
+#define EMF_PATH_CANCELLED 7u /* path_cancel, the owner went, or the session ended */
+#define EMF_PATH_OTHER 8u     /* the game gave another answer, or none in time */
+typedef struct EmfPathQuery {
+    uint32_t size;        /* sizeof(EmfPathQuery) */
+    uint32_t owner;       /* an entity the query belongs to (the game needs one); 0 = the first player */
+    float from[3];        /* metres */
+    float to[3];
+    uint16_t moves;       /* EMF_PATH_*; 0 = walk */
+    uint8_t max_jump_up;  /* metres; 0 = no limit (the game's rule) */
+    uint8_t max_jump_down;
+    float width;          /* the room the unit needs, metres (0 = the game's default) */
+    float height;
+    uint8_t closest;      /* 1 = fall back to the closest reachable point (the game's march does this) */
+    uint8_t pad[3];
+    uint32_t max_nodes;   /* 0 = 2000; at most 20000 (the game's own default is 500) */
+} EmfPathQuery;
+typedef struct EmfPathPoint {
+    float x, y, z;
+    uint32_t move; /* how it is reached: 0 walk, 2 jump up, 3 jump down, 4 jump across, 5 a door */
+} EmfPathPoint;
+typedef struct EmfPathResult {
+    uint32_t size;    /* sizeof(EmfPathResult) */
+    uint32_t status;  /* EMF_PATH_FOUND ... */
+    uint8_t reaches;  /* 1: the last point is at `to` (within 1.5 m across and 3 m up or down) */
+    uint8_t pad[3];
+    uint32_t count;   /* points (at most 512) */
+    float length;     /* metres from `from` along the points */
+} EmfPathResult;
+typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResult* result, const EmfPathPoint* points,
+                                void* user);
+
 typedef struct EmfHitRule {
     uint32_t size;             /* sizeof(EmfHitRule) */
     uint32_t attacker;         /* 0 = anyone, an entity, or EMF_HIT_PLAYERS / _CREATURES / _OBJECTS */
