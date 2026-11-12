@@ -20,6 +20,7 @@
 #include "daytime.h"
 #include "inventory.h"
 #include "item_names.h"
+#include "path_service.h"
 #include "emf/emf.hpp"
 #include "emf/generated/components.hpp"
 
@@ -1074,6 +1075,52 @@ void cmd_destroy(EmfWorld* w, int argc, const char* const* argv, void* u) {
                                              : fmt("destroy %u failed (see the log)", id));
 }
 
+// path <x> <y> <z> [jumps] [closest] (v37): a path from you; the answer comes after a step or more.
+struct LatePath {
+    ReplyFn reply;
+};
+void path_done(EmfWorld*, uint32_t id, const EmfPathResult* r, const EmfPathPoint* points, void* user) {
+    const std::unique_ptr<LatePath> late(static_cast<LatePath*>(user));
+    if (late->reply && r) late->reply(path_answer_text(id, *r, points));
+}
+void cmd_path(EmfWorld* w, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    EmfPathQuery q{};
+    q.size = sizeof q;
+    bool ok = argc >= 4 && argc <= 6;
+    for (int i = 1; ok && i <= 3; ++i) {
+        char* end = nullptr;
+        q.to[i - 1] = std::strtof(argv[i], &end);
+        ok = end && *end == 0 && end != argv[i];
+    }
+    for (int i = 4; ok && i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "jumps") q.moves |= EMF_PATH_JUMP_UP | EMF_PATH_JUMP_DOWN | EMF_PATH_JUMP_ACROSS;
+        else if (a == "closest") q.closest = 1;
+        else ok = false;
+    }
+    if (!ok) {
+        command_reply_line("usage: path <x> <y> <z> [jumps] [closest]");
+        return;
+    }
+    const uint32_t player = c.player ? c.player() : 0;
+    double at[3] = {};
+    if (!player || !player_pos(c, w, player, at)) {
+        command_reply_line("path: you have no position in this world");
+        return;
+    }
+    for (int i = 0; i < 3; ++i) q.from[i] = static_cast<float>(at[i]);
+    q.owner = player;
+    auto* late = new LatePath{current_reply()};
+    const uint32_t id = c.api->path_find ? c.api->path_find(w, &q, path_done, late) : 0;
+    if (!id) {
+        delete late;
+        command_reply_line("path not asked (see the log: path_find refused ...)");
+        return;
+    }
+    command_reply_line(fmt("path %u: asked from (%.1f, %.1f, %.1f); the answer follows", id, at[0], at[1], at[2]));
+}
+
 // remove <entity> [drop|<player>] [force] (v36): a placed object taken away like a pick-up, its item given back.
 void cmd_remove(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
@@ -1145,6 +1192,8 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         {"tplset", "<entity> <component> <offset> <f32|i32|u32|u16|u8> <value>: change one template value (host)",
          cmd_tplset},
         {"stack", "<item name> <max 1-65535>: change an item's stack size until the game restarts (host)", cmd_stack},
+        {"path", "<x> <y> <z> [jumps] [closest]: a path from you on the game's path grid (it moves nothing; host)",
+         cmd_path},
         {"remove", "<entity> [drop|<player>] [force]: take a placed object away like a pick-up, its item back as a drop or "
                    "to a player; refused for a chest with items unless force, and for a Flame Altar (host)", cmd_remove},
         {"destroy", "<entity>: remove an entity from the world, never a player (host)", cmd_destroy},

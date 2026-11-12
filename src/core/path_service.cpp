@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdio>
 #include <cstring>
 
 namespace emf::core {
@@ -40,6 +41,32 @@ void fill_path_query(uint8_t q[kPathQueryBytes], const EmfPathQuery& in, uint32_
     put_u32(0xfc, 4);
     put_u32(0x100, in.width > 0 ? static_cast<uint32_t>(std::ceil(in.width * 2.0f)) : 0u);
     put_u32(0x104, in.height > 0 ? static_cast<uint32_t>(std::ceil(in.height * 2.0f)) : 0u);
+}
+
+std::string path_answer_text(uint32_t id, const EmfPathResult& r, const EmfPathPoint* points) {
+    const std::string head = "path " + std::to_string(id) + ": ";
+    switch (r.status) {
+        case EMF_PATH_FOUND: break;
+        case EMF_PATH_NO_PATH: return head + "no path";
+        case EMF_PATH_TOO_LONG: return head + "too long (the search ran out of nodes)";
+        case EMF_PATH_NO_START: return head + "no path grid at the start (not loaded, or inside something)";
+        case EMF_PATH_NO_TARGET: return head + "no path grid at the target (not loaded, or inside something)";
+        case EMF_PATH_NO_MEMORY: return head + "the search ran out of memory";
+        case EMF_PATH_CANCELLED: return head + "cancelled";
+        default: return head + "no answer from the game";
+    }
+    uint32_t jumps = 0, doors = 0;
+    for (uint32_t i = 0; points && i < r.count; ++i) {
+        if (points[i].move >= 2 && points[i].move <= 4) ++jumps;
+        if (points[i].move == 5) ++doors;
+    }
+    char buf[256];
+    const EmfPathPoint* last = points && r.count ? &points[r.count - 1] : nullptr;
+    std::snprintf(buf, sizeof buf, "found, %s, %u points, %.1f m, ends at (%.1f, %.1f, %.1f); %u jump%s, %u door%s",
+                  r.reaches ? "reaches the target" : "stops short of the target", r.count, r.length,
+                  last ? last->x : 0.0f, last ? last->y : 0.0f, last ? last->z : 0.0f, jumps, jumps == 1 ? "" : "s",
+                  doors, doors == 1 ? "" : "s");
+    return head + buf;
 }
 
 uint32_t path_status(uint32_t game_result, size_t points) {

@@ -273,3 +273,22 @@ TEST_CASE("path query bytes: EMF's fields over the game's defaults, at the offse
     CHECK(u32(0x48) == 9000u);
     CHECK(u32(0x100) == 0u);
 }
+
+TEST_CASE("path answer text: what the console's path command prints") {
+    EmfPathResult r{};
+    r.size = sizeof r;
+    r.status = EMF_PATH_FOUND;
+    r.reaches = 1;
+    r.count = 3;
+    r.length = 52.24f;
+    const EmfPathPoint pts[3] = {{1, 2, 3, 0}, {4, 5, 6, 2}, {10, 50, 4, 5}};
+    CHECK(path_answer_text(7, r, pts) ==
+          "path 7: found, reaches the target, 3 points, 52.2 m, ends at (10.0, 50.0, 4.0); 1 jump, 1 door");
+    r.reaches = 0;
+    CHECK(path_answer_text(7, r, pts).find("found, stops short of the target") != std::string::npos);
+    r = EmfPathResult{};
+    r.status = EMF_PATH_NO_START;
+    CHECK(path_answer_text(8, r, nullptr) == "path 8: no path grid at the start (not loaded, or inside something)");
+    r.status = EMF_PATH_CANCELLED;
+    CHECK(path_answer_text(9, r, nullptr) == "path 9: cancelled");
+}

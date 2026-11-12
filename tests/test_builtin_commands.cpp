@@ -17,6 +17,7 @@
 #include "core/inventory.h"
 #include "core/items.h"
 #include "core/manifest.h"
+#include "core/path_glue.h"
 #include "core/remove_building.h"
 #include "core/spawn.h"
 #include "emf/generated/components.hpp"
@@ -1196,4 +1197,18 @@ TEST_CASE("remove (review, not judged): the same object twice in one step pays i
     CHECK(g_destroyed == std::vector<uint32_t>{60});
     CHECK(g_pickup_amounts == std::vector<uint32_t>{1});
     CHECK(bsaid("entity 60 not removed: it was removed already"));
+}
+
+TEST_CASE("builtin commands (v37): path checks its words; with the feature off it says why") {
+    BFixture f;
+    path_stop();
+    RemoveWorld rw;
+    f.center.enqueue("path 1 2");
+    f.center.enqueue("path 1 2 x");
+    f.center.enqueue("path 3740 845 1440 jumps closest");
+    f.run(rw.iw.w);
+    size_t usage = 0;
+    for (const auto& l : g_bout) usage += l.find("usage: path <x> <y> <z> [jumps] [closest]") != std::string::npos;
+    CHECK(usage == 2u);
+    CHECK(bsaid("path not asked (see the log: path_find refused"));
 }

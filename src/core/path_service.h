@@ -54,6 +54,8 @@ void fill_path_query(uint8_t q[kPathQueryBytes], const EmfPathQuery& in, uint32_
 
 // The game's PathfindingResult and the number of points -> EMF_PATH_*.
 uint32_t path_status(uint32_t game_result, size_t points);
+// One line about an answer (the console's path command).
+std::string path_answer_text(uint32_t id, const EmfPathResult& r, const EmfPathPoint* points);
 // "" when the query can be sent, else why not.
 std::string path_query_check(const EmfPathQuery& q);
 
