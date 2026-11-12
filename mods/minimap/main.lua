@@ -14,9 +14,9 @@ emf.on_key("zoom_out_key", function() zoom = math.min(#zooms, zoom + 1) end, "cl
 -- The panel: where and how big (the settings), hidden when switched off with the key.
 local function place()
   local size = emf.setting("size") or 220
-  -- 48 units up from a bottom corner: above the game's clock
+  -- 64 units up from a bottom corner: above the game's clock
   local corner = emf.setting("corner") or "bottom_right"
-  local spec = {corner = corner, x = 16, y = corner:find("bottom") and 48 or 16, w = size, h = size,
+  local spec = {corner = corner, x = 16, y = corner:find("bottom") and 64 or 16, w = size, h = size,
                 shape = emf.setting("shape") or "rect", hidden = not shown}
   local key = spec.corner .. size .. spec.shape .. tostring(spec.hidden)
   if key ~= placed then

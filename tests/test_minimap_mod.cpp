@@ -35,7 +35,7 @@ TEST_CASE("minimap mod: a square canvas at the bottom right (above the clock); t
     const EmfCanvas& c = m.r.fake.canvases["minimap:map"];
     CHECK(c.corner == EMF_CANVAS_BOTTOM_RIGHT);
     CHECK(c.shape == EMF_CANVAS_RECT);  // the game clips its map to a rectangle
-    CHECK(c.y >= 40);
+    CHECK(c.y >= 60);  // clear of the game's clock (seen live)
     CHECK(c.w == 220);
     CHECK(c.hidden == 0);
     const auto& cmds = m.r.fake.canvas_cmds["minimap:map"];
