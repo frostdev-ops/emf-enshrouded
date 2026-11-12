@@ -1,6 +1,7 @@
 // Doors (API v38): the emf_doors program opens, closes and locks doors through the game's own writeOther (fakes).
 #include <doctest.h>
 
+#include <array>
 #include <cstring>
 #include <cmath>
 #include <map>
@@ -125,8 +126,9 @@ struct Rig {
     }
     std::vector<std::string> saved;  // what the world file got
     bool save_ok = true;
-    int door_at_calls = 0;
-    bool doors_there = true;  // door_at finds a door at its spot
+    int list_calls = 0;
+    bool doors_there = true;  // list_doors sees the doors
+    std::vector<std::array<double, 3>> players;  // where the players stand
     DoorService::Deps deps() {
         DoorService::Deps d;
         d.read_other = f_read_other;
@@ -138,15 +140,17 @@ struct Rig {
             saved.push_back(text);
             return true;
         };
-        d.door_at = [this](uint8_t*, const double* p) -> uint32_t {
-            ++door_at_calls;
-            if (!doors_there) return 0;
+        d.list_doors = [this](uint8_t*) {
+            ++list_calls;
+            std::vector<DoorSpot> out;
+            if (!doors_there) return out;
             for (const auto& [e, bits] : g_doors)
-                if (bits.xf[1] && std::abs(double(bits.xf[0]) / 4294967296.0 - p[0]) < 0.5 &&
-                    std::abs(double(bits.xf[2]) / 4294967296.0 - p[2]) < 0.5)
-                    return e;
-            return 0;
+                if (g_by_hash.count({gen::ServerToggleState::kHash, e}))
+                    out.push_back({e, {double(bits.xf[0]) / 4294967296.0, double(bits.xf[1]) / 4294967296.0,
+                                       double(bits.xf[2]) / 4294967296.0}});
+            return out;
         };
+        d.players = [this](uint8_t*) { return players; };
         return d;
     }
     uint8_t* world() { return w.p(); }
@@ -360,18 +364,18 @@ TEST_CASE("door locks: a saved place without its door yet is looked for again la
     r.doors_there = false;  // not loaded yet
     r.service.load_saved("lock 500.00 20.00 30.00\n");
     r.service.server_tick(r.world(), 1000);
-    CHECK(r.door_at_calls == 1);
+    CHECK(r.list_calls == 1);
     r.service.server_tick(r.world(), 1500);
-    CHECK(r.door_at_calls == 1);  // not every step
+    CHECK(r.list_calls == 1);  // not every step
     r.doors_there = true;
     r.service.server_tick(r.world(), 5000);
-    CHECK(r.door_at_calls == 2);
+    CHECK(r.list_calls == 2);
     r.step();
     CHECK(r.service.locked_count() == 1u);
     r.service.world_reset();
     r.service.server_tick(r.world(), 9000);
     CHECK(r.service.locked_count() == 0u);
-    CHECK(r.door_at_calls == 2);
+    CHECK(r.list_calls == 2);
 }
 
 TEST_CASE("door locks: a save that fails is tried again at the next tick") {
@@ -384,4 +388,104 @@ TEST_CASE("door locks: a save that fails is tried again at the next tick") {
     r.save_ok = true;
     r.service.server_tick(r.world(), 2000);
     CHECK(r.saved.size() == 1u);
+}
+
+namespace {
+void remove_door(uint32_t e) {  // broken, or streamed out
+    g_by_hash.erase({emf::gen::ecs::ServerToggleState::kHash, e});
+    g_by_hash.erase({emf::gen::ecs::DirectionalInteraction::kHash, e});
+    g_by_hash.erase({emf::gen::ecs::InteractionOfferRuntime::kHash, e});
+}
+}  // namespace
+
+TEST_CASE("door locks (review I1): an unlock of a door at a saved place not found yet forgets that place") {
+    Rig r;
+    r.service.load_saved("lock 500.00 20.00 30.00\n");
+    REQUIRE(r.order(kDoor, DoorOrderKind::Unlock));
+    r.step();
+    r.service.server_tick(r.world(), 1000);
+    r.step();
+    CHECK(r.service.locked_count() == 0u);  // not locked again by the look
+    CHECK_FALSE(g_doors[kDoor].offer.isDisabled);
+    REQUIRE_FALSE(r.saved.empty());
+    CHECK(r.saved.back().find("lock 500.00") == std::string::npos);
+}
+
+TEST_CASE("door locks (review I1): a locked door gone with a player near was broken: its place is forgotten") {
+    Rig r;
+    add_door(kGone);
+    REQUIRE(r.order(kGone, DoorOrderKind::Lock));
+    r.step();
+    r.service.server_tick(r.world(), 1000);
+    REQUIRE(r.saved.back().find("lock 503.00") != std::string::npos);
+    r.players = {{503, 20, 40}};  // 10 m away
+    remove_door(kGone);
+    r.step();
+    r.service.server_tick(r.world(), 2000);
+    CHECK(r.service.locked_count() == 0u);
+    CHECK(r.saved.back().find("lock 503.00") == std::string::npos);
+    add_door(kGone);  // a new door in the same doorway is not locked
+    r.service.server_tick(r.world(), 60000);
+    r.step();
+    CHECK(r.service.locked_count() == 0u);
+}
+
+TEST_CASE("door locks (review I1): a locked door gone with nobody near was streamed out: it is locked again when back") {
+    Rig r;
+    add_door(kGone);
+    REQUIRE(r.order(kGone, DoorOrderKind::Lock));
+    r.step();
+    r.service.server_tick(r.world(), 1000);
+    r.players = {{700, 20, 30}};  // 197 m away
+    remove_door(kGone);
+    r.step();
+    r.service.server_tick(r.world(), 2000);
+    CHECK(r.service.locked_count() == 0u);
+    CHECK(r.service.saved_text().find("lock 503.00 20.00 30.00") != std::string::npos);  // still kept
+    add_door(kGone);
+    r.service.server_tick(r.world(), 60000);
+    r.step();
+    CHECK(r.service.locked_count() == 1u);
+}
+
+TEST_CASE("door locks (review I2): one look lists the doors once for all saved places") {
+    Rig r;
+    add_door(504);
+    r.service.load_saved("lock 500.00 20.00 30.00\nlock 504.00 20.00 30.00\nlock 9000.00 20.00 30.00\n");
+    r.service.server_tick(r.world(), 1000);
+    CHECK(r.list_calls == 1);
+    r.step();
+    CHECK(r.service.locked_count() == 2u);
+}
+
+TEST_CASE("door locks (review M2): each saved place gets the nearest door, and a door only one place") {
+    const std::vector<DoorSpot> doors{{1, {0, 0, 0}}, {2, {0.4, 0, 0}}};
+    const std::vector<std::array<double, 3>> places{{0.35, 0, 0}, {0.05, 0, 0}, {5, 0, 0}, {0.3, 0, 0}};
+    CHECK(match_doors(doors, places) == std::vector<uint32_t>{2, 1, 0, 0});
+    CHECK(match_doors(doors, {{0, 0.6, 0}}) == std::vector<uint32_t>{0});  // half a metre, in height too
+}
+
+TEST_CASE("door locks (review M1): a place found while other locks are saved stays in the file") {
+    Rig r;
+    add_door(504);
+    REQUIRE(r.order(504, DoorOrderKind::Lock));
+    r.step();  // a change waits to be saved
+    r.service.load_saved("lock 500.00 20.00 30.00\n");
+    r.service.server_tick(r.world(), 1000);  // finds 500 and saves
+    REQUIRE_FALSE(r.saved.empty());
+    CHECK(r.saved.back().find("lock 500.00 20.00 30.00") != std::string::npos);
+    CHECK(r.saved.back().find("lock 504.00 20.00 30.00") != std::string::npos);
+    r.step();
+    r.service.server_tick(r.world(), 2000);
+    const std::string t = r.service.saved_text();
+    CHECK(t.find("lock 500.00") == t.rfind("lock 500.00"));  // once
+}
+
+TEST_CASE("door locks (review M4): a door at a saved place that a switch drives now is not locked; its place goes") {
+    Rig r;
+    r.service.load_saved("lock 501.00 20.00 30.00\n");  // kSwitched
+    r.service.server_tick(r.world(), 1000);
+    r.step();
+    CHECK(r.service.locked_count() == 0u);
+    CHECK(r.service.saved_text().find("lock 501.00") == std::string::npos);
 }

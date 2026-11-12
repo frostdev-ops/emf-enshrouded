@@ -556,33 +556,45 @@ std::unique_ptr<emf::core::TeleportService> g_teleport;
 std::unique_ptr<emf::core::DoorService> g_doors;
 // The door locks kept per world: <game>\emf\config\emf_doors\<slot>.txt.
 emf::WorldFile g_door_file{"emf_doors"};
-// The door standing at a place (within 0.5 m) in the server world, 0 when none is loaded there.
-uint32_t door_at(uint8_t* world, const double* pos) {
-    struct Find {
+// A 32.32 fixed-point position (CurrentTransform's first 24 bytes) in metres; false when it cannot be read.
+bool read_place(EmfWorld* w, uint32_t id, std::array<double, 3>& out) {
+    uint64_t size = 0;
+    const void* t = emf::core::api_table()->get_component(w, emf::gen::ecs::CurrentTransform::kHash, id, &size);
+    int64_t raw[3];
+    if (!t || size < sizeof raw || !emf::seh_read(t, raw, sizeof raw)) return false;
+    for (int i = 0; i < 3; ++i) out[i] = static_cast<double>(raw[i]) / 4294967296.0;
+    return true;
+}
+// Every door in the server world (ServerToggleState and DirectionalInteraction) with its place, in one pass over the
+// entities (doors are rare: ServerToggleState is asked first).
+std::vector<emf::core::DoorSpot> list_doors(uint8_t* world) {
+    struct Acc {
         EmfWorld* w;
-        const double* p;
-        uint32_t found;
-    } f{reinterpret_cast<EmfWorld*>(world), pos, 0};
-    const EmfApi* a = emf::core::api_table();
-    a->for_each_entity(f.w, [](uint32_t id, void* user) {
-        auto& f = *static_cast<Find*>(user);
-        if (f.found) return;
+        std::vector<emf::core::DoorSpot> out;
+    } acc{reinterpret_cast<EmfWorld*>(world), {}};
+    emf::core::api_table()->for_each_entity(acc.w, [](uint32_t id, void* user) {
+        auto& acc = *static_cast<Acc*>(user);
         const EmfApi* a = emf::core::api_table();
-        uint64_t size = 0;
-        const void* t = a->get_component(f.w, emf::gen::ecs::CurrentTransform::kHash, id, &size);
-        int64_t raw[3];
-        if (!t || size < sizeof raw || !emf::seh_read(t, raw, sizeof raw)) return;
-        double d2 = 0;
-        for (int i = 0; i < 3; ++i) {
-            const double d = static_cast<double>(raw[i]) / 4294967296.0 - f.p[i];
-            d2 += d * d;
-        }
-        if (d2 > 0.25) return;
-        if (a->get_component(f.w, emf::gen::ecs::ServerToggleState::kHash, id, nullptr) &&
-            a->get_component(f.w, emf::gen::ecs::DirectionalInteraction::kHash, id, nullptr))
-            f.found = id;
-    }, &f);
-    return f.found;
+        if (!a->get_component(acc.w, emf::gen::ecs::ServerToggleState::kHash, id, nullptr) ||
+            !a->get_component(acc.w, emf::gen::ecs::DirectionalInteraction::kHash, id, nullptr))
+            return;
+        emf::core::DoorSpot d;
+        d.entity = id;
+        if (read_place(acc.w, id, d.pos)) acc.out.push_back(d);
+    }, &acc);
+    return acc.out;
+}
+// Where the players in the server world stand.
+std::vector<std::array<double, 3>> player_places(uint8_t* world) {
+    std::vector<std::array<double, 3>> out;
+    EmfWorld* w = reinterpret_cast<EmfWorld*>(world);
+    const EmfApi* a = emf::core::api_table();
+    for (uint32_t id = 1; id <= 1023; ++id) {  // player entities have the low ids (read_players)
+        if (!a->get_component(w, emf::gen::ecs::PlayerState::kHash, id, nullptr)) continue;
+        std::array<double, 3> p{};
+        if (read_place(w, id, p)) out.push_back(p);
+    }
+    return out;
 }
 // v39 enemy orders: written after every server step.
 std::unique_ptr<emf::core::EnemyOrders> g_orders;
@@ -1340,7 +1352,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         deps.get_component = g_state->get_component;
         deps.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
         deps.save = [](const std::string& text) { return g_door_file.save(text); };  // false until the world's file was read
-        deps.door_at = door_at;
+        deps.list_doors = list_doors;
+        deps.players = player_places;
         if (!deps.read_other || !deps.write_other || !sig(Sig::IterBegin)) {
             emf::logf("doors: off (the ReadOther, WriteOther or IterBegin signatures are not usable)");
         } else if (g_state->system_programs.registration_closed()) {

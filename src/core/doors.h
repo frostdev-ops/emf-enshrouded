@@ -26,8 +26,20 @@ constexpr size_t kMaxLockedDoors = 1024;
 constexpr uint64_t kLockLookMs = 3000;    // saved places whose door is not loaded yet are looked for this often,
 constexpr uint64_t kLockLookSlowMs = 30000;  // and after kLockLooksFast looks this often (a door that was broken)
 constexpr uint32_t kLockLooksFast = 20;
+// A locked door that goes while a player is this near was broken or taken down: its lock is forgotten. With nobody near
+// it streamed out: its place is looked for again (entities far from every player are not loaded on the server).
+constexpr double kDoorGoneNear = 40.0;
 
 enum class DoorOrderKind : uint8_t { Open, Close, Lock, Unlock };
+
+// A door in the server world and its place (metres).
+struct DoorSpot {
+    uint32_t entity = 0;
+    std::array<double, 3> pos{};
+};
+constexpr double kDoorPlaceRadius = 0.5;  // a saved place names the door within half a metre of it
+// For each saved place, the nearest door within kDoorPlaceRadius that no earlier place took; 0 when none.
+std::vector<uint32_t> match_doors(const std::vector<DoorSpot>& doors, const std::vector<std::array<double, 3>>& places);
 
 class DoorService {
 public:
@@ -38,8 +50,10 @@ public:
         std::function<void(const std::string&)> log;
         // the world's file of locks: false when it cannot be written now (tried again at the next tick)
         std::function<bool(const std::string&)> save;
-        // the door standing at a place (within half a metre), 0 when none is loaded there
-        std::function<uint32_t(uint8_t* world, const double* pos)> door_at;
+        // every door in the world now with its place (one pass over the entities)
+        std::function<std::vector<DoorSpot>(uint8_t* world)> list_doors;
+        // where the players in the world stand
+        std::function<std::vector<std::array<double, 3>>(uint8_t* world)> players;
     };
     explicit DoorService(Deps deps);
     ProgramSpec spec();
@@ -56,7 +70,9 @@ public:
     // The world's saved locks (its file, read once after its save loaded): each door at a saved place is locked again.
     void load_saved(const std::string& text);
     // After a server step (no world jobs running): the locks are saved when they changed, and saved places whose door
-    // was not found yet are looked for (every kLockLookMs).
+    // was not found yet are looked for (every kLockLookMs; one pass over the doors for all of them, outside the lock).
+    // A door found at a saved place is locked through request() (a door a switch drives now is not: its place goes);
+    // the place stays saved until the lock is made.
     void server_tick(uint8_t* world, uint64_t now_ms);
     std::string saved_text() const;
     size_t locked_count() const;
@@ -76,6 +92,7 @@ private:
         std::array<double, 3> pos{};
     };
     Locked* find_locked(uint32_t entity);  // under lock_
+    bool drop_pending_near(const std::array<double, 3>& pos);  // under lock_: true when a saved place went
     bool is_locked(uint32_t entity) const;
     void say(const std::string& line);
 

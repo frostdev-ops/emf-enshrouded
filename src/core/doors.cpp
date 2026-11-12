@@ -97,15 +97,20 @@ void DoorService::run(void* program_context) {
     // locks change first, so this step's lock pass sees them
     for (const Order& o : work) {
         if (o.world != call->world) continue;
+        if (o.kind != DoorOrderKind::Lock && o.kind != DoorOrderKind::Unlock) continue;
         Locked* l = find_locked(o.entity);
+        Locked n{o.entity, -1, 0};
+        int64_t raw[3];  // its place, for the world's file
+        if (l && l->has_pos) {
+            n = *l;
+        } else if (const void* t = comp(deps_.get_component, call->world, gen::CurrentTransform::kHash, o.entity, 56);
+                   t && seh_read(t, raw, sizeof raw)) {
+            for (int i = 0; i < 3; ++i) n.pos[i] = static_cast<double>(raw[i]) / 4294967296.0;
+            n.has_pos = std::isfinite(n.pos[0]) && std::isfinite(n.pos[1]) && std::isfinite(n.pos[2]);
+        }
+        // its saved place (a lock read from the file, its door not found yet) is this lock's now, or goes with the unlock
+        if (n.has_pos && drop_pending_near(n.pos)) dirty_ = true;
         if (o.kind == DoorOrderKind::Lock && !l) {
-            Locked n{o.entity, -1, 0};
-            int64_t raw[3];  // its place, for the world's file
-            if (const void* t = comp(deps_.get_component, call->world, gen::CurrentTransform::kHash, o.entity, 56);
-                t && seh_read(t, raw, sizeof raw)) {
-                for (int i = 0; i < 3; ++i) n.pos[i] = static_cast<double>(raw[i]) / 4294967296.0;
-                n.has_pos = std::isfinite(n.pos[0]) && std::isfinite(n.pos[1]) && std::isfinite(n.pos[2]);
-            }
             locked_.push_back(n);
             dirty_ = true;
         }
@@ -203,16 +208,46 @@ void DoorService::run(void* program_context) {
         }
     }
     if (!problem.empty()) say("doors: " + problem);
+    // a door that is gone: broken or taken down while a player was near (its lock is forgotten), else streamed out (its
+    // place is looked for again)
+    std::vector<bool> broken(gone.size(), true);
+    if (!gone.empty() && deps_.players) {
+        const auto players = deps_.players(call->world);
+        for (size_t i = 0; i < gone.size(); ++i) {
+            const auto it = std::find_if(locked.begin(), locked.end(), [&](const Locked& x) { return x.entity == gone[i]; });
+            if (it == locked.end() || !it->has_pos) continue;
+            broken[i] = std::any_of(players.begin(), players.end(), [&](const std::array<double, 3>& p) {
+                const double dx = p[0] - it->pos[0], dy = p[1] - it->pos[1], dz = p[2] - it->pos[2];
+                return dx * dx + dy * dy + dz * dz <= kDoorGoneNear * kDoorGoneNear;
+            });
+        }
+    }
     AcquireSRWLockExclusive(&lock_);
     for (const Locked& l : locked)  // what each lock holds now (a lock removed meanwhile stays removed)
         if (Locked* live = find_locked(l.entity)) {
             live->held = l.held;
             live->side = l.side;
         }
-    for (uint32_t e : gone)
+    for (size_t i = 0; i < gone.size(); ++i) {
+        const uint32_t e = gone[i];
+        if (Locked* live = find_locked(e); live && live->has_pos) {
+            if (broken[i]) dirty_ = true;
+            else pending_.push_back(live->pos);
+        }
         locked_.erase(std::remove_if(locked_.begin(), locked_.end(), [&](const Locked& x) { return x.entity == e; }),
                       locked_.end());
+    }
     ReleaseSRWLockExclusive(&lock_);
+}
+
+bool DoorService::drop_pending_near(const std::array<double, 3>& pos) {
+    const size_t before = pending_.size();
+    pending_.erase(std::remove_if(pending_.begin(), pending_.end(), [&](const std::array<double, 3>& p) {
+                       const double dx = p[0] - pos[0], dy = p[1] - pos[1], dz = p[2] - pos[2];
+                       return dx * dx + dy * dy + dz * dz <= kDoorPlaceRadius * kDoorPlaceRadius;
+                   }),
+                   pending_.end());
+    return pending_.size() != before;
 }
 
 void DoorService::world_reset() {
@@ -262,26 +297,65 @@ std::string DoorService::saved_text() const {
     return out;
 }
 
-void DoorService::server_tick(uint8_t* world, uint64_t now_ms) {
-    if (!world || WorldView(world).kind() != EMF_WORLD_SERVER) return;
-    AcquireSRWLockExclusive(&lock_);
-    if (!pending_.empty() && now_ms >= next_look_ && deps_.door_at) {
-        next_look_ = now_ms + (++looks_ <= kLockLooksFast ? kLockLookMs : kLockLookSlowMs);
-        std::vector<std::array<double, 3>> still;
-        for (const auto& p : pending_) {
-            const uint32_t e = deps_.door_at(world, p.data());
-            if (e && !find_locked(e)) {
-                Order o;
-                o.world = world;
-                o.entity = e;
-                o.kind = DoorOrderKind::Lock;
-                orders_.push_back(o);  // locked at the next step; its place goes into the file from there
-            } else if (!e) {
-                still.push_back(p);
+std::vector<uint32_t> match_doors(const std::vector<DoorSpot>& doors, const std::vector<std::array<double, 3>>& places) {
+    std::vector<uint32_t> out(places.size(), 0);
+    std::vector<bool> taken(doors.size(), false);
+    for (size_t i = 0; i < places.size(); ++i) {
+        double best = kDoorPlaceRadius * kDoorPlaceRadius;
+        size_t pick = doors.size();
+        for (size_t j = 0; j < doors.size(); ++j) {
+            if (taken[j]) continue;
+            const double dx = doors[j].pos[0] - places[i][0], dy = doors[j].pos[1] - places[i][1],
+                         dz = doors[j].pos[2] - places[i][2];
+            const double d2 = dx * dx + dy * dy + dz * dz;
+            if (d2 <= best) {
+                best = d2;
+                pick = j;
             }
         }
-        pending_ = std::move(still);
+        if (pick < doors.size()) {
+            taken[pick] = true;
+            out[i] = doors[pick].entity;
+        }
     }
+    return out;
+}
+
+void DoorService::server_tick(uint8_t* world, uint64_t now_ms) {
+    if (!world || WorldView(world).kind() != EMF_WORLD_SERVER) return;
+    std::vector<std::array<double, 3>> look;
+    AcquireSRWLockExclusive(&lock_);
+    if (!pending_.empty() && now_ms >= next_look_ && deps_.list_doors) {
+        next_look_ = now_ms + (++looks_ <= kLockLooksFast ? kLockLookMs : kLockLookSlowMs);
+        look = pending_;
+    }
+    ReleaseSRWLockExclusive(&lock_);
+    if (!look.empty()) {
+        const std::vector<uint32_t> found = match_doors(deps_.list_doors(world), look);
+        for (size_t i = 0; i < look.size(); ++i) {
+            const uint32_t e = found[i];
+            if (!e) continue;
+            bool forget = false;
+            if (is_locked(e)) {
+                forget = true;  // locked already: that lock holds its place
+            } else if (state(world, e) & EMF_DOOR_LOGIC) {
+                forget = true;
+                char b[160];
+                std::snprintf(b, sizeof b, "doors: the door at (%.1f, %.1f, %.1f) is driven by a switch now: its lock is forgotten",
+                              look[i][0], look[i][1], look[i][2]);
+                say(b);
+            } else {
+                std::string why;
+                request(world, e, DoorOrderKind::Lock, 0, &why);  // locked at the next step (its place stays saved till then)
+            }
+            if (forget) {
+                AcquireSRWLockExclusive(&lock_);
+                if (drop_pending_near(look[i])) dirty_ = true;
+                ReleaseSRWLockExclusive(&lock_);
+            }
+        }
+    }
+    AcquireSRWLockExclusive(&lock_);
     const bool save_now = dirty_ && deps_.save;
     ReleaseSRWLockExclusive(&lock_);
     if (save_now && deps_.save(saved_text())) {
