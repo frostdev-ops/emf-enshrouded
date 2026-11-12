@@ -56,6 +56,9 @@ struct Fake {
     bool spawn_fails = false;       // spawn answers 0, as the core does for a template the game does not have
     std::set<std::vector<uint8_t>> missing_templates;  // these templates (game byte order) only: a pack not installed
     std::vector<uint32_t> destroyed;
+    std::vector<EmfRemoveBuilding> removes;  // v36
+    bool remove_ok = true;
+    uint32_t remove_refunded = 0;
     uint32_t tick = 0;  // what world_tick answers (60 per second of game time)
     struct Sub {
         uint8_t kind;
@@ -344,6 +347,15 @@ uint32_t f_spawn_ex(EmfWorld* w, const uint8_t guid[16], double x, double y, dou
 }
 bool f_destroy(EmfWorld*, uint32_t e) {
     g->destroyed.push_back(e);
+    return true;
+}
+bool f_remove_building(EmfWorld*, EmfRemoveBuilding* r) {
+    g->removes.push_back(*r);
+    if (!g->remove_ok) {
+        std::snprintf(r->why, sizeof r->why, "%s", "it holds items (2 stacks)");
+        return false;
+    }
+    r->refunded = r->refund ? g->remove_refunded : 0;
     return true;
 }
 bool f_on_event(uint8_t kind, const char* name, uint32_t expected, EmfWorldEventCallback cb, void* user) {
@@ -975,6 +987,7 @@ EmfApi fake_api() {
     a.map_markers = f_map_markers;
     a.canvas_set = f_canvas_set;
     a.canvas_draw = f_canvas_draw;
+    a.remove_building = f_remove_building;  // v36
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;

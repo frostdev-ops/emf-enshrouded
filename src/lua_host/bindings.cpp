@@ -919,6 +919,48 @@ int l_destroy(lua_State* L) {
     return 1;
 }
 
+// emf.remove_building(world, id [, {refund = false | "drop" | player_id, force = false}]) (lua 1.28, API v36): a placed
+// object removed like a pick-up. True plus the item id given back (or nil), or false plus the reason.
+int l_remove_building(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = world_arg(L, 1);
+    EmfRemoveBuilding r{};
+    r.size = sizeof r;
+    r.entity = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    if (lua_istable(L, 3)) {
+        lua_getfield(L, 3, "refund");
+        if (lua_type(L, -1) == LUA_TSTRING && std::string(lua_tostring(L, -1)) == "drop") {
+            r.refund = EMF_REFUND_DROP;
+        } else if (lua_isinteger(L, -1) && lua_tointeger(L, -1) > 0 && lua_tointeger(L, -1) <= 0xffffffff) {
+            r.refund = EMF_REFUND_PLAYER;
+            r.player = static_cast<uint32_t>(lua_tointeger(L, -1));
+        } else if (!lua_isnil(L, -1) && !(lua_isboolean(L, -1) && !lua_toboolean(L, -1))) {
+            return luaL_error(L, "emf.remove_building: refund must be false, 'drop' or a player id");
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, 3, "force");
+        if (lua_toboolean(L, -1)) r.flags |= EMF_REMOVE_FORCE;
+        lua_pop(L, 1);
+    } else if (!lua_isnoneornil(L, 3)) {
+        return luaL_error(L, "emf.remove_building: the third argument is an options table");
+    }
+    const EmfApi* a = s->host->api;
+    if (!a || a->size < offsetof(EmfApi, remove_building) + sizeof(a->remove_building) || !a->remove_building) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, "this EMF core is too old (remove_building needs API v36)");
+        return 2;
+    }
+    if (!a->remove_building(w, &r)) {
+        lua_pushboolean(L, false);
+        lua_pushstring(L, r.why[0] ? r.why : "refused (see the log)");
+        return 2;
+    }
+    lua_pushboolean(L, true);
+    if (r.refunded) lua_pushinteger(L, r.refunded);
+    else lua_pushnil(L);
+    return 2;
+}
+
 // emf.kill(world, id) (lua 1.4): the entity's current health becomes 0 and the game's death program does the rest; no
 // attacker, no kill credit; never a player (emf::kill in emf.hpp: through attribute_add since lua 1.5 / API v18).
 int l_kill(lua_State* L) {
@@ -3125,7 +3167,7 @@ int l_net_peer(lua_State* L) {
 void open_bindings(lua_State* L, Script&) {
     static const luaL_Reg fns[] = {{"item", l_item},       {"item_info", l_item_info}, {"item_name", l_item_name}, {"language", l_language}, {"give", l_give},
                                    {"put", l_put},         {"take", l_take},           {"move", l_move},           {"spawn", l_spawn},
-                                   {"destroy", l_destroy}, {"kill", l_kill},           {"time_of_day", l_time_of_day},
+                                   {"destroy", l_destroy}, {"remove_building", l_remove_building}, {"kill", l_kill},           {"time_of_day", l_time_of_day},
                                    {"health", l_health},   {"attribute", l_attribute}, {"attribute_add", l_attribute_add},
                                    {"damage", l_damage},
                                    {"xp_required", l_xp_required}, {"level_cap", l_level_cap}, {"set_level", l_set_level},
