@@ -1,11 +1,12 @@
 # Minimap (sample, `minimap`)
 
-A small minimap at the top right of your screen: the game's own map around you (north up, as the game's map is), your
+A small minimap at the bottom right of your screen (above the clock): the game's own map around you (north up, as the game's map is), your
 arrow turning with you, the places your map shows (altars, shrines, places found) as dots, and the markers mods put on
 minimaps. It hides when the map, a menu or the console is open.
 
 - **F10** shows or hides it; **Numpad +** and **Numpad -** zoom (0.5 to 8 metres per point; 2 at the start).
-- Settings (Mods tab, EMF.exe): the corner, the size (120 to 400), round or square, and the keys.
+- Settings (Mods tab, EMF.exe): the corner, the size (120 to 400), square or round (round sits on a dark square: the
+  game draws its map into a rectangle), and the keys.
 - It runs on your own game (also when you join someone); nobody else needs it. Installed **switched off**.
 
 ## For mod makers

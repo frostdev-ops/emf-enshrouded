@@ -6,33 +6,41 @@
 
 #include "lua_mod_rig.h"
 
-TEST_CASE("minimap mod: a round canvas at the top right; on a client step: the map, markers, dots, arrow, frame, N") {
-    ModRig m("minimap", L"minimap_mod", {}, [](Fake& f) {
-        f.view_ok = true;
-        f.view.size = sizeof f.view;
-        f.view.x = 1500;
-        f.view.z = 4740;
-        f.view.heading_deg = 90;
-        f.view.world_size = 10240;
-        EmfGameMarker close_by{};
-        close_by.size = sizeof close_by;
-        close_by.type = 0x11;
-        close_by.flags = EMF_GAME_MARKER_SHOWN;
-        close_by.x = 1520;
-        close_by.z = 4760;
-        EmfGameMarker away = close_by;
-        away.x = 9000;  // off the panel
-        f.game_markers = {close_by, away};
-    });
+namespace {
+
+void world_with_player(Fake& f) {
+    f.view_ok = true;
+    f.view.size = sizeof f.view;
+    f.view.x = 1500;
+    f.view.z = 4740;
+    f.view.heading_deg = 90;
+    f.view.world_size = 10240;
+    EmfGameMarker close_by{};
+    close_by.size = sizeof close_by;
+    close_by.type = 0x11;
+    close_by.flags = EMF_GAME_MARKER_SHOWN;
+    close_by.x = 1520;
+    close_by.z = 4760;
+    EmfGameMarker away = close_by;
+    away.x = 9000;  // off the panel
+    f.game_markers = {close_by, away};
+}
+
+}  // namespace
+
+TEST_CASE("minimap mod: a square canvas at the bottom right (above the clock); the map, markers, a dot, the arrow, frame, N") {
+    ModRig m("minimap", L"minimap_mod", {}, world_with_player);
     m.host->tick(kClient);
     REQUIRE(m.r.fake.canvases.count("minimap:map") == 1);
     const EmfCanvas& c = m.r.fake.canvases["minimap:map"];
-    CHECK(c.corner == EMF_CANVAS_TOP_RIGHT);
-    CHECK(c.shape == EMF_CANVAS_CIRCLE);
+    CHECK(c.corner == EMF_CANVAS_BOTTOM_RIGHT);
+    CHECK(c.shape == EMF_CANVAS_RECT);  // the game clips its map to a rectangle
+    CHECK(c.y >= 40);
     CHECK(c.w == 220);
     CHECK(c.hidden == 0);
     const auto& cmds = m.r.fake.canvas_cmds["minimap:map"];
-    REQUIRE(cmds.size() == 7u);  // background, map, markers, one dot, arrow, frame, N
+    REQUIRE(cmds.size() == 7u);  // background (under the map), map, markers, one dot, arrow, frame, N
+    CHECK(cmds[0].c.kind == EMF_CANVAS_RECT_CMD);
     CHECK(cmds[1].c.kind == EMF_CANVAS_MAP);
     CHECK(cmds[1].c.a[0] == 1500);
     CHECK(cmds[1].c.a[2] == 2);  // 2 m per unit at the start
@@ -44,16 +52,20 @@ TEST_CASE("minimap mod: a round canvas at the top right; on a client step: the m
     CHECK(cmds[6].s == "N");
 }
 
-TEST_CASE("minimap mod: square when set so; nothing drawn on a server step or without a player") {
-    ModRig m("minimap", L"minimap_mod_sq", {{"shape", "rect"}});
+TEST_CASE("minimap mod: round when set so: the map's square corners are painted over; nothing on a server step") {
+    ModRig m("minimap", L"minimap_mod_round", {{"shape", "circle"}});
     m.host->tick(kServer);
     m.host->tick(kClient);  // no player view yet
     CHECK(m.r.fake.canvas_cmds.empty());
-    m.r.fake.view_ok = true;
-    m.r.fake.view.size = sizeof m.r.fake.view;
+    world_with_player(m.r.fake);
     m.host->tick(kClient);
     REQUIRE(m.r.fake.canvases.count("minimap:map") == 1);
-    CHECK(m.r.fake.canvases["minimap:map"].shape == EMF_CANVAS_RECT);
-    REQUIRE_FALSE(m.r.fake.canvas_cmds["minimap:map"].empty());
-    CHECK(m.r.fake.canvas_cmds["minimap:map"][0].c.kind == EMF_CANVAS_RECT_CMD);  // a square background
+    CHECK(m.r.fake.canvases["minimap:map"].shape == EMF_CANVAS_CIRCLE);
+    const auto& cmds = m.r.fake.canvas_cmds["minimap:map"];
+    REQUIRE(cmds.size() == 8u);  // and a wide ring over the corners
+    CHECK(cmds[0].c.kind == EMF_CANVAS_CIRCLE_CMD);
+    bool ring = false;
+    for (const auto& c : cmds)
+        if (c.c.kind == EMF_CANVAS_CIRCLE_CMD && c.c.a[3] > 20) ring = true;  // a thick outline past the circle
+    CHECK(ring);
 }

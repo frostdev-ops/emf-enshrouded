@@ -22,6 +22,7 @@
 #include "core/canvas.h"
 #include "core/fog_grid.h"
 #include "core/map_input.h"
+#include "core/minimap_draw.h"
 #include "window_model.h"
 #include "cursor_model.h"
 #include "emf/generated/components.hpp"
@@ -547,7 +548,10 @@ void draw_canvases(ImVec2 display) {
         const float radius = (std::min)(r[2], r[3]) * 0.5f;
         auto at = [&](float x, float y) { return ImVec2(o.x + x * k, o.y + y * k); };
         dl->PushClipRect(o, ImVec2(r[0] + r[2], r[1] + r[3]), true);
-        for (const CanvasCmd& m : c.cmds) {
+        // what the list puts before its MAP is under the map: drawn only when the game cannot draw the map
+        const size_t first = canvas_first_drawn(c.cmds, minimap_draw_ready());
+        for (size_t ci = first; ci < c.cmds.size(); ++ci) {
+            const CanvasCmd& m = c.cmds[ci];
             const ImU32 col = rgba_col(m.rgba);
             const float* a = m.a;
             switch (m.kind) {

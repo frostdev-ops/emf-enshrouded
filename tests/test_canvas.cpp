@@ -216,3 +216,17 @@ TEST_CASE("map draw plan: the canvas in UI units, the whole world's rect so (cx,
     CHECK_FALSE(plan_map_draw(c, 1920, 1080, 1500, 4740, 2.0, 1, 1).ok);       // the world size not set yet
     CHECK_FALSE(plan_map_draw(c, 0, 1080, 1500, 4740, 2.0, 10240, 10240).ok);  // no UI space
 }
+
+TEST_CASE("canvas draw order: what comes before the last MAP command is under the map (drawn only without the map)") {
+    std::vector<CanvasCmd> cmds(5);
+    cmds[0].kind = EMF_CANVAS_CIRCLE_CMD;  // a background
+    cmds[1].kind = EMF_CANVAS_MAP;
+    cmds[2].kind = EMF_CANVAS_MARKERS;
+    cmds[3].kind = EMF_CANVAS_TRI;
+    cmds[4].kind = EMF_CANVAS_TEXT;
+    CHECK(canvas_first_drawn(cmds, true) == 2u);   // the game draws the map: the background is not drawn over it
+    CHECK(canvas_first_drawn(cmds, false) == 0u);  // no map on this build: the background shows
+    std::vector<CanvasCmd> plain(2);
+    plain[0].kind = EMF_CANVAS_RECT_CMD;
+    CHECK(canvas_first_drawn(plain, true) == 0u);
+}

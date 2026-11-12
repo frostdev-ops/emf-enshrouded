@@ -141,6 +141,14 @@ std::shared_ptr<const std::vector<Canvas>> CanvasStore::view() const {
 
 void CanvasStore::publish() { view_ = std::make_shared<const std::vector<Canvas>>(canvases_); }
 
+size_t canvas_first_drawn(const std::vector<CanvasCmd>& cmds, bool map_ready) {
+    if (!map_ready) return 0;
+    size_t first = 0;
+    for (size_t i = 0; i < cmds.size(); ++i)
+        if (cmds[i].kind == EMF_CANVAS_MAP) first = i + 1;
+    return first;
+}
+
 void canvas_layout(const EmfCanvas& c, float display_w, float display_h, float out[4]) {
     const float k = display_h > 0 ? display_h / 1080.0f : 1.0f;
     const float w = c.w * k, h = c.h * k;

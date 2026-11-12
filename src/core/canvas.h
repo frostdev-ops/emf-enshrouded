@@ -48,6 +48,9 @@ private:
 };
 
 bool canvas_cmd_ok(const EmfCanvasCmd& c);
+// The first command EMF's overlay draws: the game draws the MAP command before the overlay draws anything, so what a
+// list puts before its last MAP is under the map and drawn only when the map is not (map_ready false).
+size_t canvas_first_drawn(const std::vector<CanvasCmd>& cmds, bool map_ready);
 // The canvas's rect in display pixels: x, y, w, h.
 void canvas_layout(const EmfCanvas& c, float display_w, float display_h, float out[4]);
 // A world point in display pixels for a map command centred on (cx, cz) at `mpu` metres per canvas unit, in a canvas

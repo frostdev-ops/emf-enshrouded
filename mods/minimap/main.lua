@@ -14,8 +14,10 @@ emf.on_key("zoom_out_key", function() zoom = math.min(#zooms, zoom + 1) end, "cl
 -- The panel: where and how big (the settings), hidden when switched off with the key.
 local function place()
   local size = emf.setting("size") or 220
-  local spec = {corner = emf.setting("corner") or "top_right", x = 16, y = 16, w = size, h = size,
-                shape = emf.setting("shape") or "circle", hidden = not shown}
+  -- 48 units up from a bottom corner: above the game's clock
+  local corner = emf.setting("corner") or "bottom_right"
+  local spec = {corner = corner, x = 16, y = corner:find("bottom") and 48 or 16, w = size, h = size,
+                shape = emf.setting("shape") or "rect", hidden = not shown}
   local key = spec.corner .. size .. spec.shape .. tostring(spec.hidden)
   if key ~= placed then
     emf.canvas("map", spec)
@@ -42,7 +44,7 @@ emf.on_tick(function(world)
   local size = place()
   if not shown then return end
   local r, m = size / 2, zooms[zoom]
-  local round = (emf.setting("shape") or "circle") == "circle"
+  local round = emf.setting("shape") == "circle"
   local list = {
     round and {"circle", r, r, r, colour = 0x14181ce6} or {"rect", 0, 0, size, size, colour = 0x14181ce6},  -- background
     {"map", view.x, view.z, m},                 -- the game's own map, centred on the player
@@ -58,6 +60,10 @@ emf.on_tick(function(world)
         list[#list + 1] = {"circle", px, py, 3, colour = 0xf0f0f0d0}
       end
     end
+  end
+  if round then
+    -- the game draws its map into the whole square: a wide dark ring paints the corners outside the circle
+    list[#list + 1] = {"circle", r, r, r + r * 0.25, width = r * 0.5 + 2, colour = 0x0a0a0aff}
   end
   list[#list + 1] = arrow(r, view.heading)
   list[#list + 1] = round and {"circle", r, r, r - 1.5, width = 3, colour = 0x0a0a0aff} or
