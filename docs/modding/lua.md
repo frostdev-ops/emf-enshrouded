@@ -43,7 +43,7 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    E prompts (`emf.offer`, `emf.spawn_offer`, `emf.offer_remove`; EMF API v25): depend on `">=1.14"`. 1.15 adds
    pictures in windows (`emf.image`, the `image`, `icon`, `fps` and `height` row fields; EMF API v26): depend on
    `">=1.15"`. 1.17 adds the inter-mod message bus (`emf.bus.subscribe`, `.publish`, `.unsubscribe`): mods using it
-   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. 1.23 adds hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`; EMF API v31): depend on `">=1.23"`. 1.24 adds buffs (`emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff`; EMF API v32): depend on `">=1.24"`. 1.25 adds markers (`emf.marker`, `emf.send_marker` and more; EMF API v33): depend on `">=1.25"`. 1.26 adds the map (`emf.map_cursor`, `emf.on_map_click`, `emf.map_action`, `emf.remove_map_action`, `emf.ground_at`; EMF API v34): depend on `">=1.26"`. 1.27 adds canvases and a minimap's parts (`emf.player_view`, `emf.fog_at`, `emf.map_markers`, `emf.canvas`, `emf.canvas_draw`, the marker key `minimap`, and a `fog` argument for `emf.ground_at`; EMF API v35): depend on `">=1.27"`. 1.28 adds `emf.remove_building` (EMF API v36): depend on `">=1.28"`. Ranges are explained in
+   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. 1.23 adds hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`; EMF API v31): depend on `">=1.23"`. 1.24 adds buffs (`emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff`; EMF API v32): depend on `">=1.24"`. 1.25 adds markers (`emf.marker`, `emf.send_marker` and more; EMF API v33): depend on `">=1.25"`. 1.26 adds the map (`emf.map_cursor`, `emf.on_map_click`, `emf.map_action`, `emf.remove_map_action`, `emf.ground_at`; EMF API v34): depend on `">=1.26"`. 1.27 adds canvases and a minimap's parts (`emf.player_view`, `emf.fog_at`, `emf.map_markers`, `emf.canvas`, `emf.canvas_draw`, the marker key `minimap`, and a `fog` argument for `emf.ground_at`; EMF API v35): depend on `">=1.27"`. 1.28 adds `emf.remove_building` (EMF API v36): depend on `">=1.28"`. 1.29 adds `emf.path_find` and `emf.path_cancel` (EMF API v37): depend on `">=1.29"`. Ranges are explained in
    [guide.md](guide.md), "Dependencies and version ranges".)
 
 3. Put `main.lua` next to it:
@@ -124,6 +124,8 @@ right away.
 | `emf.move(world, from, to, item, count [, opts] [, fn])` | (1.6) moves items without losing any: take, put, give back, drop; `opts`: `slot`, `exact`, `fallback`, `level`, `rarity`; `fn(world, moved, returned, dropped, taken)`. true when started (see "Moving items" below) |
 | `emf.spawn(world, guid, x, y, z [, components])` / `emf.destroy(world, id)` | spawns a template at a position in metres / removes an entity (host only). 1.12: `components` = `{Name = {field = value}, ...}` are spawned with the entity (at most 15, by their real field names, absent fields 0; not `CurrentTransform`): `emf.spawn(w, guid, x, y, z, {ScaleComponent = {uniformScale = 1.25}})` makes a creature drawn 1.25x as big (a `ScaleComponent` from 0.1 to 10). An unknown name or field is an error. On a placed object `destroy` gives no item back, drops no loot and plays no pick-up sound; a container's contents go with it. Never destroy a Flame Altar (the base). For a pick-up use `emf.remove_building` (1.28); for loot use `emf.damage` on a `Destructible` object |
 | `emf.remove_building(world, id [, opts])` | 1.28: removes a placed object like a pick-up, item back; `true, item_id` or `false, reason`; options below |
+| `emf.path_find(world, from, to [, opts], fn)` | 1.29: asks the game's path grid for a path, `fn(world, result, points)` comes later; id or nil; options below |
+| `emf.path_cancel(id)` | 1.29: cancels an open path query; true when it was open |
 | `emf.kill(world, id)` | (1.4) kills a creature without a hit: its current health becomes 0 (1.5: through the game's attribute code) and the game's death program sends `EntityDiedEvent` the next step; the corpse keeps its loot. No attacker, no kill credit (`emf.damage` gives one); never a player; host only. true / false |
 | `emf.health(world, id)` | (1.5) the current and maximum health: `local cur, max = emf.health(w, id)`; the game's attributes in a world you host, else the replicated `NetworkHealth`; nil when neither is there |
 | `emf.attribute(world, id, attr)` | (1.5) an attribute as the game reads it: `attr` is `"health"`, `"max_health"`, `"stamina"`, `"max_stamina"`, `"mana"`, `"max_mana"`, a player's `"xp_pending"`, `"xp"`, `"xp_required"` and `"level"` (1.11, EMF API v22), or an attribute id; nil when the entity has none. Give XP with `emf.attribute_add(w, player, "xp_pending", n)`: the game levels the player up itself (the other three are read-only). Host only |
@@ -579,6 +581,52 @@ emf.command("takedown", "<entity>: remove a placed object, the item to you", fun
   local ok, item = emf.remove_building(world, id, {refund = (s and s.entity ~= 0) and s.entity or "drop"})
   emf.reply(ok and ("removed, item " .. tostring(item)) or ("refused: " .. item))
 end)
+```
+
+## Paths (1.29)
+
+`emf.path_find(world, from, to [, opts], fn)` asks the game's own path grid for a path. The grid knows terrain,
+buildings, placed objects and doors. It moves nothing. It returns an id, or nil (the reason is in the log). Host only,
+like `emf.spawn`: a joined game has no path grid. `from` and `to` are `{x, y, z}` or `{x = , y = , z = }`, in metres, at
+most 200 m apart. On a core older than API v37 it is nil.
+
+The answer comes once, after a server step or more, to `fn(world, result, points)`:
+
+- `result.status`: `"found"`, `"no_path"`, `"too_long"`, `"no_start"`, `"no_target"`, `"no_memory"`, `"cancelled"` or `"other"`;
+- `result.reaches`: true when the last point is within 1.5 m across and 3 m up or down of `to`;
+- `result.length`: metres from `from` along the points; `result.count`: the points (at most 512);
+- `points`: a list of `{x, y, z, move}`; `move` is 0 walk, 2 jump up, 3 jump down, 4 jump across, 5 a door.
+
+`emf.path_cancel(id)` returns true when the query was open. The callback still comes, with `"cancelled"`. A script that
+is paused or reloaded before the answer hears nothing. Bad option values, or a position without three numbers, are Lua
+errors.
+
+| `opts` field | What |
+|---|---|
+| `jumps` | `true`: the path may jump up, down and across |
+| `doors` | `true`: the path may open doors |
+| `swim` | `true`: the path may swim |
+| `closest` | `true`: when the target cannot be reached, end at the closest reachable point |
+| `width`, `height` | the room the unit needs, in metres (0 to 64; default: the game's) |
+| `max_jump_up`, `max_jump_down` | metres (0 to 255; 0 = no limit) |
+| `nodes` | how many nodes the search may spend (0 to 20000; default 2000) |
+| `owner` | an entity the query belongs to (default: the first player) |
+
+Use `closest = true` and check `reaches`. Without `closest`, a target the grid cannot match (on a rock, in the air) ends
+`"too_long"`. Long paths need more `nodes`: 2000 got about 36 m of a 141 m route, 20000 got about 90 m in about 1.3 s.
+The grid exists only where the world is loaded, near players. Each query is a search in the game's own jobs, shared with
+every walking creature: do not ask every step. Details: [reference.md](reference.md), "v37".
+
+```lua
+-- can this raider get to the altar?
+emf.path_find(world, raider_pos, altar_pos, {closest = true, doors = true, nodes = 5000},
+  function(w, result, points)
+    if result.reaches then
+      emf.log("raider can reach the altar in", result.length, "m")
+    else
+      emf.log("blocked:", result.status, "path stops after", result.length, "m")
+    end
+  end)
 ```
 
 ## Worlds and components

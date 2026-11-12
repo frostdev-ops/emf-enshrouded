@@ -607,6 +607,31 @@ local function take_down(world, ids)
 end
 ```
 
+## Can a raider get in? (paths)
+
+Before a raid sends a raider at the base, ask the game's path grid whether it can get there. The grid knows terrain,
+buildings and doors (Lua 1.29).
+
+- Always pass `closest = true` and check `result.reaches`. Without it a target on a rock or in the air ends `too_long`.
+  With it the path ends at the nearest reachable point, and `reaches` is false: that raider is blocked.
+- The game's own enemies treat `found` as success and walk to a wall. Check `reaches` yourself.
+- The grid exists only near players, and each query is a search shared with every creature. Ask once per raider, not
+  every step.
+
+```lua
+-- send only the raiders that can get in; the rest wait
+local function try_raider(world, raider, raider_pos, altar_pos)
+  emf.path_find(world, raider_pos, altar_pos, {closest = true, doors = true, nodes = 5000},
+    function(w, result, points)
+      if result.reaches then
+        start_march(w, raider, points)   -- your own code: walk the points
+      else
+        emf.log("raider", raider, "is blocked:", result.status, result.length)
+      end
+    end)
+end
+```
+
 ## Run code before or after one of the game's programs
 
 ```cpp

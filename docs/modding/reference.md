@@ -1,7 +1,7 @@
 # EMF API reference
 
 The C API is one table of function pointers, `EmfApi`, declared in `sdk/include/emf/emf_api.h` and passed to your
-`emf_mod_load`. It only grows: each version appends functions at the end (`EMF_API_VERSION` 36 today), so a mod built
+`emf_mod_load`. It only grows: each version appends functions at the end (`EMF_API_VERSION` 37 today), so a mod built
 for an older version works with a newer core. `sdk/include/emf/emf.hpp` wraps it in C++; prefer the wrappers.
 
 **Threads.** "World callback" below means: inside `on_tick`, `run_on_world`, `on_event`, a command, a put/take result
@@ -1121,6 +1121,75 @@ if (!api()->remove_building(world, &req)) {
 }
 ```
 
+## v37: paths on the game's path grid
+
+`path_find(world, &query, cb, user)` asks the game's own path grid for a path. The grid knows terrain, buildings,
+placed objects and doors. It moves nothing: you get points and walk them yourself. C++: `emf::has_v37()` in `emf.hpp`.
+
+| C | Rules |
+|---|---|
+| `uint32_t path_find(world, const EmfPathQuery* q, EmfPathCallback cb, void* user)` | Returns the query's id, or 0 when refused. The answer comes once, after a server step or more, to `cb(world, id, result, points, user)` on the server world's thread. `points` is valid during the call only. |
+| `bool path_cancel(uint32_t id)` | Cancels an open query. The callback still comes, with `EMF_PATH_CANCELLED`. |
+
+Refused (0, logged once per 10 s):
+
+- not the server world: a joined game has no path grid, so use it on the host or the dedicated server;
+- bad numbers;
+- `from` and `to` more than 200 m apart (the game does not search farther);
+- no owner (`owner` 0 means the first player, and none is there);
+- 32 EMF queries already open;
+- the feature is off on this build.
+
+`EmfPathQuery` (set `size` to `sizeof(EmfPathQuery)`):
+
+| Field | What |
+|---|---|
+| `owner` | an entity the query belongs to; 0 = the first player |
+| `from`, `to` | start and target, in metres |
+| `moves` | `EMF_PATH_WALK` is always added. Add `EMF_PATH_JUMP_UP`, `_JUMP_DOWN`, `_JUMP_ACROSS`, `_OPEN_DOOR`, `_SWIM` |
+| `max_jump_up`, `max_jump_down` | metres; 0 = no limit |
+| `width`, `height` | the room the unit needs, in metres; 0 = the game's default |
+| `closest` | 1: fall back to the closest reachable point |
+| `max_nodes` | 0 = 2000, at most 20000 |
+
+`EmfPathResult`:
+
+| Field | What |
+|---|---|
+| `status` | `EMF_PATH_FOUND`, `_NO_PATH`, `_TOO_LONG`, `_NO_START`, `_NO_TARGET`, `_NO_MEMORY`, `_CANCELLED`, `_OTHER` |
+| `reaches` | true when the last point is within 1.5 m across and 3 m up or down of `to` |
+| `count` | the points passed (at most 512 are kept) |
+| `length` | metres from `from` along the points |
+
+Each `EmfPathPoint` has `x`, `y`, `z` and `move`: 0 walk, 2 jump up, 3 jump down, 4 jump across, 5 a door.
+
+Seen live:
+
+- A 22 m path on open ground answered in about 0.2 s.
+- **Use `closest = 1` and check `reaches`.** Without `closest`, a target the grid cannot match (on a rock, in the air)
+  spends all its nodes and ends `TOO_LONG`. With `closest` the path ends at the nearest reachable point and `reaches`
+  is false.
+- Long paths need more nodes: 2000 nodes got about 36 m of a 141 m route, 20000 got about 90 m in about 1.3 s.
+- The grid exists only where the world is loaded (near players). Far ends give `NO_START` or `NO_TARGET`, or `OTHER`
+  after 10 s with no answer.
+- The game's own march asks with "closest" and treats `FOUND` as success, which is why its enemies walk to a wall and
+  stand there. A raid mod should check `reaches`.
+- Each query is a search in the game's own jobs, shared with every walking creature. Do not ask every step (the game's
+  enemies ask at most every 0.5 s per creature).
+- A new world, or `path_cancel`, ends open queries as `CANCELLED`.
+
+```cpp
+EmfPathQuery q{};
+q.size = sizeof q;
+q.from = raider_pos;
+q.to = altar_pos;
+q.closest = 1;
+q.max_nodes = 5000;
+uint32_t id = api()->path_find(world, &q, [](EmfWorld*, uint32_t, const EmfPathResult* r, const EmfPathPoint* pts, void*) {
+    if (r->status == EMF_PATH_FOUND && r->reaches) { /* walk pts[0..r->count) */ }
+}, nullptr);
+```
+
 ## SDK headers (header-only C++, no ABI)
 
 | Header | What |
@@ -1148,7 +1217,7 @@ every mod under a name, as in EMF.exe; a load applies at the next start), `hud.l
 for the server world's jobs and each mod), `goto [#k] <x> <y> <z> [ground]` / `goto [#k] <entity> [ground]`
 (v20: teleports you, or the k-th player, there or beside that entity; the result follows a few steps later), `entities`, `near [radius]`, `inv <entity>`,
 `inspect <entity>`, `tpl <entity> <component> [bytes] [offset]`, `tplset <entity> <component> <offset> <type> <value>`,
-`stack <item> <max>`, `destroy <entity>`, `remove <entity> [drop|<player>] [force]` (v36: removes a placed object like a pick-up; `drop` leaves its item on the ground, a player number puts it in that player's inventory, `force` also removes a non-empty container), `chat.players` (v19: the players of the world you host or of the
+`stack <item> <max>`, `destroy <entity>`, `remove <entity> [drop|<player>] [force]` (v36: removes a placed object like a pick-up; `drop` leaves its item on the ground, a player number puts it in that player's inventory, `force` also removes a non-empty container), `path <x> <y> <z> [jumps] [closest] [nodes 1-20000]` (v37: a path from you to that spot on the game's path grid; prints `path N: asked ...`, then the answer: found or why not, whether it reaches or stops short, the points, the metres, where it ends, and the jumps and doors), `chat.players` (v19: the players of the world you host or of the
 dedicated server, with their account hashes for `[chat] admins`, their connection and name), `world.get [setting]`,
 `world.set <setting> <value> [persist]`, `world.reset [setting|all] [persist]`, `world.list`, `world.export` (v21: the
 running world's settings, [world_settings.md](world_settings.md)). Commands go into the in-game console (the key under Esc), the optional
