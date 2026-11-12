@@ -644,7 +644,8 @@ is not a door (player doors and gates). `logic` is true when a switch drives the
 - `emf.door_open(world, id [, "front" | "back"])` and `emf.door_close(world, id)` change the door at the next server
   step; players see it swing, and the game's collider and path grid follow it, so enemies' paths change. No sound plays.
 - `emf.door_lock(world, id, true | false)`: while locked, no player gets the E prompt on it. From EMF 0.6.8 the lock is
-  kept with the world (by the door's place): after a load the door there is locked again. `emf.door_open` and
+  kept with the world (by the door's place): after a load the door there is locked again. A locked door that breaks
+  or is taken down while a player is near loses its lock (a new door there is not locked). `emf.door_open` and
   `emf.door_close` still work on a locked door.
 
 The three actions return true when the door will change at the next step, and false when refused (not the server world,
