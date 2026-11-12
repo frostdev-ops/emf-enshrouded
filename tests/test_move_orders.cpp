@@ -350,3 +350,21 @@ TEST_CASE("move orders: a cancel from outside the server world ends the move at 
     CHECK(f.destroyed == std::vector<uint32_t>{5000});
     CHECK(o.count() == 0u);
 }
+
+// Live 2026-11-12: a Vukah guarding a waypoint 27 m away walked there and stopped 2.4 m short (its guard distance,
+// currentGuardTargetDistance, was 3.0), then went Idle: with arrive 2 the move ended stuck.
+TEST_CASE("move orders: a point counts as reached within the creature's guard distance + 1 m (it stops that far short)") {
+    Fake f = world();
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, pts({{20, 10, 0}}), 2.0, 60, 0, cb(d), &why) != 0u);
+    auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
+    ai.currentGuardTargetDistance = 3.0f;
+    f.place(kEnemy, 15.5, 10, 0);  // 4.5 m: not yet
+    o.step(W());
+    CHECK(d.calls == 0);
+    f.place(kEnemy, 16.6, 10.3, 0.8);  // 3.5 m
+    o.step(W());
+    CHECK(d.status == EMF_MOVE_ARRIVED);
+}

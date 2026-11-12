@@ -157,7 +157,12 @@ int MoveOrders::tick(Move& m, uint64_t now) {
         Point at{};
         if (!place_of(d_, m.world, m.enemy, at)) return EMF_MOVE_GONE;
         const double dx = at[0] - p[0], dz = at[2] - p[2];
-        if (std::sqrt(dx * dx + dz * dz) <= m.arrive && std::abs(at[1] - p[1]) <= m.arrive + kMoveUpDown) {
+        double radius = m.arrive;
+        if (const auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, m.world, m.enemy)) {
+            const double g = ai->currentGuardTargetDistance;  // it stops this far short of its waypoint
+            if (std::isfinite(g) && g > 0 && g <= kMoveGuardMax) radius = std::max(radius, g + kMoveGuardSlack);
+        }
+        if (std::sqrt(dx * dx + dz * dz) <= radius && std::abs(at[1] - p[1]) <= radius + kMoveUpDown) {
             if (m.next + 1 >= m.points.size()) return EMF_MOVE_ARRIVED;
             if (m.waypoint && d_.destroy) d_.destroy(m.world, m.waypoint);  // on to the next point
             m.waypoint = 0;

@@ -29,6 +29,10 @@ constexpr double kMoveProgress = 1.0;    // metres closer to the point that coun
 constexpr double kMoveArriveMin = 0.5, kMoveArriveMax = 50.0;
 constexpr double kMoveSecondsMax = 3600.0;
 constexpr double kMoveUpDown = 2.0;      // a point is reached within arrive + this up or down
+// A guarding creature stops its guard distance short of the waypoint (currentGuardTargetDistance, 3 m on a Vukah, seen
+// live): a point also counts as reached within that distance + this.
+constexpr double kMoveGuardSlack = 1.0;
+constexpr double kMoveGuardMax = 20.0;   // a larger guard distance is not believed
 // The invisible waypoint: the game's TestTransform template 6d71f70d-602c-4d55-9de2-73e5b84133b5 (CurrentTransform,
 // StaticTransform, DoNotSave), in the game's GUID layout (first three groups little-endian, docs/ENGINE_MAP.md).
 constexpr uint8_t kWaypointGuid[16] = {0x0d, 0xf7, 0x71, 0x6d, 0x2c, 0x60, 0x55, 0x4d,
