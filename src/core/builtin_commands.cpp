@@ -264,6 +264,89 @@ void cmd_inv(EmfWorld* w, int argc, const char* const* argv, void* u) {
         command_reply_line(fmt("entity %u: %zu stack(s)", id, n));
 }
 
+// health <entity> [percent 1-100]: a creature's or player's health; with a percent, set to that share of its maximum
+// (for tests: a beast beaten down for taming, a creature healed). Host.
+void cmd_health(EmfWorld* w, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    uint32_t id = 0, pct = 0;
+    const bool set = argc == 3;
+    if ((argc != 2 && argc != 3) || !parse_uint(argv[1], 0xffffffffu, &id) || !id ||
+        (set && (!parse_uint(argv[2], 100, &pct) || pct == 0))) {
+        command_reply_line("usage: health <entity> [percent 1-100]");
+        return;
+    }
+    int32_t cur = 0, max = 0;
+    if (!c.api->attribute_get || !c.api->attribute_get(w, id, EMF_ATTR_HEALTH, &cur) ||
+        !c.api->attribute_get(w, id, EMF_ATTR_MAX_HEALTH, &max) || max <= 0) {
+        command_reply_line(fmt("entity %u has no health here (not a creature or player, or not the host)", id));
+        return;
+    }
+    if (cur <= 0) {  // a spawn reads 0 until the game set it up: a change then kills it
+        command_reply_line(fmt("entity %u: health 0 of %d: dead, or just spawned (try again in a second)", id, max));
+        return;
+    }
+    if (!set) {
+        command_reply_line(fmt("entity %u: health %d of %d (%d %%)", id, cur, max,
+                               static_cast<int>(static_cast<int64_t>(cur) * 100 / max)));
+        return;
+    }
+    const int32_t want = (std::max)(1, static_cast<int32_t>(static_cast<int64_t>(max) * pct / 100));
+    if (want != cur && (!c.api->attribute_add || !c.api->attribute_add(w, id, EMF_ATTR_HEALTH, want - cur))) {
+        command_reply_line(fmt("entity %u: the game refused the change (see the log)", id));
+        return;
+    }
+    command_reply_line(fmt("entity %u: health %d -> %d of %d", id, cur, want, max));
+}
+
+// ai <entity>: what a creature's AI does: its enemy01 state, whom it guards (follows), what it fights, its aggro
+// list (the entries that are not Unknown) and its faction. For tests (a tamed beast that stands still, a fight).
+void cmd_ai(EmfWorld* w, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    uint32_t id = 0;
+    if (argc != 2 || !parse_uint(argv[1], 0xffffffffu, &id) || !id) {
+        command_reply_line("usage: ai <entity>");
+        return;
+    }
+    static const char* const kStates[] = {
+        "Invalid", "Start", "Idle", "Dead", "Spawning", "Investigate", "Combat", "ReturnHome", "FleeHome", "WaitAtHome",
+        "ReactToNoise", "Patrol", "TurnAfterPatrol", "WaitAfterPatrol", "ControlledByAttack", "Roaming", "Flee",
+        "WaitAfterFlee", "Falling", "Hit", "Guard", "Interact", "Landing", "BlockProjectile", "MoveToMarker", "Sleep",
+        "Circling", "AvoidWater", "Revive", "Stunned"};
+    static const char* const kFactions[] = {"Environment", "HitAll", "Fogger", "Vukah", "Scavenger", "Wildlife",
+                                            "WildBeast", "Player", "AutomatedPlayer", "HitOthers", "Skeleton",
+                                            "PlayerAlly", "FarmAnimal", "Cyclops", "Drak", "Ancients"};
+    std::string faction;
+    if (const auto* fa = comp_of<emf::gen::ecs::Faction>(c, w, id)) {
+        const unsigned f = static_cast<unsigned>(fa->faction);
+        faction = fmt("%s (%u)", f < std::size(kFactions) ? kFactions[f] : "unknown", f);
+    }
+    const auto* ai = comp_of<emf::gen::ecs::DynamicEnemy01BehaviorState>(c, w, id);
+    if (!ai) {
+        command_reply_line(faction.empty() ? fmt("entity %u has no creature AI", id)
+                                           : fmt("entity %u has no creature AI (faction %s)", id, faction.c_str()));
+        return;
+    }
+    const unsigned s = static_cast<unsigned>(ai->state);
+    const auto* st = comp_of<emf::gen::ecs::SelectedTargets>(c, w, id);
+    const uint32_t fights = st ? st->targets[0].targetEntityId.id : 0;
+    const uint32_t guards = ai->guardEntityId.id;
+    const std::string g = guards ? fmt("guards entity %u", guards) : std::string("guards nobody");
+    const std::string t = fights ? fmt("fights entity %u", fights) : std::string("fights nothing");
+    command_reply_line(fmt("entity %u: %s (%u), %s, %s%s%s", id, s < std::size(kStates) ? kStates[s] : "unknown", s,
+                           g.c_str(), t.c_str(), faction.empty() ? "" : ", faction ", faction.c_str()));
+    std::string aggro;
+    if (const auto* ag = comp_of<emf::gen::ecs::DynamicAggro>(c, w, id)) {
+        static const char* const kAggro[] = {"unknown", "aborted", "noticed", "alarmed"};
+        for (const auto& e : ag->targets) {
+            const unsigned a = static_cast<unsigned>(e.state);
+            if (!a || !e.entityId.id) continue;
+            aggro += fmt("%s%u %s (%.1f)", aggro.empty() ? "" : ", ", e.entityId.id, a < 4 ? kAggro[a] : "?",
+                         static_cast<double>(e.aggro));
+        }
+    }
+    command_reply_line("aggro: " + (aggro.empty() ? std::string("none") : aggro));
+}
+
 // hud <id> [place 0-2] [text]: a line kept on screen (API v12), to try a layout; no text removes it.
 void cmd_hud(EmfWorld*, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
@@ -1269,6 +1352,10 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         {"near", "[radius 1-200]: the entities around you, nearest first, and what they are (host)", cmd_near},
         {"hud", "<id> [place 0-2] [text]: keep a line on screen (0 top right, 1 bottom right, 2 bottom left); no text removes it", cmd_hud},
         {"inv", "<entity>: every stack in the entity's inventories, with slot ids and gear levels (host)", cmd_inv},
+        {"health", "<entity> [percent 1-100]: a creature's or player's health; with a percent, set it to that share of "
+                   "its maximum, e.g. a beast beaten down for taming (host)", cmd_health},
+        {"ai", "<entity>: what a creature's AI does: its state, whom it guards and fights, its aggro and faction (host)",
+         cmd_ai},
         {"entities", ": count the entities in the server world", cmd_entities},
         {"inspect", "<entity>: list the entity's components (template ones marked)", cmd_inspect},
         {"tpl", "<entity> <component> [bytes 1-256] [offset]: hex dump of the entity's template data", cmd_tpl},

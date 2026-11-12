@@ -455,6 +455,8 @@ help, mods, settings, set, hooks, pattern, hud.list, hud.move, hud.scale, hud.hi
 - near [radius 1-200]: the entities around you, nearest first, and what they are (host)
 - hud <id> [place 0-2] [text]: keep a line on screen (0 top right, 1 bottom right, 2 bottom left); no text removes it
 - inv <entity>: every stack in the entity's inventories, with slot ids and gear levels (host)
+- health <entity> [percent 1-100]: a creature's or player's health; with a percent, set it to that share of its maximum, e.g. a beast beaten down for taming (host)
+- ai <entity>: what a creature's AI does: its state, whom it guards and fights, its aggro and faction (host)
 - entities: count the entities in the server world
 - inspect <entity>: list the entity's components (template ones marked)
 - tpl <entity> <component> [bytes 1-256] [offset]: hex dump of the entity's template data

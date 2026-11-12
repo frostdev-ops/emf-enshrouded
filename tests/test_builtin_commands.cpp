@@ -1121,6 +1121,97 @@ TEST_CASE("builtin commands (v36): remove takes a placed object away like a pick
     CHECK(bsaid("usage: remove <entity> [me|drop|<player>] [force]"));
 }
 
+namespace {
+// health / ai: 70 a wild wolf in a fight (30 of 120 health), 71 no creature (no health, no AI), 72 just spawned (0 of 34).
+std::map<std::pair<uint32_t, uint32_t>, int32_t> g_attr;
+std::vector<std::pair<uint32_t, int32_t>> g_attr_adds;
+bool fake_attr_get(EmfWorld*, uint32_t entity, uint32_t attr, int32_t* out) {
+    auto it = g_attr.find({entity, attr});
+    if (it == g_attr.end()) return false;
+    *out = it->second;
+    return true;
+}
+bool fake_attr_add(EmfWorld*, uint32_t entity, uint32_t attr, int32_t delta) {
+    if (attr != EMF_ATTR_HEALTH) return false;
+    g_attr_adds.push_back({entity, delta});
+    return true;
+}
+void* ai_gc(void* out, void* w, uint32_t hash, uint32_t entity) {
+    namespace gen = emf::gen::ecs;
+    b_gc(out, w, hash, entity);
+    auto o = static_cast<uint64_t*>(out);
+    static gen::DynamicEnemy01BehaviorState ai{};
+    ai.state = emf::gen::enemy01::State::Combat;
+    ai.guardEntityId.id = 1;
+    static gen::SelectedTargets st{};
+    st.targets[0].targetEntityId.id = 80;
+    static gen::DynamicAggro ag{};
+    ag.targets[0].state = gen::AggroTargetState::Alarmed;
+    ag.targets[0].entityId.id = 80;
+    ag.targets[0].aggro = 12.5f;
+    ag.targets[2].state = gen::AggroTargetState::Noticed;
+    ag.targets[2].entityId.id = 81;
+    ag.targets[2].aggro = 3.0f;
+    static gen::Faction fa{};
+    fa.faction = static_cast<emf::gen::FactionType>(6);
+    auto give = [o](const void* p, size_t n) {
+        o[0] = reinterpret_cast<uint64_t>(p);
+        o[1] = n;
+    };
+    if (entity == 70) {
+        if (hash == gen::DynamicEnemy01BehaviorState::kHash) give(&ai, sizeof(ai));
+        if (hash == gen::SelectedTargets::kHash) give(&st, sizeof(st));
+        if (hash == gen::DynamicAggro::kHash) give(&ag, sizeof(ag));
+    }
+    if ((entity == 70 || entity == 71) && hash == gen::Faction::kHash) give(&fa, sizeof(fa));
+    return out;
+}
+}  // namespace
+
+TEST_CASE("builtin commands: health reads a creature's health and sets it to a share of its maximum (to beat a beast down for taming)") {
+    BFixture f;
+    EmfApi api = *api_table();
+    api.attribute_get = fake_attr_get;
+    api.attribute_add = fake_attr_add;
+    f.ctx.api = &api;
+    g_attr = {{{70, EMF_ATTR_HEALTH}, 30}, {{70, EMF_ATTR_MAX_HEALTH}, 120}, {{72, EMF_ATTR_HEALTH}, 0},
+              {{72, EMF_ATTR_MAX_HEALTH}, 34}};
+    g_attr_adds.clear();
+    ItemsWorld iw;
+    MapStore ents;
+    emf::test::plant_entities(iw.w, ents, {42, 70, 71, 72});
+    f.center.enqueue("health 70");
+    f.center.enqueue("health 70 20");
+    f.center.enqueue("health 71");
+    f.center.enqueue("health 72");
+    f.center.enqueue("health 72 50");
+    f.center.enqueue("health 70 0");
+    f.center.enqueue("health 70 101");
+    f.run(iw.w);
+    CHECK(bsaid("entity 70: health 30 of 120 (25 %)"));
+    CHECK(bsaid("entity 70: health 30 -> 24 of 120"));
+    CHECK(bsaid("entity 71 has no health here"));
+    CHECK(bsaid("entity 72: health 0 of 34: dead, or just spawned (try again in a second)"));
+    CHECK(g_attr_adds == std::vector<std::pair<uint32_t, int32_t>>{{70, -6}});  // 72 is never set
+    CHECK(bsaid("usage: health <entity> [percent 1-100]"));
+}
+
+TEST_CASE("builtin commands: ai shows a creature's AI state, whom it guards and fights, its aggro and faction") {
+    BFixture f;
+    f.state.get_component = ai_gc;
+    ItemsWorld iw;
+    MapStore ents;
+    emf::test::plant_entities(iw.w, ents, {42, 70, 71});
+    f.center.enqueue("ai 70");
+    f.center.enqueue("ai 71");
+    f.center.enqueue("ai");
+    f.run(iw.w);
+    CHECK(bsaid("entity 70: Combat (6), guards entity 1, fights entity 80, faction WildBeast (6)"));
+    CHECK(bsaid("aggro: 80 alarmed (12.5), 81 noticed (3.0)"));
+    CHECK(bsaid("entity 71 has no creature AI (faction WildBeast (6))"));
+    CHECK(bsaid("usage: ai <entity>"));
+}
+
 TEST_CASE("api remove_building (v36): no request, a small size field, or a call outside a world callback is refused") {
     BFixture f;
     CHECK_FALSE(api_table()->remove_building(nullptr, nullptr));

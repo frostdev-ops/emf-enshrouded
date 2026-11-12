@@ -77,7 +77,10 @@ game update that changes a layout gives you null rather than garbage.
   saved, and affects every entity of that template (including wild ones).
 
 To find out what an entity has, use the console: `inspect <entity>` lists its components and sizes, `tpl <entity>
-<component>` dumps template data, `near [radius]` lists what is around you, `inv <entity>` lists an inventory.
+<component>` dumps template data, `near [radius]` lists what is around you, `inv <entity>` lists an inventory,
+`health <entity> [percent]` reads a creature's health or sets it to a share of its maximum (beat a beast down for
+taming), and `ai <entity>` shows what its AI does (its state, whom it guards and fights, its aggro list and faction).
+For tests with hostile creatures, Flame Blessings' `blessings god on` keeps your character alive.
 
 ## Events and programs
 
