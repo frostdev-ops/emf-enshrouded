@@ -83,6 +83,7 @@ function P:reset()
 	self.strays = {}     -- entity id -> checks in a row it guarded someone else
 	self.refused = {}    -- beast -> checks in a row the game refused to bring it back
 	self.sent = {}       -- entity id -> until when Attack's order holds (a passive beast fights it until then)
+	self.orders = {}     -- entity id -> the creature Attack sent it at (written as its pick until the order ends)
 	self.recall = {}     -- entity id -> until when a beast that dropped a chase fights nothing
 	self.base = {}       -- entity id -> {damage, wrote}: its template's damage multiplier, and the one written
 	self.fought = {}     -- entity id -> when it last hit or was hit (it heals HEAL_AFTER_S after that)
@@ -223,7 +224,7 @@ end
 -- A fresh entity for a beast: whatever was kept for an earlier creature on the same id (the game gives ids out again)
 -- goes.
 function P:fresh(id)
-	self.base[id], self.sent[id], self.recall[id], self.fought[id] = nil, nil, nil, nil
+	self.base[id], self.sent[id], self.recall[id], self.fought[id], self.orders[id] = nil, nil, nil, nil, nil
 	self.speeds[id], self.called[id] = nil, nil
 	self.fight:forget(id)
 end
@@ -422,7 +423,7 @@ function P:dismiss(world, account, beast)
 	if beast.entity and ours(world, beast.entity) then emf.destroy(world, beast.entity) end
 	if beast.entity then
 		self.ids[beast.entity] = nil
-		self.sent[beast.entity], self.recall[beast.entity], self.base[beast.entity] = nil, nil, nil
+		self.sent[beast.entity], self.recall[beast.entity], self.base[beast.entity], self.orders[beast.entity] = nil, nil, nil, nil
 		self.fought[beast.entity] = nil
 	end
 	beast.entity = nil
@@ -460,7 +461,30 @@ function P:release(world, account, beast)
 	self.env.save()
 end
 
--- beastmaster.attack: every beast of `account` that is out attacks `target`.
+-- Attack's order: `target` written as beast `id`'s pick (SelectedTargets slot 0, its root too) with its target switches
+-- off, the way the threat program holds a monster on a beast; false when it has no pick to write. The game's
+-- AddThreatTargetEvent only raises a player's threat (research enemy_targets_2026-11-12): beasts sent with it went only
+-- once their own senses found the creature (seen: "Wolf attacks (2)", then a wait).
+local function order(world, id, target)
+	local a = world:get("DynamicAggro", id)
+	local s = a and world:get("SelectedTargets", id)
+	if not (s and s.targets) then return false end
+	local t = s.targets[1]
+	if t.targetEntityId ~= target then t.targetEntityId = target end
+	if t.targetRootEntityId ~= target then t.targetRootEntityId = target end
+	if a.allowTargetSwitches then a.allowTargetSwitches = false end
+	return true
+end
+
+-- The order over: the game picks for the beast again.
+function P:end_order(world, id)
+	if not self.orders[id] then return end
+	self.orders[id] = nil
+	local a = world:position(id) and world:get("DynamicAggro", id)
+	if a and not a.allowTargetSwitches then a.allowTargetSwitches = true end
+end
+
+-- beastmaster.attack: every beast of `account` that is out goes for `target` at once, for SENT_S or until it dies.
 function P:attack(world, account, target)
 	local n = 0
 	local now = self.env.now(world)
@@ -468,12 +492,24 @@ function P:attack(world, account, target)
 	for _, b in ipairs(self.env.beasts():list(account)) do
 		if b.out and b.entity and ours(world, b.entity) then
 			self.sent[b.entity] = now + SENT_S
-			emf.emit("server", "AddThreatTargetEvent",
-				{ attackerId = b.entity, targetId = target, threatValue = 1000, threatPoolId = 0 })
+			self.orders[b.entity] = target
+			order(world, b.entity, target)
 			n = n + 1
 		end
 	end
 	return n
+end
+
+-- Each step: an order holds while its time runs and its target lives.
+function P:keep_order(world, id, now)
+	local target = self.orders[id]
+	if not target then return end
+	local cur = world:position(target) and emf.health(world, target)
+	if now >= (self.sent[id] or 0) or not cur or cur <= 0 then
+		self:end_order(world, id)
+	else
+		order(world, id, target)
+	end
 end
 
 -- The nearest living hostile creature (HOSTILE) within `range` metres of `owner`, never a boss or a player; nil when
@@ -583,7 +619,7 @@ function P:on_died(id, world)
 	self.credited[id] = nil
 	self.threat:forget(id)
 	self.idle:forget(id)
-	self.sent[id], self.recall[id], self.base[id], self.fought[id] = nil, nil, nil, nil
+	self.sent[id], self.recall[id], self.base[id], self.fought[id], self.orders[id] = nil, nil, nil, nil, nil
 	local e = self.ids[id]
 	if not e then return end
 	self.ids[id] = nil
@@ -606,6 +642,7 @@ function P:leash(world, owner, b, now)
 	-- beyond chase_m it drops its chase and runs back: it fights nothing for RECALL_S and guards its owner again
 	if d > s("chase_m") and d <= s("leash_m") and now >= (self.recall[b.entity] or 0) then
 		self.recall[b.entity] = now + RECALL_S
+		self:end_order(world, b.entity)  -- an Attack order ends there too
 		calm(world, b.entity)
 		emf.emit("server", "StartGuardingEvent", { guardingEntityId = b.entity, guardedEntityId = owner })
 	end
@@ -622,6 +659,7 @@ function P:leash(world, owner, b, now)
 		-- it drops its chase and guards its owner again (seen: a wolf brought back from a far hare chase stood
 		-- still); the recall window keeps it calm while it lands
 		self.recall[b.entity] = now + RECALL_S
+		self:end_order(world, b.entity)
 		calm(world, b.entity)
 		emf.emit("server", "StartGuardingEvent", { guardingEntityId = b.entity, guardedEntityId = owner })
 	else
@@ -752,6 +790,7 @@ function P:step(world)
 						self.env.save()
 					else
 						self:leash(world, owner, b, now)
+						if b.entity then self:keep_order(world, b.entity, now) end
 						-- its level follows its owner's (a level up while it is out); the leash may have let it go
 						local lvl, mine = b.entity and world:get("Level", b.entity), level_of(world, owner)
 						if lvl and mine and lvl.dataStorage[1] ~= mine then

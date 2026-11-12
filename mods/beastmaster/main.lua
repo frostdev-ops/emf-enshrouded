@@ -20,7 +20,7 @@ local client_mod = require("client")
 local beast_line = require("beast_line")
 local markers_mod = require("markers")
 
-emf.emits({ "StartGuardingEvent", "AddThreatTargetEvent" })
+emf.emits({ "StartGuardingEvent" })
 
 local beasts = roster.new()  -- every player's collection, kept with the world
 local loaded = false          -- the world's data has arrived (saving before that could overwrite it)
@@ -416,6 +416,7 @@ function actions.dismiss(world, player, account, key)
 end
 
 local ATTACK_RANGE_M, HIT_MEMORY_S = 40, 10
+local ATTACK_CONE_DEG = 30  -- Attack with nothing under the crosshair: a monster at most this far off where you look
 
 function actions.come_back(world, player, account)
 	if not account then return "Your account is not known yet." end
@@ -441,14 +442,18 @@ function actions.attack(world, player, account)
 		local cur = emf.health(world, id)
 		return f ~= nil and f.faction ~= 11 and cur ~= nil and cur > 0
 	end
+	-- the creature under the crosshair (an animal too); else the nearest monster where you look; else what hit you
 	local target = aim.pick(world, player, ATTACK_RANGE_M, foe)
+	if not target then
+		target = aim.cone(world, player, ATTACK_RANGE_M, ATTACK_CONE_DEG, function(id) return pack_mod.hostile(world, id) end)
+	end
 	local h = last_hit[player]
 	if not target and h and now(world) - h.at <= HIT_MEMORY_S and foe(h.id) then
 		local px, py, pz = world:position(player)
 		local x, y, z = world:position(h.id)
 		if px and x and math.sqrt((x - px) ^ 2 + (y - py) ^ 2 + (z - pz) ^ 2) <= ATTACK_RANGE_M then target = h.id end
 	end
-	if not target then return "Look at a creature to attack (within 40 m)." end
+	if not target then return "No monster where you look (within 40 m): look at the creature to attack." end
 	local n = pack:attack(world, account, target)
 	return n > 0 and string.format("Your beasts attack (%d).", n) or "No beast of yours is out."
 end

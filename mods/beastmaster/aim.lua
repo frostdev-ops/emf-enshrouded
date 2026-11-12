@@ -51,4 +51,31 @@ function M.pick(world, player, range, filter, max_ray)
 	return best
 end
 
+-- The nearest entity (to the player) within `range` of them for which filter(id) is true, seen from the camera at most
+-- `half_deg` degrees off where it looks; nil when there is none.
+function M.cone(world, player, range, half_deg, filter)
+	local ray = M.ray(world, player)
+	if not ray then return nil end
+	local px, py, pz = world:position(player)
+	if not px then return nil end
+	local min_cos = math.cos(math.rad(half_deg))
+	local best, best_d
+	for _, id in ipairs(world:entities()) do
+		if id ~= player then
+			local x, y, z = world:position(id)
+			if x then
+				local d = math.sqrt((x - px) ^ 2 + (y - py) ^ 2 + (z - pz) ^ 2)
+				if d <= range and (not best_d or d < best_d) then
+					local vx, vy, vz = x - ray.ox, y + BODY - ray.oy, z - ray.oz
+					local len = math.sqrt(vx * vx + vy * vy + vz * vz)
+					if len > 1e-6 and (vx * ray.dx + vy * ray.dy + vz * ray.dz) / len >= min_cos and filter(id) then
+						best, best_d = id, d
+					end
+				end
+			end
+		end
+	end
+	return best
+end
+
 return M

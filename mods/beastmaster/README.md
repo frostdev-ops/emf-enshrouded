@@ -32,8 +32,9 @@ page says who applies them). Without them everything else works and those beasts
    15 % of your maximum mana, with 10 s between calls. As many are out at once as you have **active slots** (see The
    stable), of any kinds: with two slots, two wolves.
 4. **Fight together:** they defend you on their own. **Attack** (wheel) or `/beastmaster attack` sends every beast that is
-   out at the creature you look at, up to 40 m away; when you look at nothing, at the creature that hit you in the last
-   10 s. When a beast's hit leaves a foe at 25 % health or less, you land the killing blow, so the XP and loot are
+   out at once: at the creature you look at (an animal too), up to 40 m away; looking at no creature, at the nearest
+   monster in the direction you look (within 30 degrees); else at the creature that hit you in the last 10 s. They go
+   for it for 20 s or until it falls. When a beast's hit leaves a foe at 25 % health or less, you land the killing blow, so the XP and loot are
    yours.
 5. **They stay close.** A beast that chases something more than 45 m from you drops the chase and runs back; one more
    than 60 m away for 3 s, or 120 m away at once, comes back beside you.
@@ -318,7 +319,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | `/beastmaster call <name or number>` | call a beast from your collection |
 | `/beastmaster dismiss <name or number>` | send that beast home |
 | `/beastmaster dismiss` (or `dismiss all`) | send every beast that is out home |
-| `/beastmaster attack` | your beasts that are out attack the creature you look at (else what hit you last) |
+| `/beastmaster attack` | your beasts that are out attack the creature you look at at once (else the nearest monster where you look, else what hit you last) |
 | `/beastmaster aside` | your beasts that are out step aside (leave for now), or come back; they do it on their own while someone builds next to them |
 | `/beastmaster mode [passive, defending or aggressive]` | how all your beasts fight; without a word, the mode now |
 | `beastmaster.stable mark`, `unmark`, `list` | **host or admins:** the prop you look at (no camera data: the one within 3 m of you) is a stable; the marked prop nearest you (within 8 m) is no stable; this world's stables |

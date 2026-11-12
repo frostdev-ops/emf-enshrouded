@@ -358,15 +358,23 @@ size_t teleports_of(const Fake& f, uint32_t entity) {
         if (t.entity == entity) ++n;
     return n;
 }
-std::vector<std::pair<uint32_t, uint32_t>> attacks(BeastRig& b) {
-    b.send_events();
-    std::vector<std::pair<uint32_t, uint32_t>> out;
-    for (const auto& [name, bytes] : b.r.fake.emitted) {
-        if (name != "AddThreatTargetEvent") continue;
-        const auto* e = reinterpret_cast<const ecs::AddThreatTargetEvent*>(bytes.data());
-        out.push_back({e->attackerId.id, e->targetId.id});
-    }
-    return out;
+// Attack's order lives in the beast's own pick: SelectedTargets slot 0 and DynamicAggro's target switches (a fake beast
+// has neither until armed()).
+void armed(BeastRig& b, uint32_t id) {
+    component<ecs::SelectedTargets>(b.r.fake, id);
+    component<ecs::DynamicAggro>(b.r.fake, id).allowTargetSwitches = true;
+}
+uint32_t ordered(BeastRig& b, uint32_t id) {
+    const auto& v = b.r.fake.components.at({ecs::SelectedTargets::kHash, id});
+    return reinterpret_cast<const ecs::SelectedTargets*>(v.data())->targets[0].targetEntityId.id;
+}
+void unpick(BeastRig& b, uint32_t id) {  // the game picks something else for it
+    auto& v = b.r.fake.components.at({ecs::SelectedTargets::kHash, id});
+    reinterpret_cast<ecs::SelectedTargets*>(v.data())->targets[0].targetEntityId.id = 0;
+}
+bool held(BeastRig& b, uint32_t id) {  // its switches off: the game does not pick for it
+    const auto& v = b.r.fake.components.at({ecs::DynamicAggro::kHash, id});
+    return !reinterpret_cast<const ecs::DynamicAggro*>(v.data())->allowTargetSwitches;
 }
 // A wolf called out (entity 1234) for player 1.
 void wolf_out(BeastRig& b) {
@@ -398,15 +406,49 @@ TEST_CASE("beastmaster: a beast 70 m away for 3 s, or 130 m away at once, is tel
     CHECK(b.r.fake.teleports.size() == before + 1);
 }
 
-TEST_CASE("beastmaster: attack sends every beast out at the creature you look at") {
+// Seen live: "Wolf attacks (2)", but the beasts took a while: the game's AddThreatTargetEvent only raises a player's threat
+// (research enemy_targets_2026-11-12), so they went only once their own senses found the creature.
+TEST_CASE("beastmaster: attack writes the creature you look at as every beast's pick at once, each step for 20 s or until it dies") {
     BeastRig b;
     wolf_out(b);
+    armed(b, 1234);
     b.look(1, 0, 10.5, 0, 0);
     b.beast(60, "00000000-0000-0000-0000-000000000099", 0, 6, 4 /* Scavenger */, 100, 100);
-    CHECK(b.reply("beastmaster.attack").find("attack") != std::string::npos);
-    const auto a = attacks(b);
-    REQUIRE(a.size() == 1);
-    CHECK(a[0] == std::make_pair(1234u, 60u));
+    CHECK(b.reply("beastmaster.attack") == "Your beasts attack (1).");
+    CHECK(ordered(b, 1234) == 60u);  // at once
+    CHECK(held(b, 1234));
+    unpick(b, 1234);
+    b.seconds(1);
+    CHECK(ordered(b, 1234) == 60u);  // written again
+    b.seconds(20);
+    CHECK_FALSE(held(b, 1234));      // 20 s on: the game picks again
+    unpick(b, 1234);
+    b.seconds(1);
+    CHECK(ordered(b, 1234) == 0u);
+
+    REQUIRE(b.reply("beastmaster.attack") == "Your beasts attack (1).");
+    b.r.fake.attrs[{60, EMF_ATTR_HEALTH}] = 0;  // it died
+    b.seconds(1);
+    CHECK_FALSE(held(b, 1234));
+}
+
+TEST_CASE("beastmaster: attack with nothing under the crosshair goes for the nearest monster where you look, never an animal there or a monster behind") {
+    BeastRig b;
+    wolf_out(b);
+    armed(b, 1234);
+    b.look(1, 0, 10.5, 0, 0);  // along +z
+    b.beast(61, "00000000-0000-0000-0000-000000000099", 5, 20, 4 /* Scavenger */, 100, 100);  // ahead, 14 degrees aside
+    b.beast(62, "00000000-0000-0000-0000-000000000099", 0, -10, 4, 100, 100);                // behind, nearer
+    b.beast(63, "00000000-0000-0000-0000-000000000099", 2, 8, 5 /* Wildlife */, 100, 100);   // an animal ahead, nearer
+    b.beast(64, "00000000-0000-0000-0000-000000000099", 30, 12, 4, 100, 100);                // a monster far aside
+    CHECK(b.reply("beastmaster.attack") == "Your beasts attack (1).");
+    CHECK(ordered(b, 1234) == 61u);
+    b.look(1, 0, 10.5, 0, 90);  // along +x: only 64 there
+    CHECK(b.reply("beastmaster.attack") == "Your beasts attack (1).");
+    CHECK(ordered(b, 1234) == 64u);
+    b.look(1, 0, 10.5, 0, 0);
+    b.r.fake.attrs[{61, EMF_ATTR_HEALTH}] = 0;  // gone: the animal is not taken instead
+    CHECK(b.reply("beastmaster.attack") == "No monster where you look (within 40 m): look at the creature to attack.");
 }
 
 TEST_CASE("beastmaster: our beast's hit that leaves a foe at 20 % hands the killing blow to its owner, once") {
@@ -541,21 +583,20 @@ TEST_CASE("beastmaster: aggressive beasts go at the nearest hostile creature wit
     creature(b, 73, -3, 3, kWildlifeAnimal); // wildlife (a goat, a hare): never
     creature(b, 74, 4, 0, 11);               // another ally: never
     creature(b, 75, 0, 40, kSkeletonFoe);    // beyond 25 m: not yet
+    armed(b, 1234);
     b.seconds(2);
-    CHECK(attacks(b).empty());               // defending: they go only at what attacks you or them
+    CHECK(ordered(b, 1234) == 0u);           // defending: they go only at what attacks you or them
     b.reply("beastmaster.mode aggressive");
     b.seconds(2);
-    auto a = attacks(b);
-    REQUIRE(!a.empty());
-    CHECK(a.back() == std::make_pair(1234u, 71u));
-    for (const auto& [attacker, target] : a) CHECK((target == 70u || target == 71u));
+    CHECK(ordered(b, 1234) == 71u);
     b.r.fake.attrs[{71, EMF_ATTR_HEALTH}] = 0;  // dead: the next nearest
     b.seconds(3);
-    CHECK(attacks(b).back() == std::make_pair(1234u, 70u));
+    CHECK(ordered(b, 1234) == 70u);
     b.reply("beastmaster.mode passive");
-    const size_t before = attacks(b).size();
+    b.seconds(21);                           // the last order runs out
+    unpick(b, 1234);
     b.seconds(3);
-    CHECK(attacks(b).size() == before);      // passive: none
+    CHECK(ordered(b, 1234) == 0u);           // passive: none
 }
 
 TEST_CASE("beastmaster: aggressive beasts leave bosses and players alone") {
@@ -563,9 +604,10 @@ TEST_CASE("beastmaster: aggressive beasts leave bosses and players alone") {
     wolf_out(b);
     creature(b, 80, 0, 10, kSkeletonFoe);
     component<ecs::BossHealthBar>(b.r.fake, 80);  // a boss
+    armed(b, 1234);
     b.reply("beastmaster.mode aggressive");
     b.seconds(3);
-    CHECK(attacks(b).empty());
+    CHECK(ordered(b, 1234) == 0u);
 }
 
 namespace {
@@ -1786,15 +1828,14 @@ TEST_CASE("beastmaster: attack with nothing under the crosshair goes for the cre
     wolf_out(b);
     b.look(1, 0, 10.5, 0, 180);
     b.beast(60, "00000000-0000-0000-0000-000000000099", 0, 6, 4 /* Scavenger */, 100, 100);
-    CHECK(b.reply("beastmaster.attack").find("Look at a creature") != std::string::npos);  // nothing hit you yet
+    armed(b, 1234);
+    CHECK(b.reply("beastmaster.attack").find("No monster where you look") != std::string::npos);  // behind; nothing hit you
     deliver(b.r.fake, "HitEvent", hit_event(60, 1));
     b.seconds(1);
     CHECK(b.reply("beastmaster.attack").find("Your beasts attack") != std::string::npos);
-    const auto a = attacks(b);
-    REQUIRE(a.size() == 1);
-    CHECK(a[0] == std::make_pair(1234u, 60u));
+    CHECK(ordered(b, 1234) == 60u);
     b.seconds(11);
-    CHECK(b.reply("beastmaster.attack").find("Look at a creature") != std::string::npos);  // forgotten after 10 s
+    CHECK(b.reply("beastmaster.attack").find("No monster where you look") != std::string::npos);  // forgotten after 10 s
 }
 
 TEST_CASE("beastmaster: a bear is the wolf's graph at 1.4x scale (the pack's ScaleComponent); a wolf, or a reused id, is a wolf") {
