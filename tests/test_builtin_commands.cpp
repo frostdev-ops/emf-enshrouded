@@ -1206,9 +1206,16 @@ TEST_CASE("builtin commands (v37): path checks its words; with the feature off i
     f.center.enqueue("path 1 2");
     f.center.enqueue("path 1 2 x");
     f.center.enqueue("path 3740 845 1440 jumps closest");
+    f.center.enqueue("path 3740 845 1440 closest 20001");  // more nodes than 20000
+    f.center.enqueue("path 3740 845 1440 closest 0");
+    f.center.enqueue("path 3740 845 1440 9000 closest");   // a node count: fine
     f.run(rw.iw.w);
-    size_t usage = 0;
-    for (const auto& l : g_bout) usage += l.find("usage: path <x> <y> <z> [jumps] [closest]") != std::string::npos;
-    CHECK(usage == 2u);
+    size_t usage = 0, refused = 0;
+    for (const auto& l : g_bout) {
+        usage += l.find("usage: path <x> <y> <z> [jumps] [closest] [nodes 1-20000]") != std::string::npos;
+        refused += l.find("path not asked") != std::string::npos;
+    }
+    CHECK(usage == 4u);
+    CHECK(refused == 2u);
     CHECK(bsaid("path not asked (see the log: path_find refused"));
 }

@@ -1087,7 +1087,7 @@ void cmd_path(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
     EmfPathQuery q{};
     q.size = sizeof q;
-    bool ok = argc >= 4 && argc <= 6;
+    bool ok = argc >= 4 && argc <= 7;
     for (int i = 1; ok && i <= 3; ++i) {
         char* end = nullptr;
         q.to[i - 1] = std::strtof(argv[i], &end);
@@ -1095,12 +1095,14 @@ void cmd_path(EmfWorld* w, int argc, const char* const* argv, void* u) {
     }
     for (int i = 4; ok && i < argc; ++i) {
         const std::string a = argv[i];
+        uint32_t nodes = 0;
         if (a == "jumps") q.moves |= EMF_PATH_JUMP_UP | EMF_PATH_JUMP_DOWN | EMF_PATH_JUMP_ACROSS;
         else if (a == "closest") q.closest = 1;
+        else if (!q.max_nodes && parse_uint(a.c_str(), kPathMaxNodes, &nodes) && nodes) q.max_nodes = nodes;
         else ok = false;
     }
     if (!ok) {
-        command_reply_line("usage: path <x> <y> <z> [jumps] [closest]");
+        command_reply_line("usage: path <x> <y> <z> [jumps] [closest] [nodes 1-20000]");
         return;
     }
     const uint32_t player = c.player ? c.player() : 0;
@@ -1192,7 +1194,7 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         {"tplset", "<entity> <component> <offset> <f32|i32|u32|u16|u8> <value>: change one template value (host)",
          cmd_tplset},
         {"stack", "<item name> <max 1-65535>: change an item's stack size until the game restarts (host)", cmd_stack},
-        {"path", "<x> <y> <z> [jumps] [closest]: a path from you on the game's path grid (it moves nothing; host)",
+        {"path", "<x> <y> <z> [jumps] [closest] [nodes]: a path from you on the game's path grid (it moves nothing; host)",
          cmd_path},
         {"remove", "<entity> [drop|<player>] [force]: take a placed object away like a pick-up, its item back as a drop or "
                    "to a player; refused for a chest with items unless force, and for a Flame Altar (host)", cmd_remove},
