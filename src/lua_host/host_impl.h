@@ -88,6 +88,7 @@ struct Script {
     std::vector<int> map_click_cbs;                    // emf.on_map_click (lua 1.26)
     std::atomic<uint32_t> map_click_count{0};          // map_click_cbs.size(), read without m (the render thread)
     std::deque<EmfMapClick> map_clicks;                // clicks for the next client world step (Host::Impl::map_m)
+    std::set<std::string> canvases;                    // emf.canvas ids ("<id>:<name>", lua 1.27): removed with it
     std::map<std::string, std::vector<BusSubscription>> bus_subs;  // cross-mod message callbacks
     uint64_t next_bus_subscription = 0;             // unique callback tokens, even after unsubscribe
     // While a take's callback runs: the taken items not handed on yet (emf.put / emf.give of that item lower it). If the
@@ -280,6 +281,14 @@ int l_remove_map_action(lua_State* L);
 int l_ground_at(lua_State* L);
 void deliver_map_clicks(Host::Impl& h, Script& s, EmfWorld* world);  // s.m held
 void drop_map(Host::Impl& h, Script& s);
+// lua 1.27 a minimap's parts (canvas_bindings.cpp): emf.player_view, emf.fog_at, emf.map_markers, emf.canvas,
+// emf.canvas_draw; a script's canvases leave with it.
+int l_player_view(lua_State* L);
+int l_fog_at(lua_State* L);
+int l_map_markers(lua_State* L);
+int l_canvas(lua_State* L);
+int l_canvas_draw(lua_State* L);
+void drop_canvases(Host::Impl& h, Script& s);
 // The world argument at `index` (a world value from a callback); an error otherwise.
 EmfWorld* lua_world_arg(lua_State* L, int index);
 

@@ -155,6 +155,19 @@ struct Fake {
     };
     std::vector<GroundAsk> ground_asks;  // ground_at (answer them with their cb/user as the core would)
     bool ground_ok = true;
+    // v35 a minimap's parts
+    bool view_ok = false;
+    EmfPlayerView view{};
+    bool fog_ok = false;
+    float fog_value = 0;
+    std::vector<EmfGameMarker> game_markers;
+    std::map<std::string, EmfCanvas> canvases;                     // canvas_set, by id
+    std::vector<std::string> canvases_removed;
+    struct CmdCopy {
+        EmfCanvasCmd c{};
+        std::string s;
+    };
+    std::map<std::string, std::vector<CmdCopy>> canvas_cmds;       // canvas_draw, by id
     int saves = 0;
     bool chat_ok = true;  // what chat_tell / chat_broadcast / on_chat / request_save answer
     // v20 teleport: the requests made (answer them with their cb/user as the core would)
@@ -839,6 +852,37 @@ bool f_ground_at(EmfWorld* w, double x, double z, EmfGroundCallback cb, void* us
     g->ground_asks.push_back({w, x, z, cb, user});
     return true;
 }
+// v35
+bool f_player_view(EmfPlayerView* out) {
+    if (!g->view_ok || !out) return false;
+    *out = g->view;
+    return true;
+}
+bool f_fog_at(double, double, float* e) {
+    if (!g->fog_ok || !e) return false;
+    *e = g->fog_value;
+    return true;
+}
+uint32_t f_map_markers(EmfGameMarker* out, uint32_t cap) {
+    for (uint32_t i = 0; out && i < cap && i < g->game_markers.size(); ++i) out[i] = g->game_markers[i];
+    return static_cast<uint32_t>(g->game_markers.size());
+}
+bool f_canvas_set(const char* id, const EmfCanvas* c) {
+    if (!id) return false;
+    if (!c) {
+        g->canvases_removed.push_back(id);
+        return g->canvases.erase(id) > 0;
+    }
+    g->canvases[id] = *c;
+    return true;
+}
+bool f_canvas_draw(const char* id, const EmfCanvasCmd* cmds, uint32_t n) {
+    if (!id || !g->canvases.count(id)) return false;
+    auto& v = g->canvas_cmds[id];
+    v.clear();
+    for (uint32_t i = 0; i < n; ++i) v.push_back({cmds[i], cmds[i].s ? cmds[i].s : ""});
+    return true;
+}
 // A click on the map screen (the render thread in the game).
 void fire_map_click(uint32_t button, uint32_t mods, double x, double z) {
     EmfMapClick c{};
@@ -926,6 +970,11 @@ EmfApi fake_api() {
     a.on_map_click = f_on_map_click;
     a.map_action = f_map_action;
     a.ground_at = f_ground_at;
+    a.player_view = f_player_view;  // v35
+    a.fog_at = f_fog_at;
+    a.map_markers = f_map_markers;
+    a.canvas_set = f_canvas_set;
+    a.canvas_draw = f_canvas_draw;
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;

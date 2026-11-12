@@ -21,7 +21,8 @@ struct Spec {
 };
 
 const char* const kKeys[] = {"x",    "y",    "z",          "entity", "height",   "text",       "icon",     "colour",
-                             "shape", "world", "game_map", "game_icon", "edge_arrow", "distance", "max_distance"};
+                             "shape", "world", "game_map", "game_icon", "edge_arrow", "distance", "max_distance",
+                             "minimap"};
 
 bool known_key(const char* k) {
     for (const char* x : kKeys)
@@ -55,7 +56,7 @@ Spec read_spec(lua_State* L, Script* s, const char* id, int t, const char* fn) {
         const char* k = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "";
         if (!known_key(k))
             luaL_error(L, "%s: unknown key '%s' (x, y, z, entity, height, text, icon, colour, shape, world, game_map, "
-                          "game_icon, edge_arrow, distance, max_distance)", fn, k);
+                          "game_icon, edge_arrow, distance, max_distance, minimap)", fn, k);
         lua_pop(L, 1);
     }
     Spec sp;
@@ -91,6 +92,7 @@ Spec read_spec(lua_State* L, Script* s, const char* id, int t, const char* fn) {
     if (flag_field(L, t, "distance", true)) m.flags |= EMF_MARKER_DISTANCE;
     if (flag_field(L, t, "game_map", false)) m.flags |= EMF_MARKER_GAME_MAP;
     if (flag_field(L, t, "edge_arrow", false)) m.flags |= EMF_MARKER_EDGE_ARROW;
+    if (flag_field(L, t, "minimap", false)) m.flags |= EMF_MARKER_MINIMAP;  // lua 1.27
     return sp;
 }
 

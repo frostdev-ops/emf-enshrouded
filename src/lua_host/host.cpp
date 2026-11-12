@@ -886,6 +886,7 @@ void Host::Impl::pause(Script& s, const std::string& why) {
     drop_hit_rules(*this, s);  // its hit rules stop too: they come back when the fixed file loads
     drop_markers(*this, s);    // its markers go too (here and in the players' games)
     drop_map(*this, s);        // and its map actions; its click functions stop
+    drop_canvases(*this, s);   // and its canvases
     s.paused = true;
     s.error = why;
     api->log(s.id.c_str(), "%s (the mod is paused until one of its files changes)", why.c_str());
@@ -1009,6 +1010,7 @@ void Host::Impl::unload(Script& s) {
     drop_hit_rules(*this, s);       // its hit rules leave the core
     drop_markers(*this, s);         // and its markers, here and in the players' games
     drop_map(*this, s);             // and its map actions and click functions
+    drop_canvases(*this, s);        // and its canvases
     drop_bus(s.id);                 // also drops messages published from on_unload
     drop_sections(s.id);  // before the state (and its pick functions) goes
     lua_close(s.L);
