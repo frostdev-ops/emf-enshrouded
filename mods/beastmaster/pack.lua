@@ -127,20 +127,31 @@ end
 
 -- Clears what a beast's AI fights (every aggro target and every chosen target), so it turns from a fight: the game
 -- picks targets again from what it senses and what hits it, so a passive beast is cleared every step.
-local function calm(world, id)
+-- `players_only`: only its fights against the player side (players and their allies), as for a beast just tamed (it
+-- may still fight a monster that bites it: seen, a wild wolf killed a tamed one kept from fighting back).
+local function calm(world, id, players_only)
+	local function clears(e)
+		if not players_only then return true end
+		if not e or e == 0 then return false end
+		if world:account(e) then return true end
+		local f = world:get("Faction", e)
+		return f ~= nil and PLAYER_SIDE[f.faction] == true
+	end
 	local a = world:get("DynamicAggro", id)
 	if a and a.targets then
 		for i = 1, #a.targets do
 			local t = a.targets[i]
-			if t.state ~= 0 then t.state = 0 end
-			if t.aggro ~= 0 then t.aggro = 0 end
+			if (t.state ~= 0 or t.aggro ~= 0) and clears(t.entityId) then
+				t.state = 0
+				t.aggro = 0
+			end
 		end
 	end
 	local s = world:get("SelectedTargets", id)
 	if s and s.targets then
 		for i = 1, #s.targets do
 			local t = s.targets[i]
-			if t.targetEntityId ~= 0 then
+			if t.targetEntityId ~= 0 and clears(t.targetEntityId) then
 				t.targetEntityId = 0
 				t.targetRootEntityId = 0
 			end
@@ -149,7 +160,8 @@ local function calm(world, id)
 	-- a beast left in the game's Combat state with nothing to fight stands there (seen: a tamed wolf stood 15 m from
 	-- its owner); from Idle the game has it guard its owner again (seen: it came at once)
 	local ai = world:get("DynamicEnemy01BehaviorState", id)
-	if ai and ai.state == AI_COMBAT then ai.state = AI_IDLE end
+	local fights = s and s.targets and s.targets[1] and s.targets[1].targetEntityId ~= 0
+	if ai and ai.state == AI_COMBAT and not fights then ai.state = AI_IDLE end
 end
 
 M.calm = calm

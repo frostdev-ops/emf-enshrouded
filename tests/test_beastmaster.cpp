@@ -6527,3 +6527,26 @@ TEST_CASE("beastmaster: a calmed beast left in the game's Combat state goes back
     REQUIRE(teleports_of(chase.r.fake, 1234) >= 1);
     CHECK(now_of<ecs::DynamicEnemy01BehaviorState>(chase, 1234).state == S::Idle);
 }
+
+// Seen live: a wild wolf bit a just-tamed wolf through its protection, which kept it from fighting anything; it fell
+// 8 s after the tame.
+TEST_CASE("beastmaster: through its protection a tamed beast stops fighting players only; it may fight a monster") {
+    using S = emf::gen::enemy01::State;
+    BeastRig b;
+    b.look(1, 0, 10.5, 0, 0);
+    b.beast(50, kWolfGraph, 0, 5, kWildBeast, 20, 100);
+    component<ecs::Health>(b.r.fake, 50);  // its protection holds the game's Health minimum
+    REQUIRE(b.reply("beastmaster.tame").find("Taming") != std::string::npos);
+    b.seconds(4);
+    REQUIRE(b.noted("You tamed a wolf: Wolf"));
+    creature(b, 70, 0, 8, kWildBeast);  // a wild wolf bites it
+    fighting(b, 50, 70);
+    component<ecs::DynamicEnemy01BehaviorState>(b.r.fake, 50).state = S::Combat;
+    b.seconds(1);  // still in its protection
+    CHECK(still_fighting(b, 50));
+    CHECK(now_of<ecs::DynamicEnemy01BehaviorState>(b, 50).state == S::Combat);
+    fighting(b, 50, 1);  // the game still had its tamer
+    b.seconds(1);
+    CHECK_FALSE(still_fighting(b, 50));
+    CHECK(now_of<ecs::DynamicEnemy01BehaviorState>(b, 50).state == S::Idle);
+}

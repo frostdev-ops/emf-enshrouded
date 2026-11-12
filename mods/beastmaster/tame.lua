@@ -162,7 +162,7 @@ local function guard(self, world, now)
 			self.guarded[id] = nil
 		else
 			if h.dataStorage[2] ~= g.floor then h.dataStorage[2] = g.floor end
-			if self.env.calm then self.env.calm(world, id) end  -- no fight against its new side while guarded
+			if self.env.calm then self.env.calm(world, id, true) end  -- no fight against its new side while guarded
 		end
 	end
 end
