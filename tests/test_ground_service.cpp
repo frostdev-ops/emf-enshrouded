@@ -2,6 +2,7 @@
 #include <doctest.h>
 
 #include <array>
+#include <cmath>
 #include <string>
 #include <vector>
 
@@ -229,4 +230,31 @@ TEST_CASE("ground service: shallow water (under 1 m), water not loaded yet, or n
         REQUIRE_FALSE(r.fog_y.empty());
         CHECK(r.fog_y[0] == doctest::Approx(301.0));  // 1 m over the ground
     }
+}
+
+// Review: a player who sinks after a water landing ends on the bed: the shroud there counts too.
+TEST_CASE("ground service: over a lake the shroud is read at the surface and at the bed; a deadly bed makes the spot deadly") {
+    g_now = 1000;
+    WaterRig r;
+    r.reading.loaded = r.reading.water = true;
+    r.reading.surface_y = 304.0;
+    r.run(300.0);
+    bool at_surface = false, at_bed = false;
+    for (double y : r.fog_y) {
+        at_surface |= std::abs(y - 305.0) < 0.01;
+        at_bed |= std::abs(y - 301.0) < 0.01;
+    }
+    CHECK(at_surface);
+    CHECK(at_bed);
+}
+
+// Review: a misread plane (an unknown game build, a waterfall joined to its pool) must not send a player into the sky.
+TEST_CASE("ground service: a water surface more than 64 m over the ground is not believed (no water in the answer)") {
+    g_now = 1000;
+    WaterRig r;
+    r.reading.loaded = r.reading.water = true;
+    r.reading.surface_y = 380.0;
+    r.run(300.0);
+    CHECK(r.answers[0].ok);
+    CHECK_FALSE(r.water[0].first);
 }

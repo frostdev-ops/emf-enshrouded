@@ -67,11 +67,15 @@ void GroundService::on_server_tick(EmfWorld* world) {
                 // water over it: the landing is its surface (the shroud is read there)
                 WaterReading wr;
                 if (d_.water && d_.water(world, a.x, o.y + kWaterProbeUp, a.z, kWaterMaxDown, &wr) && wr.loaded &&
-                    wr.water && wr.surface_y - o.y >= kWaterLandDepth) {
+                    wr.water && wr.surface_y - o.y >= kWaterLandDepth && wr.surface_y - o.y <= kWaterMaxDepth) {
                     r.water = true;
                     r.water_y = wr.surface_y;
                 }
                 r.points = fog_points(a.x, r.water ? r.water_y : o.y, a.z);
+                if (r.water) {  // and at the bed: a player who sinks ends there
+                    const auto bed = fog_points(a.x, o.y, a.z);
+                    r.points.insert(r.points.end(), bed.begin(), bed.end());
+                }
                 r.verdicts.assign(r.points.size(), FogVerdict{});
                 if (fog_step(r, now, &a))
                     done.emplace_back(std::move(r), std::move(a));

@@ -166,7 +166,14 @@ bool ground_water(EmfWorld* world, double x, double y, double z, float max_down,
     }
     const int64_t pos[3] = {std::llround(x * kFixed), std::llround(y * kFixed), std::llround(z * kFixed)};
     alignas(16) uint8_t buf[0x20] = {};
-    if (!call_water(fn, buf, ws, pos, max_down)) return false;
+    if (!call_water(fn, buf, ws, pos, max_down)) {
+        // a fault inside it may leave one of its reader locks held: never call it again this session
+        g_water.store(nullptr, std::memory_order_release);
+        CoreState* s = core_state();
+        if (s && s->log_line)
+            s->log_line("map: the game's water query faulted: the water at a landing is off until the game restarts");
+        return false;
+    }
     float d = 0;
     std::memcpy(&d, buf + 0xc, sizeof d);
     out->loaded = loaded != 0;

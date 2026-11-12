@@ -987,7 +987,8 @@ where a player may be teleported so the game loads the place; ask again once the
 `EMF_FOG_DANGEROUS` (2: the shroud, its timer runs), `EMF_FOG_DEATH` (3: deeper shroud than this world's progress allows;
 a player there dies) or `EMF_FOG_UNKNOWN` (255). `deadly` (0..1) is the share of deadly shroud there; `EMF_FOG_DEATH`
 starts at 0.25. From EMF 0.6.8 (check that `size` covers `water_y`): `water` is 1 when the spot is under water at least
-1 m deep, and `water_y` is the water's surface; `y` stays the ground under it, and `fog` is read at the surface. A player
+1 m deep (64 m at most), and `water_y` is the water's surface; `y` stays the ground under it, and `fog` is the worse of
+the surface and the bed. A player
 teleported there should land 0.5 m under `water_y` without `EMF_TELEPORT_FIND_GROUND` (the game's search would take the
 lake's bed; at the surface itself a player falls in, dives and sinks to the bed; 1 m under it they hang still, drowning:
 seen in game). The water comes from the game's own water simulation (`WaterSurfacePlane`); where this build has none, `water`

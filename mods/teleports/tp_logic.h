@@ -256,11 +256,11 @@ struct Ground {
     bool water = false;          // Ok: under water at least 1 m deep: a player lands on its surface (water_y)
     double water_y = 0;
 };
-constexpr double kAboveGround = 0.5;
+constexpr double kAboveGround = 0.5;  // the teleport lands this far above the ground found (the game's search settles it)
 // Over water: this far under the surface (seen live: at the surface a player falls in, dives and sinks to the bed; 1 m
 // under it they hang still, drowning; 0.5 m under it they settle treading water)
 constexpr double kUnderSurface = 0.5;
-constexpr uint64_t kDeadlyWatchMs = 3000;  // after a map teleport: landed in the deadly shroud -> back  // the teleport lands this far above the ground found (the game's search settles it)
+constexpr uint64_t kDeadlyWatchMs = 3000;  // after a map teleport: landed in the deadly shroud -> back
 
 struct Game {
     virtual ~Game() = default;
@@ -805,8 +805,8 @@ private:
 
     // `on_water`: y is in the water just under its surface, the landing as it is (the game's ground search would take
     // the lake's bed)
-    void land(const Spot& s, double ground_y, bool on_water = false) {
-        const Vec to{s.x, on_water ? ground_y : ground_y + kAboveGround, s.z};
+    void land(const Spot& s, double y, bool on_water = false) {
+        const Vec to{s.x, on_water ? y : y + kAboveGround, s.z};
         const bool ok = g_.teleport(s.who, {to, !on_water, 0}, [this, s](const Outcome& o) {
             if (s.epoch != epoch_ || o.session_ended) return;
             if (!o.moved) {

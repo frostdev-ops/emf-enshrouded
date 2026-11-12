@@ -18,6 +18,7 @@ constexpr size_t kGroundRequestsMax = 64;
 // The water over a landing (private research water_2026-11-12): read half a metre over the ground, 1 m down at most; a
 // surface at least 1 m over the ground is water to land on (a shallower pond is ground).
 constexpr double kWaterProbeUp = 0.5, kWaterLandDepth = 1.0;
+constexpr double kWaterMaxDepth = 64.0;  // a deeper "surface" is not believed (a misread plane, a waterfall's top)
 constexpr float kWaterMaxDown = 1.0f;
 
 struct WaterReading {
