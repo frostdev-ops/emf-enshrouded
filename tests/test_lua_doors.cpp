@@ -10,6 +10,40 @@
 
 using emf::lua::Host;
 
+TEST_CASE("lua 1.32: emf.enemy_order sends an enemy (seconds, damage, allies), emf.enemy_order_cancel, emf.enemy_target") {
+    Rig r(L"lua_orders");
+    r.fake.enemy_targets[70] = 900;
+    add_script(r.dir, "eo",
+               "emf.command('go', '', function(w)\n"
+               "  emf.log('id ' .. tostring(emf.enemy_order(w, 70, 900)))\n"
+               "  emf.log('id2 ' .. tostring(emf.enemy_order(w, 71, 900, {seconds = 20, damage = 40, allies = true})))\n"
+               "  local id, why = emf.enemy_order(w, 13, 900)\n"
+               "  emf.log('no ' .. tostring(id) .. ' ' .. tostring(why))\n"
+               "  emf.log('bad ' .. tostring(pcall(emf.enemy_order, w, 70, 900, {seconds = 'soon'})))\n"
+               "  emf.log('cancel ' .. tostring(emf.enemy_order_cancel(2)) .. ' ' .. tostring(emf.enemy_order_cancel(9)))\n"
+               "  emf.log('target ' .. tostring(emf.enemy_target(w, 70)) .. ' ' .. tostring(emf.enemy_target(w, 71)))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("eo.go");
+    CHECK(logged("id 1"));
+    CHECK(logged("id2 2"));
+    CHECK(logged("no nil it has no enemy AI to send"));
+    CHECK(logged("bad false"));
+    CHECK(logged("cancel true false"));
+    CHECK(logged("target 900 nil"));
+    REQUIRE(r.fake.orders.size() == 2u);
+    CHECK(r.fake.orders[0].size == sizeof(EmfEnemyOrder));
+    CHECK(r.fake.orders[0].enemy == 70u);
+    CHECK(r.fake.orders[0].target == 900u);
+    CHECK(r.fake.orders[0].seconds == 0.0f);
+    CHECK(r.fake.orders[0].damage == 0);
+    CHECK(r.fake.orders[0].flags == 0u);
+    CHECK(r.fake.orders[1].seconds == 20.0f);
+    CHECK(r.fake.orders[1].damage == 40);
+    CHECK(r.fake.orders[1].flags == EMF_ORDER_ALLIES);
+}
+
 TEST_CASE("lua 1.30: emf.door reads the state; door_open, door_close and door_lock call the core") {
     Rig r(L"lua_doors");
     r.fake.door_states[500] = EMF_DOOR_CLOSED | EMF_DOOR_LOCKED;

@@ -292,6 +292,10 @@ int l_door(lua_State* L);
 int l_door_open(lua_State* L);
 int l_door_close(lua_State* L);
 int l_door_lock(lua_State* L);
+// lua 1.32 enemy orders (door_bindings.cpp)
+int l_enemy_order(lua_State* L);
+int l_enemy_order_cancel(lua_State* L);
+int l_enemy_target(lua_State* L);
 int l_fog_at(lua_State* L);
 int l_map_markers(lua_State* L);
 int l_canvas(lua_State* L);

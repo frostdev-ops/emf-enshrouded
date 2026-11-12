@@ -347,6 +347,42 @@ void cmd_ai(EmfWorld* w, int argc, const char* const* argv, void* u) {
     command_reply_line("aggro: " + (aggro.empty() ? std::string("none") : aggro));
 }
 
+// order <enemy> <target> [seconds] [damage] (v39): the enemy goes for the target (a door, a gate, a creature, a player);
+// order.stop <id>. The host's console may send a tamed beast too (EMF_ORDER_ALLIES).
+void cmd_order(EmfWorld* w, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    EmfEnemyOrder o{};
+    o.size = sizeof o;
+    o.flags = EMF_ORDER_ALLIES;
+    uint32_t secs = 0, dmg = 0;
+    if (argc < 3 || argc > 5 || !parse_uint(argv[1], 0xffffffffu, &o.enemy) || !parse_uint(argv[2], 0xffffffffu, &o.target) ||
+        (argc > 3 && !parse_uint(argv[3], 86400, &secs)) || (argc > 4 && !parse_uint(argv[4], 100000, &dmg))) {
+        command_reply_line("usage: order <enemy> <target> [seconds] [damage]");
+        return;
+    }
+    o.seconds = static_cast<float>(secs);
+    o.damage = static_cast<int32_t>(dmg);
+    const uint32_t id = c.api->enemy_order ? c.api->enemy_order(w, &o) : 0;
+    if (!id) {
+        command_reply_line(fmt("entity %u not sent: %s", o.enemy, o.why[0] ? o.why : "enemy orders are off"));
+        return;
+    }
+    const std::string how = secs ? fmt("for %u s", secs) : fmt("until it ends (order.stop %u)", id);
+    command_reply_line(fmt("order %u: entity %u goes for entity %u %s%s", id, o.enemy, o.target, how.c_str(),
+                           dmg ? fmt(", %u damage added to each of its hits on it", dmg).c_str() : ""));
+}
+
+void cmd_order_stop(EmfWorld*, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    uint32_t id = 0;
+    if (argc != 2 || !parse_uint(argv[1], 0xffffffffu, &id)) {
+        command_reply_line("usage: order.stop <id>");
+        return;
+    }
+    const bool ok = c.api->enemy_order_cancel && c.api->enemy_order_cancel(id);
+    command_reply_line(ok ? fmt("order %u ended", id) : fmt("no order %u", id));
+}
+
 // hud <id> [place 0-2] [text]: a line kept on screen (API v12), to try a layout; no text removes it.
 void cmd_hud(EmfWorld*, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
@@ -1356,6 +1392,9 @@ bool add_builtin_commands(BuiltinContext& ctx) {
                    "its maximum, e.g. a beast beaten down for taming (host)", cmd_health},
         {"ai", "<entity>: what a creature's AI does: its state, whom it guards and fights, its aggro and faction (host)",
          cmd_ai},
+        {"order", "<enemy> <target> [seconds] [damage]: the enemy goes for the target (a door, a gate, a creature, a "
+                  "player); damage is added to each of its hits on it (host)", cmd_order},
+        {"order.stop", "<id>: end an order (host)", cmd_order_stop},
         {"entities", ": count the entities in the server world", cmd_entities},
         {"inspect", "<entity>: list the entity's components (template ones marked)", cmd_inspect},
         {"tpl", "<entity> <component> [bytes 1-256] [offset]: hex dump of the entity's template data", cmd_tpl},

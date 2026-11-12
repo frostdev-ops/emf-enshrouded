@@ -1,5 +1,6 @@
 // Lua 1.30 doors (API v38): emf.door, emf.door_open, emf.door_close, emf.door_lock. Changes land at the next server
-// step; a lock lasts until the world closes.
+// step; a lock lasts until the world closes. Lua 1.32 enemy orders (API v39): emf.enemy_order, emf.enemy_order_cancel,
+// emf.enemy_target.
 #include <string>
 
 #include "host_impl.h"
@@ -60,6 +61,75 @@ int l_door_lock(lua_State* L) {
     const bool locked = lua_toboolean(L, 3) != 0;
     const EmfApi* a = s->host->api;
     lua_pushboolean(L, has_v38(a) && a->door_lock(w, id, locked ? 1u : 0u));
+    return 1;
+}
+
+namespace {
+bool has_v39(const EmfApi* a) {
+    return a && a->version >= 39 && a->size >= offsetof(EmfApi, enemy_target) + sizeof(a->enemy_target) && a->enemy_order;
+}
+}  // namespace
+
+// emf.enemy_order(world, enemy, target [, {seconds = n, damage = n, allies = bool}]): the order's id, or nil and why.
+int l_enemy_order(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = lua_world_arg(L, 1);
+    EmfEnemyOrder o{};
+    o.size = sizeof o;
+    o.enemy = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    o.target = static_cast<uint32_t>(luaL_checkinteger(L, 3));
+    if (!lua_isnoneornil(L, 4)) {
+        luaL_checktype(L, 4, LUA_TTABLE);
+        lua_getfield(L, 4, "seconds");
+        if (!lua_isnil(L, -1)) {
+            if (!lua_isnumber(L, -1)) return luaL_error(L, "emf.enemy_order: seconds is a number");
+            o.seconds = static_cast<float>(lua_tonumber(L, -1));
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, 4, "damage");
+        if (!lua_isnil(L, -1)) {
+            if (!lua_isinteger(L, -1)) return luaL_error(L, "emf.enemy_order: damage is a whole number");
+            o.damage = static_cast<int32_t>(lua_tointeger(L, -1));
+        }
+        lua_pop(L, 1);
+        lua_getfield(L, 4, "allies");
+        if (lua_toboolean(L, -1)) o.flags |= EMF_ORDER_ALLIES;
+        lua_pop(L, 1);
+    }
+    const EmfApi* a = s->host->api;
+    if (!has_v39(a)) {
+        lua_pushnil(L);
+        lua_pushstring(L, "this EMF has no enemy orders (EMF API v39)");
+        return 2;
+    }
+    const uint32_t id = a->enemy_order(w, &o);
+    if (!id) {
+        lua_pushnil(L);
+        lua_pushstring(L, o.why);
+        return 2;
+    }
+    lua_pushinteger(L, id);
+    return 1;
+}
+
+// emf.enemy_order_cancel(id): true when the order was there.
+int l_enemy_order_cancel(lua_State* L) {
+    Script* s = script_of(L);
+    const uint32_t id = static_cast<uint32_t>(luaL_checkinteger(L, 1));
+    const EmfApi* a = s->host->api;
+    lua_pushboolean(L, has_v39(a) && a->enemy_order_cancel(id));
+    return 1;
+}
+
+// emf.enemy_target(world, enemy): what it goes for now (its pick), or nil.
+int l_enemy_target(lua_State* L) {
+    Script* s = script_of(L);
+    EmfWorld* w = lua_world_arg(L, 1);
+    const uint32_t enemy = static_cast<uint32_t>(luaL_checkinteger(L, 2));
+    const EmfApi* a = s->host->api;
+    const uint32_t t = has_v39(a) ? a->enemy_target(w, enemy) : 0;
+    if (t) lua_pushinteger(L, t);
+    else lua_pushnil(L);
     return 1;
 }
 

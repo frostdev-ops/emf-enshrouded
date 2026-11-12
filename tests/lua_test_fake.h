@@ -67,6 +67,9 @@ struct Fake {
     bool path_ok = true;
     std::map<uint32_t, uint32_t> door_states;  // v38: entity -> EMF_DOOR_*
     std::vector<std::string> door_calls;
+    std::vector<EmfEnemyOrder> orders;  // v39
+    std::vector<uint32_t> order_cancels;
+    std::map<uint32_t, uint32_t> enemy_targets;
     bool remove_ok = true;
     uint32_t remove_refunded = 0;
     uint32_t tick = 0;  // what world_tick answers (60 per second of game time)
@@ -384,6 +387,22 @@ bool f_door_set(EmfWorld*, uint32_t e, uint32_t open, uint32_t side) {
 bool f_door_lock(EmfWorld*, uint32_t e, uint32_t locked) {
     g->door_calls.push_back("lock " + std::to_string(e) + " " + std::to_string(locked));
     return g->door_states.count(e) != 0;
+}
+uint32_t f_enemy_order(EmfWorld*, EmfEnemyOrder* o) {
+    if (o->enemy == 13) {  // the fake refuses this one
+        std::snprintf(o->why, sizeof o->why, "it has no enemy AI to send");
+        return 0;
+    }
+    g->orders.push_back(*o);
+    return static_cast<uint32_t>(g->orders.size());
+}
+bool f_enemy_order_cancel(uint32_t id) {
+    g->order_cancels.push_back(id);
+    return id >= 1 && id <= g->orders.size();
+}
+uint32_t f_enemy_target(EmfWorld*, uint32_t e) {
+    auto it = g->enemy_targets.find(e);
+    return it == g->enemy_targets.end() ? 0 : it->second;
 }
 bool f_path_cancel(uint32_t id) {
     g->path_cancels.push_back(id);
@@ -1024,6 +1043,9 @@ EmfApi fake_api() {
     a.door_state = f_door_state;  // v38
     a.door_set = f_door_set;
     a.door_lock = f_door_lock;
+    a.enemy_order = f_enemy_order;
+    a.enemy_order_cancel = f_enemy_order_cancel;
+    a.enemy_target = f_enemy_target;
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;

@@ -1214,6 +1214,54 @@ TEST_CASE("builtin commands: ai shows a creature's AI state, whom it guards and 
     CHECK(bsaid("usage: ai <entity>"));
 }
 
+namespace {
+std::vector<EmfEnemyOrder> g_orders;
+std::vector<uint32_t> g_order_cancels;
+uint32_t fake_order(EmfWorld*, EmfEnemyOrder* o) {
+    if (o->enemy == 13) {
+        std::snprintf(o->why, sizeof o->why, "it has no enemy AI to send");
+        return 0;
+    }
+    g_orders.push_back(*o);
+    return 40 + static_cast<uint32_t>(g_orders.size());
+}
+bool fake_order_cancel(uint32_t id) {
+    g_order_cancels.push_back(id);
+    return id == 41;
+}
+}  // namespace
+
+TEST_CASE("builtin commands: order sends an enemy at an entity (seconds, damage); order.stop ends it") {
+    BFixture f;
+    EmfApi api = *api_table();
+    api.enemy_order = fake_order;
+    api.enemy_order_cancel = fake_order_cancel;
+    f.ctx.api = &api;
+    g_orders.clear();
+    g_order_cancels.clear();
+    ItemsWorld iw;
+    MapStore ents;
+    emf::test::plant_entities(iw.w, ents, {42, 70, 900});
+    f.center.enqueue("order 70 900");
+    f.center.enqueue("order 70 900 30 50");
+    f.center.enqueue("order 13 900");
+    f.center.enqueue("order 70");
+    f.center.enqueue("order.stop 41");
+    f.center.enqueue("order.stop 7");
+    f.run(iw.w);
+    CHECK(bsaid("order 41: entity 70 goes for entity 900 until it ends (order.stop 41)"));
+    CHECK(bsaid("order 42: entity 70 goes for entity 900 for 30 s, 50 damage added to each of its hits on it"));
+    CHECK(bsaid("entity 13 not sent: it has no enemy AI to send"));
+    CHECK(bsaid("usage: order <enemy> <target> [seconds] [damage]"));
+    CHECK(bsaid("order 41 ended"));
+    CHECK(bsaid("no order 7"));
+    REQUIRE(g_orders.size() == 2u);
+    CHECK(g_orders[0].seconds == 0.0f);
+    CHECK(g_orders[1].seconds == 30.0f);
+    CHECK(g_orders[1].damage == 50);
+    CHECK(g_orders[1].flags == EMF_ORDER_ALLIES);  // the host's console may send a tamed beast too
+}
+
 TEST_CASE("api remove_building (v36): no request, a small size field, or a call outside a world callback is refused") {
     BFixture f;
     CHECK_FALSE(api_table()->remove_building(nullptr, nullptr));

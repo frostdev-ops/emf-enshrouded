@@ -1222,6 +1222,39 @@ if (st != EMF_DOOR_NONE && !(st & EMF_DOOR_LOGIC)) {
 }
 ```
 
+## v39: enemy orders
+
+A creature with an enemy AI (`DynamicAggro`, `SelectedTargets`) sent at any entity with a position for a while. While
+the order holds, EMF writes the target as its pick (`SelectedTargets` slot 0, target and root) with its target switches
+off (`DynamicAggro.allowTargetSwitches`) and gives the target an alarmed entry (aggro 100) in its aggro list, at once and
+after every server step. Seen in game: with the pick alone a Vukah did not move; with the entry too it walked 15 m to a
+door and swung at it. The game's hits on a placed door did 0. C++: `emf::has_v39()`.
+
+| C | Rules |
+|---|---|
+| `uint32_t enemy_order(world, EmfEnemyOrder* o)` | `o->size = sizeof(EmfEnemyOrder)`; `enemy`, `target`, `flags` (`EMF_ORDER_ALLIES`: the creature may be a player's ally), `seconds` (0 = until it ends otherwise), `damage` (0..100000: added to each of the enemy's hits on the target, through a hit rule). The order's id, or 0 with `o->why` |
+| `bool enemy_order_cancel(uint32_t id)` | Ends it: at once inside a server world callback, else at the next step. False: no such order |
+| `uint32_t enemy_target(world, enemy)` | What it goes for now (its pick), 0 = nothing |
+
+An order ends after its time, when the target is gone or dead (a target without health, such as a door, is never
+dead), when the enemy is gone, on cancel, with a new order on the same enemy, or when the world closes; then the
+switches go back on and its entry (and the pick, if it is still the target) are cleared, and its hit rule goes.
+`enemy_order` is refused when: not inside a world callback on the server world, the enemy has no enemy AI, it is a
+player, it is a player's ally without `EMF_ORDER_ALLIES`, the target has no position or is dead, `seconds` or `damage`
+is out of range, 256 orders are held, or `damage` is asked while hit rules are off on this build. Nothing is saved.
+
+```cpp
+EmfEnemyOrder o{};
+o.size = sizeof o;
+o.enemy = raider;
+o.target = gate;
+o.seconds = 60;
+o.damage = 40;  // the game's own swings do not hurt a placed gate
+if (!api()->enemy_order(world, &o)) EMF_LOG(mod, "no order: %s", o.why);
+```
+
+Console: `order <enemy> <target> [seconds] [damage]` and `order.stop <id>` (the host's console may send a tamed beast).
+
 ## SDK headers (header-only C++, no ABI)
 
 | Header | What |
