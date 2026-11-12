@@ -686,6 +686,21 @@ typedef struct EmfCanvasCmd {
     const char* s; /* TEXT: the text; else NULL */
 } EmfCanvasCmd;
 
+/* v36 remove_building: a placed object removed the way a player's pick-up does */
+#define EMF_REFUND_NONE 0u      /* nothing back */
+#define EMF_REFUND_DROP 1u      /* the item as a loose pickup at the object */
+#define EMF_REFUND_PLAYER 2u    /* into `player`'s inventory; a drop at the object when it does not fit */
+#define EMF_REMOVE_FORCE 0x01u  /* remove it even when it holds items (they are lost); never a Flame Altar */
+typedef struct EmfRemoveBuilding {
+    uint32_t size;     /* sizeof(EmfRemoveBuilding) */
+    uint32_t entity;
+    uint32_t refund;   /* EMF_REFUND_* */
+    uint32_t player;   /* EMF_REFUND_PLAYER: who gets the item */
+    uint32_t flags;    /* EMF_REMOVE_* */
+    uint32_t refunded; /* out: the item id given back (0: none) */
+    char why[120];     /* out: why it was refused ("" when removed) */
+} EmfRemoveBuilding;
+
 typedef struct EmfHitRule {
     uint32_t size;             /* sizeof(EmfHitRule) */
     uint32_t attacker;         /* 0 = anyone, an entity, or EMF_HIT_PLAYERS / _CREATURES / _OBJECTS */

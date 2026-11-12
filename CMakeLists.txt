@@ -150,6 +150,7 @@ add_library(emf_core_lib STATIC
   src/core/inventory.cpp
   src/core/teleport.cpp
   src/core/spawn.cpp
+  src/core/remove_building.cpp
   src/core/save_events.cpp
   src/core/fault_report.cpp
   src/core/world_jobs.cpp
@@ -473,6 +474,7 @@ add_executable(emf_tests
   tests/test_program_registry.cpp
   tests/test_system_programs.cpp
   tests/test_inventory.cpp
+  tests/test_remove_building.cpp
   tests/test_teleport.cpp
   tests/test_api_teleport.cpp
   tests/test_wheel_model.cpp
