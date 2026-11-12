@@ -39,7 +39,8 @@ public:
     // reused), or 0 and *why. Written at once.
     uint32_t add(EmfWorld* world, uint32_t enemy, uint32_t target, double seconds, int32_t damage, uint32_t flags,
                  std::string* why);
-    bool cancel(uint32_t id);                // false: no such order (it ends at the next step)
+    // false: no such order. now: written at once (inside a callback on its world), else it ends at the next step.
+    bool cancel(uint32_t id, bool now = true);
     void step(EmfWorld* world);              // after a server step of `world`
     void world_reset();                      // a new server world: every order ends, nothing is written
     uint32_t target_of(EmfWorld* world, uint32_t enemy) const;  // its pick now, 0 none

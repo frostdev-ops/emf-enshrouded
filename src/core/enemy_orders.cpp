@@ -110,9 +110,13 @@ void EnemyOrders::finish(const Order& o, bool clear) {
     }
 }
 
-bool EnemyOrders::cancel(uint32_t id) {
+bool EnemyOrders::cancel(uint32_t id, bool now) {
     for (size_t i = 0; i < orders_.size(); ++i)
         if (orders_[i].id == id) {
+            if (!now) {
+                orders_[i].cancelled = true;
+                return true;
+            }
             finish(orders_[i], true);
             orders_.erase(orders_.begin() + static_cast<std::ptrdiff_t>(i));
             return true;
@@ -130,7 +134,7 @@ void EnemyOrders::step(EmfWorld* world) {
             continue;
         }
         const bool gone = !has(d_, world, gen::CurrentTransform::kHash, o.target) || (d_.dead && d_.dead(world, o.target));
-        if ((o.until && now >= o.until) || gone || !write(world, o)) {
+        if (o.cancelled || (o.until && now >= o.until) || gone || !write(world, o)) {
             finish(o, true);
             continue;
         }

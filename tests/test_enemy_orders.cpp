@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "core/api.h"
+#include "core/api_sizes.h"
 #include "core/enemy_orders.h"
 #include "emf/emf_api.h"
 #include "emf/generated/components.hpp"
@@ -192,6 +194,30 @@ TEST_CASE("enemy orders: the aggro entry reuses the target's, else a free slot, 
     int n = 0;
     for (const auto& t : ag.targets) n += t.entityId.id == kDoor;
     CHECK(n == 1);  // reused, not a second slot
+}
+
+TEST_CASE("enemy orders: a cancel outside a world callback ends the order at the next step") {
+    Fake f = world();
+    EnemyOrders o(f.deps());
+    std::string why;
+    const uint32_t id = o.add(W(), kEnemy, kDoor, 30, 0, 0, &why);
+    CHECK(o.cancel(id, false));
+    CHECK(held(f));  // nothing written yet
+    o.step(W());
+    CHECK_FALSE(held(f));
+    CHECK(o.count() == 0u);
+}
+
+TEST_CASE("api table (v39): version 39, the three enemy order functions at the end") {
+    const EmfApi* api = emf::core::api_table();
+    CHECK(api->version == 39u);
+    CHECK(api->size == kApiV39Size);
+    CHECK(api->enemy_order != nullptr);
+    CHECK(api->enemy_order_cancel != nullptr);
+    CHECK(api->enemy_target != nullptr);
+    EmfEnemyOrder tiny{};
+    tiny.size = 8;  // an older or broken caller
+    CHECK(api->enemy_order(nullptr, &tiny) == 0u);
 }
 
 TEST_CASE("enemy orders: refused: no enemy AI, a player, an ally without EMF_ORDER_ALLIES, no target, itself, a dead target, bad numbers") {

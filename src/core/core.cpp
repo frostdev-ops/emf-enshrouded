@@ -47,6 +47,7 @@
 #include "minimap_draw.h"
 #include "inventory.h"
 #include "doors.h"
+#include "enemy_orders.h"
 #include "path_glue.h"
 #include "teleport.h"
 #include "component_service.h"
@@ -553,6 +554,8 @@ std::unique_ptr<emf::core::BuffService> g_buffs;  // v32 buffs: emf_buffs
 std::unique_ptr<emf::core::TeleportService> g_teleport;
 // v38 doors: the emf_doors program and its orders and locks (null when off on this game build).
 std::unique_ptr<emf::core::DoorService> g_doors;
+// v39 enemy orders: written after every server step.
+std::unique_ptr<emf::core::EnemyOrders> g_orders;
 // v23 change_component: the emf_components program and its requests (null when off on this game build).
 std::unique_ptr<emf::core::ComponentService> g_components;
 // v25 E prompts: on top of the component service (null when that is off).
@@ -675,6 +678,7 @@ void hk_register_all_programs(void* world) {
             if (g_teleport) g_teleport->world_reset();
             emf::core::path_world_reset();                // path queries of the old world end (cancelled)
             if (g_doors) g_doors->world_reset();          // door orders and locks of the old world go
+            if (g_orders) g_orders->world_reset();        // enemy orders of the old world end
             if (g_components) g_components->world_reset();  // component changes under way end (FAILED)    // teleports under way end (FAILED)
             g_state->damage_queue.clear();                // hits for the old session never land
             emf::core::env_new_session();                 // nor its env hits and carries
@@ -1267,6 +1271,31 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         }
         if (!emf::core::add_buff_commands(g_state->commands)) emf::logf("commands: the buffs.* commands could not be added");
     }
+    // v39 enemy orders: an enemy's pick and an aggro entry for its target, written after every server step; the damage
+    // option is a hit rule (enemy_orders.h)
+    {
+        emf::core::EnemyOrders::Deps d;
+        d.get = [](EmfWorld* w, uint32_t hash, uint32_t entity, uint64_t* size) -> void* {
+            return emf::core::api_table()->get_component(w, hash, entity, size);
+        };
+        d.now_ms = [] { return GetTickCount64(); };
+        d.add_rule = [](uint32_t attacker, uint32_t target, int32_t add) -> uint32_t {
+            EmfHitRule r{};
+            r.size = sizeof r;
+            r.attacker = attacker;
+            r.target = target;
+            r.scale = 1.0f;
+            r.add = add;
+            return emf::core::api_table()->hit_rule_add(&r);
+        };
+        d.remove_rule = [](uint32_t id) { emf::core::api_table()->hit_rule_remove(id); };
+        d.dead = [](EmfWorld* w, uint32_t entity) {
+            int32_t cur = 0;
+            return emf::core::api_table()->attribute_get(w, entity, EMF_ATTR_HEALTH, &cur) && cur <= 0;
+        };
+        g_orders = std::make_unique<emf::core::EnemyOrders>(std::move(d));
+        g_state->orders = g_orders.get();
+    }
     // v38 doors: an internal server program writes the door components through the game's writeOther (private research
     // doors_2026-11-12); reading needs no program.
     {
@@ -1670,6 +1699,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         else if (kind == EMF_WORLD_SERVER) {
             emf::core::markers_server_tick(w);
             emf::core::map_server_tick(w);  // v34 ground_at
+            if (g_orders) g_orders->step(w);  // v39 enemy orders
         }
     }, nullptr);
     // v32 buffs: the emf_buffs watchdog and the players' buff events after each server step.

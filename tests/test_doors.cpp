@@ -243,10 +243,10 @@ TEST_CASE("api doors (v38): door_state reads; door_set and door_lock queue for t
     set_core_state(nullptr);
 }
 
-TEST_CASE("api table (v38): version 38, the three door functions at the end") {
+TEST_CASE("api table (v38): the three door functions") {
     const EmfApi* api = api_table();
-    CHECK(api->version == 38u);
-    CHECK(api->size == kApiV38Size);
+    CHECK(api->version >= 38u);  // the newest version is checked by its own test (test_enemy_orders.cpp: v39)
+    CHECK(api->size >= kApiV38Size);
     CHECK(api->door_state != nullptr);
     CHECK(api->door_set != nullptr);
     CHECK(api->door_lock != nullptr);

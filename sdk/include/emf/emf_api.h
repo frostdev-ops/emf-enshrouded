@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 38 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 39 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 38
+#define EMF_API_VERSION 39
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -1510,6 +1510,18 @@ typedef struct EmfApi {
      * is not saved: it lasts until the world closes. door_set still works on a locked door and changes the state it
      * keeps. Same rules. */
     bool (*door_lock)(EmfWorld* world, uint32_t entity, uint32_t locked);
+
+    /* ---- v39: enemy orders (EmfEnemyOrder) ---- */
+    /* Sends order->enemy at order->target: written at once and after every server step until it ends (its time, the
+     * target gone or dead, the enemy gone, cancelled, a new order on the same enemy, the world closing); then the game
+     * picks for it again. Returns the order's id (from 1), or 0 with order->why: not a server world or not inside a
+     * world callback on it, an enemy without an enemy AI, a player, a player's ally without EMF_ORDER_ALLIES, no such
+     * target, a dead target, bad numbers, more than 256 orders, damage while hits are off on this game build. */
+    uint32_t (*enemy_order)(EmfWorld* world, EmfEnemyOrder* order);
+    /* Ends an order (at once inside a server world callback, else at the next step). False: no such order. */
+    bool (*enemy_order_cancel)(uint32_t id);
+    /* What `enemy` goes for now (its pick: SelectedTargets slot 0), 0 = nothing (or not a creature). */
+    uint32_t (*enemy_target)(EmfWorld* world, uint32_t enemy);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */

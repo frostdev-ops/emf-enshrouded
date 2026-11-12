@@ -30,6 +30,7 @@
 #include "items.h"
 #include "program_access.h"
 #include "doors.h"
+#include "enemy_orders.h"
 #include "path_glue.h"
 #include "remove_building.h"
 #include "spawn.h"
@@ -1058,6 +1059,46 @@ bool api_door_set(EmfWorld* w, uint32_t entity, uint32_t open, uint32_t side) {
     if (d->request(raw(w), entity, open ? DoorOrderKind::Open : DoorOrderKind::Close, static_cast<uint8_t>(side), &why))
         return true;
     return door_refused("door_set (entity " + std::to_string(entity) + ")", why);
+}
+
+// v39 enemy orders (enemy_orders.h).
+uint32_t api_enemy_order(EmfWorld* w, EmfEnemyOrder* req) {
+    if (!g_state || !req || req->size < kEnemyOrderV39Size) {
+        core_log("enemy_order refused: no order, or its size field is not sizeof(EmfEnemyOrder)");
+        return 0;
+    }
+    req->why[0] = 0;
+    auto refuse = [req](const std::string& why) {
+        std::snprintf(req->why, sizeof(req->why), "%s", why.c_str());
+        std::string line = "enemy_order refused (enemy " + std::to_string(req->enemy) + "): " + why;
+        if (g_state) {  // a mod retrying every step: the same line once per 10 s
+            std::lock_guard<std::mutex> l(g_state->put_refusals_lock);
+            line = g_state->put_refusals.pass(line, now());
+        }
+        if (!line.empty()) core_log(line);
+        return 0u;
+    };
+    if (!w || w != dispatching_world())
+        return refuse("call it from a world callback (on_tick, run_on_world, on_event) on the server world passed to it");
+    if (WorldView(raw(w)).kind() != EMF_WORLD_SERVER) return refuse("not a server world (host only)");
+    EnemyOrders* o = g_state->orders;
+    if (!o) return refuse("enemy orders are off");
+    std::string why;
+    const uint32_t id = o->add(w, req->enemy, req->target, req->seconds, req->damage, req->flags, &why);
+    return id ? id : refuse(why);
+}
+
+bool api_enemy_order_cancel(uint32_t id) {
+    EnemyOrders* o = g_state ? g_state->orders : nullptr;
+    if (!o) return false;
+    EmfWorld* w = dispatching_world();
+    const bool now = w && WorldView(raw(w)).kind() == EMF_WORLD_SERVER;  // else at the next step
+    return o->cancel(id, now);
+}
+
+uint32_t api_enemy_target(EmfWorld* w, uint32_t enemy) {
+    EnemyOrders* o = g_state ? g_state->orders : nullptr;
+    return o && w ? o->target_of(w, enemy) : 0;
 }
 
 bool api_door_lock(EmfWorld* w, uint32_t entity, uint32_t locked) {
@@ -2468,6 +2509,9 @@ const EmfApi kApi = {
     api_door_state,  // v38
     api_door_set,
     api_door_lock,
+    api_enemy_order,  // v39
+    api_enemy_order_cancel,
+    api_enemy_target,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

@@ -69,6 +69,7 @@ struct CoreState {
     std::mutex put_refusals_lock;
     LogLimiter put_refusals;
     class DoorService* doors = nullptr;  // v38 (null when off on this game build)
+    class EnemyOrders* orders = nullptr;  // v39 enemy orders
     struct {  // v36 remove_building: the objects removed in this server step (the server world's thread only)
         uint32_t session = 0;
         uint64_t step = 0;
