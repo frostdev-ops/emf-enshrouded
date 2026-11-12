@@ -82,6 +82,7 @@ struct Script {
     std::atomic<uint32_t> buff_cb_count{0};            // buff_cbs.size(), read without m
     std::atomic<uint32_t> hit_cb_count{0};             // hit_cbs.size(), read without m: a hit skips scripts without
     std::set<uint32_t> hit_rules;                      // its emf.hit_rule ids (lua 1.23): removed on unload and pause
+    std::set<uint32_t> enemy_orders;                   // its emf.enemy_order ids (lua 1.32): cancelled on unload and pause
     std::set<std::string> markers;                     // its emf.marker ids ("<id>:<name>", lua 1.25): removed with it
     std::set<std::pair<uint32_t, std::string>> sent_markers;  // emf.send_marker: (player or 0, id), unsent with it
     std::map<std::string, int> map_actions;            // emf.map_action (lua 1.26): "<id>:<name>" -> function; removed with it
@@ -296,6 +297,7 @@ int l_door_lock(lua_State* L);
 int l_enemy_order(lua_State* L);
 int l_enemy_order_cancel(lua_State* L);
 int l_enemy_target(lua_State* L);
+void drop_enemy_orders(Host::Impl& h, Script& s);
 int l_fog_at(lua_State* L);
 int l_map_markers(lua_State* L);
 int l_canvas(lua_State* L);

@@ -44,6 +44,21 @@ TEST_CASE("lua 1.32: emf.enemy_order sends an enemy (seconds, damage, allies), e
     CHECK(r.fake.orders[1].flags == EMF_ORDER_ALLIES);
 }
 
+// Review I4: a script's orders end when it reloads or pauses (as its hit rules do).
+TEST_CASE("lua 1.32: a reload or a pause cancels the script's enemy orders") {
+    Rig r(L"lua_orders_drop");
+    add_script(r.dir, "od",
+               "emf.command('go', '', function(w) emf.enemy_order(w, 70, 900) emf.enemy_order(w, 71, 900) end)\n"
+               "emf.command('boom', '', function() error('boom') end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("od.go");
+    REQUIRE(r.fake.orders.size() == 2u);
+    r.run_command("od.boom");
+    REQUIRE(host.status("od").rfind("paused", 0) == 0);
+    CHECK(r.fake.order_cancels.size() == 2u);
+}
+
 TEST_CASE("lua 1.30: emf.door reads the state; door_open, door_close and door_lock call the core") {
     Rig r(L"lua_doors");
     r.fake.door_states[500] = EMF_DOOR_CLOSED | EMF_DOOR_LOCKED;

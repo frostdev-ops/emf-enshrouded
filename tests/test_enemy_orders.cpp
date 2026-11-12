@@ -273,3 +273,55 @@ TEST_CASE("enemy orders: an idle or roaming enemy is put in its Combat state; on
         CHECK(f.get<gen::DynamicEnemy01BehaviorState>(kEnemy).state == st);
     }
 }
+
+// Review I2: a creature tamed during an order (Beastmaster: faction 11) would go on attacking its new owner.
+TEST_CASE("enemy orders: an order ends when its enemy becomes a player's ally (without EMF_ORDER_ALLIES) or a player") {
+    Fake f = world();
+    EnemyOrders o(f.deps());
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, kPlayer, 0, 0, 0, &why) != 0u);
+    f.get<gen::Faction>(kEnemy).faction = static_cast<emf::gen::FactionType>(11);  // tamed
+    o.step(W());
+    CHECK(o.count() == 0u);
+    CHECK_FALSE(held(f));
+    CHECK(pick(f) == 0u);
+}
+
+// Review I3: the enemy's death ends its order (its id may soon be another creature's).
+TEST_CASE("enemy orders: an order ends when its enemy dies") {
+    Fake f = world();
+    EnemyOrders o(f.deps());
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, kDoor, 0, 50, 0, &why) != 0u);
+    f.dead[kEnemy] = true;
+    o.step(W());
+    CHECK(o.count() == 0u);
+    CHECK(f.rules_removed.size() == 1u);
+}
+
+// Review I5 (the spec: never a boss): a boss is refused; its leash and its own fight stay the game's.
+TEST_CASE("enemy orders: a boss (Boss or BossHealthBar) is refused") {
+    for (int c = 0; c < 2; ++c) {
+        Fake f = world();
+        if (c == 0) f.add<gen::Boss>(kEnemy);
+        else f.add<gen::BossHealthBar>(kEnemy);
+        EnemyOrders o(f.deps());
+        std::string why;
+        CHECK(o.add(W(), kEnemy, kDoor, 30, 0, 0, &why) == 0u);
+        CHECK(why.find("boss") != std::string::npos);
+    }
+}
+
+// Review minor (re-graded: a tamed beast sent with EMF_ORDER_ALLIES stood still after it, as Beastmaster saw): an order
+// that ends with the enemy in Combat and nothing left to fight puts it back to Idle.
+TEST_CASE("enemy orders: when an order ends, an enemy in Combat with nothing picked goes back to Idle") {
+    using S = emf::gen::enemy01::State;
+    Fake f = world();
+    f.add<gen::DynamicEnemy01BehaviorState>(kEnemy).state = S::Roaming;
+    EnemyOrders o(f.deps());
+    std::string why;
+    const uint32_t id = o.add(W(), kEnemy, kDoor, 30, 0, 0, &why);
+    REQUIRE(f.get<gen::DynamicEnemy01BehaviorState>(kEnemy).state == S::Combat);
+    REQUIRE(o.cancel(id));
+    CHECK(f.get<gen::DynamicEnemy01BehaviorState>(kEnemy).state == S::Idle);
+}

@@ -671,8 +671,9 @@ door, and one hit with `damage = 200` broke it.
   target (a hit rule), so a door can break.
 - `allies = true`: the creature may be a player's ally (a tamed beast); without it such a creature is refused.
 
-It returns the order's id, or nil and why (not the server world, no enemy AI, a player, no such target, a dead target,
-bad numbers, more than 256 orders). A new order on the same enemy ends the old one. When an order ends, the game picks
+It returns the order's id, or nil and why (not the server world, no enemy AI, a player, a boss, no such target, a dead
+target, bad numbers, more than 256 orders). An order also ends when its enemy dies or becomes a player's ally (tamed),
+and when your script reloads or pauses. A new order on the same enemy ends the old one. When an order ends, the game picks
 for the enemy again. Nothing is saved. `emf.enemy_order_cancel(id)` ends one; `emf.enemy_target(world, enemy)` is what
 it goes for now (its pick), or nil. Host only, like `emf.spawn`. On a core older than API v39: nil and a reason.
 

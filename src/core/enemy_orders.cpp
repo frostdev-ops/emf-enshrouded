@@ -37,11 +37,14 @@ uint32_t EnemyOrders::add(EmfWorld* world, uint32_t enemy, uint32_t target, doub
     if (has(d_, world, gen::PlayerState::kHash, enemy)) return no("that is a player");
     if (!comp<gen::DynamicAggro>(d_, world, enemy) || !comp<gen::SelectedTargets>(d_, world, enemy))
         return no("it has no enemy AI to send (DynamicAggro, SelectedTargets)");
+    if (has(d_, world, gen::Boss::kHash, enemy) || has(d_, world, gen::BossHealthBar::kHash, enemy))
+        return no("it is a boss: its fight and its leash stay the game's");
     if (const auto* f = comp<gen::Faction>(d_, world, enemy);
         f && static_cast<uint8_t>(f->faction) == kPlayerAlly && !(flags & EMF_ORDER_ALLIES))
         return no("it is a player's ally (a tamed beast): pass EMF_ORDER_ALLIES to send it");
     if (!has(d_, world, gen::CurrentTransform::kHash, target)) return no("no such target (or it has no position)");
     if (d_.dead && d_.dead(world, target)) return no("the target is dead");
+    std::lock_guard<std::mutex> l(m_);
     // a new order on the same enemy ends its old one
     for (size_t i = 0; i < orders_.size(); ++i)
         if (orders_[i].enemy == enemy && orders_[i].world == world) {
@@ -54,6 +57,7 @@ uint32_t EnemyOrders::add(EmfWorld* world, uint32_t enemy, uint32_t target, doub
     o.enemy = enemy;
     o.target = target;
     o.world = world;
+    o.flags = flags;
     if (seconds > 0) o.until = (d_.now_ms ? d_.now_ms() : 0) + static_cast<uint64_t>(std::llround(seconds * 1000.0));
     if (damage > 0) {
         o.rule = d_.add_rule ? d_.add_rule(enemy, target, damage) : 0;
@@ -122,10 +126,24 @@ void EnemyOrders::finish(const Order& o, bool clear) {
             pick.targetEntityId.id = 0;
             pick.targetRootEntityId.id = 0;
         }
+        // in Combat with nothing to fight it would stand there (Beastmaster saw it): back to Idle
+        auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, o.world, o.enemy);
+        if (ai && ai->state == emf::gen::enemy01::State::Combat && pick.targetEntityId.id == 0)
+            ai->state = emf::gen::enemy01::State::Idle;
     }
 }
 
+bool EnemyOrders::ended(EmfWorld* w, const Order& o, uint64_t now) const {
+    if (o.cancelled || (o.until && now >= o.until)) return true;
+    if (!has(d_, w, gen::CurrentTransform::kHash, o.target) || (d_.dead && d_.dead(w, o.target))) return true;
+    // the enemy died (its id may soon be another creature's), became a player, or a player's ally (tamed)
+    if ((d_.dead && d_.dead(w, o.enemy)) || has(d_, w, gen::PlayerState::kHash, o.enemy)) return true;
+    const auto* f = comp<gen::Faction>(d_, w, o.enemy);
+    return f && static_cast<uint8_t>(f->faction) == kPlayerAlly && !(o.flags & EMF_ORDER_ALLIES);
+}
+
 bool EnemyOrders::cancel(uint32_t id, bool now) {
+    std::lock_guard<std::mutex> l(m_);
     for (size_t i = 0; i < orders_.size(); ++i)
         if (orders_[i].id == id) {
             if (!now) {
@@ -141,6 +159,7 @@ bool EnemyOrders::cancel(uint32_t id, bool now) {
 
 void EnemyOrders::step(EmfWorld* world) {
     const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
+    std::lock_guard<std::mutex> l(m_);
     std::vector<Order> keep;
     keep.reserve(orders_.size());
     for (const Order& o : orders_) {
@@ -148,8 +167,7 @@ void EnemyOrders::step(EmfWorld* world) {
             keep.push_back(o);
             continue;
         }
-        const bool gone = !has(d_, world, gen::CurrentTransform::kHash, o.target) || (d_.dead && d_.dead(world, o.target));
-        if (o.cancelled || (o.until && now >= o.until) || gone || !write(world, o)) {
+        if (ended(world, o, now) || !write(world, o)) {
             finish(o, true);
             continue;
         }
@@ -159,6 +177,7 @@ void EnemyOrders::step(EmfWorld* world) {
 }
 
 void EnemyOrders::world_reset() {
+    std::lock_guard<std::mutex> l(m_);
     for (const Order& o : orders_) finish(o, false);
     orders_.clear();
 }

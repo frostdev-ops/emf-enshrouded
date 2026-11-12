@@ -108,6 +108,7 @@ int l_enemy_order(lua_State* L) {
         lua_pushstring(L, o.why);
         return 2;
     }
+    s->enemy_orders.insert(id);
     lua_pushinteger(L, id);
     return 1;
 }
@@ -116,9 +117,17 @@ int l_enemy_order(lua_State* L) {
 int l_enemy_order_cancel(lua_State* L) {
     Script* s = script_of(L);
     const uint32_t id = static_cast<uint32_t>(luaL_checkinteger(L, 1));
+    s->enemy_orders.erase(id);
     const EmfApi* a = s->host->api;
     lua_pushboolean(L, has_v39(a) && a->enemy_order_cancel(id));
     return 1;
+}
+
+// A script that reloads or pauses: its orders end (the core ends them at the next step).
+void drop_enemy_orders(Host::Impl& h, Script& s) {
+    for (const uint32_t id : s.enemy_orders)
+        if (has_v39(h.api)) h.api->enemy_order_cancel(id);
+    s.enemy_orders.clear();
 }
 
 // emf.enemy_target(world, enemy): what it goes for now (its pick), or nil.

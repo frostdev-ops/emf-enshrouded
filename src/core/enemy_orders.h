@@ -10,6 +10,7 @@
 // through Deps; server world's thread only.
 #include <cstdint>
 #include <functional>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -44,19 +45,26 @@ public:
     void step(EmfWorld* world);              // after a server step of `world`
     void world_reset();                      // a new server world: every order ends, nothing is written
     uint32_t target_of(EmfWorld* world, uint32_t enemy) const;  // its pick now, 0 none
-    size_t count() const { return orders_.size(); }
+    size_t count() const {
+        std::lock_guard<std::mutex> l(m_);
+        return orders_.size();
+    }
 
 private:
     struct Order {
         uint32_t id = 0, enemy = 0, target = 0, rule = 0;
         EmfWorld* world = nullptr;
         uint64_t until = 0;  // 0: no time limit
+        uint32_t flags = 0;  // EMF_ORDER_*
         bool cancelled = false;
     };
     bool write(EmfWorld* w, const Order& o);   // false: the enemy has no AI to write any more
     void finish(const Order& o, bool clear);  // its rule goes; clear: the switches back on, its entry and pick cleared
 
+    bool ended(EmfWorld* w, const Order& o, uint64_t now) const;  // its time, its target or its enemy says so
+
     Deps d_;
+    mutable std::mutex m_;  // orders_: a cancel may come from any thread (a client world callback, a mod's thread)
     std::vector<Order> orders_;
     uint32_t next_id_ = 1;
 };

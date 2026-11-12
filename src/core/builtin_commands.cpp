@@ -348,12 +348,11 @@ void cmd_ai(EmfWorld* w, int argc, const char* const* argv, void* u) {
 }
 
 // order <enemy> <target> [seconds] [damage] (v39): the enemy goes for the target (a door, a gate, a creature, a player);
-// order.stop <id>. The host's console may send a tamed beast too (EMF_ORDER_ALLIES).
+// order.stop <id>. Never a tamed beast or a boss (the spec), also from the console.
 void cmd_order(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
     EmfEnemyOrder o{};
     o.size = sizeof o;
-    o.flags = EMF_ORDER_ALLIES;
     uint32_t secs = 0, dmg = 0;
     if (argc < 3 || argc > 5 || !parse_uint(argv[1], 0xffffffffu, &o.enemy) || !parse_uint(argv[2], 0xffffffffu, &o.target) ||
         (argc > 3 && !parse_uint(argv[3], 86400, &secs)) || (argc > 4 && !parse_uint(argv[4], 100000, &dmg))) {

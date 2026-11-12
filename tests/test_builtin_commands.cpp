@@ -1259,7 +1259,7 @@ TEST_CASE("builtin commands: order sends an enemy at an entity (seconds, damage)
     CHECK(g_orders[0].seconds == 0.0f);
     CHECK(g_orders[1].seconds == 30.0f);
     CHECK(g_orders[1].damage == 50);
-    CHECK(g_orders[1].flags == EMF_ORDER_ALLIES);  // the host's console may send a tamed beast too
+    CHECK(g_orders[1].flags == 0u);  // never a tamed beast (the spec), also from the console
 }
 
 TEST_CASE("api remove_building (v36): no request, a small size field, or a call outside a world callback is refused") {

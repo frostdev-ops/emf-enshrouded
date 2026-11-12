@@ -1239,10 +1239,12 @@ damage added broke it. The game's own hits on a placed door did 0. C++: `emf::ha
 | `uint32_t enemy_target(world, enemy)` | What it goes for now (its pick), 0 = nothing |
 
 An order ends after its time, when the target is gone or dead (a target without health, such as a door, is never
-dead), when the enemy is gone, on cancel, with a new order on the same enemy, or when the world closes; then the
-switches go back on and its entry (and the pick, if it is still the target) are cleared, and its hit rule goes.
+dead), when the enemy is gone, dies, becomes a player or a player's ally (tamed: unless `EMF_ORDER_ALLIES`), on cancel, with a new order on the same enemy, or when the world closes; then the
+switches go back on and its entry (and the pick, if it is still the target) are cleared, an enemy left in `Combat` with
+nothing picked goes back to `Idle`, and its hit rule goes. `enemy_order_cancel` may be called from any thread.
 `enemy_order` is refused when: not inside a world callback on the server world, the enemy has no enemy AI, it is a
-player, it is a player's ally without `EMF_ORDER_ALLIES`, the target has no position or is dead, `seconds` or `damage`
+player, a boss (`Boss`, `BossHealthBar`: its fight and leash stay the game's), a player's ally without
+`EMF_ORDER_ALLIES`, the target has no position or is dead, `seconds` or `damage`
 is out of range, 256 orders are held, or `damage` is asked while hit rules are off on this build. Nothing is saved.
 
 ```cpp
@@ -1255,7 +1257,7 @@ o.damage = 40;  // the game's own swings do not hurt a placed gate
 if (!api()->enemy_order(world, &o)) EMF_LOG(mod, "no order: %s", o.why);
 ```
 
-Console: `order <enemy> <target> [seconds] [damage]` and `order.stop <id>` (the host's console may send a tamed beast).
+Console: `order <enemy> <target> [seconds] [damage]` and `order.stop <id>` (never a tamed beast or a boss).
 
 ## SDK headers (header-only C++, no ABI)
 
