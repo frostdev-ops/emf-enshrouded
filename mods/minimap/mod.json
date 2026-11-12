@@ -1,0 +1,23 @@
+{
+  "id": "minimap",
+  "name": "Minimap (sample)",
+  "version": "1.0.0",
+  "description": "A small minimap at the top right: the game's own map around you (north up), your arrow turning with you, the places you found and the markers mods put on minimaps. F10 shows or hides it; Numpad + and - zoom. A short sample for mod makers (EMF's canvas API, Lua 1.27). Runs on your own game, also when you join someone. Installed switched off.",
+  "authors": ["EMF contributors"],
+  "enabled": false,
+  "emf": 35,
+  "side": "client",
+  "main": "main.lua",
+  "depends": {"lua": ">=1.27"},
+  "settings": [
+    {"key": "toggle_key", "type": "keybind", "default": "F10", "label": "Show or hide", "live": true, "group": "Keys"},
+    {"key": "zoom_in_key", "type": "keybind", "default": "NumpadAdd", "label": "Zoom in", "live": true, "group": "Keys"},
+    {"key": "zoom_out_key", "type": "keybind", "default": "NumpadSubtract", "label": "Zoom out", "live": true, "group": "Keys"},
+    {"key": "corner", "type": "select", "default": "top_right", "label": "Corner", "live": true, "group": "Look",
+     "options": [{"value": "top_right", "label": "Top right"}, {"value": "top_left", "label": "Top left"},
+                 {"value": "bottom_right", "label": "Bottom right"}, {"value": "bottom_left", "label": "Bottom left"}]},
+    {"key": "size", "type": "slider", "min": 120, "max": 400, "step": 10, "default": 220, "label": "Size", "live": true, "group": "Look"},
+    {"key": "shape", "type": "select", "default": "circle", "label": "Shape", "live": true, "group": "Look",
+     "options": [{"value": "circle", "label": "Round"}, {"value": "rect", "label": "Square"}]}
+  ]
+}

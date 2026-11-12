@@ -20,7 +20,7 @@ if ($version -notmatch '^\d+\.\d+\.\d+$') {  # CMake's project(VERSION) and the 
 $dist = Join-Path $Build "dist"
 # Installed switched off (mod.json): every mod but the clock, quick_stack and lua.
 $playerMods = @("companion", "quick_stack", "clock", "big_stacks", "loot_scale", "lua", "loot_magnet", "sleep", "herald", "teleports", "bulk_craft", "blessings", "villager_jobs", "raids")
-$scriptMods = @("kill_counter", "life_skills", "champion", "bounty", "grave", "handover", "beastmaster", "necromancer")  # Lua mods: a folder with mod.json and .lua files
+$scriptMods = @("kill_counter", "life_skills", "champion", "bounty", "grave", "handover", "beastmaster", "necromancer", "minimap")  # Lua mods: a folder with mod.json and .lua files
 $exampleMods = @("companion", "quick_stack", "clock", "big_stacks", "sample_mod", "event_log", "sim_rate", "loot_scale", "lua", "loot_magnet", "sleep", "herald", "teleports", "bulk_craft", "blessings", "villager_jobs", "raids")
 
 $extraPacks = @()
