@@ -1,0 +1,291 @@
+// Move orders (move_orders.h).
+#include "core/move_orders.h"
+
+#include <algorithm>
+#include <cmath>
+#include <cstring>
+
+#include "emf/generated/components.hpp"
+
+namespace emf::core {
+
+namespace {
+namespace gen = emf::gen::ecs;
+using State = emf::gen::enemy01::State;
+
+template <class T>
+T* comp(const MoveOrders::Deps& d, EmfWorld* w, uint32_t entity) {
+    uint64_t size = 0;
+    void* p = d.get ? d.get(w, T::kHash, entity, &size) : nullptr;
+    return p && size == sizeof(T) ? static_cast<T*>(p) : nullptr;
+}
+bool has(const MoveOrders::Deps& d, EmfWorld* w, uint32_t hash, uint32_t entity) {
+    return d.get && d.get(w, hash, entity, nullptr) != nullptr;
+}
+// CurrentTransform's first 24 bytes: 32.32 fixed-point metres
+bool place_of(const MoveOrders::Deps& d, EmfWorld* w, uint32_t entity, MoveOrders::Point& out) {
+    uint64_t size = 0;
+    const void* t = d.get ? d.get(w, gen::CurrentTransform::kHash, entity, &size) : nullptr;
+    int64_t raw[3];
+    if (!t || size < sizeof raw) return false;
+    std::memcpy(raw, t, sizeof raw);
+    for (int i = 0; i < 3; ++i) out[i] = static_cast<double>(raw[i]) / 4294967296.0;
+    return true;
+}
+constexpr uint8_t kPlayerAlly = 11;
+}  // namespace
+
+uint32_t MoveOrders::add(EmfWorld* world, uint32_t enemy, const std::vector<Point>& points, double arrive,
+                         double seconds, uint32_t flags, Callback cb, std::string* why) {
+    auto no = [why](const char* text) {
+        if (why) *why = text;
+        return 0u;
+    };
+    if (flags & ~static_cast<uint32_t>(EMF_MOVE_ALLIES | EMF_MOVE_PEACEFUL)) return no("unknown flags (a newer mod?)");
+    if (points.empty() || points.size() > kMovePointsMax) return no("1 to 16 points");
+    for (const Point& p : points)
+        if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) return no("a point is not a number");
+    if (!(arrive >= kMoveArriveMin && arrive <= kMoveArriveMax)) return no("arrive must be 0.5 to 50 metres");
+    if (!(seconds >= 0 && seconds <= kMoveSecondsMax)) return no("seconds must be 0 (no limit) to 3600");
+    if (!enemy) return no("no creature");
+    if (has(d_, world, gen::PlayerState::kHash, enemy)) return no("that is a player");
+    auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, world, enemy);
+    if (!ai) return no("it has no enemy AI to move (DynamicEnemy01BehaviorState)");
+    if (has(d_, world, gen::Boss::kHash, enemy) || has(d_, world, gen::BossHealthBar::kHash, enemy))
+        return no("it is a boss: its fight and its leash stay the game's");
+    if (const auto* f = comp<gen::Faction>(d_, world, enemy);
+        f && static_cast<uint8_t>(f->faction) == kPlayerAlly && !(flags & EMF_MOVE_ALLIES))
+        return no("it is a player's ally (a tamed beast): pass EMF_MOVE_ALLIES to move it");
+    if (d_.dead && d_.dead(world, enemy)) return no("it is dead");
+    const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
+    std::vector<Done> done;
+    uint32_t id = 0;
+    const char* refused = nullptr;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        Move m;
+        m.enemy = enemy;
+        m.world = world;
+        m.flags = flags;
+        m.points = points;
+        m.arrive = arrive;
+        m.cb = std::move(cb);
+        if (seconds > 0) m.until = now + static_cast<uint64_t>(std::llround(seconds * 1000.0));
+        // a move on a creature that is moving already ends the old one; whom it guarded before stays the old one's
+        uint32_t prior = ai->guardEntityId.id;
+        const bool replaces = moving_locked(world, enemy) != 0;
+        if (!replaces && moves_.size() >= kMovesMax) return no("too many moves (256)");
+        for (size_t i = 0; i < moves_.size(); ++i)
+            if (moves_[i].enemy == enemy && moves_[i].world == world) {
+                prior = moves_[i].prior_guard;
+                moves_[i].prior_guard = 0;  // not given back: the new move takes it over
+                Move old = std::move(moves_[i]);
+                moves_.erase(moves_.begin() + static_cast<std::ptrdiff_t>(i));
+                finish(old, EMF_MOVE_CANCELLED);
+                done.push_back({old.cb, world, old.id, EMF_MOVE_CANCELLED});
+                break;
+            }
+        m.prior_guard = prior;
+        if (place_waypoint(m, now)) {
+            if (flags & EMF_MOVE_PEACEFUL) calm_players(world, enemy);
+            m.id = id = next_id_++;
+            moves_.push_back(std::move(m));
+        } else {
+            refused = "its waypoint could not be spawned (spawn is off on this game build?)";
+            if (prior && d_.guard) d_.guard(enemy, prior);  // the old move's guard back
+        }
+    }
+    for (Done& x : done)
+        if (x.cb) x.cb(x.world, x.id, x.status);
+    return refused ? no(refused) : id;
+}
+
+bool MoveOrders::place_waypoint(Move& m, uint64_t now) {
+    const Point& p = m.points[m.next];
+    const uint32_t w = d_.spawn ? d_.spawn(m.world, p[0], p[1], p[2]) : 0;
+    if (!w) return false;
+    m.waypoint = w;
+    if (d_.guard) d_.guard(m.enemy, w);
+    m.last_guard = now;
+    m.since = now;
+    m.best = distance(m.world, m.enemy, p);
+    return true;
+}
+
+double MoveOrders::distance(EmfWorld* w, uint32_t enemy, const Point& p) const {
+    Point at{};
+    if (!place_of(d_, w, enemy, at)) return -1;
+    const double dx = at[0] - p[0], dy = at[1] - p[1], dz = at[2] - p[2];
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+bool MoveOrders::fighting(EmfWorld* w, uint32_t enemy) const {
+    const auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, w, enemy);
+    const auto* st = comp<gen::SelectedTargets>(d_, w, enemy);
+    return ai && st && ai->state == State::Combat && st->targets[0].targetEntityId.id != 0;
+}
+
+void MoveOrders::calm_players(EmfWorld* w, uint32_t enemy) const {
+    if (auto* ag = comp<gen::DynamicAggro>(d_, w, enemy))
+        for (auto& t : ag->targets)
+            if (t.entityId.id && has(d_, w, gen::PlayerState::kHash, t.entityId.id)) {
+                t.state = gen::AggroTargetState::Unknown;
+                t.aggro = 0;
+                t.entityId.id = 0;
+            }
+    if (auto* st = comp<gen::SelectedTargets>(d_, w, enemy)) {
+        auto& pick = st->targets[0];
+        if (pick.targetEntityId.id && has(d_, w, gen::PlayerState::kHash, pick.targetEntityId.id)) {
+            pick.targetEntityId.id = 0;
+            pick.targetRootEntityId.id = 0;
+        }
+    }
+}
+
+bool MoveOrders::gone(EmfWorld* w, const Move& m) const {
+    if (!comp<gen::DynamicEnemy01BehaviorState>(d_, w, m.enemy)) return true;
+    if ((d_.dead && d_.dead(w, m.enemy)) || has(d_, w, gen::PlayerState::kHash, m.enemy)) return true;
+    const auto* f = comp<gen::Faction>(d_, w, m.enemy);
+    return f && static_cast<uint8_t>(f->faction) == kPlayerAlly && !(m.flags & EMF_MOVE_ALLIES);
+}
+
+int MoveOrders::tick(Move& m, uint64_t now) {
+    if (m.cancelled) return EMF_MOVE_CANCELLED;
+    if (gone(m.world, m)) return EMF_MOVE_GONE;
+    {
+        const Point& p = m.points[m.next];
+        Point at{};
+        if (!place_of(d_, m.world, m.enemy, at)) return EMF_MOVE_GONE;
+        const double dx = at[0] - p[0], dz = at[2] - p[2];
+        if (std::sqrt(dx * dx + dz * dz) <= m.arrive && std::abs(at[1] - p[1]) <= m.arrive + kMoveUpDown) {
+            if (m.next + 1 >= m.points.size()) return EMF_MOVE_ARRIVED;
+            if (m.waypoint && d_.destroy) d_.destroy(m.world, m.waypoint);  // on to the next point
+            m.waypoint = 0;
+            ++m.next;
+            return place_waypoint(m, now) ? -1 : EMF_MOVE_STUCK;
+        }
+    }
+    if (m.until && now >= m.until) return EMF_MOVE_TIMEOUT;
+    if (m.flags & EMF_MOVE_PEACEFUL) calm_players(m.world, m.enemy);
+    // its waypoint went (someone destroyed it): a new one
+    if (!has(d_, m.world, gen::CurrentTransform::kHash, m.waypoint) && !place_waypoint(m, now)) return EMF_MOVE_STUCK;
+    const double dist = distance(m.world, m.enemy, m.points[m.next]);
+    if (fighting(m.world, m.enemy)) {  // a fight on the way (the game's way): the stuck clock waits
+        m.since = now;
+        m.best = dist;
+        return -1;
+    }
+    if (dist >= 0 && dist <= m.best - kMoveProgress) {
+        m.best = dist;
+        m.since = now;
+    } else if (now - m.since >= kMoveStuckMs) {
+        return EMF_MOVE_STUCK;
+    }
+    const auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, m.world, m.enemy);
+    const bool guarding = ai && ai->state == State::Guard && ai->guardEntityId.id == m.waypoint;
+    if (!guarding && now - m.last_guard >= kMoveResendMs) {
+        if (d_.guard) d_.guard(m.enemy, m.waypoint);
+        m.last_guard = now;
+    }
+    return -1;
+}
+
+void MoveOrders::finish(Move& m, uint32_t status) {
+    if (m.waypoint && d_.destroy) d_.destroy(m.world, m.waypoint);
+    auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, m.world, m.enemy);
+    if (!ai || status == EMF_MOVE_GONE) {
+        m.waypoint = 0;
+        return;
+    }
+    const bool guards_waypoint = m.waypoint && ai->guardEntityId.id == m.waypoint;
+    if (m.prior_guard && has(d_, m.world, gen::CurrentTransform::kHash, m.prior_guard) &&
+        !(d_.dead && d_.dead(m.world, m.prior_guard))) {
+        if (d_.guard) d_.guard(m.enemy, m.prior_guard);  // back to whom it guarded (a tamed beast: its owner)
+    } else {
+        if (guards_waypoint) {  // the waypoint's id may soon be another entity's: it stops guarding
+            ai->guardEntityId.id = 0;
+            if (ai->state == State::Guard) ai->state = State::Idle;
+        }
+        if (status == EMF_MOVE_ARRIVED) {  // it lives there now (its way home leads back here)
+            const Point& p = m.points.back();
+            ai->homeZonePosition.x = static_cast<float>(p[0]);
+            ai->homeZonePosition.y = static_cast<float>(p[1]);
+            ai->homeZonePosition.z = static_cast<float>(p[2]);
+        }
+    }
+    m.waypoint = 0;
+}
+
+bool MoveOrders::cancel(uint32_t id, bool now) {
+    Done x{};
+    {
+        std::lock_guard<std::mutex> l(m_);
+        auto it = std::find_if(moves_.begin(), moves_.end(), [&](const Move& m) { return m.id == id && !m.cancelled; });
+        if (it == moves_.end()) return false;
+        if (!now) {
+            it->cancelled = true;
+            return true;
+        }
+        Move m = std::move(*it);
+        moves_.erase(it);
+        finish(m, EMF_MOVE_CANCELLED);
+        x = {m.cb, m.world, m.id, EMF_MOVE_CANCELLED};
+    }
+    if (x.cb) x.cb(x.world, x.id, x.status);
+    return true;
+}
+
+bool MoveOrders::cancel_enemy(EmfWorld* world, uint32_t enemy, bool now) {
+    const uint32_t id = moving(world, enemy);
+    return id && cancel(id, now);
+}
+
+void MoveOrders::step(EmfWorld* world) {
+    const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
+    std::vector<Done> done;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        std::vector<Move> keep;
+        keep.reserve(moves_.size());
+        for (Move& m : moves_) {
+            if (m.world != world) {
+                keep.push_back(std::move(m));
+                continue;
+            }
+            const int status = tick(m, now);
+            if (status < 0) {
+                keep.push_back(std::move(m));
+                continue;
+            }
+            finish(m, static_cast<uint32_t>(status));
+            done.push_back({m.cb, world, m.id, static_cast<uint32_t>(status)});
+        }
+        moves_ = std::move(keep);
+    }
+    for (Done& x : done)
+        if (x.cb) x.cb(x.world, x.id, x.status);
+}
+
+void MoveOrders::world_reset() {
+    std::vector<Done> done;
+    {
+        std::lock_guard<std::mutex> l(m_);
+        for (const Move& m : moves_) done.push_back({m.cb, nullptr, m.id, EMF_MOVE_CANCELLED});
+        moves_.clear();
+    }
+    for (Done& x : done)
+        if (x.cb) x.cb(x.world, x.id, x.status);
+}
+
+uint32_t MoveOrders::moving(EmfWorld* world, uint32_t enemy) const {
+    std::lock_guard<std::mutex> l(m_);
+    return moving_locked(world, enemy);
+}
+
+uint32_t MoveOrders::moving_locked(EmfWorld* world, uint32_t enemy) const {
+    for (const Move& m : moves_)
+        if (m.enemy == enemy && m.world == world && !m.cancelled) return m.id;
+    return 0;
+}
+
+}  // namespace emf::core

@@ -31,6 +31,7 @@
 #include "program_access.h"
 #include "doors.h"
 #include "enemy_orders.h"
+#include "move_orders.h"
 #include "path_glue.h"
 #include "remove_building.h"
 #include "spawn.h"
@@ -1083,6 +1084,7 @@ uint32_t api_enemy_order(EmfWorld* w, EmfEnemyOrder* req) {
     if (WorldView(raw(w)).kind() != EMF_WORLD_SERVER) return refuse("not a server world (host only)");
     EnemyOrders* o = g_state->orders;
     if (!o) return refuse("enemy orders are off");
+    if (g_state->moves) g_state->moves->cancel_enemy(w, req->enemy);  // a move on it ends (v40)
     std::string why;
     const uint32_t id = o->add(w, req->enemy, req->target, req->seconds, req->damage, req->flags, &why);
     return id ? id : refuse(why);
@@ -1099,6 +1101,67 @@ bool api_enemy_order_cancel(uint32_t id) {
 uint32_t api_enemy_target(EmfWorld* w, uint32_t enemy) {
     EnemyOrders* o = g_state ? g_state->orders : nullptr;
     return o && w ? o->target_of(w, enemy) : 0;
+}
+
+// v40 move orders (move_orders.h).
+bool guarded_move_call(EmfMoveCallback cb, EmfWorld* w, uint32_t id, uint32_t status, void* user) {
+    __try {
+        cb(w, id, status, user);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+
+uint32_t api_enemy_move(EmfWorld* w, EmfMoveOrder* req, EmfMoveCallback cb, void* user) {
+    if (!g_state || !req || req->size < kMoveOrderV40Size) {
+        core_log("enemy_move refused: no order, or its size field is not sizeof(EmfMoveOrder)");
+        return 0;
+    }
+    req->why[0] = 0;
+    auto refuse = [req](const std::string& why) {
+        std::snprintf(req->why, sizeof(req->why), "%s", why.c_str());
+        std::string line = "enemy_move refused (enemy " + std::to_string(req->enemy) + "): " + why;
+        if (g_state) {  // a mod retrying every step: the same line once per 10 s
+            std::lock_guard<std::mutex> l(g_state->put_refusals_lock);
+            line = g_state->put_refusals.pass(line, now());
+        }
+        if (!line.empty()) core_log(line);
+        return 0u;
+    };
+    if (!w || w != dispatching_world())
+        return refuse("call it from a world callback (on_tick, run_on_world, on_event) on the server world passed to it");
+    if (WorldView(raw(w)).kind() != EMF_WORLD_SERVER) return refuse("not a server world (host only)");
+    MoveOrders* m = g_state->moves;
+    if (!m) return refuse("move orders are off (see the log)");
+    if (!req->points || req->count == 0 || req->count > kMovePointsMax) return refuse("1 to 16 points");
+    std::vector<MoveOrders::Point> points;
+    for (uint32_t i = 0; i < req->count; ++i)
+        points.push_back({req->points[i].x, req->points[i].y, req->points[i].z});
+    const double arrive = req->arrive == 0.0f ? 2.0 : req->arrive;
+    if (g_state->orders) g_state->orders->cancel_enemy(w, req->enemy);  // an enemy order on it ends (v39)
+    MoveOrders::Callback done;
+    if (cb)
+        done = [cb, user](EmfWorld* world, uint32_t id, uint32_t status) {
+            if (!guarded_move_call(cb, world, id, status, user))
+                core_log("enemy_move: a mod's callback faulted (move " + std::to_string(id) + ")");
+        };
+    std::string why;
+    const uint32_t id = m->add(w, req->enemy, points, arrive, req->seconds, req->flags, std::move(done), &why);
+    return id ? id : refuse(why);
+}
+
+bool api_enemy_move_cancel(uint32_t id) {
+    MoveOrders* m = g_state ? g_state->moves : nullptr;
+    if (!m) return false;
+    EmfWorld* w = dispatching_world();
+    const bool now = w && WorldView(raw(w)).kind() == EMF_WORLD_SERVER;  // else at the next step
+    return m->cancel(id, now);
+}
+
+uint32_t api_enemy_moving(EmfWorld* w, uint32_t enemy) {
+    MoveOrders* m = g_state ? g_state->moves : nullptr;
+    return m && w ? m->moving(w, enemy) : 0;
 }
 
 bool api_door_lock(EmfWorld* w, uint32_t entity, uint32_t locked) {
@@ -2512,6 +2575,9 @@ const EmfApi kApi = {
     api_enemy_order,  // v39
     api_enemy_order_cancel,
     api_enemy_target,
+    api_enemy_move,  // v40
+    api_enemy_move_cancel,
+    api_enemy_moving,
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

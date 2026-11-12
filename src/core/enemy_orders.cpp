@@ -157,6 +157,18 @@ bool EnemyOrders::cancel(uint32_t id, bool now) {
     return false;
 }
 
+uint32_t EnemyOrders::order_of(EmfWorld* world, uint32_t enemy) const {
+    std::lock_guard<std::mutex> l(m_);
+    for (const Order& o : orders_)
+        if (o.enemy == enemy && o.world == world && !o.cancelled) return o.id;
+    return 0;
+}
+
+bool EnemyOrders::cancel_enemy(EmfWorld* world, uint32_t enemy, bool now) {
+    const uint32_t id = order_of(world, enemy);
+    return id && cancel(id, now);
+}
+
 void EnemyOrders::step(EmfWorld* world) {
     const uint64_t now = d_.now_ms ? d_.now_ms() : 0;
     std::lock_guard<std::mutex> l(m_);

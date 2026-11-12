@@ -42,6 +42,8 @@ public:
                  std::string* why);
     // false: no such order. now: written at once (inside a callback on its world), else it ends at the next step.
     bool cancel(uint32_t id, bool now = true);
+    bool cancel_enemy(EmfWorld* world, uint32_t enemy, bool now = true);  // the order on it, if any (a move starts)
+    uint32_t order_of(EmfWorld* world, uint32_t enemy) const;              // its order's id, 0 none
     void step(EmfWorld* world);              // after a server step of `world`
     void world_reset();                      // a new server world: every order ends, nothing is written
     uint32_t target_of(EmfWorld* world, uint32_t enemy) const;  // its pick now, 0 none

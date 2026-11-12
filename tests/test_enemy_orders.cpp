@@ -208,10 +208,10 @@ TEST_CASE("enemy orders: a cancel outside a world callback ends the order at the
     CHECK(o.count() == 0u);
 }
 
-TEST_CASE("api table (v39): version 39, the three enemy order functions at the end") {
+TEST_CASE("api table (v39): the three enemy order functions") {
     const EmfApi* api = emf::core::api_table();
-    CHECK(api->version == 39u);
-    CHECK(api->size == kApiV39Size);
+    CHECK(api->version >= 39u);  // the newest version is checked by its own test (test_move_orders.cpp: v40)
+    CHECK(api->size >= kApiV39Size);
     CHECK(api->enemy_order != nullptr);
     CHECK(api->enemy_order_cancel != nullptr);
     CHECK(api->enemy_target != nullptr);
@@ -324,4 +324,17 @@ TEST_CASE("enemy orders: when an order ends, an enemy in Combat with nothing pic
     REQUIRE(f.get<gen::DynamicEnemy01BehaviorState>(kEnemy).state == S::Combat);
     REQUIRE(o.cancel(id));
     CHECK(f.get<gen::DynamicEnemy01BehaviorState>(kEnemy).state == S::Idle);
+}
+
+TEST_CASE("enemy orders: cancel_enemy ends the order on that enemy (a move order starts on it)") {
+    Fake f = world();
+    EnemyOrders o(f.deps());
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, kDoor, 0, 0, 0, &why) != 0u);
+    CHECK(o.order_of(W(), kEnemy) != 0u);
+    CHECK(o.cancel_enemy(W(), kEnemy));
+    CHECK_FALSE(held(f));
+    CHECK(o.count() == 0u);
+    CHECK(o.order_of(W(), kEnemy) == 0u);
+    CHECK_FALSE(o.cancel_enemy(W(), kEnemy));
 }

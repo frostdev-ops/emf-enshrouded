@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 39 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 40 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 39
+#define EMF_API_VERSION 40
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -770,6 +770,30 @@ typedef struct EmfPathResult {
 } EmfPathResult;
 typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResult* result, const EmfPathPoint* points,
                                 void* user);
+/* v40 move orders: a creature with the enemy AI (an enemy or a tamed beast) walked to points through the game's own
+ * guard order on a hidden waypoint EMF puts at each point in turn. It walks the game's way (its path, its jumps when its
+ * kind can jump) and may fight on the way; EMF_MOVE_PEACEFUL makes it ignore players. Afterwards it guards whom it
+ * guarded before (a tamed beast: its owner); any other creature that arrived lives there (its home is the last point).
+ * Nothing is saved. */
+#define EMF_MOVE_ALLIES 0x1u   /* the creature may be a player's ally (a tamed beast, faction PlayerAlly) */
+#define EMF_MOVE_PEACEFUL 0x2u /* its fights against players are cleared on the way */
+#define EMF_MOVE_ARRIVED 0u    /* EmfMoveCallback status: at the last point */
+#define EMF_MOVE_STUCK 1u      /* no metre of progress for 15 s while not fighting (a wall, no path, the game gave up) */
+#define EMF_MOVE_TIMEOUT 2u    /* its seconds ran out */
+#define EMF_MOVE_GONE 3u       /* the creature died or went (or became a player's ally without EMF_MOVE_ALLIES) */
+#define EMF_MOVE_CANCELLED 4u  /* enemy_move_cancel, a new move or enemy order on it, the world closing (world NULL) */
+typedef struct EmfMoveOrder {
+    uint32_t size;               /* sizeof(EmfMoveOrder) */
+    uint32_t enemy;              /* the creature (it has DynamicEnemy01BehaviorState); never a player or a boss */
+    uint32_t flags;              /* EMF_MOVE_* */
+    uint32_t count;              /* points: 1..16 */
+    const EmfPathPoint* points;  /* walked in order; x, y, z are read (move is ignored); path_find's points fit */
+    float arrive;                /* a point is reached within this many metres across (and that + 2 up or down);
+                                    0 = 2; 0.5..50 */
+    float seconds;               /* 0 = no time limit (it still ends stuck); at most 3600 */
+    char why[96];                /* refused: why (NUL-terminated) */
+} EmfMoveOrder;
+typedef void (*EmfMoveCallback)(EmfWorld* world, uint32_t id, uint32_t status, void* user);
 
 typedef struct EmfHitRule {
     uint32_t size;             /* sizeof(EmfHitRule) */
@@ -1524,6 +1548,20 @@ typedef struct EmfApi {
     bool (*enemy_order_cancel)(uint32_t id);
     /* What `enemy` goes for now (its pick: SelectedTargets slot 0), 0 = nothing (or not a creature). */
     uint32_t (*enemy_target)(EmfWorld* world, uint32_t enemy);
+
+    /* ---- v40: move orders (EmfMoveOrder) ---- */
+    /* Walks order->enemy to its points (see EMF_MOVE_*). Returns the move's id (from 1), or 0 with order->why: not a
+     * server world or not inside a world callback on it, not a creature with the enemy AI, a player, a boss, a player's
+     * ally without EMF_MOVE_ALLIES, bad points or numbers, more than 256 moves, no waypoint (spawning is off on this
+     * game build). A move or enemy order already on the creature ends (cancelled). cb (may be NULL) is called once when
+     * the move ends, on the server world's thread (inside enemy_move_cancel for a cancel), after the move is gone: it
+     * may start another. */
+    uint32_t (*enemy_move)(EmfWorld* world, EmfMoveOrder* order, EmfMoveCallback cb, void* user);
+    /* Ends a move now (its callback gets EMF_MOVE_CANCELLED). Inside a world callback on the server world. False: no
+     * such move. */
+    bool (*enemy_move_cancel)(uint32_t id);
+    /* The id of `enemy`'s move, 0 = it is not moving. */
+    uint32_t (*enemy_moving)(EmfWorld* world, uint32_t enemy);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */

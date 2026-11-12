@@ -48,6 +48,7 @@
 #include "inventory.h"
 #include "doors.h"
 #include "enemy_orders.h"
+#include "move_orders.h"
 #include "path_glue.h"
 #include "teleport.h"
 #include "component_service.h"
@@ -598,6 +599,26 @@ std::vector<std::array<double, 3>> player_places(uint8_t* world) {
 }
 // v39 enemy orders: written after every server step.
 std::unique_ptr<emf::core::EnemyOrders> g_orders;
+// v40 move orders: walked after every server step; their guard orders go out from the emf_moves program at the next step.
+std::unique_ptr<emf::core::MoveOrders> g_moves;
+std::mutex g_guard_lock;
+std::vector<std::pair<uint32_t, uint32_t>> g_guard_queue;  // (guarding, guarded)
+constexpr const char* kMovesProgramName = "emf_moves";
+constexpr size_t kGuardQueueMax = 1024;
+void moves_program(void* ctx, void*) {
+    std::vector<std::pair<uint32_t, uint32_t>> work;
+    {
+        std::lock_guard<std::mutex> l(g_guard_lock);
+        work.swap(g_guard_queue);
+    }
+    for (const auto& [guarding, guarded] : work) {
+        auto* ev = static_cast<emf::gen::ecs::StartGuardingEvent*>(emf::core::api_table()->emit_event(
+            ctx, "StartGuardingEvent", emf::gen::ecs::StartGuardingEvent::kSize));
+        if (!ev) break;  // logged once by emit_event; a move sends its guard order again
+        ev->guardingEntityId.id = guarding;
+        ev->guardedEntityId.id = guarded;
+    }
+}
 // v23 change_component: the emf_components program and its requests (null when off on this game build).
 std::unique_ptr<emf::core::ComponentService> g_components;
 // v25 E prompts: on top of the component service (null when that is off).
@@ -721,6 +742,11 @@ void hk_register_all_programs(void* world) {
             emf::core::path_world_reset();                // path queries of the old world end (cancelled)
             if (g_doors) g_doors->world_reset();          // door orders and locks of the old world go
             if (g_orders) g_orders->world_reset();        // enemy orders of the old world end
+            if (g_moves) g_moves->world_reset();  // move orders of the old world end (cancelled, no world)
+            {
+                std::lock_guard<std::mutex> l(g_guard_lock);
+                g_guard_queue.clear();
+            }
             if (g_components) g_components->world_reset();  // component changes under way end (FAILED)    // teleports under way end (FAILED)
             g_state->damage_queue.clear();                // hits for the old session never land
             emf::core::env_new_session();                 // nor its env hits and carries
@@ -1338,6 +1364,39 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         g_orders = std::make_unique<emf::core::EnemyOrders>(std::move(d));
         g_state->orders = g_orders.get();
     }
+    // v40 move orders: the game's guard order on a hidden waypoint EMF spawns at each point (move_orders.h); the
+    // emf_moves program sends the guard orders
+    {
+        emf::core::MoveOrders::Deps d;
+        d.get = [](EmfWorld* w, uint32_t hash, uint32_t entity, uint64_t* size) -> void* {
+            return emf::core::api_table()->get_component(w, hash, entity, size);
+        };
+        d.now_ms = [] { return GetTickCount64(); };
+        d.spawn = [](EmfWorld* w, double x, double y, double z) {
+            return emf::core::api_table()->spawn(w, emf::core::kWaypointGuid, x, y, z);
+        };
+        d.destroy = [](EmfWorld* w, uint32_t entity) { emf::core::api_table()->destroy(w, entity); };
+        d.guard = [](uint32_t guarding, uint32_t guarded) {
+            std::lock_guard<std::mutex> l(g_guard_lock);
+            if (g_guard_queue.size() < kGuardQueueMax) g_guard_queue.emplace_back(guarding, guarded);
+        };
+        d.dead = [](EmfWorld* w, uint32_t entity) {
+            int32_t cur = 0;
+            return emf::core::api_table()->attribute_get(w, entity, EMF_ATTR_HEALTH, &cur) && cur <= 0;
+        };
+        emf::core::ProgramSpec s;
+        s.name = kMovesProgramName;
+        s.world_kind = EMF_WORLD_SERVER;
+        s.fn = moves_program;
+        s.events_out = {"StartGuardingEvent"};
+        if (g_state->system_programs.registration_closed() || !g_state->system_programs.add(s, true)) {
+            emf::logf("move orders: off (the %s program could not be added)", kMovesProgramName);
+        } else {
+            g_moves = std::make_unique<emf::core::MoveOrders>(std::move(d));
+            g_state->moves = g_moves.get();
+            emf::logf("move orders: on (program %s in the server world)", kMovesProgramName);
+        }
+    }
     // v38 doors: an internal server program writes the door components through the game's writeOther (private research
     // doors_2026-11-12); reading needs no program.
     {
@@ -1746,6 +1805,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             emf::core::markers_server_tick(w);
             emf::core::map_server_tick(w);  // v34 ground_at
             if (g_orders) g_orders->step(w);  // v39 enemy orders
+            if (g_moves) g_moves->step(w);    // v40 move orders
             if (g_doors) {  // door locks kept per world: read once after the world's save loaded, saved when they change
                 g_door_file.poll([](const std::string& text) { g_doors->load_saved(text); });
                 g_doors->server_tick(reinterpret_cast<uint8_t*>(w), GetTickCount64());

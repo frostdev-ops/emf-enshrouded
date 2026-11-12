@@ -56,6 +56,8 @@ constexpr uint32_t kApiV37Size = EMF_FIELD_END(EmfApi, path_cancel);
 constexpr uint32_t kApiV38Size = EMF_FIELD_END(EmfApi, door_lock);
 constexpr uint32_t kApiV39Size = EMF_FIELD_END(EmfApi, enemy_target);
 constexpr uint32_t kEnemyOrderV39Size = EMF_FIELD_END(EmfEnemyOrder, why);
+constexpr uint32_t kApiV40Size = EMF_FIELD_END(EmfApi, enemy_moving);
+constexpr uint32_t kMoveOrderV40Size = EMF_FIELD_END(EmfMoveOrder, why);
 constexpr uint32_t kPathQueryV37Size = EMF_FIELD_END(EmfPathQuery, max_nodes);
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
@@ -144,8 +146,13 @@ static_assert(offsetof(EmfApi, path_find) == kApiV36Size && kApiV37Size == 1016,
               "EmfApi layout (v37 appends path_find, path_cancel)");
 static_assert(offsetof(EmfApi, door_state) == kApiV37Size && kApiV38Size == 1040,
               "EmfApi layout (v38 appends door_state, door_set, door_lock)");
-static_assert(offsetof(EmfApi, enemy_order) == kApiV38Size && kApiV39Size == 1064 && sizeof(EmfApi) == kApiV39Size,
+static_assert(offsetof(EmfApi, enemy_order) == kApiV38Size && kApiV39Size == 1064,
               "EmfApi layout (v39 appends enemy_order, enemy_order_cancel, enemy_target)");
+static_assert(offsetof(EmfApi, enemy_move) == kApiV39Size && kApiV40Size == 1088 && sizeof(EmfApi) == kApiV40Size,
+              "EmfApi layout (v40 appends enemy_move, enemy_move_cancel, enemy_moving)");
+static_assert(kMoveOrderV40Size == 128 && sizeof(EmfMoveOrder) == 128 && offsetof(EmfMoveOrder, points) == 16 &&
+                  offsetof(EmfMoveOrder, arrive) == 24 && offsetof(EmfMoveOrder, why) == 32,
+              "EmfMoveOrder layout (v40)");
 static_assert(kEnemyOrderV39Size == 120 && sizeof(EmfEnemyOrder) == 120 && offsetof(EmfEnemyOrder, seconds) == 16 &&
                   offsetof(EmfEnemyOrder, damage) == 20 && offsetof(EmfEnemyOrder, why) == 24,
               "EmfEnemyOrder layout (v39)");
