@@ -1,0 +1,218 @@
+// Doors (API v38): the emf_doors program opens, closes and locks doors through the game's own writeOther (fakes).
+#include <doctest.h>
+
+#include <cstring>
+#include <map>
+#include <string>
+#include <vector>
+
+#include "common/offsets.h"
+#include "core/doors.h"
+#include "core/system_programs.h"
+#include "emf/generated/components.hpp"
+#include "fake_world.h"
+
+using namespace emf;
+using namespace emf::core;
+using emf::test::FakeProgramCtx;
+using emf::test::FakeWorld;
+
+namespace {
+namespace gen = emf::gen::ecs;
+
+constexpr uint32_t kDoor = 500, kSwitched = 501, kChest = 502, kGone = 503;
+uint64_t acc(size_t i) { return 0xD0 + i; }
+
+struct DoorBits {
+    gen::ServerToggleState toggle{};
+    gen::DirectionalInteraction side{};
+    gen::InteractionOfferRuntime offer{};
+    gen::LogicGraphNodeConnected logic{};
+};
+std::map<uint32_t, DoorBits> g_doors;
+std::map<std::pair<uint32_t, uint32_t>, void*> g_by_hash;  // (hash, entity)
+std::map<uint64_t, uint32_t> g_acc_hash;                    // accessor -> component hash
+int g_writes = 0;
+alignas(8) uint8_t g_change_set[8];
+
+void* f_read_other(void** out, void*, uint64_t a, uint32_t e) {
+    const auto h = g_acc_hash.find(a);
+    const auto it = h == g_acc_hash.end() ? g_by_hash.end() : g_by_hash.find({h->second, e});
+    *out = it == g_by_hash.end() ? nullptr : it->second;
+    return out;
+}
+void* f_write_other(void** out, void*, void*, uint64_t a, uint32_t e, uint8_t) {
+    ++g_writes;
+    return f_read_other(out, nullptr, a, e);
+}
+void* f_get_component(void* out, void*, uint32_t hash, uint32_t e) {
+    auto o = static_cast<uint64_t*>(out);
+    o[0] = o[1] = 0;
+    const auto it = g_by_hash.find({hash, e});
+    if (it != g_by_hash.end()) {
+        o[0] = reinterpret_cast<uint64_t>(it->second);
+        o[1] = hash == gen::ServerToggleState::kHash          ? 24
+               : hash == gen::DirectionalInteraction::kHash   ? 160
+               : hash == gen::InteractionOfferRuntime::kHash  ? 56
+                                                               : 8;
+    }
+    return out;
+}
+std::vector<std::string> g_write_names;  // the program's write list, in iterator order
+void f_iter_begin(void* ctx, void* iter, uint32_t) {
+    auto* it = static_cast<uint64_t*>(iter);
+    it[0] = reinterpret_cast<uint64_t>(ctx);
+    for (size_t i = 0; i < 3; ++i) it[1 + i] = acc(i);
+}
+uint64_t f_register(void*, const void*, char) { return 1; }
+
+void add_door(uint32_t e, bool open = false, uint32_t writer_graph = 0) {
+    DoorBits& d = g_doors[e];
+    d.toggle.state = open;
+    d.side.state = static_cast<decltype(d.side.state)>(open ? 2 : 0);
+    d.logic.writerGraphId.id.value = writer_graph;
+    g_by_hash[{gen::ServerToggleState::kHash, e}] = &d.toggle;
+    g_by_hash[{gen::DirectionalInteraction::kHash, e}] = &d.side;
+    g_by_hash[{gen::InteractionOfferRuntime::kHash, e}] = &d.offer;
+    if (writer_graph) g_by_hash[{gen::LogicGraphNodeConnected::kHash, e}] = &d.logic;
+}
+
+struct Rig {
+    FakeWorld w;
+    SystemPrograms programs;
+    DoorService service;
+    FakeProgramCtx ctx;
+    int user = 0;
+    Rig() : service(deps()), ctx(w.p()) {
+        programs.reset();
+        g_doors.clear();
+        g_by_hash.clear();
+        g_acc_hash.clear();
+        g_writes = 0;
+        w.put<uint8_t>(off::kKind, 0);
+        void* wctx = &user;
+        std::memcpy(ctx.job + off::kJobWorldCtx, &wctx, 8);
+        void* cs = g_change_set;
+        std::memcpy(ctx.job + off::kJobChangeSet, &cs, 8);
+        int64_t tick_ns = 123456789;
+        std::memcpy(ctx.job + off::kJobTick, &tick_ns, 8);
+        REQUIRE(programs.add(service.spec(), /*internal=*/true));
+        REQUIRE(programs.register_into(w.p(), f_register) == 1);
+        set_program_iter_begin(f_iter_begin);
+        const ProgramSpec s = service.spec();
+        for (size_t i = 0; i < s.other_write.size(); ++i) {
+            const std::string& n = s.other_write[i];
+            g_acc_hash[acc(i)] = n == "ServerToggleState"        ? gen::ServerToggleState::kHash
+                                 : n == "DirectionalInteraction" ? gen::DirectionalInteraction::kHash
+                                                                 : gen::InteractionOfferRuntime::kHash;
+        }
+        add_door(kDoor);
+        add_door(kSwitched, false, 77);
+        g_by_hash[{gen::InteractionOfferRuntime::kHash, kChest}] = &g_doors[kChest].offer;  // a chest: no toggle
+    }
+    ~Rig() {
+        set_program_iter_begin(nullptr);
+        programs.reset();
+    }
+    DoorService::Deps deps() {
+        DoorService::Deps d;
+        d.read_other = f_read_other;
+        d.write_other = f_write_other;
+        d.get_component = f_get_component;
+        d.log = [](const std::string&) {};
+        return d;
+    }
+    uint8_t* world() { return w.p(); }
+    void step() { system_program_desc(0).update(ctx.p()); }
+    bool order(uint32_t e, DoorOrderKind k, uint8_t side = 0, std::string* why = nullptr) {
+        std::string w2;
+        return service.request(world(), e, k, side, why ? why : &w2);
+    }
+};
+}  // namespace
+
+TEST_CASE("doors: emf_doors writes the three door components through the game's accessors") {
+    Rig r;
+    const ProgramSpec s = r.service.spec();
+    CHECK(s.name == std::string(kDoorsProgramName));
+    CHECK(s.world_kind == EMF_WORLD_SERVER);
+    CHECK(s.other_write.size() == 3u);
+}
+
+TEST_CASE("doors: the state is closed, open or not a door; a switch-driven door says so") {
+    Rig r;
+    CHECK(r.service.state(r.world(), kDoor) == EMF_DOOR_CLOSED);
+    g_doors[kDoor].toggle.state = true;
+    CHECK(r.service.state(r.world(), kDoor) == EMF_DOOR_OPEN);
+    CHECK(r.service.state(r.world(), kChest) == EMF_DOOR_NONE);
+    CHECK(r.service.state(r.world(), 999) == EMF_DOOR_NONE);
+    CHECK(r.service.state(r.world(), kSwitched) == (EMF_DOOR_CLOSED | EMF_DOOR_LOGIC));
+}
+
+TEST_CASE("doors: open writes both states at the next step, through writeOther; close puts them back") {
+    Rig r;
+    REQUIRE(r.order(kDoor, DoorOrderKind::Open));
+    CHECK_FALSE(g_doors[kDoor].toggle.state);  // nothing until the step
+    r.step();
+    CHECK(g_doors[kDoor].toggle.state);
+    CHECK(static_cast<int>(g_doors[kDoor].side.state) == 2);  // back (the game's load default)
+    CHECK(g_doors[kDoor].toggle.lastChange.value != 0);
+    CHECK(g_writes >= 2);
+    REQUIRE(r.order(kDoor, DoorOrderKind::Close));
+    r.step();
+    CHECK_FALSE(g_doors[kDoor].toggle.state);
+    CHECK(static_cast<int>(g_doors[kDoor].side.state) == 0);
+    REQUIRE(r.order(kDoor, DoorOrderKind::Open, 1));  // swung to the front
+    r.step();
+    CHECK(static_cast<int>(g_doors[kDoor].side.state) == 1);
+}
+
+TEST_CASE("doors: refused at once: not a door, driven by a switch, already so, a bad side") {
+    Rig r;
+    std::string why;
+    CHECK_FALSE(r.order(kChest, DoorOrderKind::Open, 0, &why));
+    CHECK(why.find("not a door") != std::string::npos);
+    CHECK_FALSE(r.order(kSwitched, DoorOrderKind::Open, 0, &why));
+    CHECK(why.find("switch") != std::string::npos);
+    CHECK_FALSE(r.order(kDoor, DoorOrderKind::Close, 0, &why));
+    CHECK(why.find("already") != std::string::npos);
+    CHECK_FALSE(r.order(kDoor, DoorOrderKind::Open, 3, &why));
+    CHECK_FALSE(r.order(kSwitched, DoorOrderKind::Lock, 0, &why));
+}
+
+TEST_CASE("doors: a lock keeps isDisabled set every step (the game clearing it is undone); unlock clears it") {
+    Rig r;
+    REQUIRE(r.order(kDoor, DoorOrderKind::Lock));
+    r.step();
+    CHECK(g_doors[kDoor].offer.isDisabled);
+    CHECK(r.service.state(r.world(), kDoor) == (EMF_DOOR_CLOSED | EMF_DOOR_LOCKED));
+    g_doors[kDoor].offer.isDisabled = false;  // the game cleared it
+    r.step();
+    CHECK(g_doors[kDoor].offer.isDisabled);
+    const int writes = g_writes;
+    r.step();
+    CHECK(g_writes == writes);  // already set: no write
+    REQUIRE(r.order(kDoor, DoorOrderKind::Unlock));
+    r.step();
+    CHECK_FALSE(g_doors[kDoor].offer.isDisabled);
+    CHECK(r.service.state(r.world(), kDoor) == EMF_DOOR_CLOSED);
+}
+
+TEST_CASE("doors: a door that is gone loses its lock; a new world drops orders and locks") {
+    Rig r;
+    add_door(kGone);
+    REQUIRE(r.order(kGone, DoorOrderKind::Lock));
+    r.step();
+    CHECK(r.service.locked_count() == 1u);
+    g_by_hash.erase({emf::gen::ecs::ServerToggleState::kHash, kGone});
+    g_by_hash.erase({emf::gen::ecs::DirectionalInteraction::kHash, kGone});
+    g_by_hash.erase({emf::gen::ecs::InteractionOfferRuntime::kHash, kGone});
+    r.step();
+    CHECK(r.service.locked_count() == 0u);
+    REQUIRE(r.order(kDoor, DoorOrderKind::Lock));
+    REQUIRE(r.order(kDoor, DoorOrderKind::Open));
+    r.service.world_reset();
+    r.step();
+    CHECK_FALSE(g_doors[kDoor].toggle.state);
+    CHECK_FALSE(g_doors[kDoor].offer.isDisabled);
+}

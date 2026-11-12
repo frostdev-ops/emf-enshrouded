@@ -716,6 +716,12 @@ typedef struct EmfRemoveBuilding {
 #define EMF_PATH_NO_MEMORY 6u
 #define EMF_PATH_CANCELLED 7u /* path_cancel, the owner went, or the session ended */
 #define EMF_PATH_OTHER 8u     /* the game gave another answer, or none in time */
+/* v38 doors: door_state's answer, with flags */
+#define EMF_DOOR_NONE 0u    /* not a door (no ServerToggleState and DirectionalInteraction), or not the server world */
+#define EMF_DOOR_CLOSED 1u
+#define EMF_DOOR_OPEN 2u
+#define EMF_DOOR_LOCKED 0x10u /* flag: EMF holds it locked (no E prompt for anyone; not saved) */
+#define EMF_DOOR_LOGIC 0x20u  /* flag: a switch drives it (the logic system owns its state): EMF does not touch it */
 typedef struct EmfPathQuery {
     uint32_t size;        /* sizeof(EmfPathQuery) */
     uint32_t owner;       /* an entity the query belongs to (the game needs one); 0 = the first player */
