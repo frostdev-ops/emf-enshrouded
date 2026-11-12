@@ -51,6 +51,7 @@ constexpr uint32_t kApiV33Size = EMF_FIELD_END(EmfApi, marker_unsend);
 constexpr uint32_t kApiV34Size = EMF_FIELD_END(EmfApi, ground_at);
 constexpr uint32_t kApiV35Size = EMF_FIELD_END(EmfApi, canvas_draw);
 constexpr uint32_t kApiV36Size = EMF_FIELD_END(EmfApi, remove_building);
+constexpr uint32_t kRemoveBuildingV36Size = EMF_FIELD_END(EmfRemoveBuilding, why);
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
@@ -134,7 +135,7 @@ static_assert(offsetof(EmfApi, player_view) == kApiV34Size && kApiV35Size == 992
               "EmfApi layout (v35 appends player_view, fog_at, map_markers, canvas_set, canvas_draw)");
 static_assert(offsetof(EmfApi, remove_building) == kApiV35Size && kApiV36Size == 1000 && sizeof(EmfApi) == kApiV36Size,
               "EmfApi layout (v36 appends remove_building)");
-static_assert(sizeof(EmfRemoveBuilding) == 144 && offsetof(EmfRemoveBuilding, refunded) == 20 &&
+static_assert(kRemoveBuildingV36Size == 144 && sizeof(EmfRemoveBuilding) == 144 && offsetof(EmfRemoveBuilding, refunded) == 20 &&
                   offsetof(EmfRemoveBuilding, why) == 24,
               "EmfRemoveBuilding layout (v36)");
 static_assert(sizeof(EmfPlayerView) == 48 && offsetof(EmfPlayerView, heading_deg) == 32, "EmfPlayerView layout (v35)");

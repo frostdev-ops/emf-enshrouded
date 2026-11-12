@@ -68,6 +68,11 @@ struct CoreState {
     // put_items refusals: the same line at most every 10 s.
     std::mutex put_refusals_lock;
     LogLimiter put_refusals;
+    struct {  // v36 remove_building: the objects removed in this server step (the server world's thread only)
+        uint32_t session = 0;
+        uint64_t step = 0;
+        std::vector<uint32_t> ids;
+    } removed_this_step;
     GetComponentFn get_component = nullptr;
     GetTemplateComponentFn get_template_component = nullptr;  // optional signature
     Dispatcher dispatcher;
@@ -285,7 +290,6 @@ bool api_fog_at(double x, double z, float* explored);
 uint32_t api_map_markers(EmfGameMarker* out, uint32_t cap);
 bool api_canvas_set(const char* id, const EmfCanvas* c);
 bool api_canvas_draw(const char* id, const EmfCanvasCmd* cmds, uint32_t count);
-bool api_remove_building(EmfWorld* w, EmfRemoveBuilding* req);  // v36
 // The client world's thread, every tick: the fog of war copied (twice a second).
 void minimap_client_tick(EmfWorld* client, uint64_t now_ms);
 

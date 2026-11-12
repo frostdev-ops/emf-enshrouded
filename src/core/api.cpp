@@ -900,7 +900,7 @@ void refund_put_done(EmfWorld* w, uint32_t, uint32_t item, uint32_t, uint32_t ad
 }  // namespace
 
 bool api_remove_building(EmfWorld* w, EmfRemoveBuilding* req) {
-    if (!req || req->size < sizeof(EmfRemoveBuilding)) {
+    if (!g_state || !req || req->size < kRemoveBuildingV36Size) {
         core_log("remove_building refused: no request, or its size field is not sizeof(EmfRemoveBuilding)");
         return false;
     }
@@ -908,7 +908,12 @@ bool api_remove_building(EmfWorld* w, EmfRemoveBuilding* req) {
     req->why[0] = 0;
     auto refuse = [req](const std::string& why) {
         std::snprintf(req->why, sizeof(req->why), "%s", why.c_str());
-        core_log("remove_building refused (entity " + std::to_string(req->entity) + "): " + why);
+        std::string line = "remove_building refused (entity " + std::to_string(req->entity) + "): " + why;
+        if (g_state) {  // a mod retrying every step: the same line once per 10 s (the caller has req->why)
+            std::lock_guard<std::mutex> l(g_state->put_refusals_lock);
+            line = g_state->put_refusals.pass(line, now());
+        }
+        if (!line.empty()) core_log(line);
         return false;
     };
     if (!w || w != dispatching_world())
@@ -926,7 +931,21 @@ bool api_remove_building(EmfWorld* w, EmfRemoveBuilding* req) {
     const RemoveFacts facts = remove_facts(req->entity, get, info);
     const RemovePlan plan = plan_remove(facts, req->refund, player_ok, req->flags);
     if (!plan.ok) return refuse(plan.why);
+    // The same object twice in one step pays once (the game's destroy may leave its components until the step ends).
+    auto& removed = g_state->removed_this_step;
+    const uint32_t tick = api_world_tick(w);
+    const uint64_t step = tick ? tick : (now() / 100) | (uint64_t(1) << 63);  // no tick on this build: 0.1 s
+    if (removed.session != api_server_session() || removed.step != step) {
+        removed.session = api_server_session();
+        removed.step = step;
+        removed.ids.clear();
+    }
+    if (std::find(removed.ids.begin(), removed.ids.end(), req->entity) != removed.ids.end())
+        return refuse("it was removed already");
+    if (plan.refund_item && (!api_resolve("SpawnWrapper") || !item_by_id(reg, plan.refund_item)))
+        return refuse("its item cannot be given back on this game build");  // never removed without its item
     if (!destroy_entity(fn, raw(w), req->entity)) return refuse("the game's destroy call failed (see the log)");
+    removed.ids.push_back(req->entity);
     if (g_state && g_state->offers) g_state->offers->forget(req->entity);
     if (!plan.refund_item) return true;
     req->refunded = plan.refund_item;

@@ -1141,3 +1141,59 @@ TEST_CASE("builtin commands: items shows the template an item places (spawn take
     CHECK(bsaid("Material_T1_Wood_Logs (0x00000011, stack 250, places 54f89d91-d59c-4fd8-b39c-ee30632bf57f)"));
     CHECK(bsaid("Torch (0x00000022, stack 1)"));
 }
+
+namespace {
+// The remove test's world: entities 42, 50, 60-63 and item 0x11 consumed on placement.
+struct RemoveWorld {
+    ItemsWorld iw;
+    MapStore ents;
+    RemoveWorld() {
+        for (auto& b : iw.reg.infos) {
+            uint32_t id = 0;
+            std::memcpy(&id, b.get() + off::kItemInfoId, 4);
+            if (id == 0x11) b.get()[off::kItemInfoPlacementConsume] = 1;
+        }
+        emf::test::plant_entities(iw.w, ents, {42, 50, 60, 61, 62, 63});
+    }
+};
+}  // namespace
+
+TEST_CASE("remove (review I1): a refusal repeated every step is logged once, not every time") {
+    BFixture f;
+    f.state.get_component = rm_gc;
+    std::vector<std::string> lines;
+    f.state.log_line = [&](const std::string& l) {
+        if (l.find("remove_building refused") != std::string::npos) lines.push_back(l);
+    };
+    RemoveWorld rw;
+    for (int i = 0; i < 5; ++i) f.center.enqueue("remove 61");  // holds items: refused each time
+    f.run(rw.iw.w);
+    CHECK(lines.size() == 1u);
+    CHECK(bsaid("entity 61 not removed: it holds items"));  // the caller still gets the reason every time
+}
+
+TEST_CASE("remove (review I4): when the item cannot be given back on this build, nothing is removed") {
+    BFixture f;
+    f.state.get_component = rm_gc;
+    f.state.sigs[static_cast<size_t>(Sig::SpawnWrapper)] = Resolved{};
+    RemoveWorld rw;
+    f.center.enqueue("remove 60 drop");
+    f.center.enqueue("remove 63 50");
+    f.center.enqueue("remove 63");  // no refund asked: removed
+    f.run(rw.iw.w);
+    CHECK(bsaid("entity 60 not removed: its item cannot be given back on this game build"));
+    CHECK(bsaid("entity 63 not removed: its item cannot be given back on this game build"));
+    CHECK(g_destroyed == std::vector<uint32_t>{63});
+}
+
+TEST_CASE("remove (review, not judged): the same object twice in one step pays its item once") {
+    BFixture f;
+    f.state.get_component = rm_gc;  // (the fake destroy leaves its components, as a deferred destroy might)
+    RemoveWorld rw;
+    f.center.enqueue("remove 60 drop");
+    f.center.enqueue("remove 60 drop");
+    f.run(rw.iw.w);
+    CHECK(g_destroyed == std::vector<uint32_t>{60});
+    CHECK(g_pickup_amounts == std::vector<uint32_t>{1});
+    CHECK(bsaid("entity 60 not removed: it was removed already"));
+}
