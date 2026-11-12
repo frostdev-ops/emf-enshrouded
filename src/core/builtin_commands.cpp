@@ -1257,7 +1257,7 @@ bool add_builtin_commands(BuiltinContext& ctx) {
                 "default (host)",
          cmd_put},
         {"take", "<item name> [count 1-65535] [entity]: take items out of an inventory, yours by default (host)", cmd_take},
-        {"spawn", "<template guid> [count 1-20] [at <x> <y> <z>]: spawn templates next to you, or at a place (host)",
+        {"spawn", "<item name | template guid> [count 1-20] [at <x> <y> <z>]: what a placeable item puts down (or a template), in front of you or at a place (host)",
          cmd_spawn},
         {"time", "<hours 0-24>: set the time of day (host)", cmd_time},
         {"pos", ": your position", cmd_pos},

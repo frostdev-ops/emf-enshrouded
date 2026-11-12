@@ -845,3 +845,17 @@ TEST_CASE("teleports map (owner's hand test): the player is told at once they ar
     CHECK(r.g.last_tell().find("On your way") == 0);  // before any ground answer
     CHECK(r.g.tps.empty());
 }
+
+TEST_CASE("teleports tp.pos (review): a quoted player name or one with brackets stays one word") {
+    PosArgs p = parse_pos_args({"Big Bob", "1", "2", "3"});  // split_command keeps a quoted name as one word
+    CHECK(p.ok);
+    CHECK(p.who.type == Who::Name);
+    CHECK(p.who.name == "Big Bob");
+    p = parse_pos_args({"[EMF]Bob", "1,2,3"});
+    CHECK(p.ok);
+    CHECK(p.who.name == "[EMF]Bob");
+    p = parse_pos_args({"player", "1", "at", "(1.0,", "2.0,", "3.0)", "m", "ground"});  // a pasted pos line, then ground
+    CHECK(p.ok);
+    CHECK(p.ground);
+    CHECK(p.who.type == Who::None);
+}

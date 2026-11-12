@@ -474,11 +474,34 @@ TEST_CASE("CharSource: keys without characters (Enter, arrows) do not count; key
     CharSource s;
     s.legacy_seen();
     for (int i = 0; i < 5; ++i) {
-        CHECK(s.raw_down(0x1C, L"").empty());
+        CHECK(s.raw_down(0x1C, L"").empty());  // Enter's character is a control one: it does not count
         CHECK(s.raw_up(0x1C).empty());
+        CHECK(s.raw_down(0x0E, L"").empty());  // Backspace
+        CHECK(s.raw_up(0x0E).empty());
     }
     CHECK_FALSE(s.from_raw());
     CHECK(s.raw_down(0x1E, L"a").empty());
     CHECK(s.raw_up(0x30).empty());  // another key's release
     CHECK_FALSE(s.from_raw());
+}
+
+TEST_CASE("CharSource (review): two keys held at once under Wine both count and type in order; closing the console clears what is held") {
+    CharSource s;
+    s.legacy_seen();
+    CHECK(s.raw_down(0x23, L"h").empty());
+    CHECK(s.raw_down(0x12, L"e").empty());  // e pressed before h is released
+    CHECK(s.raw_up(0x23).empty());
+    CHECK(s.raw_up(0x12).empty());
+    CHECK(s.raw_down(0x26, L"l").empty());
+    CHECK(s.raw_up(0x26) == L"hel");
+    CharSource t;
+    t.legacy_seen();
+    t.raw_down(0x23, L"h");
+    t.raw_up(0x23);
+    t.raw_down(0x12, L"e");
+    t.raw_up(0x12);
+    t.closed();  // the console closed: what was held goes
+    t.raw_down(0x26, L"l");
+    CHECK(t.raw_up(0x26).empty());  // one miss since the close, not three
+    CHECK_FALSE(t.from_raw());
 }

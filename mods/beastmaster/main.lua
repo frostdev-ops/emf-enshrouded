@@ -974,7 +974,7 @@ emf.command("spawn", "<species>: a wild beast 5 m in front of you, to try taming
 	local v = emf.player_view and emf.player_view()
 	local yaw = math.rad((v and (v.camera_yaw or v.heading)) or 0)
 	local id = emf.spawn(world, s.template, x + math.sin(yaw) * 5, y, z + math.cos(yaw) * 5)
-	if not id then
+	if not id or id == 0 then
 		emf.reply("not spawned" .. (s.pack and (" (it needs " .. s.pack .. ")") or " (see the log)"))
 		return
 	end

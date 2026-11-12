@@ -150,11 +150,12 @@ bool apply_key(const KeyEvent& e, Route r, bool raw) {
         case Route::Game: return false;
         case Route::Toggle:
             emf::logf("overlay: console %s", g_router->open() ? "opened" : "closed");
+            if (!g_router->open()) g_chars.closed();  // what was held while deciding goes
             if (g_cb.toggled) g_cb.toggled(g_router->open());
             return true;
         case Route::Console:
             if (g_cb.console_key) g_cb.console_key(e);
-            if (raw) raw_characters(e);  // typed now, or held until the WM_CHAR that should follow
+            if (raw && g_router->open()) raw_characters(e);  // typed now, or held until the WM_CHAR that should follow
             return true;
         case Route::Both:
             if (g_cb.console_key) g_cb.console_key(e);
@@ -240,6 +241,7 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         case WM_DEADCHAR:
         case WM_SYSDEADCHAR: {
+            if (!g_chars.from_raw()) g_chars.wm_char();  // the window makes characters (whoever this one is for)
             if (g_raw_keyboard && g_chars.from_raw()) {
                 if (g_router->capturing()) return 0;
                 break;
@@ -259,13 +261,13 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             break;
         case WM_CHAR:
         case WM_SYSCHAR: {
+            if (!g_chars.from_raw()) g_chars.wm_char();  // the window makes characters (whoever this one is for)
             if (g_raw_keyboard && g_chars.from_raw()) {  // characters come from raw input
                 if (g_router->capturing()) return 0;
                 break;
             }
             const Route r = g_router->character(static_cast<wchar_t>(wp));
             if (r == Route::Console) {
-                g_chars.wm_char();  // the window makes characters: nothing raw is held for them
                 if (g_cb.console_char && wp >= 0x20) g_cb.console_char(static_cast<wchar_t>(wp));
                 return 0;
             }

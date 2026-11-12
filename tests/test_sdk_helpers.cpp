@@ -1055,3 +1055,8 @@ TEST_CASE("sdk: coordinate_words reads coordinates written many ways, other word
     CHECK(emf::coordinate_words(V{"1;2;3", "closest"}) == V{"1", "2", "3", "closest"});
     CHECK(emf::coordinate_words(V{}).empty());
 }
+
+TEST_CASE("sdk: coordinate_words (review): a pasted pos line followed by ground") {
+    using V = std::vector<std::string>;
+    CHECK(emf::coordinate_words(V{"player", "1", "at", "(1.0,", "2.0,", "3.0)", "m", "ground"}) == V{"1.0", "2.0", "3.0", "ground"});
+}

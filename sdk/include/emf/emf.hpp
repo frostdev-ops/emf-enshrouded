@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <cctype>
 #include <cstring>
 #include <exception>
 #include <initializer_list>
@@ -551,9 +552,9 @@ inline std::vector<std::string> coordinate_words(const std::vector<std::string>&
             if (std::tolower(static_cast<unsigned char>(s[i])) != w[i]) return false;
         return true;
     };
-    if (out.size() >= 6 && is(out[0], "player") && is(out[2], "at")) {  // a pasted pos line
+    if (out.size() >= 6 && is(out[0], "player") && is(out[2], "at")) {  // a pasted pos line (then maybe "ground")
         out.erase(out.begin(), out.begin() + 3);
-        if (!out.empty() && is(out.back(), "m")) out.pop_back();
+        if (out.size() > 3 && is(out[3], "m")) out.erase(out.begin() + 3);
     }
     return out;
 }

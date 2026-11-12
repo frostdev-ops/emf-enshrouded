@@ -120,38 +120,58 @@ public:
         if (!switched_) from_raw_ = false;
     }
     bool from_raw() const { return from_raw_; }
-    // A raw key press for the console and the characters ToUnicodeEx gives for it: what to type now.
+    // A raw key press for the console and the characters ToUnicodeEx gives for it: what to type now. Control
+    // characters (Enter's \r, Backspace's \b, Tab) are not typed text and do not count.
     std::wstring raw_down(uint16_t scan, const std::wstring& chars) {
-        if (from_raw_) return chars;
-        if (chars.empty()) return {};
-        pending_scan_ = scan;
-        pending_ = chars;
-        has_pending_ = true;
+        std::wstring text;
+        for (wchar_t ch : chars)
+            if (ch >= 0x20) text += ch;
+        if (from_raw_) return text;
+        if (text.empty()) return {};
+        for (auto& p : pending_)
+            if (p.first == scan) {  // its key repeats: the last characters stand
+                p.second = text;
+                return {};
+            }
+        pending_.push_back({scan, text});
         return {};
     }
-    // A character message for the console arrived: the window makes them, nothing raw is held.
+    // A character message arrived from the window (for the console or not): the window makes them, nothing raw is held.
     void wm_char() {
         if (from_raw_) return;
-        has_pending_ = false;
+        pending_.clear();
         misses_ = 0;
         held_.clear();
     }
     // The raw release of a key: what to type now (the held characters, when this press decides for raw input).
     std::wstring raw_up(uint16_t scan) {
-        if (from_raw_ || !has_pending_ || scan != pending_scan_) return {};
-        has_pending_ = false;
-        held_ += pending_;
-        if (++misses_ < kMisses) return {};
-        from_raw_ = switched_ = true;
-        std::wstring out;
-        out.swap(held_);
-        return out;
+        if (from_raw_) return {};
+        for (size_t i = 0; i < pending_.size(); ++i) {
+            if (pending_[i].first != scan) continue;
+            held_ += pending_[i].second;
+            pending_.erase(pending_.begin() + static_cast<std::ptrdiff_t>(i));
+            if (++misses_ < kMisses) return {};
+            from_raw_ = switched_ = true;
+            std::wstring out;
+            out.swap(held_);
+            for (const auto& p : pending_) out += p.second;  // keys still down type too
+            pending_.clear();
+            return out;
+        }
+        return {};
+    }
+    // The console closed: what was held while deciding is dropped, and the count starts again.
+    void closed() {
+        if (from_raw_) return;
+        pending_.clear();
+        held_.clear();
+        misses_ = 0;
     }
 
 private:
-    bool from_raw_ = true, switched_ = false, has_pending_ = false;
-    uint16_t pending_scan_ = 0;
-    std::wstring pending_, held_;
+    bool from_raw_ = true, switched_ = false;
+    std::vector<std::pair<uint16_t, std::wstring>> pending_;
+    std::wstring held_;
     int misses_ = 0;
 };
 

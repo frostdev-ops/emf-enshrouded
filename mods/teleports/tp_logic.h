@@ -164,7 +164,23 @@ struct PosArgs {
     bool ground = false;
 };
 inline PosArgs parse_pos_args(std::vector<std::string> a) {
-    a = emf::coordinate_words(a);  // "1, 2, 3", "(1, 2, 3)", a pasted pos line...
+    // coordinates any way ("1, 2, 3", "(1, 2, 3)", a pasted pos line); a player word stays as typed ("Big Bob")
+    std::vector<std::string> all = emf::coordinate_words(a);
+    auto numbers_only = [](const std::vector<std::string>& w) {
+        size_t n = w.size();
+        if (n && lower(w.back()) == "ground") --n;
+        double v = 0;
+        for (size_t i = 0; i < n; ++i)
+            if (!parse_number(w[i], &v)) return false;
+        return n == 3;
+    };
+    if (numbers_only(all) || a.empty()) {
+        a = all;
+    } else {
+        std::vector<std::string> rest = emf::coordinate_words({a.begin() + 1, a.end()});
+        rest.insert(rest.begin(), a[0]);
+        a = rest;
+    }
     PosArgs p;
     if (!a.empty() && lower(a.back()) == "ground") {
         p.ground = true;
