@@ -928,12 +928,23 @@ int l_remove_building(lua_State* L) {
     r.size = sizeof r;
     r.entity = static_cast<uint32_t>(luaL_checkinteger(L, 2));
     if (lua_istable(L, 3)) {
+        lua_pushnil(L);  // only refund and force: a typo would quietly lose the item
+        while (lua_next(L, 3)) {
+            lua_pop(L, 1);
+            const char* k = lua_type(L, -1) == LUA_TSTRING ? lua_tostring(L, -1) : nullptr;
+            if (!k || (std::string(k) != "refund" && std::string(k) != "force")) {
+                lua_pop(L, 1);
+                return luaL_error(L, "emf.remove_building: unknown option (refund and force only)");
+            }
+        }
         lua_getfield(L, 3, "refund");
+        int is_int = 0;
+        const lua_Integer as_int = lua_type(L, -1) == LUA_TNUMBER ? lua_tointegerx(L, -1, &is_int) : 0;
         if (lua_type(L, -1) == LUA_TSTRING && std::string(lua_tostring(L, -1)) == "drop") {
             r.refund = EMF_REFUND_DROP;
-        } else if (lua_isinteger(L, -1) && lua_tointeger(L, -1) > 0 && lua_tointeger(L, -1) <= 0xffffffff) {
+        } else if (is_int && as_int > 0 && as_int <= 0xffffffff) {  // 7.0 is player 7
             r.refund = EMF_REFUND_PLAYER;
-            r.player = static_cast<uint32_t>(lua_tointeger(L, -1));
+            r.player = static_cast<uint32_t>(as_int);
         } else if (!lua_isnil(L, -1) && !(lua_isboolean(L, -1) && !lua_toboolean(L, -1))) {
             return luaL_error(L, "emf.remove_building: refund must be false, 'drop' or a player id");
         }

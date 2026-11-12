@@ -569,6 +569,8 @@ too old (remove_building needs API v36)"`. `item_id` is nil when nothing went ba
 | `refund` | `false` (default): nothing back. `"drop"`: a loose pickup at the object. A player's entity id: into that player's inventory (a drop at the object when it does not fit). Any other value is an error. |
 | `force` | `true`: remove it even when it holds items (they are lost). Default false. |
 
+Any other key is an error, so a typo cannot quietly lose the item.
+
 It refuses, and changes nothing, for a player, a Flame Altar (even with `force`: use `emf.destroy` if you mean it), an
 object no player placed (use `emf.destroy`), and an object holding items unless `force`. It plays no pick-up sound.
 Details: [reference.md](reference.md), "v36".

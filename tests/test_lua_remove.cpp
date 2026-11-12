@@ -56,3 +56,22 @@ TEST_CASE("lua 1.28: emf.remove_building refused: false plus the core's reason")
     r.run_command("rn.go");
     CHECK(logged("no false it holds items (2 stacks)"));
 }
+
+TEST_CASE("lua 1.28 (review M5): refund 7.0 is player 7; an unknown option key is an error (a typo would lose the item)") {
+    Rig r(L"lua_remove_keys");
+    add_script(r.dir, "rk",
+               "emf.command('go', '', function(w)\n"
+               "  local ok, item = emf.remove_building(w, 62, {refund = 7.0})\n"
+               "  emf.log('float ' .. tostring(ok))\n"
+               "  local good = pcall(emf.remove_building, w, 63, {refnd = 'drop'})\n"
+               "  emf.log('typo ' .. tostring(good))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("rk.go");
+    CHECK(logged("float true"));
+    CHECK(logged("typo false"));
+    REQUIRE(r.fake.removes.size() == 1u);
+    CHECK(r.fake.removes[0].refund == EMF_REFUND_PLAYER);
+    CHECK(r.fake.removes[0].player == 7u);
+}
