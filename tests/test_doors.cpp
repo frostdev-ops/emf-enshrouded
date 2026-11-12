@@ -2,6 +2,7 @@
 #include <doctest.h>
 
 #include <cstring>
+#include <cmath>
 #include <map>
 #include <string>
 #include <vector>
@@ -26,6 +27,7 @@ constexpr uint32_t kDoor = 500, kSwitched = 501, kChest = 502, kGone = 503;
 uint64_t acc(size_t i) { return 0xD0 + i; }
 
 struct DoorBits {
+    int64_t xf[7] = {};  // CurrentTransform: 32.32 fixed-point metres first
     gen::ServerToggleState toggle{};
     gen::DirectionalInteraction side{};
     gen::InteractionOfferRuntime offer{};
@@ -56,6 +58,7 @@ void* f_get_component(void* out, void*, uint32_t hash, uint32_t e) {
         o[1] = hash == gen::ServerToggleState::kHash          ? 24
                : hash == gen::DirectionalInteraction::kHash   ? 160
                : hash == gen::InteractionOfferRuntime::kHash  ? 56
+               : hash == gen::CurrentTransform::kHash         ? 56
                                                                : 8;
     }
     return out;
@@ -73,6 +76,10 @@ void add_door(uint32_t e, bool open = false, uint32_t writer_graph = 0) {
     d.toggle.state = open;
     d.side.state = static_cast<decltype(d.side.state)>(open ? 2 : 0);
     d.logic.writerGraphId.id.value = writer_graph;
+    d.xf[0] = int64_t(e) << 32;  // the door stands at (e, 20, 30) m
+    d.xf[1] = int64_t(20) << 32;
+    d.xf[2] = int64_t(30) << 32;
+    g_by_hash[{gen::CurrentTransform::kHash, e}] = d.xf;
     g_by_hash[{gen::ServerToggleState::kHash, e}] = &d.toggle;
     g_by_hash[{gen::DirectionalInteraction::kHash, e}] = &d.side;
     g_by_hash[{gen::InteractionOfferRuntime::kHash, e}] = &d.offer;
@@ -116,12 +123,30 @@ struct Rig {
         set_program_iter_begin(nullptr);
         programs.reset();
     }
+    std::vector<std::string> saved;  // what the world file got
+    bool save_ok = true;
+    int door_at_calls = 0;
+    bool doors_there = true;  // door_at finds a door at its spot
     DoorService::Deps deps() {
         DoorService::Deps d;
         d.read_other = f_read_other;
         d.write_other = f_write_other;
         d.get_component = f_get_component;
         d.log = [](const std::string&) {};
+        d.save = [this](const std::string& text) {
+            if (!save_ok) return false;
+            saved.push_back(text);
+            return true;
+        };
+        d.door_at = [this](uint8_t*, const double* p) -> uint32_t {
+            ++door_at_calls;
+            if (!doors_there) return 0;
+            for (const auto& [e, bits] : g_doors)
+                if (bits.xf[1] && std::abs(double(bits.xf[0]) / 4294967296.0 - p[0]) < 0.5 &&
+                    std::abs(double(bits.xf[2]) / 4294967296.0 - p[2]) < 0.5)
+                    return e;
+            return 0;
+        };
         return d;
     }
     uint8_t* world() { return w.p(); }
@@ -297,4 +322,66 @@ TEST_CASE("doors (review M6): a failed read does not count as a gone door; the l
         if (h == emf::gen::ecs::InteractionOfferRuntime::kHash) h = 0;  // the accessor reads nothing now
     r.step();
     CHECK(r.service.locked_count() == 1u);
+}
+
+// The owner: a lock should survive a save and a reload (EMF keeps locks per world, by the door's place: entity ids change).
+TEST_CASE("door locks: a lock is saved with the world as the door's place; an unlock takes it out") {
+    Rig r;
+    REQUIRE(r.order(kDoor, DoorOrderKind::Lock));
+    r.step();
+    r.service.server_tick(r.world(), 1000);
+    REQUIRE_FALSE(r.saved.empty());
+    CHECK(r.saved.back().find("lock 500.00 20.00 30.00") != std::string::npos);
+    REQUIRE(r.order(kDoor, DoorOrderKind::Unlock));
+    r.step();
+    r.service.server_tick(r.world(), 2000);
+    CHECK(r.saved.back().find("lock 500.00") == std::string::npos);
+    const size_t n = r.saved.size();
+    r.service.server_tick(r.world(), 3000);
+    CHECK(r.saved.size() == n);  // nothing changed: nothing saved
+}
+
+TEST_CASE("door locks: after a reload the door at a saved place is locked again") {
+    Rig r;
+    r.service.load_saved("# EMF door locks\r\nlock 500.00 20.00 30.00\r\nlock 9000.00 20.00 30.00\r\n");
+    r.service.server_tick(r.world(), 1000);
+    r.step();
+    CHECK((r.service.state(r.world(), kDoor) & EMF_DOOR_LOCKED) != 0u);
+    CHECK(g_doors[kDoor].offer.isDisabled);
+    CHECK(r.service.locked_count() == 1u);
+    r.service.server_tick(r.world(), 2000);
+    REQUIRE_FALSE(r.saved.empty());  // the found one is kept, the one not there yet too
+    CHECK(r.saved.back().find("lock 500.00 20.00 30.00") != std::string::npos);
+    CHECK(r.saved.back().find("lock 9000.00 20.00 30.00") != std::string::npos);
+}
+
+TEST_CASE("door locks: a saved place without its door yet is looked for again later; a world reset drops it") {
+    Rig r;
+    r.doors_there = false;  // not loaded yet
+    r.service.load_saved("lock 500.00 20.00 30.00\n");
+    r.service.server_tick(r.world(), 1000);
+    CHECK(r.door_at_calls == 1);
+    r.service.server_tick(r.world(), 1500);
+    CHECK(r.door_at_calls == 1);  // not every step
+    r.doors_there = true;
+    r.service.server_tick(r.world(), 5000);
+    CHECK(r.door_at_calls == 2);
+    r.step();
+    CHECK(r.service.locked_count() == 1u);
+    r.service.world_reset();
+    r.service.server_tick(r.world(), 9000);
+    CHECK(r.service.locked_count() == 0u);
+    CHECK(r.door_at_calls == 2);
+}
+
+TEST_CASE("door locks: a save that fails is tried again at the next tick") {
+    Rig r;
+    r.save_ok = false;
+    REQUIRE(r.order(kDoor, DoorOrderKind::Lock));
+    r.step();
+    r.service.server_tick(r.world(), 1000);
+    CHECK(r.saved.empty());
+    r.save_ok = true;
+    r.service.server_tick(r.world(), 2000);
+    CHECK(r.saved.size() == 1u);
 }

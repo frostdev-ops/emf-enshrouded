@@ -725,7 +725,7 @@ typedef struct EmfRemoveBuilding {
 #define EMF_DOOR_NONE 0u    /* not a door (no ServerToggleState and DirectionalInteraction), or not the server world */
 #define EMF_DOOR_CLOSED 1u
 #define EMF_DOOR_OPEN 2u
-#define EMF_DOOR_LOCKED 0x10u /* flag: EMF holds it locked (no E prompt for anyone; not saved) */
+#define EMF_DOOR_LOCKED 0x10u /* flag: EMF holds it locked (no E prompt for anyone; kept with the world) */
 #define EMF_DOOR_LOGIC 0x20u  /* flag: a switch drives it (the logic system owns its state): EMF does not touch it */
 /* v39 enemy orders: a creature with an enemy AI sent at any entity for a while (a player, a creature, a door, a gate,
  * a placed object). While it holds, the target is its pick with its target switches off and an alarmed entry in its
@@ -1507,8 +1507,9 @@ typedef struct EmfApi {
      * rule as door_state. */
     bool (*door_set)(EmfWorld* world, uint32_t entity, uint32_t open, uint32_t side);
     /* Locks (1) or unlocks (0) it from the next step: no E prompt for any player while locked (EMF keeps it so each
-     * step), and the door keeps its state (a player's toggle already under way when the lock came is undone). A lock
-     * is not saved: it lasts until the world closes. door_set still works on a locked door and changes the state it
+     * step), and the door keeps its state (a player's toggle already under way when the lock came is undone). EMF
+     * keeps the lock with the world (from 0.6.8: by the door's place, in emf\config\emf_doors\<slot>.txt): after a
+     * load the door at that place is locked again. door_set still works on a locked door and changes the state it
      * keeps. Same rules. */
     bool (*door_lock)(EmfWorld* world, uint32_t entity, uint32_t locked);
 

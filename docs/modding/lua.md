@@ -128,7 +128,7 @@ right away.
 | `emf.path_cancel(id)` | 1.29: cancels an open path query; true when it was open |
 | `emf.door(world, id)` | 1.30: `"open"` or `"closed"` plus `{locked = bool, logic = bool}`, or nil when not a door (see "Doors" below) |
 | `emf.door_open(world, id [, "front" \| "back"])` / `emf.door_close(world, id)` | 1.30: opens / closes a door at the next step; true when it will change, false when refused |
-| `emf.door_lock(world, id, locked)` | 1.30: no E prompt on the door while locked (not saved); true / false |
+| `emf.door_lock(world, id, locked)` | 1.30: no E prompt on the door while locked (kept with the world from EMF 0.6.8); true / false |
 | `emf.enemy_order(world, enemy, target [, opts])` | 1.32: the enemy goes for the target (a door, a gate, a creature, a player); the order's id, or nil and why (see "Enemy orders" below) |
 | `emf.enemy_order_cancel(id)` / `emf.enemy_target(world, enemy)` | 1.32: end an order / what the enemy goes for now (or nil) |
 | `emf.kill(world, id)` | (1.4) kills a creature without a hit: its current health becomes 0 (1.5: through the game's attribute code) and the game's death program sends `EntityDiedEvent` the next step; the corpse keeps its loot. No attacker, no kill credit (`emf.damage` gives one); never a player; host only. true / false |
@@ -643,8 +643,9 @@ is not a door (player doors and gates). `logic` is true when a switch drives the
 
 - `emf.door_open(world, id [, "front" | "back"])` and `emf.door_close(world, id)` change the door at the next server
   step; players see it swing, and the game's collider and path grid follow it, so enemies' paths change. No sound plays.
-- `emf.door_lock(world, id, true | false)`: while locked, no player gets the E prompt on it. Not saved: it lasts until
-  the world closes. `emf.door_open` and `emf.door_close` still work on a locked door.
+- `emf.door_lock(world, id, true | false)`: while locked, no player gets the E prompt on it. From EMF 0.6.8 the lock is
+  kept with the world (by the door's place): after a load the door there is locked again. `emf.door_open` and
+  `emf.door_close` still work on a locked door.
 
 The three actions return true when the door will change at the next step, and false when refused (not the server world,
 not a door, a switch drives it, already so; the reason is in the log). Any other side word is a Lua error. Host only, like

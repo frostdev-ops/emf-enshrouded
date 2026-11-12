@@ -554,6 +554,36 @@ std::unique_ptr<emf::core::BuffService> g_buffs;  // v32 buffs: emf_buffs
 std::unique_ptr<emf::core::TeleportService> g_teleport;
 // v38 doors: the emf_doors program and its orders and locks (null when off on this game build).
 std::unique_ptr<emf::core::DoorService> g_doors;
+// The door locks kept per world: <game>\emf\config\emf_doors\<slot>.txt.
+emf::WorldFile g_door_file{"emf_doors"};
+// The door standing at a place (within 0.5 m) in the server world, 0 when none is loaded there.
+uint32_t door_at(uint8_t* world, const double* pos) {
+    struct Find {
+        EmfWorld* w;
+        const double* p;
+        uint32_t found;
+    } f{reinterpret_cast<EmfWorld*>(world), pos, 0};
+    const EmfApi* a = emf::core::api_table();
+    a->for_each_entity(f.w, [](uint32_t id, void* user) {
+        auto& f = *static_cast<Find*>(user);
+        if (f.found) return;
+        const EmfApi* a = emf::core::api_table();
+        uint64_t size = 0;
+        const void* t = a->get_component(f.w, emf::gen::ecs::CurrentTransform::kHash, id, &size);
+        int64_t raw[3];
+        if (!t || size < sizeof raw || !emf::seh_read(t, raw, sizeof raw)) return;
+        double d2 = 0;
+        for (int i = 0; i < 3; ++i) {
+            const double d = static_cast<double>(raw[i]) / 4294967296.0 - f.p[i];
+            d2 += d * d;
+        }
+        if (d2 > 0.25) return;
+        if (a->get_component(f.w, emf::gen::ecs::ServerToggleState::kHash, id, nullptr) &&
+            a->get_component(f.w, emf::gen::ecs::DirectionalInteraction::kHash, id, nullptr))
+            f.found = id;
+    }, &f);
+    return f.found;
+}
 // v39 enemy orders: written after every server step.
 std::unique_ptr<emf::core::EnemyOrders> g_orders;
 // v23 change_component: the emf_components program and its requests (null when off on this game build).
@@ -1309,6 +1339,8 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         deps.write_other = reinterpret_cast<emf::core::WriteOtherFn>(sig(Sig::WriteOther));
         deps.get_component = g_state->get_component;
         deps.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
+        deps.save = [](const std::string& text) { return g_door_file.save(text); };  // false until the world's file was read
+        deps.door_at = door_at;
         if (!deps.read_other || !deps.write_other || !sig(Sig::IterBegin)) {
             emf::logf("doors: off (the ReadOther, WriteOther or IterBegin signatures are not usable)");
         } else if (g_state->system_programs.registration_closed()) {
@@ -1318,6 +1350,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             if (g_state->system_programs.add(g_doors->spec(), true)) {
                 g_state->doors = g_doors.get();
                 emf::logf("doors: on (program %s in the server world)", emf::core::kDoorsProgramName);
+                if (!g_door_file.attach(emf::core::api_table())) emf::logf("doors: locks are not kept per world");
             } else {
                 emf::logf("doors: off (the %s program could not be added)", emf::core::kDoorsProgramName);
                 g_doors.reset();
@@ -1700,6 +1733,10 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             emf::core::markers_server_tick(w);
             emf::core::map_server_tick(w);  // v34 ground_at
             if (g_orders) g_orders->step(w);  // v39 enemy orders
+            if (g_doors) {  // door locks kept per world: read once after the world's save loaded, saved when they change
+                g_door_file.poll([](const std::string& text) { g_doors->load_saved(text); });
+                g_doors->server_tick(reinterpret_cast<uint8_t*>(w), GetTickCount64());
+            }
         }
     }, nullptr);
     // v32 buffs: the emf_buffs watchdog and the players' buff events after each server step.

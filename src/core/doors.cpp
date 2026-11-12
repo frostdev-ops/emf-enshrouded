@@ -2,7 +2,10 @@
 #include "core/doors.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstdio>
 #include <cstring>
+#include <sstream>
 
 #include "common/offsets.h"
 #include "common/seh.h"
@@ -95,10 +98,22 @@ void DoorService::run(void* program_context) {
     for (const Order& o : work) {
         if (o.world != call->world) continue;
         Locked* l = find_locked(o.entity);
-        if (o.kind == DoorOrderKind::Lock && !l) locked_.push_back({o.entity, -1, 0});
-        if (o.kind == DoorOrderKind::Unlock && l)
+        if (o.kind == DoorOrderKind::Lock && !l) {
+            Locked n{o.entity, -1, 0};
+            int64_t raw[3];  // its place, for the world's file
+            if (const void* t = comp(deps_.get_component, call->world, gen::CurrentTransform::kHash, o.entity, 56);
+                t && seh_read(t, raw, sizeof raw)) {
+                for (int i = 0; i < 3; ++i) n.pos[i] = static_cast<double>(raw[i]) / 4294967296.0;
+                n.has_pos = std::isfinite(n.pos[0]) && std::isfinite(n.pos[1]) && std::isfinite(n.pos[2]);
+            }
+            locked_.push_back(n);
+            dirty_ = true;
+        }
+        if (o.kind == DoorOrderKind::Unlock && l) {
             locked_.erase(std::remove_if(locked_.begin(), locked_.end(), [&](const Locked& x) { return x.entity == o.entity; }),
                           locked_.end());
+            dirty_ = true;
+        }
     }
     locked = locked_;
     ReleaseSRWLockExclusive(&lock_);
@@ -204,8 +219,76 @@ void DoorService::world_reset() {
     AcquireSRWLockExclusive(&lock_);
     orders_.clear();
     locked_.clear();
+    pending_.clear();
+    next_look_ = 0;
+    looks_ = 0;
+    dirty_ = false;
     said_.clear();
     ReleaseSRWLockExclusive(&lock_);
+}
+
+void DoorService::load_saved(const std::string& text) {
+    std::vector<std::array<double, 3>> places;
+    std::istringstream in(text);
+    std::string line;
+    while (std::getline(in, line)) {
+        std::array<double, 3> p{};
+        char word[8] = {};
+        if (std::sscanf(line.c_str(), "%7s %lf %lf %lf", word, &p[0], &p[1], &p[2]) == 4 && std::string(word) == "lock" &&
+            std::isfinite(p[0]) && std::isfinite(p[1]) && std::isfinite(p[2]))
+            places.push_back(p);
+    }
+    AcquireSRWLockExclusive(&lock_);
+    pending_ = std::move(places);
+    next_look_ = 0;
+    looks_ = 0;
+    ReleaseSRWLockExclusive(&lock_);
+}
+
+std::string DoorService::saved_text() const {
+    std::string out = "# EMF door locks for this world: the place of each locked door (door_lock, console door <id> lock)\r\n";
+    AcquireSRWLockShared(&lock_);
+    char b[96];
+    for (const Locked& l : locked_)
+        if (l.has_pos) {
+            std::snprintf(b, sizeof b, "lock %.2f %.2f %.2f\r\n", l.pos[0], l.pos[1], l.pos[2]);
+            out += b;
+        }
+    for (const auto& p : pending_) {
+        std::snprintf(b, sizeof b, "lock %.2f %.2f %.2f\r\n", p[0], p[1], p[2]);
+        out += b;
+    }
+    ReleaseSRWLockShared(&lock_);
+    return out;
+}
+
+void DoorService::server_tick(uint8_t* world, uint64_t now_ms) {
+    if (!world || WorldView(world).kind() != EMF_WORLD_SERVER) return;
+    AcquireSRWLockExclusive(&lock_);
+    if (!pending_.empty() && now_ms >= next_look_ && deps_.door_at) {
+        next_look_ = now_ms + (++looks_ <= kLockLooksFast ? kLockLookMs : kLockLookSlowMs);
+        std::vector<std::array<double, 3>> still;
+        for (const auto& p : pending_) {
+            const uint32_t e = deps_.door_at(world, p.data());
+            if (e && !find_locked(e)) {
+                Order o;
+                o.world = world;
+                o.entity = e;
+                o.kind = DoorOrderKind::Lock;
+                orders_.push_back(o);  // locked at the next step; its place goes into the file from there
+            } else if (!e) {
+                still.push_back(p);
+            }
+        }
+        pending_ = std::move(still);
+    }
+    const bool save_now = dirty_ && deps_.save;
+    ReleaseSRWLockExclusive(&lock_);
+    if (save_now && deps_.save(saved_text())) {
+        AcquireSRWLockExclusive(&lock_);
+        dirty_ = false;
+        ReleaseSRWLockExclusive(&lock_);
+    }
 }
 
 size_t DoorService::locked_count() const {
