@@ -135,6 +135,14 @@ bool marker_player_rotation(float out[4]) {
     return true;
 }
 
+bool marker_ui_size(float* w, float* h) {
+    UiSize u;
+    if (!w || !h || !g_ui.load(&u) || !(u.w > 0) || !(u.h > 0)) return false;
+    *w = u.w;
+    *h = u.h;
+    return true;
+}
+
 bool marker_player_pos(double out[3]) {
     PlayerPos p;
     if (!out || !g_player.load(&p)) return false;

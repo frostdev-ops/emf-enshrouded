@@ -10,6 +10,7 @@ namespace emf::core {
 namespace {
 
 constexpr float kMaxUnits = 4096.0f;
+constexpr float kMinMetresPerUnit = 0.01f;  // a closer zoom gives the game's map canvas an endless rect
 constexpr size_t kTextMax = 256;
 
 bool id_ok(const char* id) {
@@ -57,7 +58,7 @@ bool canvas_cmd_ok(const EmfCanvasCmd& c) {
     if (c.kind == EMF_CANVAS_FOG || c.kind == EMF_CANVAS_MARKERS || c.kind == EMF_CANVAS_MAP) {
         // a world point and metres per unit
         return std::isfinite(c.a[0]) && std::isfinite(c.a[1]) && std::fabs(c.a[0]) <= 1e6f && std::fabs(c.a[1]) <= 1e6f &&
-               std::isfinite(c.a[2]) && c.a[2] > 0 && c.a[2] <= 1000;
+               std::isfinite(c.a[2]) && c.a[2] >= kMinMetresPerUnit && c.a[2] <= 1000;
     }
     for (int i = 0; i < n; ++i)
         if (!fin(c.a[i])) return false;
@@ -117,6 +118,18 @@ bool CanvasStore::draw(const std::string& owner, const char* id, const EmfCanvas
         if (cmds[i].s && c.kind == EMF_CANVAS_TEXT) c.s.assign(cmds[i].s, strnlen(cmds[i].s, kTextMax));
         list.push_back(std::move(c));
     }
+    // one MAP, one FOG and one MARKERS per list (the last of each): each is a full drawing of the map or the fog
+    bool seen_map = false, seen_fog = false, seen_markers = false;
+    for (size_t i = list.size(); i-- > 0;) {
+        bool* seen = list[i].kind == EMF_CANVAS_MAP       ? &seen_map
+                     : list[i].kind == EMF_CANVAS_FOG     ? &seen_fog
+                     : list[i].kind == EMF_CANVAS_MARKERS ? &seen_markers
+                                                          : nullptr;
+        if (!seen) continue;
+        if (*seen) list[i].kind = 0;  // left out below
+        *seen = true;
+    }
+    std::erase_if(list, [](const CanvasCmd& c) { return c.kind == 0; });
     std::lock_guard<std::mutex> lock(m_);
     const auto it =
         std::find_if(canvases_.begin(), canvases_.end(), [&](const Canvas& x) { return x.id == id && x.owner == owner; });
@@ -164,7 +177,7 @@ MapDrawPlan plan_map_draw(const EmfCanvas& c, float ui_w, float ui_h, double cx,
                           float world_h) {
     MapDrawPlan p;
     if (!(ui_w > 0) || !(ui_h > 0) || !(world_w > 100) || !(world_h > 100) || !(world_w < 1e6f) || !(world_h < 1e6f) ||
-        !(mpu > 0) || !std::isfinite(cx) || !std::isfinite(cz))
+        !(mpu >= kMinMetresPerUnit) || !std::isfinite(cx) || !std::isfinite(cz))
         return p;
     canvas_layout(c, ui_w, ui_h, p.vp);
     const double k = p.vp[2] / c.w;  // UI units per canvas unit
@@ -175,7 +188,8 @@ MapDrawPlan plan_map_draw(const EmfCanvas& c, float ui_w, float ui_h, double cx,
     p.cv[2] = p.s * world_w;
     p.cv[3] = p.s * world_h;
     p.base = 2048.0f / (world_w < world_h ? world_w : world_h);
-    p.ok = std::isfinite(p.s) && p.s > 0 && std::isfinite(p.cv[0]) && std::isfinite(p.cv[1]);
+    p.ok = std::isfinite(p.s) && p.s > 0 && std::isfinite(p.cv[0]) && std::isfinite(p.cv[1]) && std::isfinite(p.cv[2]) &&
+           std::isfinite(p.cv[3]);
     return p;
 }
 

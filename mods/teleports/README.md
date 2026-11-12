@@ -55,6 +55,8 @@ Let go early, right-click or close the map to cancel; the click does not reach t
   you stood. Unexplored spots are allowed (the server cannot see a player's map fog).
 - **The deadly shroud** (shroud deeper than your world's progress allows): a spot in it is refused before you travel
   ("That place is in the deadly shroud"), with no cooldown spent. If you still land in it, you are sent straight back.
+  When the shroud there cannot be read within 5 seconds, the teleport goes ahead; with a low Flame level the deadly
+  shroud can then kill you before the way back.
   The ordinary shroud is allowed (its timer runs, as when you walk in).
 - Letting go early, right-clicking, closing the map or switching to another window cancels the hold.
 - **`/tp.mark`**: to your map waypoint (right-click a spot on the map, Set Waypoint), with the same rules. Admins:

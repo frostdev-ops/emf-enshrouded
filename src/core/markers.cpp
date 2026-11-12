@@ -71,7 +71,8 @@ MarkerStore::SetResult MarkerStore::set(const std::string& owner, const EmfMarke
     k.icon = received ? 0 : m.icon;  // a picture handle means nothing on another game
     k.rgba = m.rgba;
     k.shape = m.shape;
-    k.flags = m.flags & (EMF_MARKER_WORLD | EMF_MARKER_GAME_MAP | EMF_MARKER_EDGE_ARROW | EMF_MARKER_DISTANCE);
+    k.flags = m.flags & (EMF_MARKER_WORLD | EMF_MARKER_GAME_MAP | EMF_MARKER_EDGE_ARROW | EMF_MARKER_DISTANCE |
+                         EMF_MARKER_MINIMAP);
     k.max_distance = m.max_distance;
     k.game_icon = m.game_icon;
     std::lock_guard<std::mutex> lock(m_);

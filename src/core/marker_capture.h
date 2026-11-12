@@ -86,6 +86,9 @@ void markers_ui_frame(uint64_t hash, const uint8_t* node, uint64_t now_ms);
 // The display's size in pixels (the overlay sets it every frame); before that the UI's size from doPlayStateUi().
 void marker_capture_set_display(float w, float h);
 bool marker_display(float* w, float* h);
+// doPlayStateUi()'s size in UI units as the game laid it out (kept every frame, also with the HUD editor off): false
+// before it was seen. The UI is 1080 units high; its width follows the screen's shape.
+bool marker_ui_size(float* w, float* h);
 
 bool marker_camera(CameraSnap* out);
 bool marker_player_pos(double out[3]);

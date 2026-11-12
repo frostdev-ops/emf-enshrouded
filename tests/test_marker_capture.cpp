@@ -147,3 +147,17 @@ TEST_CASE("capture: the HUD editor's scope detour passes every scope on, also wi
     emf::core::hud::hud_open_path(scope, nullptr, original, 6000);  // no name: nothing
     CHECK_FALSE(marker_sight(6100).world_ui);
 }
+
+
+TEST_CASE("capture (review I1): the UI space is doPlayStateUi()'s rect, kept every frame; none before it was seen") {
+    marker_capture_reset_for_tests();
+    float w = 0, h = 0;
+    CHECK_FALSE(marker_ui_size(&w, &h));
+    FakeNode n;
+    n.set_rect(0, 0, 1728, 1080);  // a 16:10 screen (a Steam Deck): not 1920 wide
+    markers_ui_frame(kMarkerUiSpaceHash, n.node, 1000);
+    REQUIRE(marker_ui_size(&w, &h));
+    CHECK(w == doctest::Approx(1728));
+    CHECK(h == doctest::Approx(1080));
+    marker_capture_reset_for_tests();
+}

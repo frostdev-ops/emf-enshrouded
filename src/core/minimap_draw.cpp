@@ -4,7 +4,9 @@
 #include <windows.h>
 
 #include <atomic>
+#include <cstdio>
 #include <cstring>
+#include <string_view>
 #include <mutex>
 
 #include "common/fnv.h"
@@ -30,6 +32,7 @@ uint8_t* const* g_frame_global = nullptr;  // the UI frame context's global
 std::atomic<int> g_state{0};               // 0 not set up, 1 on, -1 off after a fault
 std::mutex g_status_m;
 std::string g_status = "not set up";
+std::atomic<uint64_t> g_shown_ms{0};
 
 void set_status(const std::string& s) {
     std::lock_guard<std::mutex> lock(g_status_m);
@@ -80,11 +83,28 @@ bool call_pop(void* layer) {
     }
 }
 
-void draw_one(const EmfCanvas& spec, const CanvasCmd& m, const hud::UiSpace& ui, float world_w, float world_h) {
-    const MapDrawPlan p = plan_map_draw(spec, ui.w, ui.h, m.a[0], m.a[1], m.a[2], world_w, world_h);
+// One UI node name per canvas (opening the same name twice under one parent in a pass was never checked).
+const hud::NameInfo& node_name(size_t i) {
+    static const auto names = [] {
+        struct Names {
+            char text[kCanvasMax][16];
+            hud::NameInfo ni[kCanvasMax];
+        } n{};
+        for (size_t k = 0; k < kCanvasMax; ++k) {
+            std::snprintf(n.text[k], sizeof n.text[k], "emfMinimap%zu", k);
+            const size_t len = std::strlen(n.text[k]);
+            n.ni[k] = hud::NameInfo{n.text[k], len, fnv1a64(std::string_view(n.text[k], len))};
+        }
+        return n;
+    }();
+    return names.ni[i < kCanvasMax ? i : 0];
+}
+
+void draw_one(size_t index, const EmfCanvas& spec, const CanvasCmd& m, float ui_w, float ui_h, float world_w,
+              float world_h) {
+    const MapDrawPlan p = plan_map_draw(spec, ui_w, ui_h, m.a[0], m.a[1], m.a[2], world_w, world_h);
     if (!p.ok) return;
-    static const char kName[] = "emfMinimap";
-    const hud::NameInfo ni{kName, sizeof kName - 1, fnv1a64(kName)};
+    const hud::NameInfo& ni = node_name(index);
     alignas(16) uint8_t scope[0x40] = {};
     g_open(scope, &ni);  // the trampoline: EMF's own detour does not see it
     uint8_t* node = nullptr;
@@ -147,19 +167,31 @@ void minimap_draw_in_play_ui() {
     const uint64_t now = GetTickCount64();
     const MarkerSight sight = marker_sight(now);
     if (sight.map_open || !sight.world_ui) return;  // the game's own map is open, or a menu: not now
-    const hud::UiSpace ui = hud::hud_ui_space();
-    if (!(ui.w > 0) || !(ui.h > 0)) return;
+    if (!minimap_shown_recently(now)) return;       // the overlay does not show the panels (the console, no world)
+    float ui_w = 0, ui_h = 0;  // the UI as laid out (its width follows the screen's shape), as the overlay sees it
+    if (!marker_ui_size(&ui_w, &ui_h)) return;
     float world_w = 0, world_h = 0;
     if (!ui_ready(&world_w, &world_h)) return;
+    size_t index = 0;
     for (const Canvas& c : *view) {
+        const size_t i = index++;
         if (c.spec.hidden) continue;
         for (const CanvasCmd& m : c.cmds)
             if (m.kind == EMF_CANVAS_MAP) {
-                draw_one(c.spec, m, ui, world_w, world_h);
+                draw_one(i, c.spec, m, ui_w, ui_h, world_w, world_h);
                 if (g_state.load(std::memory_order_relaxed) != 1) return;
             }
     }
 }
+
+void minimap_note_shown(uint64_t now_ms) { g_shown_ms.store(now_ms, std::memory_order_relaxed); }
+
+bool minimap_shown_recently(uint64_t now_ms) {
+    const uint64_t t = g_shown_ms.load(std::memory_order_relaxed);
+    return t != 0 && (now_ms <= t || now_ms - t <= kMinimapShownMs);
+}
+
+void minimap_shown_reset_for_tests() { g_shown_ms.store(0); }
 
 std::string minimap_draw_status() {
     std::lock_guard<std::mutex> lock(g_status_m);

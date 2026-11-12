@@ -658,7 +658,8 @@ typedef struct EmfGameMarker {
 typedef struct EmfCanvas {
     uint32_t size;   /* sizeof(EmfCanvas) */
     uint8_t corner;  /* EMF_CANVAS_TOP_LEFT ...: x, y are measured from it, inward */
-    uint8_t shape;   /* EMF_CANVAS_RECT or EMF_CANVAS_CIRCLE (the drawing is clipped to it) */
+    uint8_t shape;   /* EMF_CANVAS_RECT or EMF_CANVAS_CIRCLE: everything is clipped to the rectangle; with a circle the
+                        FOG cells and MARKERS stay inside it (the game's map and shapes do not: paint the corners) */
     uint8_t hidden;  /* 1: kept, not drawn */
     uint8_t pad;
     float x, y, w, h; /* units of a 1080-pixel-high screen; w, h 8..1080 */

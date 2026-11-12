@@ -10,6 +10,8 @@
 
 #include "core/api.h"
 #include "core/canvas.h"
+#include "core/fog_grid.h"
+#include "core/minimap_draw.h"
 
 using namespace emf::core;
 
@@ -229,4 +231,74 @@ TEST_CASE("canvas draw order: what comes before the last MAP command is under th
     std::vector<CanvasCmd> plain(2);
     plain[0].kind = EMF_CANVAS_RECT_CMD;
     CHECK(canvas_first_drawn(plain, true) == 0u);
+}
+
+
+TEST_CASE("minimap gate (review I2): the game's map is drawn only while the overlay showed the canvases in the last 250 ms") {
+    minimap_shown_reset_for_tests();
+    CHECK_FALSE(minimap_shown_recently(1000));
+    minimap_note_shown(1000);
+    CHECK(minimap_shown_recently(1100));
+    CHECK(minimap_shown_recently(1250));
+    CHECK_FALSE(minimap_shown_recently(1251));  // the console opened: the overlay stopped noting
+}
+
+TEST_CASE("canvas (review I3): one MAP, one FOG and one MARKERS per list (the last of each); the rest left out") {
+    CanvasStore s;
+    EmfCanvas c = spec(0, 0, 200, 200);
+    REQUIRE(s.set("m", "map", &c) == CanvasStore::SetResult::Ok);
+    std::vector<EmfCanvasCmd> cmds;
+    for (int i = 0; i < 5; ++i) {
+        EmfCanvasCmd map{};
+        map.kind = EMF_CANVAS_MAP;
+        map.a[0] = 100.0f + i;
+        map.a[2] = 2;
+        cmds.push_back(map);
+        EmfCanvasCmd fog = map;
+        fog.kind = EMF_CANVAS_FOG;
+        cmds.push_back(fog);
+        EmfCanvasCmd mk = map;
+        mk.kind = EMF_CANVAS_MARKERS;
+        cmds.push_back(mk);
+        cmds.push_back(circle(1, 1, 1));
+    }
+    uint32_t kept = 0;
+    REQUIRE(s.draw("m", "map", cmds.data(), static_cast<uint32_t>(cmds.size()), &kept));
+    CHECK(kept == 8u);  // 5 circles + one of each heavy kind
+    int maps = 0;
+    for (const auto& k : s.view()->at(0).cmds)
+        if (k.kind == EMF_CANVAS_MAP) {
+            ++maps;
+            CHECK(k.a[0] == doctest::Approx(104));  // the last one
+        }
+    CHECK(maps == 1);
+}
+
+TEST_CASE("canvas (review M2): metres per unit under 0.01 is left out; a plan with an endless rect is not ok") {
+    EmfCanvasCmd map{};
+    map.kind = EMF_CANVAS_MAP;
+    map.a[2] = 0.001f;
+    CHECK_FALSE(canvas_cmd_ok(map));
+    map.a[2] = 0.01f;
+    CHECK(canvas_cmd_ok(map));
+    EmfCanvas c = spec(16, 16, 220, 220, EMF_CANVAS_TOP_LEFT);
+    CHECK_FALSE(plan_map_draw(c, 1920, 1080, 1500, 4740, 1e-30, 10240, 10240).ok);
+}
+
+TEST_CASE("fog store (review I3): a snapshot answers without the lock and outlives a later copy") {
+    FogStore st;
+    std::vector<uint8_t> data(4 * 1024, 0);
+    data[0] = 255;  // pixel (0, 0): the north-west corner
+    FogHeader h;
+    h.w = h.h = 512;
+    h.cols = h.rows = 2;
+    h.data = data.data();
+    h.blocks = 4;
+    REQUIRE(st.update(h, 1000));
+    const auto snap = st.snapshot();
+    REQUIRE(static_cast<bool>(snap));
+    CHECK(fog_explored(snap->header, 4, 508) == doctest::Approx(1.0f));
+    data[0] = 0;
+    REQUIRE(st.update(h, 2000));  // a new copy
+    CHECK(fog_explored(snap->header, 4, 508) == doctest::Approx(1.0f));  // the old snapshot is unchanged
 }

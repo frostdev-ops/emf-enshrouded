@@ -23,5 +23,11 @@ bool minimap_draw_ready();
 // The UI thread, inside doPlayStateUi() just before its close.
 void minimap_draw_in_play_ui();
 std::string minimap_draw_status();  // for the log: on, off and why, or turned off after a fault
+// EMF's overlay, every frame it shows the canvases (no console or settings, a world, the HUD): the game's map is drawn
+// only while that was noted within kMinimapShownMs (so it hides with the rest of the panel).
+constexpr uint64_t kMinimapShownMs = 250;
+void minimap_note_shown(uint64_t now_ms);
+bool minimap_shown_recently(uint64_t now_ms);
+void minimap_shown_reset_for_tests();
 
 }  // namespace emf::core

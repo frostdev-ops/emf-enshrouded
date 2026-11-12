@@ -4,6 +4,7 @@
 // north edge; 0 unexplored .. 255 explored). FogStore keeps a copy (refreshed at most twice a second) for fog_at and
 // a picture with a quarter of the pixels for the overlay. Game-free.
 #include <cstdint>
+#include <memory>
 #include <mutex>
 #include <vector>
 
@@ -24,8 +25,15 @@ bool fog_header_ok(const FogHeader& h);
 uint8_t fog_pixel(const FogHeader& h, uint32_t px, uint32_t py);  // 0 outside
 float fog_explored(const FogHeader& h, double x, double z);        // 0..1; 0 outside
 
+struct FogSnapshot {
+    FogHeader header;  // data -> bytes
+    std::vector<uint8_t> bytes;
+};
+
 class FogStore {
 public:
+    // The current copy, unchanged by later updates (nullptr without one): sample it with fog_explored, no lock.
+    std::shared_ptr<const FogSnapshot> snapshot() const;
     // The client world's thread: true when a new copy was taken (it changed).
     bool update(const FogHeader& h, uint64_t now_ms);
     void clear();
@@ -40,6 +48,7 @@ private:
     mutable std::mutex m_;
     FogHeader h_;              // data -> copy_
     std::vector<uint8_t> copy_;
+    std::shared_ptr<const FogSnapshot> snap_;
     uint64_t taken_ms_ = 0;
     uint64_t sum_ = 0;
     uint32_t version_ = 0;

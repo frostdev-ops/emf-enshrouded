@@ -502,11 +502,11 @@ ImU32 rgba_col(uint32_t rgba) {
     return IM_COL32((rgba >> 24) & 0xff, (rgba >> 16) & 0xff, (rgba >> 8) & 0xff, rgba & 0xff);
 }
 
-void draw_canvas_markers(ImDrawList* dl, const float r[4], float units_w, const float* a, bool circle) {
-    if (!g_deps.markers) return;
+void draw_canvas_markers(ImDrawList* dl, const std::vector<Marker>& markers, const float r[4], float units_w,
+                         const float* a, bool circle) {
     const ImVec2 centre(r[0] + r[2] * 0.5f, r[1] + r[3] * 0.5f);
     const float radius = (std::min)(r[2], r[3]) * 0.5f, s = 7.0f * r[3] / 220.0f;  // a dot's size follows the canvas
-    for (const Marker& m : g_deps.markers->snapshot()) {
+    for (const Marker& m : markers) {
         if (!(m.flags & EMF_MARKER_MINIMAP)) continue;
         float px, py;
         canvas_world_to(r, units_w, a[0], a[1], a[2], m.x, m.z, &px, &py);
@@ -537,7 +537,12 @@ void draw_canvases(ImVec2 display) {
     const MarkerSight sight = marker_sight(now);
     const bool console = g_router->open() || g_ui.open_fraction > 0.0f;
     if (console || !sight.world_ui || sight.map_open || !world_live()) return;
+    minimap_note_shown(now);  // the game's map (drawn by the game's UI) follows the overlay's panels
     ImDrawList* dl = ImGui::GetBackgroundDrawList();
+    // once per frame: the markers for MARKERS commands, the fog copy for FOG commands (no lock per cell)
+    std::vector<Marker> markers;
+    bool markers_read = false;
+    const std::shared_ptr<const FogSnapshot> fog = g_deps.fog ? g_deps.fog->snapshot() : nullptr;
     for (const Canvas& c : *view) {
         if (c.spec.hidden) continue;
         float r[4];
@@ -595,11 +600,10 @@ void draw_canvases(ImVec2 display) {
                     break;
                 }
                 case EMF_CANVAS_FOG: {
-                    if (!g_deps.fog) break;
-                    const auto cells = fog_cells(r, c.spec.w, a[0], a[1], a[2], [](double x, double z) {
-                        float e = 1.0f;
-                        return g_deps.fog->explored(x, z, &e) ? e : 1.0f;
-                    });
+                    if (!fog) break;
+                    const FogHeader& fh = fog->header;
+                    const auto cells = fog_cells(r, c.spec.w, a[0], a[1], a[2],
+                                                 [&fh](double x, double z) { return fog_explored(fh, x, z); });
                     for (const FogCell& f : cells) {
                         if (circle) {
                             const float dx = f.x + f.w * 0.5f - centre.x, dy = f.y + f.h * 0.5f - centre.y;
@@ -610,7 +614,13 @@ void draw_canvases(ImVec2 display) {
                     }
                     break;
                 }
-                case EMF_CANVAS_MARKERS: draw_canvas_markers(dl, r, c.spec.w, a, circle); break;
+                case EMF_CANVAS_MARKERS:
+                    if (!markers_read && g_deps.markers) {
+                        markers = g_deps.markers->snapshot();
+                        markers_read = true;
+                    }
+                    draw_canvas_markers(dl, markers, r, c.spec.w, a, circle);
+                    break;
                 default: break;  // MAP: the game draws it (part 3b)
             }
         }

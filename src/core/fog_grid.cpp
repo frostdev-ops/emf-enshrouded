@@ -67,7 +67,17 @@ bool FogStore::update(const FogHeader& h, uint64_t now_ms) {
     sum_ = sum;
     have_ = true;
     ++version_;
+    auto s = std::make_shared<FogSnapshot>();
+    s->bytes = copy_;
+    s->header = h_;
+    s->header.data = s->bytes.data();
+    snap_ = std::move(s);
     return true;
+}
+
+std::shared_ptr<const FogSnapshot> FogStore::snapshot() const {
+    std::lock_guard<std::mutex> lock(m_);
+    return snap_;
 }
 
 bool FogStore::due(uint64_t now_ms) const {
@@ -80,6 +90,7 @@ void FogStore::clear() {
     if (have_) ++version_;
     have_ = false;
     copy_.clear();
+    snap_.reset();
     h_ = FogHeader{};
 }
 

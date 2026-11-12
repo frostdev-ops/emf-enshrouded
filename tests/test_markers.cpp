@@ -247,3 +247,19 @@ TEST_CASE("wire format: markers and removals round trip; broken or oversized mes
     std::vector<EmfMarker> many(300, mk("x"));
     CHECK_FALSE(decode_markers(encode_markers("lua", many, {}), &bad));  // more than 256 in one message
 }
+
+
+TEST_CASE("marker store (review C1): EMF_MARKER_MINIMAP is kept, for a local and a received marker") {
+    MarkerStore s;
+    EmfMarker m{};
+    m.size = sizeof m;
+    m.id = "a";
+    m.x = 1;
+    m.flags = EMF_MARKER_MINIMAP | EMF_MARKER_WORLD;
+    REQUIRE(s.set("mod", m, false) == MarkerStore::SetResult::Ok);
+    m.id = "b";
+    REQUIRE(s.set("mod", m, true) == MarkerStore::SetResult::Ok);
+    const auto all = s.snapshot();
+    REQUIRE(all.size() == 2u);
+    for (const auto& k : all) CHECK((k.flags & EMF_MARKER_MINIMAP) != 0u);
+}
