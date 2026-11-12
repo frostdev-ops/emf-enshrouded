@@ -1219,3 +1219,18 @@ TEST_CASE("builtin commands (v37): path checks its words; with the feature off i
     CHECK(refused == 2u);
     CHECK(bsaid("path not asked (see the log: path_find refused"));
 }
+
+TEST_CASE("builtin commands (v38): door checks its words; with doors off it says why") {
+    BFixture f;
+    RemoveWorld rw;
+    f.center.enqueue("door");
+    f.center.enqueue("door 60 wobble");
+    f.center.enqueue("door 60");
+    f.center.enqueue("door 60 open back");
+    f.run(rw.iw.w);
+    size_t usage = 0;
+    for (const auto& l : g_bout) usage += l.find("usage: door <entity> [open|close|lock|unlock] [front|back]") != std::string::npos;
+    CHECK(usage == 2u);
+    CHECK(bsaid("entity 60: not a door"));
+    CHECK(bsaid("door 60: not changed (see the log: door_set refused"));
+}

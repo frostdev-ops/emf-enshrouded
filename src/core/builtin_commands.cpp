@@ -1123,6 +1123,48 @@ void cmd_path(EmfWorld* w, int argc, const char* const* argv, void* u) {
     command_reply_line(fmt("path %u: asked from (%.1f, %.1f, %.1f); the answer follows", id, at[0], at[1], at[2]));
 }
 
+// door <entity> [open|close|lock|unlock] [front|back] (v38): a door's state, or a change at the next step.
+std::string door_text(uint32_t st) {
+    if (!(st & (EMF_DOOR_OPEN | EMF_DOOR_CLOSED))) return "not a door";
+    std::string s = (st & EMF_DOOR_OPEN) ? "open" : "closed";
+    if (st & EMF_DOOR_LOCKED) s += ", locked";
+    if (st & EMF_DOOR_LOGIC) s += ", driven by a switch";
+    return s;
+}
+void cmd_door(EmfWorld* w, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    uint32_t id = 0;
+    std::string act = argc >= 3 ? argv[2] : "";
+    const std::string side_word = argc >= 4 ? argv[3] : "";
+    const bool acts = act == "open" || act == "close" || act == "lock" || act == "unlock";
+    const bool side_ok = side_word.empty() || (act == "open" && (side_word == "front" || side_word == "back"));
+    if (argc < 2 || argc > 4 || !parse_uint(argv[1], 0xffffffffu, &id) || !id || (argc >= 3 && !acts) || !side_ok) {
+        command_reply_line("usage: door <entity> [open|close|lock|unlock] [front|back]");
+        return;
+    }
+    if (act.empty()) {
+        command_reply_line(fmt("entity %u: %s", id, door_text(c.api->door_state ? c.api->door_state(w, id) : 0).c_str()));
+        return;
+    }
+    bool ok = false;
+    if (act == "open" || act == "close") {
+        const uint32_t side = side_word == "front" ? 1u : side_word == "back" ? 2u : 0u;
+        ok = c.api->door_set && c.api->door_set(w, id, act == "open" ? 1u : 0u, side);
+        if (!ok) {
+            command_reply_line(fmt("door %u: not changed (see the log: door_set refused ...)", id));
+            return;
+        }
+    } else {
+        ok = c.api->door_lock && c.api->door_lock(w, id, act == "lock" ? 1u : 0u);
+        if (!ok) {
+            command_reply_line(fmt("door %u: not changed (see the log: door_lock refused ...)", id));
+            return;
+        }
+    }
+    command_reply_line(fmt("door %u: %s at the next step", id, act == "open" ? "opens" : act == "close" ? "closes"
+                                                               : act == "lock" ? "locked" : "unlocked"));
+}
+
 // remove <entity> [drop|<player>] [force] (v36): a placed object taken away like a pick-up, its item given back.
 void cmd_remove(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
@@ -1194,6 +1236,8 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         {"tplset", "<entity> <component> <offset> <f32|i32|u32|u16|u8> <value>: change one template value (host)",
          cmd_tplset},
         {"stack", "<item name> <max 1-65535>: change an item's stack size until the game restarts (host)", cmd_stack},
+        {"door", "<entity> [open|close|lock|unlock] [front|back]: a door's state, or open, close or lock it (host)",
+         cmd_door},
         {"path", "<x> <y> <z> [jumps] [closest] [nodes]: a path from you on the game's path grid (it moves nothing; host)",
          cmd_path},
         {"remove", "<entity> [drop|<player>] [force]: take a placed object away like a pick-up, its item back as a drop or "
