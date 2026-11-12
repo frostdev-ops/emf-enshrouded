@@ -213,13 +213,16 @@ std::vector<PathDone> PathService::step(const PathEngine& e, uint64_t now_ms) {
     return done;
 }
 
-std::vector<PathDone> PathService::world_reset() {
+std::vector<PathDone> PathService::world_reset(std::vector<std::pair<uint64_t, uint32_t>>* created) {
     AcquireSRWLockExclusive(&lock_);
     std::vector<Query> all;
     all.swap(queries_);
     ReleaseSRWLockExclusive(&lock_);
     std::vector<PathDone> done;
-    for (const Query& x : all) done.push_back(finish(x, EMF_PATH_CANCELLED, {}));
+    for (const Query& x : all) {
+        if (created && x.game_id) created->push_back({x.game_id, x.owner});
+        done.push_back(finish(x, EMF_PATH_CANCELLED, {}));
+    }
     return done;
 }
 

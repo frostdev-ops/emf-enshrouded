@@ -275,3 +275,58 @@ TEST_CASE("api path_find (review M5): a larger query (a later version's) is read
     CHECK(api_table()->path_find(reinterpret_cast<EmfWorld*>(r.world.p()), &big.q, on_path, nullptr) != 0u);
     set_core_state(nullptr);
 }
+
+namespace {
+int g_destroy_refusals = 0;  // how many destroys the fake game refuses (a full command buffer)
+bool f_destroy_maybe_full(void* cb, uint32_t entity, uint32_t id) {
+    if (g_destroy_refusals > 0) {
+        --g_destroy_refusals;
+        return false;
+    }
+    return f_destroy(cb, entity, id);
+}
+}  // namespace
+
+TEST_CASE("path glue (review M3): a destroy the game refused is tried again next step") {
+    Rig r;
+    PathGlueDeps d;
+    d.fns.create = f_create;
+    d.fns.destroy = f_destroy_maybe_full;
+    d.fns.get = f_get;
+    d.fns.defaults = f_defaults;
+    d.component = [](uint8_t*, uint32_t, uint32_t) -> const void* { static uint8_t xf[56]; return xf; };
+    d.after_step = [](std::function<void(EmfWorld*)> fn) { fn(nullptr); };
+    d.now_ms = [] { return uint64_t(1000); };
+    r.spec = path_setup(d);
+    path_service()->request(query(12), 7, on_path, nullptr, 1000, nullptr);
+    r.step();
+    g_found[1] = {{12, 50, 0, 0, {}}};
+    g_destroy_refusals = 1;
+    r.step();
+    CHECK(g_answers.size() == 1u);
+    CHECK(g_destroyed.empty());  // refused
+    r.step();
+    CHECK(g_destroyed == std::vector<uint32_t>{1});
+}
+
+TEST_CASE("path glue (review M3): queries the watchdog ends are destroyed in the game when the program runs again") {
+    Rig r;
+    path_service()->request(query(12), 7, on_path, nullptr, 1000, nullptr);
+    r.step();  // created (game id 1)
+    REQUIRE(g_owners.size() == 1u);
+    path_server_tick(1000);
+    for (uint64_t t = 0; t < kPathWatchdogSteps; ++t) path_server_tick(1000 + kPathWatchdogMs + t);
+    CHECK(g_answers.size() == 1u);
+    CHECK(g_destroyed.empty());
+    r.step();  // running again
+    CHECK(g_destroyed == std::vector<uint32_t>{1});
+}
+
+TEST_CASE("path glue (review M3): a new world forgets the old world's game records (nothing to destroy there)") {
+    Rig r;
+    path_service()->request(query(12), 7, on_path, nullptr, 1000, nullptr);
+    r.step();
+    path_world_reset();
+    r.step();
+    CHECK(g_destroyed.empty());
+}

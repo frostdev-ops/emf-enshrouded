@@ -68,8 +68,9 @@ public:
     bool cancel(uint32_t id);
     // Inside EMF's program on the server world: sends waiting queries, reads answers; returns the finished ones.
     std::vector<PathDone> step(const PathEngine& e, uint64_t now_ms);
-    // A new server world: every query ends as cancelled (the old world's game is not called).
-    std::vector<PathDone> world_reset();
+    // Every query ends as cancelled, without calling the game (a new world, or the watchdog). created, when given,
+    // gets the (game id, owner) of the queries the game has, for destroying them later in the same world.
+    std::vector<PathDone> world_reset(std::vector<std::pair<uint64_t, uint32_t>>* created = nullptr);
     size_t open() const;
 
 private:

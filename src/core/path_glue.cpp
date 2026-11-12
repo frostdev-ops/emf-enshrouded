@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "common/offsets.h"
@@ -28,6 +29,14 @@ std::atomic<uint64_t> g_waiting_since{0};  // when the watchdog first saw open q
 std::atomic<bool> g_watchdog_said{false};
 std::atomic<uint64_t> g_steps_without_run{0};
 std::atomic<bool> g_cb_fault_said{false};
+// Game records still to destroy in this world: a destroy the game refused (a full command buffer), or queries the
+// watchdog ended. The program tries them again each step; a new world forgets them (they went with the old one).
+std::mutex g_destroy_lock;
+std::vector<std::pair<uint64_t, uint32_t>> g_to_destroy;
+void destroy_later(uint64_t id, uint32_t owner) {
+    std::lock_guard<std::mutex> l(g_destroy_lock);
+    if (g_to_destroy.size() < 4096) g_to_destroy.push_back({id, owner});
+}
 
 // A mod's callback under SEH: one bad callback does not cost the other answers of the step.
 bool guarded_cb(EmfPathCallback cb, EmfWorld* w, uint32_t id, const EmfPathResult* r, const EmfPathPoint* p, void* u) {
@@ -105,6 +114,17 @@ void path_program(void* ctx, void*) {
     g_last_run_ms = g_deps.now_ms ? g_deps.now_ms() : GetTickCount64();
     g_steps_without_run = 0;
     const PathFns& f = g_deps.fns;
+    std::vector<std::pair<uint64_t, uint32_t>> retry;
+    {
+        std::lock_guard<std::mutex> l(g_destroy_lock);
+        retry.swap(g_to_destroy);
+    }
+    for (const auto& [id, owner] : retry) {
+        bool ok = false;
+        if (!g_on.load()) break;
+        if (!call_destroy(f.destroy, cb, owner, static_cast<uint32_t>(id), &ok)) fault("destroy path query");
+        else if (!ok) destroy_later(id, owner);  // still full: next step
+    }
     PathEngine e;
     e.create = [&](const EmfPathQuery& q, uint32_t owner) -> uint64_t {
         if (!g_on.load()) return 0;  // a game call faulted earlier in this step: no more calls
@@ -153,7 +173,7 @@ void path_program(void* ctx, void*) {
         if (!g_on.load()) return;
         bool ok = false;
         if (!call_destroy(f.destroy, cb, owner, static_cast<uint32_t>(id), &ok)) fault("destroy path query");
-        // a full command buffer (ok false) leaves the record until the world goes: rare, and harmless
+        else if (!ok) destroy_later(id, owner);  // the command buffer was full: tried again next step
     };
     e.exists = [&](uint32_t entity) {
         return g_deps.component && g_deps.component(world, off::kHashCurrentTransform, entity) != nullptr;
@@ -172,6 +192,10 @@ ProgramSpec path_setup(PathGlueDeps deps) {
     g_watchdog_said = false;
     g_steps_without_run = 0;
     g_cb_fault_said = false;
+    {
+        std::lock_guard<std::mutex> l(g_destroy_lock);
+        g_to_destroy.clear();
+    }
     ProgramSpec s;
     s.name = kPathProgramName;
     s.world_kind = EMF_WORLD_SERVER;
@@ -186,6 +210,10 @@ void path_world_reset() {
     g_watchdog_said = false;
     g_waiting_since = 0;
     g_steps_without_run = 0;
+    {
+        std::lock_guard<std::mutex> l(g_destroy_lock);
+        g_to_destroy.clear();
+    }
     if (g_service) deliver(g_service->world_reset());
 }
 
@@ -205,7 +233,10 @@ void path_server_tick(uint64_t now_ms) {
         g_deps.log(std::string("path_find: the ") + kPathProgramName +
                    " program is not running in this world; open queries end as cancelled");
     g_waiting_since = 0;
-    deliver(g_service->world_reset());
+    std::vector<std::pair<uint64_t, uint32_t>> created;
+    std::vector<PathDone> done = g_service->world_reset(&created);
+    for (const auto& [id, owner] : created) destroy_later(id, owner);  // the game still has them: destroyed when it runs
+    deliver(std::move(done));
 }
 
 void path_stop() { g_on = false; }
