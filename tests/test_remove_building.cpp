@@ -7,6 +7,8 @@
 #include <utility>
 #include <vector>
 
+#include "core/api.h"
+#include "core/api_sizes.h"
 #include "core/remove_building.h"
 #include "emf/emf_api.h"
 #include "emf/generated/components.hpp"
@@ -158,4 +160,11 @@ TEST_CASE("remove: a component of the wrong size is not trusted (a game update c
     f.comps[{gen::Inventory::kHash, kChest}].resize(40);
     CHECK(f.facts().stacks_unknown);
     CHECK_FALSE(plan_remove(f.facts(), EMF_REFUND_NONE, false, 0).ok);  // cannot tell: treated as holding items
+}
+
+TEST_CASE("api table (v36): version 36, remove_building at the end") {
+    const EmfApi* api = emf::core::api_table();
+    CHECK(api->version == 36u);
+    CHECK(api->size == kApiV36Size);
+    CHECK(api->remove_building != nullptr);
 }

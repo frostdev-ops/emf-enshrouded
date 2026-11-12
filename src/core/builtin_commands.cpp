@@ -1064,6 +1064,38 @@ void cmd_destroy(EmfWorld* w, int argc, const char* const* argv, void* u) {
                                              : fmt("destroy %u failed (see the log)", id));
 }
 
+// remove <entity> [drop|<player>] [force] (v36): a placed object taken away like a pick-up, its item given back.
+void cmd_remove(EmfWorld* w, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    EmfRemoveBuilding r{};
+    r.size = sizeof(r);
+    bool ok = argc >= 2 && argc <= 4 && parse_uint(argv[1], 0xffffffffu, &r.entity) && r.entity != 0;
+    for (int i = 2; ok && i < argc; ++i) {
+        const std::string a = argv[i];
+        if (a == "force" && !(r.flags & EMF_REMOVE_FORCE)) {
+            r.flags |= EMF_REMOVE_FORCE;
+        } else if (a == "drop" && r.refund == EMF_REFUND_NONE) {
+            r.refund = EMF_REFUND_DROP;
+        } else if (r.refund == EMF_REFUND_NONE && parse_uint(a.c_str(), 0xffffffffu, &r.player) && r.player) {
+            r.refund = EMF_REFUND_PLAYER;
+        } else {
+            ok = false;
+        }
+    }
+    if (!ok) {
+        command_reply_line("usage: remove <entity> [drop|<player>] [force]");
+        return;
+    }
+    if (!c.api->remove_building(w, &r)) {
+        command_reply_line(fmt("entity %u not removed: %s", r.entity, r.why));
+        return;
+    }
+    command_reply_line(!r.refunded                      ? fmt("removed entity %u (no item back)", r.entity)
+                       : r.refund == EMF_REFUND_DROP     ? fmt("removed entity %u; the item came back as a drop", r.entity)
+                                                         : fmt("removed entity %u; the item came back to player %u (a drop "
+                                                               "at the object if it did not fit)", r.entity, r.player));
+}
+
 }  // namespace
 
 bool add_builtin_commands(BuiltinContext& ctx) {
@@ -1103,6 +1135,8 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         {"tplset", "<entity> <component> <offset> <f32|i32|u32|u16|u8> <value>: change one template value (host)",
          cmd_tplset},
         {"stack", "<item name> <max 1-65535>: change an item's stack size until the game restarts (host)", cmd_stack},
+        {"remove", "<entity> [drop|<player>] [force]: take a placed object away like a pick-up, its item back as a drop or "
+                   "to a player; refused for a chest with items unless force, and for a Flame Altar (host)", cmd_remove},
         {"destroy", "<entity>: remove an entity from the world, never a player (host)", cmd_destroy},
     };
     bool ok = true;

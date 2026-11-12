@@ -285,6 +285,7 @@ bool api_fog_at(double x, double z, float* explored);
 uint32_t api_map_markers(EmfGameMarker* out, uint32_t cap);
 bool api_canvas_set(const char* id, const EmfCanvas* c);
 bool api_canvas_draw(const char* id, const EmfCanvasCmd* cmds, uint32_t count);
+bool api_remove_building(EmfWorld* w, EmfRemoveBuilding* req);  // v36
 // The client world's thread, every tick: the fog of war copied (twice a second).
 void minimap_client_tick(EmfWorld* client, uint64_t now_ms);
 

@@ -75,12 +75,12 @@ RemovePlan plan_remove(const RemoveFacts& f, uint32_t refund, bool player_ok, ui
         p.why = "the refund's player is not a player in this world";
         return p;
     }
-    if (!f.has_pos) {
-        p.why = "no such entity (or it has no position)";
-        return p;
-    }
     if (f.is_player) {
         p.why = "that is a player";
+        return p;
+    }
+    if (!f.has_pos) {
+        p.why = "no such entity (or it has no position)";
         return p;
     }
     if (f.is_altar) {

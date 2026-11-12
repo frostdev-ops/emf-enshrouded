@@ -40,8 +40,8 @@ TEST_CASE("player view: the camera's yaw from the view matrix (its forward: x v[
 
 TEST_CASE("api v35: version 35, five more functions") {
     const EmfApi* api = api_table();
-    CHECK(api->version == 35u);
-    CHECK(api->size == kApiV35Size);
+    CHECK(api->version >= 35u);  // the newest version is checked by its own test (test_remove_building.cpp: v36)
+    CHECK(api->size >= kApiV35Size);
     CHECK(kApiV35Size == 992u);
     CHECK(api->player_view);
     CHECK(api->fog_at);

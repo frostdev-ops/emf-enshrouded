@@ -17,6 +17,7 @@
 #include "core/inventory.h"
 #include "core/items.h"
 #include "core/manifest.h"
+#include "core/remove_building.h"
 #include "core/spawn.h"
 #include "emf/generated/components.hpp"
 #include "fake_world.h"
@@ -1040,4 +1041,84 @@ TEST_CASE("builtin commands: stack's reply names the item as the game shows it")
     f.run(iw.w);
     CHECK(bsaid("Wood Logs (Material_T1_Wood_Logs): stack"));
     emf::core::set_game_text_for_tests(emf::core::LocaAccess{});
+}
+
+namespace {
+// v36 remove: 60 a placed object (item 0x11), 61 a placed chest holding items, 62 a world object (no UsedItem),
+// 63 placed, for a refund to a player; 50 another player, 42 the local player.
+int64_t g_rm_xf[7] = {int64_t(100) << 32, int64_t(900) << 32, int64_t(200) << 32, 0, 0, 0, 0};
+void* rm_gc(void* out, void* w, uint32_t hash, uint32_t entity) {
+    namespace gen = emf::gen::ecs;
+    b_gc(out, w, hash, entity);
+    auto o = static_cast<uint64_t*>(out);
+    const bool ours = entity >= 60 && entity <= 63;
+    if (hash == off::kHashCurrentTransform && ours) {
+        o[0] = reinterpret_cast<uint64_t>(g_rm_xf);
+        o[1] = 56;
+    }
+    static gen::UsedItem used{};
+    used.itemId.value = 0x11;
+    if (hash == gen::UsedItem::kHash && ours && entity != 62) {
+        o[0] = reinterpret_cast<uint64_t>(&used);
+        o[1] = sizeof(used);
+    }
+    static gen::Inventory inv{};
+    inv.slots[2].id.value = 0x22;
+    if (hash == gen::Inventory::kHash && entity == 61) {
+        o[0] = reinterpret_cast<uint64_t>(&inv);
+        o[1] = sizeof(inv);
+    }
+    return out;
+}
+}  // namespace
+
+TEST_CASE("builtin commands (v36): remove takes a placed object away like a pick-up, with the item back; refuses with the reason") {
+    BFixture f;
+    f.state.get_component = rm_gc;
+    ItemsWorld iw;
+    uint8_t* logs = nullptr;
+    for (auto& b : iw.reg.infos) {
+        uint32_t id = 0;
+        std::memcpy(&id, b.get() + off::kItemInfoId, 4);
+        if (id == 0x11) logs = b.get();
+    }
+    REQUIRE(logs);
+    logs[kItemInfoPlacementConsume] = 1;  // placing it used it up: the game refunds it
+    MapStore ents;
+    emf::test::plant_entities(iw.w, ents, {42, 50, 60, 61, 62, 63});
+    f.center.enqueue("remove 60 drop");
+    f.center.enqueue("remove 61");        // holds items
+    f.center.enqueue("remove 61 force");  // with them
+    f.center.enqueue("remove 62");        // no player placed it
+    f.center.enqueue("remove 50");        // a player
+    f.center.enqueue("remove 63 50");     // to player 50: no inventory transaction in this fake, so a drop
+    f.center.enqueue("remove 63 42");     // 42 has no PlayerState in this fake: not a player
+    f.center.enqueue("remove 60 nobody");
+    f.center.enqueue("remove");
+    f.run(iw.w);
+    CHECK(g_destroyed == std::vector<uint32_t>{60, 61, 63});
+    CHECK(bsaid("removed entity 60; the item came back as a drop"));
+    CHECK(bsaid("entity 61 not removed: it holds items (1 stacks)"));
+    CHECK(bsaid("removed entity 61"));
+    CHECK(bsaid("entity 62 not removed: not something a player placed"));
+    CHECK(bsaid("entity 50 not removed: that is a player"));
+    CHECK(bsaid("removed entity 63; the item came back to player 50"));
+    CHECK(bsaid("entity 63 not removed: the refund's player is not a player"));
+    CHECK(g_pickup_amounts == std::vector<uint32_t>{1, 1});  // 60's drop and 63's (the player's inventory was not there)
+    CHECK(bsaid("usage: remove <entity> [drop|<player>] [force]"));
+}
+
+TEST_CASE("api remove_building (v36): no request, a small size field, or a call outside a world callback is refused") {
+    BFixture f;
+    CHECK_FALSE(api_table()->remove_building(nullptr, nullptr));
+    EmfRemoveBuilding r{};
+    r.size = 8;
+    CHECK_FALSE(api_table()->remove_building(nullptr, &r));
+    r = EmfRemoveBuilding{};
+    r.size = sizeof(r);
+    r.entity = 60;
+    r.refunded = 99;
+    CHECK_FALSE(api_table()->remove_building(nullptr, &r));
+    CHECK(std::string(r.why).find("world callback") != std::string::npos);
+    CHECK(r.refunded == 0);
 }

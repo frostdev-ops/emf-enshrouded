@@ -29,6 +29,7 @@
 #include "inventory.h"
 #include "items.h"
 #include "program_access.h"
+#include "remove_building.h"
 #include "spawn.h"
 #include "teleport.h"
 #include "component_service.h"
@@ -870,6 +871,74 @@ bool api_destroy(EmfWorld* w, uint32_t entity) {
     if (!ok) core_log("destroy: refused (not a server world, entity 0, or the call faulted)");
     if (ok && g_state->offers) g_state->offers->forget(entity);  // its id may soon be another entity's (E prompts)
     return ok;
+}
+
+// v36: a placed object removed like a pick-up (remove_building.h decides; destroy and the refund here).
+namespace {
+struct RefundLater {
+    uint32_t session;
+    double pos[3];
+};
+// Drops one `item` at pos (0.5 m up) as a loose pickup; false (logged) when it could not be spawned.
+bool drop_refund(EmfWorld* w, uint32_t item, const double pos[3]) {
+    auto fn = reinterpret_cast<SpawnWrapperFn>(api_resolve("SpawnWrapper"));
+    const auto rec = fn ? item_by_id(item_registry(w), item) : std::nullopt;
+    std::string why = fn ? "unknown item" : "the SpawnWrapper signature is not usable on this game build";
+    if (rec && give_pickup(fn, raw(w), *rec, 1, pos[0], pos[1] + 0.5, pos[2], &why)) return true;
+    core_log("remove_building: the item could not be dropped (" + why + ")");
+    return false;
+}
+void refund_put_done(EmfWorld* w, uint32_t, uint32_t item, uint32_t, uint32_t added, void* user) {
+    std::unique_ptr<RefundLater> r(static_cast<RefundLater*>(user));
+    if (added) return;
+    if (!w || r->session != api_server_session()) {  // another session: that spot means nothing now
+        core_log("remove_building: the refund did not fit and the session ended; nothing dropped");
+        return;
+    }
+    drop_refund(w, item, r->pos);  // the inventory was full: at the object's spot instead
+}
+}  // namespace
+
+bool api_remove_building(EmfWorld* w, EmfRemoveBuilding* req) {
+    if (!req || req->size < sizeof(EmfRemoveBuilding)) {
+        core_log("remove_building refused: no request, or its size field is not sizeof(EmfRemoveBuilding)");
+        return false;
+    }
+    req->refunded = 0;
+    req->why[0] = 0;
+    auto refuse = [req](const std::string& why) {
+        std::snprintf(req->why, sizeof(req->why), "%s", why.c_str());
+        core_log("remove_building refused (entity " + std::to_string(req->entity) + "): " + why);
+        return false;
+    };
+    if (!w || w != dispatching_world())
+        return refuse("call it from a world callback (on_tick, run_on_world, on_event) on the server world passed to it");
+    if (WorldView(raw(w)).kind() != EMF_WORLD_SERVER) return refuse("not a server world (host only)");
+    auto fn = reinterpret_cast<DestroyEntityFn>(api_resolve("DestroyEntity"));
+    if (!fn) return refuse("the DestroyEntity signature is not usable on this game build");
+    constexpr uint32_t kPlayerStateHash = 0x6ff967bbu;  // PlayerState
+    const bool player_ok = req->player && api_get_component(w, kPlayerStateHash, req->player, nullptr);
+    const ComponentGetter get = [w](uint32_t hash, uint32_t entity, uint64_t* size) -> const void* {
+        return api_get_component(w, hash, entity, size);
+    };
+    const uint8_t* reg = item_registry(w);
+    const ItemInfoGetter info = [reg](uint32_t item) -> const uint8_t* { return item_data_ptr(reg, item); };
+    const RemoveFacts facts = remove_facts(req->entity, get, info);
+    const RemovePlan plan = plan_remove(facts, req->refund, player_ok, req->flags);
+    if (!plan.ok) return refuse(plan.why);
+    if (!destroy_entity(fn, raw(w), req->entity)) return refuse("the game's destroy call failed (see the log)");
+    if (g_state && g_state->offers) g_state->offers->forget(req->entity);
+    if (!plan.refund_item) return true;
+    req->refunded = plan.refund_item;
+    if (req->refund == EMF_REFUND_PLAYER) {
+        auto later = std::make_unique<RefundLater>(RefundLater{api_server_session(), {facts.pos[0], facts.pos[1], facts.pos[2]}});
+        if (api_put_items(w, req->player, plan.refund_item, 1, refund_put_done, later.get())) {
+            later.release();  // refund_put_done frees it
+            return true;
+        }
+    }
+    if (!drop_refund(w, plan.refund_item, facts.pos)) req->refunded = 0;
+    return true;
 }
 
 void api_on_save(EmfSaveCallback cb, void* user) {
@@ -2266,6 +2335,7 @@ const EmfApi kApi = {
     api_map_markers,
     api_canvas_set,
     api_canvas_draw,
+    api_remove_building,  // v36
 };
 
 bool guarded_chat_call(EmfChatCallback cb, EmfWorld* w, uint64_t account, uint32_t entity, const char* text, void* user) {

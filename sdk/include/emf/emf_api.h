@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 35 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 36 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 35
+#define EMF_API_VERSION 36
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -1397,6 +1397,18 @@ typedef struct EmfApi {
     /* Its drawing, replacing the last list (EMF keeps it and draws it every frame). At most 2048 commands (more are
      * left out); bad numbers leave a command out. False for an unknown canvas. Any thread. */
     bool (*canvas_draw)(const char* id, const EmfCanvasCmd* cmds, uint32_t count);
+
+    /* ---- v36: removing a placed object like a pick-up ---- */
+    /* Removes req->entity, an object a player placed (it has a UsedItem), with the same engine call as destroy, and
+     * gives its item back the way the game's pick-up does: {UsedItem item, 1}, only when placing that item used it up.
+     * req->refund: EMF_REFUND_NONE, _DROP (a loose pickup at the object) or _PLAYER (put_items to req->player; when
+     * nothing fit, a drop at the object). Refused, nothing changed, req->why says why (and the log): a player, a Flame
+     * Altar (even with force: use destroy if you mean it), an object no player placed (use destroy), one holding
+     * items in its own or linked inventories unless EMF_REMOVE_FORCE (the items are lost), a refund player who is not
+     * a player, unknown refund or flags. Like destroy it plays no pick-up sound and sends no BuildingPickUpEvent.
+     * req->refunded gets the item id given back (0: none; with _PLAYER the inventory's answer comes after the step).
+     * Same calling rules as destroy (SERVER world, inside a world callback on it). */
+    bool (*remove_building)(EmfWorld* world, EmfRemoveBuilding* req);
 } EmfApi;
 
 #define EMF_ITEM_NAME_GAME_TEXT 1u /* v29 item_name: the player's language even where EMF's screens cannot draw it */
