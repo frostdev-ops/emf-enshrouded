@@ -633,36 +633,70 @@ void cmd_take(EmfWorld* w, int argc, const char* const* argv, void* u) { cmd_ite
 
 bool parse_coord(const char* s, double* out);  // goto's, below
 
-// spawn <guid> [count] [at <x> <y> <z>]: next to the player, or at a place in metres (a dedicated server's console has
-// no player of its own).
+// spawn <item name | template guid> [count] [at <x> <y> <z>]: what a placeable item puts down (or a template), 2.5 m in
+// front of you, or at a place in metres written any way (a dedicated server's console has no player of its own).
 void cmd_spawn(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
-    uint8_t guid[16];
+    const char* usage = "usage: spawn <item name | template guid> [count 1-20] [at <x> <y> <z>]";
+    std::vector<std::string> words(argv + 1, argv + argc);
+    const auto at_word = std::find_if(words.begin(), words.end(), [](const std::string& s) { return lower(s) == "at"; });
+    const bool at = at_word != words.end();
+    const std::vector<std::string> what(words.begin(), at_word);
+    const std::vector<std::string> where = at ? emf::coordinate_words({at_word + 1, words.end()}) : std::vector<std::string>{};
+    uint8_t guid[16] = {};
     uint32_t count = 1;
-    double p[3];
-    bool at = false;
-    int i = 2;
-    bool ok = argc >= 2 && emf::parse_guid(argv[1], guid);
-    if (ok && i < argc && std::strcmp(argv[i], "at") != 0) {
-        ok = parse_uint(argv[i], 20, &count) && count != 0;
-        ++i;
+    bool ok = !what.empty();
+    if (ok && emf::parse_guid(what[0], guid)) {
+        ok = what.size() == 1 || (what.size() == 2 && parse_uint(what[1].c_str(), 20, &count) && count != 0);
+    } else if (ok) {  // an item's name: the template it places
+        std::vector<const char*> av{"spawn"};
+        for (const auto& word : what) av.push_back(word.c_str());
+        uint32_t id = 0;
+        std::vector<std::string> numbers;
+        const ItemRead read = read_item(c, w, "spawn", static_cast<int>(av.size()), av.data(), 1, &id, &numbers);
+        if (read == ItemRead::Replied) return;
+        ok = read == ItemRead::Ok && (numbers.empty() || (parse_uint(numbers[0].c_str(), 20, &count) && count != 0));
+        if (ok) {
+            uint64_t size = 0;
+            const auto* info = c.api->item_data ? static_cast<const uint8_t*>(c.api->item_data(w, id, &size)) : nullptr;
+            if (info && size >= off::kItemInfoPlacedEntity + 16) std::memcpy(guid, info + off::kItemInfoPlacedEntity, 16);
+            if (std::all_of(std::begin(guid), std::end(guid), [](uint8_t v) { return v == 0; })) {
+                EmfItemInfo ii{};
+                ii.size = sizeof(ii);
+                c.api->item_info(w, id, &ii);
+                command_reply_line(fmt("%s places nothing: spawn takes an item you can place (items <name> shows "
+                                       "\"places\"), or a template guid",
+                                       item_label(c.api, w, id, ii.name, from_game_chat()).c_str()));
+                return;
+            }
+        }
     }
-    if (ok && i < argc) {
-        at = std::strcmp(argv[i], "at") == 0 && argc == i + 4 && parse_coord(argv[i + 1], &p[0]) &&
-             parse_coord(argv[i + 2], &p[1]) && parse_coord(argv[i + 3], &p[2]);
-        ok = at;
-    }
+    double p[3] = {};
+    if (ok && at)
+        ok = where.size() == 3 && parse_coord(where[0].c_str(), &p[0]) && parse_coord(where[1].c_str(), &p[1]) &&
+             parse_coord(where[2].c_str(), &p[2]);
     if (!ok) {
-        command_reply_line("usage: spawn <template guid> [count 1-20] [at <x> <y> <z>]");
+        command_reply_line(usage);
         return;
     }
     if (!at) {
         const uint32_t player = c.player ? c.player() : 0;
         if (!player_pos(c, w, player, p)) {
-            command_reply_line("spawn: player position unknown (give a place: spawn <guid> at <x> <y> <z>)");
+            command_reply_line("spawn: player position unknown (give a place: spawn <name> at <x> <y> <z>)");
             return;
         }
-        p[0] += 2.0;  // beside the player, not inside
+        double yaw = -1;  // in front of you: the camera's direction on this game, else beside you
+        EmfPlayerView v{};
+        v.size = sizeof v;
+        if (c.api->size >= offsetof(EmfApi, player_view) + sizeof(c.api->player_view) && c.api->player_view &&
+            c.api->local_player && player == c.api->local_player() && c.api->player_view(&v))
+            yaw = (v.flags & EMF_VIEW_CAMERA) ? v.camera_yaw_deg : v.heading_deg;  // your own game's view only
+        if (yaw >= -360 && yaw <= 360 && yaw != -1) {
+            p[0] += 2.5 * std::sin(yaw * 3.14159265358979 / 180.0);
+            p[2] += 2.5 * std::cos(yaw * 3.14159265358979 / 180.0);
+        } else {
+            p[0] += 2.0;  // beside the player, not inside
+        }
     }
     std::string ids;
     uint32_t made = 0;
@@ -766,7 +800,7 @@ bool parse_coord(const char* s, double* out) {
 
 void cmd_goto(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
-    std::vector<std::string> words(argv + 1, argv + argc);
+    std::vector<std::string> words = emf::coordinate_words({argv + 1, argv + argc});
     uint32_t k = 0;
     if (!words.empty() && words[0].size() > 1 && words[0][0] == '#') {
         if (!parse_uint(words[0].c_str() + 1, 1023, &k) || k == 0) words.clear();  // a bad #k: usage
@@ -1087,14 +1121,15 @@ void cmd_path(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
     EmfPathQuery q{};
     q.size = sizeof q;
-    bool ok = argc >= 4 && argc <= 7;
-    for (int i = 1; ok && i <= 3; ++i) {
+    const std::vector<std::string> words = emf::coordinate_words({argv + 1, argv + argc});
+    bool ok = words.size() >= 3 && words.size() <= 6;
+    for (size_t i = 0; ok && i < 3; ++i) {
         char* end = nullptr;
-        q.to[i - 1] = std::strtof(argv[i], &end);
-        ok = end && *end == 0 && end != argv[i];
+        q.to[i] = std::strtof(words[i].c_str(), &end);
+        ok = end && *end == 0 && end != words[i].c_str();
     }
-    for (int i = 4; ok && i < argc; ++i) {
-        const std::string a = argv[i];
+    for (size_t i = 3; ok && i < words.size(); ++i) {
+        const std::string& a = words[i];
         uint32_t nodes = 0;
         if (a == "jumps") q.moves |= EMF_PATH_JUMP_UP | EMF_PATH_JUMP_DOWN | EMF_PATH_JUMP_ACROSS;
         else if (a == "closest") q.closest = 1;

@@ -27,6 +27,8 @@
 #include <string>
 #include <vector>
 
+#include "emf/emf.hpp"
+
 namespace tp {
 
 struct Vec {
@@ -162,6 +164,7 @@ struct PosArgs {
     bool ground = false;
 };
 inline PosArgs parse_pos_args(std::vector<std::string> a) {
+    a = emf::coordinate_words(a);  // "1, 2, 3", "(1, 2, 3)", a pasted pos line...
     PosArgs p;
     if (!a.empty() && lower(a.back()) == "ground") {
         p.ground = true;

@@ -456,12 +456,12 @@ TEST_CASE("builtin commands: spawn places count copies near the player") {
     FakeWorld w;
     w.put<uint8_t>(off::kKind, 0);
     f.center.enqueue("spawn 9543cfb0-b4d7-408e-905c-ccb79a15136d 2");
-    f.center.enqueue("spawn not-a-guid");
+    f.center.enqueue("spawn 9543cfb0-b4d7-408e-905c-ccb79a15136d two");
     f.center.enqueue("spawn 9543cfb0-b4d7-408e-905c-ccb79a15136d 99");
     f.run(w);
     CHECK(g_bspawns == 2);
     CHECK(bsaid("spawned 2"));
-    CHECK(bsaid("usage: spawn <template guid> [count 1-20] [at <x> <y> <z>]"));
+    CHECK(bsaid("usage: spawn <item name | template guid> [count 1-20] [at <x> <y> <z>]"));
 }
 
 TEST_CASE("builtin commands: spawn at a place: no player needed (a dedicated server's console)") {
@@ -477,7 +477,7 @@ TEST_CASE("builtin commands: spawn at a place: no player needed (a dedicated ser
     CHECK(g_bspawns == 4);
     CHECK(bsaid("spawned 1"));
     CHECK(bsaid("spawned 3"));
-    CHECK(bsaid("usage: spawn <template guid> [count 1-20] [at <x> <y> <z>]"));
+    CHECK(bsaid("usage: spawn <item name | template guid> [count 1-20] [at <x> <y> <z>]"));
     CHECK_FALSE(bsaid("player position unknown"));
 }
 
@@ -1233,4 +1233,42 @@ TEST_CASE("builtin commands (v38): door checks its words; with doors off it says
     CHECK(usage == 2u);
     CHECK(bsaid("entity 60: not a door"));
     CHECK(bsaid("door 60: not changed (see the log: door_set refused"));
+}
+
+TEST_CASE("builtin commands: spawn takes a placeable item's name (the template it places) and a place written any way") {
+    BFixture f;
+    ItemsWorld iw;
+    uint8_t* logs = nullptr;
+    for (auto& b : iw.reg.infos) {
+        uint32_t id = 0;
+        std::memcpy(&id, b.get() + off::kItemInfoId, 4);
+        if (id == 0x11) logs = b.get();
+    }
+    REQUIRE(logs);
+    logs[off::kItemInfoPlacedEntity] = 0x5a;  // the logs place a template (a stand-in for a door's)
+    f.center.enqueue("spawn wood logs");
+    f.center.enqueue("spawn wood logs 2 at (3738.5, 843.75, 1428)");
+    f.center.enqueue("spawn torch");             // places nothing
+    f.center.enqueue("spawn wood logs at 1,2");  // no z
+    f.run(iw.w);
+    CHECK(g_bspawns == 3);
+    CHECK(bsaid("spawned 1"));
+    CHECK(bsaid("spawned 2"));
+    CHECK(bsaid("Torch places nothing"));
+    CHECK(bsaid("usage: spawn <item name | template guid> [count 1-20] [at <x> <y> <z>]"));
+}
+
+TEST_CASE("builtin commands: goto and path read coordinates written with commas and brackets, or a pasted pos line") {
+    BFixture f;
+    path_stop();
+    FakeWorld w;
+    w.put<uint8_t>(off::kKind, 0);
+    f.center.enqueue("path (3740, 845, 1440) closest");
+    f.center.enqueue("path 3740,845,1440");
+    f.center.enqueue("path player 1 at (3734.5, 843.7, 1418.0) m");
+    f.run(w);
+    size_t refused = 0;
+    for (const auto& l : g_bout) refused += l.find("path not asked") != std::string::npos;
+    CHECK(refused == 3u);  // read fine; asked (and refused here: path_find is off in this fake)
+    CHECK_FALSE(bsaid("usage: path"));
 }

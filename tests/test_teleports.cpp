@@ -824,3 +824,16 @@ TEST_CASE("teleports map (review M8): the player left and the entity id is someo
     CHECK(r.g.tps.empty());
     CHECK_FALSE(r.t.moving(2));
 }
+
+TEST_CASE("teleports tp.pos: coordinates written with commas, brackets or as a pasted pos line") {
+    PosArgs p = parse_pos_args({"(3232.3,", "3232.3,2332.4)"});
+    CHECK(p.ok);
+    CHECK(p.at.z == 2332.4);
+    p = parse_pos_args({"player", "1", "at", "(1.0,", "2.0,", "3.0)", "m"});
+    CHECK(p.ok);  // a pasted pos line
+    CHECK(p.at.y == 2.0);
+    p = parse_pos_args({"#2", "1,2,3", "ground"});
+    CHECK(p.ok);
+    CHECK(p.who.index == 2);
+    CHECK(p.ground);
+}

@@ -527,6 +527,37 @@ inline std::optional<EmfModInfo> mod_info(const char* id) {
     return info;
 }
 
+// Command words with coordinates written many ways, as plain words: "3 4 5", "3, 4,5", "(3, 4, 5)", "[3 4 5]",
+// "<3> <4> <5>", "3;4;5" and a pasted `pos` line "player 1 at (3.0, 4.0, 5.0) m" all give "3" "4" "5". Other words
+// (#k, ground, closest) stay as they are.
+inline std::vector<std::string> coordinate_words(const std::vector<std::string>& words) {
+    std::string all;
+    for (const auto& w : words) all += w + ' ';
+    for (char& ch : all)
+        if (ch == ',' || ch == ';' || ch == '(' || ch == ')' || ch == '[' || ch == ']' || ch == '<' || ch == '>') ch = ' ';
+    std::vector<std::string> out;
+    std::string cur;
+    for (char ch : all) {
+        if (ch == ' ' || ch == '\t') {
+            if (!cur.empty()) out.push_back(cur);
+            cur.clear();
+        } else {
+            cur += ch;
+        }
+    }
+    auto is = [](const std::string& s, const char* w) {
+        if (s.size() != std::strlen(w)) return false;
+        for (size_t i = 0; i < s.size(); ++i)
+            if (std::tolower(static_cast<unsigned char>(s[i])) != w[i]) return false;
+        return true;
+    };
+    if (out.size() >= 6 && is(out[0], "player") && is(out[2], "at")) {  // a pasted pos line
+        out.erase(out.begin(), out.begin() + 3);
+        if (!out.empty() && is(out.back(), "m")) out.pop_back();
+    }
+    return out;
+}
+
 // "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" -> 16 bytes. ms_layout (default) = Windows GUID layout, which is
 // how the game stores template GUIDs (first three groups little-endian); otherwise bytes in text order.
 inline bool parse_guid(std::string_view s, uint8_t out[16], bool ms_layout = true) {

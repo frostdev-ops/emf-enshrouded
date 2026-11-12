@@ -1041,3 +1041,17 @@ TEST_CASE("emf::ui::Window builds the widgets in order; open keeps f until CLOSE
     CHECK(opened.size() == 2u);
     emf::api_ref() = &api;
 }
+
+TEST_CASE("sdk: coordinate_words reads coordinates written many ways, other words stay") {
+    using V = std::vector<std::string>;
+    CHECK(emf::coordinate_words(V{"3232.3", "3232.3", "2332.4"}) == V{"3232.3", "3232.3", "2332.4"});
+    CHECK(emf::coordinate_words(V{"3232.3,", "3232.3,2332.4"}) == V{"3232.3", "3232.3", "2332.4"});
+    CHECK(emf::coordinate_words(V{"(3232.3,", "3232.3,", "2332.4)"}) == V{"3232.3", "3232.3", "2332.4"});
+    CHECK(emf::coordinate_words(V{"[1", "2", "3]"}) == V{"1", "2", "3"});
+    CHECK(emf::coordinate_words(V{"<1>", "<2>", "<3>"}) == V{"1", "2", "3"});
+    CHECK(emf::coordinate_words(V{"player", "1", "at", "(3734.5,", "843.7,", "1418.0)", "m"}) ==
+          V{"3734.5", "843.7", "1418.0"});  // a pasted pos line
+    CHECK(emf::coordinate_words(V{"#2", "1,2,3", "ground"}) == V{"#2", "1", "2", "3", "ground"});
+    CHECK(emf::coordinate_words(V{"1;2;3", "closest"}) == V{"1", "2", "3", "closest"});
+    CHECK(emf::coordinate_words(V{}).empty());
+}
