@@ -59,7 +59,7 @@ target_include_directories(lua54 PUBLIC third_party/lua)
 if(MSVC)
   target_compile_options(lua54 PRIVATE /W0 /TP /EHsc)
 endif()
-add_library(emf_lua_lib STATIC src/lua_host/fields.cpp src/lua_host/host.cpp src/lua_host/bindings.cpp src/lua_host/hit_bindings.cpp src/lua_host/buff_bindings.cpp src/lua_host/marker_bindings.cpp src/lua_host/map_bindings.cpp src/lua_host/canvas_bindings.cpp src/lua_host/lua_json.cpp
+add_library(emf_lua_lib STATIC src/lua_host/fields.cpp src/lua_host/host.cpp src/lua_host/bindings.cpp src/lua_host/hit_bindings.cpp src/lua_host/buff_bindings.cpp src/lua_host/marker_bindings.cpp src/lua_host/map_bindings.cpp src/lua_host/canvas_bindings.cpp src/lua_host/path_bindings.cpp src/lua_host/lua_json.cpp
   src/core/json.cpp src/core/manifest.cpp)
 target_include_directories(emf_lua_lib PUBLIC src sdk/include)
 target_link_libraries(emf_lua_lib PUBLIC lua54)
@@ -817,4 +817,4 @@ target_sources(emf_tests PRIVATE tests/test_buffs.cpp tests/test_buff_service.cp
 target_sources(emf_core_lib PRIVATE src/core/markers.cpp src/core/marker_capture.cpp src/core/marker_map.cpp src/core/marker_net.cpp src/core/api_markers.cpp)
 target_sources(emf_tests PRIVATE tests/test_markers.cpp tests/test_marker_capture.cpp tests/test_marker_map.cpp tests/test_marker_net.cpp tests/test_api_markers.cpp tests/test_lua_markers.cpp)
 target_sources(emf_core_lib PRIVATE src/core/map_click.cpp src/core/ground_search.cpp src/core/map_input.cpp src/core/ground_service.cpp src/core/ground_glue.cpp src/core/map_actions.cpp src/core/api_map.cpp src/core/player_view.cpp src/core/api_minimap.cpp src/core/fog_grid.cpp src/core/canvas.cpp src/core/fog_check.cpp src/core/minimap_draw.cpp)
-target_sources(emf_tests PRIVATE tests/test_map_click.cpp tests/test_ground_search.cpp tests/test_map_input.cpp tests/test_ground_service.cpp tests/test_map_actions.cpp tests/test_api_map.cpp tests/test_lua_map.cpp tests/test_player_view.cpp tests/test_fog_grid.cpp tests/test_canvas.cpp tests/test_fog_check.cpp tests/test_lua_canvas.cpp tests/test_minimap_mod.cpp tests/test_lua_remove.cpp)
+target_sources(emf_tests PRIVATE tests/test_map_click.cpp tests/test_ground_search.cpp tests/test_map_input.cpp tests/test_ground_service.cpp tests/test_map_actions.cpp tests/test_api_map.cpp tests/test_lua_map.cpp tests/test_player_view.cpp tests/test_fog_grid.cpp tests/test_canvas.cpp tests/test_fog_check.cpp tests/test_lua_canvas.cpp tests/test_minimap_mod.cpp tests/test_lua_remove.cpp tests/test_lua_path.cpp)

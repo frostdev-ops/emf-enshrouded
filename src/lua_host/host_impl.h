@@ -284,6 +284,9 @@ void drop_map(Host::Impl& h, Script& s);
 // lua 1.27 a minimap's parts (canvas_bindings.cpp): emf.player_view, emf.fog_at, emf.map_markers, emf.canvas,
 // emf.canvas_draw; a script's canvases leave with it.
 int l_player_view(lua_State* L);
+// lua 1.29 paths (path_bindings.cpp): emf.path_find, emf.path_cancel
+int l_path_find(lua_State* L);
+int l_path_cancel(lua_State* L);
 int l_fog_at(lua_State* L);
 int l_map_markers(lua_State* L);
 int l_canvas(lua_State* L);

@@ -57,6 +57,14 @@ struct Fake {
     std::set<std::vector<uint8_t>> missing_templates;  // these templates (game byte order) only: a pack not installed
     std::vector<uint32_t> destroyed;
     std::vector<EmfRemoveBuilding> removes;  // v36
+    struct PathAsk {
+        EmfPathQuery q;
+        EmfPathCallback cb;
+        void* user;
+    };
+    std::vector<PathAsk> paths;  // v37
+    std::vector<uint32_t> path_cancels;
+    bool path_ok = true;
     bool remove_ok = true;
     uint32_t remove_refunded = 0;
     uint32_t tick = 0;  // what world_tick answers (60 per second of game time)
@@ -357,6 +365,15 @@ bool f_remove_building(EmfWorld*, EmfRemoveBuilding* r) {
     }
     r->refunded = r->refund ? g->remove_refunded : 0;
     return true;
+}
+uint32_t f_path_find(EmfWorld*, const EmfPathQuery* q, EmfPathCallback cb, void* user) {
+    if (!g->path_ok) return 0;
+    g->paths.push_back({*q, cb, user});
+    return static_cast<uint32_t>(g->paths.size());
+}
+bool f_path_cancel(uint32_t id) {
+    g->path_cancels.push_back(id);
+    return id >= 1 && id <= g->paths.size();
 }
 bool f_on_event(uint8_t kind, const char* name, uint32_t expected, EmfWorldEventCallback cb, void* user) {
     g->subs.push_back({kind, name, cb, user, expected});
@@ -988,6 +1005,8 @@ EmfApi fake_api() {
     a.canvas_set = f_canvas_set;
     a.canvas_draw = f_canvas_draw;
     a.remove_building = f_remove_building;  // v36
+    a.path_find = f_path_find;  // v37
+    a.path_cancel = f_path_cancel;
     a.give_item = f_give;
     a.put_items_ex = f_put_ex;
     a.take_items = f_take;
