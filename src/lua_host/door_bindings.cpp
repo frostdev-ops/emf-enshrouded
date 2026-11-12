@@ -1,6 +1,7 @@
 // Lua 1.30 doors (API v38): emf.door, emf.door_open, emf.door_close, emf.door_lock. Changes land at the next server
-// step; a lock lasts until the world closes. Lua 1.32 enemy orders (API v39): emf.enemy_order, emf.enemy_order_cancel,
+// step; a lock is kept with the world (from EMF 0.6.8). Lua 1.32 enemy orders (API v39): emf.enemy_order, emf.enemy_order_cancel,
 // emf.enemy_target.
+#include <cstring>
 #include <string>
 
 #include "host_impl.h"
@@ -78,23 +79,27 @@ int l_enemy_order(lua_State* L) {
     o.size = sizeof o;
     o.enemy = static_cast<uint32_t>(luaL_checkinteger(L, 2));
     o.target = static_cast<uint32_t>(luaL_checkinteger(L, 3));
-    if (!lua_isnoneornil(L, 4)) {
+    if (!lua_isnoneornil(L, 4)) {  // read strictly: a typo errors at once, not an order that never ends
         luaL_checktype(L, 4, LUA_TTABLE);
-        lua_getfield(L, 4, "seconds");
-        if (!lua_isnil(L, -1)) {
-            if (!lua_isnumber(L, -1)) return luaL_error(L, "emf.enemy_order: seconds is a number");
-            o.seconds = static_cast<float>(lua_tonumber(L, -1));
+        lua_pushnil(L);
+        while (lua_next(L, 4)) {
+            const char* k = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "";
+            if (!std::strcmp(k, "seconds")) {
+                if (lua_type(L, -1) != LUA_TNUMBER) return luaL_error(L, "emf.enemy_order: seconds is a number");
+                o.seconds = static_cast<float>(lua_tonumber(L, -1));
+            } else if (!std::strcmp(k, "damage")) {
+                if (!lua_isinteger(L, -1)) return luaL_error(L, "emf.enemy_order: damage is a whole number");
+                const lua_Integer d = lua_tointeger(L, -1);
+                if (d < 0 || d > 100000) return luaL_error(L, "emf.enemy_order: damage must be 0 to 100000");
+                o.damage = static_cast<int32_t>(d);
+            } else if (!std::strcmp(k, "allies")) {
+                if (!lua_isboolean(L, -1)) return luaL_error(L, "emf.enemy_order: allies is true or false");
+                if (lua_toboolean(L, -1)) o.flags |= EMF_ORDER_ALLIES;
+            } else {
+                return luaL_error(L, "emf.enemy_order: unknown option '%s' (seconds, damage, allies)", k);
+            }
+            lua_pop(L, 1);
         }
-        lua_pop(L, 1);
-        lua_getfield(L, 4, "damage");
-        if (!lua_isnil(L, -1)) {
-            if (!lua_isinteger(L, -1)) return luaL_error(L, "emf.enemy_order: damage is a whole number");
-            o.damage = static_cast<int32_t>(lua_tointeger(L, -1));
-        }
-        lua_pop(L, 1);
-        lua_getfield(L, 4, "allies");
-        if (lua_toboolean(L, -1)) o.flags |= EMF_ORDER_ALLIES;
-        lua_pop(L, 1);
     }
     const EmfApi* a = s->host->api;
     if (!has_v39(a)) {

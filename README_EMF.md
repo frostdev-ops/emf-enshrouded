@@ -138,8 +138,8 @@ WINEDLLOVERRIDES="dinput8=n,b" %command%
 
 Then EMF and its mods start with the game. Since this version EMF also draws under Proton (the console, the HUD
 editor, mod windows and wheels): it uses its own Vulkan hook there, because Proton's Vulkan never loads Vulkan layers.
-This is new and has been tried under Wine, but not yet in the game on a Linux PC or a Steam Deck: if nothing EMF draws
-shows up, send `emf\emf_loader.log` and `emf\emf_core.log` with your report. The loader's log says which way it took
+A player on a Steam Deck saw EMF's console and HUD; it is still new there: if nothing EMF draws shows up, send
+`emf\emf_loader.log` and `emf\emf_core.log` with your report. The loader's log says which way it took
 (`overlay: Wine found: through EMF's Vulkan hook`). `[overlay] path` in `emf\emf_core.ini` picks the way by hand: `auto`
 (the default: the hook under Proton, the layer on Windows), `layer` or `hook`.
 The Steam Deck has no ` key: give a button that key in Steam Input, or pick another key with `[overlay] key=` (a scan

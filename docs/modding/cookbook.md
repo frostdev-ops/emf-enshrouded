@@ -641,7 +641,7 @@ A raid mod can open a gate when the attack starts and keep the treasure room shu
 
 - `emf.door(world, id)` first: nil means it is not a door, and `logic = true` means a switch drives it (EMF leaves it alone).
 - `emf.door_open` and `emf.door_close` swing the door at the next step, and the game's path grid follows, so enemies'
-  paths change. `emf.door_lock` takes away the E prompt; it is not saved, so lock again after a world restart.
+  paths change. `emf.door_lock` takes away the E prompt; from EMF 0.6.8 the lock is kept with the world.
 - They return false when refused: check the result, the reason is in the log.
 
 ```lua

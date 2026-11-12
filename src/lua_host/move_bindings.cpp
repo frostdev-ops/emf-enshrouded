@@ -1,6 +1,7 @@
 // Lua 1.33 move orders (API v40): emf.enemy_move(world, enemy, points [, opts] [, fn]), emf.enemy_move_cancel(id),
 // emf.enemy_moving(world, enemy). fn(world, id, status) comes once when the move ends; a script paused or reloaded in
 // between hears nothing (its moves end then).
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -81,16 +82,6 @@ void move_cb(EmfWorld* w, uint32_t id, uint32_t status, void* user) {
     }
 }
 
-double opt_number(lua_State* L, int t, const char* key) {
-    lua_getfield(L, t, key);
-    double v = 0;
-    if (!lua_isnil(L, -1)) {
-        if (lua_type(L, -1) != LUA_TNUMBER) luaL_error(L, "emf.enemy_move: %s is a number", key);
-        v = lua_tonumber(L, -1);
-    }
-    lua_pop(L, 1);
-    return v;
-}
 
 }  // namespace
 
@@ -121,16 +112,22 @@ int l_enemy_move(lua_State* L) {
     o.enemy = enemy;
     int fn_index = 4;
     if (lua_isnil(L, 4) && lua_gettop(L) >= 5) fn_index = 5;  // emf.enemy_move(w, e, p, nil, fn)
-    if (lua_istable(L, 4)) {
+    if (lua_istable(L, 4)) {  // read strictly: a typo errors at once
         fn_index = 5;
-        o.arrive = static_cast<float>(opt_number(L, 4, "arrive"));
-        o.seconds = static_cast<float>(opt_number(L, 4, "seconds"));
-        lua_getfield(L, 4, "peaceful");
-        if (lua_toboolean(L, -1)) o.flags |= EMF_MOVE_PEACEFUL;
-        lua_pop(L, 1);
-        lua_getfield(L, 4, "allies");
-        if (lua_toboolean(L, -1)) o.flags |= EMF_MOVE_ALLIES;
-        lua_pop(L, 1);
+        lua_pushnil(L);
+        while (lua_next(L, 4)) {
+            const char* k = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "";
+            const bool number = !std::strcmp(k, "arrive") || !std::strcmp(k, "seconds");
+            const bool flag = !std::strcmp(k, "peaceful") || !std::strcmp(k, "allies");
+            if (!number && !flag)
+                return luaL_error(L, "emf.enemy_move: unknown option '%s' (arrive, seconds, peaceful, allies)", k);
+            if (number && lua_type(L, -1) != LUA_TNUMBER) return luaL_error(L, "emf.enemy_move: %s is a number", k);
+            if (flag && !lua_isboolean(L, -1)) return luaL_error(L, "emf.enemy_move: %s is true or false", k);
+            if (!std::strcmp(k, "arrive")) o.arrive = static_cast<float>(lua_tonumber(L, -1));
+            else if (!std::strcmp(k, "seconds")) o.seconds = static_cast<float>(lua_tonumber(L, -1));
+            else if (lua_toboolean(L, -1)) o.flags |= !std::strcmp(k, "peaceful") ? EMF_MOVE_PEACEFUL : EMF_MOVE_ALLIES;
+            lua_pop(L, 1);
+        }
     }
     const bool has_fn = !lua_isnoneornil(L, fn_index);
     if (has_fn) luaL_checktype(L, fn_index, LUA_TFUNCTION);

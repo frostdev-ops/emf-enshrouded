@@ -177,3 +177,35 @@ TEST_CASE("lua 1.33 (review M4): emf.enemy_move with nil options still takes the
     r.fake.moves[0].cb(kServer, 1, EMF_MOVE_STUCK, r.fake.moves[0].user);
     CHECK(logged("end stuck"));
 }
+
+// Before 0.6.8 shipped: the option tables are read strictly (a typo errors at once instead of an order that never ends).
+TEST_CASE("lua 1.32/1.33: enemy_order and enemy_move refuse an unknown option key and a wrong type") {
+    Rig r(L"lua_strict_opts");
+    add_script(r.dir, "so",
+               "local function bad(f, ...) local ok, err = pcall(f, ...) return ok and 'ok' or err end\n"
+               "emf.command('go', '', function(w)\n"
+               "  emf.log('o1 ' .. bad(emf.enemy_order, w, 70, 900, {secs = 30}))\n"
+               "  emf.log('o2 ' .. bad(emf.enemy_order, w, 70, 900, {allies = 'no'}))\n"
+               "  emf.log('o3 ' .. bad(emf.enemy_order, w, 70, 900, {damage = 4294967346}))\n"
+               "  emf.log('o4 ' .. bad(emf.enemy_order, w, 70, 900, {damage = 2.5}))\n"
+               "  emf.log('o5 ' .. bad(emf.enemy_order, w, 70, 900, {seconds = 10, damage = 40, allies = true}))\n"
+               "  emf.log('m1 ' .. bad(emf.enemy_move, w, 70, {1, 2, 3}, {arive = 3}))\n"
+               "  emf.log('m2 ' .. bad(emf.enemy_move, w, 70, {1, 2, 3}, {peaceful = 1}))\n"
+               "  emf.log('m3 ' .. bad(emf.enemy_move, w, 70, {1, 2, 3}, {arrive = 3, seconds = 9, peaceful = true, allies = false}))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("so.go");
+    CHECK(logged("unknown option 'secs'"));
+    CHECK(logged("allies is true or false"));
+    CHECK(logged("damage must be 0 to 100000"));
+    CHECK(logged("damage is a whole number"));
+    CHECK(logged("o5 ok"));
+    CHECK(logged("unknown option 'arive'"));
+    CHECK(logged("peaceful is true or false"));
+    CHECK(logged("m3 ok"));
+    REQUIRE(r.fake.orders.size() == 1u);  // only the good one reached the core
+    CHECK(r.fake.orders[0].damage == 40);
+    REQUIRE(r.fake.moves.size() == 1u);
+    CHECK(r.fake.moves[0].o.flags == EMF_MOVE_PEACEFUL);
+}

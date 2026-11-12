@@ -674,6 +674,7 @@ door, and one hit with `damage = 200` broke it.
 - `damage`: the game's own hits on a placed door do 0 (seen); `damage` is added to each of the enemy's hits on the
   target (a hit rule), so a door can break.
 - `allies = true`: the creature may be a player's ally (a tamed beast); without it such a creature is refused.
+- Another key, or a value of the wrong type (`allies = "no"`, `damage = 2.5`), is a Lua error.
 
 It returns the order's id, or nil and why (not the server world, no enemy AI, a player, a boss, no such target, a dead
 target, bad numbers, more than 256 orders). An order also ends when its enemy dies or becomes a player's ally (tamed),
@@ -701,6 +702,7 @@ counts as reached within that distance + 1 m, or within `arrive` if that is larg
 - `peaceful = true`: it ignores players on the way (its fights with players are cleared each step). Without it, it may
   fight on the way (the game's way) and goes on afterwards.
 - `allies = true`: the creature may be a player's ally (a tamed beast).
+- Another key, or a value of the wrong type (`peaceful = 1`), is a Lua error.
 
 `fn(world, id, status)` comes once when the move ends; `status` is `"arrived"`, `"stuck"` (no metre closer for 15 s
 while not fighting: a wall, no path, a point it cannot reach), `"timeout"`, `"gone"` (it died or went) or `"cancelled"`
