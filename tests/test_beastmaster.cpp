@@ -1144,8 +1144,8 @@ TEST_CASE("stable: E at a stable opens the Beasts window with the slots and the 
     CHECK(text_at(w, "active.3") == "Level 20");
     CHECK((flags_at(w, "active.3") & EMF_UI_LOCKED) != 0u);
     CHECK(text_at(w, "active.4") == "Level 30");
-    CHECK(shows(w, "Stable 3/8"));
-    CHECK(text_at(w, "beast.Fang") == "Fang (wolf, loyalty 1, at home, active)");
+    CHECK(shows(w, "Stable 2/8"));  // Tusk and Rex: the active Fang is in its slot only
+    CHECK(row_at(w, "beast.Fang") == -1);
     CHECK(text_at(w, "beast.Tusk") == "Tusk (boar, loyalty 1, at home)");
     CHECK(text_at(w, "beast.Rex") == "Rex (hound, loyalty 1, at home)");
     for (const char* button : {"make_active", "store", "release"})  // nothing selected yet
@@ -1170,8 +1170,9 @@ TEST_CASE("stable: Make active puts the selected beast into a free slot; Store t
     click(b, "make_active");
     CHECK(shows(shown(b), "Tusk is active."));
     click(b, "tab.stable");
-    CHECK((flags_at(shown(b), "beast.Tusk") & EMF_UI_SELECTED) != 0u);  // still selected
     CHECK(text_at(shown(b), "active.2") == "Tusk");
+    CHECK((flags_at(shown(b), "active.2") & EMF_UI_SELECTED) != 0u);  // still selected, in its slot now
+    CHECK(row_at(shown(b), "beast.Tusk") == -1);  // not in the stable any more
     CHECK(shows(shown(b), "Active 2/2"));
     CHECK(shows(shown(b), "Tusk is active."));
     CHECK(b.saved().find("a 0x00000000000000aa Tusk") != std::string::npos);
@@ -1227,10 +1228,15 @@ TEST_CASE("stable: the window redraws when a beast falls; once closed it is not 
     at_stable(b);
     press(b, kE);
     REQUIRE(b.r.fake.windows.size() == 1u);
-    CHECK(text_at(shown(b), "beast.Fang") == "Fang (wolf, loyalty 1, out, active)");
+    auto tip = [&](const std::string& key) {
+        const Fake::Win& w = shown(b);
+        const int i = row_at(w, key);
+        return i < 0 ? std::string("<none>") : w.tips[static_cast<size_t>(i)];
+    };
+    CHECK(tip("active.1") == "wolf, loyalty 1, out");
     deliver(b.r.fake, "EntityDiedEvent", died_event(1234));
     b.seconds(2);
-    CHECK(text_at(shown(b), "beast.Fang").find("Fang (wolf, loyalty 1, rests ") == 0);
+    CHECK(tip("active.1").find("wolf, loyalty 1, rests ") == 0);
     CHECK(row_at(shown(b), "beast.Tusk") >= 0);
     click(b, "", EMF_UI_CLOSED);
     const size_t drawn = b.r.fake.window_updates.size();
@@ -1272,6 +1278,37 @@ void tame_wolf(BeastRig& b) {
     b.seconds(4);
 }
 }  // namespace
+
+// The stable holds collection_max beasts besides the active ones (seen live: one wolf, active, showed "Stable 1/8"
+// and was listed in the stable too).
+TEST_CASE("stable: the Stable list and its count are the stored beasts; the active ones are only in their slots") {
+    BeastRig b;
+    three_beasts(b);  // Fang active, Tusk and Rex stored
+    at_stable(b);
+    press(b, kE);
+    REQUIRE(b.r.fake.windows.size() == 1u);
+    CHECK(shows(shown(b), "Stable 2/8"));
+    CHECK(row_at(shown(b), "beast.Fang") == -1);
+    CHECK(text_at(shown(b), "active.1") == "Fang");
+    CHECK(text_at(shown(b), "beast.Tusk") == "Tusk (boar, loyalty 1, at home)");
+    CHECK(b.reply("beastmaster.list").rfind("Your beasts (1 active, 2/8 in the stable):", 0) == 0);
+}
+
+TEST_CASE("stable: a full stable takes no more stored beasts, but a beast can still be tamed into a free active slot") {
+    BeastRig b;  // level 10: two slots; Fang active, Tusk and Rex stored
+    three_beasts(b);
+    b.r.fake.settings["beastmaster.collection_max"] = "2";
+    at_stable(b);
+    CHECK(b.reply("beastmaster.store Fang") == "Your stable is full (2 beasts): release one first.");
+    CHECK(b.saved().find("a 0x00000000000000aa Fang") != std::string::npos);  // still active
+    CHECK(b.reply("beastmaster.give wolf") == "your stable is full (2 beasts)");
+    tame_wolf(b);  // the second slot is free: it joins as active
+    CHECK(noted(b, "You tamed a wolf: Wolf"));
+    CHECK(b.saved().find("a 0x00000000000000aa Wolf") != std::string::npos);
+    b.look(1, 0, 10.5, 0, 0);
+    b.beast(51, kWolfGraph, 0, 5, kWildBeast, 20, 100);
+    CHECK(b.reply("beastmaster.tame") == "Your stable is full.");  // both slots taken and the stable full
+}
 
 TEST_CASE("stable: two wolves can be out with two slots; one slot allows one beast out") {
     BeastRig b;  // level 10: two slots
@@ -3977,7 +4014,7 @@ TEST_CASE("stable: E Open at a stable opens the Beasts window for the host and t
     o.cb(kServer, 1, 960, o.user);  // the host presses E there
     REQUIRE(b.r.fake.windows.size() == 1u);
     CHECK(b.r.fake.windows.back().id == "beastmaster.stable");
-    CHECK(shows(b.r.fake.windows.back(), "Stable 3/8"));
+    CHECK(shows(b.r.fake.windows.back(), "Stable 2/8"));
     o.cb(kServer, 2, 960, o.user);  // a player who joined
     CHECK(b.r.fake.windows.size() == 1u);
     for (const char* part : {"/beastmaster active <name or number>", "/beastmaster store", "/beastmaster release",
@@ -5487,14 +5524,15 @@ TEST_CASE("beastmaster net: E at a stable opens the Beasts window on a joined pl
     const std::string win = sent_to(b, 2)[0];
     CHECK(win.find("\"t\":\"win\"") != std::string::npos);
     CHECK(win.find("\"open\":true") != std::string::npos);
-    CHECK(win.find("Stable 2/8") != std::string::npos);
+    CHECK(win.find("Stable 1/8") != std::string::npos);  // Tusk: the active Grey is in its slot
     relay_down(b, 2);
     REQUIRE(b.r.fake.windows.size() == 1u);
     const Fake::Win w = b.r.fake.windows.back();
     CHECK(w.id == "beastmaster.stable");
     CHECK(w.kind == EMF_WORLD_CLIENT);
     CHECK(w.close_key == kE);
-    CHECK(shows(w, "Grey (wolf, loyalty 1, at home, active)"));
+    CHECK(text_at(w, "active.1") == "Grey");
+    CHECK(text_at(w, "beast.Tusk") == "Tusk (boar, loyalty 1, at home)");
     client_click(b, "beast.Tusk");
     relay_up(b, 2, 0xBB);
     relay_down(b, 2);
@@ -5537,7 +5575,8 @@ TEST_CASE("beastmaster net: the server draws a joined player's window again only
     REQUIRE(b.reply("beastmaster.rename Grey Ash", 2, 0xBB).find("now called Ash") != std::string::npos);
     b.seconds(1);
     REQUIRE(sent_to(b, 2).size() == 1u);
-    CHECK(sent_to(b, 2)[0].find("Ash (wolf") != std::string::npos);
+    CHECK(sent_to(b, 2)[0].find("\"Ash\"") != std::string::npos);  // its slot
+    CHECK(sent_to(b, 2)[0].find("Grey") == std::string::npos);
     CHECK(sent_to(b, 2)[0].find("\"open\"") == std::string::npos);
     relay_down(b, 2);
     client_click(b, "", EMF_UI_CLOSED);

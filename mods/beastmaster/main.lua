@@ -172,16 +172,36 @@ local function state_text(b, aside)
 	return "at home"
 end
 
+local function active_count(account)
+	local n = 0
+	for _, x in ipairs(beasts:list(account)) do
+		if x.active then n = n + 1 end
+	end
+	return n
+end
+
+-- The beasts in the stable: all but the active ones once the world has a stable (it holds collection_max of them);
+-- before that the whole collection.
+local function stored_count(account)
+	return #beasts:list(account) - (beasts:stabled() and active_count(account) or 0)
+end
+
+-- How many beasts `player` may have in all: collection_max in the stable besides the active ones (before a stable,
+-- collection_max). `joins_active`: a new beast takes a free active slot when there is one (a tame).
+local function collection_cap(world, player, account, joins_active)
+	local max = setting("collection_max")
+	if not beasts:stabled() then return max end
+	local active = active_count(account)
+	local free = (joins_active and active < (open_slots(world, player) or math.huge)) and 1 or 0
+	return max + active + free
+end
+
 -- ---- the stable's actions (the Beasts window, and the chat for players who joined); each returns what it did ----
 local stable_do = {}
 
 function stable_do.make_active(world, account, player, b)
 	if b.active then return b.name .. " is active already." end
-	local n = 0
-	for _, x in ipairs(beasts:list(account)) do
-		if x.active then n = n + 1 end
-	end
-	if n >= (open_slots(world, player) or 1) then return "No free active slot: store a beast first." end
+	if active_count(account) >= (open_slots(world, player) or 1) then return "No free active slot: store a beast first." end
 	b.active = true
 	save()
 	return b.name .. " is active."
@@ -189,6 +209,10 @@ end
 
 function stable_do.store(world, account, b)
 	if not b.active then return b.name .. " is in the stable already." end
+	local max = setting("collection_max")
+	if stored_count(account) >= max then
+		return string.format("Your stable is full (%d beasts): release one first.", max)
+	end
 	b.active = false
 	if b.out then pack:dismiss(world, account, b) end
 	save()
@@ -289,7 +313,12 @@ command("list", ": your beasts", function(world, args)
 		emf.reply("You have no beasts yet. Tame one: beat a wild wolf, boar, sabretooth, hound, bear, aurochs or snake down, or feed it its bait.")
 		return
 	end
-	local lines = { string.format("Your beasts (%d/%d):", #list, setting("collection_max")) }
+	local head = string.format("Your beasts (%d/%d):", #list, setting("collection_max"))
+	if beasts:stabled() then
+		head = string.format("Your beasts (%d active, %d/%d in the stable):", active_count(account), stored_count(account),
+			setting("collection_max"))
+	end
+	local lines = { head }
 	local aside = pack:is_aside(account)
 	for i, b in ipairs(list) do
 		lines[#lines + 1] = string.format("%d. %s - %s, loyalty %d, %s%s", i, b.name, b.species, loyalty_of(b),
@@ -315,9 +344,10 @@ taming = tame_mod.new({
 	tell = tell,
 	on_tamed = function(world, player, id, sp)
 		local account = world:account(player)
-		local b = account and beasts:add(account, sp.id, sp.name, setting("collection_max"))
+		local b = account and beasts:add(account, sp.id, sp.name, collection_cap(world, player, account, true))
 		if not b then
-			tell(world, player, "Your collection is full: the " .. species.word(sp) .. " follows you until it falls.")
+			tell(world, player, (beasts:stabled() and "Your stable is full" or "Your collection is full") .. ": the " ..
+				species.word(sp) .. " follows you until it falls.")
 			return
 		end
 		pack:adopt(account, b, id, world)
@@ -325,11 +355,7 @@ taming = tame_mod.new({
 		local said = string.format("You tamed %s: %s", species.a(sp), b.name)
 		local open = open_slots(world, player) or math.huge  -- a level not read yet: it stays
 		if beasts:stabled() then
-			local active = 0
-			for _, x in ipairs(beasts:list(account)) do
-				if x.active then active = active + 1 end
-			end
-			if active < open then
+			if active_count(account) < open then
 				b.active = true
 			else
 				pack:dismiss(world, account, b)
@@ -346,21 +372,26 @@ taming = tame_mod.new({
 	end,
 })
 
+-- Nil, or what to say: no room for one more beast (a free active slot or room in the stable; before a stable, in the
+-- collection).
 local function collection_full(world, player)
 	local account = world:account(player)
-	return account and #beasts:list(account) >= setting("collection_max")
+	if not account or #beasts:list(account) < collection_cap(world, player, account, true) then return nil end
+	return beasts:stabled() and "Your stable is full." or "Your collection is full."
 end
 
 -- ---- actions: each returns the text to show (a command's reply, or a note after a wheel pick) ----
 local actions = {}
 
 function actions.tame(world, player)
-	if collection_full(world, player) then return "Your collection is full." end
+	local full = collection_full(world, player)
+	if full then return full end
 	return taming:tame(world, player)
 end
 
 function actions.feed(world, player)
-	if collection_full(world, player) then return "Your collection is full." end
+	local full = collection_full(world, player)
+	if full then return full end
 	return taming:feed(world, player)
 end
 
@@ -947,8 +978,11 @@ local function give_command(world, args)
 	end
 	local _, account = who(world)
 	if not account then emf.reply("your account is not known yet") return end
-	local b, why = beasts:add(account, s.id, s.name, setting("collection_max"))
-	if not b then emf.reply(why) return end
+	local b, why = beasts:add(account, s.id, s.name, collection_cap(world, nil, account, false))
+	if not b then
+		emf.reply(beasts:stabled() and string.format("your stable is full (%d beasts)", setting("collection_max")) or why)
+		return
+	end
 	save()
 	emf.reply(string.format("added %s (%s) to your collection", b.name, s.id))
 end

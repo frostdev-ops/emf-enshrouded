@@ -101,8 +101,10 @@ are and what they do.
 no prompt (a marked prop with an E use of its own, a prop without a collider, or one whose prompt the game dropped
 until the next search), E opens the window too, looking at it within 4 m. It has two tabs at the top: **Stable**
 and the selected beast's name (the open one lit). The Stable tab shows your active slots (a beast and its loyalty, an
-empty slot, or a locked one with the level that opens it) and the stable: every beast with its kind, loyalty and
-whether it is out, at home or resting. Click a beast (or a slot) to select it: its own tab opens (see Talents); the
+empty slot, or a locked one with the level that opens it; an active beast that rests shows its time under them) and
+the stable: the beasts not in a slot, with their kind, loyalty and whether they are at home or resting. The stable holds
+8 beasts besides the active ones (setting `collection_max`; before your world has a stable, that is your whole
+collection): a full stable takes no beast you store, and a beast you tame then needs a free active slot. Click a beast (or a slot) to select it: its own tab opens (see Talents); the
 **Stable** tab brings you back, the beast still selected. On both tabs:
 - **Make active**: into a free slot (it can be called);
 - **Store**: out of its slot (a beast that is out goes home);
@@ -341,7 +343,7 @@ All of these work from the game's chat for every player (`/beastmaster <word>`),
 | Mana to call a beast (`call_mana_pct`) | 15 % | of your maximum mana; 0 = free |
 | Seconds between calls (`call_cooldown_s`) | 10 | |
 | Rest after a beast falls (`rest_s`) | 60 s | |
-| Beasts in your collection (`collection_max`) | 8 | 1-16 |
+| Beasts in the stable, besides the active ones (`collection_max`; before a stable, the whole collection) | 8 | 1-16 |
 | Tame by defeat below (`tame_health_pct`) | 25 % | |
 | Taming takes (`tame_channel_s`) | 3 s | |
 | Taming range (`tame_range_m`) | 8 m | |

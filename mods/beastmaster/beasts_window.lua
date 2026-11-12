@@ -245,15 +245,25 @@ function W:rows(world)
 			rows[#rows + 1] = row
 		end
 	end
+	for _, b in ipairs(active) do  -- an active beast's rest, counted down (it is not in the stable list)
+		if not b.out and (b.rest or 0) > 0 then
+			rows[#rows + 1] = { text = b.name .. " " .. env.state(b, self.account), dim = true }
+		end
+	end
 	rows[#rows + 1] = { separator = true }
-	rows[#rows + 1] = { heading = string.format("Stable %d/%d", #list, env.setting("collection_max")) }
+	-- the stable: the beasts not in a slot (it holds collection_max of them besides the active ones)
+	local stored = {}
+	for _, b in ipairs(list) do
+		if not b.active then stored[#stored + 1] = b end
+	end
+	rows[#rows + 1] = { heading = string.format("Stable %d/%d", #stored, env.setting("collection_max")) }
 	if #list == 0 then
 		rows[#rows + 1] = { text = "No beasts yet: tame one (beat it down, or feed it its bait).", dim = true }
 	end
-	for _, b in ipairs(list) do
+	for _, b in ipairs(stored) do
 		rows[#rows + 1] = { row = "beast." .. b.name, selected = b == sel,
-			text = string.format("%s (%s, loyalty %d, %s%s)", b.name, species.word(b.species), self:loyalty_of(b),
-				env.state(b, self.account), b.active and ", active" or "") }
+			text = string.format("%s (%s, loyalty %d, %s)", b.name, species.word(b.species), self:loyalty_of(b),
+				env.state(b, self.account)) }
 	end
 	rows[#rows + 1] = { separator = true }
 	self:action_rows(rows, sel)
