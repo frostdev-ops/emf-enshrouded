@@ -1,6 +1,8 @@
 // path_find (path_service.h).
 #include "core/path_service.h"
 
+#include "core/api_sizes.h"
+
 #include <algorithm>
 #include <cmath>
 #include <cstdio>
@@ -85,7 +87,7 @@ uint32_t path_status(uint32_t game_result, size_t points) {
 }
 
 std::string path_query_check(const EmfPathQuery& q) {
-    if (q.size < sizeof(EmfPathQuery)) return "the query's size field is not sizeof(EmfPathQuery)";
+    if (q.size < kPathQueryV37Size) return "the query's size field is not sizeof(EmfPathQuery)";
     if (!finite3(q.from) || !finite3(q.to) || !std::isfinite(q.width) || !std::isfinite(q.height) || q.width < 0 ||
         q.height < 0 || q.width > 64 || q.height > 64)
         return "bad numbers (positions in metres, width and height 0-64 m)";
@@ -196,6 +198,9 @@ std::vector<PathDone> PathService::step(const PathEngine& e, uint64_t now_ms) {
         }
     }
     AcquireSRWLockExclusive(&lock_);
+    for (PathDone& d : done)  // cancelled while the step talked to the game: the answer says so
+        for (const Query& x : queries_)
+            if (x.id == d.id && x.cancelled && d.result.status != EMF_PATH_CANCELLED) d = finish(x, EMF_PATH_CANCELLED, {});
     for (const auto& [id, gid] : sent)
         for (Query& x : queries_)
             if (x.id == id) x.game_id = gid;

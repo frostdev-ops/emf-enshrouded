@@ -292,3 +292,21 @@ TEST_CASE("path answer text: what the console's path command prints") {
     r.status = EMF_PATH_CANCELLED;
     CHECK(path_answer_text(9, r, nullptr) == "path 9: cancelled");
 }
+
+TEST_CASE("path service (review M2): a cancel while the step talks to the game still ends the query cancelled") {
+    PathService s;
+    FakeEngine fe;
+    const uint32_t id = s.request(query(), 7, cb_noop, nullptr, 0, nullptr);
+    s.step(fe.engine(), 10);
+    fe.finish(fe.created[0], 1, {{10, 50, 0, 0}});
+    PathEngine e = fe.engine();
+    const auto poll = e.poll;
+    e.poll = [&](uint64_t gid) {
+        s.cancel(id);  // another thread, in the middle of the step
+        return poll(gid);
+    };
+    const auto done = s.step(e, 20);
+    REQUIRE(done.size() == 1u);
+    CHECK(done[0].result.status == EMF_PATH_CANCELLED);
+    CHECK(done[0].result.count == 0u);
+}

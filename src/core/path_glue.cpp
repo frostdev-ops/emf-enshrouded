@@ -26,6 +26,18 @@ std::atomic<bool> g_on{false};
 std::atomic<uint64_t> g_last_run_ms{0};   // when emf_path last ran
 std::atomic<uint64_t> g_waiting_since{0};  // when the watchdog first saw open queries with no run since
 std::atomic<bool> g_watchdog_said{false};
+std::atomic<uint64_t> g_steps_without_run{0};
+std::atomic<bool> g_cb_fault_said{false};
+
+// A mod's callback under SEH: one bad callback does not cost the other answers of the step.
+bool guarded_cb(EmfPathCallback cb, EmfWorld* w, uint32_t id, const EmfPathResult* r, const EmfPathPoint* p, void* u) {
+    __try {
+        cb(w, id, r, p, u);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
 
 // ---- the game calls under SEH (a fault turns the feature off) ----
 bool call_defaults(void* (*fn)(void*), uint8_t* q) {
@@ -78,19 +90,24 @@ void deliver(std::vector<PathDone> done) {
     auto shared = std::make_shared<std::vector<PathDone>>(std::move(done));
     g_deps.after_step([shared](EmfWorld* w) {
         for (const PathDone& d : *shared)
-            if (d.cb) d.cb(w, d.id, &d.result, d.points.empty() ? nullptr : d.points.data(), d.user);
+            if (d.cb && !guarded_cb(d.cb, w, d.id, &d.result, d.points.empty() ? nullptr : d.points.data(), d.user) &&
+                !g_cb_fault_said.exchange(true) && g_deps.log)
+                g_deps.log("path_find: a mod's path callback faulted (query " + std::to_string(d.id) +
+                           "); the other answers still came");
     });
 }
 
 void path_program(void* ctx, void*) {
     if (!g_on.load() || !g_service) return;
-    g_last_run_ms = g_deps.now_ms ? g_deps.now_ms() : GetTickCount64();
     uint8_t* world = program_context_world(ctx);
     uint8_t* cb = command_buffer(ctx);
-    if (!world || !cb) return;
+    if (!world || !cb) return;  // not counted as a run: the watchdog answers what waits
+    g_last_run_ms = g_deps.now_ms ? g_deps.now_ms() : GetTickCount64();
+    g_steps_without_run = 0;
     const PathFns& f = g_deps.fns;
     PathEngine e;
     e.create = [&](const EmfPathQuery& q, uint32_t owner) -> uint64_t {
+        if (!g_on.load()) return 0;  // a game call faulted earlier in this step: no more calls
         alignas(16) uint8_t bytes[kPathQueryBytes] = {};
         if (!call_defaults(f.defaults, bytes)) {
             fault("query defaults");
@@ -106,6 +123,7 @@ void path_program(void* ctx, void*) {
     };
     e.poll = [&](uint64_t id) {
         PathAnswer a;
+        if (!g_on.load()) return a;
         alignas(8) uint8_t out[kResultBytes] = {};
         bool ok = false;
         if (!call_get(f.get, ctx, out, static_cast<uint32_t>(id), &ok)) {
@@ -132,6 +150,7 @@ void path_program(void* ctx, void*) {
         return a;
     };
     e.destroy = [&](uint64_t id, uint32_t owner) {
+        if (!g_on.load()) return;
         bool ok = false;
         if (!call_destroy(f.destroy, cb, owner, static_cast<uint32_t>(id), &ok)) fault("destroy path query");
         // a full command buffer (ok false) leaves the record until the world goes: rare, and harmless
@@ -140,6 +159,7 @@ void path_program(void* ctx, void*) {
         return g_deps.component && g_deps.component(world, off::kHashCurrentTransform, entity) != nullptr;
     };
     deliver(g_service->step(e, g_deps.now_ms ? g_deps.now_ms() : GetTickCount64()));
+    if (!g_on.load()) deliver(g_service->world_reset());  // a fault: what is still open is answered now
 }
 }  // namespace
 
@@ -150,6 +170,8 @@ ProgramSpec path_setup(PathGlueDeps deps) {
     g_last_run_ms = 0;
     g_waiting_since = 0;
     g_watchdog_said = false;
+    g_steps_without_run = 0;
+    g_cb_fault_said = false;
     ProgramSpec s;
     s.name = kPathProgramName;
     s.world_kind = EMF_WORLD_SERVER;
@@ -163,18 +185,22 @@ PathService* path_service() { return g_on.load() ? g_service.get() : nullptr; }
 void path_world_reset() {
     g_watchdog_said = false;
     g_waiting_since = 0;
+    g_steps_without_run = 0;
     if (g_service) deliver(g_service->world_reset());
 }
 
 void path_server_tick(uint64_t now_ms) {
     if (!g_service || !g_service->open()) {
         g_waiting_since = 0;
+        g_steps_without_run = 0;
         return;
     }
     if (!g_waiting_since.load()) g_waiting_since = now_ms;  // the first step that sees open queries
+    const uint64_t steps = ++g_steps_without_run;
     const uint64_t last = g_last_run_ms.load();
     const uint64_t since = (std::max)(last, g_waiting_since.load());
-    if (now_ms < since || now_ms - since < kPathWatchdogMs) return;
+    if (steps < kPathWatchdogSteps || now_ms < since || now_ms - since < kPathWatchdogMs) return;
+    g_steps_without_run = 0;
     if (!g_watchdog_said.exchange(true) && g_deps.log)
         g_deps.log(std::string("path_find: the ") + kPathProgramName +
                    " program is not running in this world; open queries end as cancelled");

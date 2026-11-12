@@ -12,7 +12,8 @@
 namespace emf::core {
 
 constexpr const char* kPathProgramName = "emf_path";
-constexpr uint64_t kPathWatchdogMs = 5000;  // open queries, and the program has not run this long: answered
+constexpr uint64_t kPathWatchdogMs = 5000;    // open queries, and the program has not run this long ...
+constexpr uint64_t kPathWatchdogSteps = 150;  // ... nor in this many server steps (one long step is not a stall)
 
 // The four game functions (Sig::CreatePathQuery ... Sig::PathQueryDefaults).
 struct PathFns {

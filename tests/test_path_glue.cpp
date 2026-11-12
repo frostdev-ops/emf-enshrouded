@@ -176,9 +176,9 @@ TEST_CASE("path glue: when the emf_path program has not run for 5 s, open querie
     const uint32_t id = path_service()->request(query(12), 7, on_path, nullptr, 1000, nullptr);
     path_server_tick(2000);  // the program never ran in this world: give it time
     CHECK(g_answers.empty());
-    path_server_tick(2000 + kPathWatchdogMs - 1);
-    CHECK(g_answers.empty());
-    path_server_tick(2000 + kPathWatchdogMs);
+    for (uint64_t t = 0; t + 2 < kPathWatchdogSteps; ++t) path_server_tick(2000 + kPathWatchdogMs + t);
+    CHECK(g_answers.empty());  // 5 s, but not yet 150 steps
+    path_server_tick(2000 + kPathWatchdogMs + kPathWatchdogSteps);
     REQUIRE(g_answers.size() == 1u);
     CHECK(g_answers[0] == std::to_string(id) + ":7:0:0");
     r.step();  // running again: nothing left
@@ -190,4 +190,88 @@ TEST_CASE("path glue: path_stop turns the feature off (the program could not be 
     REQUIRE(path_service() != nullptr);
     path_stop();
     CHECK(path_service() == nullptr);
+}
+
+namespace {
+void on_path_faults(EmfWorld*, uint32_t, const EmfPathResult*, const EmfPathPoint*, void*) {
+    *static_cast<volatile int*>(nullptr) = 1;  // a mod's bad callback
+}
+bool g_create_faults = false;
+int g_create_calls = 0;
+uint32_t* f_create_maybe_fault(void* cb, uint32_t* id, const void* q) {
+    ++g_create_calls;
+    if (g_create_faults) *static_cast<volatile int*>(nullptr) = 1;
+    return f_create(cb, id, q);
+}
+}  // namespace
+
+TEST_CASE("path glue (review I1): a callback that faults does not cost the other answers of that step") {
+    Rig r;
+    path_service()->request(query(12), 7, on_path_faults, nullptr, 1000, nullptr);
+    const uint32_t b = path_service()->request(query(14), 7, on_path, nullptr, 1000, nullptr);
+    r.step();
+    g_found[1] = {{12, 50, 0, 0, {}}};
+    g_found[2] = {{14, 50, 0, 0, {}}};
+    r.step();
+    REQUIRE(g_answers.size() == 1u);
+    CHECK(g_answers[0].rfind(std::to_string(b) + ":1:", 0) == 0);
+}
+
+TEST_CASE("path glue (review I2): a fault in a game call stops that step; the open queries are answered at once") {
+    Rig r;
+    PathGlueDeps d;  // the Rig's deps with a create that faults
+    d.fns.create = f_create_maybe_fault;
+    d.fns.destroy = f_destroy;
+    d.fns.get = f_get;
+    d.fns.defaults = f_defaults;
+    d.component = [](uint8_t*, uint32_t, uint32_t) -> const void* { static uint8_t xf[56]; return xf; };
+    d.after_step = [](std::function<void(EmfWorld*)> fn) { fn(nullptr); };
+    d.now_ms = [] { return uint64_t(1000); };
+    r.spec = path_setup(d);
+    for (int i = 0; i < 3; ++i) path_service()->request(query(12), 7, on_path, nullptr, 1000, nullptr);
+    g_create_faults = true;
+    g_create_calls = 0;
+    r.step();
+    g_create_faults = false;
+    CHECK(g_create_calls == 1);       // no second create after the fault
+    CHECK(g_answers.size() == 3u);    // all three answered in that step
+    CHECK(path_service() == nullptr);
+}
+
+TEST_CASE("path glue (review): one long step is not a stalled program; steps without a run are") {
+    Rig r;
+    path_service()->request(query(12), 7, on_path, nullptr, 1000, nullptr);
+    r.step();                                  // ran (the clock says 1000)
+    path_server_tick(1000 + kPathWatchdogMs + 5000);  // one step that took long
+    CHECK(g_answers.empty());
+    for (uint64_t t = 0; t < kPathWatchdogSteps; ++t) path_server_tick(30000 + t);  // the program no longer runs
+    CHECK(g_answers.size() == 1u);
+}
+
+TEST_CASE("path glue (review M1): no command buffer: the program does not count as running") {
+    Rig r;
+    std::memset(r.ctx.job + 0x08, 0, 8);
+    path_service()->request(query(12), 7, on_path, nullptr, 1000, nullptr);
+    for (uint64_t t = 0; t <= kPathWatchdogSteps; ++t) {  // the program is called every step, but cannot work
+        r.step();
+        path_server_tick(t ? 1000 + kPathWatchdogMs + t : 1000);
+    }
+    CHECK(g_answers.size() == 1u);
+}
+
+TEST_CASE("api path_find (review M5): a larger query (a later version's) is read up to what v37 knows") {
+    Rig r;
+    CoreState state;
+    state.log_line = [](const std::string&) {};
+    set_core_state(&state);
+    struct Bigger {
+        EmfPathQuery q;
+        uint32_t later_field;
+    } big{};
+    big.q = query(12);
+    big.q.owner = 7;
+    big.q.size = sizeof big;
+    big.later_field = 99;
+    CHECK(api_table()->path_find(reinterpret_cast<EmfWorld*>(r.world.p()), &big.q, on_path, nullptr) != 0u);
+    set_core_state(nullptr);
 }

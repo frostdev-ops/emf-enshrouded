@@ -977,15 +977,21 @@ uint32_t api_path_find(EmfWorld* w, const EmfPathQuery* q, EmfPathCallback cb, v
     if (!q || q->size < kPathQueryV37Size) return refuse("no query, or its size field is not sizeof(EmfPathQuery)");
     if (!w || WorldView(raw(w)).kind() != EMF_WORLD_SERVER)
         return refuse("not a server world (a joined game has no path grid: ask on the host or the dedicated server)");
-    uint32_t owner = q->owner;
+    EmfPathQuery copy{};  // what v37 knows of a later version's larger struct
+    std::memcpy(&copy, q, (std::min)(static_cast<size_t>(q->size), sizeof copy));
+    copy.size = sizeof copy;
+    std::string why = path_query_check(copy);  // the cheap refusals before the owner lookup
+    if (why.empty() && paths->open() >= kMaxOpenPaths) why = "32 path queries are open already (wait for answers)";
+    if (!why.empty()) return refuse(why);
+    uint32_t owner = copy.owner;
+    if (!owner) owner = api_local_player();  // the host's own player: no scan
     if (!owner)
         for (const auto& p : read_players(api_table(), w))
             if (p.entity) {
                 owner = p.entity;
                 break;
             }
-    std::string why;
-    const uint32_t id = paths->request(*q, owner, cb, user, now(), &why);
+    const uint32_t id = paths->request(copy, owner, cb, user, now(), &why);
     return id ? id : refuse(why);
 }
 
