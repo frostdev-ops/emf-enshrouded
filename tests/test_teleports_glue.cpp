@@ -403,10 +403,26 @@ TEST_CASE("teleports glue: ground_at asks EMF's ground_at and maps its answer (o
     CHECK(got[0].status == GroundStatus::Ok);
     CHECK(got[0].y == 321);
     CHECK(got[0].deadly_shroud);
+    CHECK_FALSE(got[0].water);
     CHECK_FALSE(got[1].deadly_shroud);
     CHECK(got[1].status == GroundStatus::NotLoaded);
     CHECK(got[1].hop_y == 1100);
     CHECK(got[1].why == "not loaded");
+    // over a lake: EmfGround.water and water_y (an older EMF's EmfGround ends before them: no water then)
+    REQUIRE(g.ground_at(1500, 4740, [&](const Ground& gr) { got.push_back(gr); }));
+    EmfGround c = a;
+    c.fog = EMF_FOG_NONE;
+    c.water = 1;
+    c.water_y = 325.5;
+    r.fake.grounds.back().cb(kW, &c, r.fake.grounds.back().user);
+    REQUIRE(got.size() == 3);
+    CHECK(got[2].water);
+    CHECK(got[2].water_y == 325.5);
+    REQUIRE(g.ground_at(1500, 4740, [&](const Ground& gr) { got.push_back(gr); }));
+    c.size = static_cast<uint32_t>(offsetof(EmfGround, deadly) + sizeof(float));
+    r.fake.grounds.back().cb(kW, &c, r.fake.grounds.back().user);
+    REQUIRE(got.size() == 4);
+    CHECK_FALSE(got[3].water);
     r.api.ground_at = nullptr;  // an older EMF
     CHECK_FALSE(g.ground_at(1, 1, [](const Ground&) {}));
 }

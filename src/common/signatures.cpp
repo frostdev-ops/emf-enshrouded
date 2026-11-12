@@ -251,6 +251,9 @@ constexpr SigDef kSignatures[] = {
     // PathQuery* pathQueryDefaults(PathQuery* q): the game's defaults for all 0x110 bytes but the owner (+0); the
     // pattern holds the radii (+0xF0..+0x10C) and the 20 node costs (+0x6C..+0xBB) it writes.
     {Sig::PathQueryDefaults, "PathQueryDefaults", "40 53 48 83 EC 20 48 8B D9 E8 ?? ?? ?? ?? 66 0F 6F 05 ?? ?? ?? ?? 33 C0 C7 83 F0 00 00 00 02 00 00 00 C7 83 F4 00 00 00 02 00 00 00 C7 83 F8 00 00 00 04 00 00 00 48 C7 83 FC 00 00 00 02 00 00 00 48 89 83 04 01 00 00 89 83 0C 01 00 00 48 8B C3 0F 11 43 6C 0F 11 43 7C 0F 11 83 8C 00 00 00 0F 11 83 9C 00 00 00 0F 11 83 AC 00 00 00 48 83 C4 20 5B C3", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x982890u, 0x61e720u}, false},
+    // WaterSurfacePlane(out, WaterSimulationServer*, WorldPosition*, float maxDown): the plane {0, 1, 0, d} at +0, valid
+    // at +0x10; the surface height is -d (private research water_2026-11-12)
+    {Sig::WaterSurfacePlane, "WaterSurfacePlane", "48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 50 48 8B D9 0F 29 74 24 40 48 8D 4C 24 30 41 B1 01 0F 28 F3 49 8B F8 48 8B F2 E8 ?? ?? ?? ?? 80 7C 24 3C 00 74 ?? 0F 57 C0 F3 48 0F 2A 47 08 F3 0F 59 05 ?? ?? ?? ?? F3 0F 58 44 24 34 0F 57 05 ?? ?? ?? ?? 33 C0 89 03 48 C7 43 04 00 00 80 3F", {kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, kRvaUnchecked, 0x1121680u, 0x8a70f0u}, false},
 };
 static_assert(std::size(kSignatures) == kSigCount, "one entry per Sig");
 }  // namespace

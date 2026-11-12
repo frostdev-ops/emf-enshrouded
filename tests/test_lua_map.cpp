@@ -110,6 +110,36 @@ TEST_CASE("lua 1.26: emf.ground_at answers fn(world, ok, x, y, z, why, hop_y) on
     CHECK(logged("asked false"));
 }
 
+// The water at a landing (lua 1.31): the owner landed on a lake bed after a map teleport.
+TEST_CASE("lua 1.31: emf.ground_at's fn gets water_y (the water surface) when the spot is under water; nil otherwise") {
+    Rig r(L"ground_water");
+    add_script(r.dir, "gw",
+               "emf.command('go', '', function(world)\n"
+               "  emf.ground_at(world, 100, 200, function(w, ok, x, y, z, why, hop_y, fog, water_y)\n"
+               "    emf.log('water ' .. y .. ' ' .. tostring(water_y)) end)\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("gw.go");
+    REQUIRE(r.fake.ground_asks.size() == 1);
+    EmfGround g{};
+    g.size = sizeof g;
+    g.status = EMF_GROUND_OK;
+    g.x = 100;
+    g.y = 300;
+    g.z = 200;
+    g.why = "";
+    g.fog = EMF_FOG_NONE;
+    g.water = 1;
+    g.water_y = 304.5;
+    r.fake.ground_asks[0].cb(kServer, &g, r.fake.ground_asks[0].user);
+    CHECK(logged("water 300.0 304.5"));
+    r.run_command("gw.go");
+    g.water = 0;
+    r.fake.ground_asks.back().cb(kServer, &g, r.fake.ground_asks.back().user);
+    CHECK(logged("water 300.0 nil"));
+}
+
 TEST_CASE("lua 1.26: emf.on_map_click: a click waits for the next client world step, then fn(world, click)") {
     Rig r(L"map_click");
     add_script(r.dir, "ck",

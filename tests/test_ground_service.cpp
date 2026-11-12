@@ -1,6 +1,7 @@
 // Markers step 2 (API v34): ground_at's service: requests answered after server steps from a (fake) voxel ray.
 #include <doctest.h>
 
+#include <array>
 #include <string>
 #include <vector>
 
@@ -150,4 +151,82 @@ TEST_CASE("ground service (review M2): a spot outside the reset box's sides is r
     CHECK(why.find("outside") != std::string::npos);
     CHECK_FALSE(r.svc.request(W(), 5000, 10200, r.cb(), &why));
     CHECK(r.svc.request(W(), 5000, 5000, r.cb(), &why));
+}
+
+// The water at a landing (private research water_2026-11-12): the owner landed on a lake bed after a map teleport.
+namespace {
+struct WaterRig : Rig {
+    WaterReading reading;
+    bool readable = true;
+    std::vector<std::array<double, 4>> asked;  // x, y, z, max_down
+    std::vector<double> fog_y;
+    std::vector<std::pair<bool, double>> water;  // per answer: water, water_y
+    GroundService wsvc{wdeps()};
+    GroundService::Deps wdeps() {
+        GroundService::Deps d = deps();
+        d.water = [this](EmfWorld*, double x, double y, double z, float max_down, WaterReading* out) {
+            asked.push_back({x, y, z, max_down});
+            if (!readable) return false;
+            *out = reading;
+            return true;
+        };
+        d.fog = [this](EmfWorld*, double, double y, double, FogReading* f) {
+            fog_y.push_back(y);
+            f->loaded = true;
+            f->w[0] = 1;  // no fog
+            return true;
+        };
+        return d;
+    }
+    GroundService::Callback wcb() {
+        return [this](EmfWorld*, const GroundAnswer& a) {
+            answers.push_back({a.status == EMF_GROUND_OK, a.y, a.why, a.status, a.hop_y});
+            water.push_back({a.water, a.water_y});
+        };
+    }
+    void run(double ground) {
+        rays = {hit(ground), hit(ground)};
+        std::string why;
+        REQUIRE(wsvc.request(W(), 100, 200, wcb(), &why));
+        wsvc.on_server_tick(W());
+        wsvc.on_server_tick(W());
+        REQUIRE(answers.size() == 1);
+    }
+};
+}  // namespace
+
+TEST_CASE("ground service: over a lake the answer has the water: its surface, the ground kept; the shroud read at the surface") {
+    g_now = 1000;
+    WaterRig r;
+    r.reading.loaded = r.reading.water = true;
+    r.reading.surface_y = 304.0;
+    r.run(300.0);
+    CHECK(r.answers[0].ok);
+    CHECK(r.answers[0].y == doctest::Approx(300.0));  // the ground (a mod placing something wants it)
+    CHECK(r.water[0].first);
+    CHECK(r.water[0].second == doctest::Approx(304.0));
+    REQUIRE_FALSE(r.asked.empty());
+    CHECK(r.asked[0][1] == doctest::Approx(300.5));  // read half a metre over the bed, 1 m down at most
+    CHECK(r.asked[0][3] == doctest::Approx(1.0));
+    REQUIRE_FALSE(r.fog_y.empty());
+    CHECK(r.fog_y[0] == doctest::Approx(305.0));  // 1 m over the surface, where a player lands
+}
+
+TEST_CASE("ground service: shallow water (under 1 m), water not loaded yet, or no water query: no water in the answer") {
+    for (int c = 0; c < 4; ++c) {
+        CAPTURE(c);
+        g_now = 1000;
+        WaterRig r;
+        r.reading.loaded = true;
+        r.reading.water = true;
+        r.reading.surface_y = 300.6;           // c 0: 0.6 m deep
+        if (c == 1) r.reading.loaded = false;  // the world's water still loading
+        if (c == 2) r.reading.water = false;   // dry land
+        if (c == 3) r.readable = false;        // no water query on this build
+        r.run(300.0);
+        CHECK(r.answers[0].ok);
+        CHECK_FALSE(r.water[0].first);
+        REQUIRE_FALSE(r.fog_y.empty());
+        CHECK(r.fog_y[0] == doctest::Approx(301.0));  // 1 m over the ground
+    }
 }

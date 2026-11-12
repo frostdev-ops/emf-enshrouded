@@ -619,6 +619,11 @@ typedef struct EmfGround {
     const char* why; /* not OK: why, in plain English ("" when OK); valid during the callback */
     uint32_t fog;    /* OK: EMF_FOG_* at the spot (1 and 2 m over the ground, and 3 m around): the worst */
     float deadly;    /* OK: the share of deadly shroud there, 0..1 (EMF_FOG_DEATH from 0.25) */
+    /* From EMF 0.6.8 (check size covers water_y): OK and 1 when the spot is under water at least 1 m deep; water_y is
+     * the water's surface (y stays the ground under it; fog is read at the surface). */
+    uint32_t water;
+    uint32_t pad;
+    double water_y;
 } EmfGround;
 /* The ground under a spot, once: on the server world's thread. */
 typedef void (*EmfGroundCallback)(EmfWorld* world, const EmfGround* ground, void* user);

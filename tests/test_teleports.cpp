@@ -107,7 +107,8 @@ struct FakeGame : Game {
         return it->second;
     }
     // the last ground_at is answered
-    void ground(GroundStatus st, double y = 0, double hop_y = 0, const std::string& why = "", bool deadly = false) {
+    void ground(GroundStatus st, double y = 0, double hop_y = 0, const std::string& why = "", bool deadly = false,
+                double water_y = -1) {
         REQUIRE(!grounds.empty());
         GroundAsk a = grounds.back();
         Ground gr;
@@ -116,6 +117,8 @@ struct FakeGame : Game {
         gr.hop_y = hop_y;
         gr.why = why;
         gr.deadly_shroud = deadly;
+        gr.water = water_y >= 0;
+        gr.water_y = water_y;
         a.done(gr);
     }
     void log(const std::string& t) override { logs.push_back(t); }
@@ -619,6 +622,18 @@ TEST_CASE("teleports map: an admin's spot: the ground, then a teleport just abov
     r.g.answer(true, {1500, 321.5, 4740});
     CHECK(r.g.last_tell().find("You are at (1500, 322, 4740)") == 0);
     CHECK(r.t.tp_back(1, {}).find("tp.back: moving player 1 to (4000.0, 700.0, 1200.0)") == 0);  // where they stood
+}
+
+// The owner: "I teleported there and was under water" (a lake's bed was the landing).
+TEST_CASE("teleports map: over a lake the player lands on the water surface, without the ground search (it would take the bed)") {
+    Rig r;
+    r.t.map_teleport(1, true, 1500, 4740);
+    r.g.ground(GroundStatus::Ok, 300, 0, "", false, 304.25);
+    REQUIRE(r.g.tps.size() == 1);
+    CHECK(r.g.tps[0].ask.to.y == doctest::Approx(304.25));
+    CHECK_FALSE(r.g.tps[0].ask.ground);
+    r.g.answer(true, {1500, 304.25, 4740}, true);
+    CHECK(r.g.last_tell().find("You are at (1500, 304, 4740)") == 0);
 }
 
 TEST_CASE("teleports map: admins only by default; off refuses everyone; a refusal is told, nothing is asked") {

@@ -64,7 +64,14 @@ void GroundService::on_server_tick(EmfWorld* world) {
                 r.fog_phase = true;
                 r.ground_y = o.y;
                 r.fog_start = now;
-                r.points = fog_points(a.x, o.y, a.z);
+                // water over it: the landing is its surface (the shroud is read there)
+                WaterReading wr;
+                if (d_.water && d_.water(world, a.x, o.y + kWaterProbeUp, a.z, kWaterMaxDown, &wr) && wr.loaded &&
+                    wr.water && wr.surface_y - o.y >= kWaterLandDepth) {
+                    r.water = true;
+                    r.water_y = wr.surface_y;
+                }
+                r.points = fog_points(a.x, r.water ? r.water_y : o.y, a.z);
                 r.verdicts.assign(r.points.size(), FogVerdict{});
                 if (fog_step(r, now, &a))
                     done.emplace_back(std::move(r), std::move(a));
@@ -88,6 +95,8 @@ void GroundService::on_server_tick(EmfWorld* world) {
 bool GroundService::fog_step(Req& r, uint64_t now, GroundAnswer* a) {
     a->status = EMF_GROUND_OK;
     a->y = r.ground_y;
+    a->water = r.water;
+    a->water_y = r.water_y;
     a->fog = EMF_FOG_UNKNOWN;
     bool all = true;
     for (size_t i = 0; i < r.points.size(); ++i) {

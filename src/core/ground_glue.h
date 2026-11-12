@@ -9,6 +9,7 @@
 
 #include "core/fog_check.h"
 #include "core/ground_search.h"
+#include "core/ground_service.h"
 #include "emf/emf_api.h"
 
 namespace emf::core {
@@ -35,5 +36,12 @@ using FogSampleFn = void* (*)(void* out, const void* fog_query, const int64_t* w
 void ground_set_fog(FogSampleFn fn);
 bool ground_fog(EmfWorld* world, double x, double y, double z, FogReading* out);
 std::string ground_fog_describe();  // what the first fog read found (for the log)
+
+// The water at a point (private research water_2026-11-12): the game's WaterSurfacePlane with the server world's
+// "WaterSimulationServer" singleton (checked: its impl points back to it at +0x50; impl+0x3e5d4 = every water tile
+// loaded). False when it cannot be read (this build, a fault).
+using WaterSurfaceFn = void* (*)(void* out, void* water_server, const int64_t* world_pos, float max_down);
+void ground_set_water(WaterSurfaceFn fn);
+bool ground_water(EmfWorld* world, double x, double y, double z, float max_down, WaterReading* out);
 
 }  // namespace emf::core

@@ -61,6 +61,8 @@ enum class Sig : size_t {
     MapCanvasDraw, UiPushClip, UiPopClip,
     // path queries (API v37), both exes: create, destroy, read a result, the game's query defaults
     CreatePathQuery, DestroyPathQuery, GetPathQueryResult, PathQueryDefaults,
+    // the water surface at a point on the server (a map teleport lands on the water, not the lake bed), both exes
+    WaterSurfacePlane,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

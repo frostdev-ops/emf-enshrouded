@@ -1381,6 +1381,14 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             } else {
                 emf::logf("map: the shroud at a landing is not read on this game build (the fog stays unknown)");
             }
+            // the water over a landing (EmfGround.water): the game's water surface query, when this build has it
+            const auto& water = g_state->sigs[static_cast<size_t>(Sig::WaterSurfacePlane)];
+            if (emf::is_usable(water, known)) {
+                emf::core::ground_set_water(reinterpret_cast<emf::core::WaterSurfaceFn>(water.addr));
+                d.water = emf::core::ground_water;
+            } else {
+                emf::logf("map: the water at a landing is not read on this game build (a lake's bed is the landing)");
+            }
             g_state->map.ground = std::make_unique<emf::core::GroundService>(std::move(d));
             emf::logf("map: ground_at on");
         } else {

@@ -287,7 +287,7 @@ EMF_API_VERSION=38, EMF_WORLD_SERVER=0, EMF_WORLD_PREDICTION=1, EMF_WORLD_CLIENT
 - EmfMarker { uint32_t size; uint32_t entity; const char* id; double x, y, z; const char* text; float height; float max_distance; uint32_t rgba; uint32_t icon; uint32_t flags; uint8_t shape; uint8_t pad[3]; uint32_t game_icon; uint32_t pad2 }
 - EmfMapClick { uint32_t size; uint32_t button; uint32_t mods; uint32_t pad; double x, z }
 - EmfMapDone { uint32_t size; uint32_t player; uint8_t admin; uint8_t pad[7]; double x, z; const char* action }
-- EmfGround { uint32_t size; uint32_t status; double x, y, z; double hop_y; const char* why; uint32_t fog; float deadly }
+- EmfGround { uint32_t size; uint32_t status; double x, y, z; double hop_y; const char* why; uint32_t fog; float deadly; uint32_t water; uint32_t pad; double water_y }
 - EmfMapMarkerType { uint32_t size; uint32_t id; uint32_t flags; uint32_t pad; char name[48] }
 - EmfPlayerView { uint32_t size; uint32_t flags; double x, y, z; float heading_deg; float camera_yaw_deg; float world_size; float pad }
 - EmfGameMarker { uint32_t size; uint32_t type; uint32_t flags; uint32_t pad; double x, y, z }
@@ -304,7 +304,7 @@ EMF_API_VERSION=38, EMF_WORLD_SERVER=0, EMF_WORLD_PREDICTION=1, EMF_WORLD_CLIENT
 
 ## Lua (the lua mod; docs/modding/lua.md)
 
-mod.json has "main": "main.lua" and "depends": {"lua": ">=1.30"} (the Lua host is 1.30.0). Callbacks get a
+mod.json has "main": "main.lua" and "depends": {"lua": ">=1.31"} (the Lua host is 1.31.0). Callbacks get a
 `world` valid only during the callback. world:get(component, id) returns a component as a table with its real
 field names (sdk/include/emf/generated/components.hpp); assigning a field writes the game's data.
 

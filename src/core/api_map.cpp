@@ -118,6 +118,8 @@ bool api_ground_at(EmfWorld* world, double x, double z, EmfGroundCallback cb, vo
             g.why = a.why.c_str();
             g.fog = a.fog;
             g.deadly = a.deadly;
+            g.water = a.water ? 1u : 0u;
+            g.water_y = a.water ? a.water_y : 0;
             cb(w, &g, user);
         },
         &why);
@@ -260,7 +262,11 @@ void cmd_ground(EmfWorld* world, int argc, const char* const* argv, void*) {
                 [reply](EmfWorld*, const GroundAnswer& a) {
                     char line[240];
                     static const char* const kFog[] = {"no shroud", "removed shroud", "shroud", "deadly shroud"};
-                    if (a.status == EMF_GROUND_OK)
+                    if (a.status == EMF_GROUND_OK && a.water)  // a lake: a player lands on its surface
+                        std::snprintf(line, sizeof line, "ground: x %.1f, z %.1f: the ground is at y %.2f under water up to y "
+                                      "%.2f (%s, deadly %.2f)", a.x, a.z, a.y, a.water_y,
+                                      a.fog <= 3 ? kFog[a.fog] : "shroud not known", a.deadly);
+                    else if (a.status == EMF_GROUND_OK)
                         std::snprintf(line, sizeof line, "ground: x %.1f, z %.1f: the ground is at y %.2f (%s, deadly %.2f)",
                                       a.x, a.z, a.y, a.fog <= 3 ? kFog[a.fog] : "shroud not known", a.deadly);
                     else if (a.status == EMF_GROUND_NOT_LOADED)

@@ -132,6 +132,49 @@ bool call_fog(FogSampleFn fn, void* out, const void* fq, const int64_t* pos) {
 
 void ground_set_fog(FogSampleFn fn) { g_fog.store(fn, std::memory_order_release); }
 
+namespace {
+std::atomic<WaterSurfaceFn> g_water{nullptr};
+bool call_water(WaterSurfaceFn fn, void* out, void* ws, const int64_t* pos, float max_down) {
+    __try {
+        fn(out, ws, pos, max_down);
+        return true;
+    } __except (EXCEPTION_EXECUTE_HANDLER) {
+        return false;
+    }
+}
+}  // namespace
+
+void ground_set_water(WaterSurfaceFn fn) { g_water.store(fn, std::memory_order_release); }
+
+bool ground_water(EmfWorld* world, double x, double y, double z, float max_down, WaterReading* out) {
+    WaterSurfaceFn fn = g_water.load(std::memory_order_acquire);
+    if (!fn || !world || !out || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;
+    WorldView v(reinterpret_cast<uint8_t*>(world));
+    auto* ws = static_cast<uint8_t*>(v.singleton("WaterSimulationServer"));
+    uint8_t* impl = nullptr;
+    void* back = nullptr;
+    uint8_t loaded = 0;
+    if (!ws || !seh_read(ws, &impl, 8) || !impl || !seh_read(impl + 0x50, &back, 8) || back != ws ||
+        !seh_read(impl + 0x3e5d4, &loaded, 1)) {
+        static std::atomic<EmfWorld*> told{nullptr};  // once per server world
+        if (told.exchange(world) != world) {
+            CoreState* s = core_state();
+            if (s && s->log_line)
+                s->log_line("map: the water cannot be read in this world (a map teleport into a lake lands on its bed)");
+        }
+        return false;
+    }
+    const int64_t pos[3] = {std::llround(x * kFixed), std::llround(y * kFixed), std::llround(z * kFixed)};
+    alignas(16) uint8_t buf[0x20] = {};
+    if (!call_water(fn, buf, ws, pos, max_down)) return false;
+    float d = 0;
+    std::memcpy(&d, buf + 0xc, sizeof d);
+    out->loaded = loaded != 0;
+    out->water = buf[0x10] != 0 && std::isfinite(d);
+    out->surface_y = -static_cast<double>(d);
+    return true;
+}
+
 bool ground_fog(EmfWorld* world, double x, double y, double z, FogReading* out) {
     FogSampleFn fn = g_fog.load(std::memory_order_acquire);
     if (!fn || !world || !out || !std::isfinite(x) || !std::isfinite(y) || !std::isfinite(z)) return false;

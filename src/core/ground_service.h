@@ -15,6 +15,16 @@
 namespace emf::core {
 
 constexpr size_t kGroundRequestsMax = 64;
+// The water over a landing (private research water_2026-11-12): read half a metre over the ground, 1 m down at most; a
+// surface at least 1 m over the ground is water to land on (a shallower pond is ground).
+constexpr double kWaterProbeUp = 0.5, kWaterLandDepth = 1.0;
+constexpr float kWaterMaxDown = 1.0f;
+
+struct WaterReading {
+    bool loaded = false;  // the world's water has loaded (else unknown)
+    bool water = false;   // a surface was found
+    double surface_y = 0;
+};
 constexpr uint64_t kFogLoadMs = 5000;  // the fog at a landing that does not load in this time stays unknown
 
 struct GroundAnswer {
@@ -24,6 +34,8 @@ struct GroundAnswer {
     std::string why;
     uint32_t fog = EMF_FOG_UNKNOWN;  // OK: the shroud at the landing (fog_check.h)
     float deadly = 0;
+    bool water = false;  // OK: the spot is under water at least kWaterLandDepth deep: a player lands at water_y
+    double water_y = 0;
 };
 
 class GroundService {
@@ -36,6 +48,8 @@ public:
         std::function<bool(EmfWorld*, double x, double z, double from_y, double to_y, RayResult*)> ray;
         // the game's fog reading at a point: false when it cannot be read on this build (the fog stays unknown)
         std::function<bool(EmfWorld*, double x, double y, double z, FogReading*)> fog;
+        // the water at a point: the surface over it, or within max_down under it; false when it cannot be read
+        std::function<bool(EmfWorld*, double x, double y, double z, float max_down, WaterReading*)> water;
         std::function<uint64_t()> now_ms;
     };
     explicit GroundService(Deps d) : d_(std::move(d)) {}
@@ -54,6 +68,8 @@ private:
         // after the ground: the fog at its points, read until loaded (kFogLoadMs at most)
         bool fog_phase = false;
         double ground_y = 0;
+        bool water = false;  // the landing is on water (water_y)
+        double water_y = 0;
         uint64_t fog_start = 0;
         std::vector<std::array<double, 3>> points;
         std::vector<FogVerdict> verdicts;  // per point (EMF_FOG_UNKNOWN: not loaded yet)

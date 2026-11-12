@@ -214,6 +214,11 @@ private:
             // the fog check (an older EMF's EmfGround has no fog: then nothing is known)
             out.deadly_shroud = g->status == EMF_GROUND_OK && g->size >= offsetof(EmfGround, deadly) + sizeof(float) &&
                                 g->fog == EMF_FOG_DEATH;
+            // the water over the spot (EMF 0.6.8: an older EmfGround ends before it)
+            if (g->status == EMF_GROUND_OK && g->size >= offsetof(EmfGround, water_y) + sizeof(double) && g->water) {
+                out.water = true;
+                out.water_y = g->water_y;
+            }
         }
         slot->done(out);
         delete slot;

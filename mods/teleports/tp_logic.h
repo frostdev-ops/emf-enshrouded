@@ -253,6 +253,8 @@ struct Ground {
     double y = 0, hop_y = 0;
     std::string why;
     bool deadly_shroud = false;  // Ok: a player standing there would be in the deadly shroud (EMF reads it)
+    bool water = false;          // Ok: under water at least 1 m deep: a player lands on its surface (water_y)
+    double water_y = 0;
 };
 constexpr double kAboveGround = 0.5;
 constexpr uint64_t kDeadlyWatchMs = 3000;  // after a map teleport: landed in the deadly shroud -> back  // the teleport lands this far above the ground found (the game's search settles it)
@@ -764,7 +766,8 @@ private:
             return;
         }
         if (gr.status == GroundStatus::Ok) {
-            land(s, gr.y);
+            if (gr.water) land(s, gr.water_y, true);  // on the surface (the owner landed on a lake's bed)
+            else land(s, gr.y);
             return;
         }
         if (s.hopped) {  // the place loaded around the player and still has no ground: back
@@ -797,8 +800,10 @@ private:
         if (!ok) refused(s);
     }
 
-    void land(const Spot& s, double ground_y) {
-        const bool ok = g_.teleport(s.who, {{s.x, ground_y + kAboveGround, s.z}, true, 0}, [this, s](const Outcome& o) {
+    // `on_water`: y is the water's surface, the landing as it is (the game's ground search would take the lake's bed)
+    void land(const Spot& s, double ground_y, bool on_water = false) {
+        const Vec to{s.x, on_water ? ground_y : ground_y + kAboveGround, s.z};
+        const bool ok = g_.teleport(s.who, {to, !on_water, 0}, [this, s](const Outcome& o) {
             if (s.epoch != epoch_ || o.session_ended) return;
             if (!o.moved) {
                 if (s.hopped) {

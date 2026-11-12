@@ -84,7 +84,10 @@ void ground_cb_body(EmfWorld* w, const EmfGround* g, void* user) {
                 static const char* const kFog[] = {"none", "removed", "shroud", "deadly"};
                 const uint32_t fog = g && g->size >= offsetof(EmfGround, deadly) + sizeof(float) ? g->fog : EMF_FOG_UNKNOWN;
                 lua_pushstring(s->L, fog <= EMF_FOG_DEATH ? kFog[fog] : "unknown");
-                call_lua(*s, 8);
+                // 1.31: the water's surface when the spot is under water (an older core's EmfGround ends before it)
+                if (ok && g->size >= offsetof(EmfGround, water_y) + sizeof(double) && g->water) lua_pushnumber(s->L, g->water_y);
+                else lua_pushnil(s->L);
+                call_lua(*s, 9);
                 ++s->generation;
             }
             if (s->L) luaL_unref(s->L, LUA_REGISTRYINDEX, slot->ref);
@@ -226,7 +229,8 @@ int l_remove_map_action(lua_State* L) {
     return 1;
 }
 
-// emf.ground_at(world, x, z, fn(world, ok, x, y, z, why, hop_y, fog)): the ground under (x, z) of the server world; fn
+// emf.ground_at(world, x, z, fn(world, ok, x, y, z, why, hop_y, fog, water_y)): the ground under (x, z) of the server
+// world (water_y, 1.31: the water's surface when the spot is under water at least 1 m deep, else nil); fn
 // once with the answer (the place may take a few seconds to load). hop_y: when nobody is near the spot (not ok), a
 // height over it where a player may be teleported so it loads (ask again then); nil otherwise. fog: the shroud a player
 // standing there would be in: "none", "removed", "shroud", "deadly" or "unknown". True when asked; false when refused.
