@@ -3,13 +3,24 @@
 -- Copy it: the parts are emf.player_view, emf.map_markers, emf.canvas and emf.canvas_draw (EMF's lua.md, "Canvases").
 
 local shown = true
-local zooms = {0.5, 1, 2, 4, 8}  -- metres per canvas unit
-local zoom = 3                   -- 2 m per unit at the start
+local zooms = {0.5, 1, 2, 4, 8}  -- metres per canvas unit: the "zoom" setting's options in mod.json
 local placed = nil               -- the canvas spec last set (set again only when a setting changed)
 
+-- The zoom is a setting, so it stays from one game to the next; the keys step through zooms and change the setting.
+local function zoom()
+  local m = tonumber(emf.setting("zoom"))
+  for i, z in ipairs(zooms) do
+    if z == m then return i end
+  end
+  return 3  -- 2 m per unit
+end
+local function set_zoom(i)
+  emf.set_setting("zoom", tostring(zooms[math.max(1, math.min(#zooms, i))]))
+end
+
 emf.on_key("toggle_key", function() shown = not shown; placed = nil end, "client")
-emf.on_key("zoom_in_key", function() zoom = math.max(1, zoom - 1) end, "client")
-emf.on_key("zoom_out_key", function() zoom = math.min(#zooms, zoom + 1) end, "client")
+emf.on_key("zoom_in_key", function() set_zoom(zoom() - 1) end, "client")
+emf.on_key("zoom_out_key", function() set_zoom(zoom() + 1) end, "client")
 
 -- The panel: where and how big (the settings), hidden when switched off with the key.
 local function place()
@@ -43,7 +54,7 @@ emf.on_tick(function(world)
   if not view then return end
   local size = place()
   if not shown then return end
-  local r, m = size / 2, zooms[zoom]
+  local r, m = size / 2, zooms[zoom()]
   local round = emf.setting("shape") == "circle"
   local list = {
     round and {"circle", r, r, r, colour = 0x14181ce6} or {"rect", 0, 0, size, size, colour = 0x14181ce6},  -- background
