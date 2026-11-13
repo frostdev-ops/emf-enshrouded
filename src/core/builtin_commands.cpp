@@ -11,6 +11,7 @@
 #include <algorithm>
 #include <cstring>
 #include <memory>
+#include <mutex>
 #include <vector>
 
 #include "common/offsets.h"
@@ -296,6 +297,81 @@ void cmd_health(EmfWorld* w, int argc, const char* const* argv, void* u) {
         return;
     }
     command_reply_line(fmt("entity %u: health %d -> %d of %d", id, cur, want, max));
+}
+
+// god [entity | me] [on|off]: the entity (you by default) cannot drop below 1 health from hits, falls, the shroud, the
+// cold or drowning: a hit rule on it (v31) with min_health 1 for every kind. One rule per entity; the rules go when it
+// is switched off and when a new world starts (builtin_world_reset). Alone: who has it. Host.
+void cmd_god(EmfWorld* w, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    const uint32_t me = c.player ? c.player() : 0;
+    if (argc == 1) {
+        std::string line;
+        {
+            std::lock_guard<std::mutex> l(c.god_lock);
+            for (const auto& g : c.god)
+                line += fmt("%sentity %u%s", line.empty() ? "" : ", ", g.first, g.first == me ? " (you)" : "");
+        }
+        command_reply_line(line.empty() ? "god: nobody has it" : "god: " + line);
+        return;
+    }
+    // [entity | me] [on|off]: an entity first unless the first word is on or off
+    uint32_t id = me;
+    bool on = true, ok = true;
+    int at = 1;
+    if (const std::string word = lower(argv[at]); word != "on" && word != "off") {
+        if (word != "me") ok = parse_uint(argv[at], 0xffffffffu, &id) && id;
+        ++at;
+    }
+    if (ok && at < argc) {
+        const std::string word = lower(argv[at++]);
+        ok = word == "on" || word == "off";
+        on = word == "on";
+    }
+    if (!ok || at != argc) {
+        command_reply_line("usage: god [entity | me] [on|off]");
+        return;
+    }
+    if (!id) {
+        command_reply_line("no player of yours here: name an entity (god <entity> [on|off])");
+        return;
+    }
+    std::lock_guard<std::mutex> l(c.god_lock);
+    const auto it = c.god.find(id);
+    if (!on) {
+        if (it == c.god.end()) {
+            command_reply_line(fmt("entity %u has no god", id));
+            return;
+        }
+        if (c.api->hit_rule_remove) c.api->hit_rule_remove(it->second);
+        c.god.erase(it);
+        command_reply_line(fmt("entity %u: god off", id));
+        return;
+    }
+    if (it != c.god.end()) {
+        command_reply_line(fmt("entity %u has god already", id));
+        return;
+    }
+    int32_t cur = 0;
+    if (!c.api->attribute_get || !c.api->attribute_get(w, id, EMF_ATTR_HEALTH, &cur)) {
+        command_reply_line(fmt("entity %u has no health here (not a creature or player, or not the host)", id));
+        return;
+    }
+    EmfHitRule r{};
+    r.size = sizeof r;
+    r.target = id;
+    r.kinds = EMF_HIT_KINDS_ALL;
+    r.min_health = 1;
+    r.scale = 1.0f;
+    const uint32_t rule = c.api->hit_rule_add ? c.api->hit_rule_add(&r) : 0;
+    if (!rule) {
+        command_reply_line(fmt("entity %u: no god: the hit rule was refused (hits are off on this game build, or 64 rules "
+                               "are in use; hits and the log say which)", id));
+        return;
+    }
+    c.god[id] = rule;
+    command_reply_line(fmt("entity %u: god on: it keeps at least 1 health (hits, falls, the shroud, the cold, drowning) "
+                           "until god %u off or a new world", id, id));
 }
 
 // ai <entity>: what a creature's AI does: its enemy01 state, whom it guards (follows), what it fights, its aggro
@@ -1467,6 +1543,8 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         {"inv", "<entity>: every stack in the entity's inventories, with slot ids and gear levels (host)", cmd_inv},
         {"health", "<entity> [percent 1-100]: a creature's or player's health; with a percent, set it to that share of "
                    "its maximum, e.g. a beast beaten down for taming (host)", cmd_health},
+        {"god", "[entity | me] [on|off]: the entity (you by default) cannot drop below 1 health from hits, falls, the "
+                "shroud, the cold or drowning; alone: who has it (host)", cmd_god},
         {"ai", "<entity>: what a creature's AI does: its state, whom it guards and fights, its aggro and faction (host)",
          cmd_ai},
         {"order", "<enemy> <target> [seconds] [damage]: the enemy goes for the target (a door, a gate, a creature, a "
@@ -1500,6 +1578,13 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         ok &= ctx.center->add(d.name, d.help, d.fn, &ctx, nullptr, anywhere, flags);
     }
     return ok;
+}
+
+void builtin_world_reset(BuiltinContext& ctx) {
+    std::lock_guard<std::mutex> l(ctx.god_lock);
+    for (const auto& g : ctx.god)
+        if (ctx.api && ctx.api->hit_rule_remove) ctx.api->hit_rule_remove(g.second);
+    ctx.god.clear();
 }
 
 }  // namespace emf::core

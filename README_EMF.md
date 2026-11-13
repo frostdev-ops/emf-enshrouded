@@ -449,6 +449,7 @@ end the game; use `commands.txt` then.)
 | `destroy <entity>` | removes an entity from the world (host); refuses players and ids the world does not have |
 | `near [radius 1-200]` | the entities around you (default 10 m), nearest first, tagged: player, villager, inventory, animal, plant (level), health |
 | `inv <entity>` | every stack in the entity's inventories: inventory entity, slot, slot id (for `take_items`), item, count, and a gear item's data entity, level and rarity |
+| `god [entity \| me] [on\|off]` | for tests: the entity (you by default) cannot drop below 1 health from hits, falls, the shroud, the cold or drowning (a hit rule, API v31; `hits` says whether hit rules work on this game build). `god` alone lists who has it; `god off` or `god <entity> off` ends it, and a new world ends them all (e.g. `god`, `god on`, `god 1025 off`) |
 
 Example reply (from a test run):
 ```

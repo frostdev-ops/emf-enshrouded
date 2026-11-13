@@ -748,6 +748,7 @@ void hk_register_all_programs(void* world) {
             emf::core::path_world_reset();                // path queries of the old world end (cancelled)
             if (g_doors) g_doors->world_reset();          // door orders and locks of the old world go
             if (g_orders) g_orders->world_reset();        // enemy orders of the old world end
+            emf::core::builtin_world_reset(g_builtin);   // god's hit rules of the old world go
             if (g_moves) g_moves->world_reset();  // move orders of the old world end (cancelled, no world)
             {
                 std::lock_guard<std::mutex> l(g_guard_lock);
