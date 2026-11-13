@@ -322,3 +322,49 @@ TEST_CASE("net remote: the reasons for dropped messages are remembered up to a l
     CHECK(notices[0].find("bm/x127") != std::string::npos);
     CHECK(server.posted.empty());  // and none of them reached a mod
 }
+
+TEST_CASE("net remote: a message whose next line takes more than 30 s is dropped at either end; the next message arrives") {
+    Pair p;
+    p.join();
+    std::string why;
+    const std::string big(3000, 'q');
+    // a player's message: its first line, a long silence, the rest
+    REQUIRE(p.client.s.to_server("bm", "bm/pick", big, &why));
+    const auto up = p.client.s.client_take(100);
+    REQUIRE(up.size() >= 3u);
+    p.server.s.server_line(kHandle, kAcct, up[0]);
+    p.server.now += 30001;
+    for (size_t i = 1; i < up.size(); ++i) p.server.s.server_line(kHandle, kAcct, up[i]);
+    p.server.step(EMF_WORLD_SERVER);
+    CHECK(p.at_server.empty());
+    REQUIRE(p.client.s.to_server("bm", "bm/pick", "next", &why));
+    p.to_server();
+    p.server.step(EMF_WORLD_SERVER);
+    REQUIRE(p.at_server.size() == 1);
+    CHECK(p.at_server[0].data == "next");
+    // the server's message to the player, the same way
+    REQUIRE(p.server.s.to_player("bm", kEntity, "bm/show", big, &why));
+    const auto down = std::move(p.chat_to_player);
+    p.chat_to_player.clear();
+    REQUIRE(down.size() >= 3u);
+    p.client.s.client_line(down[0].second, kAcct);
+    p.client.now += 30001;
+    for (size_t i = 1; i < down.size(); ++i) p.client.s.client_line(down[i].second, kAcct);
+    p.client.step(EMF_WORLD_CLIENT);
+    CHECK(p.at_client.empty());
+    REQUIRE(p.server.s.to_player("bm", kEntity, "bm/show", "next", &why));
+    p.to_client();
+    p.client.step(EMF_WORLD_CLIENT);
+    REQUIRE(p.at_client.size() == 1);
+    CHECK(p.at_client[0].data == "next");
+    // within 30 s a slow message still arrives whole
+    REQUIRE(p.client.s.to_server("bm", "bm/pick", big, &why));
+    const auto slow = p.client.s.client_take(100);
+    for (const auto& line : slow) {
+        p.server.s.server_line(kHandle, kAcct, line);
+        p.server.now += 29000;
+    }
+    p.server.step(EMF_WORLD_SERVER);
+    REQUIRE(p.at_server.size() == 2);
+    CHECK(p.at_server[1].data == big);
+}

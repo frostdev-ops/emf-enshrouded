@@ -171,6 +171,7 @@ struct ClientLinkDeps {
     std::string emf_version;
     uint32_t api = 0;
     uint32_t build = 0;
+    std::function<uint64_t()> now_ms;  // optional: a half-received message is dropped after 30 s (net_peers.h)
 };
 constexpr size_t kClientOutboxLines = 64;
 

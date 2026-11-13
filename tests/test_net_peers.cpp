@@ -81,6 +81,34 @@ TEST_CASE("net reassembly: a fragment whose type, version or encoding differs fr
     }
 }
 
+TEST_CASE("net reassembly: with a clock, a message whose next line takes more than 30 s is dropped") {
+    const auto lines = msg(0, std::string(3000, 'a'));
+    REQUIRE(lines.size() >= 3u);
+    std::string why;
+    Reassembly late;
+    CHECK_FALSE(late.add(lines[0], &why, 1000).has_value());
+    CHECK_FALSE(late.add(lines[1], &why, 1000 + kPartialMaxAgeMs + 1).has_value());
+    CHECK(why.find("without the ones before") != std::string::npos);
+    for (size_t i = 2; i < lines.size(); ++i) CHECK_FALSE(late.add(lines[i], &why, 40000).has_value());
+    auto next = late.add(msg(lines.back().seq + 1, "after")[0], &why, 40000);
+    REQUIRE(next.has_value());
+    CHECK(next->data == "after");
+    Reassembly slow;  // each line within the limit of the one before: the whole message, however long it took
+    uint64_t now = 1000;
+    std::optional<Reassembly::Message> whole;
+    for (const auto& l : lines) whole = slow.add(l, &why, now += kPartialMaxAgeMs);
+    REQUIRE(whole.has_value());
+    CHECK(whole->data.size() == 3000u);
+    Reassembly backwards;  // a clock that went back is no reason to drop a message
+    CHECK_FALSE(backwards.add(lines[0], &why, 5000).has_value());
+    for (size_t i = 1; i < lines.size(); ++i) whole = backwards.add(lines[i], &why, 4000);
+    REQUIRE(whole.has_value());
+    CHECK(whole->data.size() == 3000u);
+    Reassembly no_clock;  // without a clock nothing expires
+    for (const auto& l : lines) whole = no_clock.add(l, &why);
+    CHECK(whole.has_value());
+}
+
 TEST_CASE("net peers: a hello makes a peer; a new handle for the account replaces it; a reused handle is not it") {
     PeerTable t;
     t.hello(3, 0xAAA, {{"bm/state", 1}, {"bm/pick", 2}});

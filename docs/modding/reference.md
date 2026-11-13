@@ -663,7 +663,8 @@ api->net_to_player(w, from->player, "mymod/show", "ok", 2);  // the server -> th
   that player's chat reader has more than 16 KiB waiting (at most 256 lines wait per player; one that waited 30 s is
   dropped), and adds at most 32 lines per receive-loop run (shared with command replies). A message goes into the
   outbox whole or not at all, and only to the connection that said hello (after a reconnect, the new one). A game
-  sends at most 4 lines a frame (up to 64 wait).
+  sends at most 4 lines a frame (up to 64 wait). The receiving end drops a message whose next line takes more than
+  30 s to arrive.
 - **Settings** (`emf\emf_core.ini`): `[net] enabled=0` leaves the chat hooks out (messages stay in process),
   `greet=0` as above. On a game that hosts, the hooks are installed even without `[chat] players=1` (only the
   command policy stays behind that switch). `mods_check`, `mods_required` and `mods_info` are the mod check on join's

@@ -4,7 +4,8 @@
 
 namespace emf::core::net {
 
-std::optional<Reassembly::Message> Reassembly::add(const NetLine& line, std::string* why) {
+std::optional<Reassembly::Message> Reassembly::add(const NetLine& line, std::string* why, uint64_t now_ms) {
+    if (now_ms && partial_ms_ && now_ms >= partial_ms_ && now_ms - partial_ms_ > kPartialMaxAgeMs) partial_.clear();
     const auto drop = [&](const char* r) -> std::optional<Message> {
         if (why) *why = r;
         return std::nullopt;
@@ -28,6 +29,7 @@ std::optional<Reassembly::Message> Reassembly::add(const NetLine& line, std::str
         return drop("a fragment without the ones before it");
     }
     partial_.push_back(line);
+    partial_ms_ = now_ms;
     if (line.frag + 1 < line.count) return std::nullopt;
     const auto data = join_payloads(partial_);
     Message m;
