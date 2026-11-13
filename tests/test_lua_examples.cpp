@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstdlib>
 #include <filesystem>
 #include <memory>
 
@@ -1209,9 +1210,9 @@ std::vector<std::string> lua_examples() {
 }
 // The examples that have their own tests in this file. A new folder fails the first test until it is added here (with
 // tests of its own).
-const std::set<std::string> kTestedExamples = {"bus_client",  "bus_service", "chat_command", "hotkey_wheel",
-                                               "hud_widget",  "loot_ticker", "net_ping",     "pet_follow",
-                                               "settings_tour"};
+const std::set<std::string> kTestedExamples = {"bus_client", "bus_service", "chat_command", "gate",
+                                               "hotkey_wheel", "hud_widget", "loot_ticker", "net_ping",
+                                               "pet_follow", "settings_tour"};
 
 EmfCommandSender sender_of(uint32_t entity, uint64_t account, bool chat, bool admin) {
     EmfCommandSender s{};
@@ -1358,8 +1359,9 @@ TEST_CASE("lua examples: every folder in examples/lua loads, has its own tests h
         CHECK(x.host->status(id) == "running");
         // the rule (docs/modding/README.md, "Examples"): "emf" is the API version of the Lua host it depends on
         const std::string json = read_all(EMF_SOURCE_DIR "/examples/lua/" + id + "/mod.json");
-        const bool needs_18 = json.find(R"("lua": ">=1.18")") != std::string::npos ||
-                              json.find(R"("lua": ">=1.19")") != std::string::npos;  // 1.18 and later: "emf": 20
+        const size_t lua_at = json.find(R"("lua": ">=1.)");
+        const int lua_minor = lua_at == std::string::npos ? 0 : std::atoi(json.c_str() + lua_at + std::strlen(R"("lua": ">=1.)"));
+        const bool needs_18 = lua_minor >= 18;  // 1.18 and later: "emf": 20
         const bool needs_14 = json.find(R"("lua": ">=1.4")") != std::string::npos;
         CHECK((needs_18 || needs_14 || json.find(R"("lua": ">=1.3")") != std::string::npos));
         CHECK(json.find(needs_18 ? R"("emf": 20)" : needs_14 ? R"("emf": 17)" : R"("emf": 14)") != std::string::npos);
@@ -2122,4 +2124,76 @@ TEST_CASE("lua example bus_service: a flood of pings gets at most one hello a se
     for (int i = 0; i < 100; ++i) host.tick(kServer);
     CHECK(logged("HELLO 2"));  // the pings were answered with one hello, once a second had passed
     CHECK_FALSE(logged("HELLO 3"));
+}
+
+// gate: doors (Lua 1.30) within 10 m of whoever asked
+namespace {
+// Player 1 stands at 10, 20, 30 (ExampleRig). Doors around: 500 closed 3 m away, 501 open 5 m, 502 driven by a switch
+// 6 m, 504 closed and locked 8 m; 503 is 30 m away, 50 is near but no door.
+void gate_doors(Fake& f) {
+    const struct {
+        uint32_t id;
+        double x, z;
+        uint32_t state;
+    } doors[] = {{500, 13, 30, EMF_DOOR_CLOSED},
+                 {501, 15, 30, EMF_DOOR_OPEN},
+                 {502, 16, 30, EMF_DOOR_CLOSED | EMF_DOOR_LOGIC},
+                 {503, 40, 30, EMF_DOOR_CLOSED},
+                 {504, 10, 38, EMF_DOOR_CLOSED | EMF_DOOR_LOCKED}};
+    for (const auto& d : doors) {
+        place_entity(f, d.id, d.x, 20, d.z);
+        f.door_states[d.id] = d.state;
+        f.entities.push_back(d.id);
+    }
+    place_entity(f, 50, 11, 20, 30);
+    f.entities.push_back(50);
+}
+}  // namespace
+
+TEST_CASE("lua example gate: open and close act on the doors within 10 m, skip those already so and those a switch drives") {
+    ExampleRig x("gate");
+    gate_doors(x.r.fake);
+    CHECK(x.reply("gate.open") == "Opened 2 of 4 door(s) within 10 m, 1 already so, 1 driven by a switch");
+    CHECK(x.r.fake.door_calls == std::vector<std::string>{"set 500 1 0", "set 504 1 0"});  // never 502 or 503
+    x.r.fake.door_calls.clear();
+    x.reply("gate.open back");
+    CHECK(x.r.fake.door_calls == std::vector<std::string>{"set 500 1 2", "set 504 1 2"});
+    x.r.fake.door_calls.clear();
+    CHECK(x.reply("gate.close") == "Closed 1 of 4 door(s) within 10 m, 2 already so, 1 driven by a switch");
+    CHECK(x.r.fake.door_calls == std::vector<std::string>{"set 501 0 0"});
+    x.r.fake.door_calls.clear();
+    CHECK(x.reply("gate.open sideways") == "usage: gate.open [front|back]");
+    CHECK(x.r.fake.door_calls.empty());
+    CHECK_FALSE(x.for_players("gate.open"));  // host only: the console, the host's own chat, admins
+    CHECK_FALSE(x.for_players("gate.close"));
+    CHECK_FALSE(x.for_players("gate.lock"));
+}
+
+TEST_CASE("lua example gate: lock and lock off; a refused door is counted and the answer points to the log") {
+    ExampleRig x("gate");
+    gate_doors(x.r.fake);
+    CHECK(x.reply("gate.lock") == "Locked 2 of 4 door(s) within 10 m, 1 already so, 1 driven by a switch");
+    CHECK(x.r.fake.door_calls == std::vector<std::string>{"lock 500 1", "lock 501 1"});
+    x.r.fake.door_calls.clear();
+    CHECK(x.reply("gate.lock off") == "Unlocked 1 of 4 door(s) within 10 m, 2 already so, 1 driven by a switch");
+    CHECK(x.r.fake.door_calls == std::vector<std::string>{"lock 504 0"});
+    x.r.fake.door_calls.clear();
+    CHECK(x.reply("gate.lock maybe") == "usage: gate.lock [off]");
+    CHECK(x.r.fake.door_calls.empty());
+    x.r.api.door_set = [](EmfWorld*, uint32_t, uint32_t, uint32_t) { return false; };  // the core refuses (logged)
+    CHECK(x.reply("gate.open") ==
+          "Opened 0 of 4 door(s) within 10 m, 1 already so, 1 driven by a switch, 2 refused (see the log)");
+}
+
+TEST_CASE("lua example gate: the doors near the player who typed it in the chat; none near, or no player known") {
+    ExampleRig x("gate");
+    gate_doors(x.r.fake);
+    place_entity(x.r.fake, 2, 300, 20, 300);  // far from every door
+    x.r.fake.sender = sender_of(2, 0xBB, true, true);
+    CHECK(x.reply("gate.open") == "No door within 10 m of you");
+    place_entity(x.r.fake, 2, 40, 20, 33);  // 3 m from door 503
+    CHECK(x.reply("gate.open") == "Opened 1 of 1 door(s) within 10 m");
+    CHECK(x.r.fake.door_calls == std::vector<std::string>{"set 503 1 0"});
+    x.r.fake.sender = sender_of(0, 0xBB, true, true);
+    CHECK(x.reply("gate.close") == "EMF could not tell which player you are");
 }
