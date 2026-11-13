@@ -474,9 +474,9 @@ TEST_CASE("CharSource: keys without characters (Enter, arrows) do not count; key
     CharSource s;
     s.legacy_seen();
     for (int i = 0; i < 5; ++i) {
-        CHECK(s.raw_down(0x1C, L"").empty());  // Enter's character is a control one: it does not count
+        CHECK(s.raw_down(0x1C, L"\r").empty());  // Enter's character is a control one: it does not count
         CHECK(s.raw_up(0x1C).empty());
-        CHECK(s.raw_down(0x0E, L"").empty());  // Backspace
+        CHECK(s.raw_down(0x0E, L"\b").empty());  // Backspace
         CHECK(s.raw_up(0x0E).empty());
     }
     CHECK_FALSE(s.from_raw());
@@ -513,7 +513,6 @@ TEST_CASE("fallback_chars: a letter in the case Shift and Caps Lock make, digits
     CHECK(fallback_chars('A', true, false) == L"A");
     CHECK(fallback_chars('A', false, true) == L"A");
     CHECK(fallback_chars('A', true, true) == L"a");
-    CHECK(fallback_chars(0xDC, false, false) == L"\u00fc");  // a German key that maps to U+00DC gives the small letter
     CHECK(fallback_chars('1', false, false) == L"1");
     CHECK(fallback_chars('1', true, false) == L"");  // Shift+1 is a layout's own symbol: not guessed
     CHECK(fallback_chars(' ', true, false) == L" ");
@@ -523,22 +522,59 @@ TEST_CASE("fallback_chars: a letter in the case Shift and Caps Lock make, digits
     CHECK(fallback_chars(0x0D, false, false) == L"");  // a control character
 }
 
+// Review (0.6.9): AltGr (Ctrl+Alt) or Alt with a key: no guess (AltGr+Q is @ on a German keyboard, not q; a Ctrl+Alt
+// hotkey must type nothing). A non-English letter only plain: Shift or Caps Lock may give another character on its
+// layout (French Shift+e-acute is 2, Swiss Shift+u-umlaut is e-grave), so no capital is guessed.
+TEST_CASE("fallback_chars (review): nothing with Alt or AltGr; a non-English letter only without Shift and Caps Lock") {
+    CHECK(fallback_chars('Q', false, false, true) == L"");
+    CHECK(fallback_chars('7', false, false, true) == L"");
+    CHECK(fallback_chars(' ', false, false, true) == L"");
+    CHECK(fallback_chars(0xDC, false, false) == L"\u00fc");  // a key printed U+00DC types the small letter
+    CHECK(fallback_chars(0xDC, true, false) == L"");
+    CHECK(fallback_chars(0xDC, false, true) == L"");
+    CHECK(fallback_chars(0xDF, true, false) == L"");  // German sharp s with Shift is ?, not guessed
+}
+
+namespace {
+RawKeyInfo key(uint16_t scan, uint32_t vk, int n, const wchar_t* proton, const wchar_t* fallback, const wchar_t* typed,
+               bool waits) {
+    RawKeyInfo k;
+    k.scan = scan;
+    k.vk = vk;
+    k.n = n;
+    k.proton = proton;
+    k.fallback = fallback;
+    k.typed = typed;
+    k.waits = waits;
+    return k;
+}
+}  // namespace
+
 TEST_CASE("KeyDebugLog: off by default; on, one line per key event while the console is open, the first 20 presses only") {
     KeyDebugLog log;
-    CHECK(log.raw_key(0x23, 0x48, L"h", L"", L"").empty());  // off
+    CHECK(log.raw_key(key(0x23, 0x48, 1, L"h", L"", L"", true)).empty());  // off
     log.enable(true);
     CHECK(log.opened() == "overlay keys: the console opened; logging its first 20 key presses ([overlay] debug_keys=1)");
-    CHECK(log.raw_key(0x23, 0x48, L"h", L"", L"") ==
-          "overlay keys: raw key 0x23 (vk 0x48): Proton gives \"h\"; typed now: nothing (a character message should follow)");
+    CHECK(log.raw_key(key(0x23, 0x48, 1, L"h", L"", L"", true)) ==
+          "overlay keys: raw key 0x23 (vk 0x48): ToUnicodeEx 1 \"h\"; typed now: nothing (held for a character message)");
     CHECK(log.key_message(0x23, 0x48) == "overlay keys: key message 0x23 (vk 0x48)");
     CHECK(log.character(L'h', true) == "overlay keys: character message \"h\" (U+0068): to the console");
-    CHECK(log.raw_key(0x10, 0x51, L"", L"q", L"q") ==
-          "overlay keys: raw key 0x10 (vk 0x51): Proton gives nothing, the key's own letter \"q\"; typed now: \"q\"");
+    RawKeyInfo q = key(0x10, 0x51, 0, L"", L"Q", L"Q", false);
+    q.shift = true;
+    q.caps = false;
+    CHECK(log.raw_key(q) ==
+          "overlay keys: raw key 0x10 (vk 0x51, held: Shift): ToUnicodeEx 0, the key's own letter \"Q\"; typed now: \"Q\"");
     CHECK(log.character(0x2603, false) == "overlay keys: character message \"\\u2603\" (U+2603): not for the console");
-    for (int i = 2; i < 20; ++i) CHECK_FALSE(log.raw_key(0x1E, 0x41, L"a", L"", L"").empty());
-    CHECK(log.raw_key(0x1E, 0x41, L"a", L"", L"") ==
+    CHECK(log.raw_key(key(0x1A, 0xBA, -1, L"", L"", L"", false)) ==
+          "overlay keys: raw key 0x1A (vk 0xBA): ToUnicodeEx -1 (a dead key); typed now: nothing");
+    RawKeyInfo c = key(0x2E, 0x43, 0, L"", L"", L"", false);
+    c.ctrl = true;
+    c.shortcut = true;
+    CHECK(log.raw_key(c) == "overlay keys: raw key 0x2E (vk 0x43, held: Ctrl): a shortcut (Ctrl held), not typed");
+    for (int i = 4; i < 20; ++i) CHECK_FALSE(log.raw_key(key(0x1E, 0x41, 1, L"a", L"", L"", true)).empty());
+    CHECK(log.raw_key(key(0x1E, 0x41, 1, L"a", L"", L"", true)) ==
           "overlay keys: 20 key presses logged; no more until the game starts again");
-    CHECK(log.raw_key(0x1E, 0x41, L"a", L"", L"").empty());
+    CHECK(log.raw_key(key(0x1E, 0x41, 1, L"a", L"", L"", true)).empty());
     CHECK(log.key_message(0x1E, 0x41).empty());
     CHECK(log.character(L'a', true).empty());
     CHECK(log.opened().empty());

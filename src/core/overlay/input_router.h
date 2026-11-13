@@ -110,10 +110,22 @@ private:
 };
 
 // The characters for a key when ToUnicodeEx gave none (seen possible under Proton: a Linux player's console stayed
-// empty): `mapped` is MapVirtualKeyEx(vk, MAPVK_VK_TO_CHAR), the character printed on the key. A letter comes in the
-// case Shift and Caps Lock make; a digit or another symbol only without Shift (Shift's symbol is the layout's own); a dead
-// key (the high bit), a control character or 0 gives nothing.
-std::wstring fallback_chars(uint32_t mapped, bool shift, bool caps);
+// empty): `mapped` is MapVirtualKeyEx(vk, MAPVK_VK_TO_CHAR), the character printed on the key. An English letter comes in
+// the case Shift and Caps Lock make; any other letter, a digit or a symbol only without Shift and Caps Lock (they give
+// the layout's own character, often not the capital: French Shift+e-acute is 2); nothing with Alt or AltGr held (AltGr+Q
+// is @ on a German keyboard), for a dead key (the high bit), a control character or 0.
+std::wstring fallback_chars(uint32_t mapped, bool shift, bool caps, bool alt = false);
+
+// One raw key press for the console, for KeyDebugLog.
+struct RawKeyInfo {
+    uint16_t scan = 0;
+    uint32_t vk = 0;
+    bool shift = false, ctrl = false, alt = false, caps = false;  // held (Caps Lock: on)
+    bool shortcut = false;  // Ctrl held without Alt: a shortcut, not typed
+    int n = 0;              // ToUnicodeEx's result (< 0: a dead key)
+    std::wstring proton, fallback, typed;  // ToUnicodeEx's characters, fallback_chars' when it gave none, typed now
+    bool waits = false;     // nothing typed now: the characters are held for a character message
+};
 
 // [overlay] debug_keys=1: one log line per key event while the console is open, for the first `max` key presses of a game
 // start (a raw key press, or a key message where no raw input comes), so a player's report shows where typed characters
@@ -124,10 +136,7 @@ public:
     void enable(bool on) { on_ = on; }
     bool on() const { return on_ && !done_; }
     std::string opened();
-    // A raw key press for the console: what ToUnicodeEx gave (`proton`), the fallback's characters when it gave none,
-    // what was typed into the console now; waits: no character typed now because a character message should follow.
-    std::string raw_key(uint16_t scan, uint32_t vk, const std::wstring& proton, const std::wstring& fallback,
-                        const std::wstring& typed, bool waits = true);
+    std::string raw_key(const RawKeyInfo& k);  // a raw key press for the console (not its repeats)
     std::string key_message(uint16_t scan, uint32_t vk, bool counts = false);  // counts: no raw input, this is the press
     std::string character(wchar_t ch, bool to_console);
 

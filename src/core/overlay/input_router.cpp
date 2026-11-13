@@ -171,18 +171,21 @@ bool caller_is_mod(uintptr_t return_address, const std::vector<std::pair<uintptr
 }
 
 
-std::wstring fallback_chars(uint32_t mapped, bool shift, bool caps) {
-    if (mapped & 0x80000000u) return {};  // a dead key
+std::wstring fallback_chars(uint32_t mapped, bool shift, bool caps, bool alt) {
+    if (alt || (mapped & 0x80000000u)) return {};  // AltGr or Alt: the layout's own character; a dead key
     const wchar_t ch = static_cast<wchar_t>(mapped & 0xFFFF);
     if (ch < 0x20) return {};
-    if (IsCharAlphaW(ch)) {  // any script's letters, not only English ones (iswalpha knows only the C locale's)
-        wchar_t c = ch;
-        if (shift != caps) CharUpperBuffW(&c, 1);
-        else CharLowerBuffW(&c, 1);
-        return std::wstring(1, c);
+    if ((ch >= L'A' && ch <= L'Z') || (ch >= L'a' && ch <= L'z')) {
+        const wchar_t lower = static_cast<wchar_t>(ch | 0x20);
+        return std::wstring(1, (shift != caps) ? static_cast<wchar_t>(lower - 0x20) : lower);
     }
     if (ch == L' ') return L" ";
-    if (shift) return {};
+    if (shift || caps) return {};  // the layout's own character, not guessed
+    if (IsCharAlphaW(ch)) {  // another script's letter: the small one (VK_TO_CHAR gives the capital)
+        wchar_t c = ch;
+        CharLowerBuffW(&c, 1);
+        return std::wstring(1, c);
+    }
     return std::wstring(1, ch);
 }
 
@@ -223,16 +226,21 @@ std::string KeyDebugLog::press(std::string line) {
     return line;
 }
 
-std::string KeyDebugLog::raw_key(uint16_t scan, uint32_t vk, const std::wstring& proton, const std::wstring& fallback,
-                                 const std::wstring& typed, bool waits) {
+std::string KeyDebugLog::raw_key(const RawKeyInfo& k) {
     if (!on()) return {};
-    std::string line = "overlay keys: raw key " + hex(scan) + " (vk " + hex(vk) + "): Proton gives ";
-    if (!proton.empty()) line += "\"" + shown(proton) + "\"";
-    else if (!fallback.empty()) line += "nothing, the key's own letter \"" + shown(fallback) + "\"";
-    else line += "nothing";
+    std::string held;
+    for (const auto& [is, name] : {std::pair<bool, const char*>{k.shift, "Shift"}, {k.ctrl, "Ctrl"}, {k.alt, "Alt"},
+                                    {k.caps, "Caps"}})
+        if (is) held += (held.empty() ? "" : " ") + std::string(name);
+    std::string line = "overlay keys: raw key " + hex(k.scan) + " (vk " + hex(k.vk) + (held.empty() ? "" : ", held: " + held) + "): ";
+    if (k.shortcut) return press(line + "a shortcut (Ctrl held), not typed");
+    line += "ToUnicodeEx " + std::to_string(k.n);
+    if (k.n < 0) line += " (a dead key)";
+    else if (!k.proton.empty()) line += " \"" + shown(k.proton) + "\"";
+    else if (!k.fallback.empty()) line += ", the key's own letter \"" + shown(k.fallback) + "\"";
     line += "; typed now: ";
-    if (!typed.empty()) line += "\"" + shown(typed) + "\"";
-    else line += waits ? "nothing (a character message should follow)" : "nothing";
+    if (!k.typed.empty()) line += "\"" + shown(k.typed) + "\"";
+    else line += k.waits ? "nothing (held for a character message)" : "nothing";
     return press(line);
 }
 

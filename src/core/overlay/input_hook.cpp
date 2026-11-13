@@ -133,28 +133,42 @@ void raw_release(const KeyEvent& e) {
 }
 
 // Characters for a raw key press: typed now when they come from raw input, else held until the window's own character
-// message shows up (CharSource).
-void raw_characters(const KeyEvent& e) {
+// message shows up (CharSource). repeat: the key was down already (auto-repeat: not logged).
+void raw_characters(const KeyEvent& e, bool repeat) {
     if (!e.down || !g_cb.console_char) return;
     UINT vk = e.vkey;
     if (!vk) vk = MapVirtualKeyW(e.scan | (e.extended ? 0xE000 : 0), MAPVK_VSC_TO_VK_EX);
-    if (g_keys.down(VK_CONTROL) && !g_keys.down(VK_MENU)) return;  // Ctrl+key is a shortcut (AltGr = Ctrl+Alt is text)
     BYTE state[256];
     memcpy(state, g_keys.state(), sizeof(state));
     state[VK_CAPITAL] = (o_get_key_state ? o_get_key_state(VK_CAPITAL) : GetKeyState(VK_CAPITAL)) & 1;
+    RawKeyInfo info;
+    info.scan = e.scan;
+    info.vk = vk;
+    info.shift = g_keys.down(VK_SHIFT);
+    info.ctrl = g_keys.down(VK_CONTROL);
+    info.alt = g_keys.down(VK_MENU);
+    info.caps = (state[VK_CAPITAL] & 1) != 0;
+    if (info.ctrl && !info.alt) {  // Ctrl+key is a shortcut (AltGr = Ctrl+Alt is text)
+        info.shortcut = true;
+        if (!repeat) key_log(g_keylog.raw_key(info));
+        return;
+    }
     wchar_t buf[8] = {};
     const HKL layout = GetKeyboardLayout(0);
-    const int n = ToUnicodeEx(vk, e.scan | (e.extended ? 0xE000 : 0), state, buf, 8, 0x4 /* keep dead-key state */, layout);
-    const std::wstring proton = n > 0 ? std::wstring(buf, static_cast<size_t>(n)) : std::wstring();
-    std::wstring fallback;
-    if (n == 0) {  // nothing (n < 0 is a dead key, which composes with the next key): the letter printed on the key
-        const bool shift = g_keys.down(VK_SHIFT) || g_keys.down(VK_LSHIFT) || g_keys.down(VK_RSHIFT);
-        fallback = fallback_chars(MapVirtualKeyExW(vk, MAPVK_VK_TO_CHAR, layout), shift, (state[VK_CAPITAL] & 1) != 0);
-    }
-    const std::wstring typed = g_chars.raw_down(e.scan, proton.empty() ? fallback : proton);
-    type_chars(typed);
-    key_log(g_keylog.raw_key(e.scan, vk, proton, fallback, typed, !g_chars.from_raw()));
+    // the plain scan code: its bit 15 would tell ToUnicodeEx the key is up (an extended key then gave nothing)
+    info.n = ToUnicodeEx(vk, e.scan, state, buf, 8, 0x4 /* keep dead-key state */, layout);
+    if (info.n > 0) info.proton.assign(buf, static_cast<size_t>(info.n));
+    if (info.n == 0)  // nothing (< 0 is a dead key, which composes with the next key): the letter printed on the key
+        info.fallback = fallback_chars(MapVirtualKeyExW(vk, MAPVK_VK_TO_CHAR, layout), info.shift, info.caps, info.alt);
+    const std::wstring& held = info.proton.empty() ? info.fallback : info.proton;
+    info.typed = g_chars.raw_down(e.scan, held);
+    type_chars(info.typed);
+    bool printable = false;
+    for (wchar_t ch : held) printable = printable || ch >= 0x20;
+    info.waits = info.typed.empty() && printable && !g_chars.from_raw();
+    if (!repeat) key_log(g_keylog.raw_key(info));
 }
+bool g_raw_repeat = false;  // the raw key being handled was down already (window thread only)
 
 // Applies a key route. Returns true if the message is handled here (not passed to the game).
 bool apply_key(const KeyEvent& e, Route r, bool raw) {
@@ -168,7 +182,7 @@ bool apply_key(const KeyEvent& e, Route r, bool raw) {
             return true;
         case Route::Console:
             if (g_cb.console_key) g_cb.console_key(e);
-            if (raw && g_router->open()) raw_characters(e);  // typed now, or held until the WM_CHAR that should follow
+            if (raw && g_router->open()) raw_characters(e, g_raw_repeat);  // typed now, or held until the WM_CHAR
             return true;
         case Route::Both:
             if (g_cb.console_key) g_cb.console_key(e);
@@ -204,6 +218,11 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                 if (!g_raw_keyboard.exchange(true)) emf::logf("overlay: the keyboard arrives as raw input");
                 KeyEvent e;
                 if (!decode_raw_keyboard(ri->data.keyboard, &e)) break;
+                {
+                    UINT vk = e.vkey;
+                    if (!vk) vk = MapVirtualKeyW(e.scan | (e.extended ? 0xE000 : 0), MAPVK_VSC_TO_VK_EX);
+                    g_raw_repeat = e.down && g_keys.down(vk);
+                }
                 track_key(e);
                 raw_release(e);
                 if (apply_key(e, g_router->key(e), true)) return DefWindowProcW(hwnd, msg, wp, lp);
