@@ -60,6 +60,27 @@ TEST_CASE("net reassembly: a line that is not the first of a message, with nothi
     REQUIRE(ok.has_value());
 }
 
+TEST_CASE("net reassembly: a fragment whose type, version or encoding differs from the one before it drops the message") {
+    const auto lines = msg(0, std::string(3000, 'a'));
+    REQUIRE(lines.size() >= 3u);
+    for (int field = 0; field < 3; ++field) {
+        CAPTURE(field);
+        Reassembly r;
+        std::string why;
+        CHECK_FALSE(r.add(lines[0], &why).has_value());
+        NetLine odd = lines[1];
+        if (field == 0) odd.type = 'W';
+        if (field == 1) odd.version += 1;
+        if (field == 2) odd.enc = odd.enc == 't' ? 'b' : 't';  // "aaaa" also reads as base64: it would decode, wrongly
+        CHECK_FALSE(r.add(odd, &why).has_value());
+        CHECK(why.find("without the ones before") != std::string::npos);
+        for (size_t i = 2; i < lines.size(); ++i) CHECK_FALSE(r.add(lines[i], &why).has_value());  // nothing comes out
+        auto ok = r.add(msg(lines.back().seq + 1, "after")[0], &why);  // and the next message is read again
+        REQUIRE(ok.has_value());
+        CHECK(ok->data == "after");
+    }
+}
+
 TEST_CASE("net peers: a hello makes a peer; a new handle for the account replaces it; a reused handle is not it") {
     PeerTable t;
     t.hello(3, 0xAAA, {{"bm/state", 1}, {"bm/pick", 2}});

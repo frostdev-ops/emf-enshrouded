@@ -22,7 +22,8 @@ std::optional<Reassembly::Message> Reassembly::add(const NetLine& line, std::str
     if (line.frag == 0) {
         partial_.clear();
     } else if (partial_.empty() || partial_.back().frag + 1 != line.frag || partial_.back().count != line.count ||
-               partial_.back().channel != line.channel) {
+               partial_.back().channel != line.channel || partial_.back().version != line.version ||
+               partial_.back().type != line.type || partial_.back().enc != line.enc) {
         partial_.clear();
         return drop("a fragment without the ones before it");
     }

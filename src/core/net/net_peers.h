@@ -14,7 +14,8 @@ namespace emf::core::net {
 
 // The lines of one peer and direction back into messages. Lines come numbered in sequence; a message is whole when its
 // last fragment arrived after all the others. A duplicate is dropped; a gap (a lost line) drops the message it broke,
-// and the next message that starts with fragment 0 is read again.
+// and the next message that starts with fragment 0 is read again. The fragments of one message agree on its type,
+// channel, version and encoding: one that does not drops the message.
 class Reassembly {
 public:
     struct Message {
