@@ -300,18 +300,42 @@ void cmd_health(EmfWorld* w, int argc, const char* const* argv, void* u) {
 }
 
 // god [entity | me] [on|off]: the entity (you by default) cannot drop below 1 health from hits, falls, the shroud, the
-// cold or drowning: a hit rule on it (v31) with min_health 1 for every kind. One rule per entity; the rules go when it
-// is switched off and when a new world starts (builtin_world_reset). Alone: who has it. Host.
+// cold or drowning: a hit rule on it (v31) with min_health 1 for every kind. One rule per entity; a rule goes when it is
+// switched off, when its entity is gone (no health to read; checked on every god), when a player leaves (on_player:
+// entity ids are used again) and when a new world starts (builtin_world_reset). Alone: who has it. Host.
+void god_player_left(EmfWorld*, const EmfPlayerEvent* e, void* u) {
+    if (!e || e->kind != EMF_PLAYER_LEFT) return;
+    auto& c = ctx_of(u);
+    std::lock_guard<std::mutex> l(c.god_lock);
+    const auto it = c.god.find(e->player);
+    if (it == c.god.end()) return;
+    if (c.api->hit_rule_remove) c.api->hit_rule_remove(it->second);
+    c.god.erase(it);
+}
+
+// Ends god for the entities whose health reads no more (destroyed, or gone with their world part); says which.
+void god_drop_gone(BuiltinContext& c, EmfWorld* w) {
+    for (auto it = c.god.begin(); it != c.god.end();) {
+        int32_t cur = 0;
+        if (c.api->attribute_get && c.api->attribute_get(w, it->first, EMF_ATTR_HEALTH, &cur)) {
+            ++it;
+            continue;
+        }
+        if (c.api->hit_rule_remove) c.api->hit_rule_remove(it->second);
+        command_reply_line(fmt("entity %u is gone (no health to read): its god ended", it->first));
+        it = c.god.erase(it);
+    }
+}
+
 void cmd_god(EmfWorld* w, int argc, const char* const* argv, void* u) {
     auto& c = ctx_of(u);
     const uint32_t me = c.player ? c.player() : 0;
+    std::lock_guard<std::mutex> l(c.god_lock);
+    god_drop_gone(c, w);
     if (argc == 1) {
         std::string line;
-        {
-            std::lock_guard<std::mutex> l(c.god_lock);
-            for (const auto& g : c.god)
-                line += fmt("%sentity %u%s", line.empty() ? "" : ", ", g.first, g.first == me ? " (you)" : "");
-        }
+        for (const auto& g : c.god)
+            line += fmt("%sentity %u%s", line.empty() ? "" : ", ", g.first, g.first == me ? " (you)" : "");
         command_reply_line(line.empty() ? "god: nobody has it" : "god: " + line);
         return;
     }
@@ -336,25 +360,30 @@ void cmd_god(EmfWorld* w, int argc, const char* const* argv, void* u) {
         command_reply_line("no player of yours here: name an entity (god <entity> [on|off])");
         return;
     }
-    std::lock_guard<std::mutex> l(c.god_lock);
     const auto it = c.god.find(id);
     if (!on) {
         if (it == c.god.end()) {
             command_reply_line(fmt("entity %u has no god", id));
             return;
         }
-        if (c.api->hit_rule_remove) c.api->hit_rule_remove(it->second);
+        const bool removed = c.api->hit_rule_remove && c.api->hit_rule_remove(it->second);
         c.god.erase(it);
-        command_reply_line(fmt("entity %u: god off", id));
+        command_reply_line(removed ? fmt("entity %u: god off", id)
+                                   : fmt("entity %u: god off (its hit rule was gone already)", id));
         return;
     }
     if (it != c.god.end()) {
         command_reply_line(fmt("entity %u has god already", id));
         return;
     }
-    int32_t cur = 0;
+    int32_t cur = 0, max = 0;
     if (!c.api->attribute_get || !c.api->attribute_get(w, id, EMF_ATTR_HEALTH, &cur)) {
         command_reply_line(fmt("entity %u has no health here (not a creature or player, or not the host)", id));
+        return;
+    }
+    if (cur <= 0) {  // dead, or a spawn the game has not set up yet: no rule taken for it
+        c.api->attribute_get(w, id, EMF_ATTR_MAX_HEALTH, &max);
+        command_reply_line(fmt("entity %u: health 0 of %d: dead, or just spawned (try again in a second)", id, max));
         return;
     }
     EmfHitRule r{};
@@ -370,8 +399,9 @@ void cmd_god(EmfWorld* w, int argc, const char* const* argv, void* u) {
         return;
     }
     c.god[id] = rule;
+    if (!c.god_watching && c.api->on_player) c.god_watching = c.api->on_player(god_player_left, &c);
     command_reply_line(fmt("entity %u: god on: it keeps at least 1 health (hits, falls, the shroud, the cold, drowning) "
-                           "until god %u off or a new world", id, id));
+                           "until god %u off, it is gone, or a new world", id, id));
 }
 
 // ai <entity>: what a creature's AI does: its enemy01 state, whom it guards (follows), what it fights, its aggro

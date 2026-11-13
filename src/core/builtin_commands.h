@@ -24,6 +24,7 @@ struct BuiltinContext {
     SettingsStore* settings = nullptr;                 // mods' settings ("settings", "set")
     std::mutex god_lock;                               // god: entity -> the id of the hit rule that keeps it alive
     std::map<uint32_t, uint32_t> god;
+    bool god_watching = false;                         // god's on_player watcher is in (a player who leaves loses god)
     // (put's and take's result, one server step later, goes to the reply the command had: current_reply())
 };
 
