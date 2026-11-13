@@ -319,7 +319,8 @@ stamina is not full).
   the value drops) and `heal` (while it rises), for example `hud.colour health damage #ff8000`. The game's effects (the
   damage blink, the heal glow, the HUD fading out) work with any colour; the red "not enough mana / stamina" flash and the
   ticks stay as the game draws them. The colours follow the bar when the order changes. A card's **Reset** (and R,
-  `hud.reset <part>`) moves the part back and keeps its colours; **Game's colours** and **Reset all** put them back.
+  `hud.reset <part>`) moves the part back and keeps its colours (the vitals' Reset also puts the bar order back, the
+  buffs' Reset switches grow upward off; `hud.reset` says so); **Game's colours** and **Reset all** put them back.
 - **Panel colour:** a switch on the vitals' card for the dark panel behind the bars (`hud.colour panel #20208080`). EMF
   hands the game its colour for that one panel as the game draws it; nothing in the game's data changes. The panel fades
   with the HUD as before, and an opacity of 0 hides it (the bars stay). The panels behind the rested bar and the music

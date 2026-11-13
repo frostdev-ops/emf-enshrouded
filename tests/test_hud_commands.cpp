@@ -84,6 +84,21 @@ TEST_CASE("hud.reset: one part, or all with the \"Before reset\" note") {
     CHECK(run(e, {"hud.reset", "nope"})[0].rfind("hud: no HUD part", 0) == 0);
 }
 
+TEST_CASE("hud.reset: the vitals' reset says the bar order went back too; the buffs' says grow upward is off") {
+    HudRig r;
+    HudEditor& e = r.make();
+    run(e, {"hud.order", "mana", "health", "stamina"});
+    run(e, {"hud.grow", "up"});
+    CHECK(run(e, {"hud.reset", "vitals"}) ==
+          Lines{"hud: vitals is back where the game draws it; the bars are in the game's order again (health, mana, "
+                "stamina)"});
+    CHECK(e.view().order == kDefaultOrder);
+    CHECK(run(e, {"hud.reset", "buffs"}) ==
+          Lines{"hud: buffs is back where the game draws it; status effects grow downward again, as the game draws them"});
+    CHECK_FALSE(e.view().buffs_up);
+    CHECK(run(e, {"hud.reset", "compass"}) == Lines{"hud: compass is back where the game draws it"});
+}
+
 TEST_CASE("hud.layout: list, save with spaces in the name, load, delete") {
     HudRig r;
     HudEditor& e = r.make();

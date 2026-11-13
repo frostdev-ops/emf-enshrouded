@@ -272,7 +272,11 @@ std::vector<std::string> run_hud_command(HudEditor& editor, const std::vector<st
         const int part = find_element(argv[1]);
         if (part == kNoElement) return {no_part(argv[1])};
         editor.reset(static_cast<size_t>(part), Save::Now);
-        out.push_back(std::string("hud: ") + hud_elements()[static_cast<size_t>(part)].id + " is back where the game draws it");
+        std::string line = std::string("hud: ") + hud_elements()[static_cast<size_t>(part)].id + " is back where the game draws it";
+        // what else the part's card holds goes back with it (HudEditor::reset)
+        if (part == 0) line += "; the bars are in the game's order again (" + order_text(kDefaultOrder) + ")";
+        if (part == 1) line += "; status effects grow downward again, as the game draws them";
+        out.push_back(line);
         add_not_shown(editor, out);
         return out;
     }
