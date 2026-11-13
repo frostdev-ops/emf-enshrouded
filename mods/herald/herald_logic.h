@@ -56,18 +56,28 @@ inline std::string account_text(uint64_t account) {
     std::snprintf(b, sizeof b, "0x%016llx", static_cast<unsigned long long>(account));
     return b;
 }
-// The MOTD with {character}, {name} and {online} filled in. {character} is the character's name, or the {name} value
-// while the game does not know it yet (it may come a few seconds after the join).
-inline std::string expand_motd(std::string motd, const std::string& name, size_t online,
+// The MOTD with {character}, {name} and {online} filled in, in one pass from left to right: a name with a placeholder
+// in it ("{online}") stays as it is. {character} is the character's name, or the {name} value while the game does not
+// know it yet (it may come a few seconds after the join).
+inline std::string expand_motd(const std::string& motd, const std::string& name, size_t online,
                                const std::optional<std::string>& character = std::nullopt) {
-    auto replace = [&motd](const std::string& key, const std::string& value) {
-        for (size_t at = motd.find(key); at != std::string::npos; at = motd.find(key, at + value.size()))
-            motd.replace(at, key.size(), value);
-    };
-    replace("{character}", character && !character->empty() ? printable(*character) : name);
-    replace("{name}", name);
-    replace("{online}", std::to_string(online));
-    return motd;
+    const std::pair<std::string, std::string> keys[] = {
+        {"{character}", character && !character->empty() ? printable(*character) : name},
+        {"{name}", name},
+        {"{online}", std::to_string(online)}};
+    std::string out;
+    for (size_t at = 0; at < motd.size();) {
+        bool found = false;
+        for (const auto& [key, value] : keys)
+            if (motd.compare(at, key.size(), key) == 0) {
+                out += value;
+                at += key.size();
+                found = true;
+                break;
+            }
+        if (!found) out += motd[at++];
+    }
+    return out;
 }
 // A player's name in the herald's lines: the name the game gives (emf::player_name), else "Host" for the host of a game
 // it hosts (`host`: emf::local_player(), 0 on a dedicated server; their own name is not in the connection records EMF

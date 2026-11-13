@@ -120,9 +120,15 @@ TEST_CASE("herald: the MOTD fills in {character}, the {name} value while the cha
     CHECK(expand_motd("Hi {character}", "Ember", 1, std::string("El\nara")) == "Hi El?ara");    // never a new line
 }
 
+TEST_CASE("herald: a name with a placeholder in it stays as it is (the MOTD is filled in one pass)") {
+    CHECK(expand_motd("Welcome {character} ({name}), {online} online", "{online}", 3, std::string("{name}")) ==
+          "Welcome {name} ({online}), 3 online");
+    CHECK(expand_motd("Hi {name}! {online}", "{character}", 2) == "Hi {character}! 2");
+    CHECK(expand_motd("{name}{name} {unknown} {", "A", 1) == "AA {unknown} {");
+}
+
 TEST_CASE("herald: the host of a game it hosts is \"Host\" when EMF cannot read their name, never \"player #1\"") {
-    // EMF reads names from the players' connections; in a game you host the host's own name is not found there, and no
-    // API gives a character's name
+    // EMF reads names from the players' connections; in a game you host the host's own name is not found there
     CHECK(player_label(std::nullopt, 1, 1) == "Host");
     CHECK(player_label(std::string(""), 1, 1) == "Host");
     CHECK(player_label(std::string("Ember"), 1, 1) == "Ember");  // a name the game gives wins
