@@ -1248,11 +1248,12 @@ An order ends after its time, when the target is gone or dead (a target without 
 dead), when the enemy is gone, dies, becomes a player or a player's ally (tamed: unless `EMF_ORDER_ALLIES`), on cancel, with a new order on the same enemy, or when the world closes; then the
 switches go back on and its entry (and the pick, if it is still the target) are cleared, an enemy left in `Combat` with
 nothing picked goes back to `Idle`, and its hit rule goes. `enemy_order_cancel` may be called from any thread.
-`enemy_order` is refused when: not inside a world callback on the server world, the enemy has no enemy AI, it is a
-player, a boss (`Boss`, `BossHealthBar`: its fight and leash stay the game's), a player's ally without
-`EMF_ORDER_ALLIES`, the target has no position or is dead, `seconds` or `damage`
-is out of range, 256 orders are held, or `damage` is asked and gets no hit rule: all 64 hit rules, shared by every mod
-(`hit_rule_add`, other orders with `damage`), are in use, or hit rules are off on this build. Nothing is saved.
+`enemy_order` is refused when: not inside a world callback on the server world, `enemy` or `target` is 0 or they are the
+same entity, `flags` has a bit this core does not know, the enemy has no enemy AI, it is a player, a boss (`Boss`,
+`BossHealthBar`: its fight and leash stay the game's), a player's ally without `EMF_ORDER_ALLIES`, the target has no
+position or is dead, `seconds` or `damage` is out of range, 256 orders are held, or `damage` is asked and gets no hit
+rule: all 64 hit rules, shared by every mod (`hit_rule_add`, other orders with `damage`), are in use, or hit rules are
+off on this build. Nothing is saved.
 
 ```cpp
 EmfEnemyOrder o{};
