@@ -1,5 +1,6 @@
 #include "core/hud_editor/layout.h"
 
+#include <cctype>
 #include <cmath>
 #include <cstdio>
 
@@ -12,6 +13,14 @@ namespace emf::core::hud {
 namespace {
 
 float round_hundredths(double v) { return static_cast<float>(std::round(v * 100.0) / 100.0); }
+
+// Part and bar names in a file are read in any case, as the console commands take them ("Health" is health).
+bool same_name(std::string_view a, std::string_view b) {
+    if (a.size() != b.size()) return false;
+    for (size_t i = 0; i < a.size(); ++i)
+        if (std::tolower(static_cast<unsigned char>(a[i])) != std::tolower(static_cast<unsigned char>(b[i]))) return false;
+    return true;
+}
 
 std::string raw_text(double v) {
     char buf[40];
@@ -187,7 +196,7 @@ LayoutRead layout_from_json(std::string_view text) {
         for (const auto& [key, val] : els->obj) {
             size_t idx = kHudElementCount;
             for (size_t i = 0; i < kHudElementCount; ++i)
-                if (key == parts[i].scope) idx = i;
+                if (same_name(key, parts[i].scope)) idx = i;
             if (idx == kHudElementCount) {
                 r.notes.push_back("unknown part \"" + key + "\" skipped");
                 continue;
@@ -216,7 +225,7 @@ LayoutRead layout_from_json(std::string_view text) {
             ok = false;
             if (!v.is(json::Value::Type::String)) break;
             for (int b = 0; b < static_cast<int>(kBarCount); ++b)
-                if (v.s == bar_id(b)) {
+                if (same_name(v.s, bar_id(b))) {
                     o[i] = static_cast<uint8_t>(b);
                     ok = true;
                 }
@@ -237,13 +246,13 @@ LayoutRead layout_from_json(std::string_view text) {
             r.notes.push_back("colours is not an object, skipped");
         } else {
             for (const auto& [key, val] : cv->obj) {
-                if (key == "panel") {
+                if (same_name(key, "panel")) {
                     read_colour(val, "colours.panel", &l.panel, r.notes);
                     continue;
                 }
                 int bar = -1;
                 for (int b = 0; b < static_cast<int>(kBarCount); ++b)
-                    if (key == bar_id(b)) bar = b;
+                    if (same_name(key, bar_id(b))) bar = b;
                 if (bar < 0) {
                     r.notes.push_back("colours: unknown bar \"" + key + "\" skipped");
                     continue;
