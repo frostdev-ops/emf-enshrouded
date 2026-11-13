@@ -5,6 +5,7 @@
 //   mods_required: mod ids every player's game must have too (commas or spaces between them), besides the content mods
 //   and the "side": "both" mods that are always compared.
 //   mods_info: where to get them, said in the chat line of a refusal.
+//   A required id the server does not have itself is named in the log at start-up (unknown_required).
 #include <algorithm>
 #include <cstddef>
 #include <string>
@@ -85,6 +86,18 @@ inline ModsPolicy parse_mods_policy(std::string_view check, std::string_view req
     }
     p.info = std::string(trim(text));
     return p;
+}
+
+// At start-up: one line per required id this server does not have (most likely a typo: every player would lack it).
+// `own` is every id in the server's own mod list (its content mods and running mods of any side, as the join check
+// compares them); "emf" is EMF itself and never a required mod. The lines go after "mods check: " in the log.
+inline std::vector<std::string> unknown_required(const std::vector<std::string>& required,
+                                                 const std::vector<std::string>& own) {
+    std::vector<std::string> lines;
+    for (const auto& id : required)
+        if (id != "emf" && std::find(own.begin(), own.end(), id) == own.end())
+            lines.push_back("mods_required names \"" + id + "\", which this server does not have (a typo?)");
+    return lines;
 }
 
 }  // namespace emf::core
