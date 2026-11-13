@@ -604,7 +604,7 @@ local function take_down(world, ids)
   local n = 0
   for _, id in ipairs(ids) do
     local ok, why = emf.remove_building(world, id, {refund = "drop"})
-    if ok then n = n + 1 else emf.log("skipped", id, why) end  -- players, altars and full chests are refused
+    if ok then n = n + 1 else emf.log("skipped", id, why) end  -- players, gone ids, altars, full chests
   end
   return n
 end
@@ -642,7 +642,8 @@ A raid mod can open a gate when the attack starts and keep the treasure room shu
 - `emf.door(world, id)` first: nil means it is not a door, and `logic = true` means a switch drives it (EMF leaves it alone).
 - `emf.door_open` and `emf.door_close` swing the door at the next step, and the game's path grid follows, so enemies'
   paths change. `emf.door_lock` takes away the E prompt; from EMF 0.6.8 the lock is kept with the world.
-- They return false when refused: check the result, the reason is in the log.
+- They return false when refused: check the result, the reason is in the log (not a door, a switch drives it, already
+  so, 256 door orders waiting, 1024 doors locked already).
 
 ```lua
 local function open_gate(world, gate, vault_door)

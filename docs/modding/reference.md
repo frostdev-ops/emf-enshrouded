@@ -1105,13 +1105,16 @@ Set `size` to `sizeof(EmfRemoveBuilding)`. Fields:
 Refused, with nothing changed:
 
 - a player;
+- no such entity (or it has no position);
 - a Flame Altar, even with `EMF_REMOVE_FORCE` (use `destroy` if you really mean it: destroying an altar loses the whole
   base at the next save);
 - an object no player placed (no `UsedItem`): use `destroy`;
 - an object holding items in its own or linked inventories, unless `EMF_REMOVE_FORCE` (then the items drop at its spot; refused when one of them cannot be dropped, or an inventory cannot be read);
 - a refund player who is not a player;
 - an unknown `refund` or `flags`;
-- a call outside a world callback, or not on the server world.
+- an object removed already in this step;
+- a call outside a world callback, or not on the server world;
+- on a game build where EMF cannot destroy the object, give its item back or drop what it holds.
 
 Like `destroy`, it plays no pick-up sound and sends no `BuildingPickUpEvent` (nothing in the game needs it for player
 objects).
@@ -1208,7 +1211,10 @@ server world: the host, or the dedicated server. C++: `emf::has_v38()` in `emf.h
 | `bool door_lock(world, entity, uint32_t locked)` | While locked, no player gets the E prompt on it (EMF keeps it so each step, from the next step on). From 0.6.8 EMF keeps the lock with the world, by the door's place (`emf\config\emf_doors\<slot>.txt`; entity ids change between loads): after a load the door standing there (within 0.5 m) is locked again, looked for every 3 s while it is not loaded (every 30 s after a minute). A locked door that goes while a player is within 40 m (broken, taken down) loses its lock; one that goes with nobody near was unloaded and is locked again when it loads. `door_set` still works on a locked door |
 
 `door_set` is refused (false, logged once per 10 s) when: it is not the server world, the entity is not a door, a
-switch drives it, it is already so, `side` is bad, or the feature is off on this build. No open or close sound plays.
+switch drives it, it is already so, `side` is bad, 256 door orders are waiting already, or the feature is off on this
+build. `door_lock` is refused for the same reasons (but "already so" and `side`), and a lock also when 1024 doors are
+locked already; a door EMF locked can always be unlocked, even when a switch drives it now. No open or close sound
+plays.
 
 Seen live on the host: a spawned Wooden Door opened and closed by `door_set` (it swings); locking removed the "E Open"
 prompt and unlocking brought it back. Not seen yet: a joined player's view, enemies walking through an opened door, and
@@ -1245,7 +1251,8 @@ nothing picked goes back to `Idle`, and its hit rule goes. `enemy_order_cancel` 
 `enemy_order` is refused when: not inside a world callback on the server world, the enemy has no enemy AI, it is a
 player, a boss (`Boss`, `BossHealthBar`: its fight and leash stay the game's), a player's ally without
 `EMF_ORDER_ALLIES`, the target has no position or is dead, `seconds` or `damage`
-is out of range, 256 orders are held, or `damage` is asked while hit rules are off on this build. Nothing is saved.
+is out of range, 256 orders are held, or `damage` is asked and gets no hit rule: all 64 hit rules, shared by every mod
+(`hit_rule_add`, other orders with `damage`), are in use, or hit rules are off on this build. Nothing is saved.
 
 ```cpp
 EmfEnemyOrder o{};
