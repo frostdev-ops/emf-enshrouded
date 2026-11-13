@@ -53,7 +53,10 @@ void read_colour(const json::Value& v, const std::string& where, Colour* out, st
             *out = *t.colour;
             return;
         }
-        if (t.game) return;
+        if (t.game) {  // the game's own colour, also over an earlier spelling of the same name in this file
+            *out = Colour{};
+            return;
+        }
     }
     std::string shown = "that value";
     if (v.is(json::Value::Type::String))

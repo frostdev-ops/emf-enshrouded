@@ -116,6 +116,20 @@ TEST_CASE("layout_from_json: part names, vitals_order and colours bar names in a
     }
 }
 
+TEST_CASE("layout_from_json: the same bar in two spellings: the later one wins, \"game\" too") {
+    const size_t fill = static_cast<size_t>(BarPart::Fill);
+    LayoutRead r = layout_from_json(R"({"format": 1, "colours": {"Health": {"fill": "#ff4040"}, "health": {"fill": "game"}}})");
+    REQUIRE(r.layout);
+    CHECK(r.notes.empty());
+    CHECK(r.layout->colours[0].part[fill] == Colour{});
+    r = layout_from_json(R"({"format": 1, "colours": {"health": {"fill": "game"}, "HEALTH": {"fill": "#ff4040"}}})");
+    REQUIRE(r.layout);
+    CHECK(r.layout->colours[0].part[fill] == *parse_colour("#ff4040").colour);
+    r = layout_from_json(R"({"format": 1, "colours": {"Panel": "#20202080", "panel": "game"}})");
+    REQUIRE(r.layout);
+    CHECK(r.layout->panel == Colour{});
+}
+
 TEST_CASE("layout_from_json: a part that is not an object is skipped with a note") {
     const LayoutRead r = layout_from_json(R"({"format":1,"elements":{"bossRoot":5}})");
     REQUIRE(r.layout.has_value());
