@@ -15,6 +15,7 @@
 #include "common/pe_image.h"
 #include "common/sha256.h"
 #include "common/signatures.h"
+#include "common/signatures_export.h"
 #include "common/world_offsets.h"
 
 // emf_sigcheck --patterns <file> <exe>: checks a mod's pattern file (common/pattern_file.h) against an exe.
@@ -65,6 +66,21 @@ int check_patterns(const wchar_t* file, const wchar_t* exe) {
 }
 
 int wmain(int argc, wchar_t** argv) {
+    // emf_sigcheck --export <file>: EMF's own signatures as a pattern file (docs/modding/emf_signatures.patterns)
+    if (argc >= 2 && std::wstring(argv[1]) == L"--export") {
+        if (argc < 3) {
+            std::fprintf(stderr, "usage: emf_sigcheck --export <file>\n");
+            return 3;
+        }
+        std::ofstream out(argv[2], std::ios::binary);
+        out << emf::export_signature_patterns();
+        if (!out) {
+            std::fprintf(stderr, "could not write %ls\n", argv[2]);
+            return 3;
+        }
+        std::printf("wrote %ls (%zu signatures)\n", argv[2], emf::all_signatures().size());
+        return 0;
+    }
     if (argc >= 2 && std::wstring(argv[1]) == L"--patterns") {
         if (argc < 4) {
             std::fprintf(stderr, "usage: emf_sigcheck --patterns <mod.patterns> <path to enshrouded.exe>\n");
@@ -73,7 +89,8 @@ int wmain(int argc, wchar_t** argv) {
         return check_patterns(argv[2], argv[3]);
     }
     if (argc < 2) {
-        std::fprintf(stderr, "usage: emf_sigcheck <path to enshrouded.exe>\n       emf_sigcheck --patterns <file> <exe>\n");
+        std::fprintf(stderr, "usage: emf_sigcheck <path to enshrouded.exe>\n       emf_sigcheck --patterns <file> <exe>\n"
+                             "       emf_sigcheck --export <file>\n");
         return 3;
     }
     const std::string sha = emf::sha256_file(argv[1]);

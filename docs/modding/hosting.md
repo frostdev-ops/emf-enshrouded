@@ -54,6 +54,11 @@ API v27 messages travel in the game's own chat as `#!emf1` lines (reference.md, 
 transport"). A host that speaks the same wire format can exchange messages with EMF players; one that does not must not
 send `#!emf1` lines.
 
+## Game updates
+
+EMF's engine signatures are in [emf_signatures.patterns](emf_signatures.patterns) (MIT), one pattern per line with each
+known build's address: take what you need, and tell us when you fix one after an update.
+
 ## Checking yourself
 
 EMF's own tests (`tests/` in EMF's repository, run with `bash scripts/verify.sh`) cover each function's contract against

@@ -40,6 +40,12 @@ In the EMF source, `scripts\verify.sh` runs the tests and this check, and fails 
 `emf_sigcheck --patterns <file> <exe>` checks a mod's pattern file instead (next section): exit 0 when every pattern
 is found exactly once, 1 when one is not (or a line is bad: `BAD` lines), 3 when the file or the exe cannot be read.
 
+**EMF's own signatures for other loaders:** [emf_signatures.patterns](emf_signatures.patterns) holds all of them in
+the same pattern format (MIT), with each known build's address of the function and the exe's sha256. After a game
+update, a fixed pattern there is one fix for every loader that uses it. `emf_sigcheck --export <file>` writes it from
+EMF's table (a test keeps the committed file current), and `emf_sigcheck --patterns emf_signatures.patterns <exe>`
+checks it against any exe.
+
 ## What to do as a mod author
 
 - Check API results: a null component, a `false` from `put_items`, a 0 from `spawn` are how a turned-off feature shows.

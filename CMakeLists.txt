@@ -36,6 +36,7 @@ add_library(emf_common STATIC
   src/common/keen_map.cpp
   src/common/seh.cpp
   src/common/signatures.cpp
+  src/common/signatures_export.cpp
   src/common/code_offsets.cpp
   src/common/world_offsets.cpp
   src/common/world_view.cpp
@@ -463,6 +464,7 @@ add_executable(emf_tests
   tests/test_keen_map.cpp
   tests/test_pe_image.cpp
   tests/test_signatures.cpp
+  tests/test_signatures_export.cpp
   tests/test_code_offsets.cpp
   tests/test_world_offsets.cpp
   tests/test_world_view.cpp

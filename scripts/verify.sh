@@ -43,6 +43,7 @@ if game=$(powershell -NoProfile -ExecutionPolicy Bypass -File scripts/find_game.
     ./build/msvc/emf_sigcheck.exe "$exe" | tail -1
     ./build/msvc/emf_sigcheck.exe --patterns mods/sim_rate/sim_rate.patterns "$exe" | tail -1
     ./build/msvc/emf_sigcheck.exe --patterns mods/loot_scale/loot_scale.patterns "$exe" | tail -1
+    ./build/msvc/emf_sigcheck.exe --patterns docs/modding/emf_signatures.patterns "$exe" | tail -1  # the shared file
 else
     echo "sigcheck skipped: no game found (set EMF_GAME_DIR)"
 fi
