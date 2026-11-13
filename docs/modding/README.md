@@ -25,6 +25,8 @@ This folder is the modder's documentation:
 | [server.md](server.md) | **dedicated server**: install EMF there, players' `/commands` from chat, who may |
 | [world_settings.md](world_settings.md) | **world settings while the world runs**: day length, loot, XP, enemies, weather (`world.set`, API v21, Lua 1.10) |
 | [other_mods.md](other_mods.md) | EMF next to **other mods and loaders**: renamed `dinput8.dll` mods, the chain files, notes for DLL mod authors |
+| [dinput8-chain.md](dinput8-chain.md) | **for loader authors**: the shared rules of `dinput8-chain.ini` (public domain: copy it into your project) |
+| [hosting.md](hosting.md) | **for other frameworks**: what an EMF mod relies on when another host runs it (versions, struct sizes, threads) |
 | [updating.md](updating.md) | what happens when the game updates, and how to check your mod still works |
 | [debug_bridge.md](debug_bridge.md) | **test from a script**: run commands, read the state, wait, take screenshots (off by default) |
 | [ai_agents.md](ai_agents.md) | **tools for AI coding assistants**: an MCP server, JSON test scenarios, a game session script; [llms.txt](llms.txt) is the whole API in one file for an assistant's context |

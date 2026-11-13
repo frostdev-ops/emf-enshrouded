@@ -1,8 +1,8 @@
 # EMF API reference
 
 The C API is one table of function pointers, `EmfApi`, declared in `sdk/include/emf/emf_api.h` and passed to your
-`emf_mod_load`. It only grows: each version appends functions at the end (`EMF_API_VERSION` 38 today), so a mod built
-for an older version works with a newer core. `sdk/include/emf/emf.hpp` wraps it in C++; prefer the wrappers.
+`emf_mod_load`. It only grows: each version appends functions at the end (`EMF_API_VERSION` 40 today), so a mod built
+for an older version works with a newer core. Another framework that runs EMF mods: see [hosting.md](hosting.md). `sdk/include/emf/emf.hpp` wraps it in C++; prefer the wrappers.
 
 **Threads.** "World callback" below means: inside `on_tick`, `run_on_world`, `on_event`, a command, a put/take result
 or a wheel choice, on the world that callback received. "Program" means inside your mod program's own callback with

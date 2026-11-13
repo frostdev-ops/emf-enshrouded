@@ -51,7 +51,8 @@ says what EMF does about that, for players and for authors of such mods.
 
 ## dinput8-chain.ini
 
-Plain text, one DLL per line, relative to the game folder:
+The rules every loader can follow are in [dinput8-chain.md](dinput8-chain.md); this section is what EMF does. Plain
+text, one DLL per line, relative to the game folder:
 
 ```ini
 [Chain]
