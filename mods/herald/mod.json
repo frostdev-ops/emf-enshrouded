@@ -1,7 +1,7 @@
 {
   "id": "herald",
   "name": "Server Herald",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "For dedicated servers and games you host: a message of the day for each player who joins, join, leave and death lines in the chat, announcements in turn from a file, a restart countdown (herald.restart, also from emf\\commands.txt), a chat log per day, playtime per player, /players /playtime /motd for everyone, and an opt-in Discord webhook. Off until you switch it on: it changes what players see. Players need nothing.",
   "authors": ["EMF"],
   "enabled": false,
@@ -9,7 +9,7 @@
   "side": "server",
   "settings": [
     {"key": "motd", "type": "text", "default": "", "maxLength": 256, "label": "Message of the day", "live": true,
-     "group": "Welcome", "help": "Sent to each player who joins; {name} and {online} are filled in. Empty = none."},
+     "group": "Welcome", "help": "Sent to each player who joins; {character} (the character's name), {name} and {online} are filled in. Empty = none."},
     {"key": "motd_delay_seconds", "type": "slider", "min": 0, "max": 60, "step": 1, "default": 5,
      "label": "After joining (s)", "live": true, "group": "Welcome"},
     {"key": "announce_joins", "type": "bool", "default": true, "label": "Say who joins", "live": true, "group": "Lines"},
@@ -17,6 +17,8 @@
     {"key": "announce_deaths", "type": "bool", "default": false, "label": "Say who falls", "live": true, "group": "Lines"},
     {"key": "prefix", "type": "text", "default": "[Server]", "maxLength": 24, "label": "In front of every line",
      "live": true, "group": "Lines", "help": "Empty = nothing in front."},
+    {"key": "system_lines", "type": "bool", "default": true, "label": "Lines without a speaker", "live": true,
+     "group": "Lines", "help": "The herald's lines show no name in front, like the game's own join lines. Off, or on an older EMF: under the reader's own name."},
     {"key": "announce_every_minutes", "type": "slider", "min": 0, "max": 120, "step": 5, "default": 30,
      "label": "An announcement every (minutes)", "live": true, "group": "Announcements",
      "help": "The lines of emf\\config\\herald\\announcements.txt in turn, while someone is online. 0 = off."},

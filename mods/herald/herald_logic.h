@@ -56,12 +56,15 @@ inline std::string account_text(uint64_t account) {
     std::snprintf(b, sizeof b, "0x%016llx", static_cast<unsigned long long>(account));
     return b;
 }
-// The MOTD with {name} and {online} filled in.
-inline std::string expand_motd(std::string motd, const std::string& name, size_t online) {
+// The MOTD with {character}, {name} and {online} filled in. {character} is the character's name, or the {name} value
+// while the game does not know it yet (it may come a few seconds after the join).
+inline std::string expand_motd(std::string motd, const std::string& name, size_t online,
+                               const std::optional<std::string>& character = std::nullopt) {
     auto replace = [&motd](const std::string& key, const std::string& value) {
         for (size_t at = motd.find(key); at != std::string::npos; at = motd.find(key, at + value.size()))
             motd.replace(at, key.size(), value);
     };
+    replace("{character}", character && !character->empty() ? printable(*character) : name);
     replace("{name}", name);
     replace("{online}", std::to_string(online));
     return motd;

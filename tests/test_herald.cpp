@@ -113,6 +113,13 @@ TEST_CASE("herald: the MOTD fills in {name} and {online}; lines get the prefix")
     CHECK(player_label(std::string("A\nB"), 7) == "A?B");
 }
 
+TEST_CASE("herald: the MOTD fills in {character}, the {name} value while the character name is not known yet") {
+    CHECK(expand_motd("Welcome {character} ({name})!", "Ember", 2, std::string("Elara")) == "Welcome Elara (Ember)!");
+    CHECK(expand_motd("Welcome {character}!", "Ember", 2) == "Welcome Ember!");                  // not known yet
+    CHECK(expand_motd("Welcome {character}!", "Ember", 2, std::string()) == "Welcome Ember!");  // known, but empty
+    CHECK(expand_motd("Hi {character}", "Ember", 1, std::string("El\nara")) == "Hi El?ara");    // never a new line
+}
+
 TEST_CASE("herald: the host of a game it hosts is \"Host\" when EMF cannot read their name, never \"player #1\"") {
     // EMF reads names from the players' connections; in a game you host the host's own name is not found there, and no
     // API gives a character's name
@@ -434,15 +441,17 @@ TEST_CASE("herald manifest: off by default, a server mod for API v19, every sett
     CHECK(r.manifest->emf == 19);
     CHECK_FALSE(r.manifest->enabled_default);
     CHECK(text.find("\"side\": \"server\"") != std::string::npos);
-    bool webhook_off = false;
+    bool webhook_off = false, system_lines_on = false;
     for (const auto& s : r.manifest->settings) {
         CAPTURE(s.key);
         CHECK(s.problem.empty());
         CHECK(s.warning.empty());
         if (s.key == "webhook") webhook_off = s.default_value == "0" || s.default_value == "false";
+        if (s.key == "system_lines") system_lines_on = s.default_value == "1" || s.default_value == "true";
     }
     CHECK(webhook_off);
-    CHECK(r.manifest->settings.size() == 13);
+    CHECK(system_lines_on);  // lines without a speaker unless the owner switches it off
+    CHECK(r.manifest->settings.size() == 14);
 }
 
 TEST_CASE("herald webhook: which events go for each choice") {

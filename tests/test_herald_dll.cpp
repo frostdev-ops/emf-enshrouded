@@ -24,6 +24,12 @@ void switch_herald(Fake& f, const std::wstring& ini, bool on) {
         if (mod == "herald") watcher.first(kServer, "herald", "enabled", watcher.second);
 }
 
+// A setting changed in the Mods tab: the core's change call for `key` (its value is in f.settings already).
+void change_setting(Fake& f, const char* key) {
+    for (const auto& [mod, watcher] : f.setting_watchers)
+        if (mod == "herald") watcher.first(kServer, "herald", key, watcher.second);
+}
+
 std::string all_replies(Fake& f) {
     std::string out;
     for (const auto& r : f.replies) out += r + "\n";
@@ -75,4 +81,66 @@ TEST_CASE("herald.dll: switched off in the Mods tab, every herald command says s
     r.run_command("herald.say Back");
     CHECK(r.fake.broadcasts.size() == 2u);
     switch_herald(r.fake, ini, false);  // left off: the DLL stays loaded in this process
+}
+
+TEST_CASE("herald.dll: its lines go without a speaker (a setting, on by default); /motd fills in the character name") {
+    const test_scratch::BuildFolderLock lock;
+    const std::wstring dir = herald_exe_dir();
+    CreateDirectoryW((dir + L"\\emf").c_str(), nullptr);
+    CreateDirectoryW((dir + L"\\emf\\config").c_str(), nullptr);
+    const std::wstring ini = dir + L"\\emf\\config\\herald.ini";
+    struct Remove {
+        std::wstring path;
+        ~Remove() { DeleteFileW(path.c_str()); }
+    } remove{ini};
+    Rig r(L"herald_dll_system");
+    r.fake.settings["herald.chat_log"] = "0";
+    r.fake.settings["herald.playtime"] = "0";
+    r.fake.settings["herald.motd"] = "Welcome {character} ({name})!";
+    static EmfApi api;  // the DLL keeps the pointer for the life of the process
+    api = r.api;
+    api.on_tick = [](EmfWorldCallback, void*) {};
+    api.local_player = []() -> uint32_t { return 1; };
+    HMODULE m = LoadLibraryW((dir + L"\\dist\\emf\\mods\\herald\\herald.dll").c_str());
+    REQUIRE(m != nullptr);
+    auto load = reinterpret_cast<EmfModLoadFn>(GetProcAddress(m, "emf_mod_load"));
+    REQUIRE(load != nullptr);
+    REQUIRE(load(&api));
+    switch_herald(r.fake, ini, true);
+
+    r.run_command("herald.say Hello all");  // without a speaker by default
+    REQUIRE(r.fake.broadcasts.size() == 1u);
+    CHECK(r.fake.broadcasts[0] == "[Server] Hello all");
+    REQUIRE(r.fake.broadcast_flags.size() == 1u);
+    CHECK(r.fake.broadcast_flags[0] == EMF_CHAT_SYSTEM);
+
+    r.fake.settings["herald.system_lines"] = "0";  // switched off: a normal chat line
+    change_setting(r.fake, "system_lines");
+    r.run_command("herald.say Plain");
+    CHECK(r.fake.broadcasts.size() == 2u);
+    CHECK(r.fake.broadcast_flags.size() == 1u);
+
+    r.fake.settings["herald.system_lines"] = "1";
+    change_setting(r.fake, "system_lines");
+    api.chat_broadcast_ex = nullptr;  // a core older than v30: a normal line, still sent
+    r.run_command("herald.say Old core");
+    CHECK(r.fake.broadcasts.size() == 3u);
+    CHECK(r.fake.broadcast_flags.size() == 1u);
+    api.chat_broadcast_ex = r.api.chat_broadcast_ex;
+
+    // /motd from a player's chat: the character name once the game has it, the player's name until then
+    r.fake.sender = EmfCommandSender{};
+    r.fake.sender.size = sizeof(EmfCommandSender);
+    r.fake.sender.entity = 2;
+    r.fake.sender.account = 0x22;
+    r.fake.sender.from_chat = 1;
+    r.fake.names[2] = "Ember";
+    r.fake.replies.clear();
+    r.run_command("motd");
+    CHECK(all_replies(r.fake) == "[Server] Welcome Ember (Ember)!\n");
+    r.fake.character_names[2] = "Elara";
+    r.fake.replies.clear();
+    r.run_command("motd");
+    CHECK(all_replies(r.fake) == "[Server] Welcome Elara (Ember)!\n");
+    switch_herald(r.fake, ini, false);  // left off, as the test above leaves it
 }
