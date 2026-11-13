@@ -115,6 +115,7 @@ struct Fake {
     std::map<std::string, std::vector<uint8_t>> singletons;  // other singletons by name (e.g. g38_daytime::Daytime)
     std::map<uint32_t, std::string> item_names;  // more items for item_info (0x11 "Wood" is always known)
     uint32_t last_name_flags = 99;                // v29 item_name: the flags of the last call
+    std::string language = "de_de";              // v29 game_language: "" = not known yet (the dedicated server)
     std::map<std::string, int> item_lookups;     // find_item calls by name (the game reads its whole item map each)
     // v18 attributes: (entity, attribute id) -> value; what attribute_add and damage were asked to do
     std::map<std::pair<uint32_t, uint32_t>, int32_t> attrs;
@@ -309,9 +310,10 @@ uint32_t f_item_name(EmfWorld*, uint32_t id, uint32_t flags, char* buf, uint32_t
     if (buf && size) std::snprintf(buf, size, "Holzscheite");
     return 11;
 }
+// The fake's language; the host reads only the code, so any known language reports the id 3 (De_De).
 uint32_t f_game_language(char* code, uint32_t size) {
-    if (code && size) std::snprintf(code, size, "de_de");
-    return 3;
+    if (code && size) std::snprintf(code, size, "%s", g->language.c_str());
+    return g->language.empty() ? 0 : 3;
 }
 bool f_item_info(EmfWorld*, uint32_t id, EmfItemInfo* out) {
     if (auto it = g->item_names.find(id); it != g->item_names.end()) {
