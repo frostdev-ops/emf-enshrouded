@@ -40,7 +40,7 @@ Small mods that each teach one part of the API, short enough to read in a few mi
 `examples\` folder and are not installed: copy a Lua example's folder into `<game>\emf\mods\` (it needs the `lua` mod,
 which is on by default), or build the C++ one with its own preset, as the template. Each folder's `README.md` says what
 it teaches and what to try. In a Lua example's `mod.json`, `depends` names the Lua host it needs and `"emf"` the API
-version that host needs: `"lua": ">=1.4"` with `"emf": 17`, `"lua": ">=1.3"` with `"emf": 14`, `"lua": ">=1.18"` or newer (`">=1.19"`, `">=1.30"`) with `"emf": 20`.
+version that host needs: `"lua": ">=1.4"` with `"emf": 17`, `"lua": ">=1.3"` with `"emf": 14`, `"lua": ">=1.18"` (or `">=1.19"`, `">=1.30"`) with `"emf": 20`.
 
 | Example | Kind | Teaches |
 |---|---|---|

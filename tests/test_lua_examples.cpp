@@ -5,7 +5,6 @@
 
 #include <algorithm>
 #include <cmath>
-#include <cstdlib>
 #include <filesystem>
 #include <memory>
 
@@ -1359,9 +1358,9 @@ TEST_CASE("lua examples: every folder in examples/lua loads, has its own tests h
         CHECK(x.host->status(id) == "running");
         // the rule (docs/modding/README.md, "Examples"): "emf" is the API version of the Lua host it depends on
         const std::string json = read_all(EMF_SOURCE_DIR "/examples/lua/" + id + "/mod.json");
-        const size_t lua_at = json.find(R"("lua": ">=1.)");
-        const int lua_minor = lua_at == std::string::npos ? 0 : std::atoi(json.c_str() + lua_at + std::strlen(R"("lua": ">=1.)"));
-        const bool needs_18 = lua_minor >= 18;  // 1.18 and later: "emf": 20
+        const bool needs_18 = json.find(R"("lua": ">=1.18")") != std::string::npos ||
+                              json.find(R"("lua": ">=1.19")") != std::string::npos ||
+                              json.find(R"("lua": ">=1.30")") != std::string::npos;  // 1.18 and later: "emf": 20
         const bool needs_14 = json.find(R"("lua": ">=1.4")") != std::string::npos;
         CHECK((needs_18 || needs_14 || json.find(R"("lua": ">=1.3")") != std::string::npos));
         CHECK(json.find(needs_18 ? R"("emf": 20)" : needs_14 ? R"("emf": 17)" : R"("emf": 14)") != std::string::npos);
