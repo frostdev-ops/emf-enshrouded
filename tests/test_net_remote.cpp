@@ -286,3 +286,39 @@ TEST_CASE("net remote: the server's peer watch hears a game's hello and its leav
     REQUIRE(seen.size() == 2);
     CHECK(seen[1] == std::make_pair(kAcct, false));
 }
+
+TEST_CASE("net remote: the reasons for dropped messages are remembered up to a limit, however many channels a player names") {
+    Side server;
+    ServerEnv senv;
+    senv.send = [](uint32_t, uint64_t, const std::string&) { return true; };
+    senv.room = [] { return size_t(100); };
+    senv.is_local = [](uint32_t, uint64_t) { return false; };
+    server.s.enable_server(std::move(senv));
+    const auto told = [&] {
+        size_t n = 0;
+        for (const auto& l : server.logs) n += l.find("was dropped: no such channel") != std::string::npos;
+        return n;
+    };
+    // a game that says hello with a new channel name each time and sends one message on it: the server has none of them
+    const auto say = [&](const std::string& name) {
+        HelloInfo hello;
+        hello.channels = {{name, 1}};
+        for (const auto& line : split_message('H', 0, kControlChannel, kControlVersion, hello_text(hello), nullptr))
+            server.s.server_line(kHandle, kAcct, encode_line(line));
+        for (const auto& line : split_message('M', 1, name, 1, "x", nullptr))
+            server.s.server_line(kHandle, kAcct, encode_line(line));
+        server.now += 1000;  // under the lines a player may send
+    };
+    say("bm/x0");
+    CHECK(told() == 1);
+    say("bm/x0");
+    CHECK(told() == 1);  // told once
+    for (int i = 1; i < 512; ++i) say("bm/x" + std::to_string(i));
+    CHECK(told() == 128);
+    std::vector<std::string> notices;  // the 128th says that later ones are not logged
+    for (const auto& l : server.logs)
+        if (l.find("later ones are not logged") != std::string::npos) notices.push_back(l);
+    REQUIRE(notices.size() == 1);
+    CHECK(notices[0].find("bm/x127") != std::string::npos);
+    CHECK(server.posted.empty());  // and none of them reached a mod
+}

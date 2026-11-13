@@ -4,6 +4,16 @@ namespace emf::core::net {
 
 namespace {
 
+// The reasons already told are remembered so each is logged once. A player picks the channel names in them, so the
+// list has a limit: the line that reaches it says so (in `why`), and past it nothing more is remembered or told.
+constexpr size_t kMaxRememberedReasons = 128;
+bool tell_once(std::set<std::string>& told, std::string reason, std::string* why) {
+    if (told.size() >= kMaxRememberedReasons || !told.insert(std::move(reason)).second) return false;
+    if (told.size() == kMaxRememberedReasons)
+        *why += " (the last of " + std::to_string(kMaxRememberedReasons) + " reasons told: later ones are not logged)";
+    return true;
+}
+
 bool part_ok(const std::string& s, size_t max) {
     if (s.empty() || s.size() > max) return false;
     for (const char c : s)
@@ -249,8 +259,8 @@ void NetService::remote_to_server(uint32_t, uint64_t account, const std::string&
             handler = c->def.on_server;
             from.account = account;
             from.peer_version = peer_version;
-        } else if (!logged_.insert("in " + channel + ": " + why).second) {
-            why.clear();  // told before
+        } else if (!tell_once(logged_, "in " + channel + ": " + why, &why)) {
+            why.clear();  // told before, or the limit was reached
         }
     }
     if (!why.empty()) {
@@ -288,8 +298,8 @@ void NetService::remote_to_client(const std::string& channel, uint32_t server_ve
         if (why.empty()) {
             handler = c->def.on_player;
             from.peer_version = server_version;
-        } else if (!logged_.insert("from the server on " + channel + ": " + why).second) {
-            why.clear();
+        } else if (!tell_once(logged_, "from the server on " + channel + ": " + why, &why)) {
+            why.clear();  // told before, or the limit was reached
         }
     }
     if (!why.empty()) {

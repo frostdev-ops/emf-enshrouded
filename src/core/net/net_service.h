@@ -146,7 +146,7 @@ private:
     NetDeps d_;
     std::mutex m_;
     std::map<std::string, Channel> channels_;
-    std::set<std::string> logged_;
+    std::set<std::string> logged_;  // the reasons for dropped messages told so far (each once; at most 128 remembered)
     // set once, then published: the chat hooks can already run on other threads while the ends are made
     std::unique_ptr<ServerLink> server_owned_;
     std::unique_ptr<ClientLink> client_owned_;
