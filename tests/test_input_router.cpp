@@ -505,3 +505,49 @@ TEST_CASE("CharSource (review): two keys held at once under Wine both count and 
     CHECK(t.raw_up(0x26).empty());  // one miss since the close, not three
     CHECK_FALSE(t.from_raw());
 }
+
+// 0.6.9: a Linux player's console stayed empty on 0.6.8 and the switch to raw typing never came (no log line). Proton's
+// ToUnicodeEx may give nothing for a raw key: then the letter printed on the key (MapVirtualKey VK_TO_CHAR) is typed.
+TEST_CASE("fallback_chars: a letter in the case Shift and Caps Lock make, digits and space without Shift, dead keys never") {
+    CHECK(fallback_chars('A', false, false) == L"a");
+    CHECK(fallback_chars('A', true, false) == L"A");
+    CHECK(fallback_chars('A', false, true) == L"A");
+    CHECK(fallback_chars('A', true, true) == L"a");
+    CHECK(fallback_chars(0xDC, false, false) == L"\u00fc");  // a German key that maps to U+00DC gives the small letter
+    CHECK(fallback_chars('1', false, false) == L"1");
+    CHECK(fallback_chars('1', true, false) == L"");  // Shift+1 is a layout's own symbol: not guessed
+    CHECK(fallback_chars(' ', true, false) == L" ");
+    CHECK(fallback_chars('-', false, false) == L"-");
+    CHECK(fallback_chars(0x80000000u | '^', false, false) == L"");  // a dead key
+    CHECK(fallback_chars(0, false, false) == L"");
+    CHECK(fallback_chars(0x0D, false, false) == L"");  // a control character
+}
+
+TEST_CASE("KeyDebugLog: off by default; on, one line per key event while the console is open, the first 20 presses only") {
+    KeyDebugLog log;
+    CHECK(log.raw_key(0x23, 0x48, L"h", L"", L"").empty());  // off
+    log.enable(true);
+    CHECK(log.opened() == "overlay keys: the console opened; logging its first 20 key presses ([overlay] debug_keys=1)");
+    CHECK(log.raw_key(0x23, 0x48, L"h", L"", L"") ==
+          "overlay keys: raw key 0x23 (vk 0x48): Proton gives \"h\"; typed now: nothing (a character message should follow)");
+    CHECK(log.key_message(0x23, 0x48) == "overlay keys: key message 0x23 (vk 0x48)");
+    CHECK(log.character(L'h', true) == "overlay keys: character message \"h\" (U+0068): to the console");
+    CHECK(log.raw_key(0x10, 0x51, L"", L"q", L"q") ==
+          "overlay keys: raw key 0x10 (vk 0x51): Proton gives nothing, the key's own letter \"q\"; typed now: \"q\"");
+    CHECK(log.character(0x2603, false) == "overlay keys: character message \"\\u2603\" (U+2603): not for the console");
+    for (int i = 2; i < 20; ++i) CHECK_FALSE(log.raw_key(0x1E, 0x41, L"a", L"", L"").empty());
+    CHECK(log.raw_key(0x1E, 0x41, L"a", L"", L"") ==
+          "overlay keys: 20 key presses logged; no more until the game starts again");
+    CHECK(log.raw_key(0x1E, 0x41, L"a", L"", L"").empty());
+    CHECK(log.key_message(0x1E, 0x41).empty());
+    CHECK(log.character(L'a', true).empty());
+    CHECK(log.opened().empty());
+}
+
+TEST_CASE("KeyDebugLog: without raw input, key messages count as the presses") {
+    KeyDebugLog log(2);
+    log.enable(true);
+    CHECK_FALSE(log.key_message(0x23, 0x48, true).empty());
+    CHECK_FALSE(log.key_message(0x17, 0x49, true).empty());
+    CHECK(log.key_message(0x17, 0x49, true) == "overlay keys: 2 key presses logged; no more until the game starts again");
+}

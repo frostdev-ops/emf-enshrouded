@@ -734,6 +734,7 @@ OverlayConfig read_overlay_config(const std::wstring& ini_path) {
         if (end && !*end && v >= 1 && v <= 0x7F) c.toggle_scan = static_cast<uint16_t>(v);
     }
     c.suggest = GetPrivateProfileIntW(L"overlay", L"suggest", 1, ini_path.c_str()) != 0;
+    c.debug_keys = GetPrivateProfileIntW(L"overlay", L"debug_keys", 0, ini_path.c_str()) != 0;
     const std::wstring rows = overlay_value(L"suggest_rows", ini_path);
     if (!rows.empty()) {
         wchar_t* end = nullptr;
@@ -866,6 +867,7 @@ bool start_overlay(const OverlayConfig& config, OverlayDeps deps) {
         e.open = open;
         push(e);
     };
+    set_key_debug(config.debug_keys);  // [overlay] debug_keys=1: the first console keys go to the log
     const bool input = install_input_hooks(g_router.get(), std::move(cb));
     VkOverlayHooks hooks;
     hooks.visible = [] {

@@ -29,6 +29,9 @@ bool install_input_hooks(InputRouter* router, InputCallbacks callbacks);
 // The game window is subclassed (keys, characters and mouse reach the overlay).
 bool window_hooked();
 
+// [overlay] debug_keys=1: the first console key presses go to the log (KeyDebugLog). Set before the window is hooked.
+void set_key_debug(bool on);
+
 // The Windows pointer, for the console's one pointer (cursor_model.h). Any thread.
 struct WindowsPointer {
     bool showing = false;   // the game shows it (its menus); in play it is hidden

@@ -109,6 +109,34 @@ private:
     BYTE keys_[256] = {};
 };
 
+// The characters for a key when ToUnicodeEx gave none (seen possible under Proton: a Linux player's console stayed
+// empty): `mapped` is MapVirtualKeyEx(vk, MAPVK_VK_TO_CHAR), the character printed on the key. A letter comes in the
+// case Shift and Caps Lock make; a digit or another symbol only without Shift (Shift's symbol is the layout's own); a dead
+// key (the high bit), a control character or 0 gives nothing.
+std::wstring fallback_chars(uint32_t mapped, bool shift, bool caps);
+
+// [overlay] debug_keys=1: one log line per key event while the console is open, for the first `max` key presses of a game
+// start (a raw key press, or a key message where no raw input comes), so a player's report shows where typed characters
+// get lost. Off by default (what is typed must not end up in logs). Window thread only.
+class KeyDebugLog {
+public:
+    explicit KeyDebugLog(size_t max = 20) : max_(max) {}
+    void enable(bool on) { on_ = on; }
+    bool on() const { return on_ && !done_; }
+    std::string opened();
+    // A raw key press for the console: what ToUnicodeEx gave (`proton`), the fallback's characters when it gave none,
+    // what was typed into the console now; waits: no character typed now because a character message should follow.
+    std::string raw_key(uint16_t scan, uint32_t vk, const std::wstring& proton, const std::wstring& fallback,
+                        const std::wstring& typed, bool waits = true);
+    std::string key_message(uint16_t scan, uint32_t vk, bool counts = false);  // counts: no raw input, this is the press
+    std::string character(wchar_t ch, bool to_console);
+
+private:
+    std::string press(std::string line);  // counts a press: the line, the last line, or "" once done
+    size_t max_, presses_ = 0;
+    bool on_ = false, done_ = false;
+};
+
 // Where the console's characters come from. With raw keys only, from raw input (ToUnicodeEx). Once the window also gets
 // key messages, from its character messages (WM_CHAR, made by the game's TranslateMessage), as on Windows. Under Wine the
 // key messages come but the character messages may not: after kMisses console key presses in a row whose characters

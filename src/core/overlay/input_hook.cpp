@@ -29,6 +29,10 @@ std::atomic<bool> g_raw_mouse{false};
 std::atomic<bool> g_absolute_mouse{false};  // raw mouse input with MOUSE_MOVE_ABSOLUTE (remote desktop, a VM)
 std::atomic<bool> g_legacy_keys{false};   // the window also gets WM_KEYDOWN/WM_CHAR: characters come from WM_CHAR
 HeldKeys g_keys;  // key state as seen through raw input (window thread only), for ToUnicodeEx
+KeyDebugLog g_keylog;  // [overlay] debug_keys=1 (window thread only)
+void key_log(const std::string& line) {
+    if (!line.empty()) emf::logf("%s", line.c_str());
+}
 CharSource g_chars;  // where the console's characters come from (window thread only)
 
 SRWLOCK g_ranges_lock = SRWLOCK_INIT;
@@ -139,9 +143,17 @@ void raw_characters(const KeyEvent& e) {
     memcpy(state, g_keys.state(), sizeof(state));
     state[VK_CAPITAL] = (o_get_key_state ? o_get_key_state(VK_CAPITAL) : GetKeyState(VK_CAPITAL)) & 1;
     wchar_t buf[8] = {};
-    const int n = ToUnicodeEx(vk, e.scan | (e.extended ? 0xE000 : 0), state, buf, 8, 0x4 /* keep dead-key state */,
-                              GetKeyboardLayout(0));
-    type_chars(g_chars.raw_down(e.scan, n > 0 ? std::wstring(buf, static_cast<size_t>(n)) : std::wstring()));
+    const HKL layout = GetKeyboardLayout(0);
+    const int n = ToUnicodeEx(vk, e.scan | (e.extended ? 0xE000 : 0), state, buf, 8, 0x4 /* keep dead-key state */, layout);
+    const std::wstring proton = n > 0 ? std::wstring(buf, static_cast<size_t>(n)) : std::wstring();
+    std::wstring fallback;
+    if (n == 0) {  // nothing (n < 0 is a dead key, which composes with the next key): the letter printed on the key
+        const bool shift = g_keys.down(VK_SHIFT) || g_keys.down(VK_LSHIFT) || g_keys.down(VK_RSHIFT);
+        fallback = fallback_chars(MapVirtualKeyExW(vk, MAPVK_VK_TO_CHAR, layout), shift, (state[VK_CAPITAL] & 1) != 0);
+    }
+    const std::wstring typed = g_chars.raw_down(e.scan, proton.empty() ? fallback : proton);
+    type_chars(typed);
+    key_log(g_keylog.raw_key(e.scan, vk, proton, fallback, typed, !g_chars.from_raw()));
 }
 
 // Applies a key route. Returns true if the message is handled here (not passed to the game).
@@ -150,6 +162,7 @@ bool apply_key(const KeyEvent& e, Route r, bool raw) {
         case Route::Game: return false;
         case Route::Toggle:
             emf::logf("overlay: console %s", g_router->open() ? "opened" : "closed");
+            if (g_router->open()) key_log(g_keylog.opened());
             if (!g_router->open()) g_chars.closed();  // what was held while deciding goes
             if (g_cb.toggled) g_cb.toggled(g_router->open());
             return true;
@@ -227,6 +240,7 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
                              msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN, ((lp >> 24) & 1) != 0};
             if (!g_legacy_keys.exchange(true)) emf::logf("overlay: the game window also gets key messages (WM_KEYDOWN)");
             g_chars.legacy_seen();
+            if (e.down && g_router->open()) key_log(g_keylog.key_message(e.scan, e.vkey, !g_raw_keyboard));
             // Raw input already decided this key; its key message copies that decision (no deciding twice).
             const Route r = g_raw_keyboard ? g_router->legacy_key(e) : g_router->key(e);
             // A dead toggle key (German ^) was stored by the game's TranslateMessage just now: clear it.
@@ -263,10 +277,12 @@ LRESULT CALLBACK hook_proc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_SYSCHAR: {
             if (!g_chars.from_raw()) g_chars.wm_char();  // the window makes characters (whoever this one is for)
             if (g_raw_keyboard && g_chars.from_raw()) {  // characters come from raw input
+                if (g_router->open()) key_log(g_keylog.character(static_cast<wchar_t>(wp), false));
                 if (g_router->capturing()) return 0;
                 break;
             }
             const Route r = g_router->character(static_cast<wchar_t>(wp));
+            if (g_router->open()) key_log(g_keylog.character(static_cast<wchar_t>(wp), r == Route::Console && wp >= 0x20));
             if (r == Route::Console) {
                 if (g_cb.console_char && wp >= 0x20) g_cb.console_char(static_cast<wchar_t>(wp));
                 return 0;
@@ -355,6 +371,8 @@ bool ensure_key_state_hooks() {
 }
 
 }  // namespace
+
+void set_key_debug(bool on) { g_keylog.enable(on); }
 
 bool window_hooked() { return g_window_hooked.load(); }
 

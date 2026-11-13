@@ -655,3 +655,15 @@ TEST_CASE("console UI: open_tab selects a tab on the next frame, once") {
     frame();
     CHECK(r.ui.tab == 2);  // stays there
 }
+
+TEST_CASE("read_overlay_config: debug_keys is off by default; debug_keys=1 turns the key log on") {
+    wchar_t dir[MAX_PATH];
+    GetTempPathW(MAX_PATH, dir);
+    const std::wstring ini = std::wstring(dir) + L"emf_test_debugkeys_" + std::to_wstring(GetCurrentProcessId()) + L".ini";
+    DeleteFileW(ini.c_str());
+    CHECK_FALSE(read_overlay_config(ini).debug_keys);
+    WritePrivateProfileStringW(L"overlay", L"debug_keys", L"1", ini.c_str());
+    OverlayConfig c = read_overlay_config(ini);
+    CHECK(c.debug_keys);
+    DeleteFileW(ini.c_str());
+}

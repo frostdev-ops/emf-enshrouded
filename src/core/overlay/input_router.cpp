@@ -1,3 +1,5 @@
+#include <string>
+#include <cstdio>
 #include "input_router.h"
 
 namespace emf::core {
@@ -166,6 +168,86 @@ bool caller_is_mod(uintptr_t return_address, const std::vector<std::pair<uintptr
     for (const auto& [begin, end] : mod_ranges)
         if (return_address >= begin && return_address < end) return true;
     return false;
+}
+
+
+std::wstring fallback_chars(uint32_t mapped, bool shift, bool caps) {
+    if (mapped & 0x80000000u) return {};  // a dead key
+    const wchar_t ch = static_cast<wchar_t>(mapped & 0xFFFF);
+    if (ch < 0x20) return {};
+    if (IsCharAlphaW(ch)) {  // any script's letters, not only English ones (iswalpha knows only the C locale's)
+        wchar_t c = ch;
+        if (shift != caps) CharUpperBuffW(&c, 1);
+        else CharLowerBuffW(&c, 1);
+        return std::wstring(1, c);
+    }
+    if (ch == L' ') return L" ";
+    if (shift) return {};
+    return std::wstring(1, ch);
+}
+
+namespace {
+// Text for a log line: printable ASCII as it is, anything else as a backslash-u escape.
+std::string shown(const std::wstring& s) {
+    std::string out;
+    char b[8];
+    for (wchar_t ch : s) {
+        if (ch >= 0x20 && ch < 0x7F && ch != L'"' && ch != L'\\') {
+            out += static_cast<char>(ch);
+        } else {
+            std::snprintf(b, sizeof b, "\\u%04x", static_cast<unsigned>(ch));
+            out += b;
+        }
+    }
+    return out;
+}
+std::string hex(uint32_t v) {
+    char b[16];
+    std::snprintf(b, sizeof b, "0x%02X", v);
+    return b;
+}
+}  // namespace
+
+std::string KeyDebugLog::opened() {
+    if (!on()) return {};
+    return "overlay keys: the console opened; logging its first " + std::to_string(max_) +
+           " key presses ([overlay] debug_keys=1)";
+}
+
+std::string KeyDebugLog::press(std::string line) {
+    if (!on()) return {};
+    if (++presses_ > max_) {
+        done_ = true;
+        return "overlay keys: " + std::to_string(max_) + " key presses logged; no more until the game starts again";
+    }
+    return line;
+}
+
+std::string KeyDebugLog::raw_key(uint16_t scan, uint32_t vk, const std::wstring& proton, const std::wstring& fallback,
+                                 const std::wstring& typed, bool waits) {
+    if (!on()) return {};
+    std::string line = "overlay keys: raw key " + hex(scan) + " (vk " + hex(vk) + "): Proton gives ";
+    if (!proton.empty()) line += "\"" + shown(proton) + "\"";
+    else if (!fallback.empty()) line += "nothing, the key's own letter \"" + shown(fallback) + "\"";
+    else line += "nothing";
+    line += "; typed now: ";
+    if (!typed.empty()) line += "\"" + shown(typed) + "\"";
+    else line += waits ? "nothing (a character message should follow)" : "nothing";
+    return press(line);
+}
+
+std::string KeyDebugLog::key_message(uint16_t scan, uint32_t vk, bool counts) {
+    if (!on()) return {};
+    const std::string line = "overlay keys: key message " + hex(scan) + " (vk " + hex(vk) + ")";
+    return counts ? press(line) : line;
+}
+
+std::string KeyDebugLog::character(wchar_t ch, bool to_console) {
+    if (!on()) return {};
+    char b[16];
+    std::snprintf(b, sizeof b, "U+%04X", static_cast<unsigned>(ch));
+    return "overlay keys: character message \"" + shown(std::wstring(1, ch)) + "\" (" + b + "): " +
+           (to_console ? "to the console" : "not for the console");
 }
 
 }  // namespace emf::core

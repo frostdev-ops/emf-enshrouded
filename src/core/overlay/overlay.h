@@ -37,11 +37,12 @@ struct OverlayConfig {
     size_t suggest_rows = 8;      // at most this many suggestions (3-12)
     LookSettings look;            // [hud] and the look keys of [overlay] (look_settings.h)
     std::vector<std::string> look_problems;  // values in them that could not be used, one line each (for the log)
+    bool debug_keys = false;  // [overlay] debug_keys=1: the first console keys go to the log (KeyDebugLog), for reports
 };
 
 // [overlay] enabled=0|1 (default 1), key=<scan code, decimal or 0x hex, 1-0x7F> (default 0x29), chat=0|1 (default 1),
 // mouse_speed=<0.1-10> (default 1), suggest=0|1 (default 1), suggest_rows=<3-12> (default 8; more or fewer are kept
-// within 3-12), and the look (read_look_settings). A "; comment" after a value on the same line is not part of it.
+// within 3-12), debug_keys=0|1 (default 0), and the look (read_look_settings). A "; comment" after a value on the same line is not part of it.
 OverlayConfig read_overlay_config(const std::wstring& ini_path);
 
 // The config with what the store holds for EMF's own settings (the Settings tab's values, one parser): the look, the

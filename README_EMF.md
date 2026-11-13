@@ -145,6 +145,11 @@ A player on a Steam Deck saw EMF's console and HUD; it is still new there: if no
 The Steam Deck has no ` key: give a button that key in Steam Input, or pick another key with `[overlay] key=` (a scan
 code, below).
 Under Wine or Proton the game window sometimes gets the keys but no typed characters, so the console stays empty. EMF notices after a few key presses and types from the raw keys itself (the log says "the console's characters come from raw input now"). The first characters you typed are not lost.
+When Proton cannot turn a key into a character, EMF types the letter printed on the key (letters, digits and space;
+characters made with AltGr or an accent key may not come). If the console still stays empty, add `debug_keys=1` under
+`[overlay]` in `emf\emf_core.ini`, start the game, open the console, type a test word such as `help`, and send
+`emf\emf_core.log` with your report: it then shows what happened to your first 20 key presses in the console (and only
+those, and only in the console). Type nothing private while it is on, and set it back to 0 afterwards.
 A dedicated server under Wine needs the same `WINEDLLOVERRIDES` (mods only: a server draws nothing).
 EMF.exe runs under Wine too, but its **Play** cannot reach Linux's Steam: start the game from Steam.
 
@@ -207,6 +212,7 @@ key=0x29       ; the key's scan code (0x29 = the key under Esc)
 chat=1         ; 0 turns chat commands off (below)
 suggest=1      ; 0: no suggestions as you type (Tab still completes)
 suggest_rows=8 ; at most this many suggestions (3 to 12)
+debug_keys=0   ; 1: the first 20 key presses in the console go to emf_core.log (for a report when typing fails)
 font=consolas  ; the console's font: consolas, cascadia, serif or file:<name>.ttf
 tabs_font=serif  ; the tab bar and the Mods tab: serif, consolas, cascadia or file:<name>.ttf
 text_size=100  ; the console's text size, 60 to 200 (%)
