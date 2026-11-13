@@ -36,7 +36,7 @@ report belongs. The details of each function are in [reference.md](reference.md)
   means the mod did not load, but the DLL stays loaded (what it registered stays registered).
 - Order: by `depends`, then by folder name. Skip a mod whose `[<id>] enabled=0` is set in `emf\config\<id>.ini`.
 - Lua mods name a script in `main` and depend on `"lua": ">=1.x"`: the Lua host's version. The Lua host is a mod of
-  its own (`mods/lua`); its version list is in lua.md, step 2 of "Your first Lua mod".
+  its own (`mods/lua`); its versions are in lua.md, "Lua versions".
 
 ## Threads and worlds
 

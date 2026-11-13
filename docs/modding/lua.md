@@ -26,25 +26,8 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
    }
    ```
 
-   (`lua` 1.1 is the Lua host that has `emf.on_world_data`, `emf.save_world_data` and `world:account`; a mod that uses
-   none of them can depend on `>=1.0`. 1.2 also takes full type names such as `keen::ecs::HitEvent`, and
-   `emf.command` returns true or false. 1.3 adds `emf.on_key` and `emf.key_down`, and `emf.hud` takes a corner name
-   and a `#rrggbb` colour: depend on `">=1.3"` for those. 1.4 adds `emf.time_of_day`, `emf.kill`, a level and rarity
-   for `emf.put`, and commands for every player (`emf.command(..., {players = true})`): depend on `">=1.4"`. 1.5 adds
-   `emf.health`, `emf.attribute`, `emf.attribute_add` and `emf.damage` (the host needs EMF API v18): depend on
-   `">=1.5"`. 1.6 adds `emf.tell`, `emf.broadcast`, `world:name`, `emf.on_chat` and `emf.request_save` (EMF API
-   v19), and `emf.command(emf.id, ...)` makes the bare command `/<id>`: depend on `">=1.6"`. 1.7 adds `emf.teleport`
-   (EMF API v20): depend on `">=1.7"`. 1.8 adds `world:template`: depend on `">=1.8"`. 1.9 adds wheel groups (`emf.wheel_section`, `emf.wheel_group`): depend on `">=1.9"`. 1.10 adds
-   `emf.world_settings` and `emf.on_world_setting_changed` (EMF API v21): depend on `">=1.10"`. 1.11 adds a
-   player's XP and level (`emf.xp_required`, `emf.level_cap`, `emf.set_level` and the attribute names `"xp_pending"`,
-   `"xp"`, `"xp_required"`, `"level"`; EMF API v22): depend on `">=1.11"`. 1.12 adds `emf.add_component`,
-   `emf.remove_component` (EMF API v23) and components spawned with `emf.spawn`: depend on `">=1.12"`. 1.13 adds
-   mod windows (`emf.window`, `emf.window_update`, `emf.window_close`; EMF API v24): depend on `">=1.13"`. 1.14 adds
-   E prompts (`emf.offer`, `emf.spawn_offer`, `emf.offer_remove`; EMF API v25): depend on `">=1.14"`. 1.15 adds
-   pictures in windows (`emf.image`, the `image`, `icon`, `fps` and `height` row fields; EMF API v26): depend on
-   `">=1.15"`. 1.17 adds the inter-mod message bus (`emf.bus.subscribe`, `.publish`, `.unsubscribe`): mods using it
-   depend on `"lua": ">=1.17"`. 1.18 adds `emf.json` (encode and decode tables as JSON text, for messages on the bus): depend on `">=1.18"`. 1.19 adds mod messages (`emf.net`; EMF API v27): depend on `">=1.19"`. 1.20 adds player events (`emf.on_player_joined`, `_left`, `_died`; EMF API v28): depend on `">=1.20"`. 1.21 adds the game's item names and language (`emf.item_name`, `emf.language`; EMF API v29): depend on `">=1.21"`. 1.22 adds `world:character_name` and the `{system = true}` option of `emf.tell` and `emf.broadcast` (EMF API v30): depend on `">=1.22"`. 1.23 adds hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`; EMF API v31): depend on `">=1.23"`. 1.24 adds buffs (`emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff`; EMF API v32): depend on `">=1.24"`. 1.25 adds markers (`emf.marker`, `emf.send_marker` and more; EMF API v33): depend on `">=1.25"`. 1.26 adds the map (`emf.map_cursor`, `emf.on_map_click`, `emf.map_action`, `emf.remove_map_action`, `emf.ground_at`; EMF API v34): depend on `">=1.26"`. 1.27 adds canvases and a minimap's parts (`emf.player_view`, `emf.fog_at`, `emf.map_markers`, `emf.canvas`, `emf.canvas_draw`, the marker key `minimap`, and a `fog` argument for `emf.ground_at`; EMF API v35): depend on `">=1.27"`. 1.28 adds `emf.remove_building` (EMF API v36): depend on `">=1.28"`. 1.29 adds `emf.path_find` and `emf.path_cancel` (EMF API v37): depend on `">=1.29"`. 1.30 adds `emf.door`, `emf.door_open`, `emf.door_close` and `emf.door_lock` (EMF API v38): depend on `">=1.30"`. 1.31 adds a `water_y` argument for `emf.ground_at` (EMF 0.6.8): depend on `">=1.31"`. 1.32 adds enemy orders (`emf.enemy_order`, `emf.enemy_order_cancel`, `emf.enemy_target`; EMF API v39): depend on `">=1.32"`. 1.33 adds move orders (`emf.enemy_move`, `emf.enemy_move_cancel`, `emf.enemy_moving`; EMF API v40): depend on `">=1.33"`. Ranges are explained in
-   [guide.md](guide.md), "Dependencies and version ranges".)
+   (`"lua": ">=1.1"` is the Lua host version the mod needs: [Lua versions](#lua-versions) says which version added
+   what.)
 
 3. Put `main.lua` next to it:
 
@@ -70,6 +53,51 @@ The quickest start is the starter in the EMF zip: copy `template_lua\` into `<ga
 `emf\mods\kill_counter\` is a complete example (it counts your kills): read it, then copy the folder under a new id
 (and change `"id"` in its `mod.json`) to change it. Installing EMF again replaces `kill_counter` itself. It is installed
 switched off: switch it on in the Mods tab to see it count.
+
+## Lua versions
+
+Each version of the `lua` mod (the Lua host) adds to the one before. Put the newest version whose additions your mod
+uses into `depends`: `"lua": ">=1.21"` for `emf.language`. A mod that uses none of them can depend on `">=1.0"`. The
+`lua` mod itself needs EMF API v20 (its `mod.json`), so it runs on no older core; the last column names the EMF API
+version the additions need where that is newer (none: v20 is enough). Today's version is 1.33. Ranges are explained in
+[guide.md](guide.md), "Dependencies and version ranges".
+
+| Version | What it adds | EMF API |
+|---|---|---|
+| 1.0 | the first Lua host: the `emf` table without the additions below | |
+| 1.1 | `emf.on_world_data`, `emf.save_world_data`, `world:account` | |
+| 1.2 | full type names such as `keen::ecs::HitEvent`; `emf.command` returns true or false | |
+| 1.3 | `emf.on_key`, `emf.key_down`; `emf.hud` takes a corner name and a `#rrggbb` colour | |
+| 1.4 | `emf.time_of_day`, `emf.kill`, a level and rarity for `emf.put`, commands for every player (`emf.command(..., {players = true})`) | |
+| 1.5 | `emf.health`, `emf.attribute`, `emf.attribute_add`, `emf.damage` | v18 |
+| 1.6 | `emf.tell`, `emf.broadcast`, `world:name`, `emf.on_chat`, `emf.request_save`; `emf.command(emf.id, ...)` makes the bare command `/<id>` | v19 |
+| 1.7 | `emf.teleport` | v20 |
+| 1.8 | `world:template` | |
+| 1.9 | wheel groups (`emf.wheel_section`, `emf.wheel_group`) | |
+| 1.10 | `emf.world_settings`, `emf.on_world_setting_changed` | v21 |
+| 1.11 | a player's XP and level: `emf.xp_required`, `emf.level_cap`, `emf.set_level`, the attribute names `"xp_pending"`, `"xp"`, `"xp_required"`, `"level"` | v22 |
+| 1.12 | `emf.add_component`, `emf.remove_component`, components spawned with `emf.spawn` | v23 |
+| 1.13 | mod windows (`emf.window`, `emf.window_update`, `emf.window_close`) | v24 |
+| 1.14 | E prompts (`emf.offer`, `emf.spawn_offer`, `emf.offer_remove`) | v25 |
+| 1.15 | pictures in windows (`emf.image`, the `image`, `icon`, `fps` and `height` row fields) | v26 |
+| 1.16 | never used: the version went from 1.15 to 1.17 | |
+| 1.17 | the message bus between mods (`emf.bus.subscribe`, `.publish`, `.unsubscribe`) | |
+| 1.18 | `emf.json` (tables to JSON text and back, for messages on the bus) | |
+| 1.19 | mod messages (`emf.net`) | v27 |
+| 1.20 | player events (`emf.on_player_joined`, `_left`, `_died`) | v28 |
+| 1.21 | the game's item names and language (`emf.item_name`, `emf.language`) | v29 |
+| 1.22 | `world:character_name`, the `{system = true}` option of `emf.tell` and `emf.broadcast` | v30 |
+| 1.23 | hits (`emf.on_hit`, `emf.hit_rule`, `emf.hit_rule_remove`) | v31 |
+| 1.24 | buffs (`emf.buff_types`, `emf.buff_type`, `emf.buffs`, `emf.apply_buff`, `emf.remove_buff`, `emf.on_buff`) | v32 |
+| 1.25 | markers (`emf.marker`, `emf.send_marker` and more) | v33 |
+| 1.26 | the map (`emf.map_cursor`, `emf.on_map_click`, `emf.map_action`, `emf.remove_map_action`, `emf.ground_at`) | v34 |
+| 1.27 | canvases and a minimap's parts (`emf.player_view`, `emf.fog_at`, `emf.map_markers`, `emf.canvas`, `emf.canvas_draw`, the marker key `minimap`, a `fog` argument for `emf.ground_at`) | v35 |
+| 1.28 | `emf.remove_building` | v36 |
+| 1.29 | `emf.path_find`, `emf.path_cancel` | v37 |
+| 1.30 | `emf.door`, `emf.door_open`, `emf.door_close`, `emf.door_lock` | v38 |
+| 1.31 | a `water_y` argument for `emf.ground_at` | v34, from EMF 0.6.8 |
+| 1.32 | enemy orders (`emf.enemy_order`, `emf.enemy_order_cancel`, `emf.enemy_target`) | v39 |
+| 1.33 | move orders (`emf.enemy_move`, `emf.enemy_move_cancel`, `emf.enemy_moving`) | v40 |
 
 ## What happens when a script fails
 
