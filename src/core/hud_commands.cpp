@@ -366,7 +366,7 @@ bool add_hud_commands(CommandCenter& center, HudEditor& editor) {
     ok &= center.add("hud.layout", "[save|load|delete <name>]: the HUD layouts in emf\\hud (save as a new name, switch, delete); without words, the list", cmd_layout, &editor, nullptr, true);
     ok &= center.add("hud.swap", "health|mana|stamina health|mana|stamina: two of the vitals' bars change places (e.g. hud.swap health mana: mana on top)", cmd_swap, &editor, nullptr, true);
     ok &= center.add("hud.order", "<bar> <bar> <bar>: the vitals' bars from the top (e.g. hud.order mana health stamina)", cmd_order, &editor, nullptr, true);
-    ok &= center.add("hud.colour", "[bar] [part] [colour]: the vitals' bar colours (e.g. hud.colour health #ff4040, hud.colour mana empty #00000000, hud.colour panel #20202080, hud.colour health game)", cmd_colour, &editor, nullptr, true);
+    ok &= center.add("hud.colour", "[bar] [part] [colour]: the vitals' bar colours (e.g. hud.colour health #ff4040, hud.colour mana empty #00000000, hud.colour panel #20202080, hud.colour health all game)", cmd_colour, &editor, nullptr, true);
     ok &= center.add("hud.grow", "up|down: the status effects list grows upward from the food icons' bottom edge, or down as the game draws it", cmd_grow, &editor, nullptr, true);
     return ok;
 }

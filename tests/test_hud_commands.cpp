@@ -99,6 +99,18 @@ TEST_CASE("hud.reset: the vitals' reset says the bar order went back too; the bu
     CHECK(run(e, {"hud.reset", "compass"}) == Lines{"hud: compass is back where the game draws it"});
 }
 
+TEST_CASE("hud.colour: the help's example resets every colour of a bar") {
+    HudRig r;
+    HudEditor& e = r.make();
+    CommandCenter c;
+    REQUIRE(add_hud_commands(c, e));
+    std::string help;
+    for (const auto& [name, h] : c.list())
+        if (name == "hud.colour") help = h;
+    CHECK(help.find("hud.colour health all game)") != std::string::npos);
+    CHECK(help.find("hud.colour health game)") == std::string::npos);
+}
+
 TEST_CASE("hud.layout: list, save with spaces in the name, load, delete") {
     HudRig r;
     HudEditor& e = r.make();

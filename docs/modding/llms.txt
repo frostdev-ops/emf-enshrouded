@@ -496,7 +496,7 @@ help, mods, settings, set, hooks, pattern, hud.list, hud.move, hud.scale, hud.hi
 - hud.layout [save|load|delete <name>]: the HUD layouts in emf\\hud (save as a new name, switch, delete); without words, the list
 - hud.swap health|mana|stamina health|mana|stamina: two of the vitals' bars change places (e.g. hud.swap health mana: mana on top)
 - hud.order <bar> <bar> <bar>: the vitals' bars from the top (e.g. hud.order mana health stamina)
-- hud.colour [bar] [part] [colour]: the vitals' bar colours (e.g. hud.colour health #ff4040, hud.colour mana empty #00000000, hud.colour panel #20202080, hud.colour health game)
+- hud.colour [bar] [part] [colour]: the vitals' bar colours (e.g. hud.colour health #ff4040, hud.colour mana empty #00000000, hud.colour panel #20202080, hud.colour health all game)
 - hud.grow up|down: the status effects list grows upward from the food icons' bottom edge, or down as the game draws it
 - profile [save <name> [--settings] [--replace] | load <name>]: mod profiles (the mods' switches by name; a load applies at the next game start)
 - saves.backup [label]: back up every save file now (at the main menu)
