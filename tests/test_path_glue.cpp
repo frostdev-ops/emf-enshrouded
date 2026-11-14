@@ -442,3 +442,27 @@ TEST_CASE("path glue (path.door): at most 16 wait; the watchdog answers them whe
     CHECK(g_door_lines[0] == "path.door 100: not answered (the emf_path program is not running in this world)");
     CHECK(path_door_ask(200, door_reply()) == "");  // room again
 }
+
+TEST_CASE("path glue (0.6.11 review M1): a door id on a point that is not a door point is not handed on") {
+    Rig r;
+    REQUIRE(path_service()->request(query(12), 7, on_path_doors, nullptr, 1000, nullptr) != 0u);
+    r.step();
+    g_found[1] = {{4, 50, 0, 0, {}}, {8, 50, 0, 5, {}}, {12, 50, 0, 2, {}}};
+    g_door_ids[1] = {33, 812, 34};  // an old array the game did not clear: only the door point counts
+    r.step();
+    CHECK(g_cb_doors == std::vector<uint32_t>{0, 812, 0});
+}
+
+TEST_CASE("path glue (0.6.11 review M2): path.door asks waiting when the world ends are answered, not read in the next world") {
+    g_door_lines.clear();
+    Rig r(true);
+    CHECK(path_door_ask(77, door_reply()) == "");
+    path_world_reset();
+    REQUIRE(g_door_lines.size() == 1u);
+    CHECK(g_door_lines[0] == "path.door 77: not answered (the world ended)");
+    emf::test::FakeGrid g;
+    g.standard_door(2);
+    set_grid(r, g.grid.data());
+    r.step();
+    CHECK(g_door_lines.size() == 1u);  // nothing left for the next world's grid
+}

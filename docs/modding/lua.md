@@ -605,7 +605,7 @@ The answer comes once, after a server step or more, to `fn(world, result, points
 - `result.reaches`: true when the last point is within 1.5 m across and 3 m up or down of `to`;
 - `result.length`: metres from `from` along the points; `result.count`: the points (at most 512);
 - `points`: a list of `{x, y, z, move}`; `move` is 0 walk, 2 jump up, 3 jump down, 4 jump across, 5 a door. A door
-  point also has `door`, the door's entity (1.35, EMF API v42): the gate a raid has to break.
+  point also has `door`, the door's entity (1.35, EMF API v42): the door this path opens there.
 
 `emf.path_cancel(id)` returns true when the query was open. The callback still comes, with `"cancelled"`. A script that
 is paused or reloaded before the answer hears nothing. Bad option values, or a position without three numbers, are Lua
@@ -614,7 +614,7 @@ errors.
 | `opts` field | What |
 |---|---|
 | `jumps` | `true`: the path may jump up, down and across |
-| `doors` | `true`: the path may open doors. A closed door is crossed only this way (EMF 0.6.11; before, a plain walk could cross a closed door with a floor piece under it), at a point with `move` 5 |
+| `doors` | `true`: the path may open doors. A closed door is crossed only this way (EMF 0.6.11; before, a plain walk could cross a closed door, whose spot counts as ground in the grid), at a point with `move` 5. The whole box of a closed door's collider, on its lowest 1 m layer, is closed to walking: a door standing at an angle closes the floor beside it too. This is path_find's view; creatures walk with the game's own rules |
 | `swim` | `true`: the path may swim |
 | `closest` | `true`: when the target cannot be reached, end at the closest reachable point |
 | `width`, `height` | the room the unit needs, in metres (0 to 64; default: the game's). `width` works as a radius: 0.5 needs 0.5 m free all round, 1.5 a clear 3 m circle (an open gate rarely has that). The grid keeps at most about 2 m across and 3.5 m up, so more finds no start. Jumps ignore both in flight. Try 0.5 and 2 for a humanoid, 1 and 3 for a big one |
@@ -702,8 +702,6 @@ counts as reached within that distance + 1 m, or within `arrive` if that is larg
 - `seconds`: a time limit (default 0: none; at most 3600).
 - `peaceful = true` (or `"players"`): it ignores players on the way (its fights with players are cleared each step).
   `peaceful = "all"` (1.34): it ignores everyone, animals and players' beasts too: it only walks (a thief running off).
-  Either way it ignores noise too (EMF 0.6.11): the game's noise reactions (ReactToNoise, Investigate) are broken off
-  each step.
   Without it, it may fight on the way (the game's way) and goes on afterwards.
 - `stuck` (1.34): seconds without a metre closer (while not fighting) before it ends `"stuck"` (2 to 120; default 15).
 - `allies = true`: the creature may be a player's ally (a tamed beast).

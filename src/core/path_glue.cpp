@@ -236,6 +236,8 @@ void path_program(void* ctx, void*) {
         if (door_ids && door_count == count) {  // one per point, or not trusted
             a.doors.resize(n);
             if (!seh_read(door_ids, a.doors.data(), n * sizeof(uint32_t))) a.doors.clear();
+            for (size_t i = 0; i < a.doors.size(); ++i)  // only a door point names a door (an old array is not trusted)
+                if (a.points[i].move != 5) a.doors[i] = 0;
         }
         return a;
     };
@@ -289,6 +291,7 @@ void path_world_reset() {
         g_to_destroy.clear();
     }
     if (g_service) deliver(g_service->world_reset());
+    answer_doors_unread("the world ended");  // not read from the next world's grid (entity ids come again)
 }
 
 void path_server_tick(uint64_t now_ms) {

@@ -768,7 +768,8 @@ typedef struct EmfPathResult {
     uint32_t count;   /* points (at most 512) */
     float length;     /* metres from `from` along the points */
     /* API v42 (0.6.11; read it only when `size` covers it): per point, the door entity the path goes through there (a
-       point with move 5), else 0; `count` entries. NULL when no point is a door. Valid during the callback only. */
+       point with move 5), else 0; `count` entries. NULL when no point is a door (or the game gave no usable list).
+       Valid during the callback only. */
     const uint32_t* doors;
 } EmfPathResult;
 typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResult* result, const EmfPathPoint* points,

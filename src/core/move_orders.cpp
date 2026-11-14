@@ -255,15 +255,11 @@ int MoveOrders::tick(Move& m, uint64_t now) {
     auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, m.world, m.enemy);
     // it took the waypoint as its guard target but stays calm (a fresh spawn sent farther than ~10 m, seen live: Roaming
     // or Idle, never walking; put in Guard it walked): Guard it is. Not while it goes for something it picked (it may
-    // fight on the way), and at most every kMoveResendMs (another state writer is not fought every step). A peaceful
-    // move breaks off the game's noise reactions every step (a raider stood 46 s outside a gate, switched to
-    // ReactToNoise / Investigate by a fight nearby).
+    // fight on the way), and at most every kMoveResendMs (another state writer is not fought every step).
     const auto* sel = comp<gen::SelectedTargets>(d_, m.world, m.enemy);
     const bool picked = sel && sel->targets[0].targetEntityId.id != 0;
-    const bool peaceful_noise = (m.flags & (EMF_MOVE_PEACEFUL | EMF_MOVE_PEACEFUL_ALL)) && ai &&
-                                (ai->state == State::ReactToNoise || ai->state == State::Investigate);
     if (ai && m.waypoint && ai->guardEntityId.id == m.waypoint && calm_state(ai->state) && !picked &&
-        (peaceful_noise || m.last_nudge == 0 || now - m.last_nudge >= kMoveResendMs)) {
+        (m.last_nudge == 0 || now - m.last_nudge >= kMoveResendMs)) {
         ai->state = State::Guard;
         m.last_nudge = now;
     }

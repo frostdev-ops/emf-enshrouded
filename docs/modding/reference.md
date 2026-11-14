@@ -1152,7 +1152,7 @@ Refused (0, logged once per 10 s):
 |---|---|
 | `owner` | an entity the query belongs to; 0 = the first player |
 | `from`, `to` | start and target, in metres |
-| `moves` | `EMF_PATH_WALK` is always added. Add `EMF_PATH_JUMP_UP`, `_JUMP_DOWN`, `_JUMP_ACROSS`, `_OPEN_DOOR`, `_SWIM`. A closed door is crossed only with `_OPEN_DOOR` (since 0.6.11 EMF forbids closed-door nodes, the node rule for type 19, for every other move: a walk could cross a closed door that had a floor piece under it) |
+| `moves` | `EMF_PATH_WALK` is always added. Add `EMF_PATH_JUMP_UP`, `_JUMP_DOWN`, `_JUMP_ACROSS`, `_OPEN_DOOR`, `_SWIM`. A closed door is crossed only with `_OPEN_DOOR` (since 0.6.11 EMF forbids closed-door nodes, the node rule for type 19, for every other move: the grid counts a closed door's spot as ground, so a walk could cross it). The whole box of a closed door's collider, on its lowest 1 m layer, is closed: a door at an angle closes the floor beside it too; a start inside that box may find no start node. This is path_find only; creatures walk with the game's own rules |
 | `max_jump_up`, `max_jump_down` | metres; 0 = no limit |
 | `width`, `height` | the room the unit needs, in metres; 0 = the game's default. `width` works as a radius (the game doubles it into half metres of free room all round, as it does with a creature's `PathWalker.horizontalRadius`); the grid keeps at most about 2 m across and 3.5 m up, so more finds no start node. Jump flights are checked against fixed room, not these |
 | `closest` | 1: fall back to the closest reachable point |
@@ -1166,7 +1166,7 @@ Refused (0, logged once per 10 s):
 | `reaches` | true when the last point is within 1.5 m across and 3 m up or down of `to` |
 | `count` | the points passed (at most 512 are kept) |
 | `length` | metres from `from` along the points |
-| `doors` | API v42 (0.6.11; read it when `size` covers it, `emf::has_v42()`): per point, the door entity the path goes through there (a point with `move` 5), else 0; `count` entries; NULL when no point is a door. Valid during the callback only. The game's own record of the door for that point |
+| `doors` | API v42 (0.6.11; read it when `size` covers it, `emf::has_v42()`): per point, the door entity the path goes through there (a point with `move` 5), else 0; `count` entries; NULL when no point is a door (or the game gave no usable list). Valid during the callback only. The game's own record of the door for that point |
 
 Each `EmfPathPoint` has `x`, `y`, `z` and `move`: 0 walk, 2 jump up, 3 jump down, 4 jump across, 5 a door.
 
@@ -1289,8 +1289,7 @@ world's thread, inside `enemy_move_cancel`, inside the `enemy_move` or `enemy_or
 the world closes. A waiting guard order of an ended move is dropped; a waypoint that vanishes is placed again up to 3 times. `EMF_MOVE_PEACEFUL`
 clears its fights against players each step (`EMF_MOVE_PEACEFUL_ALL`, API v41: every fight, animals and players'
 beasts too; a v40 core refuses the flag: check `emf::has_v41()`, which goes by the version number since the table did
-not grow) (a creature left in `Combat` with nothing to fight goes to `Idle`); since 0.6.11 either flag also breaks
-off the game's noise reactions (`ReactToNoise`, `Investigate`) each step; without
+not grow) (a creature left in `Combat` with nothing to fight goes to `Idle`); without
 it the creature may fight on the way (the stuck clock waits) and goes on afterwards. When a move ends its waypoint goes;
 a creature that guarded someone before guards them again (a tamed beast: its owner); any other stops guarding, and if it
 arrived its home becomes the last point (it lives there). A move and an enemy order on the same creature end each other (once the new one holds: a refused one ends nothing).
