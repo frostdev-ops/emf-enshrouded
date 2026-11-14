@@ -1,6 +1,7 @@
 // path_find (API v37): the emf_path program over fake game calls (create, result, destroy, defaults).
 #include <doctest.h>
 
+#include <cstddef>
 #include <cstring>
 #include <map>
 #include <string>
@@ -26,6 +27,7 @@ uint32_t g_next_id = 0;
 std::vector<uint32_t> g_owners, g_destroyed;
 std::vector<float> g_targets;  // target x of each created query
 std::map<uint32_t, std::vector<GamePoint>> g_found;
+std::map<uint32_t, std::vector<uint32_t>> g_door_ids;  // the game's door entity per point (out +0x10 / +0x18)
 bool g_get_faults = false;
 
 uint32_t* f_create(void*, uint32_t* id, const void* q) {
@@ -52,6 +54,12 @@ bool f_get(void*, void* out, uint32_t id, bool dirty) {
     const uint64_t n = it->second.size();
     std::memcpy(o, &p, 8);
     std::memcpy(o + 8, &n, 8);
+    if (auto d = g_door_ids.find(id); d != g_door_ids.end()) {
+        const uint32_t* dp = d->second.data();
+        const uint64_t dn = d->second.size();
+        std::memcpy(o + 0x10, &dp, 8);
+        std::memcpy(o + 0x18, &dn, 8);
+    }
     o[0x24] = 1;  // PathFound
     return true;
 }
@@ -79,6 +87,7 @@ struct Rig {
         g_destroyed.clear();
         g_targets.clear();
         g_found.clear();
+        g_door_ids.clear();
         g_answers.clear();
         g_get_faults = false;
         PathGlueDeps d;
@@ -329,4 +338,42 @@ TEST_CASE("path glue (review M3): a new world forgets the old world's game recor
     path_world_reset();
     r.step();
     CHECK(g_destroyed.empty());
+}
+
+// 0.6.11 (a modder's raids): next to the points the game's answer holds the door entity of each point (out +0x10 pointer,
+// +0x18 count; the path builder writes it for door points, path_walking reads it). EMF hands it on as
+// EmfPathResult.doors: NULL when no point is a door, or when the game's count is not the points' count.
+namespace {
+std::vector<uint32_t> g_cb_doors;
+bool g_cb_doors_null = true;
+void on_path_doors(EmfWorld*, uint32_t, const EmfPathResult* r, const EmfPathPoint*, void*) {
+    g_cb_doors.clear();
+    g_cb_doors_null = r->size < offsetof(EmfPathResult, doors) + sizeof(r->doors) || !r->doors;
+    if (!g_cb_doors_null) g_cb_doors.assign(r->doors, r->doors + r->count);
+}
+}  // namespace
+
+TEST_CASE("path glue (0.6.11): the door entity of each point comes with the answer (EmfPathResult.doors)") {
+    Rig r;
+    REQUIRE(path_service()->request(query(12), 7, on_path_doors, nullptr, 1000, nullptr) != 0u);
+    r.step();
+    g_found[1] = {{4, 50, 0, 0, {}}, {8, 50, 0, 5, {}}, {12, 50, 0, 0, {}}};
+    g_door_ids[1] = {0, 812, 0};
+    r.step();
+    CHECK_FALSE(g_cb_doors_null);
+    CHECK(g_cb_doors == std::vector<uint32_t>{0, 812, 0});
+
+    REQUIRE(path_service()->request(query(12), 7, on_path_doors, nullptr, 1000, nullptr) != 0u);
+    r.step();
+    g_found[2] = {{4, 50, 0, 0, {}}, {12, 50, 0, 0, {}}};
+    g_door_ids[2] = {0, 0};  // no door point
+    r.step();
+    CHECK(g_cb_doors_null);
+
+    REQUIRE(path_service()->request(query(12), 7, on_path_doors, nullptr, 1000, nullptr) != 0u);
+    r.step();
+    g_found[3] = {{4, 50, 0, 5, {}}, {12, 50, 0, 0, {}}};
+    g_door_ids[3] = {812};  // not one per point: not trusted
+    r.step();
+    CHECK(g_cb_doors_null);
 }

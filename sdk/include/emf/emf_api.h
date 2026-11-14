@@ -1,4 +1,4 @@
-/* EMF (Enshrouded Modding Framework) C API, version 41 (see EMF_API_VERSION).
+/* EMF (Enshrouded Modding Framework) C API, version 42 (see EMF_API_VERSION).
  *
  * A mod is a DLL in <game>/emf/mods/ that exports:
  *     extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api);
@@ -26,7 +26,7 @@
 extern "C" {
 #endif
 
-#define EMF_API_VERSION 41
+#define EMF_API_VERSION 42
 
 /* World kinds (the byte at the entity storage + 8: world+0xE15DC8 on build 1273043, world+0xE179C8 on 1283531). */
 #define EMF_WORLD_SERVER 0
@@ -767,6 +767,9 @@ typedef struct EmfPathResult {
     uint8_t pad[3];
     uint32_t count;   /* points (at most 512) */
     float length;     /* metres from `from` along the points */
+    /* API v42 (0.6.11; read it only when `size` covers it): per point, the door entity the path goes through there (a
+       point with move 5), else 0; `count` entries. NULL when no point is a door. Valid during the callback only. */
+    const uint32_t* doors;
 } EmfPathResult;
 typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResult* result, const EmfPathPoint* points,
                                 void* user);

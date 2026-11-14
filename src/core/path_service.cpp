@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <cstddef>
 #include <cstdio>
 #include <cstring>
 
@@ -63,9 +64,13 @@ std::string path_answer_text(uint32_t id, const EmfPathResult& r, const EmfPathP
         default: return head + "no answer from the game";
     }
     uint32_t jumps = 0, doors = 0;
+    std::string named;  // the door entities the game names (v42 results)
+    const bool has_doors = r.size >= offsetof(EmfPathResult, doors) + sizeof(r.doors) && r.doors;
     for (uint32_t i = 0; points && i < r.count; ++i) {
         if (points[i].move >= 2 && points[i].move <= 4) ++jumps;
         if (points[i].move == 5) ++doors;
+        if (has_doors && r.doors[i] && named.size() < 200)
+            named += (named.empty() ? "" : ", ") + std::to_string(r.doors[i]) + " at point " + std::to_string(i + 1);
     }
     char buf[256];
     const EmfPathPoint* last = points && r.count ? &points[r.count - 1] : nullptr;
@@ -73,7 +78,7 @@ std::string path_answer_text(uint32_t id, const EmfPathResult& r, const EmfPathP
                   r.reaches ? "reaches the target" : "stops short of the target", r.count, r.length,
                   last ? last->x : 0.0f, last ? last->y : 0.0f, last ? last->z : 0.0f, jumps, jumps == 1 ? "" : "s",
                   doors, doors == 1 ? "" : "s");
-    return head + buf;
+    return head + buf + (named.empty() ? "" : " (" + named + ")");
 }
 
 uint32_t path_status(uint32_t game_result, size_t points) {
@@ -138,7 +143,8 @@ bool PathService::cancel(uint32_t id) {
     return found;
 }
 
-PathDone PathService::finish(const Query& x, uint32_t status, const std::vector<EmfPathPoint>& pts) const {
+PathDone PathService::finish(const Query& x, uint32_t status, const std::vector<EmfPathPoint>& pts,
+                             const std::vector<uint32_t>& doors) const {
     PathDone d;
     d.id = x.id;
     d.cb = x.cb;
@@ -153,6 +159,9 @@ PathDone PathService::finish(const Query& x, uint32_t status, const std::vector<
     const size_t keep = (std::min)(pts.size(), size_t{kMaxPathPoints});
     d.points.assign(pts.begin(), pts.begin() + keep);
     d.result.count = static_cast<uint32_t>(keep);
+    // the game's door entity per point: only when it has one per point and names a door among the kept ones
+    if (doors.size() == pts.size() && std::any_of(doors.begin(), doors.begin() + keep, [](uint32_t e) { return e != 0; }))
+        d.doors.assign(doors.begin(), doors.begin() + keep);
     float len = 0;
     float at[3] = {x.q.from[0], x.q.from[1], x.q.from[2]};
     for (const EmfPathPoint& p : d.points) {
@@ -175,9 +184,9 @@ std::vector<PathDone> PathService::step(const PathEngine& e, uint64_t now_ms) {
     std::vector<uint32_t> ended;
     size_t creates = 0;
     for (Query& x : work) {
-        auto end = [&](uint32_t status, const std::vector<EmfPathPoint>& pts) {
+        auto end = [&](uint32_t status, const std::vector<EmfPathPoint>& pts, const std::vector<uint32_t>& doors = {}) {
             if (x.game_id && e.destroy) e.destroy(x.game_id, x.owner);  // the game never drops a query by itself
-            done.push_back(finish(x, status, pts));
+            done.push_back(finish(x, status, pts, doors));
             ended.push_back(x.id);
         };
         if (x.cancelled || (e.exists && !e.exists(x.owner))) {
@@ -197,7 +206,7 @@ std::vector<PathDone> PathService::step(const PathEngine& e, uint64_t now_ms) {
         }
         const PathAnswer a = e.poll ? e.poll(x.game_id) : PathAnswer{};
         if (a.done) {
-            end(path_status(a.game_result, a.points.size()), a.points);
+            end(path_status(a.game_result, a.points.size()), a.points, a.doors);
         } else if (now_ms - x.asked_ms > kPathTimeoutMs) {
             end(EMF_PATH_OTHER, {});
         }

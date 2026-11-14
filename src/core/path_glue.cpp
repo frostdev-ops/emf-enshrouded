@@ -17,7 +17,9 @@ namespace emf::core {
 
 namespace {
 constexpr size_t kJobCmdBuffer = 0x08;    // ProgramContext -> job; cmdbuf = *(job + 8)
-constexpr size_t kResultBytes = 0x28;     // getPathQueryResult's out: points +0, count +8, result +0x24
+constexpr size_t kResultBytes = 0x28;     // getPathQueryResult's out: points +0, count +8, door entities +0x10,
+                                          // their count +0x18 (one u32 per point; private path_doors_2026-11-14.md
+                                          // section 6), result +0x24
 constexpr size_t kGamePointBytes = 0x10;  // float x, y, z, u8 move at +0xC
 constexpr size_t kMaxGamePoints = 4096;   // read at most (the service keeps 512)
 
@@ -98,11 +100,13 @@ void deliver(std::vector<PathDone> done) {
     if (done.empty() || !g_deps.after_step) return;
     auto shared = std::make_shared<std::vector<PathDone>>(std::move(done));
     g_deps.after_step([shared](EmfWorld* w) {
-        for (const PathDone& d : *shared)
-            if (d.cb && !guarded_cb(d.cb, w, d.id, &d.result, d.points.empty() ? nullptr : d.points.data(), d.user) &&
+        for (const PathDone& d : *shared) {
+            const EmfPathResult r = d.view();
+            if (d.cb && !guarded_cb(d.cb, w, d.id, &r, d.points.empty() ? nullptr : d.points.data(), d.user) &&
                 !g_cb_fault_said.exchange(true) && g_deps.log)
                 g_deps.log("path_find: a mod's path callback faulted (query " + std::to_string(d.id) +
                            "); the other answers still came");
+        }
     });
 }
 
@@ -166,6 +170,14 @@ void path_program(void* ctx, void*) {
             const uint8_t* p = raw.data() + i * kGamePointBytes;
             std::memcpy(&a.points[i].x, p, 12);
             a.points[i].move = p[0xC];
+        }
+        const uint8_t* door_ids = nullptr;
+        uint64_t door_count = 0;
+        std::memcpy(&door_ids, out + 0x10, 8);
+        std::memcpy(&door_count, out + 0x18, 8);
+        if (door_ids && door_count == count) {  // one per point, or not trusted
+            a.doors.resize(n);
+            if (!seh_read(door_ids, a.doors.data(), n * sizeof(uint32_t))) a.doors.clear();
         }
         return a;
     };

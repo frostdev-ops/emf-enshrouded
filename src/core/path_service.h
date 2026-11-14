@@ -26,6 +26,7 @@ struct PathAnswer {
     bool done = false;
     uint32_t game_result = 0;
     std::vector<EmfPathPoint> points;
+    std::vector<uint32_t> doors;  // the game's door entity per point (empty, or one per point)
 };
 
 // The game's path query calls, made from inside EMF's program.
@@ -43,6 +44,13 @@ struct PathDone {
     void* user = nullptr;
     EmfPathResult result{};
     std::vector<EmfPathPoint> points;
+    std::vector<uint32_t> doors;  // one per kept point, or empty when no point is a door
+    // the result as a mod's callback gets it: `doors` points into this PathDone (NULL when empty)
+    EmfPathResult view() const {
+        EmfPathResult r = result;
+        r.doors = doors.empty() ? nullptr : doors.data();
+        return r;
+    }
 };
 
 // The game's 0x110-byte path query (private research path_query_impl_2026-11-12.md 3.2).
@@ -84,7 +92,8 @@ private:
         uint64_t game_id = 0;  // 0 until sent
         bool cancelled = false;
     };
-    PathDone finish(const Query& q, uint32_t status, const std::vector<EmfPathPoint>& pts) const;
+    PathDone finish(const Query& q, uint32_t status, const std::vector<EmfPathPoint>& pts,
+                    const std::vector<uint32_t>& doors = {}) const;
 
     mutable SRWLOCK lock_ = SRWLOCK_INIT;
     std::vector<Query> queries_;

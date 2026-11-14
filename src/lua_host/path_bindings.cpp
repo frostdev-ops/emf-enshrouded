@@ -1,6 +1,7 @@
-// Lua 1.29 paths on the game's path grid (API v37): emf.path_find(world, from, to [, opts], fn) and emf.path_cancel(id).
+// Lua 1.29 paths on the game's path grid (API v37; 1.35: points[i].door, API v42): emf.path_find(world, from, to [, opts], fn) and emf.path_cancel(id).
 // The answer comes once, after a server step or more, to fn(world, result, points); a script paused or reloaded in
 // between hears nothing.
+#include <cstddef>
 #include <memory>
 #include <string>
 
@@ -88,6 +89,7 @@ void path_cb_body(EmfWorld* w, uint32_t, const EmfPathResult* r, const EmfPathPo
     lua_pushinteger(L, r->count);
     lua_setfield(L, -2, "count");
     lua_createtable(L, static_cast<int>(r->count), 0);
+    const uint32_t* doors = r->size >= offsetof(EmfPathResult, doors) + sizeof(r->doors) ? r->doors : nullptr;
     for (uint32_t i = 0; pts && i < r->count; ++i) {
         lua_createtable(L, 0, 4);
         lua_pushnumber(L, pts[i].x);
@@ -98,6 +100,10 @@ void path_cb_body(EmfWorld* w, uint32_t, const EmfPathResult* r, const EmfPathPo
         lua_setfield(L, -2, "z");
         lua_pushinteger(L, pts[i].move);
         lua_setfield(L, -2, "move");
+        if (doors && doors[i]) {  // 1.35 (API v42): the door entity of a door point
+            lua_pushinteger(L, doors[i]);
+            lua_setfield(L, -2, "door");
+        }
         lua_rawseti(L, -2, static_cast<lua_Integer>(i) + 1);
     }
     call_lua(*s, 3);

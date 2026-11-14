@@ -1,7 +1,7 @@
 # EMF API reference
 
 The C API is one table of function pointers, `EmfApi`, declared in `sdk/include/emf/emf_api.h` and passed to your
-`emf_mod_load`. It only grows: each version appends functions at the end (`EMF_API_VERSION` 41 today), so a mod built
+`emf_mod_load`. It only grows: each version appends functions at the end (`EMF_API_VERSION` 42 today), so a mod built
 for an older version works with a newer core. Another framework that runs EMF mods: see [hosting.md](hosting.md). `sdk/include/emf/emf.hpp` wraps it in C++; prefer the wrappers.
 
 **Threads.** "World callback" below means: inside `on_tick`, `run_on_world`, `on_event`, a command, a put/take result
@@ -1166,6 +1166,7 @@ Refused (0, logged once per 10 s):
 | `reaches` | true when the last point is within 1.5 m across and 3 m up or down of `to` |
 | `count` | the points passed (at most 512 are kept) |
 | `length` | metres from `from` along the points |
+| `doors` | API v42 (0.6.11; read it when `size` covers it, `emf::has_v42()`): per point, the door entity the path goes through there (a point with `move` 5), else 0; `count` entries; NULL when no point is a door. Valid during the callback only. The game's own record of the door for that point |
 
 Each `EmfPathPoint` has `x`, `y`, `z` and `move`: 0 walk, 2 jump up, 3 jump down, 4 jump across, 5 a door.
 
@@ -1338,7 +1339,7 @@ every mod under a name, as in EMF.exe; a load applies at the next start), `hud.l
 for the server world's jobs and each mod), `goto [#k] <x> <y> <z> [ground]` / `goto [#k] <entity> [ground]`
 (v20: teleports you, or the k-th player, there or beside that entity; the result follows a few steps later). Coordinates for `goto`, `path`, `spawn ... at` and Teleports' `tp.pos` can be written many ways: `3 4 5`, `3, 4,5`, `(3, 4, 5)`, `[3 4 5]`, `<3> <4> <5>`, `3;4;5`, or a pasted `pos` line (`player 1 at (3.0, 4.0, 5.0) m`). For mod makers: `emf::coordinate_words(words)` in `emf.hpp` turns such words into plain numbers, `entities`, `near [radius]`, `inv <entity>`, `health <entity> [percent 1-100]` (read, or set to that share of the maximum; refused while it reads 0: dead, or a spawn not set up yet), `ai <entity>` (the enemy01 state, the guarded entity, the combat target, the aggro entries and the faction),
 `inspect <entity>`, `tpl <entity> <component> [bytes] [offset]`, `tplset <entity> <component> <offset> <type> <value>`,
-`stack <item> <max>`, `destroy <entity>`, `remove <entity> [me|drop|<player>] [force]` (v36: removes a placed object like a pick-up; `me` (or `player`) gives the item back to whoever typed the command; `drop` leaves its item on the ground, a player number puts it in that player's inventory, `force` also removes a non-empty container), `path <x> <y> <z> [jumps] [closest] [nodes 1-20000]` (v37: a path from you to that spot on the game's path grid; prints `path N: asked ...`, then the answer: found or why not, whether it reaches or stops short, the points, the metres, where it ends, and the jumps and doors), `door <entity> [open|close|lock|unlock] [front|back]` (v38: without a word it prints the state: "closed", "open, locked", "driven by a switch" or "not a door"; `items door` lists door items and `spawn <guid>` puts one down for a test), `chat.players` (v19: the players of the world you host or of the
+`stack <item> <max>`, `destroy <entity>`, `remove <entity> [me|drop|<player>] [force]` (v36: removes a placed object like a pick-up; `me` (or `player`) gives the item back to whoever typed the command; `drop` leaves its item on the ground, a player number puts it in that player's inventory, `force` also removes a non-empty container), `path <x> <y> <z> [jumps] [doors] [closest] [nodes 1-20000]` (v37: a path from you to that spot on the game's path grid; prints `path N: asked ...`, then the answer: found or why not, whether it reaches or stops short, the points, the metres, where it ends, and the jumps and doors; `doors` (0.6.11) lets it open doors, and each door point names its door entity), `door <entity> [open|close|lock|unlock] [front|back]` (v38: without a word it prints the state: "closed", "open, locked", "driven by a switch" or "not a door"; `items door` lists door items and `spawn <guid>` puts one down for a test), `chat.players` (v19: the players of the world you host or of the
 dedicated server, with their account hashes for `[chat] admins`, their connection and name), `world.get [setting]`,
 `world.set <setting> <value> [persist]`, `world.reset [setting|all] [persist]`, `world.list`, `world.export` (v21: the
 running world's settings, [world_settings.md](world_settings.md)). Commands go into the in-game console (the key under Esc), the optional

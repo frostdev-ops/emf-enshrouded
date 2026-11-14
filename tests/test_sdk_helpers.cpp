@@ -1104,3 +1104,16 @@ TEST_CASE("emf::init (review): a lower minimum below 17 counts as 17 (the SDK's 
     CHECK(emf::has_v26() == true);
     CHECK(emf::has_v27() == true);
 }
+
+TEST_CASE("emf::has_v42 (0.6.11): by the version number, the table did not grow") {
+    reset();
+    static EmfApi v41 = fake_api();
+    v41.version = 41;
+    REQUIRE(emf::init(&v41, 41));
+    CHECK(emf::has_v41());
+    CHECK_FALSE(emf::has_v42());
+    static EmfApi v42 = fake_api();
+    v42.version = 42;
+    REQUIRE(emf::init(&v42));
+    CHECK(emf::has_v42());
+}

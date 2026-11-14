@@ -1050,6 +1050,8 @@ inline bool has_v39() { return api() && api()->size >= offsetof(EmfApi, enemy_ta
 inline bool has_v40() { return api() && api()->size >= offsetof(EmfApi, enemy_moving) + sizeof(api()->enemy_moving); }
 // v41 (0.6.10, the version only): EmfMoveOrder.stuck_seconds and EMF_MOVE_PEACEFUL_ALL are understood
 inline bool has_v41() { return has_v40() && api()->version >= 41; }
+// v42 (0.6.11, the version only): EmfPathResult.doors (the door entity of each door point); check result->size too
+inline bool has_v42() { return has_v40() && api()->version >= 42; }
 // v25: E prompts (offer_add, offer_remove); v26: pictures in windows (offer_active ends it); v27: mod messages
 inline bool has_v25() { return api() && api()->size >= offsetof(EmfApi, offer_remove) + sizeof(api()->offer_remove); }
 inline bool has_v26() { return api() && api()->size >= offsetof(EmfApi, offer_active) + sizeof(api()->offer_active); }

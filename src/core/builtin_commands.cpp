@@ -1305,7 +1305,7 @@ void cmd_destroy(EmfWorld* w, int argc, const char* const* argv, void* u) {
                                              : fmt("destroy %u failed (see the log)", id));
 }
 
-// path <x> <y> <z> [jumps] [closest] (v37): a path from you; the answer comes after a step or more.
+// path <x> <y> <z> [jumps] [doors] [closest] (v37; doors 0.6.11): a path from you; the answer comes after a step or more.
 struct LatePath {
     ReplyFn reply;
 };
@@ -1328,12 +1328,13 @@ void cmd_path(EmfWorld* w, int argc, const char* const* argv, void* u) {
         const std::string& a = words[i];
         uint32_t nodes = 0;
         if (a == "jumps") q.moves |= EMF_PATH_JUMP_UP | EMF_PATH_JUMP_DOWN | EMF_PATH_JUMP_ACROSS;
+        else if (a == "doors") q.moves |= EMF_PATH_OPEN_DOOR;
         else if (a == "closest") q.closest = 1;
         else if (!q.max_nodes && parse_uint(a.c_str(), kPathMaxNodes, &nodes) && nodes) q.max_nodes = nodes;
         else ok = false;
     }
     if (!ok) {
-        command_reply_line("usage: path <x> <y> <z> [jumps] [closest] [nodes 1-20000]");
+        command_reply_line("usage: path <x> <y> <z> [jumps] [doors] [closest] [nodes 1-20000]");
         return;
     }
     const uint32_t player = c.player ? c.player() : 0;
@@ -1483,7 +1484,7 @@ bool add_builtin_commands(BuiltinContext& ctx) {
         {"stack", "<item name> <max 1-65535>: change an item's stack size until the game restarts (host)", cmd_stack},
         {"door", "<entity> [open|close|lock|unlock] [front|back]: a door's state, or open, close or lock it (host)",
          cmd_door},
-        {"path", "<x> <y> <z> [jumps] [closest] [nodes]: a path from you on the game's path grid (it moves nothing; host)",
+        {"path", "<x> <y> <z> [jumps] [doors] [closest] [nodes]: a path from you on the game's path grid; a door point names its door (it moves nothing; host)",
          cmd_path},
         {"remove", "<entity> [me|drop|<player>] [force]: take a placed object away like a pick-up, its item back to you, as a "
                    "drop or to a player; refused for a chest with items unless force (they drop on the ground), and for a Flame "

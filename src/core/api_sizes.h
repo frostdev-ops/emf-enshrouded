@@ -60,6 +60,8 @@ constexpr uint32_t kApiV40Size = EMF_FIELD_END(EmfApi, enemy_moving);
 constexpr uint32_t kMoveOrderV40Size = EMF_FIELD_END(EmfMoveOrder, why);
 constexpr uint32_t kApiV41Size = kApiV40Size;  // v41 (0.6.10): the version only (EmfMoveOrder.stuck_seconds, PEACEFUL_ALL)
 constexpr uint32_t kPathQueryV37Size = EMF_FIELD_END(EmfPathQuery, max_nodes);
+constexpr uint32_t kApiV42Size = kApiV40Size;  // v42 (0.6.11): the version only (EmfPathResult.doors)
+constexpr uint32_t kPathResultV37Size = EMF_FIELD_END(EmfPathResult, length);  // before v42's doors
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
 // The x64 layouts mods are built with. A field that moves breaks every built mod; appending one changes sizeof only:
@@ -161,8 +163,9 @@ static_assert(kEnemyOrderV39Size == 120 && sizeof(EmfEnemyOrder) == 120 && offse
 static_assert(kPathQueryV37Size == 52 && sizeof(EmfPathQuery) == 52 && offsetof(EmfPathQuery, moves) == 32 &&
                   offsetof(EmfPathQuery, width) == 36 && offsetof(EmfPathQuery, max_nodes) == 48,
               "EmfPathQuery layout (v37)");
-static_assert(sizeof(EmfPathPoint) == 16 && sizeof(EmfPathResult) == 20 && offsetof(EmfPathResult, count) == 12,
-              "EmfPathPoint / EmfPathResult layout (v37)");
+static_assert(sizeof(EmfPathPoint) == 16 && kPathResultV37Size == 20 && offsetof(EmfPathResult, count) == 12 &&
+                  offsetof(EmfPathResult, doors) == 24 && sizeof(EmfPathResult) == 32,
+              "EmfPathPoint / EmfPathResult layout (v37; v42 doors)");
 static_assert(kRemoveBuildingV36Size == 144 && sizeof(EmfRemoveBuilding) == 144 && offsetof(EmfRemoveBuilding, refunded) == 20 &&
                   offsetof(EmfRemoveBuilding, why) == 24,
               "EmfRemoveBuilding layout (v36)");

@@ -4,6 +4,8 @@
 
 #include <doctest.h>
 
+#include <cstddef>
+#include <cstring>
 #include <string>
 
 #include "lua_host/host.h"
@@ -80,4 +82,35 @@ TEST_CASE("lua 1.29: a refused path_find gives nil; an answer after a reload is 
     res.status = EMF_PATH_NO_PATH;
     r.fake.paths[0].cb(kServer, 1, &res, nullptr, r.fake.paths[0].user);
     CHECK_FALSE(logged("heard"));
+}
+
+TEST_CASE("lua 1.35: a door point carries its door entity (points[i].door); none on a core without it") {
+    Rig r(L"lua_path_door");
+    add_script(r.dir, "pd",
+               "emf.command('go', '', function(w)\n"
+               "  emf.path_find(w, {1, 50, 2}, {30, 51, 4}, {doors = true}, function(w2, res, pts)\n"
+               "    emf.log('door ' .. tostring(pts[1].door) .. ' ' .. tostring(pts[2].door))\n"
+               "  end)\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("pd.go");
+    r.run_command("pd.go");
+    REQUIRE(r.fake.paths.size() == 2u);
+    EmfPathResult res{};
+    res.size = sizeof res;
+    res.status = EMF_PATH_FOUND;
+    res.reaches = 1;
+    res.count = 2;
+    const EmfPathPoint pts[2] = {{10, 50, 2, 0}, {30, 51, 4, 5}};
+    const uint32_t doors[2] = {0, 812};
+    res.doors = doors;
+    r.fake.paths[0].cb(kServer, 1, &res, pts, r.fake.paths[0].user);
+    CHECK(logged("door nil 812"));
+    EmfPathResult old{};  // a v37-v41 core: the result ends before doors
+    std::memcpy(&old, &res, sizeof old);
+    old.size = offsetof(EmfPathResult, doors);
+    old.doors = doors;  // past its size: must not be read
+    r.fake.paths[1].cb(kServer, 2, &old, pts, r.fake.paths[1].user);
+    CHECK(logged("door nil nil"));
 }

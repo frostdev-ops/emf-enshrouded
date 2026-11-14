@@ -781,11 +781,19 @@ TEST_CASE("move orders (review I1): no Guard nudge while it has a pick; at most 
     CHECK(ai.state == emf::gen::enemy01::State::Guard);
 }
 
-TEST_CASE("api table (v41): version 41 (0.6.10's move options: stuck_seconds, EMF_MOVE_PEACEFUL_ALL); the table did not grow") {
+TEST_CASE("api table (v41): version 41 or newer (0.6.10's move options: stuck_seconds, EMF_MOVE_PEACEFUL_ALL); the table did not grow") {
     const EmfApi* api = emf::core::api_table();
-    CHECK(api->version == 41u);
+    CHECK(api->version >= 41u);
     CHECK(api->size == kApiV40Size);
-    CHECK(EMF_API_VERSION == 41);
+}
+
+TEST_CASE("api table (v42): version 42 (0.6.11: EmfPathResult.doors); the table did not grow") {
+    const EmfApi* api = emf::core::api_table();
+    CHECK(api->version == 42u);
+    CHECK(api->size == kApiV40Size);
+    CHECK(EMF_API_VERSION == 42);
+    CHECK(kPathResultV37Size == 20u);
+    CHECK(sizeof(EmfPathResult) > kPathResultV37Size);
 }
 
 // A modder's raids (0.6.9, 2026-11-14): a raider carrying a trophy under a peaceful move stood 46 s outside a gate, the

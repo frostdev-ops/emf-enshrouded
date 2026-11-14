@@ -8,6 +8,7 @@
 #include <string>
 #include <vector>
 
+#include "core/api_sizes.h"
 #include "core/path_service.h"
 #include "emf/emf_api.h"
 
@@ -293,6 +294,23 @@ TEST_CASE("path answer text: what the console's path command prints") {
     CHECK(path_answer_text(9, r, nullptr) == "path 9: cancelled");
 }
 
+TEST_CASE("path answer text (0.6.11): a door point names its door entity") {
+    EmfPathResult r{};
+    r.size = sizeof r;
+    r.status = EMF_PATH_FOUND;
+    r.reaches = 1;
+    r.count = 3;
+    r.length = 52.24f;
+    const EmfPathPoint pts[3] = {{1, 2, 3, 0}, {4, 5, 6, 5}, {10, 50, 4, 5}};
+    const uint32_t doors[3] = {0, 812, 0};  // the game names no door at the last point
+    r.doors = doors;
+    CHECK(path_answer_text(7, r, pts) ==
+          "path 7: found, reaches the target, 3 points, 52.2 m, ends at (10.0, 50.0, 4.0); 0 jumps, 2 doors "
+          "(812 at point 2)");
+    r.size = kPathResultV37Size;  // a result without the door array: not read
+    CHECK(path_answer_text(7, r, pts).find("812") == std::string::npos);
+}
+
 TEST_CASE("path service (review M2): a cancel while the step talks to the game still ends the query cancelled") {
     PathService s;
     FakeEngine fe;
@@ -329,4 +347,36 @@ TEST_CASE("path query bytes (0.6.11): closed doors are forbidden for every move 
     fill_path_query(b, q, 77);
     std::memcpy(&forbidden, b + 0x60, 4);
     CHECK(forbidden == (game_rule | (1u << 19)));
+}
+
+TEST_CASE("path service (0.6.11): the door entities are kept with the points (at most 512); none when no point is a door") {
+    PathService s;
+    FakeEngine fe;
+    REQUIRE(s.request(query(10, 0), 7, cb_noop, nullptr, 0, nullptr));
+    s.step(fe.engine(), 10);
+    PathAnswer a;
+    a.done = true;
+    a.game_result = 1;
+    a.points.assign(600, EmfPathPoint{1, 50, 0, 0});
+    a.doors.assign(600, 0);
+    a.doors[3] = 44;
+    a.doors[599] = 45;  // past what is kept
+    fe.answers[fe.created[0]] = a;
+    auto done = s.step(fe.engine(), 20);
+    REQUIRE(done.size() == 1u);
+    REQUIRE(done[0].doors.size() == kMaxPathPoints);
+    CHECK(done[0].doors[3] == 44u);
+    const EmfPathResult v = done[0].view();
+    CHECK(v.doors == done[0].doors.data());
+    CHECK(v.count == kMaxPathPoints);
+
+    REQUIRE(s.request(query(10, 0), 7, cb_noop, nullptr, 0, nullptr));
+    s.step(fe.engine(), 30);
+    a.points.assign(2, EmfPathPoint{1, 50, 0, 0});
+    a.doors.assign(2, 0);  // a door array with no door in it
+    fe.answers[fe.created[1]] = a;
+    done = s.step(fe.engine(), 40);
+    REQUIRE(done.size() == 1u);
+    CHECK(done[0].doors.empty());
+    CHECK(done[0].view().doors == nullptr);
 }
