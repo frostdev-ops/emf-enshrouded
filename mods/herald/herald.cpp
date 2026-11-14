@@ -3,7 +3,8 @@
 // also from emf\commands.txt), a chat log per day, playtime per account and world, /players /playtime /motd for every
 // player, and an opt-in Discord webhook. Off by default: it changes what players see. The rules (tested without the
 // game) are herald_logic.h; chat lines go through EMF API v19 (chat_tell, chat_broadcast, player_name, on_chat,
-// request_save).
+// request_save), without a speaker in front and with characters' names from API v30 (an older core: normal lines, and
+// {character} is the player's name).
 #define NOMINMAX
 #include <windows.h>
 
@@ -37,6 +38,7 @@ struct Config {
     uint64_t motd_delay_ms = 5000;
     bool joins = true, leaves = true, deaths = false;
     std::string prefix = "[Server]";
+    bool system_lines = true;  // lines without a speaker in front (API v30; an older core sends normal lines)
     uint64_t announce_ms = 30 * 60 * 1000;
     bool restart_save = true;
     bool chat_log = true;
@@ -75,6 +77,7 @@ void read_settings() {
     c.leaves = emf::setting_bool(kMod, "announce_leaves", true);
     c.deaths = emf::setting_bool(kMod, "announce_deaths", false);
     c.prefix = herald::printable(emf::setting_text(kMod, "prefix", "[Server]"));
+    c.system_lines = emf::setting_bool(kMod, "system_lines", true);
     c.announce_ms = static_cast<uint64_t>(emf::setting_float(kMod, "announce_every_minutes", 30.0) * 60000.0);
     c.restart_save = emf::setting_bool(kMod, "restart_save", true);
     c.chat_log = emf::setting_bool(kMod, "chat_log", true);
@@ -218,14 +221,14 @@ void reload_announcements() {
 // A line for everyone (with the prefix), in the chat log and, when chosen, the webhook.
 void say(const std::string& text, herald::Hook what) {
     const Config c = config();
-    emf::broadcast(herald::with_prefix(c.prefix, text));
+    emf::broadcast(herald::with_prefix(c.prefix, text), c.system_lines);
     chat_log_event(herald::with_prefix(c.prefix, text));
     hook_line(what, text);
 }
 
 // The game's name for a player, else "Host" (the host of a game it hosts: their own name is not found in the
 // connection records), else "player #<entity>". The names come from the server's connection records, which EMF reads only with
-// players' chat on; a character's name is not readable.
+// players' chat on. A character's name (emf::character_name) is only for the MOTD's {character}.
 std::string name_of(emf::World w, uint32_t entity) {
     const auto name = emf::player_name(w, entity);
     const uint32_t host = emf::local_player();
@@ -274,7 +277,7 @@ void each_second(emf::World w, uint64_t now) {
         const std::string line = herald::printable(ch.name) + (joined ? " joined (" : " left (") +
                                  std::to_string(ch.online) + " online)";
         EMF_LOG(kMod, "%s, entity %u, account %s", line.c_str(), ch.entity, herald::account_text(ch.account).c_str());
-        if (joined ? c.joins : c.leaves) emf::broadcast(herald::with_prefix(c.prefix, line));
+        if (joined ? c.joins : c.leaves) emf::broadcast(herald::with_prefix(c.prefix, line), c.system_lines);
         chat_log_event(line);
         hook_line(joined ? herald::Hook::Join : herald::Hook::Leave, line);
         if (joined && c.playtime) g_playtime.add(ch.account, 0, unix_now(), ch.name);  // first / last seen
@@ -285,8 +288,9 @@ void each_second(emf::World w, uint64_t now) {
             g_roster.motd_result(o.entity, true, now);  // nothing to say
             continue;
         }
-        const bool sent = emf::tell(w, o.entity, herald::with_prefix(c.prefix, herald::expand_motd(c.motd, herald::printable(o.name),
-                                                                                                  g_roster.online().size())));
+        const std::string motd = herald::expand_motd(c.motd, herald::printable(o.name), g_roster.online().size(),
+                                                     emf::character_name(w, o.entity));
+        const bool sent = emf::tell(w, o.entity, herald::with_prefix(c.prefix, motd), c.system_lines);
         if (g_roster.motd_result(o.entity, sent, now))
             EMF_LOG(kMod, "the MOTD for %s could not be sent after %d tries (see the lines above)",
                     herald::printable(o.name).c_str(), herald::kMotdTries);
@@ -368,7 +372,8 @@ void cmd_tell(emf::World w, const std::vector<std::string>& a) {
         EMF_REPLY("usage: herald.tell <name|#k> <text>");
         return;
     }
-    const bool ok = emf::tell(w, t.entity, herald::with_prefix(config().prefix, text));
+    const Config c = config();
+    const bool ok = emf::tell(w, t.entity, herald::with_prefix(c.prefix, text), c.system_lines);
     EMF_REPLY("%s %s", ok ? "told" : "could not tell (see the log)", herald::printable(t.name).c_str());
 }
 
@@ -468,7 +473,8 @@ void cmd_motd(emf::World w, const std::vector<std::string>&) {
     }
     const Sender s = sender(w);
     const std::string name = s.entity ? herald::printable(name_of(w, s.entity)) : "you";
-    EMF_REPLY("%s", herald::with_prefix(c.prefix, herald::expand_motd(c.motd, name, g_roster.online().size())).c_str());
+    const auto character = s.entity ? emf::character_name(w, s.entity) : std::nullopt;
+    EMF_REPLY("%s", herald::with_prefix(c.prefix, herald::expand_motd(c.motd, name, g_roster.online().size(), character)).c_str());
 }
 
 // Every herald command checks the Mods tab's switch first: switched off, it says so and does nothing (the DLL stays
@@ -504,7 +510,7 @@ extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api) {
         if (g_switched_off || id < 1 || id > emf::kMaxPlayerEntity || !w.get<gen::PlayerState>(id)) return;
         const std::string line = herald::printable(name_of(w, id)) + " fell";
         const Config c = config();
-        if (c.deaths) emf::broadcast(herald::with_prefix(c.prefix, line));
+        if (c.deaths) emf::broadcast(herald::with_prefix(c.prefix, line), c.system_lines);
         chat_log_event(line);
         hook_line(herald::Hook::Death, line);
     });

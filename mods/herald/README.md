@@ -16,14 +16,17 @@ runs, it stops at once: no more lines, and its commands answer that it is switch
 
 Names are the ones the game's chat shows (the player's platform name, e.g. their Steam name; EMF API v19
 `player_name`); when EMF cannot read one, the host of a game you host is `Host` and anyone else `player #<entity>`.
-Characters' names are not readable by mods yet.
+The message of the day can also use the character's name (`{character}`, EMF API v30).
 
-All of these are chat lines; the game shows them under the reader's own name, the way EMF's command replies appear
-(the game shows no chat line without a speaker). Every line starts with the prefix (the setting **In front of every
-line**, `[Server]` by default).
+All of these are chat lines with no speaker in front, the way the game shows a player joining (the setting **Lines
+without a speaker**, on by default; EMF API v30). Switched off, or with an older EMF, the game shows them under the
+reader's own name, the way EMF's command replies appear. Every line starts with the prefix (the setting **In front of
+every line**, `[Server]` by default); with **Lines without a speaker** on, it is the only label a line has.
 
-- **Message of the day:** a few seconds after a player is in the world, only they get the MOTD. `{name}` and `{online}`
-  in it are filled in: `Welcome {name}! {online} online. Type /help.`
+- **Message of the day:** a few seconds after a player is in the world, only they get the MOTD. `{character}`,
+  `{name}` and `{online}` in it are filled in: `Welcome {character}! {online} online. Type /help.` `{character}` is the
+  character's name; while the game does not know it yet (it can come a few seconds after the join), it is the
+  `{name}` value.
 - **Joins and leaves:** `[Server] Ember joined (3 online)`, `[Server] Ember left (2 online)`. A player counts as joined
   once their game says it is ready (not while it is still loading).
 - **Deaths** (off by default): `[Server] Ember fell`.
@@ -61,10 +64,11 @@ Admins are the console, `emf\commands.txt`, and the accounts in `[chat] admins` 
 
 | Setting | Default | What it does |
 |---|---|---|
-| Message of the day (`motd`) | empty (none) | up to 256 characters, `{name}` and `{online}` filled in |
+| Message of the day (`motd`) | empty (none) | up to 256 characters, `{character}`, `{name}` and `{online}` filled in |
 | After joining (`motd_delay_seconds`) | 5 s | 0-60 |
 | Say who joins / leaves / falls (`announce_joins`, `announce_leaves`, `announce_deaths`) | on / on / off | |
 | In front of every line (`prefix`) | `[Server]` | up to 24 characters; empty = nothing |
+| Lines without a speaker (`system_lines`) | on | off: the herald's lines appear under the reader's own name |
 | An announcement every (`announce_every_minutes`) | 30 | 0-120 minutes, 0 = off |
 | Save when a restart countdown ends (`restart_save`) | on | |
 | Chat log (`chat_log`) | on | |
@@ -115,7 +119,8 @@ only you see the herald's lines and the chat log has no chat lines.
 
 ## Good to know
 
-- Names are the names the game's chat shows for the players (their platform names, not their characters' names).
+- Names are the names the game's chat shows for the players (their platform names, not their characters' names);
+  only the MOTD's `{character}` is the character's name.
   EMF reads them from the players' connections. In a game you host the host's own name is not found there, so the host
   is `Host`; guests' names need `players=1` (above), and a guest without one is `player #<entity>` (the log says why,
   once).
