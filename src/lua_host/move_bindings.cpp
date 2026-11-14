@@ -1,4 +1,4 @@
-// Lua 1.33 move orders (API v40): emf.enemy_move(world, enemy, points [, opts] [, fn]), emf.enemy_move_cancel(id),
+// Lua 1.33 move orders (API v40; 1.34: stuck, peaceful = "all", API v41): emf.enemy_move(world, enemy, points [, opts] [, fn]), emf.enemy_move_cancel(id),
 // emf.enemy_moving(world, enemy). fn(world, id, status) comes once when the move ends; a script paused or reloaded in
 // between hears nothing (its moves end then).
 #include <cstring>

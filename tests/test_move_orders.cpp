@@ -323,9 +323,9 @@ TEST_CASE("move orders: refused: no enemy AI, a player, a boss, no points, too m
     CHECK(d.calls == 0);
 }
 
-TEST_CASE("api table (v40): version 40, the three move functions at the end") {
+TEST_CASE("api table (v40): the three move functions at the end") {
     const EmfApi* api = emf::core::api_table();
-    CHECK(api->version == 40u);
+    CHECK(api->version >= 40u);  // the newest version is checked by its own test (v41, below)
     CHECK(api->size == kApiV40Size);
     CHECK(api->enemy_move != nullptr);
     CHECK(api->enemy_move_cancel != nullptr);
@@ -674,10 +674,12 @@ TEST_CASE("move orders: a calm creature that took the waypoint as its guard targ
     o.step(W());
     CHECK(ai.state == emf::gen::enemy01::State::Guard);
     ai.state = emf::gen::enemy01::State::Idle;
+    f.now += 3000;  // a nudge at most every 3 s
     o.step(W());
     CHECK(ai.state == emf::gen::enemy01::State::Guard);
     ai.guardEntityId.id = 4444;  // another guard target (not ours yet): left to the guard order
     ai.state = emf::gen::enemy01::State::Idle;
+    f.now += 3000;
     o.step(W());
     CHECK(ai.state == emf::gen::enemy01::State::Idle);
     ai.guardEntityId.id = 5000;  // ours, but in a fight: the fight goes on
@@ -750,4 +752,38 @@ TEST_CASE("api (0.6.10): an EmfMoveOrder of 0.6.9's size is still taken; the new
         m.stuck_seconds = 5;
         CHECK(api_table()->enemy_move(world, &m, nullptr, nullptr) != 0u);
     });
+}
+
+// Review (0.6.10): the Guard nudge only for a creature with nothing picked (one going for a target may fight on the
+// way), and at most every 3 s (it must not fight another state writer every step).
+TEST_CASE("move orders (review I1): no Guard nudge while it has a pick; at most every 3 s") {
+    Fake f = world();
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, pts({{30, 10, 0}}), 2.0, 60, 0, cb(d), &why) != 0u);
+    auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
+    ai.guardEntityId.id = 5000;
+    ai.state = emf::gen::enemy01::State::Investigate;  // it spotted a player: going for it
+    f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id = kPlayer;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Investigate);
+    f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id = 0;
+    ai.state = emf::gen::enemy01::State::Roaming;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Guard);  // nudged
+    ai.state = emf::gen::enemy01::State::Sleep;  // something else wants it asleep
+    f.now += 1000;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Sleep);  // not again within 3 s
+    f.now += 2500;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Guard);
+}
+
+TEST_CASE("api table (v41): version 41 (0.6.10's move options: stuck_seconds, EMF_MOVE_PEACEFUL_ALL); the table did not grow") {
+    const EmfApi* api = emf::core::api_table();
+    CHECK(api->version == 41u);
+    CHECK(api->size == kApiV40Size);
+    CHECK(EMF_API_VERSION == 41);
 }

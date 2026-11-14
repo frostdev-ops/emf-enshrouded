@@ -1084,3 +1084,23 @@ TEST_CASE("sdk: coordinate_words (review): a pasted pos line followed by ground"
     using V = std::vector<std::string>;
     CHECK(emf::coordinate_words(V{"player", "1", "at", "(1.0,", "2.0,", "3.0)", "m", "ground"}) == V{"1.0", "2.0", "3.0", "ground"});
 }
+
+TEST_CASE("emf::init (review): a lower minimum below 17 counts as 17 (the SDK's older wrappers need it); has_v41 by version") {
+    reset();
+    static EmfApi host = fake_api();
+    host.version = 12;
+    host.size = 300;
+    CHECK_FALSE(emf::init(&host, 5));
+    static EmfApi v40 = fake_api();
+    v40.version = 40;  // a 0.6.8 or 0.6.9 core: the same table size as v41
+    REQUIRE(emf::init(&v40, 40));
+    CHECK(emf::has_v40());
+    CHECK_FALSE(emf::has_v41());
+    static EmfApi v41 = fake_api();
+    v41.version = 41;
+    REQUIRE(emf::init(&v41));
+    CHECK(emf::has_v41());
+    CHECK(emf::has_v25() == true);
+    CHECK(emf::has_v26() == true);
+    CHECK(emf::has_v27() == true);
+}

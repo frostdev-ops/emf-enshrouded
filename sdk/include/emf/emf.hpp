@@ -42,6 +42,7 @@ inline EmfApi& padded_api() {
 // copy of the table: its newer functions are null and has_vNN() is false for them.
 inline bool init(const EmfApi* a, uint32_t min_version = EMF_API_VERSION) {
     if (!a || a->version < 1) return false;
+    if (min_version < 17) min_version = 17;  // the wrappers of v1-v16 call their functions without a has_vNN() check
     if (min_version >= EMF_API_VERSION) {
         if (a->size < sizeof(EmfApi)) {
             if (a->log)
@@ -1047,6 +1048,12 @@ inline bool has_v38() { return api() && api()->size >= offsetof(EmfApi, door_loc
 inline bool has_v39() { return api() && api()->size >= offsetof(EmfApi, enemy_target) + sizeof(api()->enemy_target); }
 // v40: enemy_move, enemy_move_cancel, enemy_moving (move orders)
 inline bool has_v40() { return api() && api()->size >= offsetof(EmfApi, enemy_moving) + sizeof(api()->enemy_moving); }
+// v41 (0.6.10, the version only): EmfMoveOrder.stuck_seconds and EMF_MOVE_PEACEFUL_ALL are understood
+inline bool has_v41() { return has_v40() && api()->version >= 41; }
+// v25: E prompts (offer_add, offer_remove); v26: pictures in windows (offer_active ends it); v27: mod messages
+inline bool has_v25() { return api() && api()->size >= offsetof(EmfApi, offer_remove) + sizeof(api()->offer_remove); }
+inline bool has_v26() { return api() && api()->size >= offsetof(EmfApi, offer_active) + sizeof(api()->offer_active); }
+inline bool has_v27() { return api() && api()->size >= offsetof(EmfApi, net_peer) + sizeof(api()->net_peer); }
 
 // Asks the game to save the world now (on_save follows once written). False when refused (logged) or on an older core.
 inline bool request_save() { return has_v19() && api()->request_save && api()->request_save(); }

@@ -85,6 +85,7 @@ private:
         Point waypoint_at{};        // where the waypoint was spawned: an id at another place is not ours any more
         uint32_t replaced = 0;      // times its waypoint vanished and was placed again
         uint64_t last_place = 0;    // when a waypoint was last spawned
+        uint64_t last_nudge = 0;    // when it was last put in Guard (a calm creature that took the waypoint)
         EmfWorld* world = nullptr;
         std::vector<Point> points;
         size_t next = 0;  // the point it walks to

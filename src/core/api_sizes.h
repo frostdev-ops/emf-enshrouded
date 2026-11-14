@@ -58,6 +58,7 @@ constexpr uint32_t kApiV39Size = EMF_FIELD_END(EmfApi, enemy_target);
 constexpr uint32_t kEnemyOrderV39Size = EMF_FIELD_END(EmfEnemyOrder, why);
 constexpr uint32_t kApiV40Size = EMF_FIELD_END(EmfApi, enemy_moving);
 constexpr uint32_t kMoveOrderV40Size = EMF_FIELD_END(EmfMoveOrder, why);
+constexpr uint32_t kApiV41Size = kApiV40Size;  // v41 (0.6.10): the version only (EmfMoveOrder.stuck_seconds, PEACEFUL_ALL)
 constexpr uint32_t kPathQueryV37Size = EMF_FIELD_END(EmfPathQuery, max_nodes);
 constexpr uint32_t kUiWidgetV24Size = EMF_FIELD_END(EmfUiWidget, pad);  // 56: a v24/v25 mod's widget_size
 
