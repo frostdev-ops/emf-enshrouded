@@ -787,3 +787,43 @@ TEST_CASE("api table (v41): version 41 (0.6.10's move options: stuck_seconds, EM
     CHECK(api->size == kApiV40Size);
     CHECK(EMF_API_VERSION == 41);
 }
+
+// A modder's raids (0.6.9, 2026-11-14): a raider carrying a trophy under a peaceful move stood 46 s outside a gate, the
+// game switching it to ReactToNoise / Investigate (a fight nearby). A peaceful move breaks off noise reactions every
+// step, not at most every 3 s like the other calm states; a move that is not peaceful leaves them to the 3 s nudge.
+TEST_CASE("move orders (0.6.11): a peaceful move breaks off the game's noise reactions every step") {
+    using emf::gen::enemy01::State;
+    for (uint32_t flags : {EMF_MOVE_PEACEFUL, EMF_MOVE_PEACEFUL_ALL}) {
+        CAPTURE(flags);
+        Fake f = world();
+        MoveOrders o(f.deps());
+        Done d;
+        std::string why;
+        REQUIRE(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, flags, cb(d), &why) != 0u);
+        auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
+        ai.guardEntityId.id = 5000;
+        ai.state = State::ReactToNoise;
+        o.step(W());
+        CHECK(ai.state == State::Guard);
+        ai.state = State::Investigate;
+        o.step(W());
+        CHECK(ai.state == State::Guard);  // again at once
+        ai.state = State::ReactToNoise;
+        f.now += 100;
+        o.step(W());
+        CHECK(ai.state == State::Guard);
+    }
+    Fake f = world();
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, 0, cb(d), &why) != 0u);
+    auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
+    ai.guardEntityId.id = 5000;
+    ai.state = State::ReactToNoise;
+    o.step(W());
+    CHECK(ai.state == State::Guard);  // the calm-state nudge
+    ai.state = State::ReactToNoise;
+    o.step(W());
+    CHECK(ai.state == State::ReactToNoise);  // not again within 3 s
+}

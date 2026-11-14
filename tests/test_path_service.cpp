@@ -310,3 +310,23 @@ TEST_CASE("path service (review M2): a cancel while the step talks to the game s
     CHECK(done[0].result.status == EMF_PATH_CANCELLED);
     CHECK(done[0].result.count == 0u);
 }
+
+// A modder's base (0.6.9, 2026-11-14): a closed gate with a floor piece under it was walked through (no doors, no jumps),
+// while the raiders were stopped there. The game lets a walk or jump move enter a ClosedDoor node (type 19) that counts
+// as ground unless a node rule forbids it; the door move ignores node rules. So EMF always forbids type 19.
+TEST_CASE("path query bytes (0.6.11): closed doors are forbidden for every move but the door move (node rule bit 19)") {
+    uint8_t b[kPathQueryBytes] = {};
+    const uint32_t game_rule = 1u << 3;  // a forbidden rule of the game's defaults stays
+    std::memcpy(b + 0x60, &game_rule, 4);
+    EmfPathQuery q = query(10, 4);
+    fill_path_query(b, q, 77);
+    uint32_t forbidden = 0, required = 0;
+    std::memcpy(&forbidden, b + 0x60, 4);
+    std::memcpy(&required, b + 0x5c, 4);
+    CHECK(forbidden == (game_rule | (1u << 19)));
+    CHECK(required == 0u);
+    q.moves = EMF_PATH_OPEN_DOOR;  // with the door move a closed door is still crossed (as a DOOR point)
+    fill_path_query(b, q, 77);
+    std::memcpy(&forbidden, b + 0x60, 4);
+    CHECK(forbidden == (game_rule | (1u << 19)));
+}

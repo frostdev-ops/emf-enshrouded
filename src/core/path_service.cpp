@@ -43,6 +43,11 @@ void fill_path_query(uint8_t q[kPathQueryBytes], const EmfPathQuery& in, uint32_
     put_u32(0xfc, 4);
     put_u32(0x100, in.width > 0 ? static_cast<uint32_t>(std::ceil(in.width * 2.0f)) : 0u);
     put_u32(0x104, in.height > 0 ? static_cast<uint32_t>(std::ceil(in.height * 2.0f)) : 0u);
+    // closed doors (node type 19) only with the door move: a walk or jump move may otherwise enter a ClosedDoor node that
+    // counts as ground (a closed gate with a floor piece under it was walked through); the door move skips node rules
+    uint32_t forbidden = 0;
+    std::memcpy(&forbidden, q + 0x60, 4);
+    put_u32(0x60, forbidden | (1u << 19));
 }
 
 std::string path_answer_text(uint32_t id, const EmfPathResult& r, const EmfPathPoint* points) {

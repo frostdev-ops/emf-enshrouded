@@ -613,7 +613,7 @@ errors.
 | `opts` field | What |
 |---|---|
 | `jumps` | `true`: the path may jump up, down and across |
-| `doors` | `true`: the path may open doors |
+| `doors` | `true`: the path may open doors. A closed door is crossed only this way (EMF 0.6.11; before, a plain walk could cross a closed door with a floor piece under it), at a point with `move` 5 |
 | `swim` | `true`: the path may swim |
 | `closest` | `true`: when the target cannot be reached, end at the closest reachable point |
 | `width`, `height` | the room the unit needs, in metres (0 to 64; default: the game's) |
@@ -701,6 +701,8 @@ counts as reached within that distance + 1 m, or within `arrive` if that is larg
 - `seconds`: a time limit (default 0: none; at most 3600).
 - `peaceful = true` (or `"players"`): it ignores players on the way (its fights with players are cleared each step).
   `peaceful = "all"` (1.34): it ignores everyone, animals and players' beasts too: it only walks (a thief running off).
+  Either way it ignores noise too (EMF 0.6.11): the game's noise reactions (ReactToNoise, Investigate) are broken off
+  each step.
   Without it, it may fight on the way (the game's way) and goes on afterwards.
 - `stuck` (1.34): seconds without a metre closer (while not fighting) before it ends `"stuck"` (2 to 120; default 15).
 - `allies = true`: the creature may be a player's ally (a tamed beast).
