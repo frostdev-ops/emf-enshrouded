@@ -23,7 +23,7 @@ throw. How often that line is written:
 
 | C++ | C | Notes |
 |---|---|---|
-| `emf::init(api)` | — | Call first in `emf_mod_load`. Returns false (and logs why) when the core is older than the SDK you built with. |
+| `emf::init(api)` | — | Call first in `emf_mod_load`. Returns false (and logs why) when the core is older than the SDK you built with. `emf::init(api, N)` (since 0.6.10): your mod needs only API vN and checks `emf::has_vNN()` before newer calls; on an older core, or another host with a smaller table, it then starts with the newer functions null. |
 | `EMF_LOG(mod, fmt, ...)` | `log(mod, fmt, ...)` | A line in `emf_core.log` prefixed `[mod]`. Any thread. |
 
 `extern "C" __declspec(dllexport) bool emf_mod_load(const EmfApi* api)`: return true when loaded. Returning false
@@ -1266,7 +1266,10 @@ through up to 16 points by the game's own guard order (`StartGuardingEvent`) on 
 in turn (the game's `TestTransform` template: a position, not saved), sent from EMF's `emf_moves` program. It walks the
 game's way: its own path and jumps where its kind can. The guard order is sent again every 3 s while it is not fighting
 and not guarding its waypoint, and a calm creature (roaming, at home, patrolling, investigating, asleep) is put in `Idle`
-with it (seen: a roaming Vukah took the guard only from Idle). A guarding creature stops its guard distance
+with it (seen: a roaming Vukah took the guard only from Idle), and one that took the waypoint as its guard target but stays
+calm is put in `Guard` (seen: a freshly spawned Vukah sent 30 m kept roaming and never walked; in `Guard` it walked).
+Spawn where the ground is loaded: about 150 m from every player it was not, and a Vukah spawned there fell through the
+world (`ground_at` says whether a spot is loaded). A guarding creature stops its guard distance
 (`currentGuardTargetDistance`, about 3 m) short of its waypoint, so a point counts as reached within that + 1 m, or
 within `arrive` if larger (and that + 2 m up or down). Seen in game: a Vukah walked 36 m in 10 s; to a point 37 m up it
 roamed and the move ended stuck. C++: `emf::has_v40()`.

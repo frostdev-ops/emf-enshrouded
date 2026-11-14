@@ -30,16 +30,39 @@ inline const EmfApi*& api_ref() {
 }
 inline const EmfApi* api() { return api_ref(); }
 
+// The table a mod uses when the core's (or another host's) is smaller than this header's: a copy, zero-padded.
+inline EmfApi& padded_api() {
+    static EmfApi t{};
+    return t;
+}
+
 // Call first in emf_mod_load. Fails if the core is older than the API this mod was built against.
-inline bool init(const EmfApi* a) {
+// min_version (since 0.6.10): the lowest EMF_API_VERSION the mod needs, for a mod that checks emf::has_vNN() before it
+// calls newer functions. On an older core or another host with a smaller table the mod then starts, with a zero-padded
+// copy of the table: its newer functions are null and has_vNN() is false for them.
+inline bool init(const EmfApi* a, uint32_t min_version = EMF_API_VERSION) {
     if (!a || a->version < 1) return false;
-    if (a->size < sizeof(EmfApi)) {
+    if (min_version >= EMF_API_VERSION) {
+        if (a->size < sizeof(EmfApi)) {
+            if (a->log)
+                a->log("emf", "this mod was built for EMF API v%d; the core is v%u: update EMF (the mod stays off)",
+                       EMF_API_VERSION, a->version);
+            return false;
+        }
+    } else if (a->version < min_version || a->size < offsetof(EmfApi, log) + sizeof(a->log)) {
         if (a->log)
-            a->log("emf", "this mod was built for EMF API v%d; the core is v%u: update EMF (the mod stays off)",
-                   EMF_API_VERSION, a->version);
+            a->log("emf", "this mod needs EMF API v%u; the core is v%u: update EMF (the mod stays off)", min_version,
+                   a->version);
         return false;
     }
-    api_ref() = a;
+    if (a->size >= sizeof(EmfApi)) {
+        api_ref() = a;
+        return true;
+    }
+    EmfApi& t = padded_api();  // an older table: copy what it has, the rest stays null
+    t = EmfApi{};
+    std::memcpy(&t, a, a->size);
+    api_ref() = &t;
     return true;
 }
 

@@ -13,6 +13,14 @@ game's chat.
 3. Start the server. Its window shows EMF's lines (`[EMF] ...`) next to its own; the full log is
    `emf\emf_core.log` in the server folder.
 
+**A rented server** (G-Portal, Nitrado and the like, where you only get FTP or a file manager): `install.cmd` cannot run
+there, so copy the files yourself. Stop the server, then upload everything inside the zip's `game` folder
+(`dinput8.dll` and the `emf` folder) into the server's main folder, the one with `enshrouded_server.exe`. Start it
+again; `emf\emf_core.log` in that folder says EMF started. Switch mods on with `enabled=1` in `emf\config\<mod>.ini`
+(or copy those ini files from your own game's `emf\config`). Players need nothing for the server-side mods. If the host
+runs the server on Linux (under Wine), it must let Wine load a `dinput8.dll` next to the server (the launch option
+`WINEDLLOVERRIDES="dinput8=n,b"`): ask their support if EMF does not start.
+
 `uninstall.cmd "D:\EnshroudedServer"` removes it again. The server must use the same game version EMF knows
 (`tools\emf_sigcheck.exe "D:\EnshroudedServer\enshrouded_server.exe"` checks it without starting anything).
 

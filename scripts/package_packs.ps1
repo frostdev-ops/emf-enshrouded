@@ -37,7 +37,7 @@ New-Item -ItemType Directory -Force -Path $Out | Out-Null
 $zip = Join-Path $Out "$name.zip"
 try {
     $lines = @("EMF creature packs $Version", "", "New creatures for EMF's Beastmaster and Necromancer mods. They are EML content packs:",
-               "they need EML (Enshrouded Mod Loader, github.com/Brabb3l/kfc-parser) or ShroudForge, which loads EML mods.",
+               "EMF (0.4.0 and newer) builds them itself at the game's start; EML (Enshrouded Mod Loader) or ShroudForge work too.",
                "Without a pack the mods still work; the creatures it adds are refused with a note.", "", "In this download:")
     foreach ($p in $found) {
         Copy-Item -LiteralPath $p.FullName -Destination (Join-Path $root "mods\$($p.Name)") -Recurse
@@ -50,8 +50,8 @@ try {
     $lines += @("", "Install:",
                 "- With EMF.exe: Mods tab, ""Install a downloaded file"", pick this zip. It puts each pack in the mods folder",
                 "  next to the game.",
-                "- By hand: copy the folders inside mods\ into the mods folder next to enshrouded.exe, then run the game",
-                "  through EML (emm.exe) as its page says.",
+                "- By hand: copy the folders inside mods\ into the mods folder next to enshrouded.exe (not into emf\mods,",
+                "  which is for EMF mods), and start the game: EMF builds them. On Linux or a Steam Deck this is the way.",
                 "Every player in a world that uses these creatures needs the same packs, and the host needs Beastmaster or",
                 "Necromancer switched on in EMF.", "",
                 "Uninstall: delete the pack folders from the mods folder (or uninstall each one in EMF.exe).", "",

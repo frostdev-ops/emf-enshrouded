@@ -11,6 +11,10 @@ report belongs. The details of each function are in [reference.md](reference.md)
   newer function (`emf::has_v40()` and the like in `emf.hpp`), so a table that claims more than it has crashes mods.
   A function you cannot do yet still needs its slot: put a function there that returns the documented failure (null,
   0, false) and logs a line, never a null pointer.
+- **Mods built with a newer SDK:** `emf::init(api)` refuses a table smaller than the SDK's own, so a mod built with a
+  newer header does not start on your host. A mod that checks `has_vNN()` can say so with `emf::init(api, N)` (since
+  EMF 0.6.10) and then starts on a v`N` table, with the newer functions null. Slots you provide that only return the
+  documented failure are fine too: that is how EMF itself behaves when a feature is off on a game build.
 - **Refuse a mod that needs more.** `mod.json`'s `"emf": N` is the lowest API version it needs: with N above yours, do
   not load it, and say why ("needs EMF API vN").
 - **Say in your log that you run EMF mods**, under your own name and version, so a player's report reaches you first.

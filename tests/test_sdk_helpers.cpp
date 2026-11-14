@@ -108,6 +108,30 @@ TEST_CASE("emf::init says why it refuses a core older than the SDK") {
     CHECK(g_logged[0].find("the core is v9") != std::string::npos);
 }
 
+// 0.6.10 (another framework running EMF mods reports a smaller table): a mod that checks emf::has_vNN() before newer
+// calls may start on an older core or host by giving its own minimum; its newer functions are then null.
+TEST_CASE("emf::init with a lower minimum takes a smaller table, zero-padded: newer functions null, has_vNN false") {
+    reset();
+    static EmfApi host = fake_api();
+    host.version = 27;
+    host.size = static_cast<uint32_t>(offsetof(EmfApi, net_peer) + sizeof(host.net_peer));  // a v27 table
+    host.enemy_move = reinterpret_cast<decltype(host.enemy_move)>(uintptr_t{1});  // memory past its table: not its own
+    CHECK_FALSE(emf::init(&host));  // the default: this SDK's own version
+    REQUIRE(emf::init(&host, 27));
+    CHECK(emf::api()->version == 27u);
+    CHECK(emf::api()->size == host.size);
+    CHECK(emf::api()->log == host.log);
+    CHECK(emf::api()->enemy_move == nullptr);  // past the host's table: never read from it
+    CHECK_FALSE(emf::has_v40());
+    CHECK_FALSE(emf::has_v28());
+    CHECK_FALSE(emf::init(&host, 28));  // the mod needs v28
+    REQUIRE_FALSE(g_logged.empty());
+    CHECK(g_logged.back().find("needs EMF API v28") != std::string::npos);
+    static EmfApi full = fake_api();
+    REQUIRE(emf::init(&full));  // a full table is used as it is
+    CHECK(emf::api() == &full);
+}
+
 TEST_CASE("query: position in metres and the entities near a point, nearest first, filtered") {
     reset();
     static EmfApi api = fake_api();
