@@ -63,7 +63,11 @@ class CApiTests(unittest.TestCase):
             self.assertIn(n, names)
         versions = [f[0] for f in fields]
         self.assertEqual(versions, sorted(versions))
-        self.assertEqual(versions[-1], int(re.search(r"#define EMF_API_VERSION (\d+)", header).group(1)))
+        newest = int(re.search(r"#define EMF_API_VERSION (\d+)", header).group(1))
+        self.assertLessEqual(versions[-1], newest)
+        # a version that adds no function (v41: new options only) says in the header what it brought
+        for v in range(versions[-1] + 1, newest + 1):
+            self.assertIn("API v%d" % v, header)
 
     def test_first_sentence(self):
         self.assertEqual(g.first_sentence("One. Two."), "One.")
