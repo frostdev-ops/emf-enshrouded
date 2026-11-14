@@ -98,6 +98,38 @@ TEST_CASE("layout_from_json: unknown parts are skipped with a note") {
     CHECK(r.notes[0] == "unknown part \"noSuchScope\" skipped");
 }
 
+TEST_CASE("layout_from_json: part names, vitals_order and colours bar names in any case, as the console takes them") {
+    const size_t mana = static_cast<size_t>(bar_element(kBarMana));
+    for (const char* name : {"health", "Health", "HEALTH"}) {
+        CAPTURE(name);
+        const std::string n = name;
+        const LayoutRead r = layout_from_json(
+            R"({"format": 1, "elements": {"BOSSROOT": {"y": 3}, "Bar:Mana": {"y": 2}}, "vitals_order": ["Mana", ")" + n +
+            R"(", "STAMINA"], "colours": {")" + n + R"(": {"Fill": "#ff4040"}, "Panel": "#20202080"}})");
+        REQUIRE(r.layout);
+        CHECK(r.notes.empty());
+        CHECK(r.layout->elements[8].y == 3.0f);
+        CHECK(r.layout->elements[mana].y == doctest::Approx(2));
+        CHECK(r.layout->order == BarOrder{1, 0, 2});
+        CHECK(r.layout->colours[0].part[static_cast<size_t>(BarPart::Fill)] == *parse_colour("#ff4040").colour);
+        CHECK(r.layout->panel == *parse_colour("#20202080").colour);
+    }
+}
+
+TEST_CASE("layout_from_json: the same bar in two spellings: the later one wins, \"game\" too") {
+    const size_t fill = static_cast<size_t>(BarPart::Fill);
+    LayoutRead r = layout_from_json(R"({"format": 1, "colours": {"Health": {"fill": "#ff4040"}, "health": {"fill": "game"}}})");
+    REQUIRE(r.layout);
+    CHECK(r.notes.empty());
+    CHECK(r.layout->colours[0].part[fill] == Colour{});
+    r = layout_from_json(R"({"format": 1, "colours": {"health": {"fill": "game"}, "HEALTH": {"fill": "#ff4040"}}})");
+    REQUIRE(r.layout);
+    CHECK(r.layout->colours[0].part[fill] == *parse_colour("#ff4040").colour);
+    r = layout_from_json(R"({"format": 1, "colours": {"Panel": "#20202080", "panel": "game"}})");
+    REQUIRE(r.layout);
+    CHECK(r.layout->panel == Colour{});
+}
+
 TEST_CASE("layout_from_json: a part that is not an object is skipped with a note") {
     const LayoutRead r = layout_from_json(R"({"format":1,"elements":{"bossRoot":5}})");
     REQUIRE(r.layout.has_value());

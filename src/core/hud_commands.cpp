@@ -272,7 +272,11 @@ std::vector<std::string> run_hud_command(HudEditor& editor, const std::vector<st
         const int part = find_element(argv[1]);
         if (part == kNoElement) return {no_part(argv[1])};
         editor.reset(static_cast<size_t>(part), Save::Now);
-        out.push_back(std::string("hud: ") + hud_elements()[static_cast<size_t>(part)].id + " is back where the game draws it");
+        std::string line = std::string("hud: ") + hud_elements()[static_cast<size_t>(part)].id + " is back where the game draws it";
+        // what else the part's card holds goes back with it (HudEditor::reset)
+        if (part == 0) line += "; the bars are in the game's order again (" + order_text(kDefaultOrder) + ")";
+        if (part == 1) line += "; status effects grow downward again, as the game draws them";
+        out.push_back(line);
         add_not_shown(editor, out);
         return out;
     }
@@ -362,7 +366,7 @@ bool add_hud_commands(CommandCenter& center, HudEditor& editor) {
     ok &= center.add("hud.layout", "[save|load|delete <name>]: the HUD layouts in emf\\hud (save as a new name, switch, delete); without words, the list", cmd_layout, &editor, nullptr, true);
     ok &= center.add("hud.swap", "health|mana|stamina health|mana|stamina: two of the vitals' bars change places (e.g. hud.swap health mana: mana on top)", cmd_swap, &editor, nullptr, true);
     ok &= center.add("hud.order", "<bar> <bar> <bar>: the vitals' bars from the top (e.g. hud.order mana health stamina)", cmd_order, &editor, nullptr, true);
-    ok &= center.add("hud.colour", "[bar] [part] [colour]: the vitals' bar colours (e.g. hud.colour health #ff4040, hud.colour mana empty #00000000, hud.colour panel #20202080, hud.colour health game)", cmd_colour, &editor, nullptr, true);
+    ok &= center.add("hud.colour", "[bar] [part] [colour]: the vitals' bar colours (e.g. hud.colour health #ff4040, hud.colour mana empty #00000000, hud.colour panel #20202080, hud.colour health all game)", cmd_colour, &editor, nullptr, true);
     ok &= center.add("hud.grow", "up|down: the status effects list grows upward from the food icons' bottom edge, or down as the game draws it", cmd_grow, &editor, nullptr, true);
     return ok;
 }
