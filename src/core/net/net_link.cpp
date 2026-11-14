@@ -187,7 +187,7 @@ bool ServerLink::on_line(uint32_t handle, uint64_t account, std::string_view tex
                     note(account, "a hello on the wrong channel");
                     return true;
                 }
-                msg = joining_[conn].in.add(*line, &why);
+                msg = joining_[conn].in.add(*line, &why, d_.now_ms ? d_.now_ms() : 0);
                 if (!msg) {
                     if (!why.empty()) note(account, "a hello line dropped: " + why);
                     return true;
@@ -200,7 +200,7 @@ bool ServerLink::on_line(uint32_t handle, uint64_t account, std::string_view tex
                     note(account, "a message before a hello: dropped");
                     return true;
                 }
-                msg = p->in.add(*line, &why);
+                msg = p->in.add(*line, &why, d_.now_ms ? d_.now_ms() : 0);
                 if (!msg) {
                     if (!why.empty()) note(account, "a line dropped: " + why);
                     return true;
@@ -426,7 +426,7 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
                 break;
             case 'W': {
                 if (state_ == State::Idle || line->channel != kControl) break;
-                msg = in_.add(*line, &why);
+                msg = in_.add(*line, &why, d_.now_ms ? d_.now_ms() : 0);
                 if (!msg) break;
                 const auto hello = parse_hello_text(msg->data);
                 msg.reset();
@@ -444,7 +444,7 @@ bool ClientLink::on_chat_line(std::string_view text, uint64_t speaker) {
             }
             case 'M': {
                 if (state_ != State::Welcomed) break;
-                msg = in_.add(*line, &why);
+                msg = in_.add(*line, &why, d_.now_ms ? d_.now_ms() : 0);
                 if (!msg) break;
                 const auto it = server_channels_.find(msg->channel);
                 if (msg->channel == kControl || it == server_channels_.end() || it->second != msg->version) msg.reset();

@@ -286,3 +286,104 @@ TEST_CASE("net remote: the server's peer watch hears a game's hello and its leav
     REQUIRE(seen.size() == 2);
     CHECK(seen[1] == std::make_pair(kAcct, false));
 }
+
+TEST_CASE("net remote: the reasons for dropped messages are remembered up to a limit, however many channels a player names") {
+    Side server;
+    ServerEnv senv;
+    senv.send = [](uint32_t, uint64_t, const std::string&) { return true; };
+    senv.room = [] { return size_t(100); };
+    senv.is_local = [](uint32_t, uint64_t) { return false; };
+    server.s.enable_server(std::move(senv));
+    const auto told = [&] {
+        size_t n = 0;
+        for (const auto& l : server.logs) n += l.find("was dropped: no such channel") != std::string::npos;
+        return n;
+    };
+    // a game that says hello with a new channel name each time and sends one message on it: the server has none of them
+    const auto say = [&](const std::string& name) {
+        HelloInfo hello;
+        hello.channels = {{name, 1}};
+        for (const auto& line : split_message('H', 0, kControlChannel, kControlVersion, hello_text(hello), nullptr))
+            server.s.server_line(kHandle, kAcct, encode_line(line));
+        for (const auto& line : split_message('M', 1, name, 1, "x", nullptr))
+            server.s.server_line(kHandle, kAcct, encode_line(line));
+        server.now += 1000;  // under the lines a player may send
+    };
+    say("bm/x0");
+    CHECK(told() == 1);
+    say("bm/x0");
+    CHECK(told() == 1);  // told once
+    for (int i = 1; i < 512; ++i) say("bm/x" + std::to_string(i));
+    CHECK(told() == 128);
+    std::vector<std::string> notices;  // the 128th says that later ones are not logged
+    for (const auto& l : server.logs)
+        if (l.find("later ones are not logged") != std::string::npos) notices.push_back(l);
+    REQUIRE(notices.size() == 1);
+    CHECK(notices[0].find("bm/x127") != std::string::npos);
+    // an hour after the first reason was told the list is forgotten: a full list does not silence the log for good
+    server.now += 59 * 60 * 1000 - 512 * 1000;  // 59 minutes after the first: still remembered, still full
+    say("bm/x0");
+    say("bm/new");
+    CHECK(told() == 128);
+    server.now += 2 * 60 * 1000;
+    say("bm/x0");  // a reason that still happens is told again
+    CHECK(told() == 129);
+    say("bm/new");  // and one that never fitted is told now
+    CHECK(told() == 130);
+    say("bm/x0");
+    CHECK(told() == 130);  // once, as before
+    CHECK(server.posted.empty());  // and none of them reached a mod
+}
+
+TEST_CASE("net remote: a message whose next line takes more than 60 s is dropped at either end; the next message arrives") {
+    Pair p;
+    p.join();
+    std::string why;
+    const std::string big(3000, 'q');
+    // a player's message: its first line, a long silence, the rest
+    REQUIRE(p.client.s.to_server("bm", "bm/pick", big, &why));
+    const auto up = p.client.s.client_take(100);
+    REQUIRE(up.size() >= 3u);
+    p.server.s.server_line(kHandle, kAcct, up[0]);
+    p.server.now += kPartialMaxAgeMs + 1;
+    for (size_t i = 1; i < up.size(); ++i) p.server.s.server_line(kHandle, kAcct, up[i]);
+    p.server.step(EMF_WORLD_SERVER);
+    CHECK(p.at_server.empty());
+    size_t timed_out = 0, out_of_place = 0;  // the server's log says why: late, not out of place
+    for (const auto& l : p.server.logs) {
+        timed_out += l.find("a line dropped: a fragment of a message that timed out") != std::string::npos;
+        out_of_place += l.find("without the ones before") != std::string::npos;
+    }
+    CHECK(timed_out == 1);
+    CHECK(out_of_place == 0);
+    REQUIRE(p.client.s.to_server("bm", "bm/pick", "next", &why));
+    p.to_server();
+    p.server.step(EMF_WORLD_SERVER);
+    REQUIRE(p.at_server.size() == 1);
+    CHECK(p.at_server[0].data == "next");
+    // the server's message to the player, the same way
+    REQUIRE(p.server.s.to_player("bm", kEntity, "bm/show", big, &why));
+    const auto down = std::move(p.chat_to_player);
+    p.chat_to_player.clear();
+    REQUIRE(down.size() >= 3u);
+    p.client.s.client_line(down[0].second, kAcct);
+    p.client.now += kPartialMaxAgeMs + 1;
+    for (size_t i = 1; i < down.size(); ++i) p.client.s.client_line(down[i].second, kAcct);
+    p.client.step(EMF_WORLD_CLIENT);
+    CHECK(p.at_client.empty());
+    REQUIRE(p.server.s.to_player("bm", kEntity, "bm/show", "next", &why));
+    p.to_client();
+    p.client.step(EMF_WORLD_CLIENT);
+    REQUIRE(p.at_client.size() == 1);
+    CHECK(p.at_client[0].data == "next");
+    // within the limit a slow message still arrives whole: 45 s between its lines, more than the server's outbox wait
+    REQUIRE(p.client.s.to_server("bm", "bm/pick", big, &why));
+    const auto slow = p.client.s.client_take(100);
+    for (const auto& line : slow) {
+        p.server.s.server_line(kHandle, kAcct, line);
+        p.server.now += 45000;
+    }
+    p.server.step(EMF_WORLD_SERVER);
+    REQUIRE(p.at_server.size() == 2);
+    CHECK(p.at_server[1].data == big);
+}

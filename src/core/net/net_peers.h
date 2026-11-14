@@ -14,7 +14,14 @@ namespace emf::core::net {
 
 // The lines of one peer and direction back into messages. Lines come numbered in sequence; a message is whole when its
 // last fragment arrived after all the others. A duplicate is dropped; a gap (a lost line) drops the message it broke,
-// and the next message that starts with fragment 0 is read again.
+// and the next message that starts with fragment 0 is read again. The fragments of one message agree on its type,
+// channel, version and encoding: one that does not drops the message. With a clock, a message whose next line takes
+// more than kPartialMaxAgeMs is dropped as well: its late lines are "a fragment of a message that timed out" (a reason
+// of its own: the lines were in order, only late, which is no protocol error). The limit is twice the server's outbox
+// wait (kNetMaxWaitMs in server_chat.h, 30 s): with a lagging game a line can leave the server up to that long after
+// the one before it, and then has the trip to make, so the same 30 s here would drop messages the server still
+// delivered.
+constexpr uint64_t kPartialMaxAgeMs = 60000;
 class Reassembly {
 public:
     struct Message {
@@ -23,12 +30,15 @@ public:
         uint32_t version = 1;
         std::string data;
     };
-    // `line` in; the message it completed, if any; `why` says why a line was dropped.
-    std::optional<Message> add(const NetLine& line, std::string* why);
+    // `line` in; the message it completed, if any; `why` says why a line was dropped. `now_ms`: the caller's clock
+    // (0: none, a message then waits for its lines without a limit).
+    std::optional<Message> add(const NetLine& line, std::string* why, uint64_t now_ms = 0);
 
 private:
     std::optional<uint32_t> next_;  // the sequence number expected next
     std::vector<NetLine> partial_;
+    uint64_t partial_ms_ = 0;  // when the last line of partial_ came (0: no clock)
+    bool expired_ = false;  // partial_ was dropped for its age: the rest of that message's lines say so
 };
 
 // A player's game that said hello (server side): its connection handle and account (the server's own records), the

@@ -60,6 +60,65 @@ TEST_CASE("net reassembly: a line that is not the first of a message, with nothi
     REQUIRE(ok.has_value());
 }
 
+TEST_CASE("net reassembly: a fragment whose type, version or encoding differs from the one before it drops the message") {
+    const auto lines = msg(0, std::string(3000, 'a'));
+    REQUIRE(lines.size() >= 3u);
+    for (int field = 0; field < 3; ++field) {
+        CAPTURE(field);
+        Reassembly r;
+        std::string why;
+        CHECK_FALSE(r.add(lines[0], &why).has_value());
+        NetLine odd = lines[1];
+        if (field == 0) odd.type = 'W';
+        if (field == 1) odd.version += 1;
+        if (field == 2) odd.enc = odd.enc == 't' ? 'b' : 't';  // "aaaa" also reads as base64: it would decode, wrongly
+        CHECK_FALSE(r.add(odd, &why).has_value());
+        CHECK(why.find("without the ones before") != std::string::npos);
+        for (size_t i = 2; i < lines.size(); ++i) CHECK_FALSE(r.add(lines[i], &why).has_value());  // nothing comes out
+        auto ok = r.add(msg(lines.back().seq + 1, "after")[0], &why);  // and the next message is read again
+        REQUIRE(ok.has_value());
+        CHECK(ok->data == "after");
+    }
+}
+
+TEST_CASE("net reassembly: with a clock, a message whose next line takes more than 60 s is dropped") {
+    const auto lines = msg(0, std::string(3000, 'a'));
+    REQUIRE(lines.size() >= 3u);
+    std::string why;
+    Reassembly late;
+    CHECK_FALSE(late.add(lines[0], &why, 1000).has_value());
+    const uint64_t after = 1000 + kPartialMaxAgeMs + 1;
+    CHECK_FALSE(late.add(lines[1], &why, after).has_value());
+    CHECK(why.find("timed out (its next line took more than 60 s)") != std::string::npos);  // a reason of its own
+    for (size_t i = 2; i < lines.size(); ++i) {
+        why.clear();
+        CHECK_FALSE(late.add(lines[i], &why, after + 10).has_value());
+        CHECK(why.find("timed out") != std::string::npos);  // and so say the rest of its lines
+    }
+    auto next = late.add(msg(lines.back().seq + 1, "after")[0], &why, after + 10);
+    REQUIRE(next.has_value());
+    CHECK(next->data == "after");
+    // after it, a fragment out of place is a protocol error again, however late it comes
+    NetLine stray = lines[1];
+    stray.seq = lines.back().seq + 2;
+    CHECK_FALSE(late.add(stray, &why, after + 10 + 2 * kPartialMaxAgeMs).has_value());
+    CHECK(why.find("without the ones before") != std::string::npos);
+    Reassembly slow;  // each line within the limit of the one before: the whole message, however long it took
+    uint64_t now = 1000;
+    std::optional<Reassembly::Message> whole;
+    for (const auto& l : lines) whole = slow.add(l, &why, now += kPartialMaxAgeMs);
+    REQUIRE(whole.has_value());
+    CHECK(whole->data.size() == 3000u);
+    Reassembly backwards;  // a clock that went back is no reason to drop a message
+    CHECK_FALSE(backwards.add(lines[0], &why, 5000).has_value());
+    for (size_t i = 1; i < lines.size(); ++i) whole = backwards.add(lines[i], &why, 4000);
+    REQUIRE(whole.has_value());
+    CHECK(whole->data.size() == 3000u);
+    Reassembly no_clock;  // without a clock nothing expires
+    for (const auto& l : lines) whole = no_clock.add(l, &why);
+    CHECK(whole.has_value());
+}
+
 TEST_CASE("net peers: a hello makes a peer; a new handle for the account replaces it; a reused handle is not it") {
     PeerTable t;
     t.hello(3, 0xAAA, {{"bm/state", 1}, {"bm/pick", 2}});
