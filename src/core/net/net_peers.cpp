@@ -5,8 +5,12 @@
 namespace emf::core::net {
 
 std::optional<Reassembly::Message> Reassembly::add(const NetLine& line, std::string* why, uint64_t now_ms) {
-    if (now_ms && partial_ms_ && now_ms >= partial_ms_ && now_ms - partial_ms_ > kPartialMaxAgeMs) partial_.clear();
-    const auto drop = [&](const char* r) -> std::optional<Message> {
+    if (now_ms && partial_ms_ && !partial_.empty() && now_ms >= partial_ms_ &&
+        now_ms - partial_ms_ > kPartialMaxAgeMs) {
+        partial_.clear();
+        expired_ = true;
+    }
+    const auto drop = [&](const std::string& r) -> std::optional<Message> {
         if (why) *why = r;
         return std::nullopt;
     };
@@ -15,6 +19,7 @@ std::optional<Reassembly::Message> Reassembly::add(const NetLine& line, std::str
         const uint32_t ahead = line.seq - *next_;
         if (ahead >= 0x80000000u) return drop("a duplicate line");
         partial_.clear();  // a gap: the message it broke is lost
+        expired_ = false;
         next_ = line.seq + 1;
         if (line.frag != 0) return drop("a gap: lines were lost, the message they broke is dropped");
     } else {
@@ -22,10 +27,14 @@ std::optional<Reassembly::Message> Reassembly::add(const NetLine& line, std::str
     }
     if (line.frag == 0) {
         partial_.clear();
+        expired_ = false;
     } else if (partial_.empty() || partial_.back().frag + 1 != line.frag || partial_.back().count != line.count ||
                partial_.back().channel != line.channel || partial_.back().version != line.version ||
                partial_.back().type != line.type || partial_.back().enc != line.enc) {
         partial_.clear();
+        if (expired_)
+            return drop("a fragment of a message that timed out (its next line took more than " +
+                        std::to_string(kPartialMaxAgeMs / 1000) + " s)");
         return drop("a fragment without the ones before it");
     }
     partial_.push_back(line);

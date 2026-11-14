@@ -89,11 +89,20 @@ TEST_CASE("net reassembly: with a clock, a message whose next line takes more th
     CHECK_FALSE(late.add(lines[0], &why, 1000).has_value());
     const uint64_t after = 1000 + kPartialMaxAgeMs + 1;
     CHECK_FALSE(late.add(lines[1], &why, after).has_value());
-    CHECK(why.find("without the ones before") != std::string::npos);
-    for (size_t i = 2; i < lines.size(); ++i) CHECK_FALSE(late.add(lines[i], &why, after + 10).has_value());
+    CHECK(why.find("timed out (its next line took more than 60 s)") != std::string::npos);  // a reason of its own
+    for (size_t i = 2; i < lines.size(); ++i) {
+        why.clear();
+        CHECK_FALSE(late.add(lines[i], &why, after + 10).has_value());
+        CHECK(why.find("timed out") != std::string::npos);  // and so say the rest of its lines
+    }
     auto next = late.add(msg(lines.back().seq + 1, "after")[0], &why, after + 10);
     REQUIRE(next.has_value());
     CHECK(next->data == "after");
+    // after it, a fragment out of place is a protocol error again, however late it comes
+    NetLine stray = lines[1];
+    stray.seq = lines.back().seq + 2;
+    CHECK_FALSE(late.add(stray, &why, after + 10 + 2 * kPartialMaxAgeMs).has_value());
+    CHECK(why.find("without the ones before") != std::string::npos);
     Reassembly slow;  // each line within the limit of the one before: the whole message, however long it took
     uint64_t now = 1000;
     std::optional<Reassembly::Message> whole;

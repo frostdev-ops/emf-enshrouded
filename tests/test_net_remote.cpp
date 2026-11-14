@@ -337,6 +337,13 @@ TEST_CASE("net remote: a message whose next line takes more than 60 s is dropped
     for (size_t i = 1; i < up.size(); ++i) p.server.s.server_line(kHandle, kAcct, up[i]);
     p.server.step(EMF_WORLD_SERVER);
     CHECK(p.at_server.empty());
+    size_t timed_out = 0, out_of_place = 0;  // the server's log says why: late, not out of place
+    for (const auto& l : p.server.logs) {
+        timed_out += l.find("a line dropped: a fragment of a message that timed out") != std::string::npos;
+        out_of_place += l.find("without the ones before") != std::string::npos;
+    }
+    CHECK(timed_out == 1);
+    CHECK(out_of_place == 0);
     REQUIRE(p.client.s.to_server("bm", "bm/pick", "next", &why));
     p.to_server();
     p.server.step(EMF_WORLD_SERVER);
