@@ -608,3 +608,32 @@ TEST_CASE("mod loading: the core's once-a-second file look reaches the mods' mod
     CHECK(poll.tick(12000));
     CHECK(center.pending());
 }
+
+// 0.6.10: a player put the creature packs into emf\mods and got "emf_necromancer_undead.dll not found in the mod's
+// folder". A content pack (EML's layout: mod.json and src\mod.lua, no DLL) gets a message saying where it goes.
+TEST_CASE("mod loading: a content pack in emf\\mods is named as one, with the folder it belongs in") {
+    const std::wstring dir = fresh_dir(L"pack");
+    add_mod(dir, L"emf_necromancer_undead",
+            R"({"id": "emf_necromancer_undead", "name": "Necromancer: new undead", "version": "1.0.0", "capabilities": ["patch"]})",
+            nullptr);
+    CreateDirectoryW((dir + L"\\emf_necromancer_undead\\src").c_str(), nullptr);
+    {
+        std::ofstream lua(dir + L"\\emf_necromancer_undead\\src\\mod.lua");
+        lua << "-- a pack\n";
+    }
+    FakeIni ini;
+    SettingsStore store(&ini);
+    ModRegistry registry;
+    const EmfApi api = fake_api();
+    LoadOptions opt;
+    opt.settings = &store;
+    opt.registry = &registry;
+    load_mods(dir, &api, [](const std::string&) {}, opt);
+    const auto list = registry.list();
+    const ModRecord* r = record(list, "emf_necromancer_undead");
+    REQUIRE(r != nullptr);
+    CHECK(r->status == ModStatus::Rejected);
+    CHECK(r->reason.find("content pack") != std::string::npos);
+    CHECK(r->reason.find("mods folder next to") != std::string::npos);
+    CHECK(r->reason.find(".dll not found") == std::string::npos);
+}

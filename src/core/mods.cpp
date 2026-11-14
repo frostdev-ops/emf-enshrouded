@@ -142,7 +142,12 @@ std::vector<Found> discover(const std::wstring& dir) {
             x.dll = base + L"\\" + wide(rel);
             if (GetFileAttributesW(x.dll.c_str()) == INVALID_FILE_ATTRIBUTES) {
                 x.rec.status = ModStatus::Rejected;
-                x.rec.reason = m.dll + " not found in the mod's folder";
+                // a content pack (EML's layout: src\mod.lua, no DLL) put here instead of the game's mods folder
+                if (GetFileAttributesW((base + L"\\src\\mod.lua").c_str()) != INVALID_FILE_ATTRIBUTES)
+                    x.rec.reason = "a content pack, not an EMF mod: move its folder into the mods folder next to the game's "
+                                   "exe (<game>\\mods\\" + fname + "), not emf\\mods";
+                else
+                    x.rec.reason = m.dll + " not found in the mod's folder";
                 x.rejected = true;
             }
         }
