@@ -58,6 +58,7 @@ std::vector<uint8_t> died(uint32_t entity) {
 TEST_CASE("lua example kill_counter: your last hit before a death counts; others' kills and stray deaths do not") {
     Rig r(L"examples");
     r.api.local_player = one_player;
+    r.fake.language = "en_us";
     EmfModInfo info{};
     info.size = sizeof info;
     info.status = EMF_MOD_SCRIPT;
@@ -94,6 +95,7 @@ std::string read_text(const std::wstring& path) {
 TEST_CASE("lua example kill_counter: the count is kept per world and comes back when that world loads again") {
     Rig r(L"examples_world");
     r.api.local_player = one_player;
+    r.fake.language = "en_us";
     // the shipped mod, copied into the test's mods folder (its world data goes beside it, not into the source tree)
     const std::wstring folder = r.dir + L"\\kill_counter";
     CreateDirectoryW(folder.c_str(), nullptr);
@@ -130,6 +132,54 @@ TEST_CASE("lua example kill_counter: the count is kept per world and comes back 
     host.tick(kServer);
     CHECK(r.fake.hud["kill_counter.count"] == "Kills: 7");
     DeleteFileW(saved.c_str());
+}
+
+namespace {
+// Kill Counter loaded from mods/ with the game showing `language` ("": not known yet).
+struct KillCounterRig {
+    Rig r{L"examples_language"};
+    std::unique_ptr<Host> host;
+    explicit KillCounterRig(const std::string& language) {
+        r.api.local_player = one_player;
+        r.fake.language = language;
+        EmfModInfo info{};
+        info.size = sizeof info;
+        info.status = EMF_MOD_SCRIPT;
+        std::snprintf(info.id, sizeof info.id, "kill_counter");
+        std::snprintf(info.source, sizeof info.source, "kill_counter\\");
+        std::snprintf(info.main, sizeof info.main, "main.lua");
+        r.fake.mods.push_back(info);
+        r.fake.settings["kill_counter.corner"] = "0";
+        const std::string src = EMF_SOURCE_DIR "/mods";
+        host = std::make_unique<Host>(&r.api, std::wstring(src.begin(), src.end()));
+        host->load_all();
+        REQUIRE(host->status("kill_counter") == "running");
+    }
+    std::string line() { return r.fake.hud["kill_counter.count"]; }
+};
+}  // namespace
+
+TEST_CASE("lua example kill_counter: the line in the player's language; English for a language it has no word for") {
+    CHECK(KillCounterRig("en_us").line() == "Kills: 0");
+    CHECK(KillCounterRig("de_de").line() == "Tötungen: 0");
+    CHECK(KillCounterRig("ru_ru").line() == "Убийства: 0");
+    CHECK(KillCounterRig("es_mx").line() == "Bajas: 0");     // any Spanish
+    CHECK(KillCounterRig("ja_jp").line() == "Kills: 0");     // EMF's font has no Japanese letters
+    CHECK(KillCounterRig("fr_fr").line() == "Kills: 0");     // no word in the mod
+    KillCounterRig k("pt_br");
+    send(k.r.fake, "HitEvent", hit(1, 500));
+    send(k.r.fake, "EntityDiedEvent", died(500));
+    CHECK(k.line() == "Abates: 1");
+}
+
+TEST_CASE("lua example kill_counter: English while the game's language is not known; the line changes once it is") {
+    KillCounterRig k("");  // before the game's text is known (and always on a dedicated server)
+    CHECK(k.line() == "Kills: 0");
+    k.host->tick(kClient);
+    CHECK(k.line() == "Kills: 0");
+    k.r.fake.language = "de_de";
+    k.host->tick(kClient);
+    CHECK(k.line() == "Tötungen: 0");
 }
 
 // ---- life_skills ----
