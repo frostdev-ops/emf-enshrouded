@@ -4,6 +4,8 @@
 
 #include <doctest.h>
 
+#include <map>
+
 #include "lua_mod_rig.h"
 
 namespace {
@@ -24,6 +26,23 @@ void world_with_player(Fake& f) {
     EmfGameMarker away = close_by;
     away.x = 9000;  // off the panel
     f.game_markers = {close_by, away};
+}
+
+std::map<uint32_t, bool> g_minimap_keys;  // the fake keyboard (the host's key_down)
+
+// Holds `vk` for one client step and lets it go in the next (a press, as on_key sees it).
+void press(ModRig& m, uint32_t vk) {
+    g_minimap_keys[vk] = true;
+    m.host->tick(kClient);
+    g_minimap_keys[vk] = false;
+    m.host->tick(kClient);
+}
+
+double map_metres_per_unit(ModRig& m) {
+    const auto& cmds = m.r.fake.canvas_cmds["minimap:map"];
+    REQUIRE(cmds.size() > 1u);
+    REQUIRE(cmds[1].c.kind == EMF_CANVAS_MAP);
+    return cmds[1].c.a[2];
 }
 
 }  // namespace
@@ -68,4 +87,30 @@ TEST_CASE("minimap mod: round when set so: the map's square corners are painted 
     for (const auto& c : cmds)
         if (c.c.kind == EMF_CANVAS_CIRCLE_CMD && c.c.a[3] > 20) ring = true;  // a thick outline past the circle
     CHECK(ring);
+}
+
+TEST_CASE("minimap mod: the zoom is the setting \"zoom\" (it stays from one game to the next)") {
+    ModRig m("minimap", L"minimap_mod_zoom", {{"zoom", "4"}}, world_with_player);
+    m.host->tick(kClient);
+    CHECK(map_metres_per_unit(m) == 4);
+    m.r.fake.settings["minimap.zoom"] = "0.5";  // changed in the Mods tab
+    m.host->tick(kClient);
+    CHECK(map_metres_per_unit(m) == 0.5);
+}
+
+TEST_CASE("minimap mod: Numpad + and - change the zoom setting one step, from 0.5 to 8 m per unit") {
+    ModRig m("minimap", L"minimap_mod_zoom_keys", {}, world_with_player);
+    m.host->set_key_reader([](uint32_t vk) { return g_minimap_keys[vk]; });
+    m.host->tick(kClient);
+    CHECK(m.r.fake.settings["minimap.zoom"] == "2");  // mod.json's default
+    press(m, VK_ADD);
+    CHECK(m.r.fake.settings["minimap.zoom"] == "1");
+    CHECK(map_metres_per_unit(m) == 1);
+    press(m, VK_ADD);
+    press(m, VK_ADD);  // already the closest
+    CHECK(m.r.fake.settings["minimap.zoom"] == "0.5");
+    for (int i = 0; i < 5; ++i) press(m, VK_SUBTRACT);
+    CHECK(m.r.fake.settings["minimap.zoom"] == "8");
+    CHECK(map_metres_per_unit(m) == 8);
+    g_minimap_keys.clear();
 }

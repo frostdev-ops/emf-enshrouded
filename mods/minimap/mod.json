@@ -1,8 +1,8 @@
 {
   "id": "minimap",
   "name": "Minimap (sample)",
-  "version": "1.0.0",
-  "description": "A small minimap at the bottom right: the game's own map around you (north up), your arrow turning with you, the places you found and the markers mods put on minimaps. F10 shows or hides it; Numpad + and - zoom. A short sample for mod makers (EMF's canvas API, Lua 1.27). Runs on your own game, also when you join someone. Installed switched off.",
+  "version": "1.1.0",
+  "description": "A small minimap at the bottom right: the game's own map around you (north up), your arrow turning with you, the places you found and the markers mods put on minimaps. F10 shows or hides it; Numpad + and - zoom (kept as a setting). A short sample for mod makers (EMF's canvas API, Lua 1.27). Runs on your own game, also when you join someone. Installed switched off.",
   "authors": ["EMF contributors"],
   "enabled": false,
   "emf": 35,
@@ -18,6 +18,10 @@
                  {"value": "top_right", "label": "Top right"}, {"value": "top_left", "label": "Top left"}]},
     {"key": "size", "type": "slider", "min": 120, "max": 400, "step": 10, "default": 220, "label": "Size", "live": true, "group": "Look"},
     {"key": "shape", "type": "select", "default": "rect", "label": "Shape", "live": true, "group": "Look",
-     "options": [{"value": "rect", "label": "Square"}, {"value": "circle", "label": "Round (on a dark square)"}]}
+     "options": [{"value": "rect", "label": "Square"}, {"value": "circle", "label": "Round (on a dark square)"}]},
+    {"key": "zoom", "type": "select", "default": "2", "label": "Zoom", "live": true, "group": "Look",
+     "options": [{"value": "0.5", "label": "0.5 m per point"}, {"value": "1", "label": "1 m per point"},
+                 {"value": "2", "label": "2 m per point"}, {"value": "4", "label": "4 m per point"},
+                 {"value": "8", "label": "8 m per point"}]}
   ]
 }
