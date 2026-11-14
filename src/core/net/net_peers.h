@@ -16,8 +16,11 @@ namespace emf::core::net {
 // last fragment arrived after all the others. A duplicate is dropped; a gap (a lost line) drops the message it broke,
 // and the next message that starts with fragment 0 is read again. The fragments of one message agree on its type,
 // channel, version and encoding: one that does not drops the message. With a clock, a message whose next line takes
-// more than kPartialMaxAgeMs is dropped as well: its late lines are "a fragment without the ones before it".
-constexpr uint64_t kPartialMaxAgeMs = 30000;
+// more than kPartialMaxAgeMs is dropped as well: its late lines are "a fragment without the ones before it". The limit
+// is twice the server's outbox wait (kNetMaxWaitMs in server_chat.h, 30 s): with a lagging game a line can leave the
+// server up to that long after the one before it, and then has the trip to make, so the same 30 s here would drop
+// messages the server still delivered.
+constexpr uint64_t kPartialMaxAgeMs = 60000;
 class Reassembly {
 public:
     struct Message {

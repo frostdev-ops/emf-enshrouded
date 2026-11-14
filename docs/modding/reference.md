@@ -641,10 +641,12 @@ api->net_to_player(w, from->player, "mymod/show", "ok", 2);  // the server -> th
 ### The chat transport (joined players, the dedicated server)
 
 - **Lines.** A message becomes up to 24 marked chat lines (`#!emf1 <type> <seq> <channel>@<ver> <frag>/<count> <enc>
-  <payload>`, at most 1024 bytes each, text or base64url). The server's end takes a player's marked line in the receive
-  loop before the game adds it (so no one sees it, and it never reaches commands, `on_chat` or the log); the player's
-  end takes the server's marked lines before the chat shows them. The sender of a message is the server's own
-  connection record (handle and account), never the message.
+  <payload>`, at most 1024 bytes each, text or base64url). All lines of one message have the same type, channel,
+  version, count and encoding, and their `<frag>` counts up from 0: a line that differs from the one before it drops
+  the message, and the next message that starts with fragment 0 is read again. The server's end takes a player's
+  marked line in the receive loop before the game adds it (so no one sees it, and it never reaches commands, `on_chat`
+  or the log); the player's end takes the server's marked lines before the chat shows them. The sender of a message is
+  the server's own connection record (handle and account), never the message.
 - **Discovery.** Nothing is sent to a game that did not prove it runs EMF. A server that has at least one mod channel (or
   only the core's own `emf/mods`, when it has mods its players must match: server.md "Players' mods") sends
   each new connection a beacon line (spoken as that player, kind 0) 10 s after it appears, and once more 35 s later
@@ -664,7 +666,8 @@ api->net_to_player(w, from->player, "mymod/show", "ok", 2);  // the server -> th
   dropped), and adds at most 32 lines per receive-loop run (shared with command replies). A message goes into the
   outbox whole or not at all, and only to the connection that said hello (after a reconnect, the new one). A game
   sends at most 4 lines a frame (up to 64 wait). The receiving end drops a message whose next line takes more than
-  30 s to arrive.
+  60 s to arrive (twice the 30 s a line may wait in the server's outbox, so a message the server still sent is not
+  dropped for its lag).
 - **Settings** (`emf\emf_core.ini`): `[net] enabled=0` leaves the chat hooks out (messages stay in process),
   `greet=0` as above. On a game that hosts, the hooks are installed even without `[chat] players=1` (only the
   command policy stays behind that switch). `mods_check`, `mods_required` and `mods_info` are the mod check on join's

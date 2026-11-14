@@ -81,16 +81,17 @@ TEST_CASE("net reassembly: a fragment whose type, version or encoding differs fr
     }
 }
 
-TEST_CASE("net reassembly: with a clock, a message whose next line takes more than 30 s is dropped") {
+TEST_CASE("net reassembly: with a clock, a message whose next line takes more than 60 s is dropped") {
     const auto lines = msg(0, std::string(3000, 'a'));
     REQUIRE(lines.size() >= 3u);
     std::string why;
     Reassembly late;
     CHECK_FALSE(late.add(lines[0], &why, 1000).has_value());
-    CHECK_FALSE(late.add(lines[1], &why, 1000 + kPartialMaxAgeMs + 1).has_value());
+    const uint64_t after = 1000 + kPartialMaxAgeMs + 1;
+    CHECK_FALSE(late.add(lines[1], &why, after).has_value());
     CHECK(why.find("without the ones before") != std::string::npos);
-    for (size_t i = 2; i < lines.size(); ++i) CHECK_FALSE(late.add(lines[i], &why, 40000).has_value());
-    auto next = late.add(msg(lines.back().seq + 1, "after")[0], &why, 40000);
+    for (size_t i = 2; i < lines.size(); ++i) CHECK_FALSE(late.add(lines[i], &why, after + 10).has_value());
+    auto next = late.add(msg(lines.back().seq + 1, "after")[0], &why, after + 10);
     REQUIRE(next.has_value());
     CHECK(next->data == "after");
     Reassembly slow;  // each line within the limit of the one before: the whole message, however long it took

@@ -323,7 +323,7 @@ TEST_CASE("net remote: the reasons for dropped messages are remembered up to a l
     CHECK(server.posted.empty());  // and none of them reached a mod
 }
 
-TEST_CASE("net remote: a message whose next line takes more than 30 s is dropped at either end; the next message arrives") {
+TEST_CASE("net remote: a message whose next line takes more than 60 s is dropped at either end; the next message arrives") {
     Pair p;
     p.join();
     std::string why;
@@ -333,7 +333,7 @@ TEST_CASE("net remote: a message whose next line takes more than 30 s is dropped
     const auto up = p.client.s.client_take(100);
     REQUIRE(up.size() >= 3u);
     p.server.s.server_line(kHandle, kAcct, up[0]);
-    p.server.now += 30001;
+    p.server.now += kPartialMaxAgeMs + 1;
     for (size_t i = 1; i < up.size(); ++i) p.server.s.server_line(kHandle, kAcct, up[i]);
     p.server.step(EMF_WORLD_SERVER);
     CHECK(p.at_server.empty());
@@ -348,7 +348,7 @@ TEST_CASE("net remote: a message whose next line takes more than 30 s is dropped
     p.chat_to_player.clear();
     REQUIRE(down.size() >= 3u);
     p.client.s.client_line(down[0].second, kAcct);
-    p.client.now += 30001;
+    p.client.now += kPartialMaxAgeMs + 1;
     for (size_t i = 1; i < down.size(); ++i) p.client.s.client_line(down[i].second, kAcct);
     p.client.step(EMF_WORLD_CLIENT);
     CHECK(p.at_client.empty());
@@ -357,12 +357,12 @@ TEST_CASE("net remote: a message whose next line takes more than 30 s is dropped
     p.client.step(EMF_WORLD_CLIENT);
     REQUIRE(p.at_client.size() == 1);
     CHECK(p.at_client[0].data == "next");
-    // within 30 s a slow message still arrives whole
+    // within the limit a slow message still arrives whole: 45 s between its lines, more than the server's outbox wait
     REQUIRE(p.client.s.to_server("bm", "bm/pick", big, &why));
     const auto slow = p.client.s.client_take(100);
     for (const auto& line : slow) {
         p.server.s.server_line(kHandle, kAcct, line);
-        p.server.now += 29000;
+        p.server.now += 45000;
     }
     p.server.step(EMF_WORLD_SERVER);
     REQUIRE(p.at_server.size() == 2);
