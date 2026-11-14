@@ -58,6 +58,8 @@ send `#!emf1` lines.
 
 EMF's engine signatures are in [emf_signatures.patterns](emf_signatures.patterns) (MIT), one pattern per line with each
 known build's address: take what you need, and tell us when you fix one after an update.
+[kiln_signatures.patterns](kiln_signatures.patterns) (MIT, Kiln contributors) has Kiln's signatures for 231 more
+functions, in the same format.
 
 ## Checking yourself
 
