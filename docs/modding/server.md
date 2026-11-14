@@ -207,7 +207,8 @@ are not compared.
     At start-up the log names each required id this server does not have itself, one line each (`mods check:
     mods_required names "beastmster", which this server does not have (a typo?)`): with refuse on, every player
     without that mod would be refused. The ids it has are its content mods and the mods it runs, of any side (a Lua
-    mod counts while the Lua host runs it).
+    mod counts while the Lua host runs it). A mod you require on purpose but do not run on the server gets the line
+    too; install it there (switched on) to silence it.
   - `[net] mods_info` is the "Get them from ..." text (at most 200 bytes); without it an EMF player reads "Install
     them with EMF.exe."
   - Never refused: the host's own player, the server's admins (a user group with `canKickBan`) and the accounts in

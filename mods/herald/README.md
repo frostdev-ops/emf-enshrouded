@@ -21,7 +21,8 @@ The message of the day can also use the character's name (`{character}`, EMF API
 All of these are chat lines with no speaker in front, the way the game shows a player joining (the setting **Lines
 without a speaker**, on by default; EMF API v30). Switched off, or with an older EMF, the game shows them under the
 reader's own name, the way EMF's command replies appear. Every line starts with the prefix (the setting **In front of
-every line**, `[Server]` by default); with **Lines without a speaker** on, it is the only label a line has.
+every line**, `[Server]` by default); with **Lines without a speaker** on, it is the only label a line has, so keep
+a prefix: player names are in those lines, and a player picks their own name.
 
 - **Message of the day:** a few seconds after a player is in the world, only they get the MOTD. `{character}`,
   `{name}` and `{online}` in it are filled in: `Welcome {character}! {online} online. Type /help.` `{character}` is the

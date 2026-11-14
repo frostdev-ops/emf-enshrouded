@@ -1120,6 +1120,8 @@ Refused, with nothing changed:
 - a call outside a world callback, or not on the server world;
 - on a game build where EMF cannot destroy the object, give its item back or drop what it holds.
 
+If the game's destroy call fails, it returns false with that reason ("the game's destroy call failed (see the log)").
+
 Like `destroy`, it plays no pick-up sound and sends no `BuildingPickUpEvent` (nothing in the game needs it for player
 objects).
 
@@ -1217,8 +1219,8 @@ server world: the host, or the dedicated server. C++: `emf::has_v38()` in `emf.h
 
 `door_set` is refused (false, logged once per 10 s) when: it is not the server world, the entity is not a door, a
 switch drives it, it is already so, `side` is bad, 256 door orders are waiting already, or the feature is off on this
-build. `door_lock` is refused for the same reasons (but "already so" and `side`), and a lock also when 1024 doors are
-locked already; a door EMF locked can always be unlocked, even when a switch drives it now. No open or close sound
+build. `door_lock` is refused for the same reasons except "already so" and `side`, and a lock also when 1024 doors are
+locked already. A door EMF locked can still be unlocked when a switch drives it now. No open or close sound
 plays.
 
 Seen live on the host: a spawned Wooden Door opened and closed by `door_set` (it swings); locking removed the "E Open"

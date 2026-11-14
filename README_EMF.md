@@ -450,7 +450,7 @@ end the game; use `commands.txt` then.)
 | `destroy <entity>` | removes an entity from the world (host); refuses players and ids the world does not have |
 | `near [radius 1-200]` | the entities around you (default 10 m), nearest first, tagged: player, villager, inventory, animal, plant (level), health |
 | `inv <entity>` | every stack in the entity's inventories: inventory entity, slot, slot id (for `take_items`), item, count, and a gear item's data entity, level and rarity |
-| `god [entity \| me] [on\|off]` | for tests: the entity (you by default) cannot drop below 1 health from hits, falls, the shroud, the cold or drowning (a hit rule, API v31; `hits` says whether hit rules work on this game build). `god` alone lists who has it; `god off` or `god <entity> off` ends it. It also ends when a player leaves (their entity id goes to the next player), when the entity is gone (said at the next `god`), and for everyone when a new world starts. A dead entity gets none (e.g. `god`, `god on`, `god 1025 off`) |
+| `god [entity \| me] [on\|off]` | for tests: the entity (you by default) cannot drop below 1 health from hits, falls, the shroud, the cold or drowning (a hit rule, API v31; `hits` says whether hit rules work on this game build). `god` alone lists who has it; `god off` or `god <entity> off` ends it. It also ends when a player leaves (their entity id goes to the next player), when `destroy` removes the entity, when the entity is gone otherwise (found and said at the next `god`), and for everyone when a new world starts. Refused while the entity's health reads 0 (dead, or just spawned). Examples: `god`, `god on`, `god 1025 off` |
 
 Example reply (from a test run):
 ```

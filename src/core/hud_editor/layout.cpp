@@ -65,6 +65,7 @@ void read_colour(const json::Value& v, const std::string& where, Colour* out, st
         shown = raw_text(v.n);
     else if (v.is(json::Value::Type::Bool))
         shown = v.b ? "true" : "false";
+    *out = Colour{};  // the game's, as the note says (also over an earlier spelling of the same name)
     notes.push_back(where + ": " + shown + " is not a colour (#rrggbb or #rrggbbaa), left at the game's");
 }
 

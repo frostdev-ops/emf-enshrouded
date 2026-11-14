@@ -37,7 +37,7 @@ end
 
 -- Runs change(world, door) on each door around the asker and answers with one line. change returns true (it changes
 -- at the next server step), "already" (nothing to do) or false (refused: the core logged why).
-local function each_door(world, done_word, change)
+local function each_door(world, done_word, change, unlocking)
   local id, why = asker()
   if not id then emf.reply(why) return end
   local list = doors_near(world, id)
@@ -45,8 +45,8 @@ local function each_door(world, done_word, change)
   if #list == 0 then emf.reply("No door within " .. RADIUS .. " m of you") return end
   local done, already, switch, refused = 0, 0, 0, 0
   for _, door in ipairs(list) do
-    if door.logic then
-      switch = switch + 1  -- a switch drives it: EMF leaves it alone (and would refuse)
+    if door.logic and not (unlocking and door.locked) then
+      switch = switch + 1  -- a switch drives it: EMF leaves it alone (and would refuse; an unlock it allows)
     else
       local result = change(world, door)
       if result == "already" then already = already + 1
@@ -62,7 +62,7 @@ local function each_door(world, done_word, change)
 end
 
 emf.command("open", "[front|back]: open the doors within 10 m of you (host)", function(world, args)
-  local side = args[1]  -- which way it swings; nil lets the game choose
+  local side = args[1]  -- which way it swings; nil: back, EMF's default
   if side ~= nil and side ~= "front" and side ~= "back" then emf.reply("usage: gate.open [front|back]") return end
   each_door(world, "Opened", function(w, door)
     if door.state == "open" then return "already" end
@@ -84,5 +84,5 @@ emf.command("lock", "[off]: lock the doors within 10 m of you, so nobody can ope
     each_door(world, lock and "Locked" or "Unlocked", function(w, door)
       if door.locked == lock then return "already" end
       return emf.door_lock(w, door.id, lock)  -- kept with the world (EMF 0.6.8); open and close still work
-    end)
+    end, not lock)
   end)

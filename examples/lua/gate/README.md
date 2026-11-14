@@ -29,12 +29,13 @@ so the commands answer `No door within 10 m of you`: update EMF.
 1. Load a world you host and stand near a door or a gate you built. Open the console (the key under Esc) and type
    `gate.open`: `Opened 1 of 1 door(s) within 10 m`, and the door swings open.
 2. `gate.close` closes it. `gate.close` again says `Closed 0 of 1 door(s) within 10 m, 1 already so`. Then
-   `gate.open back` opens it the other way.
+   `gate.open front` opens it the other way.
 3. `gate.lock`: press E at the door; there is no prompt. `gate.open` and `gate.close` still work on it.
-   `gate.lock off` gives the prompt back. The lock is kept with the world: load the world again and it is still there.
+   `gate.lock off` gives the prompt back. The lock is kept with the world (EMF 0.6.8 or newer): load the world again and it is still there.
 4. In the game's chat, `/gate.open` does the same (the host's own chat runs every command). On a dedicated server an
    admin (`[chat] admins` in `emf\emf_core.ini`) types it; the doors near them change.
-5. Doors a switch opens and closes are counted as `driven by a switch` and left alone.
+5. Doors a switch opens and closes are counted as `driven by a switch` and left alone; `gate.lock off` still
+   unlocks one that was locked before a switch was wired to it.
 
 Lua commands always start with the mod's id. To type `/g.open`, copy the folder as `g` and change `"id"` in
 `mod.json` to `"g"`.

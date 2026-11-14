@@ -1247,6 +1247,7 @@ TEST_CASE("builtin commands: god keeps an entity (you by default) at 1 health or
     g_attr = {{{42, EMF_ATTR_HEALTH}, 100}, {{70, EMF_ATTR_HEALTH}, 30}};  // 42 is you; 71 has no health
     g_god_rules.clear();
     g_god_removed.clear();
+    g_god_gone_rules.clear();
     g_god_refuse = false;
     ItemsWorld iw;
     MapStore ents;
@@ -1697,4 +1698,69 @@ TEST_CASE("builtin commands (v36): remove <id> me (or player) gives the item bac
     CHECK_FALSE(bsaid("usage: remove"));
     CHECK(bsaid("entity 60 not removed: the refund's player is not a player"));
     CHECK(bsaid("entity 63 not removed: the refund's player is not a player"));
+}
+
+// Review (contributed god command): not for players who are no admin; an admin's "you" is their own entity; destroy
+// ends the god of what it destroys at once (a new entity may get its id before the next god).
+TEST_CASE("builtin commands: god is not for players who are no admin; an admin's god is their own entity") {
+    BFixture f;
+    EmfApi api = *api_table();
+    api.attribute_get = fake_attr_get;
+    api.hit_rule_add = fake_god_add;
+    api.hit_rule_remove = fake_god_remove;
+    f.ctx.api = &api;
+    g_attr = {{{42, EMF_ATTR_HEALTH}, 100}, {{70, EMF_ATTR_HEALTH}, 30}};
+    g_god_rules.clear();
+    g_god_removed.clear();
+    g_god_gone_rules.clear();
+    g_god_refuse = false;
+    ItemsWorld iw;
+    MapStore ents;
+    emf::test::plant_entities(iw.w, ents, {42, 70});
+    f.ctx.player = [] { return emf::core::command_player(42); };  // as core.cpp sets it: a chat sender's entity
+    CHECK_FALSE(f.center.for_players("god"));
+    CommandSender guest;
+    guest.from_chat = true;
+    guest.account = 0xbb;
+    guest.entity = 70;
+    guest.restricted = true;
+    f.center.enqueue("god on", GetTickCount64(), guest);
+    f.run(iw.w);
+    CHECK(g_god_rules.empty());
+    CommandSender admin;
+    admin.from_chat = true;
+    admin.account = 0xaa;
+    admin.entity = 70;
+    f.center.enqueue("god on", GetTickCount64(), admin);
+    f.run(iw.w);
+    REQUIRE(g_god_rules.size() == 1u);
+    CHECK(g_god_rules[0].target == 70u);  // the admin, not the host (42)
+    builtin_world_reset(f.ctx);
+}
+
+TEST_CASE("builtin commands: destroy ends the god of the entity it destroys at once") {
+    BFixture f;
+    EmfApi api = *api_table();
+    api.attribute_get = fake_attr_get;
+    api.hit_rule_add = fake_god_add;
+    api.hit_rule_remove = fake_god_remove;
+    api.destroy = [](EmfWorld*, uint32_t) { return true; };
+    f.ctx.api = &api;
+    g_attr = {{{42, EMF_ATTR_HEALTH}, 100}, {{70, EMF_ATTR_HEALTH}, 30}};
+    g_god_rules.clear();
+    g_god_removed.clear();
+    g_god_gone_rules.clear();
+    g_god_refuse = false;
+    ItemsWorld iw;
+    MapStore ents;
+    emf::test::plant_entities(iw.w, ents, {42, 70});
+    f.center.enqueue("god 70");
+    f.center.enqueue("destroy 70");
+    f.run(iw.w);
+    CHECK(bsaid("destroyed entity 70"));
+    CHECK(g_god_removed == std::vector<uint32_t>{101});  // at once, not at the next god
+    g_bout.clear();
+    f.center.enqueue("god");
+    f.run(iw.w);
+    CHECK(bsaid("god: nobody has it"));
 }

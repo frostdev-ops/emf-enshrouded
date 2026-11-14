@@ -59,7 +59,7 @@ switched off: switch it on in the Mods tab to see it count.
 Each version of the `lua` mod (the Lua host) adds to the one before. Put the newest version whose additions your mod
 uses into `depends`: `"lua": ">=1.21"` for `emf.language`. A mod that uses none of them can depend on `">=1.0"`. The
 `lua` mod itself needs EMF API v20 (its `mod.json`), so it runs on no older core; the last column names the EMF API
-version the additions need where that is newer (none: v20 is enough). Today's version is 1.35. Ranges are explained in
+version the additions need (empty: the v20 the `lua` mod needs is enough). Ranges are explained in
 [guide.md](guide.md), "Dependencies and version ranges".
 
 | Version | What it adds | EMF API |
@@ -608,8 +608,9 @@ too old (remove_building needs API v36)"`. `item_id` is nil when nothing went ba
 
 Any other key is an error, so a typo cannot quietly lose the item.
 
-It refuses, and changes nothing, for a player, no such entity (or one with no position), a Flame Altar (even with `force`: use `emf.destroy` if you mean it), an
-object no player placed (use `emf.destroy`), and an object holding items unless `force`. It plays no pick-up sound.
+It refuses, and changes nothing, for a player, an id with no entity (or no position), a Flame Altar (even with
+`force`: use `emf.destroy` if you mean it), an object no player placed (use `emf.destroy`), and an object holding items
+unless `force`. It plays no pick-up sound.
 Details: [reference.md](reference.md), "v36".
 
 ```lua
@@ -682,8 +683,8 @@ is not a door (player doors and gates). `logic` is true when a switch drives the
   `emf.door_close` still work on a locked door.
 
 The three actions return true when the door will change at the next step, and false when refused (not the server world,
-not a door, a switch drives it, already so, 256 door orders waiting already; a lock also when 1024 doors are locked
-already; the reason is in the log). Any other side word is a Lua error. Host only, like
+not a door, a switch drives it, already so, 256 door orders waiting already, or doors are off on this game build; a
+lock also when 1024 doors are locked already; the reason is in the log). Any other side word is a Lua error. Host only, like
 `emf.spawn`. On a core older than API v38: nil and false.
 
 ```lua

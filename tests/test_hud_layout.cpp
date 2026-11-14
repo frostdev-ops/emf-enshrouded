@@ -128,6 +128,12 @@ TEST_CASE("layout_from_json: the same bar in two spellings: the later one wins, 
     r = layout_from_json(R"({"format": 1, "colours": {"Panel": "#20202080", "panel": "game"}})");
     REQUIRE(r.layout);
     CHECK(r.layout->panel == Colour{});
+    // review: a later spelling with a bad value leaves the game's colour, as its note says (not the earlier one)
+    r = layout_from_json(R"({"format": 1, "colours": {"health": {"fill": "#ff0000"}, "Health": {"fill": "red"}}})");
+    REQUIRE(r.layout);
+    REQUIRE(r.notes.size() == 1u);
+    CHECK(r.notes[0].find("left at the game's") != std::string::npos);
+    CHECK(r.layout->colours[0].part[fill] == Colour{});
 }
 
 TEST_CASE("layout_from_json: a part that is not an object is skipped with a note") {

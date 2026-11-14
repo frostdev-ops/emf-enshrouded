@@ -1408,8 +1408,16 @@ void cmd_destroy(EmfWorld* w, int argc, const char* const* argv, void* u) {
         command_reply_line(fmt("entity %u is a player: not destroyed", id));
         return;
     }
-    command_reply_line(c.api->destroy(w, id) ? fmt("destroyed entity %u", id)
-                                             : fmt("destroy %u failed (see the log)", id));
+    if (!c.api->destroy(w, id)) {
+        command_reply_line(fmt("destroy %u failed (see the log)", id));
+        return;
+    }
+    command_reply_line(fmt("destroyed entity %u", id));
+    std::lock_guard<std::mutex> l(c.god_lock);  // its god ends now: a new entity may get its id before the next god
+    if (const auto g = c.god.find(id); g != c.god.end()) {
+        if (c.api->hit_rule_remove) c.api->hit_rule_remove(g->second);
+        c.god.erase(g);
+    }
 }
 
 // path <x> <y> <z> [jumps] [doors] [closest] (v37; doors 0.6.11): a path from you; the answer comes after a step or more.

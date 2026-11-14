@@ -45,3 +45,17 @@ TEST_CASE("signatures export: the committed docs/modding/emf_signatures.patterns
     CHECK_MESSAGE(clean == emf::export_signature_patterns(),
                   "the signatures changed: build\\msvc\\emf_sigcheck.exe --export docs\\modding\\emf_signatures.patterns");
 }
+
+// Kiln's signatures (a contributed data file next to EMF's): EMF neither uses nor checks its patterns (a game update may
+// break some; a fix belongs in Kiln's database), but the file must parse, and Kiln's MIT notice travels with it.
+TEST_CASE("signatures export: Kiln's kiln_signatures.patterns parses and carries Kiln's MIT notice") {
+    std::ifstream in(std::string(EMF_SOURCE_DIR) + "/docs/modding/kiln_signatures.patterns", std::ios::binary);
+    REQUIRE(in);
+    std::stringstream text;
+    text << in.rdbuf();
+    const emf::PatternFile f = emf::parse_pattern_file(text.str());
+    CHECK(f.errors.empty());
+    CHECK_FALSE(f.entries.empty());
+    CHECK(text.str().find("Copyright (c) 2026 Kiln contributors") != std::string::npos);
+    CHECK(text.str().find("Permission is hereby granted, free of charge") != std::string::npos);
+}

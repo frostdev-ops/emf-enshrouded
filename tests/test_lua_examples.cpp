@@ -2246,3 +2246,16 @@ TEST_CASE("lua example gate: the doors near the player who typed it in the chat;
     x.r.fake.sender = sender_of(0, 0xBB, true, true);
     CHECK(x.reply("gate.close") == "EMF could not tell which player you are");
 }
+
+// Review (contributed gate example): a door EMF locked that a switch drives now (a lever wired to it later) is unlocked
+// by gate.lock off: the core allows unlocking it, and the lock would hold the lever's door still.
+TEST_CASE("lua example gate: lock off also unlocks a locked door that a switch drives now") {
+    ExampleRig x("gate");
+    gate_doors(x.r.fake);
+    x.r.fake.door_states[502] = EMF_DOOR_CLOSED | EMF_DOOR_LOGIC | EMF_DOOR_LOCKED;
+    CHECK(x.reply("gate.lock off") == "Unlocked 2 of 4 door(s) within 10 m, 2 already so");
+    CHECK(x.r.fake.door_calls == std::vector<std::string>{"lock 502 0", "lock 504 0"});
+    x.r.fake.door_calls.clear();
+    CHECK(x.reply("gate.lock") == "Locked 2 of 4 door(s) within 10 m, 1 already so, 1 driven by a switch");
+    CHECK(x.r.fake.door_calls == std::vector<std::string>{"lock 500 1", "lock 501 1"});  // never a switch's door
+}

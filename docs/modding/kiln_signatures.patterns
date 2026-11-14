@@ -3,12 +3,30 @@
 # src/common/pattern_file.h). MIT licence (Kiln contributors): use them in any loader.
 # Generated from Kiln's signature database (https://github.com/frostdev-ops/kiln, sigdb/symbols/, Kiln
 # 0.2.0-dev.27, commit 14bcce2c5324): do not edit by hand; a fix belongs in Kiln's database.
+# Kiln's licence, which these lines are under:
+#   MIT License
+#   Copyright (c) 2026 Kiln contributors
+#   Permission is hereby granted, free of charge, to any person obtaining a copy
+#   of this software and associated documentation files (the "Software"), to deal
+#   in the Software without restriction, including without limitation the rights
+#   to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+#   copies of the Software, and to permit persons to whom the Software is
+#   furnished to do so, subject to the following conditions:
+#   The above copyright notice and this permission notice shall be included in all
+#   copies or substantial portions of the Software.
+#   THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+#   IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+#   FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+#   AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+#   LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+#   OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+#   SOFTWARE.
 # Check them against a game exe without starting the game:
 #   emf_sigcheck --patterns kiln_signatures.patterns "<game>\enshrouded.exe"
 # Each pattern must match exactly once in the exe's .text. `offset=N` alone: the function starts at match + N.
 # `offset=N ; rel32`: the function is the target of the call or jump whose rel32 is at match + N.
-# Names are Kiln's (`<service>/<Name>`), so a line can be looked up in Kiln's database; none equals a name in
-# emf_signatures.patterns. The second comment line, where there is one, names the Kiln definition the pattern
+# Names are Kiln's (`<service>/<Name>`, a few without a service), so a line can be looked up in Kiln's database;
+# none equals a name in emf_signatures.patterns. The second comment line, where there is one, names the Kiln definition the pattern
 # comes from when it is not the function's own first one, and Kiln's other names for the same function ("also").
 # A pattern is Kiln's own, with its typed holes written as ??; nothing else was changed.
 # What is here: every named address in Kiln's database that is a function's first byte, that EMF's file does not
@@ -20,6 +38,8 @@
 # there and gives the address Kiln's own resolver gives ("s": the dedicated server's exe; "client only": Kiln
 # has no such function for the server and the pattern does not match there). All patterns match once in the
 # game client's exe of both builds.
+# Against the dedicated server's exe, the "client only" lines and the two Kiln has no server address for are
+# expected to fail: emf_sigcheck --patterns cannot tell which lines are for the client only.
 # Checked builds (the game's "Build version", the exe's sha256); the older builds that emf_signatures.patterns
 # lists were not checked:
 #   1285601  ce6fdba63e27744943b695921383a29133285d359e07671f6ca33a47e2147618
