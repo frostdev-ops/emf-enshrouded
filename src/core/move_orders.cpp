@@ -48,12 +48,15 @@ bool calm_state(State s) {
 }  // namespace
 
 uint32_t MoveOrders::add(EmfWorld* world, uint32_t enemy, const std::vector<Point>& points, double arrive,
-                         double seconds, uint32_t flags, Callback cb, std::string* why) {
+                         double seconds, uint32_t flags, Callback cb, std::string* why, double stuck_seconds) {
     auto no = [why](const char* text) {
         if (why) *why = text;
         return 0u;
     };
-    if (flags & ~static_cast<uint32_t>(EMF_MOVE_ALLIES | EMF_MOVE_PEACEFUL)) return no("unknown flags (a newer mod?)");
+    if (flags & ~static_cast<uint32_t>(EMF_MOVE_ALLIES | EMF_MOVE_PEACEFUL | EMF_MOVE_PEACEFUL_ALL))
+        return no("unknown flags (a newer mod?)");
+    if (!(stuck_seconds == 0 || (stuck_seconds >= kMoveStuckMin && stuck_seconds <= kMoveStuckMax)))
+        return no("stuck must be 2 to 120 seconds (0: 15)");
     if (points.empty() || points.size() > kMovePointsMax) return no("1 to 16 points");
     for (const Point& p : points)
         if (!std::isfinite(p[0]) || !std::isfinite(p[1]) || !std::isfinite(p[2])) return no("a point is not a number");
@@ -82,6 +85,7 @@ uint32_t MoveOrders::add(EmfWorld* world, uint32_t enemy, const std::vector<Poin
         m.points = points;
         m.arrive = arrive;
         m.cb = std::move(cb);
+        if (stuck_seconds > 0) m.stuck_ms = static_cast<uint64_t>(std::llround(stuck_seconds * 1000.0));
         if (seconds > 0) m.until = now + static_cast<uint64_t>(std::llround(seconds * 1000.0));
         // a move on a creature that is moving already ends the old one; whom it guarded before stays the old one's
         uint32_t prior = ai->guardEntityId.id;  // whom it guards now (a stale id is dropped below)
@@ -100,7 +104,8 @@ uint32_t MoveOrders::add(EmfWorld* world, uint32_t enemy, const std::vector<Poin
         if (prior && !alive(world, prior)) prior = 0;
         m.prior_guard = prior;
         if (place_waypoint(m, now, true)) {
-            if (flags & EMF_MOVE_PEACEFUL) calm_players(world, enemy);
+            if (flags & (EMF_MOVE_PEACEFUL | EMF_MOVE_PEACEFUL_ALL))
+                calm_players(world, enemy, (flags & EMF_MOVE_PEACEFUL_ALL) != 0);
             m.id = id = next_id_++;
             moves_.push_back(std::move(m));
         } else {
@@ -171,17 +176,17 @@ bool MoveOrders::fighting(EmfWorld* w, uint32_t enemy) const {
     }
 }
 
-void MoveOrders::calm_players(EmfWorld* w, uint32_t enemy) const {
+void MoveOrders::calm_players(EmfWorld* w, uint32_t enemy, bool all) const {
     if (auto* ag = comp<gen::DynamicAggro>(d_, w, enemy))
         for (auto& t : ag->targets)
-            if (t.entityId.id && has(d_, w, gen::PlayerState::kHash, t.entityId.id)) {
+            if (t.entityId.id && (all || has(d_, w, gen::PlayerState::kHash, t.entityId.id))) {
                 t.state = gen::AggroTargetState::Unknown;
                 t.aggro = 0;
                 t.entityId.id = 0;
             }
     if (auto* st = comp<gen::SelectedTargets>(d_, w, enemy)) {
         auto& pick = st->targets[0];
-        if (pick.targetEntityId.id && has(d_, w, gen::PlayerState::kHash, pick.targetEntityId.id)) {
+        if (pick.targetEntityId.id && (all || has(d_, w, gen::PlayerState::kHash, pick.targetEntityId.id))) {
             pick.targetEntityId.id = 0;
             pick.targetRootEntityId.id = 0;
         }
@@ -224,7 +229,8 @@ int MoveOrders::tick(Move& m, uint64_t now) {
         }
     }
     if (m.until && now >= m.until) return EMF_MOVE_TIMEOUT;
-    if (m.flags & EMF_MOVE_PEACEFUL) calm_players(m.world, m.enemy);
+    if (m.flags & (EMF_MOVE_PEACEFUL | EMF_MOVE_PEACEFUL_ALL))
+        calm_players(m.world, m.enemy, (m.flags & EMF_MOVE_PEACEFUL_ALL) != 0);
     // its waypoint went (destroyed, or its id is another entity's now): a new one, at most kMoveReplaceMax times
     if (!waypoint_alive(m)) {
         if (m.waypoint) m.old_waypoint = m.waypoint;
@@ -243,7 +249,7 @@ int MoveOrders::tick(Move& m, uint64_t now) {
     if (dist >= 0 && dist <= m.best - kMoveProgress) {
         m.best = dist;
         m.since = now;
-    } else if (now - m.since >= kMoveStuckMs) {
+    } else if (now - m.since >= m.stuck_ms) {
         return EMF_MOVE_STUCK;
     }
     auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, m.world, m.enemy);

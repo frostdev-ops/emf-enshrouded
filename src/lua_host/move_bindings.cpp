@@ -117,15 +117,29 @@ int l_enemy_move(lua_State* L) {
         lua_pushnil(L);
         while (lua_next(L, 4)) {
             const char* k = lua_type(L, -2) == LUA_TSTRING ? lua_tostring(L, -2) : "";
-            const bool number = !std::strcmp(k, "arrive") || !std::strcmp(k, "seconds");
-            const bool flag = !std::strcmp(k, "peaceful") || !std::strcmp(k, "allies");
-            if (!number && !flag)
-                return luaL_error(L, "emf.enemy_move: unknown option '%s' (arrive, seconds, peaceful, allies)", k);
+            const bool number = !std::strcmp(k, "arrive") || !std::strcmp(k, "seconds") || !std::strcmp(k, "stuck");
+            const bool peaceful = !std::strcmp(k, "peaceful");
+            const bool flag = !std::strcmp(k, "allies");
+            if (!number && !flag && !peaceful)
+                return luaL_error(L, "emf.enemy_move: unknown option '%s' (arrive, seconds, stuck, peaceful, allies)", k);
             if (number && lua_type(L, -1) != LUA_TNUMBER) return luaL_error(L, "emf.enemy_move: %s is a number", k);
             if (flag && !lua_isboolean(L, -1)) return luaL_error(L, "emf.enemy_move: %s is true or false", k);
-            if (!std::strcmp(k, "arrive")) o.arrive = static_cast<float>(lua_tonumber(L, -1));
-            else if (!std::strcmp(k, "seconds")) o.seconds = static_cast<float>(lua_tonumber(L, -1));
-            else if (lua_toboolean(L, -1)) o.flags |= !std::strcmp(k, "peaceful") ? EMF_MOVE_PEACEFUL : EMF_MOVE_ALLIES;
+            if (peaceful) {  // true / "players": its fights with players are cleared; "all": every fight
+                const bool text = lua_type(L, -1) == LUA_TSTRING;
+                const char* v = text ? lua_tostring(L, -1) : "";
+                if (!lua_isboolean(L, -1) && !(text && (!std::strcmp(v, "players") || !std::strcmp(v, "all"))))
+                    return luaL_error(L, "emf.enemy_move: peaceful is true, false, \"players\" or \"all\"");
+                if (text && !std::strcmp(v, "all")) o.flags |= EMF_MOVE_PEACEFUL_ALL;
+                else if (text || lua_toboolean(L, -1)) o.flags |= EMF_MOVE_PEACEFUL;
+            } else if (!std::strcmp(k, "arrive")) {
+                o.arrive = static_cast<float>(lua_tonumber(L, -1));
+            } else if (!std::strcmp(k, "seconds")) {
+                o.seconds = static_cast<float>(lua_tonumber(L, -1));
+            } else if (!std::strcmp(k, "stuck")) {
+                o.stuck_seconds = static_cast<float>(lua_tonumber(L, -1));
+            } else if (lua_toboolean(L, -1)) {
+                o.flags |= EMF_MOVE_ALLIES;
+            }
             lua_pop(L, 1);
         }
     }

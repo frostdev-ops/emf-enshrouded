@@ -150,7 +150,8 @@ static_assert(offsetof(EmfApi, enemy_order) == kApiV38Size && kApiV39Size == 106
               "EmfApi layout (v39 appends enemy_order, enemy_order_cancel, enemy_target)");
 static_assert(offsetof(EmfApi, enemy_move) == kApiV39Size && kApiV40Size == 1088 && sizeof(EmfApi) == kApiV40Size,
               "EmfApi layout (v40 appends enemy_move, enemy_move_cancel, enemy_moving)");
-static_assert(kMoveOrderV40Size == 128 && sizeof(EmfMoveOrder) == 128 && offsetof(EmfMoveOrder, points) == 16 &&
+static_assert(kMoveOrderV40Size == 128 && sizeof(EmfMoveOrder) == 136 && offsetof(EmfMoveOrder, stuck_seconds) == 128 &&
+                  offsetof(EmfMoveOrder, points) == 16 &&
                   offsetof(EmfMoveOrder, arrive) == 24 && offsetof(EmfMoveOrder, why) == 32,
               "EmfMoveOrder layout (v40)");
 static_assert(kEnemyOrderV39Size == 120 && sizeof(EmfEnemyOrder) == 120 && offsetof(EmfEnemyOrder, seconds) == 16 &&

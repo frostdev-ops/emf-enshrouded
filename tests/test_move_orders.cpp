@@ -686,3 +686,68 @@ TEST_CASE("move orders: a calm creature that took the waypoint as its guard targ
     o.step(W());
     CHECK(ai.state == emf::gen::enemy01::State::Combat);
 }
+
+// 0.6.10, a modder's raids: a raider at a wall should try another way in sooner than after 15 s, and a raider that stole a
+// trophy should only run (not stop to fight an animal or a player's beast).
+TEST_CASE("move orders (0.6.10): a stuck time of its own (2-120 s, 0 = 15)") {
+    Fake f = world();
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, 0, cb(d), &why, 5) != 0u);
+    for (int i = 0; i < 4; ++i) {
+        f.now += 1000;
+        o.step(W());
+    }
+    CHECK(d.calls == 0);
+    f.now += 1000;
+    o.step(W());
+    CHECK(d.status == EMF_MOVE_STUCK);
+    CHECK(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, 0, cb(d), &why, 1) == 0u);
+    CHECK(why.find("stuck") != std::string::npos);
+    CHECK(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, 0, cb(d), &why, 121) == 0u);
+}
+
+TEST_CASE("move orders (0.6.10): EMF_MOVE_PEACEFUL_ALL clears every fight (monsters, animals, beasts), not only players'") {
+    Fake f = world();
+    f.add<gen::Faction>(71).faction = static_cast<emf::gen::FactionType>(6);  // a wild animal
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, pts({{40, 10, 0}}), 2.0, 60, EMF_MOVE_PEACEFUL_ALL, cb(d), &why) != 0u);
+    auto& ag = f.get<gen::DynamicAggro>(kEnemy);
+    ag.targets[0].entityId.id = 71;
+    ag.targets[0].state = gen::AggroTargetState::Alarmed;
+    ag.targets[0].aggro = 20;
+    ag.targets[1].entityId.id = kPlayer;
+    ag.targets[1].state = gen::AggroTargetState::Alarmed;
+    f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id = 71;
+    auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
+    ai.state = emf::gen::enemy01::State::Combat;
+    f.place(kEnemy, 5, 10, 0);
+    o.step(W());
+    CHECK(ag.targets[0].state == gen::AggroTargetState::Unknown);
+    CHECK(ag.targets[1].state == gen::AggroTargetState::Unknown);
+    CHECK(f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id == 0u);
+    CHECK(ai.state != emf::gen::enemy01::State::Combat);
+}
+
+TEST_CASE("api (0.6.10): an EmfMoveOrder of 0.6.9's size is still taken; the new stuck_seconds is read when present") {
+    ApiRig r;
+    r.in_world([&](EmfWorld* world) {
+        EmfPathPoint p{40, 10, 0, 0};
+        EmfMoveOrder m{};
+        m.size = kMoveOrderV40Size;  // a mod built with 0.6.8's header
+        m.enemy = kEnemy;
+        m.count = 1;
+        m.points = &p;
+        m.stuck_seconds = 1;  // past its size: not read
+        CHECK(api_table()->enemy_move(world, &m, nullptr, nullptr) != 0u);
+        m.size = sizeof m;
+        m.stuck_seconds = 1;  // read now: out of range
+        CHECK(api_table()->enemy_move(world, &m, nullptr, nullptr) == 0u);
+        CHECK(std::string(m.why).find("stuck") != std::string::npos);
+        m.stuck_seconds = 5;
+        CHECK(api_table()->enemy_move(world, &m, nullptr, nullptr) != 0u);
+    });
+}

@@ -1273,17 +1273,18 @@ roamed and the move ended stuck. C++: `emf::has_v40()`.
 
 | C | Rules |
 |---|---|
-| `uint32_t enemy_move(world, EmfMoveOrder* o, EmfMoveCallback cb, void* user)` | `o->size = sizeof(EmfMoveOrder)`; `enemy`, `flags` (`EMF_MOVE_ALLIES`, `EMF_MOVE_PEACEFUL`), `count` (1..16) `points` (`EmfPathPoint`: x, y, z; `move` is ignored, so path_find's points fit: thin a longer path to 16), `arrive` (0 = 2; 0.5..50 m), `seconds` (0 = no limit; at most 3600). The move's id, or 0 with `o->why`. `cb(world, id, status, user)` (may be NULL) is called once when it ends |
+| `uint32_t enemy_move(world, EmfMoveOrder* o, EmfMoveCallback cb, void* user)` | `o->size = sizeof(EmfMoveOrder)`; `enemy`, `flags` (`EMF_MOVE_ALLIES`, `EMF_MOVE_PEACEFUL`, `EMF_MOVE_PEACEFUL_ALL`), `count` (1..16) `points` (`EmfPathPoint`: x, y, z; `move` is ignored, so path_find's points fit: thin a longer path to 16), `arrive` (0 = 2; 0.5..50 m), `seconds` (0 = no limit; at most 3600), `stuck_seconds` (since 0.6.10, read when `size` covers it: no metre closer for this long while not fighting ends it stuck; 0 = 15; 2..120). The move's id, or 0 with `o->why`. `cb(world, id, status, user)` (may be NULL) is called once when it ends |
 | `bool enemy_move_cancel(uint32_t id)` | Ends it (`EMF_MOVE_CANCELLED`): at once inside a server world callback, else at the next step. False: no such move |
 | `uint32_t enemy_moving(world, enemy)` | Its move's id, 0 = it is not moving |
 
-Status: `EMF_MOVE_ARRIVED` (at the last point), `EMF_MOVE_STUCK` (no metre closer for 15 s while not fighting),
+Status: `EMF_MOVE_ARRIVED` (at the last point), `EMF_MOVE_STUCK` (no metre closer for 15 s, or `stuck_seconds`, while not fighting),
 `EMF_MOVE_TIMEOUT`, `EMF_MOVE_GONE` (it died, went, became a player, or a player's ally without `EMF_MOVE_ALLIES`),
 `EMF_MOVE_CANCELLED` (`enemy_move_cancel`, a new move or `enemy_order` on it, or the world closed: then `world` is
 NULL). The callback runs once, after the move is gone (it may start another move): after a server step on the server
 world's thread, inside `enemy_move_cancel`, inside the `enemy_move` or `enemy_order` that replaced it, or (world NULL) when
 the world closes. A waiting guard order of an ended move is dropped; a waypoint that vanishes is placed again up to 3 times. `EMF_MOVE_PEACEFUL`
-clears its fights against players each step (a creature left in `Combat` with nothing to fight goes to `Idle`); without
+clears its fights against players each step (`EMF_MOVE_PEACEFUL_ALL`, since 0.6.10: every fight, animals and players'
+beasts too) (a creature left in `Combat` with nothing to fight goes to `Idle`); without
 it the creature may fight on the way (the stuck clock waits) and goes on afterwards. When a move ends its waypoint goes;
 a creature that guarded someone before guards them again (a tamed beast: its owner); any other stops guarding, and if it
 arrived its home becomes the last point (it lives there). A move and an enemy order on the same creature end each other (once the new one holds: a refused one ends nothing).

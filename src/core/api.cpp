@@ -1140,6 +1140,9 @@ uint32_t api_enemy_move(EmfWorld* w, EmfMoveOrder* req, EmfMoveCallback cb, void
     for (uint32_t i = 0; i < req->count; ++i)
         points.push_back({req->points[i].x, req->points[i].y, req->points[i].z});
     const double arrive = req->arrive == 0.0f ? 2.0 : req->arrive;
+    const double stuck = req->size >= offsetof(EmfMoveOrder, stuck_seconds) + sizeof(req->stuck_seconds)
+                             ? static_cast<double>(req->stuck_seconds)
+                             : 0.0;  // a mod built with 0.6.8's or 0.6.9's header
     MoveOrders::Callback done;
     if (cb)
         done = [cb, user](EmfWorld* world, uint32_t id, uint32_t status) {
@@ -1147,7 +1150,7 @@ uint32_t api_enemy_move(EmfWorld* w, EmfMoveOrder* req, EmfMoveCallback cb, void
                 core_log("enemy_move: a mod's callback faulted (move " + std::to_string(id) + ")");
         };
     std::string why;
-    const uint32_t id = m->add(w, req->enemy, points, arrive, req->seconds, req->flags, std::move(done), &why);
+    const uint32_t id = m->add(w, req->enemy, points, arrive, req->seconds, req->flags, std::move(done), &why, stuck);
     if (!id) return refuse(why);
     if (g_state->orders) g_state->orders->cancel_enemy(w, req->enemy);  // an enemy order on it ends (v39), once the move holds
     return id;

@@ -777,6 +777,8 @@ typedef void (*EmfPathCallback)(EmfWorld* world, uint32_t id, const EmfPathResul
  * Nothing is saved. */
 #define EMF_MOVE_ALLIES 0x1u   /* the creature may be a player's ally (a tamed beast, faction PlayerAlly) */
 #define EMF_MOVE_PEACEFUL 0x2u /* its fights against players are cleared on the way */
+#define EMF_MOVE_PEACEFUL_ALL 0x4u /* since 0.6.10: every fight is cleared on the way (animals, monsters, players'
+                                      beasts too): it only walks */
 #define EMF_MOVE_ARRIVED 0u    /* EmfMoveCallback status: at the last point */
 #define EMF_MOVE_STUCK 1u      /* no metre of progress for 15 s while not fighting (a wall, no path, the game gave up) */
 #define EMF_MOVE_TIMEOUT 2u    /* its seconds ran out */
@@ -794,6 +796,9 @@ typedef struct EmfMoveOrder {
                                     about 3 m short); 0 = 2; 0.5..50 */
     float seconds;               /* 0 = no time limit (it still ends stuck); at most 3600 */
     char why[96];                /* refused: why (NUL-terminated) */
+    float stuck_seconds;         /* since 0.6.10 (read when size covers it): no metre closer for this long while not
+                                    fighting ends it stuck; 0 = 15; 2..120 */
+    uint32_t pad2;
 } EmfMoveOrder;
 typedef void (*EmfMoveCallback)(EmfWorld* world, uint32_t id, uint32_t status, void* user);
 

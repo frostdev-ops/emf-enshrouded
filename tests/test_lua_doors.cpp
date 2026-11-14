@@ -202,10 +202,33 @@ TEST_CASE("lua 1.32/1.33: enemy_order and enemy_move refuse an unknown option ke
     CHECK(logged("damage is a whole number"));
     CHECK(logged("o5 ok"));
     CHECK(logged("unknown option 'arive'"));
-    CHECK(logged("peaceful is true or false"));
+    CHECK(logged("peaceful is true, false"));
     CHECK(logged("m3 ok"));
     REQUIRE(r.fake.orders.size() == 1u);  // only the good one reached the core
     CHECK(r.fake.orders[0].damage == 40);
     REQUIRE(r.fake.moves.size() == 1u);
     CHECK(r.fake.moves[0].o.flags == EMF_MOVE_PEACEFUL);
+}
+
+TEST_CASE("lua 1.34: emf.enemy_move takes stuck = seconds and peaceful = \"all\"") {
+    Rig r(L"lua_moves_opts");
+    add_script(r.dir, "mo",
+               "local function bad(f, ...) local ok, err = pcall(f, ...) return ok and 'ok' or err end\n"
+               "emf.command('go', '', function(w)\n"
+               "  emf.enemy_move(w, 70, {1, 2, 3}, {stuck = 5, peaceful = 'all'})\n"
+               "  emf.enemy_move(w, 71, {1, 2, 3}, {peaceful = 'players'})\n"
+               "  emf.log('b1 ' .. bad(emf.enemy_move, w, 70, {1, 2, 3}, {peaceful = 'everyone'}))\n"
+               "  emf.log('b2 ' .. bad(emf.enemy_move, w, 70, {1, 2, 3}, {stuck = 'soon'}))\n"
+               "end)\n");
+    Host host(&r.api, r.dir);
+    host.load_all();
+    r.run_command("mo.go");
+    REQUIRE(r.fake.moves.size() == 2u);
+    CHECK(r.fake.moves[0].o.stuck_seconds == 5.0f);
+    CHECK(r.fake.moves[0].o.flags == EMF_MOVE_PEACEFUL_ALL);
+    CHECK(r.fake.moves[1].o.flags == EMF_MOVE_PEACEFUL);
+    CHECK(r.fake.moves[1].o.stuck_seconds == 0.0f);
+    CHECK(logged("b1 "));
+    CHECK_FALSE(logged("b1 ok"));
+    CHECK_FALSE(logged("b2 ok"));
 }

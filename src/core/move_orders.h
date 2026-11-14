@@ -27,7 +27,8 @@ namespace emf::core {
 constexpr size_t kMovesMax = 256;
 constexpr size_t kMovePointsMax = 16;
 constexpr uint64_t kMoveResendMs = 3000;
-constexpr uint64_t kMoveStuckMs = 15000;
+constexpr uint64_t kMoveStuckMs = 15000;  // the default stuck time
+constexpr double kMoveStuckMin = 2.0, kMoveStuckMax = 120.0;  // seconds
 constexpr double kMoveProgress = 1.0;    // metres closer to the point that count as progress
 constexpr double kMoveArriveMin = 0.5, kMoveArriveMax = 50.0;
 constexpr double kMoveSecondsMax = 3600.0;
@@ -62,8 +63,9 @@ public:
     // A move (arrive: metres, kMoveArriveMin..Max; seconds: 0 = no limit, at most kMoveSecondsMax; flags: EMF_MOVE_*);
     // its id (from 1, never reused), or 0 and *why. Its first waypoint is spawned and the guard order queued at once.
     // A move on a creature that is moving already ends the old one (cancelled).
+    // stuck_seconds: no metre closer for this long while not fighting ends it stuck (0 = kMoveStuckMs; else kMoveStuckMin..Max).
     uint32_t add(EmfWorld* world, uint32_t enemy, const std::vector<Point>& points, double arrive, double seconds,
-                 uint32_t flags, Callback cb, std::string* why);
+                 uint32_t flags, Callback cb, std::string* why, double stuck_seconds = 0);
     // Ends a move (cancelled). now: at once (inside a callback on its world: its waypoint goes now), else at the next
     // step. False: no such move.
     bool cancel(uint32_t id, bool now = true);
@@ -90,6 +92,7 @@ private:
         uint64_t until = 0;       // 0: no time limit
         uint64_t last_guard = 0;  // when the guard order was last sent
         uint64_t since = 0;       // when it last made progress (or stopped fighting)
+        uint64_t stuck_ms = kMoveStuckMs;
         double best = 0;          // its closest distance to the point since then
         bool cancelled = false;   // ends at the next step
         Callback cb;
@@ -108,7 +111,7 @@ private:
     bool alive(EmfWorld* w, uint32_t entity) const;  // an entity with a position, not dead
     void send_guard(EmfWorld* w, uint32_t enemy, uint32_t waypoint);  // and a calm creature is put in Idle
     bool fighting(EmfWorld* w, uint32_t enemy) const;
-    void calm_players(EmfWorld* w, uint32_t enemy) const;  // EMF_MOVE_PEACEFUL
+    void calm_players(EmfWorld* w, uint32_t enemy, bool all) const;  // EMF_MOVE_PEACEFUL (all: _PEACEFUL_ALL)
     bool gone(EmfWorld* w, const Move& m) const;
     uint32_t moving_locked(EmfWorld* world, uint32_t enemy) const;  // under m_
     double distance(EmfWorld* w, uint32_t enemy, const Point& p) const;  // metres; < 0: no position
