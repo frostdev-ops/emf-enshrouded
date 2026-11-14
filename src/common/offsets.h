@@ -71,6 +71,7 @@ constexpr uint32_t kJobEventBuffer = 0x1B8;     // event write buffer (first arg
 constexpr uint32_t kJobChangeSet = 0x1C0;  // change set for writeOther (0x1409b4070 reads it; server 0x1406548f0)
 constexpr uint32_t kJobVariant = 0x0BB;    // u8 passed to writeOther (0x1409b9a20; server 0x14065a3c0)
 constexpr uint32_t kJobWorldCtx = 0x030;        // world context for readOther (re_inventory_api.md, 0x1409b2fe0)
+constexpr uint32_t kJobPathGrid = 0x028;       // the PathGridSystem, server storage only (getPathQueryResult reads it)
 
 // Keen hash map
 constexpr uint32_t kMapBits = 0x08;

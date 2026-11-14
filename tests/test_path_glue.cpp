@@ -3,6 +3,7 @@
 
 #include <cstddef>
 #include <cstring>
+#include <functional>
 #include <map>
 #include <string>
 #include <vector>
@@ -11,6 +12,7 @@
 #include "core/api.h"
 #include "core/api_sizes.h"
 #include "core/path_glue.h"
+#include "fake_path_grid.h"
 #include "fake_world.h"
 
 using namespace emf;
@@ -79,7 +81,7 @@ struct Rig {
     FakeProgramCtx ctx;
     alignas(8) uint8_t cmdbuf[0x40] = {};
     ProgramSpec spec;
-    Rig() : ctx((world.put<uint8_t>(off::kKind, 0), world.p())) {
+    explicit Rig(bool grid_layout = false) : ctx((world.put<uint8_t>(off::kKind, 0), world.p())) {
         void* cb = cmdbuf;
         std::memcpy(ctx.job + 0x08, &cb, 8);
         g_next_id = 0;
@@ -102,6 +104,7 @@ struct Rig {
         d.after_step = [](std::function<void(EmfWorld*)> fn) { fn(nullptr); };
         d.log = [](const std::string&) {};
         d.now_ms = [] { return uint64_t(1000); };
+        d.grid_layout = grid_layout;
         spec = path_setup(d);
     }
     void step() { spec.fn(ctx.p(), spec.user); }
@@ -376,4 +379,66 @@ TEST_CASE("path glue (0.6.11): the door entity of each point comes with the answ
     g_door_ids[3] = {812};  // not one per point: not trusted
     r.step();
     CHECK(g_cb_doors_null);
+}
+
+// path.door (0.6.11): the console asks; emf_path reads the game's path grid (*(job + 0x28)) at its next run and the
+// reply comes after that step, one or two lines.
+namespace {
+std::vector<std::string> g_door_lines;
+std::function<void(const std::string&)> door_reply() {
+    return [](const std::string& l) { g_door_lines.push_back(l); };
+}
+void set_grid(Rig& r, const uint8_t* grid) { std::memcpy(r.ctx.job + 0x28, &grid, 8); }
+}  // namespace
+
+TEST_CASE("path glue (path.door): asked, answered after the program's next run from the grid at job + 0x28") {
+    g_door_lines.clear();
+    Rig r(true);
+    emf::test::FakeGrid g;
+    g.standard_door(2);
+    g.node(4, 2, 5, 0x98, 0x00);
+    set_grid(r, g.grid.data());
+    CHECK(path_door_ask(77, door_reply()) == "");
+    CHECK(path_door_ask(5, door_reply()) == "");
+    CHECK(g_door_lines.empty());  // nothing before the step
+    r.step();
+    REQUIRE(g_door_lines.size() == 3u);  // two lines for the door, one for the entity that is not one
+    CHECK(g_door_lines[0].find("path.door 77: in the path grid's door table, closed (kind 2)") == 0);
+    CHECK(g_door_lines[1].find("at the row's centre: node (") == 0);
+    CHECK(g_door_lines[1].find("ClosedDoor (19)") != std::string::npos);
+    CHECK(g_door_lines[2] == "path.door 5: not in the path grid's door table (2 doors registered)");
+    r.step();
+    CHECK(g_door_lines.size() == 3u);  // answered once
+}
+
+TEST_CASE("path glue (path.door): no grid in this storage; not available without the guards or with path_find off") {
+    g_door_lines.clear();
+    {
+        Rig r(true);  // the job's grid stays 0 (not the server storage)
+        CHECK(path_door_ask(77, door_reply()) == "");
+        r.step();
+        REQUIRE(g_door_lines.size() == 1u);
+        CHECK(g_door_lines[0] == "path.door 77: no path grid in this world");
+    }
+    {
+        Rig r(false);  // a PathGrid guard signature is not usable on this build
+        CHECK(path_door_ask(77, door_reply()) == "path.door: not available on this game build");
+    }
+    {
+        Rig r(true);
+        path_stop();
+        CHECK(path_door_ask(77, door_reply()) == "path.door: not available (path_find is off; see the log)");
+    }
+}
+
+TEST_CASE("path glue (path.door): at most 16 wait; the watchdog answers them when emf_path does not run") {
+    g_door_lines.clear();
+    Rig r(true);
+    for (uint32_t i = 0; i < 16; ++i) CHECK(path_door_ask(100 + i, door_reply()) == "");
+    CHECK(path_door_ask(200, door_reply()) == "path.door: 16 are waiting for the path grid (try again in a moment)");
+    path_server_tick(1000);
+    for (uint64_t t = 0; t < kPathWatchdogSteps; ++t) path_server_tick(1000 + kPathWatchdogMs + t);
+    REQUIRE(g_door_lines.size() == 16u);
+    CHECK(g_door_lines[0] == "path.door 100: not answered (the emf_path program is not running in this world)");
+    CHECK(path_door_ask(200, door_reply()) == "");  // room again
 }

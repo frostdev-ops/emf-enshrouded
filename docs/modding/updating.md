@@ -46,6 +46,13 @@ update, a fixed pattern there is one fix for every loader that uses it. `emf_sig
 EMF's table (a test keeps the committed file current), and `emf_sigcheck --patterns emf_signatures.patterns <exe>`
 checks it against any exe.
 
+**Guard signatures:** a few signatures are not functions EMF calls: their bytes pin data offsets EMF reads, so a game
+update that moves those offsets makes the pattern stop matching instead of letting EMF read the wrong memory.
+`PathGridRegister`, `PathGridBoxToCells` and `PathGridNodePos` (EMF 0.6.11) pin the game's path grid (its door table,
+its cells and their nodes) that the console's `path.door` reads; where one of them is not usable, `path.door` says
+"not available on this game build" and the log says `path.door: off`, while `path_find` keeps working. The markers'
+`UiCameraBlock` and map-marker guards work the same way.
+
 ## What to do as a mod author
 
 - Check API results: a null component, a `false` from `put_items`, a 0 from `spawn` are how a turned-off feature shows.

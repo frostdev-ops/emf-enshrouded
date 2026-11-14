@@ -20,6 +20,7 @@
 #include "daytime.h"
 #include "inventory.h"
 #include "item_names.h"
+#include "path_glue.h"
 #include "path_service.h"
 #include "emf/emf.hpp"
 #include "emf/generated/components.hpp"
@@ -1355,6 +1356,23 @@ void cmd_path(EmfWorld* w, int argc, const char* const* argv, void* u) {
     command_reply_line(fmt("path %u: asked from (%.1f, %.1f, %.1f); the answer follows", id, at[0], at[1], at[2]));
 }
 
+// path.door <entity> (0.6.11): what the game's path grid knows about a door (its door table entry, open or closed, the
+// box, the door row and the node there); answered after a step by the emf_path program, which holds the grid.
+void cmd_path_door(EmfWorld* w, int argc, const char* const* argv, void* u) {
+    auto& c = ctx_of(u);
+    uint32_t id = 0;
+    if (argc != 2 || !parse_uint(argv[1], 0xffffffffu, &id) || !id) {
+        command_reply_line("usage: path.door <entity>");
+        return;
+    }
+    if (c.api->world_kind && c.api->world_kind(w) != EMF_WORLD_SERVER) {
+        command_reply_line("path.door: needs the world you host or the dedicated server (a joined game has no path grid)");
+        return;
+    }
+    const std::string why = path_door_ask(id, current_reply());
+    if (!why.empty()) command_reply_line(why);
+}
+
 // door <entity> [open|close|lock|unlock] [front|back] (v38): a door's state, or a change at the next step.
 std::string door_text(uint32_t st) {
     if (!(st & (EMF_DOOR_OPEN | EMF_DOOR_CLOSED))) return "not a door";
@@ -1486,6 +1504,9 @@ bool add_builtin_commands(BuiltinContext& ctx) {
          cmd_door},
         {"path", "<x> <y> <z> [jumps] [doors] [closest] [nodes]: a path from you on the game's path grid; a door point names its door (it moves nothing; host)",
          cmd_path},
+        {"path.door", "<entity>: what the game's path grid knows about a door: whether it is in the grid's door table, "
+                      "open or closed there, its box and door row, and the node in the row's middle (type, ground, "
+                      "room); the answer follows after a step (host)", cmd_path_door},
         {"remove", "<entity> [me|drop|<player>] [force]: take a placed object away like a pick-up, its item back to you, as a "
                    "drop or to a player; refused for a chest with items unless force (they drop on the ground), and for a Flame "
                    "Altar (host)", cmd_remove},

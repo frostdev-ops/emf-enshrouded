@@ -485,6 +485,7 @@ help, mods, settings, set, hooks, pattern, hud.list, hud.move, hud.scale, hud.hi
 - stack <item name> <max 1-65535>: change an item's stack size until the game restarts (host)
 - door <entity> [open|close|lock|unlock] [front|back]: a door's state, or open, close or lock it (host)
 - path <x> <y> <z> [jumps] [doors] [closest] [nodes]: a path from you on the game's path grid; a door point names its door (it moves nothing; host)
+- path.door <entity>: what the game's path grid knows about a door: whether it is in the grid's door table, open or closed there, its box and door row, and the node in the row's middle (type, ground, room); the answer follows after a step (host)
 - remove <entity> [me|drop|<player>] [force]: take a placed object away like a pick-up, its item back to you, as a drop or to a player; refused for a chest with items unless force (they drop on the ground), and for a Flame Altar (host)
 - destroy <entity>: remove an entity from the world, never a player (host)
 - hud.list: the HUD editor's state, every HUD part with its offset, scale and whether it is hidden, and the layouts

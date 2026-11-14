@@ -31,6 +31,9 @@ struct PathGlueDeps {
     std::function<void(std::function<void(EmfWorld*)>)> after_step;
     std::function<void(const std::string&)> log;
     std::function<uint64_t()> now_ms;
+    // path.door: Sig::PathGridRegister, PathGridBoxToCells and PathGridNodePos are usable (the grid's layout is the one
+    // EMF knows); false: path.door says it is not available on this build
+    bool grid_layout = false;
 };
 
 // Sets the feature up (once, at start); its program to add to the server world.
@@ -44,5 +47,11 @@ void path_world_reset();
 void path_server_tick(uint64_t now_ms);
 // Turns the feature off (its program could not be added).
 void path_stop();
+
+constexpr size_t kMaxDoorAsks = 16;  // path.door requests waiting for emf_path's next run
+// path.door (0.6.11): emf_path reads the game's path grid for `entity` at its next run (private research
+// path_doors_2026-11-14.md) and `reply` gets one or two lines after that step, on the server world's thread. "" when
+// asked; else why not (not available on this build, path_find off, too many waiting).
+std::string path_door_ask(uint32_t entity, std::function<void(const std::string&)> reply);
 
 }  // namespace emf::core

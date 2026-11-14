@@ -1434,6 +1434,26 @@ TEST_CASE("builtin commands (v37): path checks its words; with the feature off i
     CHECK(bsaid("path not asked (see the log: path_find refused"));
 }
 
+TEST_CASE("builtin commands (path.door): checks its words; asks emf_path, or says the feature is not available") {
+    BFixture f;
+    path_stop();
+    RemoveWorld rw;
+    f.center.enqueue("path.door");
+    f.center.enqueue("path.door x");
+    f.center.enqueue("path.door 0");
+    f.center.enqueue("path.door 60 61");
+    f.center.enqueue("path.door 60");
+    f.run(rw.iw.w);
+    size_t usage = 0;
+    for (const auto& l : g_bout) usage += l.find("usage: path.door <entity>") != std::string::npos;
+    CHECK(usage == 4u);
+    CHECK(bsaid("path.door: not available"));  // no path grid feature in this fake
+    g_bout.clear();
+    f.center.enqueue("help");
+    f.run(rw.iw.w);
+    CHECK(bsaid("path.door <entity>: what the game's path grid knows about a door"));
+}
+
 TEST_CASE("builtin commands (v38): door checks its words; with doors off it says why") {
     BFixture f;
     RemoveWorld rw;

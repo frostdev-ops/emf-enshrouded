@@ -154,6 +154,7 @@ add_library(emf_core_lib STATIC
   src/core/remove_building.cpp
   src/core/path_service.cpp
   src/core/path_glue.cpp
+  src/core/path_grid.cpp
   src/core/doors.cpp
   src/core/enemy_orders.cpp
   src/core/move_orders.cpp
@@ -484,6 +485,7 @@ add_executable(emf_tests
   tests/test_remove_building.cpp
   tests/test_path_service.cpp
   tests/test_path_glue.cpp
+  tests/test_path_grid.cpp
   tests/test_doors.cpp
   tests/test_move_orders.cpp
   tests/test_enemy_orders.cpp

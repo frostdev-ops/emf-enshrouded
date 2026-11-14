@@ -1624,8 +1624,14 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             };
             deps.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
             deps.now_ms = [] { return GetTickCount64(); };
+            // path.door reads the grid's memory: only where its three guards pin the layout EMF knows
+            deps.grid_layout = addr(emf::Sig::PathGridRegister) && addr(emf::Sig::PathGridBoxToCells) &&
+                               addr(emf::Sig::PathGridNodePos);
+            const bool grid_layout = deps.grid_layout;
             if (g_state->system_programs.add(emf::core::path_setup(std::move(deps)), true)) {
                 emf::logf("path_find: on (program %s in the server world)", emf::core::kPathProgramName);
+                if (!grid_layout)
+                    emf::logf("path.door: off (the PathGrid guard signatures are not usable on this game build)");
                 g_state->dispatcher.subscribe_tick([](EmfWorld* w, void*) {
                     if (emf::WorldView(reinterpret_cast<uint8_t*>(w)).kind() == EMF_WORLD_SERVER)
                         emf::core::path_server_tick(GetTickCount64());

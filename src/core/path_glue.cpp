@@ -12,6 +12,7 @@
 
 #include "common/offsets.h"
 #include "common/seh.h"
+#include "core/path_grid.h"
 
 namespace emf::core {
 
@@ -38,6 +39,57 @@ std::vector<std::pair<uint64_t, uint32_t>> g_to_destroy;
 void destroy_later(uint64_t id, uint32_t owner) {
     std::lock_guard<std::mutex> l(g_destroy_lock);
     if (g_to_destroy.size() < 4096) g_to_destroy.push_back({id, owner});
+}
+
+// path.door: the console's requests, answered by the program's next run (or by the watchdog when it does not run).
+struct DoorAsk {
+    uint32_t entity = 0;
+    std::function<void(const std::string&)> reply;
+};
+std::mutex g_door_lock;
+std::vector<DoorAsk> g_door_asks;
+size_t door_asks_waiting() {
+    std::lock_guard<std::mutex> l(g_door_lock);
+    return g_door_asks.size();
+}
+// Hands each answer's lines to its reply after this step (the answer may hold two lines: one reply call each).
+void deliver_doors(std::vector<std::pair<std::function<void(const std::string&)>, std::string>> answers) {
+    if (answers.empty() || !g_deps.after_step) return;
+    auto shared = std::make_shared<decltype(answers)>(std::move(answers));
+    g_deps.after_step([shared](EmfWorld*) {
+        for (const auto& [reply, text] : *shared) {
+            if (!reply) continue;
+            size_t start = 0;
+            while (start <= text.size()) {
+                const size_t nl = text.find('\n', start);
+                reply(text.substr(start, nl == std::string::npos ? std::string::npos : nl - start));
+                if (nl == std::string::npos) break;
+                start = nl + 1;
+            }
+        }
+    });
+}
+void answer_doors(const uint8_t* grid) {
+    std::vector<DoorAsk> asks;
+    {
+        std::lock_guard<std::mutex> l(g_door_lock);
+        asks.swap(g_door_asks);
+    }
+    std::vector<std::pair<std::function<void(const std::string&)>, std::string>> answers;
+    for (DoorAsk& a : asks)
+        answers.push_back({std::move(a.reply), path_door_text(a.entity, read_path_door(grid, a.entity))});
+    deliver_doors(std::move(answers));
+}
+void answer_doors_unread(const std::string& why) {
+    std::vector<DoorAsk> asks;
+    {
+        std::lock_guard<std::mutex> l(g_door_lock);
+        asks.swap(g_door_asks);
+    }
+    std::vector<std::pair<std::function<void(const std::string&)>, std::string>> answers;
+    for (DoorAsk& a : asks)
+        answers.push_back({std::move(a.reply), "path.door " + std::to_string(a.entity) + ": not answered (" + why + ")"});
+    deliver_doors(std::move(answers));
 }
 
 // A mod's callback under SEH: one bad callback does not cost the other answers of the step.
@@ -117,6 +169,12 @@ void path_program(void* ctx, void*) {
     if (!world || !cb) return;  // not counted as a run: the watchdog answers what waits
     g_last_run_ms = g_deps.now_ms ? g_deps.now_ms() : GetTickCount64();
     g_steps_without_run = 0;
+    if (door_asks_waiting()) {  // path.door: the grid of this storage (0 outside the server world's)
+        const uint8_t* grid = nullptr;
+        uint8_t* job = nullptr;
+        if (!seh_read(ctx, &job, 8) || !job || !seh_read(job + off::kJobPathGrid, &grid, 8)) grid = nullptr;
+        answer_doors(grid);
+    }
     const PathFns& f = g_deps.fns;
     std::vector<std::pair<uint64_t, uint32_t>> retry;
     {
@@ -208,6 +266,10 @@ ProgramSpec path_setup(PathGlueDeps deps) {
         std::lock_guard<std::mutex> l(g_destroy_lock);
         g_to_destroy.clear();
     }
+    {
+        std::lock_guard<std::mutex> l(g_door_lock);
+        g_door_asks.clear();
+    }
     ProgramSpec s;
     s.name = kPathProgramName;
     s.world_kind = EMF_WORLD_SERVER;
@@ -230,7 +292,7 @@ void path_world_reset() {
 }
 
 void path_server_tick(uint64_t now_ms) {
-    if (!g_service || !g_service->open()) {
+    if (!g_service || (!g_service->open() && !door_asks_waiting())) {
         g_waiting_since = 0;
         g_steps_without_run = 0;
         return;
@@ -249,8 +311,19 @@ void path_server_tick(uint64_t now_ms) {
     std::vector<PathDone> done = g_service->world_reset(&created);
     for (const auto& [id, owner] : created) destroy_later(id, owner);  // the game still has them: destroyed when it runs
     deliver(std::move(done));
+    answer_doors_unread("the emf_path program is not running in this world");
 }
 
 void path_stop() { g_on = false; }
+
+std::string path_door_ask(uint32_t entity, std::function<void(const std::string&)> reply) {
+    if (!g_deps.grid_layout) return "path.door: not available on this game build";
+    if (!g_on.load() || !g_service) return "path.door: not available (path_find is off; see the log)";
+    std::lock_guard<std::mutex> l(g_door_lock);
+    if (g_door_asks.size() >= kMaxDoorAsks)
+        return "path.door: " + std::to_string(kMaxDoorAsks) + " are waiting for the path grid (try again in a moment)";
+    g_door_asks.push_back({entity, std::move(reply)});
+    return {};
+}
 
 }  // namespace emf::core
