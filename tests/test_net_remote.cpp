@@ -320,6 +320,18 @@ TEST_CASE("net remote: the reasons for dropped messages are remembered up to a l
         if (l.find("later ones are not logged") != std::string::npos) notices.push_back(l);
     REQUIRE(notices.size() == 1);
     CHECK(notices[0].find("bm/x127") != std::string::npos);
+    // an hour after the first reason was told the list is forgotten: a full list does not silence the log for good
+    server.now += 59 * 60 * 1000 - 512 * 1000;  // 59 minutes after the first: still remembered, still full
+    say("bm/x0");
+    say("bm/new");
+    CHECK(told() == 128);
+    server.now += 2 * 60 * 1000;
+    say("bm/x0");  // a reason that still happens is told again
+    CHECK(told() == 129);
+    say("bm/new");  // and one that never fitted is told now
+    CHECK(told() == 130);
+    say("bm/x0");
+    CHECK(told() == 130);  // once, as before
     CHECK(server.posted.empty());  // and none of them reached a mod
 }
 

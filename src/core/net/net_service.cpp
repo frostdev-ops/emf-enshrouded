@@ -5,12 +5,20 @@ namespace emf::core::net {
 namespace {
 
 // The reasons already told are remembered so each is logged once. A player picks the channel names in them, so the
-// list has a limit: the line that reaches it says so (in `why`), and past it nothing more is remembered or told.
+// list has a limit: the line that reaches it says so (in `why`), and past it nothing more is remembered or told. The
+// list is forgotten kReasonsMaxAgeMs after its first reason was told, so one noisy player cannot use it up for good:
+// a reason that still happens is told again then, and the log gets at most 128 of these lines an hour. `since_ms`:
+// when the first reason of the list was told; a clock that went back, or none (0), forgets nothing.
 constexpr size_t kMaxRememberedReasons = 128;
-bool tell_once(std::set<std::string>& told, std::string reason, std::string* why) {
+constexpr uint64_t kReasonsMaxAgeMs = 60 * 60 * 1000;
+bool tell_once(std::set<std::string>& told, uint64_t& since_ms, uint64_t now_ms, std::string reason,
+               std::string* why) {
+    if (!told.empty() && now_ms >= since_ms && now_ms - since_ms > kReasonsMaxAgeMs) told.clear();
     if (told.size() >= kMaxRememberedReasons || !told.insert(std::move(reason)).second) return false;
+    if (told.size() == 1) since_ms = now_ms;
     if (told.size() == kMaxRememberedReasons)
-        *why += " (the last of " + std::to_string(kMaxRememberedReasons) + " reasons told: later ones are not logged)";
+        *why += " (the last of " + std::to_string(kMaxRememberedReasons) +
+                " reasons told: later ones are not logged for up to an hour)";
     return true;
 }
 
@@ -260,7 +268,8 @@ void NetService::remote_to_server(uint32_t, uint64_t account, const std::string&
             handler = c->def.on_server;
             from.account = account;
             from.peer_version = peer_version;
-        } else if (!tell_once(logged_, "in " + channel + ": " + why, &why)) {
+        } else if (!tell_once(logged_, logged_since_ms_, d_.now_ms ? d_.now_ms() : 0, "in " + channel + ": " + why,
+                              &why)) {
             why.clear();  // told before, or the limit was reached
         }
     }
@@ -299,7 +308,8 @@ void NetService::remote_to_client(const std::string& channel, uint32_t server_ve
         if (why.empty()) {
             handler = c->def.on_player;
             from.peer_version = server_version;
-        } else if (!tell_once(logged_, "from the server on " + channel + ": " + why, &why)) {
+        } else if (!tell_once(logged_, logged_since_ms_, d_.now_ms ? d_.now_ms() : 0,
+                              "from the server on " + channel + ": " + why, &why)) {
             why.clear();  // told before, or the limit was reached
         }
     }
