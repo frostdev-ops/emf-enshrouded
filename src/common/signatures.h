@@ -64,8 +64,9 @@ enum class Sig : size_t {
     // the water surface at a point on the server (a map teleport lands on the water, not the lake bed), both exes
     WaterSurfacePlane,
     // path.door (0.6.11), both exes: guards that pin the path grid layout EMF reads (it calls none of them): the door
-    // table and the cell list (PG_RegisterInteraction), metres to cells and nodes, and a cell's node block and strides
-    PathGridRegister, PathGridBoxToCells, PathGridNodePos,
+    // table (PG_RegisterInteraction's start), metres to cells and nodes, a cell's node block and strides, and the cell
+    // list (a loop inside PG_RegisterInteraction)
+    PathGridRegister, PathGridBoxToCells, PathGridNodePos, PathGridCellList,
     _Count
 };
 constexpr size_t kSigCount = static_cast<size_t>(Sig::_Count);

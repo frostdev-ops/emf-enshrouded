@@ -1,7 +1,8 @@
 #pragma once
 // path.door (0.6.11): what the game's path grid knows about a door, read from its PathGridSystem inside EMF's emf_path
 // program (the only place EMF holds it). Private research path_doors_2026-11-14.md sections 1 and 2. The layout is the
-// one of build 1287369, pinned by Sig::PathGridRegister, PathGridBoxToCells and PathGridNodePos; every read goes
+// one of build 1287369, pinned by Sig::PathGridRegister, PathGridBoxToCells, PathGridNodePos and PathGridCellList;
+// every read goes
 // through seh_read, and values that do not look like the game's are reported, never guessed around.
 #include <cstdint>
 #include <string>
@@ -31,8 +32,11 @@ struct PathDoorView {
     uint32_t local[3] = {};  // ... and its node inside the cell
     float node_at[3] = {};   // that node in metres (the middle across, the layer's floor up)
     bool cell_found = false; // the cell is in the grid's cell list
-    uint8_t cell_state = 0;  // 0 new, 1/3/4/6 built, 2 dirty (rebuilt when a query needs it), 5 failed
+    bool list_cut = false;   // the cell list could not be read to its end (a fault, or more cells than the game keeps)
+    uint8_t cell_state = 0;  // 0 new, 1/3/4 built, 6 built or a failed build, 2 dirty (rebuilt when a query needs it),
+                             // 5 failed
     PathGridNode node;       // its two bytes, when the cell has nodes
+    bool node_unreadable = false;  // the cell's state or node block could not be read
 };
 
 // Reads the grid's view of `entity` (grid = the PathGridSystem, *(job + 0x28) in a server program; null: none).

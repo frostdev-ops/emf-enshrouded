@@ -16,7 +16,7 @@ constexpr size_t kGridDoors = 0xa861c0;       // door table: entries of kDoorEnt
 constexpr size_t kGridDoorCount = 0xabe1c0;   // u16
 constexpr size_t kDoorEntry = 0x38;           // u32 entity, u8 kind, six (u32 cell, u8 node in a u32) pairs from +8
 constexpr uint32_t kDoorMax = 0x1000;
-// the cells object (Sig::PathGridBoxToCells, Sig::PathGridNodePos, Sig::PathGridRegister for the list)
+// the cells object (Sig::PathGridBoxToCells, Sig::PathGridNodePos, Sig::PathGridCellList for the list)
 constexpr size_t kCellsList = 0xb8;           // -> first cell record; a record's next at kCellNext
 constexpr size_t kCellsNodesAcross = 0xd1;    // u8 nodes per cell across (16), kCellsNodesUp u8 up (8)
 constexpr size_t kCellsNodesUp = 0xd2;
@@ -32,6 +32,7 @@ constexpr size_t kCellState = 0x2c;           // u8
 constexpr size_t kCellBlock = 0x40;           // -> node block, null when the cell has none
 constexpr size_t kBlockNodes = 0x28;          // 2 bytes per node
 constexpr size_t kMaxCellsWalked = 0x8000;    // the game keeps at most 0x3000 cells
+constexpr float kMaxOrigin = 1.0e6f;          // metres: a corner past this is not the game's grid
 
 const char* const kNodeTypes[] = {"None", "TerrainEdge", "Tar", "Mud", "Road", "RoadCenter", "Fog", "DeadlyFog", "Lava",
                                   "Building", "Collider", "WalkablePlatform", "NoNpcMovementCollider",
@@ -68,7 +69,8 @@ bool read_layout(const uint8_t* cells, Layout* l) {
     l->shift[1] = su;
     // what the game's code makes it (path_doors_2026-11-14.md 1.1): anything else is not this layout
     for (int i = 0; i < 3; ++i) {
-        if (!(l->npm[i] > 0.01f && l->npm[i] < 100.0f) || !std::isfinite(l->origin[i]) || l->nodes[i] == 0 ||
+        if (!(l->npm[i] > 0.01f && l->npm[i] < 100.0f) || !(std::fabs(l->origin[i]) <= kMaxOrigin) ||
+            l->nodes[i] == 0 ||
             l->shift[i] > 12 || l->stride[i] == 0)
             return false;
         // a cell is (1 << shift) metres and holds `nodes` nodes of 1 / npm metres
@@ -108,24 +110,33 @@ PathDoorView read_path_door(const uint8_t* grid, uint32_t entity) {
         return v;  // readable stays false: not the table EMF knows
     }
     v.readable = true;
-    const uint8_t* entry = nullptr;
-    for (uint32_t i = 0; i < count; ++i) {
-        uint32_t e = 0;
-        if (!rd(grid + kGridDoors + i * kDoorEntry, &e)) {
-            v.readable = false;
-            return v;
+    // The game may change the table while EMF reads it (pathgrid_interaction_update moves the last entry into a removed
+    // one's place): on a miss, or when the entry's copy no longer names the entity, the table is read once more.
+    uint8_t raw[kDoorEntry] = {};
+    bool have = false;
+    for (int pass = 0; pass < 2 && !have; ++pass) {
+        if (pass == 1) {
+            if (!rd(grid + kGridDoorCount, &count) || count > kDoorMax) break;
+            v.doors = count;
         }
-        if (e == entity) {
-            entry = grid + kGridDoors + i * kDoorEntry;
+        for (uint32_t i = 0; i < count; ++i) {
+            uint32_t e = 0;
+            if (!rd(grid + kGridDoors + i * kDoorEntry, &e)) {
+                v.readable = false;
+                return v;
+            }
+            if (e != entity) continue;
+            if (!seh_read(grid + kGridDoors + i * kDoorEntry, raw, sizeof raw)) {
+                v.readable = false;
+                return v;
+            }
+            uint32_t copied = 0;
+            std::memcpy(&copied, raw, 4);
+            have = copied == entity;  // else it moved between the two reads: look again
             break;
         }
     }
-    if (!entry) return v;
-    uint8_t raw[kDoorEntry] = {};
-    if (!seh_read(entry, raw, sizeof raw)) {
-        v.readable = false;
-        return v;
-    }
+    if (!have) return v;
     v.found = true;
     v.kind = raw[4];
     Layout l;
@@ -156,23 +167,36 @@ PathDoorView read_path_door(const uint8_t* grid, uint32_t entity) {
     }
     // find the cell in the grid's list of cells
     const uint8_t* rec = nullptr;
-    if (!rd(cells + kCellsList, &rec)) return v;
+    if (!rd(cells + kCellsList, &rec)) {
+        v.list_cut = true;
+        return v;
+    }
     for (size_t walked = 0; rec && walked < kMaxCellsWalked; ++walked) {
         uint32_t c[3] = {};
+        const uint8_t* next = nullptr;
         if (!seh_read(rec + kCellCoords, c, sizeof c)) break;
         if (c[0] == v.cell[0] && c[1] == v.cell[1] && c[2] == v.cell[2]) {
             v.cell_found = true;
             break;
         }
-        const uint8_t* next = nullptr;
         if (!rd(rec + kCellNext, &next)) break;
         rec = next;
     }
-    if (!v.cell_found) return v;
-    rd(rec + kCellState, &v.cell_state);
-    if (!built(v.cell_state) && v.cell_state != 2) return v;  // new or failed: no nodes worth reading
+    if (!v.cell_found) {
+        v.list_cut = rec != nullptr;  // stopped before the list's end: a fault, or more cells than the game keeps
+        return v;
+    }
+    if (!rd(rec + kCellState, &v.cell_state)) {
+        v.node_unreadable = true;
+        return v;
+    }
+    if (!built(v.cell_state) && v.cell_state != 2) return v;  // new, failed or unknown: no nodes worth reading
     const uint8_t* block = nullptr;
-    if (!rd(rec + kCellBlock, &block) || !block) return v;
+    if (!rd(rec + kCellBlock, &block)) {
+        v.node_unreadable = true;
+        return v;
+    }
+    if (!block) return v;
     const uint64_t index = uint64_t(v.local[0]) * l.stride[0] + uint64_t(v.local[1]) * l.stride[1] +
                            uint64_t(v.local[2]) * l.stride[2];
     if (index >= uint64_t(l.nodes[0]) * l.nodes[1] * l.nodes[2]) {
@@ -180,7 +204,10 @@ PathDoorView read_path_door(const uint8_t* grid, uint32_t entity) {
         return v;
     }
     uint8_t b[2] = {};
-    if (!seh_read(block + kBlockNodes + index * 2, b, 2)) return v;
+    if (!seh_read(block + kBlockNodes + index * 2, b, 2)) {
+        v.node_unreadable = true;
+        return v;
+    }
     v.node.read = true;
     v.node.type = static_cast<uint8_t>(b[0] >> 3);
     v.node.across = static_cast<uint8_t>(b[0] & 7);
@@ -213,17 +240,25 @@ std::string path_door_text(uint32_t entity, const PathDoorView& v) {
     char at[96];
     std::snprintf(at, sizeof at, "node (%.2f, %.2f, %.2f)", v.node_at[0], v.node_at[1], v.node_at[2]);
     std::string second = std::string(v.kind == 3 ? "lowest layer at the box's centre: " : "at the row's centre: ") + at;
-    if (!v.cell_found) return line + "\n" + second + ": its cell is not built (no path query has needed it yet)";
-    if (v.cell_state == 0) return line + "\n" + second + ": cell not built yet";
-    if (v.cell_state == 5) return line + "\n" + second + ": the cell's build failed";
-    std::string cell = built(v.cell_state) ? "cell built"
+    const std::string at_line = line + "\n" + second + ": ";
+    if (!v.cell_found && v.list_cut)
+        return at_line + "its cell could not be looked up (the grid's cell list could not be read to the end); ask again";
+    if (!v.cell_found) return at_line + "its cell is not built (no path query has needed it yet)";
+    const bool known = built(v.cell_state) || v.cell_state == 2;
+    if (v.node_unreadable && !known) return at_line + "its cell could not be read; ask again";
+    if (v.cell_state == 0) return at_line + "cell not built yet";
+    if (v.cell_state == 5) return at_line + "the cell's build failed";
+    if (!known)
+        return at_line + "cell state " + std::to_string(v.cell_state) + " (not one EMF knows); its nodes are not read";
+    std::string cell = v.cell_state == 6 ? "cell built or its build failed (state 6)"
                        : v.cell_state == 2 ? "cell dirty (rebuilt when a query needs it; these nodes are the old ones)"
-                                           : "cell state " + std::to_string(v.cell_state);
-    if (!v.node.read) return line + "\n" + second + ": " + cell + ", no node data (nothing walkable in it)";
+                                           : "cell built";
+    if (v.node_unreadable) return at_line + cell + ", its nodes could not be read; ask again";
+    if (!v.node.read) return at_line + cell + ", no node data (nothing walkable in it)";
     char n[160];
     std::snprintf(n, sizeof n, ", %s (%u), %s, room across %.1f m, up %.1f m", path_node_type_name(v.node.type).c_str(),
                   unsigned(v.node.type), v.node.ground ? "ground" : "not ground", v.node.across * 0.5, v.node.up * 0.5);
-    return line + "\n" + second + ": " + cell + n;
+    return at_line + cell + n;
 }
 
 }  // namespace emf::core

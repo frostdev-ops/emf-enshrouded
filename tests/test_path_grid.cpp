@@ -191,3 +191,70 @@ TEST_CASE("path grid: node type names are the game's PathNodeType") {
     CHECK(path_node_type_name(20) == "type 20");
     CHECK(path_node_type_name(31) == "type 31");
 }
+
+// Review (0.6.11) M3: what could not be read is said as such, not as "not built" or "nothing walkable"; state 6 (built,
+// or set when a build failed) and states EMF does not know are named. M7: a grid corner past a million metres is not
+// the game's layout.
+TEST_CASE("path grid (review M3, M7): an unreadable or cut-off cell list, unreadable nodes, state 6 and unknown states") {
+    SUBCASE("a cell list that loops: cut off, said so") {
+        FakeGrid g;
+        g.standard_door(2);
+        grid_put<uint32_t>(g.cell, 0x20, 11);
+        grid_put<void*>(g.cell, 0x08, g.other);  // other -> cell -> other -> ...
+        const PathDoorView v = read_path_door(g.grid.data(), 77);
+        CHECK(v.list_cut);
+        CHECK(path_door_text(77, v).find("its cell could not be looked up (the grid's cell list could not be read to "
+                                         "the end); ask again") != std::string::npos);
+    }
+    SUBCASE("a cell list whose next cell faults") {
+        FakeGrid g;
+        g.standard_door(2);
+        grid_put<void*>(g.other, 0x08, reinterpret_cast<void*>(uintptr_t(0x10)));
+        const PathDoorView v = read_path_door(g.grid.data(), 77);
+        CHECK_FALSE(v.cell_found);
+        CHECK(v.list_cut);
+    }
+    SUBCASE("the list's end without the cell: not built (the list was read to the end)") {
+        FakeGrid g;
+        g.standard_door(2);
+        grid_put<uint32_t>(g.cell, 0x20, 11);
+        const PathDoorView v = read_path_door(g.grid.data(), 77);
+        CHECK_FALSE(v.list_cut);
+        CHECK(path_door_text(77, v).find("its cell is not built (no path query has needed it yet)") != std::string::npos);
+    }
+    SUBCASE("a node block that faults") {
+        FakeGrid g;
+        g.standard_door(2);
+        grid_put<void*>(g.cell, 0x40, reinterpret_cast<void*>(uintptr_t(0x10)));
+        const PathDoorView v = read_path_door(g.grid.data(), 77);
+        CHECK_FALSE(v.node.read);
+        CHECK(v.node_unreadable);
+        CHECK(path_door_text(77, v).find("cell built, its nodes could not be read; ask again") != std::string::npos);
+    }
+    SUBCASE("state 6: built, or set when a build failed; the nodes are read") {
+        FakeGrid g;
+        g.standard_door(2);
+        g.cell[0x2c] = 6;
+        g.node(4, 2, 5, 0x98, 0x80);
+        const PathDoorView v = read_path_door(g.grid.data(), 77);
+        REQUIRE(v.node.read);
+        CHECK(path_door_text(77, v).find("cell built or its build failed (state 6), ClosedDoor (19), ground") !=
+              std::string::npos);
+    }
+    SUBCASE("a state EMF does not know") {
+        FakeGrid g;
+        g.standard_door(2);
+        g.cell[0x2c] = 7;
+        const PathDoorView v = read_path_door(g.grid.data(), 77);
+        CHECK_FALSE(v.node.read);
+        CHECK(path_door_text(77, v).find("cell state 7 (not one EMF knows); its nodes are not read") != std::string::npos);
+    }
+    SUBCASE("M7: a grid corner past a million metres is not the game's layout") {
+        FakeGrid g;
+        g.standard_door(2);
+        grid_put<float>(g.cells, 0x120, 2.0e6f);
+        const PathDoorView v = read_path_door(g.grid.data(), 77);
+        CHECK(v.found);
+        CHECK_FALSE(v.layout_ok);
+    }
+}

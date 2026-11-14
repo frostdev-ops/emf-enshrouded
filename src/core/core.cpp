@@ -1624,9 +1624,9 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
             };
             deps.log = [](const std::string& line) { emf::logf("%s", line.c_str()); };
             deps.now_ms = [] { return GetTickCount64(); };
-            // path.door reads the grid's memory: only where its three guards pin the layout EMF knows
+            // path.door reads the grid's memory: only where its four guards pin the layout EMF knows
             deps.grid_layout = addr(emf::Sig::PathGridRegister) && addr(emf::Sig::PathGridBoxToCells) &&
-                               addr(emf::Sig::PathGridNodePos);
+                               addr(emf::Sig::PathGridNodePos) && addr(emf::Sig::PathGridCellList);
             const bool grid_layout = deps.grid_layout;
             if (g_state->system_programs.add(emf::core::path_setup(std::move(deps)), true)) {
                 emf::logf("path_find: on (program %s in the server world)", emf::core::kPathProgramName);

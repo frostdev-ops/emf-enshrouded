@@ -31,7 +31,7 @@ struct PathGlueDeps {
     std::function<void(std::function<void(EmfWorld*)>)> after_step;
     std::function<void(const std::string&)> log;
     std::function<uint64_t()> now_ms;
-    // path.door: Sig::PathGridRegister, PathGridBoxToCells and PathGridNodePos are usable (the grid's layout is the one
+    // path.door: Sig::PathGridRegister, PathGridBoxToCells, PathGridNodePos and PathGridCellList are usable (the grid's layout is the one
     // EMF knows); false: path.door says it is not available on this build
     bool grid_layout = false;
 };
