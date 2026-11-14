@@ -90,6 +90,7 @@
 namespace {
 emf::core::ModsCheck* g_mods_check = nullptr;  // the mod check on join (core channel emf/mods)
 emf::core::ModsRefuse* g_mods_refuse = nullptr;  // [net] mods_check=refuse (null: warn only)
+std::vector<std::string> g_mods_required;          // [net] mods_required, checked against this server's mods at start-up
 emf::core::HandleAccountActionFn g_kick_fn = nullptr;  // the game's handleAccountAction (refuse only)
 
 // players.mods: each player in the server world, with their EMF and what differs from this server's mods.
@@ -1977,6 +1978,7 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
         std::vector<std::string> problems;
         auto policy = emf::core::parse_mods_policy(utf8(check), utf8(required), utf8(info), &problems);
         for (const auto& p : problems) emf::logf("mods check: %s", p.c_str());
+        g_mods_required = policy.required;  // named after the mods load when this server does not have one
         if (policy.refuse) {
             const auto& handler = g_state->sigs[static_cast<size_t>(emf::Sig::HandleAccountAction)];
             const auto& call = g_state->sigs[static_cast<size_t>(emf::Sig::SessionRequestKick)];
@@ -2349,6 +2351,12 @@ extern "C" __declspec(dllexport) void emf_core_start(const wchar_t* game_dir) {
     g_mods = emf::core::load_mods(dir + L"\\emf\\mods", emf::core::api_table(),
                                   [](const std::string& s) { emf::logf("%s", s.c_str()); }, load_opt);
     emf::logf("%zu mod(s) loaded", g_mods.size());
+    // a [net] mods_required id this server does not have (the same list the join check compares): most likely a typo
+    {
+        std::vector<std::string> own;
+        for (const auto& m : emf::core::this_games_mods(g_state->mods.list(), content_mods)) own.push_back(m.id);
+        for (const auto& line : emf::core::unknown_required(g_mods_required, own)) emf::logf("mods check: %s", line.c_str());
+    }
     g_manifest_watch.poll(g_file_poll.mods_dir, g_state->mods.list(), *g_state->settings);  // notes the files as loaded
     // While the in-game console is open, mods' GetAsyncKeyState/GetKeyState calls see no keys (no hotkeys while typing).
     std::vector<std::pair<uintptr_t, uintptr_t>> ranges;

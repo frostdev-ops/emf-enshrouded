@@ -294,6 +294,20 @@ TEST_CASE("mods policy: required ids are split by commas and spaces, lower-cased
     CHECK_FALSE(emf::core::valid_list_id("Beasts"));
 }
 
+TEST_CASE("mods policy: one line at start-up for each required id the server does not have; none for its own or emf") {
+    using emf::core::unknown_required;
+    // the server's ids: content mods, its running mods of every side (the Lua host and Lua mods too), EMF itself
+    const std::vector<std::string> mine = {"emf", "beasts_pack", "emberbrand", "beastmaster", "lua", "bounty"};
+    const auto lines = unknown_required({"beastmster", "beastmaster", "lua", "bounty", "emf", "hud_mdo"}, mine);
+    REQUIRE(lines.size() == 2);
+    CHECK(lines[0] == "mods_required names \"beastmster\", which this server does not have (a typo?)");
+    CHECK(lines[1] == "mods_required names \"hud_mdo\", which this server does not have (a typo?)");
+    CHECK(unknown_required({"beastmaster", "emberbrand"}, mine).empty());
+    CHECK(unknown_required({}, mine).empty());
+    CHECK(unknown_required({"emf"}, {}).empty());  // EMF itself, never a required mod
+    CHECK(unknown_required({"hudmod"}, {}).size() == 1);
+}
+
 TEST_CASE("mods policy: the info text is trimmed, control characters become spaces, cut at 200 bytes on a UTF-8 boundary") {
     using emf::core::parse_mods_policy;
     CHECK(parse_mods_policy("refuse", "", "  nexusmods.com/enshrouded	or discord  ", nullptr).info ==
@@ -564,18 +578,4 @@ TEST_CASE("mods check: a list without EMF's own entry is not taken (lines that a
     CHECK(server.logged("not taken") == 1);
     server.m.on_server_message(2, 0xBB, "b emberbrand 1.2.0\n");  // entries, but no "e emf"
     CHECK_FALSE(server.m.player(0xBB));
-}
-
-TEST_CASE("refuse: required ids this server does not run are named once (a typo would refuse everyone)") {
-    RefuseRig g(refusing({"beastmaster", "hudmod", "hud_mdo", "emf"}));
-    g.r.tick({}, 0);
-    CHECK(g.logged("does not run") == 1);
-    CHECK(g.logged(", emf") == 0);  // EMF itself is never a required mod
-    CHECK(g.logged("hudmod, hud_mdo") == 1);
-    CHECK(g.logged("does not run: beastmaster") == 0);
-    g.r.tick({}, 1000);
-    CHECK(g.logged("does not run") == 1);
-    RefuseRig fine(refusing({"beastmaster"}));
-    fine.r.tick({}, 0);
-    CHECK(fine.logged("does not run") == 0);
 }

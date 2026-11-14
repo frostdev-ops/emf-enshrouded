@@ -122,20 +122,6 @@ public:
     // The server world's thread: the players in the world now (RosterSeen as read_players gives them).
     void tick(const std::vector<RosterSeen>& players, uint64_t now_ms) {
         std::lock_guard<std::mutex> l(m_);
-        if (!named_) {  // once: a required id the server does not run is most likely a typo (it would refuse everyone)
-            named_ = true;
-            const auto mine = d_.mine ? d_.mine() : std::vector<ModEntry>{};
-            std::string missing;
-            for (const auto& id : p_.required) {
-                if (id == "emf") continue;  // EMF itself, never a required mod (refusal_needs skips it too)
-                bool runs = false;
-                for (const auto& m : mine) runs = runs || (m.kind != 'e' && m.id == id);
-                if (!runs) missing += (missing.empty() ? "" : ", ") + id;
-            }
-            if (!missing.empty())
-                log("required mods this server does not run (any version of them is required; check the spelling): " +
-                    missing);
-        }
         std::set<uint64_t> present;
         for (const auto& p : players)
             if (p.account) present.insert(p.account);
@@ -257,7 +243,6 @@ private:
     Deps d_;
     mutable std::mutex m_;
     std::map<uint64_t, Watch> w_;  // by account
-    bool named_ = false;           // the required ids the server does not run were named
 };
 
 }  // namespace emf::core
