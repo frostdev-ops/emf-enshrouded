@@ -473,6 +473,7 @@ help, mods, settings, set, hooks, pattern, hud.list, hud.move, hud.scale, hud.hi
 - hud <id> [place 0-2] [text]: keep a line on screen (0 top right, 1 bottom right, 2 bottom left); no text removes it
 - inv <entity>: every stack in the entity's inventories, with slot ids and gear levels (host)
 - health <entity> [percent 1-100]: a creature's or player's health; with a percent, set it to that share of its maximum, e.g. a beast beaten down for taming (host)
+- god [entity | me] [on|off]: the entity (you by default) cannot drop below 1 health from hits, falls, the shroud, the cold or drowning; alone: who has it (host)
 - ai <entity>: what a creature's AI does: its state, whom it guards and fights, its aggro and faction (host)
 - order <enemy> <target> [seconds] [damage]: the enemy goes for the target (a door, a gate, a creature, a player); damage is added to each of its hits on it (host)
 - order.stop <id>: end an order (host)

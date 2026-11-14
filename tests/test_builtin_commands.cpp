@@ -1215,6 +1215,185 @@ TEST_CASE("builtin commands: ai shows a creature's AI state, whom it guards and 
 }
 
 namespace {
+std::vector<EmfHitRule> g_god_rules;      // what hit_rule_add was given
+std::vector<uint32_t> g_god_removed;      // the ids hit_rule_remove was given
+bool g_god_refuse = false;                // hit_rule_add answers 0 (hits off on this game build, or 64 rules)
+uint32_t fake_god_add(const EmfHitRule* r) {
+    if (g_god_refuse) return 0;
+    g_god_rules.push_back(*r);
+    return 100 + static_cast<uint32_t>(g_god_rules.size());
+}
+std::vector<uint32_t> g_god_gone_rules;  // hit_rule_remove answers false for these (the rule was gone already)
+bool fake_god_remove(uint32_t id) {
+    g_god_removed.push_back(id);
+    return std::find(g_god_gone_rules.begin(), g_god_gone_rules.end(), id) == g_god_gone_rules.end();
+}
+EmfPlayerCallback g_god_player_cb = nullptr;  // on_player's watcher
+void* g_god_player_user = nullptr;
+bool fake_god_on_player(EmfPlayerCallback cb, void* user) {
+    g_god_player_cb = cb;
+    g_god_player_user = user;
+    return true;
+}
+}  // namespace
+
+TEST_CASE("builtin commands: god keeps an entity (you by default) at 1 health or more with a hit rule; god alone lists") {
+    BFixture f;
+    EmfApi api = *api_table();
+    api.attribute_get = fake_attr_get;
+    api.hit_rule_add = fake_god_add;
+    api.hit_rule_remove = fake_god_remove;
+    f.ctx.api = &api;
+    g_attr = {{{42, EMF_ATTR_HEALTH}, 100}, {{70, EMF_ATTR_HEALTH}, 30}};  // 42 is you; 71 has no health
+    g_god_rules.clear();
+    g_god_removed.clear();
+    g_god_refuse = false;
+    ItemsWorld iw;
+    MapStore ents;
+    emf::test::plant_entities(iw.w, ents, {42, 70, 71});
+    f.center.enqueue("god");
+    f.center.enqueue("god on");      // you
+    f.center.enqueue("god 70");      // on is the default
+    f.center.enqueue("god me on");   // no second rule
+    f.center.enqueue("god");
+    f.run(iw.w);
+    CHECK(bsaid("god: nobody has it"));
+    CHECK(bsaid("entity 42: god on"));
+    CHECK(bsaid("entity 70: god on"));
+    CHECK(bsaid("entity 42 has god already"));
+    CHECK(bsaid("god: entity 42 (you), entity 70"));
+    REQUIRE(g_god_rules.size() == 2u);
+    for (const auto& r : g_god_rules) {
+        CHECK(r.size == sizeof(EmfHitRule));
+        CHECK(r.attacker == 0u);
+        CHECK(r.kinds == EMF_HIT_KINDS_ALL);  // hits, falls, the shroud, the cold, drowning
+        CHECK(r.min_health == 1);
+        CHECK(r.scale == 1.0f);
+        CHECK(r.add == 0);
+        CHECK(r.cancel == 0);
+        CHECK(r.healing == 0);
+    }
+    CHECK(g_god_rules[0].target == 42u);
+    CHECK(g_god_rules[1].target == 70u);
+
+    g_bout.clear();
+    f.center.enqueue("god 70 off");
+    f.center.enqueue("god 70 off");
+    f.center.enqueue("god");
+    f.run(iw.w);
+    CHECK(bsaid("entity 70: god off"));
+    CHECK(bsaid("entity 70 has no god"));
+    CHECK(bsaid("god: entity 42 (you)"));
+    CHECK(g_god_removed == std::vector<uint32_t>{102});
+
+    // bad input: nothing is added or removed
+    g_bout.clear();
+    f.center.enqueue("god 71");          // no health: not a creature or player, or not the host
+    f.center.enqueue("god 70 maybe");
+    f.center.enqueue("god x");
+    f.center.enqueue("god 0");
+    f.center.enqueue("god 70 on now");
+    f.run(iw.w);
+    CHECK(bsaid("entity 71 has no health here"));
+    CHECK(std::count_if(g_bout.begin(), g_bout.end(),
+                        [](const std::string& l) { return l == "usage: god [entity | me] [on|off]"; }) == 4);
+    CHECK(g_god_rules.size() == 2u);
+    CHECK(g_god_removed.size() == 1u);
+
+    // hit rules off on this game build (add answers 0): the command says so
+    g_bout.clear();
+    g_god_refuse = true;
+    f.center.enqueue("god 70");
+    f.center.enqueue("god");
+    f.run(iw.w);
+    CHECK(bsaid("entity 70: no god: the hit rule was refused"));
+    CHECK(bsaid("god: entity 42 (you)"));
+
+    // a new world: the rules go (entity ids are used again there)
+    g_bout.clear();
+    builtin_world_reset(f.ctx);
+    CHECK(g_god_removed == std::vector<uint32_t>{102, 101});
+    f.center.enqueue("god");
+    f.run(iw.w);
+    CHECK(bsaid("god: nobody has it"));
+}
+
+TEST_CASE("builtin commands: god ends for an entity that is gone or a player who leaves; a dead entity gets none") {
+    BFixture f;
+    EmfApi api = *api_table();
+    api.attribute_get = fake_attr_get;
+    api.hit_rule_add = fake_god_add;
+    api.hit_rule_remove = fake_god_remove;
+    api.on_player = fake_god_on_player;
+    f.ctx.api = &api;
+    g_attr = {{{42, EMF_ATTR_HEALTH}, 100}, {{70, EMF_ATTR_HEALTH}, 30}, {{80, EMF_ATTR_HEALTH}, 50},
+              {{72, EMF_ATTR_HEALTH}, 0}, {{72, EMF_ATTR_MAX_HEALTH}, 34}};
+    g_god_rules.clear();
+    g_god_removed.clear();
+    g_god_gone_rules.clear();
+    g_god_refuse = false;
+    g_god_player_cb = nullptr;
+    ItemsWorld iw;
+    MapStore ents;
+    emf::test::plant_entities(iw.w, ents, {42, 70, 72, 80});
+    f.center.enqueue("god 72");  // dead (or a spawn not set up yet): no rule taken
+    f.center.enqueue("god on");
+    f.center.enqueue("god 70");
+    f.center.enqueue("god 80");
+    f.run(iw.w);
+    CHECK(bsaid("entity 72: health 0 of 34: dead, or just spawned (try again in a second)"));
+    REQUIRE(g_god_rules.size() == 3u);  // 42 -> 101, 70 -> 102, 80 -> 103
+    REQUIRE(g_god_player_cb != nullptr);  // god watches players leaving
+
+    // creature 70 was destroyed: its health reads no more; the list ends its god
+    g_attr.erase({70, EMF_ATTR_HEALTH});
+    g_bout.clear();
+    f.center.enqueue("god");
+    f.run(iw.w);
+    CHECK(bsaid("entity 70 is gone (no health to read): its god ended"));
+    CHECK(bsaid("god: entity 42 (you), entity 80"));
+    CHECK(g_god_removed == std::vector<uint32_t>{102});
+
+    // player 42 leaves: their god ends at once (the next player may get their entity id)
+    EmfPlayerEvent left{};
+    left.size = sizeof left;
+    left.kind = EMF_PLAYER_LEFT;
+    left.player = 42;
+    g_god_player_cb(nullptr, &left, g_god_player_user);
+    CHECK(g_god_removed == std::vector<uint32_t>{102, 101});
+    g_bout.clear();
+    f.center.enqueue("god");
+    f.run(iw.w);
+    CHECK(bsaid("god: entity 80"));
+
+    // the rule was gone already (removed by someone else): the reply says so
+    g_god_gone_rules = {103};
+    g_bout.clear();
+    f.center.enqueue("god 80 off");
+    f.run(iw.w);
+    CHECK(bsaid("entity 80: god off (its hit rule was gone already)"));
+    CHECK(g_god_rules.size() == 3u);
+}
+
+TEST_CASE("builtin commands: god without a player of yours (a dedicated server's console) asks for an entity") {
+    BFixture f;
+    EmfApi api = *api_table();
+    api.attribute_get = fake_attr_get;
+    api.hit_rule_add = fake_god_add;
+    api.hit_rule_remove = fake_god_remove;
+    f.ctx.api = &api;
+    f.ctx.player = [] { return uint32_t(0); };
+    g_god_rules.clear();
+    ItemsWorld iw;
+    MapStore ents;
+    emf::test::plant_entities(iw.w, ents, {42});
+    f.center.enqueue("god on");
+    f.run(iw.w);
+    CHECK(bsaid("no player of yours here: name an entity (god <entity> [on|off])"));
+    CHECK(g_god_rules.empty());
+}
+
+namespace {
 std::vector<EmfEnemyOrder> g_orders;
 std::vector<uint32_t> g_order_cancels;
 uint32_t fake_order(EmfWorld*, EmfEnemyOrder* o) {
