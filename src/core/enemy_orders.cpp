@@ -61,7 +61,8 @@ uint32_t EnemyOrders::add(EmfWorld* world, uint32_t enemy, uint32_t target, doub
     if (seconds > 0) o.until = (d_.now_ms ? d_.now_ms() : 0) + static_cast<uint64_t>(std::llround(seconds * 1000.0));
     if (damage > 0) {
         o.rule = d_.add_rule ? d_.add_rule(enemy, target, damage) : 0;
-        if (!o.rule) return no("its damage could not be added (hit rules are off on this game build)");
+        if (!o.rule)  // the 64 hit rules every mod shares (hits.h), or the hit hook not usable on this build
+            return no("no hit rule for its damage: all 64 shared ones are in use, or hit rules are off on this build");
     }
     o.id = next_id_++;
     write(world, o);

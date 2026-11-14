@@ -578,7 +578,7 @@ too old (remove_building needs API v36)"`. `item_id` is nil when nothing went ba
 
 Any other key is an error, so a typo cannot quietly lose the item.
 
-It refuses, and changes nothing, for a player, a Flame Altar (even with `force`: use `emf.destroy` if you mean it), an
+It refuses, and changes nothing, for a player, no such entity (or one with no position), a Flame Altar (even with `force`: use `emf.destroy` if you mean it), an
 object no player placed (use `emf.destroy`), and an object holding items unless `force`. It plays no pick-up sound.
 Details: [reference.md](reference.md), "v36".
 
@@ -652,7 +652,8 @@ is not a door (player doors and gates). `logic` is true when a switch drives the
   `emf.door_close` still work on a locked door.
 
 The three actions return true when the door will change at the next step, and false when refused (not the server world,
-not a door, a switch drives it, already so; the reason is in the log). Any other side word is a Lua error. Host only, like
+not a door, a switch drives it, already so, 256 door orders waiting already; a lock also when 1024 doors are locked
+already; the reason is in the log). Any other side word is a Lua error. Host only, like
 `emf.spawn`. On a core older than API v38: nil and false.
 
 ```lua
@@ -675,13 +676,16 @@ door, and one hit with `damage = 200` broke it.
 - `damage`: the game's own hits on a placed door do 0 (seen); `damage` is added to each of the enemy's hits on the
   target (a hit rule), so a door can break.
 - `allies = true`: the creature may be a player's ally (a tamed beast); without it such a creature is refused.
-- Another key, or a value of the wrong type (`allies = "no"`, `damage = 2.5`), is a Lua error.
+- Another key, a value of the wrong type (`allies = "no"`, `damage = 2.5`), or `damage` outside 0..100000 is a Lua
+  error.
 
-It returns the order's id, or nil and why (not the server world, no enemy AI, a player, a boss, no such target, a dead
-target, bad numbers, more than 256 orders). An order also ends when its enemy dies or becomes a player's ally (tamed),
-and when your script reloads or pauses. A new order on the same enemy ends the old one. When an order ends, the game picks
-for the enemy again. Nothing is saved. `emf.enemy_order_cancel(id)` ends one; `emf.enemy_target(world, enemy)` is what
-it goes for now (its pick), or nil. Host only, like `emf.spawn`. On a core older than API v39: nil and a reason.
+It returns the order's id, or nil and why (not the server world, the enemy as its own target, no enemy AI, a player, a
+boss, no such target, a dead target, `seconds` below 0, more than 256 orders, or `damage` with no hit rule free: all 64,
+shared by every mod, are in use, or hit rules are off on this build). An order also ends when its enemy dies or becomes
+a player's ally (tamed), and when your script reloads or pauses. A new order on the same enemy ends the old one. When an
+order ends, the game picks for the enemy again. Nothing is saved. `emf.enemy_order_cancel(id)` ends one;
+`emf.enemy_target(world, enemy)` is what it goes for now (its pick), or nil. Host only, like `emf.spawn`. On a core
+older than API v39: nil and a reason.
 
 ```lua
 -- a raid: the raider breaks the gate, then the game takes over

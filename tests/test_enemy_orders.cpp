@@ -176,6 +176,17 @@ TEST_CASE("enemy orders: damage adds a hit rule for the enemy's hits on the targ
     CHECK_FALSE(held(f));
 }
 
+TEST_CASE("enemy orders: a damage order without a hit rule says both causes: all 64 in use, or hit rules off") {
+    Fake f = world();
+    f.rules_ok = false;  // add_rule returns 0
+    EnemyOrders o(f.deps());
+    std::string why;
+    CHECK(o.add(W(), kEnemy, kDoor, 30, 50, 0, &why) == 0u);
+    CHECK(why == "no hit rule for its damage: all 64 shared ones are in use, or hit rules are off on this build");
+    CHECK(why.size() < sizeof(EmfEnemyOrder{}.why));  // o->why holds it whole
+    CHECK(o.add(W(), kEnemy, kDoor, 30, 0, 0, &why) != 0u);  // without damage it needs no rule
+}
+
 TEST_CASE("enemy orders: the aggro entry reuses the target's, else a free slot, else the lowest aggro") {
     Fake f = world();
     auto& ag = f.get<gen::DynamicAggro>(kEnemy);
