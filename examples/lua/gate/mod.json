@@ -1,0 +1,11 @@
+{
+  "id": "gate",
+  "name": "Gate",
+  "version": "1.0.0",
+  "description": "/gate.open, /gate.close and /gate.lock: open, close or lock the doors within 10 m of you. An EMF example mod in Lua.",
+  "authors": ["EMF"],
+  "emf": 20,
+  "main": "main.lua",
+  "depends": {"lua": ">=1.30"},
+  "side": "server"
+}
