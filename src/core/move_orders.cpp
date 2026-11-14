@@ -33,6 +33,18 @@ bool place_of(const MoveOrders::Deps& d, EmfWorld* w, uint32_t entity, MoveOrder
     return true;
 }
 constexpr uint8_t kPlayerAlly = 11;
+
+// A calm state: not fighting, hit, falling, spawning or dead.
+bool calm_state(State s) {
+    switch (s) {
+    case State::Idle: case State::Roaming: case State::ReturnHome: case State::WaitAtHome: case State::Patrol:
+    case State::TurnAfterPatrol: case State::WaitAfterPatrol: case State::Investigate: case State::ReactToNoise:
+    case State::Sleep: case State::MoveToMarker:
+        return true;
+    default:
+        return false;
+    }
+}
 }  // namespace
 
 uint32_t MoveOrders::add(EmfWorld* world, uint32_t enemy, const std::vector<Point>& points, double arrive,
@@ -135,17 +147,8 @@ bool MoveOrders::alive(EmfWorld* w, uint32_t entity) const {
 void MoveOrders::send_guard(EmfWorld* w, uint32_t enemy, uint32_t waypoint) {
     if (d_.guard) d_.guard(enemy, waypoint);
     // a calm creature takes the guard order only from Idle (seen live: a roaming one walked on to its roam spot first)
-    if (auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, w, enemy)) {
-        switch (ai->state) {
-        case State::Roaming: case State::ReturnHome: case State::WaitAtHome: case State::Patrol:
-        case State::TurnAfterPatrol: case State::WaitAfterPatrol: case State::Investigate: case State::ReactToNoise:
-        case State::Sleep: case State::MoveToMarker:
-            ai->state = State::Idle;
-            break;
-        default:
-            break;
-        }
-    }
+    if (auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, w, enemy); ai && ai->state != State::Idle && calm_state(ai->state))
+        ai->state = State::Idle;
 }
 
 double MoveOrders::distance(EmfWorld* w, uint32_t enemy, const Point& p) const {
@@ -243,7 +246,10 @@ int MoveOrders::tick(Move& m, uint64_t now) {
     } else if (now - m.since >= kMoveStuckMs) {
         return EMF_MOVE_STUCK;
     }
-    const auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, m.world, m.enemy);
+    auto* ai = comp<gen::DynamicEnemy01BehaviorState>(d_, m.world, m.enemy);
+    // it took the waypoint as its guard target but stays calm (a fresh spawn sent farther than ~10 m, seen live: Roaming
+    // or Idle, never walking; put in Guard it walked): Guard it is
+    if (ai && m.waypoint && ai->guardEntityId.id == m.waypoint && calm_state(ai->state)) ai->state = State::Guard;
     const bool guarding = ai && ai->state == State::Guard && ai->guardEntityId.id == m.waypoint;
     if (m.waypoint && !guarding && now - m.last_guard >= kMoveResendMs) {
         send_guard(m.world, m.enemy, m.waypoint);

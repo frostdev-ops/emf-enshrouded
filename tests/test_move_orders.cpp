@@ -658,3 +658,31 @@ TEST_CASE("api (review I6): a refused enemy order leaves the creature's move; an
         CHECK(r.orders->order_of(world, kEnemy) == 0u);  // the move ended it
     });
 }
+
+// Live 2026-11-14 (a modder's raids: every freshly spawned raider stood still, stuck after 15 s): a fresh Vukah sent
+// 30 m took the guard target (guardEntityId = the waypoint) but stayed Roaming, or Idle when held there, and never
+// walked; with its state set to Guard it walked and arrived in 5 s.
+TEST_CASE("move orders: a calm creature that took the waypoint as its guard target is put in Guard (a fresh spawn)") {
+    Fake f = world();
+    MoveOrders o(f.deps());
+    Done d;
+    std::string why;
+    REQUIRE(o.add(W(), kEnemy, pts({{30, 10, 0}}), 2.0, 60, 0, cb(d), &why) != 0u);
+    auto& ai = f.get<gen::DynamicEnemy01BehaviorState>(kEnemy);
+    ai.state = emf::gen::enemy01::State::Roaming;  // the guard order landed, the state did not follow
+    ai.guardEntityId.id = 5000;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Guard);
+    ai.state = emf::gen::enemy01::State::Idle;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Guard);
+    ai.guardEntityId.id = 4444;  // another guard target (not ours yet): left to the guard order
+    ai.state = emf::gen::enemy01::State::Idle;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Idle);
+    ai.guardEntityId.id = 5000;  // ours, but in a fight: the fight goes on
+    ai.state = emf::gen::enemy01::State::Combat;
+    f.get<gen::SelectedTargets>(kEnemy).targets[0].targetEntityId.id = 71;
+    o.step(W());
+    CHECK(ai.state == emf::gen::enemy01::State::Combat);
+}
