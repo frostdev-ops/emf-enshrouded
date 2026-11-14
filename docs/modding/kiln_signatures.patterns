@@ -1,0 +1,805 @@
+# Kiln's engine signatures: 231 game functions Kiln finds by their bytes that emf_signatures.patterns (next to this
+# file) does not have, one per line in EMF's pattern format (docs/modding/reference.md, v14 find_pattern;
+# src/common/pattern_file.h). MIT licence (Kiln contributors): use them in any loader.
+# Generated from Kiln's signature database (https://github.com/frostdev-ops/kiln, sigdb/symbols/, Kiln
+# 0.2.0-dev.27, commit 14bcce2c5324): do not edit by hand; a fix belongs in Kiln's database.
+# Check them against a game exe without starting the game:
+#   emf_sigcheck --patterns kiln_signatures.patterns "<game>\enshrouded.exe"
+# Each pattern must match exactly once in the exe's .text. `offset=N` alone: the function starts at match + N.
+# `offset=N ; rel32`: the function is the target of the call or jump whose rel32 is at match + N.
+# Names are Kiln's (`<service>/<Name>`), so a line can be looked up in Kiln's database; none equals a name in
+# emf_signatures.patterns. The second comment line, where there is one, names the Kiln definition the pattern
+# comes from when it is not the function's own first one, and Kiln's other names for the same function ("also").
+# A pattern is Kiln's own, with its typed holes written as ??; nothing else was changed.
+# What is here: every named address in Kiln's database that is a function's first byte, that EMF's file does not
+# have (the same RVA on the same exe: 54 functions are in both and stay out), and that one pattern of Kiln's finds
+# under the rule above on every exe below. Not here: 46 addresses inside functions (hook sites, return
+# addresses), 6 data addresses, and 9 functions without one pattern for every exe (Kiln finds them inside
+# another function, or with different bytes on the client and the server, or they are in the server's exe only).
+# The comment above a line gives the function's RVA on each build it was checked on: the pattern matches once
+# there and gives the address Kiln's own resolver gives ("s": the dedicated server's exe; "client only": Kiln
+# has no such function for the server and the pattern does not match there). All patterns match once in the
+# game client's exe of both builds.
+# Checked builds (the game's "Build version", the exe's sha256); the older builds that emf_signatures.patterns
+# lists were not checked:
+#   1285601  ce6fdba63e27744943b695921383a29133285d359e07671f6ca33a47e2147618
+#   1285601s c5c9fe50c6398d2adedd98923c2d04bf9d9b4af64c1447ac167cdf8f874ff84f
+#   1287369  5d9ef2f140b8ed49e30dbee655841b89d08baec20f799a1817e171a18a850c77
+#   1287369s f0d824be7fcd48ebfe2458ff5c28da26060c2074e3ec1fcac587e5a1d508aeb2
+
+# IsLocalPlayer: 1285601=0x3bb660 1287369=0x3bb740 (the server's exe: not in Kiln's database)
+IsLocalPlayer = CC 39 4A ?? 0F 94 C0 C3 CC ; offset=1
+
+# WaitTaskGroup: 1285601=0x8f0a50 1285601s=0x5db870 1287369=0x8f0b30 1287369s=0x5db870
+# the call is in WaitWorldJobs.find[1]
+WaitTaskGroup = 48 8B 89 60 79 E1 00 E9 ?? ?? ?? ?? ; offset=8 ; rel32
+
+# WorldDestroy: 1285601=0x9a1ea0 1285601s=0x63de10 1287369=0x9a1f80 1287369s=0x63de10
+WorldDestroy = 48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 41 54 41 55 41 56 41 57 48 83 EC 40 80 39 03 48 8B F9 74 03 C6 01 03 4C 8D B1 ?? ?? ?? ?? 45 33 FF 45 38 7E ?? 0F 85
+
+# abilities/CreateInstance: 1285601=0x123cef0 1285601s=0x993eb0 1287369=0x123cfc0 1287369s=0x993ea0
+abilities/CreateInstance = 48 89 4C 24 08 55 53 57 41 54 41 55 48 8B EC 48 83 EC 50 4C 8B E9 41 8B F8 48 8B 49 ?? 8B DA E8 ?? ?? ?? ?? 4C 8B E0 48 85 C0
+
+# abilities/GetProgram: 1285601=0x123bfc0 1285601s=0x992f80 1287369=0x123c090 1287369s=0x992f70
+abilities/GetProgram = 48 89 5C 24 08 48 89 7C 24 10 83 B9 ?? ?? ?? ?? 00 4C 8B D1 48 8B 59 ?? 74 ?? 48 8B 79 ?? 48 8D 43 FF 44 8B C2 49 23 C0 4C 8B C0 0F B6 C8 49 C1 E8 06 4E 8B 0C C7 49 D3 E9 41 F6 C1 01 74 ?? 4D 8B 9A ?? ?? ?? ?? 41 39 14 83 74 ?? 48 8D 48 01 33 C0 48 3B CB 48 0F 42 C1 4C 8B C0 0F B6 C8 49 C1 E8 06 4E 8B 0C C7 49 D3 E9 41 F6 C1 01 75 ?? 33 C0 48 8B 5C 24 08 48 8B 7C 24 10 C3 48 3B C3 73 ?? 49 8B 8A ?? ?? ?? ?? 48 8D 04 C1
+
+# abilities/InstanceLookup: 1285601=0x123c330 1285601s=0x9932f0 1287369=0x123c400 1287369s=0x9932e0
+# the call is in abilities/RunImpact.find[0]
+abilities/InstanceLookup = 48 89 5C 24 08 57 48 83 EC 40 49 8B F8 4C 8B D1 E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 0F 84 ?? ?? ?? ?? 8B 50 ?? 49 8B 4A ?? E8 ; offset=17 ; rel32
+
+# abilities/RegisterNative: 1285601=0x123fbc0 1285601s=0x996b80 1287369=0x123fc90 1287369s=0x996b70
+abilities/RegisterNative = 48 89 5C 24 18 48 89 74 24 20 89 54 24 10 55 57 41 56 48 8B EC 48 83 EC 70 49 8B 79 08 48 8D 45 D8 41 0F 10 09 45 33 F6 48 89 45 B8 48 C7 45 C8 ?? ?? ?? ?? 8B DA 4C 89 75 D0 48 8D 71 ??
+
+# abilities/RunImpact: 1285601=0x1244f30 1285601s=0x99c1e0 1287369=0x1245000 1287369s=0x99c1d0
+abilities/RunImpact = 48 89 5C 24 08 57 48 83 EC 40 49 8B F8 4C 8B D1 E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 0F 84 ?? ?? ?? ?? 8B 50 ?? 49 8B 4A ?? E8
+
+# abilities/TriggerSequence: 1285601=0x219950 1285601s=0x369d0 1287369=0x219a30 1287369s=0x369d0
+abilities/TriggerSequence = 48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 40 48 8B EA 49 8B F8 4C 8B F1 33 D2 41 B8 ?? ?? ?? ?? 41 8B D9 48 8D 4D ?? E8 ?? ?? ?? ?? 8B 07 48 8B 74 24 60 89 44 24 30 48 8B 47 08 48 8B 7C 24 68 48 89 44 24 28 0F B6 85 ?? ?? ?? ?? 88 44 24 34 0F B7 44 24 70 F2 0F 10 4C 24 30 66 89 45 ?? 0F B6 44 24 78 89 5C 24 20 0F 10 54 24 20 48 8B 5C 24 50 88 45 22 49 8B C6
+
+# assets/AsyncIoCreate: 1285601=0xf3e410 1285601s=0x5abed0 1287369=0xf3e4f0 1287369s=0x5abed0
+assets/AsyncIoCreate = 48 89 4C 24 08 55 56 41 55 41 57 48 8D 6C 24 C1 48 81 EC D8 00 00 00 4C 8B 52 18 45 33 ED 48 8B F2 4C 8B F9 45 8B C5 4D 85 D2 74 38
+
+# assets/ContentSubmit: 1285601=0x1083130 1285601s=0x82c380 1287369=0x1083210 1287369s=0x82c380
+assets/ContentSubmit = 48 89 54 24 10 53 57 41 54 41 56 41 57 48 81 EC A0 00 00 00 4C 8B 31 48 8B F9 48 8B DA 49 8B 4E 08 E8 ?? ?? ?? ?? 45 33 E4 4C 8B F8 4C 39 63 08
+
+# assets/KfcContentMap: 1285601=0x125dd00 1285601s=0xa63790 1287369=0x125ddd0 1287369s=0xa63780
+# the call is in assets/ContentSubmit.find[0]
+assets/KfcContentMap = 48 89 54 24 10 53 57 41 54 41 56 41 57 48 81 EC A0 00 00 00 4C 8B 31 48 8B F9 48 8B DA 49 8B 4E 08 E8 ?? ?? ?? ?? 45 33 E4 4C 8B F8 4C 39 63 08 ; offset=34 ; rel32
+
+# assets/ResourceByKey: 1285601=0x1080a00 1285601s=0x829c50 1287369=0x1080ae0 1287369s=0x829c50
+assets/ResourceByKey = 48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 48 8B F9 49 8B D8 48 8B 4A 08 E8 ?? ?? ?? ?? 48 8B D3 48 8B C8 48 8B F0 E8
+
+# assets/ResourceData: 1285601=0x10804f0 1285601s=0x829740 1287369=0x10805d0 1287369s=0x829740
+assets/ResourceData = 48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 40 48 8B F9 41 8B D8 48 8B 4A 08 48 8B F2 E8 ?? ?? ?? ?? 48 63 48 10 48 83 C0 10 85 C9 75 05 45 33 C0
+
+# assets/ResourceInit: 1285601=0x107f2d0 1285601s=0x828510 1287369=0x107f3b0 1287369s=0x828510
+assets/ResourceInit = 48 89 54 24 10 48 89 4C 24 08 55 53 56 41 56 41 57 48 8D AC 24 F0 F5 FF FF 48 81 EC 10 0B 00 00 4C 8B 39 48 8D 5A 20 4C 8B F2 48 8B F1 4C 8B C3
+
+# assets/ResourceKeyOf: 1285601=0x107ec80 1285601s=0x827ec0 1287369=0x107ed60 1287369s=0x827ec0
+assets/ResourceKeyOf = 48 89 5C 24 08 57 48 83 EC 20 41 8B D8 48 8B F9 45 85 C0 75 20 0F 57 C0 48 8B C1 0F 11 41 08 0F 11 41 18 44 89 41 04 C6 01 12
+
+# assets/ResourcesByType: 1285601=0x1081650 1285601s=0x82a8a0 1287369=0x1081730 1287369s=0x82a8a0
+assets/ResourcesByType = 48 89 5C 24 18 48 89 7C 24 20 41 56 48 83 EC 20 41 8B D8 4C 8B F2 48 8B F9 4D 85 C9 74 07 41 C7 01 01 00 00 00 48 8B 4A 08
+
+# assets/UiTexturePopulate: 1285601=0xa560a0 1287369=0xa56180 (client only)
+assets/UiTexturePopulate = 40 55 48 83 EC 40 80 B9 ?? ?? ?? ?? 01 48 8B E9 0F 84 ?? ?? ?? ?? 48 8B 51 ?? 45 33 C9 44 8B 05 ?? ?? ?? ?? 48 8D 4C 24 20 E8
+
+# audio/InstanceLookup: 1285601=0x105b4a0 1287369=0x105b580 (client only)
+# the call is in audio/SoundStop.find[0]
+audio/InstanceLookup = 48 89 74 24 20 55 57 41 56 48 8D AC 24 40 FE FF FF 48 81 EC C0 02 00 00 49 8B F8 4C 8B F1 E8 ?? ?? ?? ?? 48 8B F0 48 85 C0 ; offset=31 ; rel32
+
+# audio/SoundIsPlaying: 1285601=0x105e800 1287369=0x105e8e0 (client only)
+# the call is in @audio/fx.is_playing.find[0]
+audio/SoundIsPlaying = 41 8B 97 ?? ?? 00 00 49 8B 4D 10 E8 ?? ?? ?? ?? 84 C0 75 ?? 41 38 B7 ; offset=12 ; rel32
+
+# audio/SoundScenesInit: 1285601=0x845d30 1287369=0x845e10 (client only)
+audio/SoundScenesInit = 48 8B C4 48 89 58 08 48 89 68 10 48 89 70 18 57 41 56 41 57 48 81 EC ?? 00 00 00 48 8B EA 0F 29 70 ?? 41 B9 08 00 00 00 0F 29 78 ?? 41 8B D8 4C 8B F1 45 33 FF 45 8B C1 48 8B CD 44 89 7C 24 20 33 D2 E8 ?? ?? ?? ?? 41 B9 80 00 00 00 41 89 06
+
+# audio/SoundSetPosition: 1285601=0x1069ac0 1287369=0x1069ba0 (client only)
+audio/SoundSetPosition = 48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 49 8B F0 48 8B F9 E8 ?? ?? ?? ?? 48 8B D8 48 85 C0 74 ?? 0F 10 06 8B 50 ?? 4C 8B C6 48 8B CF 0F 11 40 ?? F2 0F 10 4E 10 F2 0F 11 48
+
+# audio/SoundSetVolume: 1285601=0x1069b30 1287369=0x1069c10 (client only)
+audio/SoundSetVolume = 40 53 48 83 EC 20 4D 8B D9 48 8B D9 E8 ?? ?? ?? ?? 48 85 C0 74 ?? 83 78 ?? 00 F3 0F 11 50 ?? 74 ?? F3 0F 59 50
+
+# audio/SoundStart: 1285601=0x106ed70 1287369=0x106ee50 (client only)
+audio/SoundStart = 44 89 44 24 18 55 57 41 56 48 81 EC 80 00 00 00 41 8B D0 49 8B F9 48 8B E9 E8 ?? ?? ?? ?? 48 85 C0 75
+
+# audio/SoundStop: 1285601=0x106fb70 1287369=0x106fc50 (client only)
+audio/SoundStop = 48 89 74 24 20 55 57 41 56 48 8D AC 24 40 FE FF FF 48 81 EC C0 02 00 00 49 8B F8 4C 8B F1 E8 ?? ?? ?? ?? 48 8B F0 48 85 C0
+
+# audio/VoiceoverLorePush: 1285601=0x12324a0 1287369=0x1232570 (client only)
+audio/VoiceoverLorePush = 48 8B C4 48 89 58 08 48 89 70 10 48 89 78 18 4C 89 60 20 55 41 56 41 57 48 8D 68 ?? 48 81 EC ?? 00 00 00 0F 29 70 ?? 41 8B D9 0F 29 78 ?? 41 8B F8 0F B7 45 ?? 4C 8B E2 4C 8B F1 66 85 C0
+
+# audio/VoiceoverRequest: 1285601=0x1232430 1287369=0x1232500 (client only)
+audio/VoiceoverRequest = 4C 8B D1 45 84 C9 74 ?? 8B 81 ?? ?? ?? ?? 83 F8 01 75 ?? 44 3A C8 74
+
+# audio/VoiceoverUpdate: 1285601=0x1233450 1287369=0x1233520 (client only)
+audio/VoiceoverUpdate = 48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 80 79 ?? 00 48 8B F9 74 ?? 8B 51 ?? 48 8B 49 ?? E8 ?? ?? ?? ?? 84 C0 75
+
+# build/BuildZoneAppend: 1285601=0xeab7a0 1285601s=0x952ae0 1287369=0xeab880 1287369s=0x952ad0
+# the call is in @build/BuildZoneAdd.lists.find[0]
+build/BuildZoneAppend = 84 D2 74 ?? 83 E9 01 74 ?? 83 F9 01 75 ?? 49 8D 4A ?? 48 8D 54 24 20 E8 ?? ?? ?? ?? 48 83 C4 78 C3 49 8D 4A ?? 48 8D 54 24 20 E8 ?? ?? ?? ?? 48 83 C4 78 C3 41 80 F8 01 74 ?? 49 8D 4A ?? 48 8D 54 24 20 E8 ; offset=24 ; rel32
+
+# build/SaveRegions: 1285601=0xe8b810 1285601s=0x932a40 1287369=0xe8b8f0 1287369s=0x932a30
+build/SaveRegions = 48 8B C4 48 89 58 08 48 89 68 10 48 89 70 18 57 41 56 41 57 48 81 EC 80 00 00 00 0F 29 70 D8 33 F6 0F 29 78 C8 4D 8B F0 48 C7 42 08 00 00 00 00 48 8B DA 4C 8B F9
+
+# build/SetVoxelInterface: 1285601=0x9e3460 1285601s=0x67f4e0 1287369=0x9e3540 1287369s=0x67f4e0
+build/SetVoxelInterface = 48 8B 81 ?? ?? ?? ?? 48 85 C0 74 ?? 0F 10 02 48 8B 80 ?? ?? ?? ?? 0F 11 80
+
+# build/StoreCommit: 1285601=0x10babc0 1285601s=0x83f6e0 1287369=0x10baca0 1287369s=0x83f6e0
+build/StoreCommit = 48 8B C4 55 57 48 8D A8 ?? ?? FF FF 48 81 EC ?? ?? 00 00 4D 8B 19 48 89 58 10 4C 89 60 20 45 8B E0
+
+# build/VoxelGridOccupied: 1285601=0xa9b230 1285601s=0xa45c20 1287369=0xa9b310 1287369s=0xa45c10
+# the call is in @build/VoxelInterface.build.find[0]
+build/VoxelGridOccupied = 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8B 87 ?? ?? ?? ?? 48 05 ?? ?? ?? ?? 48 C7 45 ?? 00 01 00 00 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? E8 ?? ?? ?? ?? 48 83 BF ?? ?? ?? ?? 00 4C 8D BF ; offset=72 ; rel32
+
+# build/VoxelGridOrigin: 1285601=0xa99e80 1285601s=0xa44870 1287369=0xa99f60 1287369s=0xa44860
+# the call is in @build/VoxelInterface.build.find[0]
+build/VoxelGridOrigin = 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8B 87 ?? ?? ?? ?? 48 05 ?? ?? ?? ?? 48 C7 45 ?? 00 01 00 00 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? E8 ?? ?? ?? ?? 48 83 BF ?? ?? ?? ?? 00 4C 8D BF ; offset=50 ; rel32
+
+# build/VoxelGridRead: 1285601=0xa94b40 1285601s=0xa3f530 1287369=0xa94c20 1287369s=0xa3f520
+build/VoxelGridRead = 48 83 EC 38 48 8B 52 ?? 48 89 4C 24 20 48 8D 4C 24 20 48 C7 44 24 28 01 00 00 00 E8 ?? ?? ?? ?? 48 83 C4 38 C3
+
+# build/VoxelGridReady: 1285601=0xa9a170 1285601s=0xa44b60 1287369=0xa9a250 1287369s=0xa44b50
+# the call is in @build/VoxelInterface.build.find[0]
+build/VoxelGridReady = 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8B 87 ?? ?? ?? ?? 48 05 ?? ?? ?? ?? 48 C7 45 ?? 00 01 00 00 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? E8 ?? ?? ?? ?? 48 83 BF ?? ?? ?? ?? 00 4C 8D BF ; offset=61 ; rel32
+
+# build/VoxelGridRegion: 1285601=0xa99f80 1285601s=0xa44970 1287369=0xa9a060 1287369s=0xa44960
+# the call is in @build/VoxelInterface.build.find[0]
+build/VoxelGridRegion = 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8B 87 ?? ?? ?? ?? 48 05 ?? ?? ?? ?? 48 C7 45 ?? 00 01 00 00 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? E8 ?? ?? ?? ?? 48 83 BF ?? ?? ?? ?? 00 4C 8D BF ; offset=14 ; rel32
+
+# build/VoxelGridSlot4: 1285601=0xa9b260 1285601s=0xa45c50 1287369=0xa9b340 1287369s=0xa45c40
+# the call is in @build/VoxelInterface.build.find[0]
+build/VoxelGridSlot4 = 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8B 87 ?? ?? ?? ?? 48 05 ?? ?? ?? ?? 48 C7 45 ?? 00 01 00 00 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? 48 8D 05 ?? ?? ?? ?? 48 89 45 ?? E8 ?? ?? ?? ?? 48 83 BF ?? ?? ?? ?? 00 4C 8D BF ; offset=83 ; rel32
+
+# build/VoxelReadBatch: 1285601=0x10b2000 1285601s=0x836910 1287369=0x10b20e0 1287369s=0x836910
+# the call is in build/VoxelGridRead.find[0]
+build/VoxelReadBatch = 48 83 EC 38 48 8B 52 ?? 48 89 4C 24 20 48 8D 4C 24 20 48 C7 44 24 28 01 00 00 00 E8 ?? ?? ?? ?? 48 83 C4 38 C3 ; offset=28 ; rel32
+
+# build/VoxelWrite: 1285601=0x10baf50 1285601s=0x83fa70 1287369=0x10bb030 1287369s=0x83fa70
+build/VoxelWrite = 4C 8B DC 4D 89 4B 20 4D 89 43 18 49 89 53 10 49 89 4B 08 41 54 48 81 EC ?? ?? 00 00 45 33 E4 49 8B C1 45 39 60 08 0F 86
+
+# chat/MarkSent: 1285601=0xea7a60 1285601s=0x94eda0 1287369=0xea7b40 1287369s=0x94ed90
+chat/MarkSent = 8B 42 ?? 44 0F AB C0 89 42 ?? 41 8B C0 48 8D 14 40 44 29 4C 91 ?? C3
+
+# combat/ActorStateTest: 1285601=0x21e410 1285601s=0x3b7a0 1287369=0x21e4f0 1287369s=0x3b7a0
+# also rules/ActorStateTest
+combat/ActorStateTest = 4C 8B C1 0F B6 CA BA 01 00 00 00 48 D3 E2 41 F6 80 ?? ?? ?? ?? 01 49 8B 80 ?? ?? ?? ?? 74 ?? 49 8B 88 ?? ?? ?? ?? 49 0B 80 ?? ?? ?? ?? 48 F7 D1 48 23 C1 48 23 C2 48 3B C2 0F 94 C0 C3
+
+# combat/AlreadyHit: 1285601=0x123db40 1285601s=0x994b00 1287369=0x123dc10 1287369s=0x994af0
+# the call is in @combat/HitConclusion.calls.find[1]
+combat/AlreadyHit = 8B 13 48 8B 8D ?? ?? ?? ?? E8 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? ?? ?? 44 8B 86 A0 00 00 00 ; offset=10 ; rel32
+
+# combat/ClearPendingHits: 1285601=0x12367a0 1285601s=0x98d760 1287369=0x1236870 1287369s=0x98d750
+combat/ClearPendingHits = 48 89 5C 24 08 57 48 83 EC 40 48 8B 91 ?? ?? ?? ?? 4C 8D 44 24 20 8B 81 ?? ?? ?? ?? 33 FF 48 89 B9 ?? ?? ?? ??
+
+# combat/DeathProgram: 1285601=0x277880 1285601s=0x89660 1287369=0x277960 1287369s=0x89660
+combat/DeathProgram = 40 55 56 48 8D 6C 24 E8 48 81 EC ?? ?? 00 00 41 B8 88 00 00 00 48 8D 54 24 30 48 8B F1 E8
+
+# combat/HitConclusion: 1285601=0x3f4a80 1285601s=0x195e00 1287369=0x3f4b60 1287369s=0x195e00
+combat/HitConclusion = 48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 68 FC FF FF
+
+# combat/PendingPush: 1285601=0x1244800 1285601s=0x99bab0 1287369=0x12448d0 1287369s=0x99baa0
+# the call is in combat/AllocPendingHit.find[0]
+combat/PendingPush = 48 89 5C 24 08 57 48 83 EC ?? 48 8B D9 0F B6 FA 48 81 C1 ?? ?? ?? ?? E8 ?? ?? ?? ?? ; offset=24 ; rel32
+
+# combat/RegenProgram: 1285601=0x23a1e0 1285601s=0x57190 1287369=0x23a2c0 1287369s=0x57190
+combat/RegenProgram = 40 55 41 55 41 56 48 8D 6C 24 ?? 48 81 EC ?? ?? 00 00 41 B8 ?? 00 00 00 48 8D 54 24 ?? 4C 8B E9 E8 ?? ?? ?? ?? 4C 8B 45 ?? 48 8D 4C 24 ?? BA 95 49 B8 8E
+
+# combat/TriggerKnowledgeOnKill: 1285601=0x41da20 1285601s=0x1bd4e0 1287369=0x41db00 1287369s=0x1bd4e0
+combat/TriggerKnowledgeOnKill = 48 89 4C 24 08 55 56 41 55 41 57 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? 00 00 41 B8 38 00 00 00
+
+# content/CraftMenuCategories: 1285601=0xd5ade0 1287369=0xd5aec0 (client only)
+content/CraftMenuCategories = 48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 48 8B EA 4C 8B F1 48 8B 51 08 41 0F B6 F1 48 8B 09 41 8B D8 E8 ?? ?? ?? ?? 48 8B 05 ?? ?? ?? ?? 33 FF 49 89 7E 08 49 C7 C2 FF FF FF FF 8B D7 4C 8B 80 ?? ?? ?? ?? 49 81 C0 ?? ?? ?? ?? 45 8B 48 04
+
+# content/DefaultInventoryAcquire: 1285601=0x3fc5f0 1285601s=0x19d9b0 1287369=0x3fc6d0 1287369s=0x19d9b0
+content/DefaultInventoryAcquire = 48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 48 8B EC 48 81 EC 80 00 00 00 33 F6 48 C7 45 C0 48 BC B1 3E
+
+# content/ItemRegistryFind: 1285601=0xe94390 1285601s=0x93b5c0 1287369=0xe94470 1287369s=0x93b5b0
+# also build/ItemFind, items/ItemRegistryFind
+content/ItemRegistryFind = 89 4C 24 08 48 83 EC 28 85 C9 74 1B 48 8D 4A ?? 48 8D 54 24 30 E8
+
+# content/ItemRegistryUpdate: 1285601=0xec2c30 1285601s=0x96abc0 1287369=0xec2d10 1287369s=0x96abb0
+content/ItemRegistryUpdate = 48 89 5C 24 10 48 89 74 24 18 48 89 7C 24 20 55 41 54 41 55 41 56 41 57 48 8B EC 48 83 EC 60 80 B9 ?? ?? ?? ?? 00 48 8B F1 0F 84 ?? ?? ?? ?? 80 B9 ?? ?? ?? ?? 00 0F 84
+
+# content/LocaRecord: 1285601=0x12165f0 1287369=0x12166c0 (client only)
+content/LocaRecord = 48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 20 33 FF 48 8B F2 48 8B D9 45 85 C0 75 1D 48 89 79 08 48 8B C1 89 79 04 C6 01 12
+
+# content/LootFind: 1285601=0xe886c0 1285601s=0x92f950 1287369=0xe887a0 1287369s=0x92f940
+# the call is in @content/LootRoll.fields.find[0]
+content/LootFind = 48 8B 49 ?? 66 0F 6E C8 0F 5B C9 F3 0F 5F C1 F3 44 0F 2C E8 E8 ?? ?? ?? ?? ; offset=21 ; rel32
+
+# content/LootItems: 1285601=0xe960b0 1285601s=0x93d3c0 1287369=0xe96190 1287369s=0x93d3b0
+content/LootItems = 48 8B 52 ?? 48 85 D2 75 0D 33 C0 48 89 41 08 48 89 01 48 8B C1 C3 48 63 42 ?? 48 83 C2 14 44 8B 42 04 85 C0 75 0D 33 C0 4C 89 41 08 48 89 01 48 8B C1 C3 48 03 C2
+
+# content/RecipeAll: 1285601=0xe9a0b0 1287369=0xe9a190 (the server's exe: not in Kiln's database)
+content/RecipeAll = 48 8B 52 20 48 85 D2 75 0D 33 C0 48 89 41 08 48 89 01 48 8B C1 C3 48 63 42 ?? 48 83 C2
+
+# content/RecipeFind: 1285601=0xe99700 1285601s=0x940a30 1287369=0xe997e0 1287369s=0x940a20
+# also gameplay/RecipeFind
+content/RecipeFind = 48 89 5C 24 08 48 89 7C 24 10 8B C1 4C 8B D2 85 C9 74 ?? 83 BA ?? ?? ?? ?? 00 48 8B 5A ?? 74 ?? 48 8B 7A ?? 4C 8D 43 FF
+
+# content/RecipeFinishLoading: 1285601=0xec5f80 1285601s=0x96df10 1287369=0xec6060 1287369s=0x96df00
+content/RecipeFinishLoading = 40 57 48 83 EC 70 48 83 79 ?? 00 48 8B F9 0F 85
+
+# content/TypeByHash: 1285601=0x8de780 1285601s=0x7e15d0 1287369=0x8de860 1287369s=0x7e15d0
+# also creatures/TypeByHash, players/TypeByHash, settings/TypeByHash
+content/TypeByHash = 48 89 5C 24 08 57 48 83 EC 20 48 8B 3D ?? ?? ?? ?? 8B D9 48 85 FF 74 ?? 89 4C 24 38 48 8D 54 24 38 48 8D 4F ?? E8
+
+# content/UiTextureGet: 1285601=0xa4e5f0 1287369=0xa4e6d0 (client only)
+content/UiTextureGet = 48 89 5C 24 10 48 89 6C 24 18 48 89 74 24 20 57 41 54 41 55 41 56 41 57 48 83 EC 20 83 B9 ?? ?? 00 00 00 45 0F B6 E8 4C 8B 89 ?? ?? 00 00 4C 8B FA 48 8B D9 0F 84 ?? ?? 00 00 44 8B 52 ?? 44 8B 5A ??
+
+# creatures/ActionExec: 1285601=0x35f790 1285601s=0x11eed0 1287369=0x35f870 1287369s=0x11eed0
+creatures/ActionExec = 48 8B C4 48 89 58 10 55 56 57 41 54 41 55 41 56 41 57 48 8D 68 B8 48 81
+
+# creatures/ArsenalFind: 1285601=0x123bd90 1285601s=0x992d50 1287369=0x123be60 1287369s=0x992d40
+# the call is in @creatures/Enemy01Entity.calls.find[0]
+creatures/ArsenalFind = 49 8B 46 08 0F 10 00 0F 29 45 ?? E8 ?? ?? ?? ?? 48 8D 55 ?? 48 89 45 ?? 49 8B CC E8 ?? ?? ?? ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8B 5D ; offset=12 ; rel32
+
+# creatures/AttackAvailable: 1285601=0x367690 1285601s=0x126e60 1287369=0x367770 1287369s=0x126e60
+creatures/AttackAvailable = 40 55 53 41 56 41 57 48 8D 6C 24 98 48 81 EC 68
+
+# creatures/BeginAttack: 1285601=0x369260 1285601s=0x128a30 1287369=0x369340 1287369s=0x128a30
+creatures/BeginAttack = 48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 30 48 8B 71 08 48 8B F9 41 0F B6 E9 41 8B D8 4C 8B F2
+
+# creatures/BehaviorUpdate: 1285601=0x375ca0 1285601s=0x135470 1287369=0x375d80 1287369s=0x135470
+# the call is in @creatures/Enemy01Entity.calls.find[0]
+creatures/BehaviorUpdate = 49 8B 46 08 0F 10 00 0F 29 45 ?? E8 ?? ?? ?? ?? 48 8D 55 ?? 48 89 45 ?? 49 8B CC E8 ?? ?? ?? ?? 48 8D 4D ?? E8 ?? ?? ?? ?? 48 8B 5D ; offset=37 ; rel32
+
+# creatures/ComponentMapFind: 1285601=0x9b1cd0 1285601s=0x64dc40 1287369=0x9b1db0 1287369s=0x64dc40
+# the call is in @creatures/GetTemplateComponent.calls.find[0]; also items/ComponentMapFind
+creatures/ComponentMapFind = 48 8B 0F 48 8D 54 24 38 48 83 C1 ?? 41 8B D8 E8 ?? ?? ?? ?? ; offset=16 ; rel32
+
+# creatures/ConstraintEval: 1285601=0x35e2a0 1285601s=0x11d9e0 1287369=0x35e380 1287369s=0x11d9e0
+creatures/ConstraintEval = 48 8B C4 48 89 58 08 48 89 70 18 48 89 78 20 55 41 54 41 55 41 56 41 57 48 8D 68 A1 48 81 EC C0
+
+# creatures/CurrentTarget: 1285601=0x362680 1285601s=0x121e50 1287369=0x362760 1287369s=0x121e50
+creatures/CurrentTarget = 40 53 48 83 EC 30 48 8B 59 08 48 83 BB ?? ?? 00 00 00 75 0C 8B 05 ?? ?? ?? ?? 48 83 C4 30 5B C3
+
+# creatures/Enemy01Entity: 1285601=0x36d660 1285601s=0x12ce30 1287369=0x36d740 1287369s=0x12ce30
+# the call is in @creatures/Enemy01Update.calls.find[0]
+creatures/Enemy01Entity = 48 8D 94 24 ?? ?? 00 00 48 89 44 24 20 E8 ?? ?? ?? ?? 41 B8 ; offset=14 ; rel32
+
+# creatures/Enemy01Update: 1285601=0x36e380 1285601s=0x12db50 1287369=0x36e460 1287369s=0x12db50
+creatures/Enemy01Update = 40 53 48 81 EC 90 06 00 00 41 B8 48 06 00 00 48 8D 54 24 40 48 8B D9 E8
+
+# creatures/EntityMapFind: 1285601=0x9b4ce0 1285601s=0x650c50 1287369=0x9b4dc0 1287369s=0x650c50
+# the call is in @items/ReadOtherImpl.fields.find[0]; also items/HashMapFindEntity
+creatures/EntityMapFind = 48 8D BA ?? ?? ?? ?? 48 8B D9 48 8B CF 48 8D 54 24 48 49 8B F0 E8 ?? ?? ?? ?? 48 3B 47 ?? 0F 83 ?? ?? ?? ?? 48 8B 57 ?? ; offset=22 ; rel32
+
+# creatures/FindAttackBySequence: 1285601=0x361780 1285601s=0x120f50 1287369=0x361860 1287369s=0x120f50
+# the call is in @creatures/FollowUpAttack.find[0]
+creatures/FindAttackBySequence = BA 01 00 00 00 48 8B CE 0F 11 44 24 ?? E8 ?? ?? ?? ?? 48 85 C0 74 ?? 44 8B 00 45 85 C0 74 ?? 80 B8 ?? ?? 00 00 00 75 ?? 48 8B D3 48 8D 4C 24 ?? E8 ?? ?? ?? ?? 0F 10 08 ; offset=49 ; rel32
+
+# creatures/HandleCondition: 1285601=0x36cce0 1285601s=0x12c4b0 1287369=0x36cdc0 1287369s=0x12c4b0
+creatures/HandleCondition = 48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 20 4C 8B 49 ?? 48 8D 1D ?? ?? ?? ?? 0F B6 C2 48 8B F9 41 0F B6 31 4C 6B C6 ?? 4C 03 C0
+
+# creatures/ReadyProgram: 1285601=0x26a8e0 1285601s=0x7d1a0 1287369=0x26a9c0 1287369s=0x7d1a0
+creatures/ReadyProgram = 40 57 48 81 EC 10 01 00 00 41 B8 58 00 00 00 48 8D 54 24 30 48 8B F9 E8 ?? ?? ?? ?? 41 B8 58 00 00 00 48 8D 54 24 30 48 8B CF E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 89 AC 24 ?? ?? 00 00 48 BD 00 00 00 00 00 00 04 00
+
+# creatures/SelectAttack: 1285601=0x366ed0 1285601s=0x1266a0 1287369=0x366fb0 1287369s=0x1266a0
+creatures/SelectAttack = 48 89 54 24 10 48 89 4C 24 08 55 53 56 48 8D 6C 24 ?? 48 81 EC ?? ?? 00 00 48 8B 72 ?? 4C 8B CA 41 0F B6 C0
+
+# creatures/SetCurrentAttack: 1285601=0x36b3a0 1285601s=0x12ab70 1287369=0x36b480 1287369s=0x12ab70
+creatures/SetCurrentAttack = 48 8B C4 53 55 56 57 41 56 48 81 EC 80 00 00 00 4C 89 60 10 4C 8B F1
+
+# creatures/SetState: 1285601=0x36b740 1285601s=0x12af10 1287369=0x36b820 1287369s=0x12af10
+creatures/SetState = 48 8B C4 48 89 58 20 55 56 57 41 55 41 56 48 81 EC 90 00 00 00 4C 89 60 10 41 B0 02 4C 89 78 18 4C 8B F1 4C 8B 79 ?? 44 0F B6 E2 41 0F B6 17 E8
+
+# creatures/TemplateComponentAt: 1285601=0x9b3a90 1285601s=0x64fa00 1287369=0x9b3b70 1287369s=0x64fa00
+creatures/TemplateComponentAt = 48 89 5C 24 08 44 89 44 24 18 57 48 83 EC 20 48 8B FA 48 85 D2 74 ?? 48 8D 99 ?? ?? ?? ?? 48 8B CB
+
+# gamedata/GetBuffType: 1285601=0xe8c4e0 1285601s=0x933710 1287369=0xe8c5c0 1287369s=0x933700
+gamedata/GetBuffType = 48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 20 57 85 C9 74 ?? 4C 8B 5A ?? 4D 85 DB 74 ?? 41 8B 53 04
+
+# gamedata/RegisterTemplateInfo: 1285601=0x9cb140 1285601s=0x6671d0 1287369=0x9cb220 1287369s=0x6671d0
+gamedata/RegisterTemplateInfo = 48 89 5C 24 18 48 89 54 24 10 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 B0 F7 FF FF 48 81 EC 50 09 00 00 48 8B 39
+
+# gameplay/CraftRecipe: 1285601=0x4785a0 1285601s=0x210f00 1287369=0x478680 1287369s=0x210f00
+gameplay/CraftRecipe = 48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 54 41 55 41 56 41 57 48 8D AC 24 A0 8B FF FF B8 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 2B E0 33 C0 48 C7 85 ?? ?? 00 00 00 02 00 00
+
+# gameplay/DeliverEvents: 1285601=0xa25970 1285601s=0x6c2300 1287369=0xa25a50 1287369s=0x6c2300
+gameplay/DeliverEvents = 40 56 41 55 41 56 48 83 EC 40 48 8B 31 45 33 ED 4C 8B F1 4C 39 A9 ?? ?? ?? ?? 0F 86
+
+# gameplay/DismantleBlock: 1285601=0x48ee40 1285601s=0x226440 1287369=0x48ef20 1287369s=0x226440
+# the call is in @gameplay/Dismantle.calls.find[0]
+gameplay/DismantleBlock = F3 0F 11 54 24 58 0F 11 44 24 5C E8 ?? ?? ?? ?? 44 0F B6 F0 E9 ; offset=12 ; rel32
+
+# gameplay/DismantleBlock2: 1285601=0x48f9d0 1285601s=0x226fd0 1287369=0x48fab0 1287369s=0x226fd0
+# the call is in @gameplay/Dismantle.calls.find[1]
+gameplay/DismantleBlock2 = 48 8D 54 24 50 48 8D 4D 50 48 89 5C 24 68 E8 ?? ?? ?? ?? 44 0F B6 F0 E9 ; offset=15 ; rel32
+
+# gameplay/InventoryActions: 1285601=0x404710 1285601s=0x1a5af0 1287369=0x4047f0 1287369s=0x1a5af0
+gameplay/InventoryActions = 40 55 41 55 48 8D AC 24 ?? ?? FF FF B8 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 2B E0 4C 8B E9 E8 ?? ?? ?? ?? 84 C0 0F 85 ?? ?? 00 00 41 B8 ?? 01 00 00
+
+# gameplay/InventoryTransfer: 1285601=0x3fd4a0 1285601s=0x19e860 1287369=0x3fd580 1287369s=0x19e860
+# the call is in @gameplay/InventoryActions.discard.find[2]
+gameplay/InventoryTransfer = 48 8B 45 ?? 8B 4B ?? 39 48 ?? 0F 84 ?? ?? ?? ?? 48 8D 55 ?? 49 8B CD E8 ?? ?? ?? ?? ; offset=24 ; rel32
+
+# gameplay/JobEventBuffer: 1285601=0x9c5280 1285601s=0x661310 1287369=0x9c5360 1287369s=0x661310
+# the call is in @gameplay/PlayerCrafting.emit.find[0]; also players/JobEventBuffer
+gameplay/JobEventBuffer = 48 8B CE E8 ?? ?? ?? ?? 48 8B CE 0F B7 D8 E8 ?? ?? ?? ?? 44 0F B7 CB BA B7 6F 76 A4 41 B8 38 00 00 00 48 8B C8 E8 ?? ?? ?? ?? ; offset=15 ; rel32
+
+# gameplay/JobProgramId: 1285601=0x9c3680 1285601s=0x65f5f0 1287369=0x9c3760 1287369s=0x65f5f0
+# the call is in @gameplay/PlayerCrafting.emit.find[0]; also players/JobProgramId
+gameplay/JobProgramId = 48 8B CE E8 ?? ?? ?? ?? 48 8B CE 0F B7 D8 E8 ?? ?? ?? ?? 44 0F B7 CB BA B7 6F 76 A4 41 B8 38 00 00 00 48 8B C8 E8 ?? ?? ?? ?? ; offset=4 ; rel32
+
+# gameplay/PickUpProp: 1285601=0x490950 1285601s=0x227f50 1287369=0x490a30 1287369s=0x227f50
+# the call is in @gameplay/Dismantle.calls.find[2]
+gameplay/PickUpProp = 44 88 65 84 48 8D 55 80 89 5D 80 48 8D 4D 50 E8 ?? ?? ?? ?? 44 0F B6 F0 ; offset=16 ; rel32
+
+# gameplay/PlaceBlueprint: 1285601=0x48e610 1285601s=0x225c10 1287369=0x48e6f0 1287369s=0x225c10
+gameplay/PlaceBlueprint = 48 8B C4 55 53 56 57 41 54 41 56 41 57 48 8D A8 88 FD FF FF
+
+# gameplay/PlaceProp: 1285601=0x48ddd0 1285601s=0x2253d0 1287369=0x48deb0 1287369s=0x2253d0
+gameplay/PlaceProp = 48 89 74 24 18 48 89 7C 24 20 55 41 55 41 57 48 8D 6C 24 F0 48 81 EC
+
+# gameplay/ProgramTime: 1285601=0x9c4ce0 1285601s=0x660d70 1287369=0x9c4dc0 1287369s=0x660d70
+# the call is in @players/PlayerLevel.event.find[1]; also players/ProgramTime
+gameplay/ProgramTime = 48 8B D8 48 85 C0 0F 84 ?? ?? ?? ?? 48 8B 8D ?? ?? 00 00 48 8D 95 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 8D 95 ?? ?? 00 00 48 8B 08 48 89 0B ; offset=27 ; rel32
+
+# gameplay/QueueSpawn: 1285601=0x95f590 1285601s=0x5fb1c0 1287369=0x95f670 1287369s=0x5fb1c0
+gameplay/QueueSpawn = 4C 8B DC 53 48 81 EC B0 00 00 00 48 8B 84 24 E8 00 00 00 48 8B DA C7 44 24 30 64 C5 7A 02 49 C7 43 88 38 00 00 00
+
+# gameplay/TerraformImpact: 1285601=0x3ecd30 1285601s=0x18e0b0 1287369=0x3ece10 1287369s=0x18e0b0
+gameplay/TerraformImpact = 4C 89 44 24 18 48 89 4C 24 08 55 53 56 41 55 41 56 41 57 48 8D AC 24 ?? ?? FF FF B8 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 2B E0 48 8B 12 48 8B F1
+
+# items/AddComponent: 1285601=0x960940 1285601s=0x5fc570 1287369=0x960a20 1287369s=0x5fc570
+items/AddComponent = 48 83 EC 38 41 0F 10 01 48 81 C1 ?? ?? ?? ?? 4C 8D 4C 24 20 0F 29 44 24 20 E8 ?? ?? ?? ?? 48 83 C4 38 C3
+
+# items/AreaDeposit: 1285601=0x412df0 1285601s=0x1b2a70 1287369=0x412ed0 1287369s=0x1b2a70
+items/AreaDeposit = 48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 20 FE FF FF 48 81 EC E0 02 00 00 4C 8B FA
+
+# items/AttrChanged: 1285601=0x2357e0 1285601s=0x52700 1287369=0x2358c0 1287369s=0x52700
+# the call is in @items/AttrChanged.site.find[0]; also players/AttrRecomputeNeed
+items/AttrChanged = 29 3C 8A 48 8B D6 48 8B CB E8 ?? ?? ?? ?? ; offset=10 ; rel32
+
+# items/CreatePide: 1285601=0x411d40 1285601s=0x1b1920 1287369=0x411e20 1287369s=0x1b1920
+items/CreatePide = 48 89 5C 24 20 55 57 41 54 41 55 41 56 48 8D AC 24 50 FF FF FF 48 81 EC B0 01 00 00 45 33 E4 C6 85 F0 00 00 00 FF
+
+# items/EquipItem: 1285601=0x4151f0 1285601s=0x1b4e70 1287369=0x4152d0 1287369s=0x1b4e70
+items/EquipItem = 44 88 4C 24 20 48 89 54 24 10 48 89 4C 24 08 55 56 41 54 41 55 41 56 48 8D AC 24 30 FF FF FF 48 81 EC D0 01 00 00 48 8B F2 4C 8B E1
+
+# items/GuidToItemId: 1285601=0x223320 1285601s=0x40720 1287369=0x223400 1287369s=0x40720
+items/GuidToItemId = 48 89 5C 24 08 8B 01 4C 8B D1 8B D0
+
+# items/JobStorage: 1285601=0x9bfaa0 1285601s=0x65ba10 1287369=0x9bfb80 1287369s=0x65ba10
+# the call is in @items/FuelWrite.site.find[0]; also world/JobStorage
+items/JobStorage = E8 ?? ?? ?? ?? 49 8B 4D 00 0F B6 D8 E8 ?? ?? ?? ?? 49 8B 4D 00 48 8B F8 E8 ?? ?? ?? ?? 4C 8B CE 88 5C 24 28 4C 8B C7 44 89 74 24 20 48 8B D0 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? ; offset=25 ; rel32
+
+# items/JobTracker: 1285601=0x9bf740 1285601s=0x65b6b0 1287369=0x9bf820 1287369s=0x65b6b0
+# the call is in @items/FuelWrite.site.find[0]
+items/JobTracker = E8 ?? ?? ?? ?? 49 8B 4D 00 0F B6 D8 E8 ?? ?? ?? ?? 49 8B 4D 00 48 8B F8 E8 ?? ?? ?? ?? 4C 8B CE 88 5C 24 28 4C 8B C7 44 89 74 24 20 48 8B D0 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? ; offset=13 ; rel32
+
+# items/JobWriteFlag: 1285601=0x9c5270 1285601s=0x661300 1287369=0x9c5350 1287369s=0x661300
+# the call is in @items/FuelWrite.site.find[0]
+items/JobWriteFlag = E8 ?? ?? ?? ?? 49 8B 4D 00 0F B6 D8 E8 ?? ?? ?? ?? 49 8B 4D 00 48 8B F8 E8 ?? ?? ?? ?? 4C 8B CE 88 5C 24 28 4C 8B C7 44 89 74 24 20 48 8B D0 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? ; offset=1 ; rel32
+
+# items/MoveAll: 1285601=0x414330 1285601s=0x1b3fb0 1287369=0x414410 1287369s=0x1b3fb0
+items/MoveAll = 48 89 4C 24 08 55 53 56 57 41 54 41 56 48 8D AC 24 A8 FC FF FF
+
+# items/QuickStack: 1285601=0x413bb0 1285601s=0x1b3830 1287369=0x413c90 1287369s=0x1b3830
+items/QuickStack = 48 89 5C 24 18 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 20 FE FF FF 48 81 EC E0 02 00 00 48 8B 72 18
+
+# items/ReadOtherImpl: 1285601=0x9b2b10 1285601s=0x64ea80 1287369=0x9b2bf0 1287369s=0x64ea80
+# also world/GetComponentByType
+items/ReadOtherImpl = 48 89 5C 24 08 48 89 74 24 10 44 89 4C 24 20 57 48 83 EC 20 48 8D BA ?? ?? ?? ?? 48 8B D9
+
+# items/RecipeApply: 1285601=0x3f8e50 1285601s=0x19a1d0 1287369=0x3f8f30 1287369s=0x19a1d0
+items/RecipeApply = 48 89 5C 24 20 55 56 41 56 48 81 EC 90 00 00 00 4C 8B F2 49 8B F0 4C 8B 84 24 D0 00 00 00 48 8B E9 48 8B 94 24 D8 00 00 00 49 8B CE 49 8B D9 E8
+
+# items/RecordBuild: 1285601=0xe192f0 1285601s=0x72a9b0 1287369=0xe193d0 1287369s=0x72a9b0
+items/RecordBuild = 48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 48 8D 6C 24 F1 48 81 EC 00 01 00 00 44 88 4A 04 48 8B DA 41 8B 00 89 42 08
+
+# items/SetString: 1285601=0xe6ea70 1285601s=0x915b90 1287369=0xe6eb50 1287369s=0x915b80
+items/SetString = 48 89 5C 24 10 55 56 57 41 54 41 57 48 83 EC 30 4D 8B 59 08
+
+# items/SlotTransfer: 1285601=0x4148d0 1285601s=0x1b4550 1287369=0x4149b0 1287369s=0x1b4550
+items/SlotTransfer = 48 89 5C 24 18 55 56 57 41 56 41 57 48 8B EC 48 81 EC 80 00 00 00 49 8B D9 49 8B F8 4C 8B FA 48 8B F1 45 3B C1 75 1F
+
+# items/UnequipItem: 1285601=0x419660 1285601s=0x1b9b80 1287369=0x419740 1287369s=0x1b9b80
+items/UnequipItem = 4C 89 44 24 18 53 55 56 41 55 41 56 41 57 48 83 EC 78 4C 8B FA 48 8B F1 48 8D 94 24 B8 00 00 00 41 0F B6 E9 49 8B D8 49 8B 0F E8
+
+# items/WriteOther: 1285601=0x9b2820 1285601s=0x64e790 1287369=0x9b2900 1287369s=0x64e790
+# the call is in @items/FuelWrite.site.find[0]; not EMF's WriteOther
+items/WriteOther = E8 ?? ?? ?? ?? 49 8B 4D 00 0F B6 D8 E8 ?? ?? ?? ?? 49 8B 4D 00 48 8B F8 E8 ?? ?? ?? ?? 4C 8B CE 88 5C 24 28 4C 8B C7 44 89 74 24 20 48 8B D0 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? ; offset=55 ; rel32
+
+# net/ClientGameplayReady: 1285601=0x86d910 1287369=0x86d9f0 (client only)
+net/ClientGameplayReady = 40 55 57 41 56 48 8D AC 24 D0 FE FF FF 48 81 EC 30 02 00 00 48 8B 81 D8 00 00 00 48 8B FA 4C 8B F1 80 78 40 02
+
+# net/ClientReceive: 1285601=0x874df0 1287369=0x874ed0 (client only)
+net/ClientReceive = 48 8B C4 55 41 57 48 8D A8 ?? ?? FF FF 48 81 EC ?? ?? 00 00 4C 8B F9 48 8B 89 ?? ?? ?? ?? 48 85 C9 0F 84
+
+# net/MachineLogin: 1285601=0xe53650 1285601s=0x7af4e0 1287369=0xe53730 1287369s=0x7af4e0
+net/MachineLogin = 89 54 24 10 55 53 57 48 8D AC 24 70 FF FF FF 48 81 EC 90 01 00 00 48 8B F9 85 D2 0F 84
+
+# net/ReplicationEnqueue: 1285601=0x9cd110 1285601s=0x6691a0 1287369=0x9cd1f0 1287369s=0x6691a0
+net/ReplicationEnqueue = 44 89 4C 24 20 55 57 41 56 48 83 EC 50 44 8B 99 DC 04 00 00 4C 8D B2 00 09 00 00 49 8B 06 48 8B FA 41 0F B6 50 01
+
+# net/SendLoginResult: 1285601=0xe5a030 1285601s=0x7b6020 1287369=0xe5a110 1287369s=0x7b6020
+net/SendLoginResult = 48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 48 8D AC 24 00 FF FF FF 48 81 EC 00 02 00 00 33 F6 C6 44 24 30 00 48 8B D9 48 8B 49 30 41 0F B6
+
+# net/SessionAlloc: 1285601=0xa6f430 1285601s=0xa033c0 1287369=0xa6f510 1287369s=0xa033b0
+net/SessionAlloc = 40 55 53 57 41 56 48 8D 6C 24 C1 48 81 EC C8 00 00 00 49 8B F9 4D 8B F0 48 8B D9 4D 85 C0 75 32 0F 10 05
+
+# net/SessionCommit: 1285601=0xa65cc0 1285601s=0x9fa4c0 1287369=0xa65da0 1287369s=0x9fa4b0
+net/SessionCommit = 48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 44 8B 42 18 4C 8B F1 48 8B 42 08 41 8B E8
+
+# net/SessionRead: 1285601=0xa6f2a0 1285601s=0xa03230 1287369=0xa6f380 1287369s=0xa03220
+net/SessionRead = 48 89 5C 24 08 57 48 83 EC 40 0F 10 05 ?? ?? ?? ?? 33 FF 48 8B D9 4D 85 C0 75 20 48 89 79 08 48
+
+# net/SyncSockets: 1285601=0xe60de0 1285601s=0x7bd3c0 1287369=0xe60ec0 1287369s=0x7bd3c0
+net/SyncSockets = 48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 54 41 55 41 56 41 57 48 8D 6C 24 C9 48 81 EC B0 00 00 00 48 8B 11 48 8D 45 EF 48 89 45 C7 4C
+
+# npcai/FactionFriend: 1285601=0xea3320 1285601s=0x94a660 1287369=0xea3400 1287369s=0x94a650
+npcai/FactionFriend = 48 85 C9 74 06 44 0F B6 01 EB 03 45 32 C0 48 85 D2 74 05 0F B6 0A EB 02 32 C9 44 3A C1 75 03 B0 01 C3 41 8D 40 F9 A8 FA 75 ?? 41 80 F8 0C 74 ?? 8D 41 F9 A8 FA 75 ?? 80 F9 0C 75 ?? 32 C0 C3
+
+# npcai/FactionFriendOpt: 1285601=0xea3360 1285601s=0x94a6a0 1287369=0xea3440 1287369s=0x94a690
+npcai/FactionFriendOpt = 48 85 C9 74 06 44 0F B6 09 EB 03 45 32 C9 48 85 D2 74 05 0F B6 0A EB 02 32 C9 44 3A C9 74 ?? 41 8D 41 F9 A8 FA 75 ?? 41 80 F9 0C 74 ?? 8D 41 F9 A8 FA 75 ?? 80 F9 0C 75 ?? 32 C0 C3 80 E9 07 80 F9 01 77 ?? 4D 85 C0
+
+# npcai/FactionFriendValue: 1285601=0xea33c0 1285601s=0x94a700 1287369=0xea34a0 1287369s=0x94a6f0
+npcai/FactionFriendValue = 3A CA 74 ?? 8D 41 F9 A8 FA 75 ?? 80 F9 0C 74 ?? 8D 42 F9 A8 FA 75 ?? 80 FA 0C 75 ?? 32 C0 C3 B0 01 C3
+
+# npcai/FactionHostile: 1285601=0xea2d70 1285601s=0x94a0b0 1287369=0xea2e50 1287369s=0x94a0a0
+npcai/FactionHostile = 48 85 C9 74 06 44 0F B6 01 EB 03 45 32 C0 48 85 D2 74 05 0F B6 0A EB 02 32 C9 45 84 C0 74 ?? 41 8D 40 F9 A8 FA 75 ?? 41 80 F8 0C 74 ?? 8D 41 F9 A8 FA 75 ?? 80 F9 0C 75 ?? 41 80 F8 01 74
+
+# npcai/FactionHostileValue: 1285601=0xea2e30 1285601s=0x94a170 1287369=0xea2f10 1287369s=0x94a160
+npcai/FactionHostileValue = 84 C9 74 ?? 8D 41 F9 A8 FA 75 ?? 80 F9 0C 74 ?? 8D 42 F9 A8 FA 75 ?? 80 FA 0C 75 ?? 80 F9 01 74 ?? 3A CA 74 ?? 80 F9 03
+
+# players/ActionReset: 1285601=0x216fc0 1285601s=0x34040 1287369=0x2170a0 1287369s=0x34040
+players/ActionReset = 48 89 5C 24 08 57 48 83 EC 20 0F B6 99 B1 01 00 00 33 D2 41 B8 F8 0B 00 00 48 8B F9 E8 ?? ?? ?? ?? C7 87 C8 0B 00 00 00 40 3C 02 F6 C3 20 74 07 80 8F B1 01 00 00 20 0F 10 05 ?? ?? ?? ?? 48 8D 8F 20 0C 00 00
+
+# players/AttrRecompute: 1285601=0x2c0580 1285601s=0xab970 1287369=0x2c0660 1287369s=0xab970
+# the call is in @players/PlayerLevel.pending.find[0]
+players/AttrRecompute = 4C 8B C7 BA ?? ?? ?? ?? E8 ?? ?? ?? ?? 0F B6 4D 40 45 33 FF 84 C9 74 09 41 0F B7 C7 E9 ?? ?? ?? ?? 48 8B 45 48 0F B7 40 0C 0F B7 C8 48 85 DB 0F 84 ?? ?? ?? ?? F6 43 06 01 0F 84 ?? ?? ?? ?? 44 0F B7 43 04 48 8B D7 4C 03 C3 45 89 3C 88 48 8B CB E8 ?? ?? ?? ?? ; offset=82 ; rel32
+
+# players/HandleToEntity: 1285601=0x3b61d0 1285601s=0x160ee0 1287369=0x3b62b0 1287369s=0x160ee0
+players/HandleToEntity = 8B 01 85 C0 75 07 8B 05 ?? ?? ?? ?? C3 83 E0 3F FF C0 C3
+
+# players/InfoHandle: 1285601=0x3b8300 1285601s=0x163010 1287369=0x3b83e0 1287369s=0x163010
+players/InfoHandle = 8D 42 FF 3D FE 03 00 00 77 19 4C 8D 0C 80 49 C1 E1 05 43 39 14 01 75 0B 43 8B 44 01 ?? 89 01 48 8B C1 C3
+
+# players/InputApply: 1285601=0x965300 1285601s=0x600ff0 1287369=0x9653e0 1287369s=0x600ff0
+players/InputApply = 48 8B C4 41 56 48 83 EC 70 80 79 08 00 4C 8B F1 0F 85 ?? ?? ?? ?? 48 89 58 10 48 89 68 18 48 89 70 20 48 89 78 F0 4C 89 60 E8 45 33 E4 4C 89 68 E0 41 8B EC 4C 89 78 D8 41 BD 7F 00 00 00 44 8B B9 ?? ?? ?? ?? 0F 29 70 C8 F3 0F 10 35 ?? ?? ?? ?? 4D 8B 8E ?? ?? ?? ?? 8D 5D 01
+
+# players/IsAdmin: 1285601=0x3baa10 1285601s=0x165720 1287369=0x3baaf0 1287369s=0x165720
+players/IsAdmin = 8D 41 FF 4C 8B C2 3D ?? ?? ?? ?? 77 1A 48 8D 14 80 48 C1 E2 05 42 39 0C 02 75 0C 42 0F B6 84 02 ?? ?? ?? ?? 24 01 C3
+
+# players/KnowledgeIndex: 1285601=0x121a620 1285601s=0x99fc90 1287369=0x121a6f0 1287369s=0x99fc80
+# the call is in @players/KnowledgePoints.index.find[0]
+players/KnowledgeIndex = 48 8B D3 44 89 64 24 58 48 8B CE C6 44 24 5C FF E8 ?? ?? ?? ?? 48 8B C8 49 3B C7 ; offset=17 ; rel32
+
+# players/KnowledgePlayerContext: 1285601=0x1219a00 1285601s=0x99f310 1287369=0x1219ad0 1287369s=0x99f300
+# the call is in @players/KnowledgeInput.push.find[0]
+players/KnowledgePlayerContext = 8B 08 E8 ?? ?? ?? ?? 48 8B 4D ?? 48 8D 55 ?? 89 45 ?? E8 ?? ?? ?? ?? 84 C0 ; offset=3 ; rel32
+
+# players/KnowledgePointsOf: 1285601=0xf078f0 1285601s=0xa2a540 1287369=0xf079d0 1287369s=0xa2a530
+# the call is in @players/SkillPoints.parts.find[0]
+players/KnowledgePointsOf = 4C 8D 44 24 60 48 8D 4C 24 20 E8 ?? ?? ?? ?? 48 8B CE E8 ?? ?? ?? ?? 8B D0 8D 4F FF 0F AF D1 ; offset=11 ; rel32
+
+# players/KnowledgeQueuePush: 1285601=0x121eb30 1285601s=0x9a3c50 1287369=0x121ec00 1287369s=0x9a3c40
+# the call is in @players/KnowledgeInput.push.find[0]
+players/KnowledgeQueuePush = 8B 08 E8 ?? ?? ?? ?? 48 8B 4D ?? 48 8D 55 ?? 89 45 ?? E8 ?? ?? ?? ?? 84 C0 ; offset=19 ; rel32
+
+# players/SkillNodeById: 1285601=0xe9d850 1285601s=0x944b80 1287369=0xe9d930 1287369s=0x944b70
+# the call is in @players/SkillUnlock.calls.find[0]; also skills/NodeById
+players/SkillNodeById = 8B CB 4C 89 BC 24 80 00 00 00 E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8B 96 ?? ?? ?? ?? 8B CB E8 ?? ?? ?? ?? ; offset=29 ; rel32
+
+# players/SkillNodeSet: 1285601=0xe78c40 1285601s=0x91fea0 1287369=0xe78d20 1287369s=0x91fe90
+# the call is in @players/SkillUnlock.calls.find[2]; also skills/NodeSet
+players/SkillNodeSet = 48 8B 96 ?? 00 00 00 4C 8B CB 41 8B 0F 41 B0 01 E8 ?? ?? ?? ?? 84 C0 ; offset=17 ; rel32
+
+# players/SkillPointsPerLevel: 1285601=0xe9d780 1285601s=0x944ab0 1287369=0xe9d860 1287369s=0x944aa0
+# the call is in @players/SkillPoints.parts.find[0]
+players/SkillPointsPerLevel = 4C 8D 44 24 60 48 8D 4C 24 20 E8 ?? ?? ?? ?? 48 8B CE E8 ?? ?? ?? ?? 8B D0 8D 4F FF 0F AF D1 ; offset=19 ; rel32
+
+# players/SkillPointsSpent: 1285601=0xe7b090 1285601s=0x922300 1287369=0xe7b170 1287369s=0x9222f0
+# the call is in @players/SkillUnlock.calls.find[1]; also skills/PointsSpent
+players/SkillPointsSpent = 48 8B 96 ?? 00 00 00 44 8B CB 8B 00 89 44 24 20 E8 ?? ?? ?? ?? 48 8B BE ?? 00 00 00 48 8D 4E 20 E8 ?? ?? ?? ?? 48 8D 4E 20 48 8D 58 20 E8 ?? ?? ?? ?? 4C 8B C7 48 8B D3 48 8B C8 E8 ?? ?? ?? ?? 41 0F B7 8F ?? ?? ?? ?? ; offset=60 ; rel32
+
+# players/SkillPointsTotal: 1285601=0x2bf420 1285601s=0xaa810 1287369=0x2bf500 1287369s=0xaa810
+# the call is in @players/SkillUnlock.calls.find[1]
+players/SkillPointsTotal = 48 8B 96 ?? 00 00 00 44 8B CB 8B 00 89 44 24 20 E8 ?? ?? ?? ?? 48 8B BE ?? 00 00 00 48 8D 4E 20 E8 ?? ?? ?? ?? 48 8D 4E 20 48 8D 58 20 E8 ?? ?? ?? ?? 4C 8B C7 48 8B D3 48 8B C8 E8 ?? ?? ?? ?? 41 0F B7 8F ?? ?? ?? ?? ; offset=17 ; rel32
+
+# players/SkillReachable: 1285601=0xe78880 1285601s=0x91f9a0 1287369=0xe78960 1287369s=0x91f990
+# the call is in @players/SkillUnlock.calls.find[0]; also skills/Reachable
+players/SkillReachable = 8B CB 4C 89 BC 24 80 00 00 00 E8 ?? ?? ?? ?? 84 C0 74 ?? 48 8B 96 ?? ?? ?? ?? 8B CB E8 ?? ?? ?? ?? ; offset=11 ; rel32
+
+# players/SkillTreeConnected: 1285601=0xec7930 1285601s=0x96f8c0 1287369=0xec7a10 1287369s=0x96f8b0
+# the call is in @players/SkillUnlearn.calls.find[1]; also skills/TreeConnected
+players/SkillTreeConnected = 48 8B 4F 20 48 8B D5 E8 ?? ?? ?? ?? 84 C0 ; offset=8 ; rel32
+
+# players/SkillUiRebuild: 1285601=0xe86410 1285601s=0x92d680 1287369=0xe864f0 1287369s=0x92d670
+# the call is in @players/SkillUnlearn.calls.find[0]; also skills/UiRebuild
+players/SkillUiRebuild = 48 8B 4F 20 4D 8B C7 49 8B D6 E8 ?? ?? ?? ?? 84 C0 ; offset=11 ; rel32
+
+# players/SubSequence: 1285601=0xe8b710 1285601s=0x932940 1287369=0xe8b7f0 1287369s=0x932930
+players/SubSequence = 40 53 48 83 EC 20 8B C2 41 0F B6 D8 48 8B D1 8B C8 E8 ?? ?? ?? ?? 48 8B C8 48 85 C0 75 0A 33 C9 8B C1 48 83 C4 20 5B C3 8B 40 14 48 3B D8 73 EE
+
+# quests/BlockStore: 1285601=0x121b240 1285601s=0x9a08b0 1287369=0x121b310 1287369s=0x9a08a0
+# the call is in @quests/Apply.player.find[2]
+quests/BlockStore = 4C 8D 44 24 50 48 8B D6 48 8B CF E8 ?? ?? ?? ?? 4C 8B 44 24 50 48 8D 4F ?? 8B 16 E8 ?? ?? ?? ?? 0F B7 97 ?? ?? ?? ?? C6 87 ?? ?? ?? ?? 00 ; offset=12 ; rel32
+
+# quests/ChangeListAppend: 1285601=0x121a290 1285601s=0x99fa60 1287369=0x121a360 1287369s=0x99fa50
+# the call is in @quests/Apply.world.find[2]
+quests/ChangeListAppend = 48 8B 4D ?? 4C 8D 1C D1 41 8B C9 49 8B 13 48 8B C2 48 D3 E8 A8 01 75 ?? 4C 0F AB CA 49 89 13 FF 45 ?? 48 8B 4D ?? 8B 06 42 89 04 81 49 89 1A C6 85 ?? ?? ?? ?? 02 48 8D 4D ?? 8B 16 4C 8B C3 E8 ?? ?? ?? ?? 0F B7 95 ?? ?? ?? ?? ; offset=64 ; rel32
+
+# quests/FindDialogLine: 1285601=0x453f80 1285601s=0x1f0ef0 1287369=0x454060 1287369s=0x1f0ef0
+# the call is in quests/DialogLineFound.find[0]
+quests/FindDialogLine = 48 8D 50 ?? 4C 8B C6 33 C9 E8 ?? ?? ?? ?? 48 8B F8 48 85 C0 0F 84 ?? ?? ?? ?? 48 8D 55 ?? C6 45 ?? 00 49 8B CE E8 ?? ?? ?? ?? 8B 08 E8 ; offset=10 ; rel32
+
+# quests/JournalQuests: 1285601=0xe94a30 1285601s=0x93bc60 1287369=0xe94b10 1287369s=0x93bc50
+# the call is in @quests/QuestRewards.calls.find[0]
+quests/JournalQuests = 48 8B 4D F0 E8 ?? ?? ?? ?? 48 8B F0 48 85 C0 0F 84 ?? ?? ?? ?? 83 78 04 00 ; offset=5 ; rel32
+
+# quests/KnowledgeApplyOp: 1285601=0x121b010 1285601s=0x9a0680 1287369=0x121b0e0 1287369s=0x9a0670
+# the call is in @quests/ApplyQueue.calls.find[0]
+quests/KnowledgeApplyOp = 4C 8B C3 48 8B D6 48 8B CD E8 ?? ?? ?? ?? 48 83 C3 10 48 3B DF ; offset=10 ; rel32
+
+# quests/KnowledgeApplyQueue: 1285601=0x121b1d0 1285601s=0x9a0840 1287369=0x121b2a0 1287369s=0x9a0830
+quests/KnowledgeApplyQueue = 48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 20 8B 42 ?? 48 8D 5A ?? 48 8B E9 8B F8 B9 00 08 00 00 49 8B F0 3B C1
+
+# quests/NpcRegistryNpcs: 1285601=0xe97c00 1285601s=0x93ef30 1287369=0xe97ce0 1287369s=0x93ef20
+quests/NpcRegistryNpcs = 0F B7 81 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC 4C 8B 42 ?? 4D 85 C0 75 0D ; offset=16
+
+# quests/NpcRegistrySetUnlocks: 1285601=0xec4720 1285601s=0x96c6b0 1287369=0xec4800 1287369s=0x96c6a0
+quests/NpcRegistrySetUnlocks = 48 83 EC 18 48 89 54 24 08 C7 44 24 04 00 00 00 00 C6 04 24 00 0F 10 04 24 66 44 89 81 ?? ?? ?? ?? 0F 11 81 ?? ?? ?? ??
+
+# quests/NpcRegistryVersion: 1285601=0xe97bf0 1285601s=0x93ef20 1287369=0xe97cd0 1287369s=0x93ef10
+quests/NpcRegistryVersion = 0F B7 81 ?? ?? ?? ?? C3 CC CC CC CC CC CC CC CC 4C 8B 42 ?? 4D 85 C0 75 0D
+
+# quests/QueryEval: 1285601=0xf0a9b0 1285601s=0xa2d600 1287369=0xf0aa90 1287369s=0xa2d5f0
+# the call is in @quests/QuestRewards.calls.find[1]
+quests/QueryEval = C6 45 6C 01 E8 ?? ?? ?? ?? 80 7C 24 58 00 0F 85 ?? ?? ?? ?? 80 7C 24 60 00 ; offset=5 ; rel32
+
+# quests/StaticPlayerFind: 1285601=0x121a750 1285601s=0x99fdc0 1287369=0x121a820 1287369s=0x99fdb0
+# the call is in @quests/Apply.player.find[0]
+quests/StaticPlayerFind = 48 8B 48 ?? 48 83 C1 ?? E8 ?? ?? ?? ?? 48 8B E8 48 85 C0 0F 84 ?? ?? ?? ?? 85 DB 0F 84 ?? ?? ?? ?? 48 8B BF ?? ?? ?? ?? 8D 4B FF 4C 8D 04 C9 49 C1 E0 04 49 03 F8 80 BF ?? ?? ?? ?? 00 ; offset=9 ; rel32
+
+# quests/StaticWorldFind: 1285601=0x121a880 1285601s=0x99fef0 1287369=0x121a950 1287369s=0x99fee0
+# the call is in @quests/Apply.world.find[0]
+quests/StaticWorldFind = 48 8B 49 ?? 4C 8B FA 41 8B 10 49 8B F0 48 8B 49 ?? E8 ?? ?? ?? ?? 33 FF 4C 8B E8 48 85 C0 0F 84 ?? ?? ?? ?? 80 78 ?? 02 75 ?? 8B 50 ?? ; offset=18 ; rel32
+
+# rules/ApplyMaterials: 1285601=0x495e40 1285601s=0x22d480 1287369=0x495f20 1287369s=0x22d480
+rules/ApplyMaterials = 40 55 56 48 83 EC 78 48 8B F2 48 8B E9 0F B6 11 85 D2 0F 84 ?? ?? 00 00 83 EA 01 74 ?? 83 FA 01 74 ?? 32 C0
+
+# rules/client.CameraTransform: 1285601=0xe98dc0 1287369=0xe98ea0 (client only)
+# the call is in rules/client.CameraInput.find[0]
+rules/client.CameraTransform = 48 8B 95 ?? ?? ?? ?? 0F 57 C0 F3 0F 7F 44 24 ?? 48 C7 44 24 ?? 00 00 00 00 0F 11 4C 24 ?? C7 84 24 ?? ?? 00 00 00 00 80 3F C7 84 24 ?? ?? 00 00 00 00 80 3F C7 84 24 ?? ?? 00 00 00 00 80 3F E8 ?? ?? ?? ?? 0F 10 44 24 ?? F2 0F 10 4C 24 ?? 41 0F 11 46 ?? 0F 10 44 24 ?? F2 41 0F 11 4E 30 41 0F 11 46 38 48 8B 85 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 41 89 4E 48 48 8B 85 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 41 89 4E 4C 48 8B 85 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 41 89 4E 50 48 8B 85 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 41 89 4E 54 48 8B 85 ?? ?? ?? ?? 8B 88 ?? ?? ?? ?? 41 89 4E 58 48 8B 8D ; offset=64 ; rel32
+
+# rules/client.CraftableAmount: 1285601=0xb2dcf0 1287369=0xb2ddd0 (client only)
+rules/client.CraftableAmount = 48 89 5C 24 10 48 89 74 24 18 57 48 83 EC 70 48 8B 81 ?? ?? 00 00 0F 57 C0 41 0F 10 49 10 48 8B F1 4C 8B 10 49 8B 7A 38 0F 11 44 24 40 48 81 C7 ?? ?? ?? ?? 66 44 89 44 24 44
+
+# rules/client.FogDiscover: 1285601=0x3a26a0 1287369=0x3a2780 (client only)
+rules/client.FogDiscover = 40 53 56 57 41 56 41 57 48 81 EC 80 00 00 00 48 8B 79 08 4C 8B F1 F3 0F 10 05 ?? ?? ?? ?? 44 8B CF 0F 29 7C 24 60
+
+# rules/client.Healthbar: 1285601=0x30bc90 1287369=0x30bd70 (client only)
+rules/client.Healthbar = 40 55 53 56 41 57 48 8D AC 24 B8 FD FF FF 48 81 EC 48 03 00 00 41 B8 F0 00 00 00 48 8D 55 10 4C 8B F9 E8 ?? ?? ?? ?? 48 8B 9D B8 00 00 00 49 8B CF 48 8B 85 D0 00 00 00 48 89 45 C0 8B 5B 04 8B D3 E8
+
+# rules/client.LineOfSight: 1285601=0xe88e00 1287369=0xe88ee0 (client only)
+# the call is in rules/client.HealthbarRay.find[0]
+rules/client.LineOfSight = F2 0F 10 85 ?? ?? 00 00 4C 8D 4C 24 ?? F2 0F 11 45 D0 4C 8D 45 D0 F2 0F 10 85 ?? ?? 00 00 48 8D 55 E0 8B 08 8B 85 ?? ?? 00 00 89 45 D8 8B 85 ?? ?? 00 00 89 4D ?? 48 8D 8D ?? ?? 00 00 89 45 E8 C6 45 ?? 01 F2 0F 11 45 E0 E8 ?? ?? ?? ?? 0F B6 8D ?? ?? 00 00 ; offset=74 ; rel32
+
+# rules/CursorFlags: 1285601=0x29bed0 1285601s=0x9fb20 1287369=0x29bfb0 1287369s=0x9fb20
+rules/CursorFlags = 48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 55 41 56 41 57 48 8D 6C 24 C0 48 81 EC 40 01 00 00 0F B6 85 88 00 00 00 4D 8B F1 88 44 24 28 49 8B F8 0F B6 85 80 00 00 00 4D 8B C8 4D 8B C6 88 44 24 20 48 8B F2 48 8B D9 E8 ?? ?? ?? ?? 48 8B 8E ?? ?? ?? ?? B2 07 E8 ?? ?? ?? ?? 45 33 FF 84 C0
+
+# rules/FlightMover: 1285601=0x431050 1285601s=0x1d09d0 1287369=0x431130 1287369s=0x1d09d0
+rules/FlightMover = 48 8B C4 48 89 58 10 48 89 68 18 48 89 70 20 57 41 56 41 57 48 81 EC D0 00 00 00 0F 29 70 D8 48 8D 50 08 0F 29 78 C8 48 8B F1 48 8B 09
+
+# rules/GlideStep: 1285601=0x4329a0 1285601s=0x1d2320 1287369=0x432a80 1287369s=0x1d2320
+rules/GlideStep = 40 55 41 55 41 56 48 8D AC 24 ?? ?? ?? ?? 48 81 EC ?? ?? ?? ?? 4C 8B 29 48 8D 95 ?? ?? ?? ?? 4C 8B F1 49 8B CD E8 ?? ?? ?? ?? 49 8B 96 ?? ?? ?? ?? 41 B1 01 49 8B 8E ?? ?? ?? ?? 44 8B 00 E8
+
+# rules/InventoryPay: 1285601=0x3f8900 1285601s=0x199c80 1287369=0x3f89e0 1287369s=0x199c80
+# the call is in rules/UpgradeStoragePaid.find[0]
+rules/InventoryPay = 48 89 74 24 20 E8 ?? ?? ?? ?? 85 C0 48 8D 8D ?? ?? ?? ?? 40 0F 94 C7 45 33 C0 33 D2 E8 ; offset=6 ; rel32
+
+# rules/LocoNextState: 1285601=0x4258c0 1285601s=0x1c5180 1287369=0x4259a0 1287369s=0x1c5180
+rules/LocoNextState = 48 89 5C 24 10 48 89 6C 24 18 48 89 7C 24 20 41 56 48 83 EC 40 41 80 78 ?? 0B 49 8B E9 49 8B F8 48 8B DA 4C 8B F1 75 ?? B0 0B
+
+# rules/QuatRotate: 1285601=0x21e680 1285601s=0x3ba80 1287369=0x21e760 1287369s=0x3ba80
+# the call is in @rules/GlideStep.xform.find[0]
+rules/QuatRotate = E8 ?? ?? ?? ?? F2 44 0F 10 ?? ?? ?? ?? ?? 4C 8D 44 24 ?? 49 8B 56 ?? 48 8D 4C 24 ?? 0F 57 C0 F3 0F 11 74 24 ?? F2 48 0F 2A 00 48 83 C2 ?? F2 41 0F 59 ?? 66 44 0F 5A F8 0F 57 C0 0F 14 C7 F2 0F 11 44 24 ?? E8 ?? ?? ?? ?? 49 8B 9E ?? ?? ?? ?? ; offset=69 ; rel32
+
+# rules/RecipePayAlt: 1285601=0x3f9620 1285601s=0x19a9b0 1287369=0x3f9700 1287369s=0x19a9b0
+# the call is in rules/RecipePaid.find[0]
+rules/RecipePayAlt = A8 40 75 07 E8 ?? ?? ?? ?? EB 05 E8 ?? ?? ?? ?? 85 C0 0F 85 ; offset=12 ; rel32
+
+# rules/ResolveActorCollider: 1285601=0x283ac0 1285601s=0x95890 1287369=0x283ba0 1287369s=0x95890
+rules/ResolveActorCollider = 4C 89 4C 24 20 4C 89 44 24 18 48 89 54 24 10 48 89 4C 24 08 55 53 56 57 41 54 41 55 41 56 41 57 48 8D AC 24 38 FA FF FF 48 81 EC C8 06 00 00 48 8B B5 38 06 00 00 4C 8B F1 48 8B 8D 48 06 00 00 4D 8B E9 4C 8B A5 30 06 00 00 48 8B DA 48 8D BE ?? ?? ?? ?? 48 8B 41 10 4C 8B 3F 48 89 85 ?? ?? ?? ?? 48 8B 41 18 48 89 85 ?? ?? ?? ?? 41 80 7F ?? 00 49 8B 44 24 08 48 89 45 ?? 0F 84 ?? ?? ?? ??
+
+# rules/StepDelta: 1285601=0x9c4cc0 1285601s=0x660d50 1287369=0x9c4da0 1287369s=0x660d50
+# the call is in @rules/GlideStep.xform.find[0]
+rules/StepDelta = E8 ?? ?? ?? ?? F2 44 0F 10 ?? ?? ?? ?? ?? 4C 8D 44 24 ?? 49 8B 56 ?? 48 8D 4C 24 ?? 0F 57 C0 F3 0F 11 74 24 ?? F2 48 0F 2A 00 48 83 C2 ?? F2 41 0F 59 ?? 66 44 0F 5A F8 0F 57 C0 0F 14 C7 F2 0F 11 44 24 ?? E8 ?? ?? ?? ?? 49 8B 9E ?? ?? ?? ?? ; offset=1 ; rel32
+
+# rules/TerrainDamage: 1285601=0x495330 1285601s=0x22c970 1287369=0x495410 1287369s=0x22c970
+rules/TerrainDamage = 48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 30 48 8B D9 0F 29 74 24 20 0F B6 4C 24 60 49 8B F8 41 0F B6 F1 85 C9
+
+# settings/DaytimeSetDurations: 1285601=0xec1e50 1285601s=0x969de0 1287369=0xec1f30 1287369s=0x969dd0
+settings/DaytimeSetDurations = 48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 49 8B F9 49 8B D8 48 8B F2 48 8B E9 48 3B 51 ?? 75 ?? 48 3B 59 ?? 74 ?? 48 8B D7 E8 ?? ?? ?? ?? 48 8B D0 48 8B CD E8 ?? ?? ?? ?? 80 7D ?? 00 48 89 75 ?? 48 89 5D ?? 74 ?? 48 8B D0 48 8B CD E8 ?? ?? ?? ?? FF 45 ??
+
+# skills/IsUnlocked: 1285601=0xea5150 1285601s=0x94c490 1287369=0xea5230 1287369s=0x94c480
+skills/IsUnlocked = 40 53 48 83 EC 20 48 8B DA 89 4C 24 30 49 8D 88 ?? ?? ?? ?? 48 8D 54 24 30 E8 ?? ?? ?? ?? 48 85 C0 74 35 48 8B 08 45 33
+
+# skills/LevelsValid: 1285601=0xec7980 1285601s=0x96f910 1287369=0xec7a60 1287369s=0x96f900
+# the call is in @skills/LoginCheck.calls.find[1]
+skills/LevelsValid = 48 8B CD E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 8B 9E D0 00 00 00 49 8B CE E8 ?? ?? ?? ?? 4C 8B C3 48 8B D5 48 8B C8 E8 ?? ?? ?? ?? ; offset=41 ; rel32
+
+# skills/LoginCheck: 1285601=0x2f4030 1285601s=0xe00b0 1287369=0x2f4110 1287369s=0xe00b0
+skills/LoginCheck = 48 89 5C 24 08 48 89 6C 24 18 48 89 74 24 20 57 41 56 41 57 48 83 EC 50 48 8B AA ?? ?? ?? ?? 4C 8D B2 ?? ?? ?? ?? 48 8B F9 48 8B F2
+
+# skills/Reset: 1285601=0x2ce290 1285601s=0xb9a00 1287369=0x2ce370 1287369s=0xb9a00
+skills/Reset = 48 89 5C 24 10 48 89 6C 24 18 56 57 41 56 48 83 EC 30 4C 8D B1 ?? ?? ?? ?? 48 8B D9 48 8B 49 48 0F B6 F2 49 8B 2E 48 85 C9 74 29 0F B6 43 42 4C
+
+# skills/TreeLoad: 1285601=0xec6b00 1285601s=0x96ea90 1287369=0xec6be0 1287369s=0x96ea80
+skills/TreeLoad = 48 85 C9 0F 84 ?? ?? ?? ?? 41 56 48 81 EC 80 00 00 00 48 83 79 ?? 00 4C 8B F1 48 89 7C 24 68 0F 85 ?? ?? ?? ?? 48 8B 51 08 44 8B 41 10 48 89 51 18 44 89 41 30
+
+# skills/TreeUi: 1285601=0x318460 1287369=0x318540 (client only)
+skills/TreeUi = 48 89 4C 24 08 55 53 57 48 8D 6C 24 B9 48 81 EC F0 00 00 00 41 B8 28 00 00 00 48 8D 55 87 48 8B D9 E8 ?? ?? ?? ?? 48 8B 45 9F 48 8D 55 87 48 8B
+
+# skills/WriteAccess: 1285601=0x2c1d80 1285601s=0xad220 1287369=0x2c1e60 1287369s=0xad220
+# the call is in @skills/LoginCheck.calls.find[1]
+skills/WriteAccess = 48 8B CD E8 ?? ?? ?? ?? 84 C0 0F 84 ?? ?? ?? ?? 48 8B 9E D0 00 00 00 49 8B CE E8 ?? ?? ?? ?? 4C 8B C3 48 8B D5 48 8B C8 E8 ?? ?? ?? ?? ; offset=27 ; rel32
+
+# steamguard/ReportAchievements: 1285601=0x1088360 1287369=0x1088440 (client only)
+steamguard/ReportAchievements = 40 55 53 41 55 48 8D AC 24 ?? ?? FF FF 48 81 EC ?? ?? 00 00 4C 8B E9 49 8B D8 48 8B 49 70 48 8B 01 FF 50 08 84 C0 75 ?? B0 18
+
+# time/DaytimeSyncIfChanged: 1285601=0xec7df0 1285601s=0x96fd80 1287369=0xec7ed0 1287369s=0x96fd70
+time/DaytimeSyncIfChanged = 41 8B 40 ?? 39 02 75 03 32 C0 C3 89 02 49 8B 40 ?? 48 89 01 49 8B 40 ?? 48 89 41 08 41 8B 40 ?? 89 41 10 B0 01 C3
+
+# time/DaytimeUpdate: 1285601=0xec1af0 1285601s=0x969a80 1287369=0xec1bd0 1287369s=0x969a70
+time/DaytimeUpdate = 40 53 57 48 81 EC B8 00 00 00 48 8B
+
+# time/GameTimeToTod: 1285601=0xe8b150 1285601s=0x932380 1287369=0xe8b230 1287369s=0x932370
+time/GameTimeToTod = 48 89 5C 24 18 55 48 83 EC 10 4C 8B 59 ?? 48 BD FF FF FF FF FF FF FF 7F
+
+# time/GetGameTime: 1285601=0xe90800 1285601s=0x937a30 1287369=0xe908e0 1287369s=0x937a20
+time/GetGameTime = 4C 8B 51 ?? 49 B8 FF FF FF FF FF FF FF 7F 45 33 C9 4C 8B D9
+
+# time/ServerGameDaytimeSync: 1285601=0x4a1bc0 1285601s=0x23a310 1287369=0x4a1ca0 1287369s=0x23a310
+time/ServerGameDaytimeSync = CC 4D 8B 80 ?? ?? ?? ?? E9 ?? ?? ?? ?? CC ; offset=1
+
+# time/SetTimeScale: 1285601=0xeb38f0 1285601s=0x95b650 1287369=0xeb39d0 1287369s=0x95b640
+time/SetTimeScale = 48 89 5C 24 08 57 48 83 EC 30 0F 29 74 24 20 49 8B D0 0F 28 F1 49 8B D8 48 8B F9 E8 ?? ?? ?? ?? FF 47 ?? F3 0F 11 77 ??
+
+# time/TodToGameTime: 1285601=0xe802f0 1285601s=0x927560 1287369=0xe803d0 1287369s=0x927550
+time/TodToGameTime = 48 89 5C 24 08 48 89 74 24 10 57 48 83 EC 10 4C 8B 51 ?? 48 BE FF FF FF FF FF FF FF 7F 4C 8B 49 ??
+
+# time/WeatherRemoveInstance: 1285601=0xaa9f70 1285601s=0xa21540 1287369=0xaaa050 1287369s=0xa21530
+time/WeatherRemoveInstance = 85 D2 0F 84 ?? ?? ?? ?? 89 54 24 10 53 57 48 83
+
+# time/WeatherStartPhenomenon: 1285601=0xaab140 1285601s=0xa22840 1287369=0xaab220 1287369s=0xa22830
+# the call is in @time.weather_start.find[0]
+time/WeatherStartPhenomenon = 4C 8B 4C 24 ?? 48 8D 44 24 ?? 48 89 44 24 28 4C 8B C3 48 8B D7 44 88 5C 24 20 49 8B CF C6 44 24 ?? 00 E8 ?? ?? ?? ?? ; offset=35 ; rel32
+
+# time/WeatherUpdateLayers: 1285601=0xaac170 1285601s=0xa233e0 1287369=0xaac250 1287369s=0xa233d0
+time/WeatherUpdateLayers = 48 8B C4 4C 89 48 20 48 89 48 08 53 55 57 41 57
+
+# types/ProgramRunner: 1285601=0x9aec90 1285601s=0x64ac00 1287369=0x9aed70 1287369s=0x64ac00
+types/ProgramRunner = 48 89 5C 24 08 48 89 74 24 10 48 89 7C 24 18 4C 89 64 24 20 55 41 56 41 57 48 8D AC 24 70 F8 FF FF 48 81 EC 90
+
+# ui/CraftingMenu: 1285601=0xb80050 1287369=0xb80130 (client only)
+ui/CraftingMenu = 48 8B C4 48 89 58 10 48 89 48 08 55 56 57 41 54 41 55 41 56 41 57 48 8D A8 ?? ?? FF FF 48 81 EC ?? ?? 00 00 48 C1 E9 08 8B F2 0F B6 D1 B9 10 00 00 00
+
+# ui/GameUiDataGet: 1285601=0xa4bf60 1287369=0xa4c040 (client only)
+ui/GameUiDataGet = 48 8B 41 10 0F 10 40 ?? 48 8B C2 0F 11 02 C3 CC 48 8B 41 10 48 05 ?? ?? 00 00 C3
+
+# ui/GameUiFrame: 1285601=0xbd0eb0 1287369=0xbd0f90 (client only)
+ui/GameUiFrame = 40 55 53 57 41 54 48 8D 6C 24 88 48 81 EC 78 01 00 00 0F 29 BC 24 50 01 00 00 48 8B FA 48 8B D9 E8 ?? ?? ?? ?? 4C 8B C7 48 8D 4C 24 60 48 8B D3 E8 ?? ?? ?? ?? 48 8D 54 24 20 48 8D 4C 24 60 E8 ?? ?? ?? ??
+
+# ui/MainMenuEntry: 1285601=0xc2cbb0 1287369=0xc2cc90 (client only)
+ui/MainMenuEntry = 48 8B C4 55 53 56 57 41 54 41 56 41 57 48 8D A8 ?? ?? FF FF 48 81 EC ?? ?? 00 00 0F 29 70 B8 48 8B FA 0F 29 78 A8 4C 8B F1 44 0F 29 40 98
+
+# ui/PlayStateUi: 1285601=0xc602f0 1287369=0xc603d0 (client only)
+ui/PlayStateUi = 4C 8B DC 55 49 8D AB ?? ?? FF FF 48 81 EC ?? ?? 00 00 48 8B 05 ?? ?? ?? ?? 48 8B 88 ?? ?? ?? ?? 48 8B 01 48 85 C0 0F 84 ?? ?? ?? ?? 4D 89 73 ?? 4C 8B 70 ?? 4C 89 B5 ?? ?? ?? ?? 4D 85 F6 0F 84 ?? ?? ?? ?? 4D 89 63 ?? 4D 8D A6 ?? ?? ?? ?? 41 0F B6 04 24 4C 89 65 ?? 3C ?? 0F 84
+
+# ui/PreGameCredits: 1285601=0xb81a40 1287369=0xb81b20 (client only)
+ui/PreGameCredits = 48 8B C4 55 53 56 57 41 56 48 8D A8 ?? ?? FF FF 48 81 EC ?? ?? 00 00 0F 29 70 A8 48 8D 54 24 40 0F 29 78 98 48 8D 8D ?? ?? 00 00 44 0F 29 40 88 41 B9 09 00 00 00
+
+# ui/PreGameGoTo: 1285601=0xd49980 1287369=0xd49a60 (client only)
+ui/PreGameGoTo = 48 89 5C 24 08 57 48 81 EC 80 00 00 00 83 B9 ?? ?? ?? ?? 0A 8B FA 48 8B D9 75 0C 48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? 83 BB ?? ?? ?? ?? 03 75 ?? 83 FF 08
+
+# ui/ScrollbarParamsInit: 1285601=0xa3de40 1287369=0xa3df20 (client only)
+# the call is in @ui/InfoScroller.scrollbar.find[0]
+ui/ScrollbarParamsInit = E8 ?? ?? ?? ?? 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? 4C 8D 0D ?? ?? ?? ?? C6 85 ?? ?? 00 00 01 48 BA 72 52 AE 78 DA E0 20 26 41 B8 04 00 00 00 C7 44 24 20 01 00 00 00 48 8B 81 ?? ?? ?? ?? 0F 10 80 ?? ?? ?? ?? 0F 11 85 ?? ?? 00 00 0F 10 88 ?? ?? ?? ?? 0F 11 8D ?? ?? 00 00 48 8B 81 ?? ?? ?? ?? 0F 10 80 ?? ?? ?? ?? 0F 11 85 ?? ?? 00 00 0F 10 88 ?? ?? ?? ?? C7 85 ?? ?? 00 00 00 00 C0 41 C7 85 ?? ?? 00 00 00 00 C0 41 0F 11 8D ?? ?? 00 00 C7 85 ?? ?? 00 00 00 00 C0 41 C7 85 ?? ?? 00 00 00 00 A0 41 48 8B 81 ?? ?? ?? ?? 48 8B 88 ?? ?? ?? ?? ; offset=13 ; rel32
+
+# ui/ScrollLayoutBegin: 1285601=0xa3df40 1287369=0xa3e020 (client only)
+# the call is in @ui/Credits.scroll.find[0]
+ui/ScrollLayoutBegin = 48 8D 8D ?? ?? 00 00 40 88 B5 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? 0F 28 C8 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? ; offset=15 ; rel32
+
+# ui/ScrollLayoutEnd: 1285601=0xa40080 1287369=0xa40160 (client only)
+# the call is in @ui/Credits.scroll_end.find[0]
+ui/ScrollLayoutEnd = E8 ?? ?? ?? ?? 48 8D 8D F8 07 00 00 E8 ?? ?? ?? ?? 48 8D 8D D0 00 00 00 E8 ; offset=13 ; rel32
+
+# ui/ScrollLayoutSetSpeed: 1285601=0xa517c0 1287369=0xa518a0 (client only)
+# the call is in @ui/Credits.scroll.find[0]
+ui/ScrollLayoutSetSpeed = 48 8D 8D ?? ?? 00 00 40 88 B5 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? 0F 28 C8 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? ; offset=42 ; rel32
+
+# ui/ScrollLayoutSpeed: 1285601=0xd4e300 1287369=0xd4e3e0 (client only)
+# the call is in @ui/Credits.scroll.find[0]
+ui/ScrollLayoutSpeed = 48 8D 8D ?? ?? 00 00 40 88 B5 ?? ?? 00 00 E8 ?? ?? ?? ?? 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? 0F 28 C8 48 8D 8D ?? ?? 00 00 E8 ?? ?? ?? ?? ; offset=27 ; rel32
+
+# ui/ScrollParamsInit: 1285601=0xa3edd0 1287369=0xa3eeb0 (client only)
+# the call is in @ui/Credits.scroll_params.find[0]
+ui/ScrollParamsInit = E8 ?? ?? ?? ?? 48 8D 8D ?? ?? 00 00 0F 10 38 E8 ?? ?? ?? ?? ; offset=16 ; rel32
+
+# ui/SystemMenuEntry: 1285601=0xcb4710 1287369=0xcb47f0 (client only)
+ui/SystemMenuEntry = 48 8B C4 44 88 40 18 88 50 10 48 89 48 08 55 56 57 41 54 41 57 48 8D A8 ?? ?? FF FF 48 81 EC ?? ?? 00 00 0F 29 70 A8 44 0F B6 FA 48 8B F9
+
+# ui/UiFrameState: 1285601=0x11a0610 1287369=0x11a06e0 (client only)
+# the call is in @ui/Credits.scroll_state.find[0]
+ui/UiFrameState = 48 8B 4D 08 4C 8D 0D ?? ?? ?? ?? 48 BA 62 AD 66 57 0A C1 56 EB C7 44 24 20 01 00 00 00 41 B8 04 00 00 00 E8 ?? ?? ?? ?? 48 8B C8 4C 8B F0 E8 ?? ?? ?? ?? ; offset=36 ; rel32
+
+# ui/UiNodeAlign: 1285601=0x11ceca0 1287369=0x11ced70 (client only)
+# the call is in ui/SystemMenuColumnOpened.find[0]
+ui/UiNodeAlign = 48 8B 4D ?? 48 8D 95 ?? ?? 00 00 66 C7 85 ?? ?? 00 00 01 02 E8 ?? ?? ?? ?? 41 0F 28 C3 48 8D 4D ?? 41 0F 14 C3 66 48 0F 7E C2 E8 ; offset=21 ; rel32
+
+# ui/UiNodeRect: 1285601=0x11b6700 1287369=0x11b67d0 (client only)
+# the call is in @ui/Credits.scroll_params.find[0]
+ui/UiNodeRect = E8 ?? ?? ?? ?? 48 8D 8D ?? ?? 00 00 0F 10 38 E8 ?? ?? ?? ?? ; offset=1 ; rel32
+
+# ui/UiNodeSize: 1285601=0x11cf290 1287369=0x11cf360 (client only)
+# the call is in @ui/SystemMenu.column.find[0]
+ui/UiNodeSize = 0F 57 C9 48 8D 4D ?? E8 ?? ?? ?? ?? F3 0F 10 15 ?? ?? ?? ?? F3 0F 10 0D ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? F3 0F 59 05 ?? ?? ?? ?? 48 8B 4D ?? 0F 28 C8 E8 ?? ?? ?? ?? 48 8B 4D ?? 0F 57 C0 41 0F 14 C3 66 48 0F 7E C2 E8 ?? ?? ?? ?? ; offset=77 ; rel32
+
+# ui/UiPlaySound: 1285601=0xa4f230 1287369=0xa4f310 (client only)
+# the call is in @ui/PlaySelection.back.find[0]
+ui/UiPlaySound = 48 8B 0D ?? ?? ?? ?? 48 8D 54 24 ?? 48 8B 81 ?? ?? ?? ?? 0F 10 80 ?? ?? ?? ?? 0F 29 44 24 ?? E8 ?? ?? ?? ?? 83 BF ?? ?? ?? ?? 0A ; offset=32 ; rel32
+
+# ui/UiStateIsNew: 1285601=0x11bacb0 1287369=0x11bad80 (client only)
+# the call is in @ui/Credits.scroll_state.find[0]
+ui/UiStateIsNew = 48 8B 4D 08 4C 8D 0D ?? ?? ?? ?? 48 BA 62 AD 66 57 0A C1 56 EB C7 44 24 20 01 00 00 00 41 B8 04 00 00 00 E8 ?? ?? ?? ?? 48 8B C8 4C 8B F0 E8 ?? ?? ?? ?? ; offset=47 ; rel32
+
+# ui/UiStateNop: 1285601=0xa3b820 1287369=0xa3b900 (client only)
+# the call is in @ui/Credits.scroll_state.find[0]
+ui/UiStateNop = 48 8B 4D 08 4C 8D 0D ?? ?? ?? ?? 48 BA 62 AD 66 57 0A C1 56 EB C7 44 24 20 01 00 00 00 41 B8 04 00 00 00 E8 ?? ?? ?? ?? 48 8B C8 4C 8B F0 E8 ?? ?? ?? ?? ; offset=7 ; rel32
+
+# ui/UiVStack: 1285601=0xa3c6b0 1287369=0xa3c790 (client only)
+# the call is in @ui/SystemMenu.column.find[0]
+ui/UiVStack = 0F 57 C9 48 8D 4D ?? E8 ?? ?? ?? ?? F3 0F 10 15 ?? ?? ?? ?? F3 0F 10 0D ?? ?? ?? ?? 48 8B 0D ?? ?? ?? ?? E8 ?? ?? ?? ?? F3 0F 59 05 ?? ?? ?? ?? 48 8B 4D ?? 0F 28 C8 E8 ?? ?? ?? ?? 48 8B 4D ?? 0F 57 C0 41 0F 14 C3 66 48 0F 7E C2 E8 ?? ?? ?? ?? ; offset=8 ; rel32
+
+# vfx/CreateInstance: 1285601=0x197d10 1287369=0x197de0 (client only)
+vfx/CreateInstance = 48 89 6C 24 10 48 89 74 24 18 48 89 7C 24 20 41 56 48 83 EC 20 48 8B 6A ?? 48 8B FA 48 8B 52 28 49 8B F1 4D 8B D8 4C 8B F1 48 85 D2 0F 84
+
+# vfx/FxLookup: 1285601=0x29f4d0 1287369=0x29f5b0 (client only)
+# the call is in vfx/FxStop.find[0]
+vfx/FxLookup = 48 89 5C 24 08 57 48 83 EC 20 48 8B C2 49 8B F9 8B 12 49 8B D8 85 D2 74 ?? 48 81 C1 ?? ?? ?? ?? C7 00 00 00 00 00 E8 ?? ?? ?? ?? 48 85 C0 74 ?? 80 B8 ?? ?? ?? ?? 00 75 07 C6 80 ?? ?? ?? ?? 01 48 89 98 ?? ?? ?? ?? ; offset=39 ; rel32
+
+# vfx/FxPlayAt: 1285601=0x2a0e50 1287369=0x2a0f30 (client only)
+vfx/FxPlayAt = 48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 49 8B 40 08 49 8B E9 49 0B 00 49 8B F0 48 8B DA 48 8B F9 74 ?? 48 81 C1 ?? ?? ?? ?? 48 8D 54 24 20 E8 ?? ?? ?? ?? 48 8B 54 24 28 48 85 D2 75 ?? 48 8B CF E8 ?? ?? ?? ?? 33 C0 E9 ?? ?? ?? ?? 48 8B 84 24 A0 00 00 00 4C 8D 4C 24 30
+
+# vfx/FxPlayAttached: 1285601=0x2a0d20 1287369=0x2a0e00 (client only)
+vfx/FxPlayAttached = 48 89 5C 24 08 48 89 6C 24 10 48 89 74 24 18 57 48 83 EC 70 49 8B 40 08 49 8B F9 49 0B 00 49 8B E8 48 8B DA 48 8B F1 74 ?? 48 81 C1 ?? ?? ?? ?? 48 8D 54 24 20 E8 ?? ?? ?? ?? 48 8B 54 24 28 48 85 D2 75 ?? 48 8B CE E8 ?? ?? ?? ?? 33 C0 E9 ?? ?? ?? ?? C6 02 01 8B 07 89 82 88 00 00 00 0F B6 47 04 88 82 C0 00 00 00 0F 10 47 08 0F 11 82 8C 00 00 00 0F 10 4F 18 0F 11 8A 9C 00 00 00 F2 0F 10 47 28 F2 0F 11 82 AC 00 00 00 80 7F 30 00 74 07 80 8A C1 00 00 00 01 80 8A C1 00 00 00 04 4C 8D 4C 24 30
+
+# vfx/FxStart: 1285601=0x2a1a70 1287369=0x2a1b50 (client only)
+vfx/FxStart = 48 89 5C 24 18 55 57 41 57 48 83 EC 70 48 8B 82 ?? ?? ?? ?? 49 8B F9 48 0B 82 ?? ?? ?? ?? 48 8B DA 4C 8B 79 ?? 48 8B E9 75 ?? 38 82 ?? ?? ?? ?? 75 07 C6 82 ?? ?? ?? ?? 01 4C 89 82 ?? ?? ?? ?? 80 BA ?? ?? ?? ?? 00 75 07 C6 82 ?? ?? ?? ?? 01 4C 89 82 ?? ?? ?? ??
+
+# vfx/FxStop: 1285601=0x2a1e90 1287369=0x2a1f70 (client only)
+vfx/FxStop = 48 89 5C 24 08 57 48 83 EC 20 48 8B C2 49 8B F9 8B 12 49 8B D8 85 D2 74 ?? 48 81 C1 ?? ?? ?? ?? C7 00 00 00 00 00 E8 ?? ?? ?? ?? 48 85 C0 74 ?? 80 B8 ?? ?? ?? ?? 00 75 07 C6 80 ?? ?? ?? ?? 01 48 89 98 ?? ?? ?? ??
+
+# vfx/FxUpdate: 1285601=0x2a27e0 1287369=0x2a28c0 (client only)
+vfx/FxUpdate = 40 55 53 56 57 41 55 41 56 48 8D 6C 24 D1 48 81 EC F8 00 00 00 48 8B FA 4C 8B E9 8B 51 38 41 0F B7 D8 48 8B 49 30 45 32 F6 E8
+
+# vfx/RenderCreateVfx: 1285601=0xf3840 1287369=0xf3910 (client only)
+# the call is in @vfx/FxStart.vfx.find[0]
+vfx/RenderCreateVfx = 0F B6 0B 85 C9 0F 84 ?? ?? ?? ?? 83 F9 01 0F 85 ?? ?? ?? ?? 0F B6 83 ?? ?? ?? ?? 4C 8D 43 04 41 88 40 44 4C 8D 4B 50 0F 10 83 ?? ?? ?? ?? 48 8B 4D ?? 48 8D 54 24 30 0F 11 44 24 30 E8 ?? ?? ?? ?? 89 83 ?? ?? ?? ?? ; offset=61 ; rel32
+
+# vfx/Resolve: 1285601=0x1a0130 1287369=0x1a0200 (client only)
+vfx/Resolve = 40 57 48 83 EC 20 4C 8B 5A 08 48 8B FA 4C 8B 12 49 8B C3 49 0B C2 4C 8B C9 0F 84 ?? ?? ?? ?? 83 B9 ?? ?? ?? ?? 00 48 89 5C 24 30 48 8B 99 ?? ?? ?? ?? 48 89 74 24 38 4C 89 74 24 40 0F 84 ?? ?? ?? ?? 4C 8B B1 ?? ?? ?? ?? 4C 8D 43 FF 41 8B C2 4C 23 C0 49 8B C0 41 0F B6 C8 48 C1 E8 06 49 8B 14 C6 48 D3 EA F6 C2 01 0F 84 ?? ?? ?? ?? 49 8B B1 ?? ?? ?? ??
+
+# vfx/SetParameter: 1285601=0x1a4c80 1287369=0x1a4d50 (client only)
+vfx/SetParameter = 85 D2 0F 84 ?? ?? ?? ?? 55 48 83 EC 30 44 0F B7 D2 48 8B E9 4C 3B 51 58 0F 83 ?? ?? ?? ?? 48 89 74 24 48 4B 8D 34 52 48 C1 E6 06 48 03 71 50 39
+
+# world/FinalizePrograms: 1285601=0xa25b70 1285601s=0x6c2500 1287369=0xa25c50 1287369s=0x6c2500
+world/FinalizePrograms = 48 8B C4 48 89 48 08 41 56 48 81 EC ?? ?? 00 00 80 39 00 4C 8B F1 0F 85 ?? ?? ?? ?? 80 B9 ?? ?? ?? ?? 00
+
+# world/JobCmdBuf: 1285601=0x9bd300 1285601s=0x659270 1287369=0x9bd3e0 1287369s=0x659270
+world/JobCmdBuf = 48 8B 01 48 8B 40 08 C3 CC CC CC CC CC CC CC CC
+
+# world/ResolveAccess: 1285601=0xa01db0 1285601s=0x69ef00 1287369=0xa01e90 1287369s=0x69ef00
+world/ResolveAccess = 48 8B C4 41 54 41 56 41 57 48 81 EC ?? ?? 00 00 48 89 58 10 41 B1 01 48 89 68 E0 49 8B D8 48 89 70 D8 49 83 C0 38
+
+# world/ResolveEvents: 1285601=0x98a220 1285601s=0x626190 1287369=0x98a300 1287369s=0x626190
+world/ResolveEvents = 48 89 5C 24 10 48 89 4C 24 08 55 56 57 41 54 41 55 41 56 41 57 48 8D 6C 24 D9 48 81 EC F0 00 00 00
+
+# world/ResolveSingletons: 1285601=0x98a580 1285601s=0x6264f0 1287369=0x98a660 1287369s=0x6264f0
+world/ResolveSingletons = 40 53 55 57 41 56 41 57 48 83 EC 30 4C 8B B4 24 80 00 00 00 33 FF
