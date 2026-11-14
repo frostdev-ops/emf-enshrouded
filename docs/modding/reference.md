@@ -1154,7 +1154,7 @@ Refused (0, logged once per 10 s):
 | `from`, `to` | start and target, in metres |
 | `moves` | `EMF_PATH_WALK` is always added. Add `EMF_PATH_JUMP_UP`, `_JUMP_DOWN`, `_JUMP_ACROSS`, `_OPEN_DOOR`, `_SWIM`. A closed door is crossed only with `_OPEN_DOOR` (since 0.6.11 EMF forbids closed-door nodes, the node rule for type 19, for every other move: a walk could cross a closed door that had a floor piece under it) |
 | `max_jump_up`, `max_jump_down` | metres; 0 = no limit |
-| `width`, `height` | the room the unit needs, in metres; 0 = the game's default |
+| `width`, `height` | the room the unit needs, in metres; 0 = the game's default. `width` works as a radius (the game doubles it into half metres of free room all round, as it does with a creature's `PathWalker.horizontalRadius`); the grid keeps at most about 2 m across and 3.5 m up, so more finds no start node. Jump flights are checked against fixed room, not these |
 | `closest` | 1: fall back to the closest reachable point |
 | `max_nodes` | 0 = 2000, at most 20000 |
 

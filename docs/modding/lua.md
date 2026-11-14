@@ -617,7 +617,7 @@ errors.
 | `doors` | `true`: the path may open doors. A closed door is crossed only this way (EMF 0.6.11; before, a plain walk could cross a closed door with a floor piece under it), at a point with `move` 5 |
 | `swim` | `true`: the path may swim |
 | `closest` | `true`: when the target cannot be reached, end at the closest reachable point |
-| `width`, `height` | the room the unit needs, in metres (0 to 64; default: the game's) |
+| `width`, `height` | the room the unit needs, in metres (0 to 64; default: the game's). `width` works as a radius: 0.5 needs 0.5 m free all round, 1.5 a clear 3 m circle (an open gate rarely has that). The grid keeps at most about 2 m across and 3.5 m up, so more finds no start. Jumps ignore both in flight. Try 0.5 and 2 for a humanoid, 1 and 3 for a big one |
 | `max_jump_up`, `max_jump_down` | metres (0 to 255; 0 = no limit) |
 | `nodes` | how many nodes the search may spend (0 to 20000; default 2000) |
 | `owner` | an entity the query belongs to (default: the first player) |
